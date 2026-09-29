@@ -57,7 +57,7 @@ export default function ImportsPage() {
               </p>
               {!tablesOn ? (
                 <p className="m-0 mt-2 text-sm text-ink-2">
-                  Tables is turned off for this workspace. <Link href="/settings/modules" className="font-medium text-brand-deep hover:underline">Turn it on in Apps and modules</Link> to import a CSV into a table.
+                  Tables is turned off for this workspace. <Link href="/settings/apps#modules" className="font-medium text-brand-deep hover:underline">Turn it on in Apps &amp; modules</Link> to import a CSV into a table.
                 </p>
               ) : null}
             </div>

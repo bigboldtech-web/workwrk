@@ -258,6 +258,8 @@ export const SETTINGS_PAGE_GATES: Record<SettingsPageKey, PageGate> = {
   tasks: { gate: "owner-admin" },
   data: { gate: "owner-admin" },
   audit: { gate: "owner-admin" },
+  // The generated index of every Workspace setting (settings spec 5.17).
+  all: { gate: "owner-admin" },
 
   "account/profile": { gate: "personal" },
   "account/preferences": { gate: "personal" },
@@ -265,6 +267,7 @@ export const SETTINGS_PAGE_GATES: Record<SettingsPageKey, PageGate> = {
   "account/security": { gate: "personal" },
   "account/connections": { gate: "personal" },
   "account/shortcuts": { gate: "personal" },
+  "account/all": { gate: "personal" },
 };
 
 export const SETTINGS_PAGE_KEYS = Object.keys(SETTINGS_PAGE_GATES) as SettingsPageKey[];

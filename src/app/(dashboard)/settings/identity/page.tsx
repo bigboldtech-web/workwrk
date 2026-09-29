@@ -18,10 +18,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, Loader2, X, Plus,
+  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, X, Plus,
 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
+import Link from "next/link";
+import { Dots } from "@/components/ui/dots";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { AppearanceDefaults } from "./appearance-defaults";
 
 // Mirror the /api/settings/logo endpoint's server-side validation so we can
 // reject bad files before the round-trip (endpoint allows these + 2MB cap).
@@ -40,9 +47,27 @@ type IdentityState = {
   values: string[]; // add/remove one at a time; stored as string[]
 };
 
+// Identity & culture: tabs Profile and Appearance defaults (the second is
+// the old /settings/defaults). Culture and Danger zone join with S3/S5.
+const IDENTITY_TABS: readonly SettingsTab[] = [
+  { key: "profile", label: "Profile" },
+  { key: "appearance", label: "Appearance defaults" },
+];
+
 export default function IdentitySettingsPage() {
+  return (
+    <SettingsPage pageKey="identity" tabs={IDENTITY_TABS}>
+      {(tab) => (tab === "appearance" ? <AppearanceDefaults /> : <IdentityProfileTab />)}
+    </SettingsPage>
+  );
+}
+
+function IdentityProfileTab() {
   const { accessLevel } = useRole();
-  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel);
+  // The page's gate admits Admins only (SettingsGate "admin"), so C_LEVEL is
+  // not listed: a control the viewer's gate never lets them reach is not
+  // offered here either.
+  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
   const { toast } = useOsToast();
 
   const [state, setState] = useState<IdentityState | null>(null);
@@ -50,10 +75,15 @@ export default function IdentitySettingsPage() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // A failed read renders ErrorState with Retry. It used to render a BLANK
+  // form, and Save then overwrote the live name, mission and values with
+  // empty strings (settings-architecture 8.6).
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
-      const res = await fetch("/api/settings");
-      if (!res.ok) { setState(blank()); return; }
+      const res = await fetch("/api/settings", { cache: "no-store" });
+      if (!res.ok) { setLoadError(`HTTP ${res.status}`); return; }
       const d = await res.json();
       const org = d?.organization ?? {};
       const profile = d?.settings?.companyProfile ?? {};
@@ -67,7 +97,7 @@ export default function IdentitySettingsPage() {
         industry: typeof profile.industry === "string" ? profile.industry : "",
         values: Array.isArray(profile.values) ? profile.values.filter((v: unknown): v is string => typeof v === "string" && v.trim().length > 0) : [],
       });
-    } catch { setState(blank()); }
+    } catch (e) { setLoadError(e instanceof Error ? e.message : "Network error"); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -153,24 +183,18 @@ export default function IdentitySettingsPage() {
   }
 
   return (
-    <div className="px-6 pt-6">
-      <header className="mb-1 flex items-center gap-2">
-        <Building2 className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">
-          Identity &amp; company profile
-        </h1>
-      </header>
+    <div>
       <p className="mb-5 max-w-2xl text-base text-zinc-500">
         Your organization&apos;s name, logo, and the mission/vision that grounds AI.
         Timezone, currency and fiscal year live under{" "}
-        <a href="/settings/locale" className="text-[var(--os-brand,#0073EA)] hover:underline">Locale &amp; finance</a>.
+        <Link href="/settings/locale" className="text-[var(--os-brand,#0073EA)] hover:underline">{SETTINGS_PAGES.locale.label}</Link>.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
-      {state === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
-        </div>
+      {loadError ? (
+        <ErrorState what="the workspace profile" hint={loadError} onRetry={() => { void load(); }} />
+      ) : state === null ? (
+        <SkeletonRows rows={6} className="max-w-2xl" />
       ) : (
         <>
           {/* Brand -------------------------------------------------------- */}
@@ -196,7 +220,7 @@ export default function IdentitySettingsPage() {
                     onClick={() => fileRef.current?.click()}
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
                   >
-                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    {uploading ? <Dots variant="pending" /> : <Upload className="h-3.5 w-3.5" />}
                     {state.logo ? "Replace" : "Upload"}
                   </button>
                   {state.logo && (
@@ -280,7 +304,7 @@ export default function IdentitySettingsPage() {
               disabled={!canEdit || saving}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-sm font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {saving ? <Dots variant="pending" /> : null}
               Save changes
             </button>
           </div>
@@ -292,10 +316,6 @@ export default function IdentitySettingsPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-
-function blank(): IdentityState {
-  return { name: "", domain: "", logo: null, mission: "", vision: "", about: "", industry: "", values: [] };
-}
 
 async function errText(res: Response): Promise<string> {
   if (res.status === 403) return "Admin access required";

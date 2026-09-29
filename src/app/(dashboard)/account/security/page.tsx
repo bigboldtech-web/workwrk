@@ -10,13 +10,11 @@
 import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import {
   ShieldCheck,
   Key,
   Mail,
-  Hash,
   CheckCircle2,
   AlertTriangle,
   Building,
@@ -32,6 +30,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 
 import { useOsToast } from "@/components/layout/os/toast";
 import { MfaEnrollDialog, MfaDisableDialog } from "./mfa-modal";
@@ -145,41 +144,13 @@ export default function AccountSecurityPage() {
   }, [loadActivity]);
   useEffect(() => { void load(); }, [load]);
 
-  const score = (() => {
-    if (!mfa) return 0;
-    let s = 50;
-    if (mfa.emailVerified) s += 25;
-    if (mfa.mfaEnabled) s += 25;
-    return s;
-  })();
-  const scoreLabel = score >= 90 ? "Strong" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Weak";
-  const scoreHue = score >= 90 ? "var(--os-c-green)" : score >= 70 ? "var(--os-c-teal)" : score >= 50 ? "var(--os-c-orange)" : "var(--os-c-red)";
-
   return (
     <>
-      <OsPageHeader
-        title="Security"
-        actions={
-          <div className="acs__head-actions">
-            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-          </div>
-        }
-      />
+      <OsPageHeader title={SETTINGS_PAGES["account/security"].label} />
 
       <div className="acs">
         {loadError && <div className="acs__error">{loadError}</div>}
 
-        <section className="acs__score" style={{ ["--score-c" as unknown as string]: scoreHue }}>
-          <div className="acs__score-l">
-            <span className="acs__score-tag"><ShieldCheck /> Security score</span>
-            <h2>{scoreLabel}</h2>
-            <p>{score >= 90 ? "Excellent posture. Keep MFA enabled and rotate passwords yearly." : score >= 70 ? "Good posture. Add MFA to reach Strong." : "Address the recommendations below to improve your score."}</p>
-          </div>
-          <div className="acs__score-r">
-            <strong>{score}</strong>
-            <span>of 100</span>
-          </div>
-        </section>
 
         <section className="acs__section">
           <header><h2><Key /> Your posture</h2></header>
@@ -192,13 +163,16 @@ export default function AccountSecurityPage() {
         </section>
 
         <section className="acs__section">
-          <header><h2><Activity /> Org policy</h2></header>
+          <header><h2><Activity /> Password rules</h2></header>
           <div className="acs__policy">
             <PolicyRow label="Minimum password length" value={`${orgSec?.minPasswordLength ?? 8} characters`} />
             <PolicyRow label="Requires uppercase" value={orgSec?.requireUppercase ? "Yes" : "No"} />
             <PolicyRow label="Requires numbers" value={orgSec?.requireNumbers ? "Yes" : "No"} />
-            <PolicyRow label="Session timeout" value={`${orgSec?.sessionTimeout ?? 30} minutes`} />
-            <PolicyRow label="MFA required org-wide" value={orgSec?.twoFactorEnabled ? "Yes" : "Optional"} highlight={orgSec?.twoFactorEnabled} />
+            {/* Session timeout and "MFA required org-wide" are gone: nothing
+                read or enforced either value (the real idle window and the
+                two-step gate live in the sign-in code), so showing them as
+                policy was untrue. The Workspace Security page brings the
+                real sign-in policy with S5. */}
           </div>
         </section>
 

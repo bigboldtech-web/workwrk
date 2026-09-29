@@ -18,7 +18,6 @@ import {
   Plus,
   Copy,
   Trash2,
-  Hash,
   Activity,
   Clock,
   ShieldCheck,
@@ -227,12 +226,6 @@ export default function ApiKeysPage() {
     <>
       <OsPageHeader
         title={SETTINGS_PAGES.api.label}
-        actions={
-          <div className="apk__head-actions">
-            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-            <Link href="/settings/audit" className="os-head__link"><Activity /> Audit</Link>
-          </div>
-        }
         primary={canManage ? { label: "Generate key", onClick: openCreate } : undefined}
       />
 
@@ -359,6 +352,14 @@ export default function ApiKeysPage() {
             )}
           </>
         )}
+        {/* The settings hub of links at /settings/integrations 308s here; its two
+            other destinations stay one click away. */}
+        <p className="mt-6 text-sm text-ink-2">
+          Connecting apps lives in{" "}
+          <Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link>
+          ; your own calendar feeds live in{" "}
+          <Link href="/account/connections" className="font-medium text-brand-deep hover:underline">My settings, Calendar &amp; connections</Link>.
+        </p>
       </div>
 
       {/* Create-key modal */}

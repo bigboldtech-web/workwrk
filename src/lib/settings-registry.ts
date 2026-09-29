@@ -24,6 +24,16 @@ export type SettingsDoor = "me" | "workspace";
 
 export type WorkspaceGroup = "Workspace" | "People" | "Work" | "Security & data" | "Billing";
 
+/**
+ * The page's 20px sidebar glyph, as a Lucide component name. A string, not
+ * the component, so this table stays pure and server-importable; the shell
+ * maps the name to the icon (src/components/layout/os/settings-shell.tsx).
+ */
+export type SettingsIconName =
+  | "LayoutGrid" | "Building2" | "Globe" | "Boxes" | "Users" | "Network" | "ShieldCheck" | "Shapes"
+  | "BarChart3" | "Shield" | "Database" | "FileCheck" | "Key" | "CreditCard" | "List"
+  | "CircleUser" | "SlidersHorizontal" | "Bell" | "CalendarCheck" | "Keyboard";
+
 export interface SettingsPage {
   door: SettingsDoor;
   key: SettingsPageKey;
@@ -34,13 +44,17 @@ export interface SettingsPage {
   todayHref?: string | null;
   /** Sidebar group (Workspace door only). */
   group?: WorkspaceGroup;
+  /** Sidebar glyph (Lucide name). */
+  icon: SettingsIconName;
   /** Old URLs that mean this page (with an optional tab). */
   aliases: string[];
+  /** Other live routes that render inside this page's row (Data owns /imports until S5). */
+  alsoActiveOn?: string[];
   /** Search terms beyond the label. */
   keywords: string[];
   /** Declared, not enforced (see header). */
   gate: PageGate;
-  /** Tabs the page owns, in order (`?tab=`). */
+  /** Tabs the page renders today, in order (`?tab=`). */
   tabs?: string[];
 }
 
@@ -49,13 +63,15 @@ function page(
   key: SettingsPageKey,
   label: string,
   href: string,
-  extra: Partial<Omit<SettingsPage, "door" | "key" | "label" | "href" | "gate">> = {},
+  icon: SettingsIconName,
+  extra: Partial<Omit<SettingsPage, "door" | "key" | "label" | "href" | "gate" | "icon">> = {},
 ): SettingsPage {
   return {
     door,
     key,
     label,
     href,
+    icon,
     aliases: [],
     keywords: [],
     ...extra,
@@ -65,112 +81,144 @@ function page(
 
 /** Section 1's two sidebars, in order. */
 export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
-  // ── My settings (flat) ─────────────────────────────────────────
-  page("me", "account/profile", "Profile", "/account/profile", {
+  // My settings (flat, seven rows)
+  page("me", "account/profile", "Profile", "/account/profile", "CircleUser", {
     keywords: ["name", "avatar", "phone", "photo", "personal"],
   }),
-  page("me", "account/preferences", "Preferences", "/account/preferences", {
-    todayHref: "/account/appearance",
-    tabs: ["appearance", "locale", "sidebar"],
+  page("me", "account/preferences", "Preferences", "/account/preferences", "SlidersHorizontal", {
+    tabs: ["appearance"],
     aliases: ["/account/appearance", "/settings?tab=themes"],
     keywords: ["theme", "appearance", "dark", "density", "accent", "language", "timezone", "sidebar"],
   }),
-  page("me", "account/notifications", "Notifications", "/account/notifications", {
-    todayHref: "/settings/notifications",
-    tabs: ["inbox", "email", "desktop"],
+  page("me", "account/notifications", "Notifications", "/account/notifications", "Bell", {
     aliases: ["/settings/notifications"],
     keywords: ["inbox", "email", "mute", "quiet hours", "desktop", "alerts"],
   }),
-  page("me", "account/security", "Security", "/account/security", {
-    keywords: ["password", "two-factor", "2fa", "mfa", "sessions", "sign out"],
+  page("me", "account/security", "Security", "/account/security", "ShieldCheck", {
+    keywords: ["password", "two step verification", "2fa", "mfa", "sessions", "log out everywhere"],
   }),
-  page("me", "account/connections", "Calendar & connections", "/account/connections", {
-    // Phase 4: the page exists now, so the canonical URL is its own href and
-    // /settings/calendar is a 308 alias rather than the place it actually
-    // lived. `todayHref` defaults to the href when it is not given.
+  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", {
     aliases: ["/settings/calendar"],
     keywords: ["google calendar", "ics", "feed", "sync", "integrations"],
   }),
-  page("me", "account/shortcuts", "Keyboard shortcuts", "/account/shortcuts", {
-    todayHref: null,
+  page("me", "account/shortcuts", "Keyboard shortcuts", "/account/shortcuts", "Keyboard", {
     aliases: ["/settings?tab=shortcuts"],
     keywords: ["keys", "hotkeys", "chords"],
   }),
+  page("me", "account/all", "All settings", "/account/all", "List", {
+    keywords: ["index", "everything", "find"],
+  }),
 
-  // ── Workspace settings (grouped) ───────────────────────────────
-  page("workspace", "overview", "Overview", "/settings", {
-    keywords: ["all settings", "workspace"],
+  // Workspace settings (grouped)
+  page("workspace", "overview", "Overview", "/settings", "LayoutGrid", {
+    keywords: ["workspace", "home"],
   }),
-  page("workspace", "identity", "Identity & culture", "/settings/identity", {
+  page("workspace", "identity", "Identity & culture", "/settings/identity", "Building2", {
     group: "Workspace",
-    tabs: ["profile", "culture", "appearance", "danger"],
+    tabs: ["profile", "appearance"],
     aliases: ["/settings/defaults"],
-    keywords: ["name", "logo", "domain", "mission", "values", "splash", "defaults", "locks", "branding"],
+    keywords: ["name", "logo", "domain", "mission", "values", "splash", "defaults", "locks", "branding", "density", "theme"],
   }),
-  page("workspace", "locale", "Locale & work week", "/settings/locale", {
+  page("workspace", "locale", "Locale & work week", "/settings/locale", "Globe", {
     group: "Workspace",
     keywords: ["timezone", "currency", "fiscal year", "language", "week start", "capacity"],
   }),
-  page("workspace", "apps", "Apps & modules", "/settings/apps", {
+  page("workspace", "apps", "Apps & modules", "/settings/apps", "Boxes", {
     group: "Workspace",
     aliases: ["/settings/modules"],
-    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor"],
+    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium"],
   }),
-  page("workspace", "members", "Members", "/settings/members", {
+  page("workspace", "members", "Members", "/settings/members", "Users", {
     group: "People",
-    tabs: ["people", "guests", "teams", "invites"],
     keywords: ["people", "invite", "guests", "teams", "roles", "deactivate"],
   }),
-  page("workspace", "structure", "Structure", "/settings/structure", {
+  page("workspace", "structure", "Structure", "/settings/structure", "Network", {
     group: "People",
-    tabs: ["departments", "titles", "offices", "orgchart"],
+    tabs: ["overview", "departments", "titles", "fields"],
     // No /settings/hierarchy alias: that URL 308s to /organization, the one
     // org chart (next.config.ts), so search and the resolver agree with it.
-    keywords: ["departments", "job titles", "offices", "org chart", "reporting", "hierarchy"],
+    keywords: ["departments", "job titles", "offices", "org chart", "reporting", "hierarchy", "profile fields"],
   }),
-  page("workspace", "access", "Access", "/settings/access", {
+  page("workspace", "access", "Access", "/settings/access", "ShieldCheck", {
     group: "People",
-    todayHref: "/settings/permissions",
     aliases: ["/settings/permissions"],
-    keywords: ["permissions", "roles", "people team", "lock it down", "toggles"],
+    keywords: ["permissions", "roles", "people team", "lock it down", "toggles", "public links"],
   }),
-  page("workspace", "tasks", "Task system", "/settings/tasks", {
+  page("workspace", "tasks", "Task system", "/settings/tasks", "Shapes", {
     group: "Work",
-    todayHref: "/settings/task-types",
-    tabs: ["types", "tags", "templates"],
+    tabs: ["types", "tags"],
     aliases: ["/settings/task-types", "/settings/tags"],
     keywords: ["task types", "tags", "labels", "templates", "statuses"],
   }),
-  page("workspace", "scoring", "Scoring & reviews", "/settings/scoring", {
+  page("workspace", "scoring", "Scoring & reviews", "/settings/scoring", "BarChart3", {
     group: "Work",
     keywords: ["reviews", "weights", "bands", "cadence", "anchors", "kpi"],
   }),
-  page("workspace", "security", "Security", "/settings/security", {
+  page("workspace", "security", "Security", "/settings/security", "Shield", {
     group: "Security & data",
     todayHref: null,
     tabs: ["signin", "sso", "scim"],
     keywords: ["sign-in policy", "sso", "saml", "scim", "provisioning", "mfa", "sessions"],
   }),
-  page("workspace", "data", "Data", "/settings/data", {
+  page("workspace", "data", "Data", "/settings/data", "Database", {
     group: "Security & data",
-    tabs: ["export", "import", "retention", "trash"],
+    tabs: ["export", "import"],
     aliases: ["/settings/import-export"],
-    keywords: ["export", "import", "retention", "privacy", "trash", "compliance", "gdpr"],
+    alsoActiveOn: ["/imports"],
+    keywords: ["export", "import", "csv", "retention", "privacy", "trash", "compliance", "gdpr", "backup"],
   }),
-  page("workspace", "audit", "Audit log", "/settings/audit", {
+  page("workspace", "audit", "Audit log", "/settings/audit", "FileCheck", {
     group: "Security & data",
     keywords: ["activity", "history", "who did what", "log"],
   }),
-  page("workspace", "api", "API & webhooks", "/settings/api", {
+  page("workspace", "api", "API & webhooks", "/settings/api", "Key", {
     group: "Security & data",
-    tabs: ["keys", "webhooks", "ai"],
     aliases: ["/settings/integrations"],
     keywords: ["api keys", "webhooks", "tokens", "integrations", "byok", "ai keys"],
   }),
-  page("workspace", "billing", "Plan & billing", "/settings/billing", {
+  page("workspace", "billing", "Plan & billing", "/settings/billing", "CreditCard", {
     group: "Billing",
     keywords: ["plan", "invoice", "subscription", "seats", "upgrade", "payment"],
   }),
+  page("workspace", "all", "All settings", "/settings/all", "List", {
+    keywords: ["index", "everything", "find"],
+  }),
+];
+
+/**
+ * settings-architecture 8.4 and spec-account-auth section 0: every old URL
+ * and where it 308s to, query preserved. `next.config.ts` carries these
+ * rows (it runs before the filesystem in production) and a route-handler
+ * twin answers the path-only ones under hot reload. A vitest test holds the
+ * three in step: every alias here has a config row, every config row with a
+ * settings or account source is listed here.
+ *
+ * `/settings/hierarchy` goes to /organization (outside the doors) and
+ * `/me/mentions` stays a page (it is the only door to doc and SOP mentions
+ * until scripts/backfill-mentions.ts runs in production; see next.config.ts).
+ */
+export interface SettingsRedirect {
+  source: string;
+  /** Query condition (`has`), when the source is query-matched. */
+  query?: { key: string; value: string };
+  destination: string;
+}
+
+export const SETTINGS_REDIRECTS: readonly SettingsRedirect[] = [
+  { source: "/settings/modules", destination: "/settings/apps#modules" },
+  { source: "/settings/tags", destination: "/settings/tasks?tab=tags" },
+  { source: "/settings/task-types", destination: "/settings/tasks?tab=types" },
+  { source: "/settings/defaults", destination: "/settings/identity?tab=appearance" },
+  { source: "/settings/hierarchy", destination: "/organization" },
+  { source: "/settings/permissions", destination: "/settings/access" },
+  { source: "/settings/import-export", destination: "/settings/data?tab=import" },
+  { source: "/settings/integrations", destination: "/settings/api" },
+  { source: "/settings/notifications", destination: "/account/notifications" },
+  { source: "/settings/calendar", destination: "/account/connections" },
+  { source: "/settings", query: { key: "tab", value: "themes" }, destination: "/account/preferences?tab=appearance" },
+  { source: "/settings", query: { key: "tab", value: "shortcuts" }, destination: "/account/shortcuts" },
+  { source: "/account", destination: "/account/profile" },
+  { source: "/account/appearance", destination: "/account/preferences?tab=appearance" },
 ];
 
 export const SETTINGS_PAGES: Record<SettingsPageKey, SettingsPage> = Object.fromEntries(
@@ -215,7 +263,7 @@ export function resolveSettingsPage(pathname: string, search: string = ""): Sett
   }
   const candidates: { page: SettingsPage; len: number }[] = [];
   for (const p of SETTINGS_PAGE_LIST) {
-    const hrefs = [p.href, p.todayHref ?? null, ...p.aliases.filter((a) => !a.includes("?"))].filter((h): h is string => !!h);
+    const hrefs = [p.href, p.todayHref ?? null, ...p.aliases.filter((a) => !a.includes("?")), ...(p.alsoActiveOn ?? [])].filter((h): h is string => !!h);
     for (const h of hrefs) {
       if (path === h || path.startsWith(`${h}/`)) candidates.push({ page: p, len: h.length });
     }
@@ -248,20 +296,54 @@ export function filterSettingsPages(query: string, door?: SettingsDoor): Setting
 }
 
 /**
- * The redirect table from settings-architecture.md section 8.4, derived from
- * the aliases: old URL -> canonical URL. `next.config.ts` adds only the rows
- * whose target renders the same content today; the rest wait for their page.
+ * The alias rows as redirects (settings-architecture 8.4): old URL to the
+ * canonical page. The explicit SETTINGS_REDIRECTS table above carries the
+ * exact target (tab, hash); this derived view is what the consistency test
+ * compares it with, so an alias can never exist without its redirect.
  */
 export function settingsAliasRedirects(): { source: string; destination: string }[] {
   const out: { source: string; destination: string }[] = [];
   for (const p of SETTINGS_PAGE_LIST) {
     for (const a of p.aliases) {
-      if (a.includes("?")) continue; // query-conditioned rows need `has`; handled by hand
       if (a === p.href) continue;
       out.push({ source: a, destination: p.href });
     }
   }
   return out;
+}
+
+/** The redirect row for a URL (path plus optional query), when there is one. */
+export function settingsRedirectFor(pathname: string, search: string = ""): SettingsRedirect | null {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  for (const r of SETTINGS_REDIRECTS) {
+    if (r.source !== path) continue;
+    if (r.query) {
+      if (params.get(r.query.key) === r.query.value) return r;
+      continue;
+    }
+    return r;
+  }
+  return null;
+}
+
+/**
+ * The URL a redirect lands on, with the request's other query parameters
+ * carried along (the query is preserved, spec-account-auth section 0). The
+ * matched `tab=` of a query-conditioned row is dropped, since the target
+ * owns its own tab; a target hash stays last.
+ */
+export function settingsRedirectTarget(r: SettingsRedirect, search: string = ""): string {
+  const [beforeHash, hash = ""] = r.destination.split("#");
+  const [path, destQuery = ""] = beforeHash.split("?");
+  const out = new URLSearchParams(destQuery);
+  const incoming = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  for (const [k, v] of incoming) {
+    if (r.query && k === r.query.key) continue;
+    if (!out.has(k)) out.append(k, v);
+  }
+  const q = out.toString();
+  return `${path}${q ? `?${q}` : ""}${hash ? `#${hash}` : ""}`;
 }
 
 // ─────────────────────────────────────────────────────────────────

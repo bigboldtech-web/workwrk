@@ -9,6 +9,8 @@ import { normalizeEnabledModules } from "@/lib/module-keys";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { MODULE_SLUGS } from "@/lib/modules";
 import { DEFAULT_INSTALLED_SLUGS, DEPARTMENT_RECOMMENDED_PRODUCTS } from "@/lib/products/catalog";
+import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 
 export async function GET() {
   try {
@@ -43,6 +45,16 @@ export async function POST(req: Request) {
 
     const userId = (session.user as any).id;
     const orgId = (session.user as any).organizationId;
+    const inviterLevel: string = (session.user as any).accessLevel ?? "EMPLOYEE";
+
+    // Org setup is an Owner and Admin act (spec-account-auth "Access",
+    // correction 1). This route used to check only for a session, so any
+    // Member, Agent or Guest could rewrite the setup keys, turn modules on
+    // and send invitations. The one wizard (A3) retires the route; until
+    // then it answers Admins only.
+    if (!legacyIsAdminLevel(inviterLevel)) {
+      return NextResponse.json({ error: "Only a workspace Admin can run setup" }, { status: 403 });
+    }
     const body = await req.json();
 
     const {
@@ -157,19 +169,13 @@ export async function POST(req: Request) {
 
     const existingDeptNames = existingDepts.map((d) => d.name);
 
-    // Delete default departments that were unchecked (only if they have no members)
-    const defaultNames = ["Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"];
-    for (const dept of existingDepts) {
-      if (defaultNames.includes(dept.name) && !enabledDeptNames.includes(dept.name)) {
-        // Check if department has members
-        const memberCount = await prisma.user.count({
-          where: { departmentId: dept.id },
-        });
-        if (memberCount === 0) {
-          await prisma.department.delete({ where: { id: dept.id } });
-        }
-      }
-    }
+    // NOTHING IS DELETED HERE ANY MORE. This loop deleted every default
+    // department (Engineering, Sales, Marketing, Operations, HR, Finance)
+    // with no members that the body did not list, and the /onboard wizard
+    // sends `departments: []`, so finishing it wiped all six. An unchecked
+    // department now stays; removing one is a deliberate act on Settings >
+    // Structure > Departments, which asks first.
+    void enabledDeptNames;
 
     // Update existing departments with colors/descriptions
     for (const deptData of (departments || []).filter((d: any) => d.enabled)) {
@@ -224,10 +230,15 @@ export async function POST(req: Request) {
       });
       if (existingInvite) continue;
 
+      // The same level rule as POST /api/invitations: never WorkwrK staff.
+      // A level this Admin may not give is skipped rather than stored.
+      const levelCheck = resolveInviteLevel(inviterLevel, invite.role);
+      if (!levelCheck.ok) continue;
+
       const invitation = await prisma.invitation.create({
         data: {
           email: invite.email,
-          accessLevel: invite.role || "EMPLOYEE",
+          accessLevel: levelCheck.level,
           token: crypto.randomBytes(32).toString("hex"),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
           organizationId: orgId,
@@ -235,11 +246,11 @@ export async function POST(req: Request) {
       });
 
       // Send invitation email
-      const inviteLink = `${baseUrl}/register?token=${invitation.token}`;
+      const inviteLink = `${baseUrl}/join?token=${invitation.token}`;
       const { subject, html } = invitationTemplate({
         companyName: org?.name || "Your team",
         inviteLink,
-        accessLevel: invite.role || "EMPLOYEE",
+        accessLevel: levelCheck.level,
       });
 
       try {

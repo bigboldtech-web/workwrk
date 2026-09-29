@@ -34,6 +34,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { MODULES, MODULE_SLUGS } from "@/lib/modules";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 
 type ApiSettings = {
   organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null };
@@ -109,7 +110,7 @@ export function SettingsOverviewClient() {
       cards: [
         {
           href: "/settings/identity",
-          title: "Identity & profile",
+          title: SETTINGS_PAGES.identity.label,
           description: "Name, slug, primary domain, contact info.",
           Icon: Building2,
           fields: [
@@ -119,8 +120,8 @@ export function SettingsOverviewClient() {
           ],
         },
         {
-          href: "/settings",
-          title: "Locale & finance",
+          href: "/settings/locale",
+          title: SETTINGS_PAGES.locale.label,
           description: "Timezone, currency, fiscal year start.",
           Icon: CalendarIcon,
           fields: [
@@ -130,8 +131,8 @@ export function SettingsOverviewClient() {
           ],
         },
         {
-          href: "/settings",
-          title: "Plan & billing",
+          href: "/settings/billing",
+          title: SETTINGS_PAGES.billing.label,
           description: "Current subscription and billing details.",
           Icon: Award,
           fields: [
@@ -146,8 +147,8 @@ export function SettingsOverviewClient() {
       title: "Product & integrations",
       cards: [
         {
-          href: "/settings/modules",
-          title: "Modules",
+          href: "/settings/apps#modules",
+          title: SETTINGS_PAGES.apps.label,
           description: "Turn premium modules like Talk and Tables on or off for your team.",
           Icon: Boxes,
           fields: [
@@ -156,14 +157,14 @@ export function SettingsOverviewClient() {
           ],
         },
         {
-          href: "/settings/tags",
-          title: "Tags & labels",
+          href: "/settings/tasks?tab=tags",
+          title: "Tags",
           description: "Shared taxonomy across boards, tasks, and SOPs.",
           Icon: Tag,
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
-          href: "/settings/task-types",
+          href: "/settings/tasks?tab=types",
           title: "Task types",
           description: "Re-skin tasks as Milestones, Bugs, Deals & more.",
           Icon: Shapes,
@@ -171,14 +172,14 @@ export function SettingsOverviewClient() {
         },
         {
           href: "/settings/api",
-          title: "API keys",
+          title: SETTINGS_PAGES.api.label,
           description: "Service tokens for webhooks and automations.",
           Icon: Key,
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
           href: "/account/connections",
-          title: "Calendar feeds",
+          title: SETTINGS_PAGES["account/connections"].label,
           description: "Subscribe external calendars; publish org feeds.",
           Icon: CalendarIcon,
           fields: [{ label: "Manage", value: "Open" }],
@@ -218,7 +219,7 @@ export function SettingsOverviewClient() {
       cards: [
         {
           href: "/account/security",
-          title: "Password policy",
+          title: "Password rules",
           description: "Minimum length and character requirements.",
           Icon: Shield,
           fields: [
@@ -227,16 +228,10 @@ export function SettingsOverviewClient() {
             { label: "Numbers", value: sec.requireNumbers ? "Required" : "Optional" },
           ],
         },
-        {
-          href: "/account/security",
-          title: "Session & 2FA",
-          description: "Idle timeout and two-factor enforcement.",
-          Icon: Key,
-          fields: [
-            { label: "Timeout", value: `${sec.sessionTimeout ?? 30} min` },
-            { label: "2FA", value: sec.twoFactorEnabled ? "Required" : "Optional" },
-          ],
-        },
+        // "Session & 2FA" is gone: the idle timeout and the two-step rule it
+        // showed were read by nothing (the live idle window and the two-step
+        // gate are in the sign-in code), so the card stated a policy that did
+        // not exist. The Workspace Security page brings the real one (S5).
         {
           href: "/settings/audit",
           title: "Audit log",

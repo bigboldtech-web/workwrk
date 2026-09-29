@@ -2590,6 +2590,9 @@ describe("spec 6.6: the settings page table", () => {
     expect(readable.sort()).toEqual(
       [
         "access",
+        // Phase 8: My settings > All settings, the generated index, is a
+        // personal page like the other six; Workspace "all" is not readable.
+        "account/all",
         "account/connections",
         "account/notifications",
         "account/preferences",

@@ -15,7 +15,7 @@
 //      (the assignment grant), its creator, or a reader of a List it is
 //      linked into. A row names the task, so it never reaches anyone the
 //      task is hidden from (a watcher who has since lost the List, say).
-//   5. `filterNotifyUsers(...)`: the /settings/notifications inbox toggle
+//   5. `filterNotifyUsers(...)`: the /account/notifications inbox toggle
 //   6. one `createMany`
 //
 // A future producer that wants to notify about an item calls one of these
@@ -70,7 +70,7 @@ function formatDue(due: Date | string | null | undefined): string | null {
 
 interface EmitArgs {
   organizationId: string;
-  /** Preference key the recipient's /settings/notifications toggle controls. */
+  /** Preference key the recipient's /account/notifications toggle controls. */
   prefKey: NotifyType;
   /** Stored Notification.type: what /inbox and the bell filter on. */
   type: string;
@@ -151,7 +151,7 @@ async function emit(args: EmitArgs): Promise<number> {
       : new Set(members.map((m) => m.id));
     if (readers.size === 0) return 0;
 
-    // THE preference gate: /settings/notifications inbox toggles.
+    // THE preference gate: /account/notifications inbox toggles.
     const wanted = await filterNotifyUsers([...readers], args.prefKey);
     if (wanted.size === 0) return 0;
 

@@ -79,7 +79,7 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
       // can turn it on. Never a bare "Couldn't create".
       const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
       if (!r.ok && r.status === 409 && isAdmin) {
-        toast(r.error, { tone: "danger", action: { label: "Open Access settings", onClick: () => router.push("/settings/permissions") } });
+        toast(r.error, { tone: "danger", action: { label: "Open Access settings", onClick: () => router.push("/settings/access") } });
         return;
       }
       toast(r.ok ? "Couldn't create a public link" : r.error || "Couldn't create a public link", { tone: "danger" });

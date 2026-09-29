@@ -128,7 +128,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
     void write("rows", { home: { cards: next } });
   };
 
-  const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/appearance";
+  const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/preferences";
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>

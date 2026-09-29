@@ -28,6 +28,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { C } from "@/components/layout/os/catalog";
 import {
   CADENCE_LABELS, METRIC_LABELS,
@@ -80,7 +81,7 @@ export default function ScoringSettingsPage() {
   if (loading) {
     return (
       <div>
-        <OsPageHeader title="Scoring & reviews" />
+        <OsPageHeader title={SETTINGS_PAGES.scoring.label} />
         <div className="px-6 py-6"><SkeletonRows rows={6} /></div>
       </div>
     );
@@ -88,7 +89,7 @@ export default function ScoringSettingsPage() {
 
   return (
     <div className="pb-16">
-      <OsPageHeader title="Scoring & reviews" />
+      <OsPageHeader title={SETTINGS_PAGES.scoring.label} />
       <div className="px-6">
         <div className="max-w-3xl space-y-5">
           <CadencesSection cadences={cadences} setCadences={setCadences} />

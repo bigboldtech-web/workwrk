@@ -21,3 +21,14 @@ export const ACCENT_LABELS: Record<AccentKey, string> = {
 export function isAccentKey(v: unknown): v is AccentKey {
   return typeof v === "string" && (ACCENT_KEYS as readonly string[]).includes(v);
 }
+
+/**
+ * The read-time normaliser (settings spec section 3, `accents`): any stored
+ * accent, org or personal, resolves to a key the product still draws, and
+ * anything else (a retired purple hue, a typo, a non-string) resolves to the
+ * brand blue. Readers call this rather than trusting the column, so a value
+ * written before a swatch was retired can never paint an undefined theme.
+ */
+export function normalizeAccent(v: unknown): AccentKey {
+  return isAccentKey(v) ? v : "workwrk";
+}

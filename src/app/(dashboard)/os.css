@@ -8466,34 +8466,6 @@ table.os-tbl {
 
 /* Account · Security */
 .acs__error { padding: 10px 14px; background: color-mix(in srgb, var(--os-c-red) 8%, transparent); color: var(--os-c-red); border: 1px solid color-mix(in srgb, var(--os-c-red) 25%, var(--os-line)); border-radius: 8px; font-size: 13.5px; }
-.acs__score {
-  position: relative;
-  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--score-c) 6%, var(--os-surface)));
-  border: 1px solid color-mix(in srgb, var(--score-c) 28%, var(--os-line));
-  border-radius: 14px;
-  padding: 18px 22px;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  overflow: hidden;
-}
-.acs__score::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-  background: var(--score-c);
-}
-.acs__score-l { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
-.acs__score-tag {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 700; padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--score-c); color: white;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  align-self: flex-start;
-}
-.acs__score-tag svg { width: 11px; height: 11px; }
-.acs__score-l h2 { font-size: 22px; font-weight: 700; color: var(--os-ink); margin: 0; letter-spacing: -0.02em; }
-.acs__score-l p { font-size: 14px; color: var(--os-ink-2); margin: 0; line-height: 1.5; }
-.acs__score-r { text-align: right; flex-shrink: 0; }
-.acs__score-r strong { font-size: 44px; font-weight: 700; color: var(--score-c); font-variant-numeric: tabular-nums; line-height: 1; }
-.acs__score-r span { font-size: 12px; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; display: block; margin-top: 4px; }
 
 .acs__section {
   background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 12px;

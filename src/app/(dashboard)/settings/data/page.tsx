@@ -37,8 +37,7 @@ import {
   Megaphone,
   type LucideIcon,
 } from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -111,17 +110,20 @@ const CSV_EXPORTS: ExportRow[] = [
   },
 ];
 
-// Governance destinations that already have their own pages.
-const GOVERNANCE = [
+// The Import tab (the old /settings/import-export 308s here). /imports keeps
+// its own URL inside the takeover until the inline importer ships (S5); its
+// People card opens the Directory's Import people (Phase 6).
+const IMPORTS = [
   {
     href: "/imports",
     icon: Upload,
     title: "Import data",
-    // /imports brings a CSV into a table, and its People card opens the
-    // Directory's Import people (Phase 6); the Settings > Data > Import tab
-    // that hosts the same flow inline is Phase 8.
     desc: "Bring a CSV file into a table, or invite people from a CSV.",
   },
+] as const;
+
+// Governance destinations that already have their own pages.
+const GOVERNANCE = [
   {
     href: "/trash",
     icon: Trash2,
@@ -140,6 +142,29 @@ function filenameFromDisposition(cd: string, fallback: string): string {
   }
   const plain = /filename="?([^";]+)"?/i.exec(cd);
   return plain?.[1] ?? fallback;
+}
+
+const DATA_TABS: readonly SettingsTab[] = [
+  { key: "export", label: "Export" },
+  { key: "import", label: "Import" },
+];
+
+function LinkCard({ href, icon: Icon, title, desc }: { href: string; icon: LucideIcon; title: string; desc: string }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3 hover:border-line-strong hover:bg-hover"
+    >
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-active text-ink-2">
+        <Icon className="h-[18px] w-[18px]" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-medium text-ink">{title}</div>
+        <div className="text-base text-ink-2">{desc}</div>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-ink-3" />
+    </Link>
+  );
 }
 
 export default function DataCompliancePage() {
@@ -189,49 +214,42 @@ export default function DataCompliancePage() {
   }, [busy, toast]);
 
   return (
-    <div className="flex h-full flex-col">
-      <OsPageHeader title={SETTINGS_PAGES.data.label} />
+    <SettingsPage pageKey="data" tabs={DATA_TABS}>
+      {(tab) =>
+        tab === "import" ? (
+          <div className="max-w-2xl space-y-7">
+            <Section label="Import">
+              {IMPORTS.map((c) => <LinkCard key={c.href} {...c} />)}
+            </Section>
+          </div>
+        ) : (
+          <>
+            <p className="mb-6 max-w-2xl text-base text-ink-2">
+              Download a full copy of this organization&rsquo;s data for compliance,
+              backup or migration. Every export is admin-only and recorded in the audit trail.
+            </p>
 
-      <div className="flex-1 overflow-y-auto px-6 pt-4 pb-10">
-        <p className="mb-6 max-w-2xl text-base text-zinc-500">
-          Download a full copy of this organization&rsquo;s data for compliance,
-          backup or migration. Every export is admin-only and recorded in the audit trail.
-        </p>
+            <div className="max-w-2xl space-y-7">
+              <Section label="Full export">
+                <ExportButton row={FULL_EXPORT} busy={busy} onRun={download} />
+              </Section>
 
-        <div className="max-w-2xl space-y-7">
-          <Section label="Full export">
-            <ExportButton row={FULL_EXPORT} busy={busy} onRun={download} />
-          </Section>
+              <Section label="Data exports (CSV)">
+                {CSV_EXPORTS.map((row) => (
+                  <ExportButton key={row.key} row={row} busy={busy} onRun={download} />
+                ))}
+              </Section>
 
-          <Section label="Data exports (CSV)">
-            {CSV_EXPORTS.map((row) => (
-              <ExportButton key={row.key} row={row} busy={busy} onRun={download} />
-            ))}
-          </Section>
+              <LegacyMarketingSection busy={busy} onExport={download} />
 
-          <LegacyMarketingSection busy={busy} onExport={download} />
-
-          <Section label="Governance">
-            {GOVERNANCE.map(({ href, icon: Icon, title, desc }) => (
-              <Link
-                key={href}
-                href={href}
-                className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 hover:border-zinc-300 hover:bg-zinc-50"
-              >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-500">
-                  <Icon className="h-[18px] w-[18px]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-base font-medium text-zinc-900">{title}</div>
-                  <div className="text-base text-zinc-500">{desc}</div>
-                </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
-              </Link>
-            ))}
-          </Section>
-        </div>
-      </div>
-    </div>
+              <Section label="Governance">
+                {GOVERNANCE.map((c) => <LinkCard key={c.href} {...c} />)}
+              </Section>
+            </div>
+          </>
+        )
+      }
+    </SettingsPage>
   );
 }
 

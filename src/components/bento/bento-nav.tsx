@@ -110,7 +110,7 @@ export function BentoNav({ links = defaultLinks }: { links?: NavLink[] }) {
               >
                 {t("signIn")}
               </Link>
-              <Link href={appHref("/register")} className="bento-btn bento-btn-lime">
+              <Link href={appHref("/signup")} className="bento-btn bento-btn-lime">
                 {t("startFree")} <span className="arr">→</span>
               </Link>
             </>

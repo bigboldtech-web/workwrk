@@ -89,7 +89,7 @@ export interface HomePref {
   // Space Overview tab — same shape, separate key.
   overviewCardLayout?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
   overviewCardsHidden?: string[];
-  // Notification settings (/settings/notifications). Lives inside the home
+  // Notification settings (/account/notifications). Lives inside the home
   // JSON column on purpose — UserPreference has fixed columns and this
   // avoids a schema migration. Missing key = all defaults (true).
   // Enforced server-side by src/lib/notify-prefs.ts.

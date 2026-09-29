@@ -24,7 +24,7 @@
 // feature is not finished until the control ships.
 //
 // WHERE THE CONTROL LANDS: the Inbox section of
-// src/app/(dashboard)/settings/notifications/page.tsx, as four more entries in
+// src/app/(dashboard)/account/notifications/page.tsx, as four more entries in
 // its INBOX_ROWS list. That page already round-trips arbitrary keys through the
 // same loose `inbox` record its six older rows use, so the rows need no schema
 // change and no migration: map TALK_INBOX_KEYS through TALK_INBOX_LABELS and
@@ -79,7 +79,7 @@ export const TALK_INBOX_DEFAULTS: Record<TalkInboxKey, boolean> = {
  * reader yet. The schema accepts it (src/lib/preferences-schema.ts, a sibling
  * of `desktop` on purpose) and the default is declared here, but the switch is
  * not on the Desktop section of
- * src/app/(dashboard)/settings/notifications/page.tsx and
+ * src/app/(dashboard)/account/notifications/page.tsx and
  * src/components/calls/incoming-call-watcher.tsx does not consult it, so a
  * person who turned the ring off would still be rung. Both halves land
  * together or neither does: shipping the switch alone would be a control with

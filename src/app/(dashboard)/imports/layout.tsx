@@ -19,11 +19,11 @@ import { SHELL_LABELS } from "@/lib/nav/labels";
 // gets "Import a CSV into a table", which opens the in-place CSV dialog on
 // /tables (spec-tables-forms section 2 /imports, the ?import=1 latch).
 export default async function ImportsLayout({ children }: { children: React.ReactNode }) {
-  if (await isOrgAdminViewer()) return <SettingsShell>{children}</SettingsShell>;
+  if (await isOrgAdminViewer()) return <SettingsShell door="workspace">{children}</SettingsShell>;
   const user = await requireSessionUser();
   const tablesOn = !(await isGuestViewer()) && (await isModuleActive(user.organizationId, MODULE_BY_SLUG["workwrk-tables"].productSlug));
   return (
-    <SettingsShell>
+    <SettingsShell door="workspace">
       <AdminOnly page="Import" back={{ fallbackHref: "/account/profile", label: SHELL_LABELS.mySettings }}>
         {/* Not "import people": no People importer exists for anyone until
             Settings > Data > Import (Phase 8), so the strip promises only

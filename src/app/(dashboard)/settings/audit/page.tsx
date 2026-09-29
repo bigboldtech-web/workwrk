@@ -12,7 +12,6 @@
 
 import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
   Activity, Search, Hash, ChevronRight, User as UserIcon, Edit3, Trash2,
   Plus, Eye, ShieldAlert, Key, FileText, Calendar as CalendarIcon, Download, X,
@@ -236,14 +235,12 @@ export default function AuditLogPage() {
   return (
     <>
       <OsPageHeader
-        title="Audit log"
+        title={SETTINGS_PAGES.audit.label}
         actions={
           <div className="adt__head-actions">
             <button type="button" className="os-head__link" onClick={exportLog} disabled={exporting}>
-              <Download /> {exporting ? "Exporting…" : "Export"}
+              <Download /> {exporting ? "Exporting" : "Export"}
             </button>
-            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-            <Link href="/settings/api" className="os-head__link"><Key /> {SETTINGS_PAGES.api.label}</Link>
           </div>
         }
       />

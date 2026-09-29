@@ -1094,7 +1094,7 @@ export function CreateTaskModal() {
                       </button>
                     );
                   })}
-                  <Link href="/settings/task-types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
+                  <Link href="/settings/tasks?tab=types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
                     <SettingsIcon className="w-3.5 h-3.5" /> Manage task types
                   </Link>
                 </div>

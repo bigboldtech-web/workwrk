@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { resolveInviteLevel } from "@/lib/access/invite-level";
 
 export async function GET() {
   try {
@@ -23,7 +24,11 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(invitations);
+    // The raw token is the invitation: whoever holds it can accept it with a
+    // password of their choosing. It goes to the invitee by email and never
+    // back out of this list (any signed-in member can read it), so a pending
+    // Admin invite cannot be lifted and accepted by someone else.
+    return NextResponse.json(invitations.map(({ token: _token, ...rest }) => { void _token; return rest; }));
   } catch (error) {
     console.error("Invitations GET error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -44,7 +49,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+    const { email, accessLevel: requestedLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+
+    // The level an invitation may carry (src/lib/access/invite-level.ts):
+    // never WorkwrK staff, an Admin only from an Admin, and otherwise at or
+    // below the inviter's own rung. It used to be stored as sent.
+    const levelCheck = resolveInviteLevel((session.user as any).accessLevel, requestedLevel);
+    if (!levelCheck.ok) {
+      return NextResponse.json({ error: levelCheck.error }, { status: levelCheck.status });
+    }
+    const inviteLevel = levelCheck.level;
 
     // Optional personal note from the inviter — capped so the email stays sane.
     const personalMessage =
@@ -127,7 +141,7 @@ export async function POST(req: Request) {
     // Send invitation email
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const inviteLink = `${baseUrl}/register?token=${invitation.token}`;
+    const inviteLink = `${baseUrl}/join?token=${invitation.token}`;
     const { subject, html } = invitationTemplate({
       companyName: org?.name || "Your team",
       inviteLink,

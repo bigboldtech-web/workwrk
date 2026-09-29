@@ -15,7 +15,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import {
-  Building2, Briefcase, ShieldCheck, ChevronRight, ListPlus, Users, Layers, Lock,
+  Building2, Briefcase, ShieldCheck, ChevronRight, ListPlus, Users, Lock,
   type LucideIcon,
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
@@ -25,7 +25,8 @@ import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { AdminOnly } from "@/components/access";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 import { Suspense } from "react";
-import { BackButton } from "@/components/ui/back-button";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { DepartmentsManager } from "@/components/people/departments-manager";
 import { JobTitlesList } from "@/components/people/job-titles-list";
 import { ProfileFieldsManager } from "@/components/people/profile-fields-manager";
@@ -62,6 +63,13 @@ for (const lvl of ACCESS_LEVELS) {
   }
 }
 
+const STRUCTURE_TABS: SettingsTab[] = [
+  { key: "overview", label: "Overview" },
+  { key: "departments", label: "Departments" },
+  { key: "titles", label: "Job titles" },
+  { key: "fields", label: "Profile fields" },
+];
+
 export default async function StructurePage({ searchParams }: { searchParams?: Promise<{ tab?: string }> }) {
   const tab = (await searchParams)?.tab;
   const session = await getServerSession(authOptions);
@@ -79,17 +87,15 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
   // The Structure tabs (spec-teams-people section 3): the same
   // DepartmentsManager and JobTitlesList the Teams pages render, inside the
   // settings door. The org chart is a link card, never embedded (one chart).
+  // Tabs, not sub-pages with a Back button (no BackButton inside a door,
+  // settings-architecture 8.3): Overview is the landing below.
   if (tab === "departments" || tab === "titles" || tab === "fields") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 px-6 pt-4">
-          <BackButton fallbackHref="/settings/structure" label="Structure" />
-          <h1 className="text-title font-semibold text-ink">{tab === "departments" ? "Departments" : tab === "titles" ? "Job titles" : "Profile fields"}</h1>
-        </div>
+      <SettingsPage pageKey="structure" tabs={STRUCTURE_TABS} width="list">
         <Suspense>
           {tab === "departments" ? <DepartmentsManager door="settings" /> : tab === "titles" ? <JobTitlesList door="settings" /> : <ProfileFieldsManager />}
         </Suspense>
-      </div>
+      </SettingsPage>
     );
   }
 
@@ -110,23 +116,11 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
   const totalPeople = [...holders.values()].reduce((a, b) => a + b, 0);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-6">
-      {/* Header */}
-      <header className="mb-6">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
-          <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
-          <ChevronRight className="h-3 w-3" />
-          <span>Structure</span>
-        </div>
-        <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900">
-          <Layers className="h-5 w-5 text-[#0073EA]" />
-          Structure
-        </h1>
-        <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
-          How the company is shaped: the departments people belong to, the job titles they hold, the
-          offices they work from, and the access ladder that decides what each person can reach.
-        </p>
-      </header>
+    <SettingsPage pageKey="structure" tabs={STRUCTURE_TABS} width="list">
+      <p className="mb-6 max-w-2xl text-base leading-relaxed text-ink-2">
+        How the company is shaped: the departments people belong to, the job titles they hold, the
+        offices they work from, and the access ladder that decides what each person can reach.
+      </p>
 
       {/* Building blocks */}
       <section className="mb-8">
@@ -191,7 +185,7 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
             Each level is a value of the <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs text-zinc-700">AccessLevel</code> enum
             that the permission matrix is built on, so the rungs can&apos;t be renamed, reordered or added from here.
             You place people on a rung (on their profile or via a role); you tune what a rung can do in{" "}
-            <Link href="/settings/permissions" className="font-medium text-[#0073EA] hover:underline">Roles &amp; permissions</Link>.
+            <Link href="/settings/access" className="font-medium text-[#0073EA] hover:underline">{SETTINGS_PAGES.access.label}</Link>.
           </p>
         </div>
 
@@ -224,10 +218,10 @@ export default async function StructurePage({ searchParams }: { searchParams?: P
           })}
         </ol>
         <p className="mt-2 text-xs text-zinc-400">
-          Everyone, on every rung, gets the Personal door (<Link href="/account/profile" className="text-[#0073EA] hover:underline">/account</Link>): profile, notifications, appearance and their own security posture.
+          Everyone, on every rung, gets <Link href="/account/profile" className="text-[#0073EA] hover:underline">{SHELL_LABELS.mySettings}</Link>: profile, notifications, preferences and their own security.
         </p>
       </section>
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -252,7 +246,7 @@ function BlockTile({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="text-base font-semibold text-zinc-900">{title}</span>
-          <ChevronRight className="h-3.5 w-3.5 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-500" />
+          <ChevronRight className="h-3.5 w-3.5 text-zinc-300 transition-colors group-hover:text-zinc-500" />
         </div>
         <div className="mt-0.5 text-sm font-medium text-zinc-400">{meta}</div>
         <p className="mt-1 text-sm leading-relaxed text-zinc-500">{desc}</p>

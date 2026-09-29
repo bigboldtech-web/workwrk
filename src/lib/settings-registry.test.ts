@@ -9,6 +9,8 @@ import {
   resolveSettingsPage,
   settingsAliasRedirects,
   settingsHrefToday,
+  settingsRedirectFor,
+  settingsRedirectTarget,
   settingsSidebar,
 } from "./settings-registry";
 import { resolveCloseTarget, isSettingsRoute } from "./settings-nav";
@@ -18,9 +20,24 @@ describe("settings registry", () => {
     expect(SETTINGS_PAGE_LIST.map((p) => p.key).sort()).toEqual([...SETTINGS_PAGE_KEYS].sort());
     for (const p of SETTINGS_PAGE_LIST) expect(p.gate).toBe(SETTINGS_PAGE_GATES[p.key]);
   });
-  it("lists the 14 workspace pages and 6 personal pages in section-1 order (the two 'All settings' indexes are generated, not pages)", () => {
-    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "workspace")).toHaveLength(14);
-    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me")).toHaveLength(6);
+  it("lists the 15 workspace rows and 7 personal rows in the spec's order, All settings last in each", () => {
+    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "workspace").map((p) => p.href)).toEqual([
+      "/settings",
+      "/settings/identity",
+      "/settings/locale",
+      "/settings/apps",
+      "/settings/members",
+      "/settings/structure",
+      "/settings/access",
+      "/settings/tasks",
+      "/settings/scoring",
+      "/settings/security",
+      "/settings/data",
+      "/settings/audit",
+      "/settings/api",
+      "/settings/billing",
+      "/settings/all",
+    ]);
     expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me").map((p) => p.href)).toEqual([
       "/account/profile",
       "/account/preferences",
@@ -28,6 +45,13 @@ describe("settings registry", () => {
       "/account/security",
       "/account/connections",
       "/account/shortcuts",
+      "/account/all",
+    ]);
+  });
+  it("gives every row an icon, and the spec's icons to the My settings rows", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(p.icon).toBeTruthy();
+    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me").map((p) => p.icon)).toEqual([
+      "CircleUser", "SlidersHorizontal", "Bell", "ShieldCheck", "CalendarCheck", "Keyboard", "List",
     ]);
   });
   it("never repeats an href or an alias", () => {
@@ -75,18 +99,16 @@ describe("resolveSettingsPage", () => {
 });
 
 describe("today's hrefs and the sidebar", () => {
-  it("points every navigable row at a route that renders today", () => {
-    const today = SETTINGS_PAGE_LIST.map((p) => settingsHrefToday(p));
-    expect(today).toContain("/account/appearance");
-    expect(today).toContain("/settings/notifications");
-    expect(today).toContain("/settings/task-types");
-    expect(settingsHrefToday(SETTINGS_PAGES["account/shortcuts"])).toBeNull();
-    expect(settingsHrefToday(SETTINGS_PAGES.security)).toBeNull();
+  it("every page renders at its canonical URL, except Workspace Security (S5)", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      if (p.key === "security") expect(settingsHrefToday(p)).toBeNull();
+      else expect(settingsHrefToday(p)).toBe(p.href);
+    }
   });
   it("hides unbuilt pages from the sidebar unless asked", () => {
     expect(settingsSidebar("workspace").map((p) => p.key)).not.toContain("security");
     expect(settingsSidebar("workspace", { includeUnbuilt: true }).map((p) => p.key)).toContain("security");
-    expect(settingsSidebar("me").map((p) => p.key)).not.toContain("account/shortcuts");
+    expect(settingsSidebar("me").map((p) => p.key)).toContain("account/shortcuts");
   });
   it("filters by label, keyword, group and alias", () => {
     expect(filterSettingsPages("2fa").map((p) => p.key)).toEqual(["account/security"]);
@@ -100,7 +122,41 @@ describe("today's hrefs and the sidebar", () => {
     expect(rows).toContainEqual({ source: "/settings/permissions", destination: "/settings/access" });
     expect(rows).toContainEqual({ source: "/settings/tags", destination: "/settings/tasks" });
     expect(rows).toContainEqual({ source: "/account/appearance", destination: "/account/preferences" });
-    expect(rows.every((r) => !r.source.includes("?"))).toBe(true);
+  });
+});
+
+describe("SETTINGS_REDIRECTS", () => {
+  it("has one explicit row for every alias, landing on that alias's page", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      for (const a of p.aliases) {
+        const [path, q = ""] = a.split("?");
+        const r = settingsRedirectFor(path, q ? `?${q}` : "");
+        expect(r, a).not.toBeNull();
+        expect(resolveSettingsPage(r!.destination.split(/[?#]/)[0])?.key, a).toBe(p.key);
+      }
+    }
+  });
+  it("lands tabbed and hashed targets on the right tab", () => {
+    expect(settingsRedirectFor("/settings/tags")?.destination).toBe("/settings/tasks?tab=tags");
+    expect(settingsRedirectFor("/settings/task-types")?.destination).toBe("/settings/tasks?tab=types");
+    expect(settingsRedirectFor("/settings/modules")?.destination).toBe("/settings/apps#modules");
+    expect(settingsRedirectFor("/settings", "?tab=themes")?.destination).toBe("/account/preferences?tab=appearance");
+    expect(settingsRedirectFor("/settings", "?tab=shortcuts")?.destination).toBe("/account/shortcuts");
+    expect(settingsRedirectFor("/settings")).toBeNull();
+    expect(settingsRedirectFor("/settings", "?tab=nope")).toBeNull();
+  });
+  it("preserves the query, drops the matched tab and keeps the hash last", () => {
+    const tags = settingsRedirectFor("/settings/tags")!;
+    expect(settingsRedirectTarget(tags, "?q=bug")).toBe("/settings/tasks?tab=tags&q=bug");
+    const themes = settingsRedirectFor("/settings", "?tab=themes")!;
+    expect(settingsRedirectTarget(themes, "?tab=themes&x=1")).toBe("/account/preferences?tab=appearance&x=1");
+    const modules = settingsRedirectFor("/settings/modules")!;
+    expect(settingsRedirectTarget(modules, "?from=rail")).toBe("/settings/apps?from=rail#modules");
+    // A tab already on the target wins over an incoming one of the same name.
+    expect(settingsRedirectTarget(tags, "?tab=types")).toBe("/settings/tasks?tab=tags");
+  });
+  it("never redirects a canonical page URL", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(settingsRedirectFor(p.href), p.href).toBeNull();
   });
 });
 

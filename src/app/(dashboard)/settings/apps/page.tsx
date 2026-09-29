@@ -30,7 +30,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AppWindow, ChevronRight, ChevronUp, ChevronDown, GripVertical, Loader2, Lock,
+  ChevronUp, ChevronDown, GripVertical, Lock,
 } from "lucide-react";
 import {
   APPS,
@@ -43,6 +43,11 @@ import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatRelative } from "@/lib/format/date";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { ModulesSection } from "./modules-section";
 
 // The select reuses the catalog's own tier vocabulary (AccessTier), not a
 // second copy: a vocabulary drift here is a compile error, not a silent bug.
@@ -84,6 +89,9 @@ type OrgPrefResponse = {
 export default function AppsSettingsPage() {
   const { toast } = useOsToast();
   const [state, setState] = useState<State | null>(null);
+  // A failed read renders ErrorState: an editable default catalog here would
+  // let the next autosave overwrite the workspace's real rail config.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -93,6 +101,7 @@ export default function AppsSettingsPage() {
   const byKey = useMemo(() => new Map<string, AppEntry>(APPS.map((a) => [a.key, a])), []);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await fetch("/api/org/preferences", { cache: "no-store" });
       if (!res.ok) throw new Error(`status ${res.status}`);
@@ -113,16 +122,10 @@ export default function AppsSettingsPage() {
         hidden: rows.filter((r) => r.hidden).map((r) => r.app.key),
         minAccess,
       });
-    } catch {
-      // Still render something editable: the pure catalog in default order.
-      setState({
-        order: orderedCatalogForAdmin({}).map((r) => r.app.key),
-        hidden: [],
-        minAccess: {},
-      });
-      toast("Couldn't load app settings");
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Network error");
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -238,37 +241,29 @@ export default function AppsSettingsPage() {
     : [];
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-6">
-      {/* Header */}
-      <header className="mb-6">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
-          <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
-          <ChevronRight className="h-3 w-3" />
-          <span>Apps</span>
-        </div>
-        <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900">
-          <AppWindow className="h-5 w-5 text-[#0073EA]" />
-          Apps
-        </h1>
-        <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
-          The left rail shows every app a person has access to, in the order below.
-          There is no personal pinning: what you arrange here is what everyone sees.
-        </p>
-        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-400">
-          Hiding an app or raising its access floor changes the rail only. The pages
-          themselves stay gated by their own access rules.
-        </p>
-      </header>
+    <SettingsPage pageKey="apps">
+      <div className="flex flex-col gap-6">
+      <ModulesSection />
+      <SettingsCard
+        id="rail"
+        wide="apps.rail"
+        title="Rail apps"
+        description={
+          <>
+            The left rail shows every app a person has access to, in the order below.
+            There is no personal pinning: what you arrange here is what everyone sees.
+            Hiding an app or raising its access floor changes the rail only; the pages
+            themselves stay gated by their own access rules.
+          </>
+        }
+      >
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading app settings…
-        </div>
+      {loadError ? (
+        <ErrorState compact what="the rail apps" hint={loadError} onRetry={() => { void load(); }} />
+      ) : loading ? (
+        <SkeletonRows rows={6} />
       ) : (
         <section>
-          <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            Rail apps &amp; order
-          </h2>
           <ul className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
             {rows.map((app, i) => {
               const always = Boolean(app.alwaysPinned);
@@ -392,9 +387,10 @@ export default function AppsSettingsPage() {
           </p>
         </section>
       )}
+      </SettingsCard>
       <RequestsSection />
-      <div className="h-10" />
-    </div>
+      </div>
+    </SettingsPage>
   );
 }
 
@@ -439,7 +435,8 @@ function RequestsSection() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
   }, [load]);
 
   if (requests?.state === "hidden" && suggestions?.state === "hidden") return null;
@@ -457,9 +454,7 @@ function RequestsSection() {
       </p>
 
       {requests === null || suggestions === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading requests…
-        </div>
+        <SkeletonRows rows={3} />
       ) : (
         <div className="flex flex-col gap-4">
           {requests.state === "hidden" ? null : (

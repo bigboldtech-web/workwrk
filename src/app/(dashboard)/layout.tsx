@@ -73,7 +73,13 @@ export default function DashboardLayout({
         if (r.status !== 401) setBootError(r.error || "Couldn't open WorkwrK");
         return;
       }
-      if (!r.data.setupCompleted) {
+      // Only an Owner or Admin is sent to the setup wizard: org setup is
+      // theirs to run (POST /api/setup answers Admins only), so sending a
+      // Member or Guest there would trap them in a wizard they cannot
+      // finish. Everyone else goes straight in. The spec (spec-account-auth
+      // A3) retires this redirect entirely once seedOrgDefaults exists.
+      const role = r.data.viewer?.orgRole;
+      if (!r.data.setupCompleted && (role === "OWNER" || role === "ADMIN")) {
         router.push("/onboard");
         return;
       }

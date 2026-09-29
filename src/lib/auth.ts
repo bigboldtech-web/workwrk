@@ -319,9 +319,11 @@ export const authOptions: NextAuthOptions = {
     updateAge: 30 * 60,
   },
   cookies: crossSubdomainCookies,
+  // `newUser: "/welcome"` is gone (spec-account-auth section 0): with JWT
+  // sessions and no adapter NextAuth never fires it, and /welcome is retiring
+  // into the one wizard. With the key absent NextAuth falls back to signIn.
   pages: {
     signIn: "/login",
-    newUser: "/welcome",
   },
   providers,
   callbacks: {

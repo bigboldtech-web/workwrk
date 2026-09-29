@@ -15,6 +15,14 @@ import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
+import {
+  cultureSectionSchema,
+  describeIssue,
+  generalSectionSchema,
+  parseSettingsEnvelope,
+  scoringSectionSchema,
+  securitySectionSchema,
+} from "@/lib/settings/org-settings-sections";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
 /** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
@@ -96,16 +104,9 @@ export async function GET() {
         ],
         reviewCadences: getReviewCadences(settings),
         behavioralAnchors: getBehavioralAnchors(settings),
-        notifications: settings.notifications || {
-          kraAssigned: true,
-          kpiUpdate: true,
-          reviewDue: true,
-          sopUpdate: true,
-          checkInReminder: true,
-          kudosReceived: true,
-          emailEnabled: true,
-          reminderFrequency: "daily",
-        },
+        // `notifications` (org defaults) is retired: no UI and no reader
+        // (settings-architecture open decision 6). The stored object stays in
+        // Organization.settings untouched; it is only no longer served.
         security: settings.security || {
           minPasswordLength: 8,
           requireUppercase: true,
@@ -142,13 +143,24 @@ export async function PATCH(req: Request) {
 
     const accessLevel = (session.user as SessionUser).accessLevel ?? "";
     const orgId = (session.user as SessionUser).organizationId;
-    const body = await req.json();
-    const { section, data, companyProfile } = body;
+    const body = await req.json().catch(() => null);
+
+    // One envelope, strict (src/lib/settings/org-settings-sections.ts): the
+    // section decides the gate, and nothing else in the body can ride along
+    // under it. Identity's legacy top-level `companyProfile` is the
+    // `culture` section and takes the admin gate, which closes the
+    // { section: "process", companyProfile } bypass.
+    const envelope = parseSettingsEnvelope(body);
+    if (envelope.kind === "error") {
+      return NextResponse.json({ error: envelope.error, ...(envelope.retired ? { retired: true } : {}) }, { status: envelope.status });
+    }
+    const { section } = envelope;
+    const data = envelope.data;
 
     // The `process` section is the one OrgAction `manage_process` gates
     // (spec-process section 1: Owner, Admin, People team; never Guests or
     // Agents). The People team (HR) may write it; every other section keeps
-    // the admin-only gate below. ONE rule, lib/process-scope canManageProcess,
+    // the admin gate below. ONE rule, lib/process-scope canManageProcess,
     // shared with rename-category and rename-folder.
     if (section === "process") {
       if (!canManageProcess(session)) {
@@ -173,28 +185,30 @@ export async function PATCH(req: Request) {
     // save here never erases a key another writer changed a moment before
     // (a doc's sharing, branding, the access model). A section that merges
     // inside its key still reads that key from currentSettings.
-
-    // Handle company profile update directly
-    if (companyProfile) {
-      await writeOrgSettingsKeys(orgId, { companyProfile });
-      return NextResponse.json({ success: true });
-    }
+    let changedKeys: string[] = [];
 
     switch (section) {
       case "general": {
+        const parsed = generalSectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "general"), issues: parsed.error.issues }, { status: 400 });
+        const d = parsed.data;
+        if (d.scoreWeights !== undefined) {
+          const v = validateScoreWeights(d.scoreWeights);
+          if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+        }
+        if (d.scoringBands !== undefined) {
+          const v = validateScoringBands(d.scoringBands);
+          if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+        }
         const updateData: { name?: string; domain?: string | null } = {};
-        if (data.name) updateData.name = data.name;
-        if (data.domain !== undefined) updateData.domain = data.domain;
+        if (d.name !== undefined) updateData.name = d.name;
+        if (d.domain !== undefined) updateData.domain = d.domain === "" ? null : d.domain;
 
         // Also store extended general settings in JSON
         const generalSettings: SettingsBlob = {};
-        if (data.timezone !== undefined) generalSettings.timezone = data.timezone;
-        if (data.currency !== undefined) generalSettings.currency = data.currency;
-        if (data.fiscalYearStart !== undefined) generalSettings.fiscalYearStart = data.fiscalYearStart;
-        if (data.language !== undefined) generalSettings.language = data.language;
-        if (data.reviewFrequency !== undefined) generalSettings.reviewFrequency = data.reviewFrequency;
-        if (data.scoreWeights !== undefined) generalSettings.scoreWeights = data.scoreWeights;
-        if (data.scoringBands !== undefined) generalSettings.scoringBands = data.scoringBands;
+        for (const k of ["timezone", "currency", "fiscalYearStart", "language", "reviewFrequency", "scoreWeights", "scoringBands"] as const) {
+          if (d[k] !== undefined) generalSettings[k] = k === "currency" ? String(d[k]).toUpperCase() : d[k];
+        }
 
         await prisma.$transaction(async (tx) => {
           if (Object.keys(updateData).length > 0) {
@@ -202,6 +216,18 @@ export async function PATCH(req: Request) {
           }
           if (Object.keys(generalSettings).length > 0) await writeOrgSettingsKeys(orgId, generalSettings, tx);
         });
+        changedKeys = Object.keys(d);
+        break;
+      }
+
+      case "culture": {
+        // Merged over the stored profile, so a save that does not send a key
+        // (Identity never sends `splash`) keeps it instead of erasing it.
+        const parsed = cultureSectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "culture"), issues: parsed.error.issues }, { status: 400 });
+        const current = currentSettings.companyProfile && typeof currentSettings.companyProfile === "object" ? currentSettings.companyProfile : {};
+        await writeOrgSettingsKeys(orgId, { companyProfile: { ...current, ...parsed.data } });
+        changedKeys = Object.keys(parsed.data);
         break;
       }
 
@@ -209,41 +235,35 @@ export async function PATCH(req: Request) {
         // Editable Scoring & reviews config (weights, bands, cadences,
         // behavioral anchors). Validate the numeric invariants so a bad
         // payload can't silently corrupt the composite-score engine.
+        const parsed = scoringSectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "scoring"), issues: parsed.error.issues }, { status: 400 });
+        const d = parsed.data;
         const scoring: SettingsBlob = {};
-        if (data.reviewFrequency !== undefined) scoring.reviewFrequency = data.reviewFrequency;
-        if (data.scoreWeights !== undefined) {
-          const v = validateScoreWeights(data.scoreWeights);
+        if (d.reviewFrequency !== undefined) scoring.reviewFrequency = d.reviewFrequency;
+        if (d.scoreWeights !== undefined) {
+          const v = validateScoreWeights(d.scoreWeights);
           if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
-          scoring.scoreWeights = data.scoreWeights;
+          scoring.scoreWeights = d.scoreWeights;
         }
-        if (data.scoringBands !== undefined) {
-          const v = validateScoringBands(data.scoringBands);
+        if (d.scoringBands !== undefined) {
+          const v = validateScoringBands(d.scoringBands);
           if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
-          scoring.scoringBands = data.scoringBands;
+          scoring.scoringBands = d.scoringBands;
         }
-        if (data.reviewCadences !== undefined) scoring.reviewCadences = data.reviewCadences;
-        if (data.behavioralAnchors !== undefined) {
-          if (!Array.isArray(data.behavioralAnchors) || data.behavioralAnchors.length !== 5) {
-            return NextResponse.json({ error: "behavioralAnchors must be 5 labels" }, { status: 400 });
-          }
-          scoring.behavioralAnchors = data.behavioralAnchors;
-        }
+        if (d.reviewCadences !== undefined) scoring.reviewCadences = d.reviewCadences;
+        if (d.behavioralAnchors !== undefined) scoring.behavioralAnchors = d.behavioralAnchors;
         await writeOrgSettingsKeys(orgId, scoring);
-        break;
-      }
-
-      case "notifications": {
-        await writeOrgSettingsKeys(orgId, { notifications: data });
+        changedKeys = Object.keys(d);
         break;
       }
 
       case "security": {
-        await writeOrgSettingsKeys(orgId, { security: data });
-        break;
-      }
-
-      case "modules": {
-        await writeOrgSettingsKeys(orgId, { enabledModules: normalizeEnabledModules(data.enabledModules) });
+        // Merged over the stored policy (a partial write keeps the rest).
+        const parsed = securitySectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "security"), issues: parsed.error.issues }, { status: 400 });
+        const current = currentSettings.security && typeof currentSettings.security === "object" ? currentSettings.security : {};
+        await writeOrgSettingsKeys(orgId, { security: { ...current, ...parsed.data } });
+        changedKeys = Object.keys(parsed.data);
         break;
       }
 
@@ -257,10 +277,11 @@ export async function PATCH(req: Request) {
         // and the share dialogs read.
         const partial = accessSettingsSchema.partial().strict().safeParse(data ?? {});
         if (!partial.success) {
-          return NextResponse.json({ error: "Invalid access settings" }, { status: 400 });
+          return NextResponse.json({ error: describeIssue(partial.error, "access"), issues: partial.error.issues }, { status: 400 });
         }
         const merged = { ...parseAccessSettings(currentSettings.access), ...partial.data };
         await writeOrgSettingsKeys(orgId, { access: merged });
+        changedKeys = Object.keys(partial.data);
         break;
       }
 
@@ -277,6 +298,7 @@ export async function PATCH(req: Request) {
         }
         const merged = { ...parseProcessSettings(currentSettings.process).value, ...partial.data };
         await writeOrgSettingsKeys(orgId, { process: merged });
+        changedKeys = Object.keys(partial.data);
         break;
       }
 
@@ -284,22 +306,22 @@ export async function PATCH(req: Request) {
         return NextResponse.json({ error: "Invalid section" }, { status: 400 });
     }
 
-    // Audit-log every org-settings change. The section name + a list
-    // of changed keys is enough for SOC 2 / compliance review; we
-    // don't store the full body to avoid bloating ActivityLog with
-    // large JSON blobs. The process section is audited under the name
-    // spec-process section 2 gives it.
+    // Audit-log every org-settings change: the section name plus the list
+    // of changed keys is enough for SOC 2 / compliance review; the full body
+    // is not stored, so ActivityLog does not bloat with large JSON blobs.
+    // One naming scheme, settings.updated.{section} (settings-architecture
+    // 9.1); the process section already used it.
     logAuditEvent({
-      type: section === "process" ? "settings.updated.process" : `settings.update.${section}`,
+      type: `settings.updated.${section}`,
       actorId: (session.user as SessionUser).id,
       organizationId: orgId,
       description: `Updated org settings: ${section}`,
       targetType: "Organization",
       targetId: orgId,
-      metadata: { section, keys: data && typeof data === "object" ? Object.keys(data) : [] },
+      metadata: { section, keys: changedKeys },
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, ok: true });
   } catch (error) {
     console.error("Settings PATCH error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

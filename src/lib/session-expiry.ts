@@ -74,7 +74,7 @@ export function markSessionExpired(detail: SessionExpiredDetail = { reason: "unk
  */
 export function loginUrlFor(pathname: string, search: string = "", hash: string = ""): string {
   const path = pathname && pathname.startsWith("/") ? pathname : "/";
-  if (path === "/" || path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/reset-password") || path.startsWith("/forgot-password")) {
+  if (path === "/" || path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/signup") || path.startsWith("/join") || path.startsWith("/verify-email") || path.startsWith("/reset-password") || path.startsWith("/forgot-password")) {
     return "/login";
   }
   const query = search && search.startsWith("?") ? search : search ? `?${search}` : "";

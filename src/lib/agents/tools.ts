@@ -970,7 +970,7 @@ const createWorkspaceTool: ToolDefinition = {
 const invitePersonWithRole: ToolDefinition = {
   name: "invite_person_with_role",
   description:
-    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /register?token=… email flow.",
+    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /join?token=… email flow.",
   input_schema: {
     type: "object",
     properties: {
@@ -1048,7 +1048,7 @@ const invitePersonWithRole: ToolDefinition = {
         email: invitation.email,
         // Token is sensitive, don't echo it back in chat. The email
         // worker already includes the registration link.
-        registerLink: `/register?token=…`,
+        registerLink: `/join?token=…`,
       },
     };
   },

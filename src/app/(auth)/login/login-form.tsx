@@ -202,8 +202,8 @@ export function LoginForm({ staffConsole = false }: { staffConsole?: boolean }) 
       ) : staffConsole ? null : (
         <p className="text-base text-slate-600 text-center">
           New to WorkwrK?{" "}
-          <Link href="/register" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
-            Start your free trial
+          <Link href="/signup" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
+            Start free
           </Link>
         </p>
       )}

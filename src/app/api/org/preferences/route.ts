@@ -8,6 +8,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { partitionLockedKeys } from "@/lib/preferences-locks";
+import { logAuditEvent } from "@/lib/activity";
 import { getOrgPreferenceRow, setOrgPreference } from "@/lib/preferences";
 
 const ORG_ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
@@ -31,34 +33,47 @@ export async function GET() {
   return NextResponse.json({ preference: row });
 }
 
-const patchSchema = z.object({
-  sidebarDefault: z.object({
+// Strict at every level (settings-architecture 9.3): a stray key is a 400
+// that names it, never a silent strip. lockedKeys accepts only the lockable
+// dot-paths from src/lib/preferences-locks.ts, so a lock can never be a typo
+// that silently locks nothing. densityDefault takes the three values the
+// personal schema takes; "comfortable" (the design system's default, and
+// what the Appearance defaults card offers) was refused before.
+const patchSchema = z.strictObject({
+  sidebarDefault: z.strictObject({
     pinned: z.array(z.string()).optional(),
     hidden: z.array(z.string()).optional(),
     order: z.array(z.string()).optional(),
     iconsOnly: z.boolean().optional(),
     sectionsOrder: z.array(z.string()).optional(),
-    // 2026-08-22 ACCESS system — the org rail config (src/lib/rail-apps.ts):
+    // 2026-08-22 ACCESS system: the org rail config (src/lib/rail-apps.ts):
     // which apps every user's rail shows, in what order, with what tier
     // floors. Writes are strict (reads stay tolerant via parseOrgAppsConfig).
     // setOrgPreference shallow-merges sidebarDefault keys, so patching
     // { apps } preserves sibling keys and replaces the apps object whole.
-    apps: z.object({
+    apps: z.strictObject({
       order: z.array(z.string()).optional(),
       hidden: z.array(z.string()).optional(),
       minAccess: z.record(z.string(), z.enum(["manager", "hr-admin", "org-admin"])).optional(),
     }).optional(),
   }).optional(),
-  homeDefault: z.object({
+  homeDefault: z.strictObject({
     cards: z.array(z.string()).optional(),
     order: z.array(z.string()).optional(),
   }).optional(),
-  themeDefault: z.object({
+  themeDefault: z.strictObject({
     appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),
     accent: z.string().max(40).optional(),
   }).optional(),
-  densityDefault: z.enum(["compact", "cozy"]).optional(),
-  lockedKeys: z.array(z.string().max(80)).optional(),
+  densityDefault: z.enum(["compact", "cozy", "comfortable"]).optional(),
+  lockedKeys: z
+    .array(z.string().max(80))
+    .optional()
+    .superRefine((keys, ctx) => {
+      if (!keys) return;
+      const { unknown } = partitionLockedKeys(keys);
+      for (const k of unknown) ctx.addIssue({ code: "custom", message: `Not a lockable preference: ${k}` });
+    }),
 });
 
 export async function PATCH(req: Request) {
@@ -70,8 +85,22 @@ export async function PATCH(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+    const first = parsed.error.issues[0];
+    const where = first ? [...first.path].join(".") : "";
+    const unknownKeys = first && first.code === "unrecognized_keys" ? (first as { keys?: string[] }).keys ?? [] : [];
+    const named = unknownKeys.length > 0 ? `Unknown setting: ${[where, unknownKeys.join(", ")].filter(Boolean).join(".")}` : first ? `${where || "body"}: ${first.message}` : "Invalid body";
+    return NextResponse.json({ error: named, issues: parsed.error.issues }, { status: 400 });
   }
   const updated = await setOrgPreference(c.organizationId, parsed.data);
+  // Every org write is audited with the changed keys (settings-architecture 9.1).
+  logAuditEvent({
+    type: "settings.updated.org_preferences",
+    actorId: c.userId,
+    organizationId: c.organizationId,
+    description: "Updated workspace defaults",
+    targetType: "Organization",
+    targetId: c.organizationId,
+    metadata: { keys: Object.keys(parsed.data) },
+  });
   return NextResponse.json({ preference: updated });
 }

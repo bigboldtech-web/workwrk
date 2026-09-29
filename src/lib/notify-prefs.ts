@@ -1,6 +1,6 @@
 // Notification preference gate — server-side helpers that decide whether a
 // user wants a given notification type, read from the per-user notification
-// settings saved at /settings/notifications.
+// settings saved at /account/notifications.
 //
 // Storage: UserPreference.home JSON column under the "notifications" key
 // (deliberately reusing an existing JSON column — no schema migration):
@@ -14,7 +14,7 @@
 import { prisma } from "@/lib/prisma";
 
 /** Keys shared with the settings page rows — keep in sync with
- *  src/app/(dashboard)/settings/notifications/page.tsx. */
+ *  src/app/(dashboard)/account/notifications/page.tsx. */
 export type NotifyType =
   | "task_assigned"
   | "mentions"

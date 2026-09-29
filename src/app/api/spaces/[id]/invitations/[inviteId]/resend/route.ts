@@ -49,7 +49,7 @@ export async function POST(
   }
 
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const inviteUrl = `${baseUrl}/register?token=${invitation.token}`;
+  const inviteUrl = `${baseUrl}/join?token=${invitation.token}`;
   const org = await prisma.organization.findUnique({
     where: { id: c.organizationId },
     select: { name: true },

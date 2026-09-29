@@ -273,12 +273,14 @@ export type SettingsPageKey =
   | "billing"
   | "security"
   | "api"
+  | "all"
   | "account/profile"
   | "account/preferences"
   | "account/notifications"
   | "account/security"
   | "account/connections"
-  | "account/shortcuts";
+  | "account/shortcuts"
+  | "account/all";
 
 export type ObjectRef =
   | { type: ObjectType; id: string }

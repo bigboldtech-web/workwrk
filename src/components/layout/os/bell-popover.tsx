@@ -107,7 +107,7 @@ export function BellPopover() {
   const { mutedNotifications } = useOsShell();
   const { openSettings } = useSettingsNav();
   const dot = counts.inboxUnread > 0 || counts.remindersDue > 0;
-  const notificationsHref = settingsHrefToday(SETTINGS_PAGES["account/notifications"]) ?? "/settings/notifications";
+  const notificationsHref = settingsHrefToday(SETTINGS_PAGES["account/notifications"]) ?? "/account/notifications";
   // One hook instance for the door and the alert path, so enabling here is
   // what the alert reads (two instances would each keep their own state).
   const desktop = useDesktopNotifications();

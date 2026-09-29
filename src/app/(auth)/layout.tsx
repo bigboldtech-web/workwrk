@@ -6,10 +6,18 @@
 // /forgot-password, /verify-email, /welcome all share the same
 // clean light aesthetic the rest of the marketing + app uses.
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Sparkles, Shield, Zap, Globe, FormInput, Table as TableIcon, FileText, Bot } from "lucide-react";
 import { ConsentBanner } from "@/components/layout/consent-banner";
 import { ConsentProvider } from "@/components/layout/consent-provider";
+
+// Sign-in pages are never search results (spec-account-auth B28): they hold
+// no content of their own, and an indexed /reset-password or /join invites
+// phishing look-alikes. robots.ts also disallows the private app paths.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default function AuthLayout({
   children,

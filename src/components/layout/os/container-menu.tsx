@@ -1042,7 +1042,7 @@ function ContainerMenuBody({
                   ))
                 )}
                 <MenuSeparator />
-                <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); router.push("/settings/task-types"); }} />
+                <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); router.push("/settings/tasks?tab=types"); }} />
               </MenuSubmenu>
             );
 
