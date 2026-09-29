@@ -21,7 +21,7 @@
 // Below 1280 the search field narrows to 240; below 1024 the sidebar becomes
 // a 264 slide-over behind a Menu button and the breadcrumb keeps two crumbs.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -39,6 +39,7 @@ import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/compone
 import { SidebarRow, SidebarSectionLabel } from "@/components/layout/os/sidebar-primitives";
 import { shortcutHint, shortcuts, useShortcut, SHORTCUTS } from "@/lib/shortcuts";
 import { isSessionExpired } from "@/lib/session-expiry";
+import { recordShellPath } from "@/lib/nav/entry-path";
 import { activeConsoleNav, consoleCrumbs, shippedConsoleNav, type ConsoleCrumb } from "@/lib/admin/console-nav";
 import type { ConsolePrefs } from "@/lib/admin/console-prefs";
 import type { RecentCompany } from "@/lib/admin/console-me";
@@ -66,12 +67,18 @@ export interface AdminShellProps {
   mySettingsHref: string | null;
   /** STAFF_RUNBOOK_URL; Help renders only when it is set. */
   runbookUrl: string | null;
+  /** The @drawer slot (the company drawer), rendered over the content area. */
+  drawer?: React.ReactNode;
   children: React.ReactNode;
 }
 
 export function AdminShell({
-  staff, prefs, recents, persisted, density, appearance, datePrefs, appUrl, mySettingsHref, runbookUrl, children,
+  staff, prefs, recents, persisted, density, appearance, datePrefs, appUrl, mySettingsHref, runbookUrl, drawer, children,
 }: AdminShellProps) {
+  // The shell is the @drawer slot's parent, so this runs before the slot's
+  // own render: it is what lets the company drawer tell a hard load of
+  // /admin/companies/<id> (the full page) from a click on a row.
+  recordShellPath(usePathname());
   return (
     <LayerStackProvider>
       <OsToastProvider>
@@ -89,7 +96,7 @@ export function AdminShell({
           <ToastProvider>
             <DialogProvider>
               <div id={APP_ROOT_ID} style={{ display: "contents" }}>
-                <Frame mySettingsHref={mySettingsHref} runbookUrl={runbookUrl}>
+                <Frame mySettingsHref={mySettingsHref} runbookUrl={runbookUrl} drawer={drawer}>
                   {children}
                 </Frame>
               </div>
@@ -144,8 +151,8 @@ function useOverlaySidebar() {
 }
 
 function Frame({
-  mySettingsHref, runbookUrl, children,
-}: { mySettingsHref: string | null; runbookUrl: string | null; children: React.ReactNode }) {
+  mySettingsHref, runbookUrl, drawer, children,
+}: { mySettingsHref: string | null; runbookUrl: string | null; drawer?: React.ReactNode; children: React.ReactNode }) {
   const { prefs, patchPrefs, recents, searchOpen, setSearchOpen } = useConsole();
   const overlay = useOverlaySidebar();
   const setOverlayOpen = overlay.setOpen;
@@ -204,7 +211,13 @@ function Frame({
   return (
     <div
       className="workwrk-os grid h-screen overflow-hidden bg-app text-ink"
-      style={{ gridTemplateColumns: "auto minmax(0, 1fr)", gridTemplateRows: "var(--os-top-h) minmax(0, 1fr)" }}
+      style={{
+        gridTemplateColumns: "auto minmax(0, 1fr)",
+        gridTemplateRows: "var(--os-top-h) minmax(0, 1fr)",
+        // No rail here: the Drawer's expanded edge and the FilterPanel's
+        // narrow scrim both start after the rail, which is zero wide.
+        ["--os-rail-w" as string]: "0px",
+      }}
     >
       <a
         href="#main"
@@ -250,6 +263,9 @@ function Frame({
       >
         {children}
       </main>
+      {/* The @drawer slot: fixed over the content area, never a grid item.
+          Children.toArray keys the slot's array value (os-shell.tsx). */}
+      {Children.toArray(drawer)}
       {collapsed ? (
         <button
           type="button"

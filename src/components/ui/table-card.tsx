@@ -148,9 +148,17 @@ export interface TableCardProps<T> {
    * on this device (a per-viewer convenience, never shared state).
    */
   columnSettings?: boolean | { storageKey?: string };
+  /**
+   * A controlled column choice, for a surface that keeps it somewhere other
+   * than this device (the Staff console keeps it per staff member on the
+   * server). When given it wins over `storageKey`, and every change goes to
+   * `onColumnChoiceChange` instead of localStorage.
+   */
+  columnChoice?: ColumnChoice;
+  onColumnChoiceChange?: (next: ColumnChoice) => void;
 }
 
-type ColumnChoice = { shown: string[]; hidden: string[] };
+export type ColumnChoice = { shown: string[]; hidden: string[] };
 const COL_NS = "workwrk:table-columns";
 function readChoice(key: string | undefined): ColumnChoice {
   if (!key) return { shown: [], hidden: [] };
@@ -230,6 +238,8 @@ export function TableCard<T>({
   collapsedGroups,
   onToggleGroup,
   columnSettings,
+  columnChoice,
+  onColumnChoiceChange,
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -242,15 +252,20 @@ export function TableCard<T>({
   // cell sits over the last visible column and cuts it mid-word (a date
   // reading "17 S" with the Filter panel open).
   const settingsKey = typeof columnSettings === "object" ? columnSettings.storageKey : undefined;
-  const [choice, setChoice] = useState<ColumnChoice>({ shown: [], hidden: [] });
+  const [localChoice, setChoice] = useState<ColumnChoice>({ shown: [], hidden: [] });
+  const choice = columnChoice ?? localChoice;
   // Read after mount, so server render and hydration agree.
   // The setState runs in a timer (the bulk bar's pattern), after the first paint.
   useEffect(() => {
-    if (!settingsKey) return;
+    if (!settingsKey || columnChoice !== undefined) return;
     const t = setTimeout(() => setChoice(readChoice(settingsKey)), 0);
     return () => clearTimeout(t);
-  }, [settingsKey]);
-  const updateChoice = useCallback((next: ColumnChoice) => { setChoice(next); writeChoice(settingsKey, next); }, [settingsKey]);
+  }, [settingsKey, columnChoice]);
+  const controlled = columnChoice !== undefined;
+  const updateChoice = useCallback((next: ColumnChoice) => {
+    if (controlled) { onColumnChoiceChange?.(next); return; }
+    setChoice(next); writeChoice(settingsKey, next);
+  }, [settingsKey, controlled, onColumnChoiceChange]);
   const columns = useMemo(
     () => visibleTableColumns(allColumns, cardWidth, (selectable ? 44 : 0) + (rowMenu ? rowMenuWidth : 0), choice),
     [allColumns, cardWidth, selectable, rowMenu, rowMenuWidth, choice],

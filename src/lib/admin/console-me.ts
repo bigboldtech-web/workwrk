@@ -126,3 +126,28 @@ export async function staffEmailOf(
   const u = await prisma.user.findUnique({ where: { id }, select: { email: true } });
   return u?.email ? u.email.toLowerCase() : null;
 }
+
+/** "Last opened the console" moves at most this often: one write per sitting, not per page. */
+export const OPENED_STAMP_EVERY_MS = 10 * 60 * 1000;
+
+/**
+ * Stamp `consolePrefs.lastOpenedAt` for this staff member when it is unset
+ * or older than ten minutes. One guarded UPDATE (the row lock serialises it
+ * with a prefs save, whose merge keeps the stamp). Never throws: the console
+ * opens whether or not the stamp lands.
+ */
+export async function stampConsoleOpened(email: string, now: Date = new Date()): Promise<void> {
+  const lower = email.trim().toLowerCase();
+  if (!lower) return;
+  const iso = now.toISOString();
+  const cutoff = new Date(now.getTime() - OPENED_STAMP_EVERY_MS).toISOString();
+  try {
+    await prisma.$executeRaw`
+      UPDATE "PlatformAdmin"
+      SET "consolePrefs" = jsonb_set(COALESCE("consolePrefs", '{}'::jsonb), '{lastOpenedAt}', to_jsonb(${iso}::text), true)
+      WHERE "email" = ${lower}
+        AND (("consolePrefs"->>'lastOpenedAt') IS NULL OR ("consolePrefs"->>'lastOpenedAt') < ${cutoff})`;
+  } catch (err) {
+    console.error("[console-me] could not stamp lastOpenedAt:", err);
+  }
+}

@@ -4,13 +4,16 @@ import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import { escapeHtml, logStaffAction, requestIp, staffActorFromSession } from "@/lib/staff-audit";
 import { sendEmail } from "@/lib/email";
+import { staffNames } from "@/lib/admin/company-detail";
+import { readConsolePrefs } from "@/lib/admin/console-prefs";
 
 /**
  * The Staff list (the PlatformAdmin allow-list that gates the Staff console).
  * Platform staff only, gated on the same check as the rest of /api/admin/*.
  * One flat list: no read-only tier.
  *
- * GET    → list all staff
+ * GET    → list all staff, with who added each person and when they last
+ *          opened the console
  * POST   → add by email (body: { email, name? }); every existing staff member
  *          is told by email, and the add is recorded as a StaffAction row in
  *          the same transaction
@@ -42,9 +45,34 @@ export async function GET() {
   const denied = await requirePlatformAdminApi(session);
   if (denied) return denied;
 
-  const staff = await prisma.platformAdmin.findMany({
+  const rows = await prisma.platformAdmin.findMany({
     orderBy: { createdAt: "asc" },
-    select: { id: true, email: true, name: true, createdAt: true },
+    select: { id: true, email: true, name: true, createdAt: true, consolePrefs: true },
+  });
+  // Who added each person: the newest admin.staff.added row naming them. A
+  // person added before the log existed has none, and reads "Unknown".
+  const adds = rows.length
+    ? await prisma.staffAction.findMany({
+        where: { action: "admin.staff.added", targetLabel: { in: rows.map((r) => r.email) } },
+        orderBy: { createdAt: "desc" },
+        select: { targetLabel: true, actorEmail: true, createdAt: true },
+      })
+    : [];
+  const addedBy = new Map<string, string>();
+  for (const a of adds) if (a.targetLabel && !addedBy.has(a.targetLabel)) addedBy.set(a.targetLabel, a.actorEmail);
+  const names = await staffNames([...addedBy.values()]);
+  const staff = rows.map((r) => {
+    const by = addedBy.get(r.email) ?? null;
+    return {
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      createdAt: r.createdAt,
+      addedByEmail: by,
+      addedByName: by ? names.get(by) ?? by : null,
+      // Stamped by the console layout when they open it (console-me.ts).
+      lastOpenedAt: readConsolePrefs(r.consolePrefs).lastOpenedAt,
+    };
   });
   // `you` lets the page say "You are removing yourself" in its confirm.
   return jsonSuccess({ staff, you: staffActorFromSession(session).email });

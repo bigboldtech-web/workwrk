@@ -25,7 +25,7 @@ import { recordDeniedAccess, requestIp } from "@/lib/staff-audit";
 import { LockedPage } from "@/components/access";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { getEffectivePreferences, DEFAULT_DENSITY, DEFAULT_THEME, type DensityPref } from "@/lib/preferences";
-import { loadConsoleMe, staffEmailOf } from "@/lib/admin/console-me";
+import { loadConsoleMe, stampConsoleOpened, staffEmailOf } from "@/lib/admin/console-me";
 import { isAdminHost, productHref } from "@/lib/admin/console-nav";
 import { AdminShell } from "./admin-shell";
 
@@ -45,7 +45,14 @@ async function personPrefs(userId: string | undefined, organizationId: string | 
   }
 }
 
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({
+  children,
+  drawer,
+}: {
+  children: React.ReactNode;
+  /** The @drawer parallel slot: the company drawer intercept, or nothing. */
+  drawer: React.ReactNode;
+}) {
   const session = await getServerSession(authOptions);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
@@ -96,6 +103,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const user = session.user as { id?: string; email?: string | null; name?: string | null; organizationId?: string };
   const [email, prefs] = await Promise.all([staffEmailOf(session), personPrefs(user.id, user.organizationId)]);
   const me = await loadConsoleMe(email ?? "", user.name ?? null);
+  // Staff > "Last opened the console" (at most one write per ten minutes).
+  if (me.persisted && email) await stampConsoleOpened(email);
   const runbook = process.env.STAFF_RUNBOOK_URL?.trim() || null;
 
   return (
@@ -115,6 +124,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       appUrl={appUrl}
       mySettingsHref={productHref("/account/preferences?tab=appearance", appUrl, onAdmin)}
       runbookUrl={runbook}
+      drawer={drawer}
     >
       {children}
     </AdminShell>

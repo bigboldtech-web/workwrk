@@ -30,12 +30,11 @@ export const CONSOLE_NAV: readonly ConsoleNavRow[] = [
 ];
 
 /**
- * Rows whose page has not shipped yet. /admin/audit (Staff activity) is built
- * in spec step 5; until its page exists the sidebar and Search do not offer
- * a door that opens a 404. Delete the key here in the change that adds the
- * page. The crumb and active-row rules below already know the route.
+ * Rows whose page has not shipped yet: the sidebar and Search offer no door
+ * that opens a 404. Empty since Staff activity (/admin/audit) shipped in
+ * spec step 5; a future row goes here until its page exists.
  */
-const NOT_YET_SHIPPED: ReadonlySet<ConsoleNavKey> = new Set<ConsoleNavKey>(["audit"]);
+const NOT_YET_SHIPPED: ReadonlySet<ConsoleNavKey> = new Set<ConsoleNavKey>([]);
 
 /** The rows the sidebar and Search's GO TO render, in order. */
 export function shippedConsoleNav(): ConsoleNavRow[] {

@@ -1,16 +1,25 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import type { Plan, Prisma } from "@/generated/prisma";
 import { logStaffAction, requestIp, staffActorFromSession, writeTenantRow } from "@/lib/staff-audit";
-import { boundedInt, codeSearchWhere } from "@/lib/admin/search";
+import { codeStatus } from "@/lib/admin/search";
+import { CODE_VIEWS, codeFilterWhere, codeGives, codeOrderBy, codeViewWhere, parseCodeListParams } from "@/lib/admin/codes-list";
+import { CSV_MAX_ROWS, seatsAreUnlimited, toCsv } from "@/lib/admin/companies-list";
+import { planLabel } from "@/lib/staff-audit-helpers";
 
 /**
  * /api/admin/appsumo: WorkwrK staff endpoints for AppSumo code
  * management. Platform staff only.
  *
- * GET    → list of codes with redemption status (paginated)
+ * GET    → the codes (paginated), with the four view counts under the same
+ *          filters and the redeeming company's name joined in.
+ *          ?view=all|unused|redeemed|refunded (`filter` is the old name)
+ *          &code= (exact or prefix) &tier=1,2 &plan=GROWTH
+ *          &imported_from=&imported_to=&redeemed_from=&redeemed_to=
+ *          &redeemed_by=<company id> &sort=newest|oldest|code
+ *          &page=&limit= (at most 500) &format=csv (at most 5,000)
  * POST   → bulk import. Body: { codes: [{code, tier, plan, seats}] }
  * PATCH  → flip a code to refunded. Body: { code, refunded: true, notes? }
  *
@@ -28,43 +37,81 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const filter = url.searchParams.get("filter") ?? "all"; // all / unused / redeemed / refunded
-  // Bounded and NaN-safe, the same rule as the companies list.
-  const page = boundedInt(url.searchParams.get("page"), 1, 1, 100_000);
-  const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
-  // `code`: exact or prefix, case-insensitive, the same rule as Search's
-  // CODES section, so a Search result always lands on a list that has it.
-  const codeQuery = (url.searchParams.get("code") ?? "").trim().slice(0, 100);
+  const p = parseCodeListParams(url.searchParams);
+  const csv = url.searchParams.get("format") === "csv";
+  const filters = codeFilterWhere(p);
+  const where: Prisma.AppsumoCodeWhereInput = { AND: [filters, codeViewWhere(p.view)] };
 
-  const where: Prisma.AppsumoCodeWhereInput = codeQuery ? codeSearchWhere(codeQuery) : {};
-  if (filter === "unused") where.redeemedAt = null;
-  if (filter === "redeemed") {
-    where.redeemedAt = { not: null };
-    where.refundedAt = null;
-  }
-  if (filter === "refunded") where.refundedAt = { not: null };
+  const select = {
+    id: true, code: true, tier: true, plan: true, seats: true, redeemedByOrg: true,
+    redeemedAt: true, refundedAt: true, createdAt: true,
+  } as const;
 
-  const [codes, total, summary] = await Promise.all([
+  const [codes, total, ...viewCounts] = await Promise.all([
     prisma.appsumoCode.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
+      orderBy: codeOrderBy(p.sort),
+      skip: csv ? 0 : (p.page - 1) * p.limit,
+      take: csv ? CSV_MAX_ROWS + 1 : p.limit,
+      select,
     }),
     prisma.appsumoCode.count({ where }),
-    prisma.appsumoCode.groupBy({
-      by: ["tier"],
-      _count: { _all: true },
-    }),
+    ...CODE_VIEWS.map((v) => prisma.appsumoCode.count({ where: { AND: [filters, codeViewWhere(v)] } })),
   ]);
 
+  // redeemedByOrg is a bare id with no relation: join the names by hand. A
+  // company deleted since reads as no company ("None"), never a dangling id.
+  const page = csv ? codes.slice(0, CSV_MAX_ROWS) : codes;
+  const orgIds = [...new Set(page.map((c) => c.redeemedByOrg).filter((v): v is string => Boolean(v)))];
+  const [orgs, byCompany] = await Promise.all([
+    orgIds.length ? prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }) : [],
+    p.redeemedBy ? prisma.organization.findUnique({ where: { id: p.redeemedBy }, select: { id: true, name: true } }) : null,
+  ]);
+  const orgName = new Map(orgs.map((o) => [o.id, o.name]));
+  const rows = page.map((c) => {
+    const companyName = c.redeemedByOrg ? orgName.get(c.redeemedByOrg) ?? null : null;
+    return {
+      ...c,
+      status: codeStatus(c),
+      gives: codeGives(c),
+      company: companyName && c.redeemedByOrg ? { id: c.redeemedByOrg, name: companyName } : null,
+    };
+  });
+
+  if (csv) {
+    const body = toCsv([
+      ["Code", "Tier", "Plan", "Seats", "What it gives", "Status", "Redeemed by", "Company ID", "Redeemed", "Refunded", "Imported"],
+      ...rows.map((r) => [
+        r.code,
+        r.tier,
+        planLabel(r.plan),
+        seatsAreUnlimited(r.seats) ? "Unlimited" : r.seats,
+        r.gives,
+        r.status === "refunded" ? "Refunded" : r.status === "redeemed" ? "Redeemed" : "Unused",
+        r.company?.name ?? "",
+        r.company?.id ?? "",
+        r.redeemedAt ? r.redeemedAt.toISOString().slice(0, 10) : "",
+        r.refundedAt ? r.refundedAt.toISOString().slice(0, 10) : "",
+        r.createdAt.toISOString().slice(0, 10),
+      ]),
+    ]);
+    return new NextResponse(body, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="appsumo-codes-${new Date().toISOString().slice(0, 10)}${codes.length > CSV_MAX_ROWS ? "-first-5000" : ""}.csv"`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+
   return jsonSuccess({
-    codes,
+    codes: rows,
     total,
-    page,
-    limit,
-    code: codeQuery || null,
-    summary,
+    page: p.page,
+    limit: p.limit,
+    code: p.code || null,
+    counts: Object.fromEntries(CODE_VIEWS.map((v, i) => [v, viewCounts[i]])),
+    redeemedBy: byCompany,
   });
 }
 

@@ -1,20 +1,23 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import { applyCompanyPatch, validateCompanyPatch } from "@/lib/admin/company-patch";
 import { requestIp, staffActorFromSession } from "@/lib/staff-audit";
+import { loadCompanyDetail } from "@/lib/admin/company-detail";
 
 /**
- * Staff console → one company. Platform staff only.
+ * Staff console, one company. Platform staff only.
  *
- * GET    → company metadata + counts + current Enterprise add-on flags.
- * PATCH  → change the plan (body: { plan }), the status (body: { status })
- *          or one add-on (body: { feature, enabled }). Every branch runs in
- *          one transaction with its StaffAction row (src/lib/admin/company-patch.ts);
- *          SUSPENDED and CANCELLED also need { confirm: "<company name>" },
- *          checked here and not only in the dialog, and sign out every
- *          member with no other healthy workspace.
+ * GET    company facts, subscription, modules, Owners, counts and the last
+ *        five staff changes (src/lib/admin/company-detail.ts). Counts only:
+ *        never the customer's settings or content.
+ * PATCH  one or more of { plan }, { status }, { seats } (a whole number, or
+ *        null for unlimited; needs a subscription), { feature, enabled }
+ *        (byok, whiteLabel) or { module, enabled } (chat, tables). Every
+ *        branch runs in one transaction with its StaffAction row
+ *        (src/lib/admin/company-patch.ts); SUSPENDED and CANCELLED also need
+ *        { confirm: "<company name>" }, checked here and not only in the
+ *        dialog, and sign out every member with no other healthy workspace.
  */
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,34 +27,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (denied) return denied;
 
   const { id } = await params;
-  const org = await prisma.organization.findUnique({
-    where: { id },
-    select: {
-      id: true, name: true, slug: true, domain: true, logo: true,
-      plan: true, status: true, settings: true, createdAt: true,
-      _count: {
-        select: {
-          users: true, sops: true, kras: true, tasks: true, kpis: true,
-        },
-      },
-    },
-  });
-  if (!org) return jsonError("Company not found", 404);
-
-  // Only the add-on flags leave this route. The rest of Organization.settings
-  // (company profile, routing, access rules and more) is the customer's
-  // configuration: the console never shows it, so it is never sent.
-  const { settings: rawSettings, ...rest } = org;
-  const settings = (rawSettings ?? {}) as Record<string, unknown>;
-  const features = (settings.features ?? {}) as Record<string, boolean>;
-  return jsonSuccess({
-    ...rest,
-    features: {
-      byok: !!features.byok,
-      whiteLabel: !!features.whiteLabel,
-      customDomain: !!features.customDomain,
-    },
-  });
+  const company = await loadCompanyDetail(id);
+  if (!company) return jsonError("Company not found", 404);
+  return jsonSuccess(company);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

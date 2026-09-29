@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch } from "./company-patch-rules";
+import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, validateCompanyPatch, validateOwnerBody, VALID_FEATURES } from "./company-patch-rules";
 
 describe("validateCompanyPatch", () => {
   it("accepts a valid plan, status and feature together", () => {
@@ -76,5 +76,40 @@ describe("the server-side typed confirmation", () => {
     expect(confirmMatches("Acme", "Acme Corp")).toBe(false);
     expect(confirmMatches(undefined, "Acme Corp")).toBe(false);
     expect(confirmMatches("", "")).toBe(false);
+  });
+});
+
+describe("seats and modules", () => {
+  it("accepts a whole seat count, and null or empty as unlimited (0)", () => {
+    expect(validateCompanyPatch({ seats: 25 })).toEqual({ ok: true, patch: { seats: 25 } });
+    expect(validateCompanyPatch({ seats: null })).toEqual({ ok: true, patch: { seats: 0 } });
+    expect(validateCompanyPatch({ seats: "" })).toEqual({ ok: true, patch: { seats: 0 } });
+  });
+  it("refuses a fractional, negative, huge or text seat count", () => {
+    for (const seats of [2.5, -1, 1_000_001, "12"]) {
+      expect(validateCompanyPatch({ seats }).ok).toBe(false);
+    }
+  });
+  it("accepts a known module with a boolean and refuses anything else", () => {
+    expect(validateCompanyPatch({ module: "chat", enabled: false })).toEqual({ ok: true, patch: { module: { key: "chat", enabled: false } } });
+    expect(validateCompanyPatch({ module: "slack", enabled: true })).toEqual({ ok: false, error: "Unknown module" });
+    expect(validateCompanyPatch({ module: "tables" }).ok).toBe(false);
+  });
+  it("one body carries one switch: a feature and a module share `enabled`", () => {
+    expect(validateCompanyPatch({ feature: "byok", module: "chat", enabled: true })).toEqual({ ok: false, error: "Change one switch at a time" });
+  });
+  it("no longer switches Custom domain (nothing reads it); its stored value is left alone", () => {
+    expect(VALID_FEATURES).toEqual(["byok", "whiteLabel"]);
+    expect(validateCompanyPatch({ feature: "customDomain", enabled: true })).toEqual({ ok: false, error: "Unknown feature" });
+  });
+});
+
+describe("validateOwnerBody", () => {
+  it("needs a person, a reason of a few words and carries the typed name", () => {
+    expect(validateOwnerBody({ userId: "u1", reason: "  founder   left ", confirm: "Acme" })).toEqual({ ok: true, userId: "u1", reason: "founder left", confirm: "Acme" });
+    expect(validateOwnerBody({ reason: "because" }).ok).toBe(false);
+    expect(validateOwnerBody({ userId: "u1", reason: "no" }).ok).toBe(false);
+    expect(validateOwnerBody({ userId: "u1", reason: "x".repeat(501) }).ok).toBe(false);
+    expect(validateOwnerBody(null).ok).toBe(false);
   });
 });

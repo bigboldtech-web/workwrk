@@ -4,10 +4,21 @@
 // (src/lib/admin/company-patch-rules.test.ts). The write is company-patch.ts.
 
 import type { EnterpriseFeature } from "@/lib/enterprise-features";
+import { MODULES } from "@/lib/modules";
 
 export const VALID_PLANS = ["STARTER", "GROWTH", "SCALE", "ENTERPRISE"] as const;
 export const VALID_STATUSES = ["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"] as const;
-export const VALID_FEATURES = ["byok", "whiteLabel", "customDomain"] as const;
+/**
+ * The add-ons staff can switch. Custom domain is NOT here (spec 2.3 card 4):
+ * nothing reads its flag, so a switch for it changed nothing. Stored values
+ * of `settings.features.customDomain` are left in place, unread, so the
+ * flag can come back with the routing without a data loss.
+ */
+export const VALID_FEATURES = ["byok", "whiteLabel"] as const;
+/** Module app keys (MODULES[].appKey): the same switch an Owner sees in Settings > Apps & modules. */
+export const VALID_MODULES: readonly string[] = MODULES.map((m) => m.appKey);
+/** The largest seat count staff may type; anything above reads as Unlimited anyway. */
+export const MAX_SEATS = 1_000_000;
 
 export type CompanyPlan = (typeof VALID_PLANS)[number];
 export type CompanyStatus = (typeof VALID_STATUSES)[number];
@@ -23,6 +34,10 @@ export interface CompanyPatch {
   plan?: CompanyPlan;
   status?: CompanyStatus;
   feature?: { key: EnterpriseFeature; enabled: boolean };
+  /** A seat count; 0 means unlimited (an empty field). */
+  seats?: number;
+  /** A premium module by app key ("chat" is Talk, "tables" is Tables). */
+  module?: { key: string; enabled: boolean };
   /**
    * The company name as the staff member typed it. Required, and checked on
    * the server, for SUSPENDED and CANCELLED: the typed confirmation is not
@@ -35,9 +50,11 @@ export interface CompanyPatch {
 export type ValidatedPatch = { ok: true; patch: CompanyPatch } | { ok: false; error: string };
 
 /**
- * Body → patch, or the one sentence that says why not. Pure. Accepts `plan`,
- * `status`, and `feature` + `enabled`; anything else in the body is ignored.
- * An empty patch is valid and applies nothing.
+ * Body to patch, or the one sentence that says why not. Pure. Accepts
+ * `plan`, `status`, `seats` (a whole number, or null or "" for unlimited),
+ * `feature` + `enabled` and `module` + `enabled`; anything else in the body
+ * is ignored. A feature and a module share `enabled`, so one body carries
+ * at most one of the two. An empty patch is valid and applies nothing.
  */
 export function validateCompanyPatch(body: unknown): ValidatedPatch {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
@@ -61,6 +78,22 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
     }
     if (typeof b.enabled !== "boolean") return { ok: false, error: "`enabled` must be a boolean" };
     patch.feature = { key: b.feature as EnterpriseFeature, enabled: b.enabled };
+  }
+  if (b.module !== undefined) {
+    if (patch.feature) return { ok: false, error: "Change one switch at a time" };
+    if (typeof b.module !== "string" || !VALID_MODULES.includes(b.module)) {
+      return { ok: false, error: "Unknown module" };
+    }
+    if (typeof b.enabled !== "boolean") return { ok: false, error: "`enabled` must be a boolean" };
+    patch.module = { key: b.module, enabled: b.enabled };
+  }
+  if (b.seats !== undefined) {
+    if (b.seats === null || b.seats === "") patch.seats = 0;
+    else if (typeof b.seats === "number" && Number.isInteger(b.seats) && b.seats >= 0 && b.seats <= MAX_SEATS) {
+      patch.seats = b.seats;
+    } else {
+      return { ok: false, error: "Seats must be a whole number from 0 to 1,000,000, or empty for unlimited" };
+    }
   }
   if (b.confirm !== undefined) {
     if (typeof b.confirm !== "string") return { ok: false, error: "`confirm` must be the company name" };
@@ -107,4 +140,23 @@ export function deletionSchedule(settings: unknown): DeletionSchedule | null {
     cancelledById: str(s.cancelledById),
     scheduledHardDeleteAt: str(s.scheduledHardDeleteAt),
   };
+}
+
+/* Set workspace Owner (spec 2.3 card 5): the POST body's rules. */
+
+export const OWNER_REASON_MIN = 3;
+export const OWNER_REASON_MAX = 500;
+
+export type OwnerBody = { ok: true; userId: string; reason: string; confirm: string } | { ok: false; error: string };
+
+/** Pure: the POST body, or the one sentence that says why not. */
+export function validateOwnerBody(body: unknown): OwnerBody {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const userId = typeof b.userId === "string" ? b.userId.trim() : "";
+  if (!userId || userId.length > 64) return { ok: false, error: "Choose the person to make an Owner" };
+  const reason = typeof b.reason === "string" ? b.reason.replace(/\s+/g, " ").trim() : "";
+  if (reason.length < OWNER_REASON_MIN) return { ok: false, error: "Say why, in a few words. It goes on the audit row." };
+  if (reason.length > OWNER_REASON_MAX) return { ok: false, error: "Keep the reason under 500 characters" };
+  const confirm = typeof b.confirm === "string" ? b.confirm : "";
+  return { ok: true, userId, reason, confirm };
 }

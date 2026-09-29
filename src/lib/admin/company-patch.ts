@@ -1,11 +1,12 @@
 // The one place a staff member's change to a company is applied
 // (spec-admin-backoffice section 2.3 Data, section 4 steps 1 and 2a).
 //
-// Both PATCH routes (`/api/admin/companies` and `/api/admin/companies/[id]`)
-// call `applyCompanyPatch`, so there is exactly one validated, transactional,
-// audited path: the list-level endpoint used to write whatever strings
-// arrived, with no audit row and no session revocation, and was the way
-// around every confirm the company page adds.
+// PATCH /api/admin/companies/[id] is the one writer and calls
+// `applyCompanyPatch`, so there is exactly one validated, transactional,
+// audited path. The list-level PATCH /api/admin/companies (it wrote whatever
+// strings arrived, with no audit row and no session revocation, and was the
+// way around every confirm the company page adds) is deleted along with the
+// list's quick-edit dialog (spec section 0 and section 4 step 4).
 //
 // Every branch runs inside ONE transaction with its StaffAction row; a
 // change that cannot record itself does not happen. The customer's own
@@ -23,11 +24,15 @@ import {
 import { setFeature } from "@/lib/enterprise-features";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
+import { seatsAreUnlimited } from "@/lib/admin/companies-list";
+import { MODULES } from "@/lib/modules";
 
 export {
   VALID_PLANS,
   VALID_STATUSES,
   VALID_FEATURES,
+  VALID_MODULES,
+  MAX_SEATS,
   FEATURE_LABELS,
   validateCompanyPatch,
   statusRevokesSessions,
@@ -54,12 +59,14 @@ export type ApplyCompanyPatchResult =
   | {
       ok: true;
       /** Which fields actually changed; a value equal to the current one is not a write. */
-      changed: ("plan" | "status" | "feature")[];
+      changed: CompanyPatchField[];
       /** How many people had every live session revoked (suspend or cancel). */
       signedOut: number;
       company: { id: string; name: string; slug: string; plan: string; status: string };
     }
-  | { ok: false; status: 400 | 404; error: string };
+  | { ok: false; status: 400 | 404 | 409; error: string };
+
+export type CompanyPatchField = "plan" | "status" | "feature" | "seats" | "module";
 
 /**
  * Applies the patch in one transaction with one StaffAction row per changed
@@ -107,7 +114,28 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
         }
       }
 
-      const changed: ("plan" | "status" | "feature")[] = [];
+      // Seats live on the subscription: with no subscription there is no
+      // seat count to correct, and creating a Subscription row here would
+      // invent a billing relationship nobody sold (and would make the
+      // customer's own redeem refuse a code). Refused before any write.
+      const sub =
+        patch.seats !== undefined
+          ? await tx.subscription.findUnique({ where: { organizationId: id }, select: { id: true, seats: true } })
+          : null;
+      if (patch.seats !== undefined && !sub) {
+        return { refused: "This company has no subscription, so there is no seat count to change." };
+      }
+      // A module needs its Product row (seeded by scripts/seed-products.ts).
+      // Missing on this server: say so and write nothing, never a 500.
+      const moduleDef = patch.module ? MODULES.find((m) => m.appKey === patch.module!.key) ?? null : null;
+      const product = moduleDef
+        ? await tx.product.findUnique({ where: { slug: moduleDef.productSlug }, select: { id: true } })
+        : null;
+      if (moduleDef && !product) {
+        return { conflict: `${moduleDef.label} is not set up on this server (its product row is missing), so nothing was changed.` };
+      }
+
+      const changed: CompanyPatchField[] = [];
       let signedOut = 0;
       let moved = 0;
       let plan: string = org.plan;
@@ -156,6 +184,68 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
             }),
           );
           changed.push("feature");
+        }
+      }
+
+      if (patch.seats !== undefined && sub) {
+        const was = seatsAreUnlimited(sub.seats) ? null : sub.seats;
+        const next = patch.seats === 0 || seatsAreUnlimited(patch.seats) ? null : patch.seats;
+        if (was !== next) {
+          await tx.subscription.update({ where: { id: sub.id }, data: { seats: next ?? 0 } });
+          logged.push(
+            await logStaffAction({
+              db: tx,
+              action: "admin.org.seats_changed",
+              actor,
+              ip,
+              targetCompanyId: id,
+              targetLabel: org.name,
+              summary: `Changed ${org.name}'s seats from ${was ?? "unlimited"} to ${next ?? "unlimited"}`,
+              before: { seats: was },
+              after: { seats: next },
+            }),
+          );
+          changed.push("seats");
+        }
+      }
+
+      if (moduleDef && product && patch.module) {
+        const current = await tx.productInstallation.findUnique({
+          where: { organizationId_productId: { organizationId: id, productId: product.id } },
+          select: { id: true, status: true },
+        });
+        const was = current?.status === "ACTIVE";
+        if (was !== patch.module.enabled) {
+          if (patch.module.enabled) {
+            // The same row the Owner's own switch writes. installedById stays
+            // as it was: a WorkwrK employee is not a member of this company.
+            await tx.productInstallation.upsert({
+              where: { organizationId_productId: { organizationId: id, productId: product.id } },
+              create: { organizationId: id, productId: product.id, status: "ACTIVE" },
+              update: { status: "ACTIVE", pausedAt: null, removedAt: null },
+            });
+          } else {
+            // Paused, not removed: nothing is deleted, and the Owner (or
+            // staff) turns it back on with the same switch.
+            await tx.productInstallation.update({
+              where: { id: current!.id },
+              data: { status: "PAUSED", pausedAt: new Date() },
+            });
+          }
+          logged.push(
+            await logStaffAction({
+              db: tx,
+              action: "admin.org.module_changed",
+              actor,
+              ip,
+              targetCompanyId: id,
+              targetLabel: org.name,
+              summary: `Turned ${moduleDef.label} ${patch.module.enabled ? "on" : "off"} for ${org.name}`,
+              before: { module: moduleDef.appKey, label: moduleDef.label, enabled: was },
+              after: { module: moduleDef.appKey, label: moduleDef.label, enabled: patch.module.enabled },
+            }),
+          );
+          changed.push("module");
         }
       }
 
@@ -234,6 +324,7 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   // A string check, not just "in": the transaction's return shapes are
   // normalised into one object type, so "in" alone does not narrow it.
   if ("refused" in result && typeof result.refused === "string") return { ok: false, status: 400, error: result.refused };
+  if ("conflict" in result && typeof result.conflict === "string") return { ok: false, status: 409, error: result.conflict };
 
   // The customer's half, after commit and best effort.
   for (const row of logged) void writeTenantRow(row);

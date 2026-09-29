@@ -6,7 +6,8 @@
 //
 // What lives here, and only this: the sidebar collapsed state, the company
 // drawer width, the column choices of two tables, and the last five
-// companies this staff member opened. Theme and density are PRODUCT
+// companies this staff member opened, and when they last opened the console
+// (server-stamped, read on Staff). Theme and density are PRODUCT
 // preferences (My settings > Preferences > Appearance) and are never copied
 // into this column. Nothing here is ever read from or written to
 // localStorage.
@@ -28,6 +29,13 @@ export interface ConsolePrefs {
   audit: { columns: string[] | null };
   /** Company ids, newest first, at most MAX_RECENTS. */
   recent: string[];
+  /**
+   * When this staff member last opened the console (an ISO time), stamped by
+   * the server layout at most every ten minutes (stampConsoleOpened). Shown
+   * on Staff as "Last opened the console". Never written by the client: a
+   * PATCH cannot name it.
+   */
+  lastOpenedAt: string | null;
 }
 
 /** `null` columns = "all on" (the default the table itself owns). */
@@ -36,6 +44,7 @@ export const DEFAULT_CONSOLE_PREFS: ConsolePrefs = {
   companies: { drawerWidth: DRAWER_WIDTH_DEFAULT, columns: null },
   audit: { columns: null },
   recent: [],
+  lastOpenedAt: null,
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -86,6 +95,7 @@ export function readConsolePrefs(raw: unknown): ConsolePrefs {
     },
     audit: { columns: cleanColumns(audit.columns) ?? null },
     recent: cleanRecent(r.recent) ?? [],
+    lastOpenedAt: typeof r.lastOpenedAt === "string" && !Number.isNaN(Date.parse(r.lastOpenedAt)) ? r.lastOpenedAt : null,
   };
 }
 
@@ -166,6 +176,7 @@ export function mergeConsolePrefs(current: ConsolePrefs, patch: ConsolePrefsPatc
     companies: { ...current.companies, ...(patch.companies ?? {}) },
     audit: { ...current.audit, ...(patch.audit ?? {}) },
     recent: patch.recent ? [...patch.recent] : [...current.recent],
+    lastOpenedAt: current.lastOpenedAt,
   };
   if (patch.openedCompany) next.recent = pushRecent(next.recent, patch.openedCompany);
   return next;

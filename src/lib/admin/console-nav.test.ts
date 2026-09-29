@@ -67,18 +67,17 @@ describe("consoleCrumbs", () => {
   it("says Not found on a path no console page owns", () => {
     const nf = [{ label: "Staff console", href: "/admin" }, { label: "Not found" }];
     expect(consoleCrumbs("/admin/nope")).toEqual(nf);
-    // Staff activity has no page yet, so its path is a 404 too.
-    expect(consoleCrumbs("/admin/audit")).toEqual(nf);
+    expect(consoleCrumbs("/admin/audit/extra")).toEqual(nf);
     expect(consoleCrumbs("/admin/companies/abc123def/extra")).toEqual(nf);
     expect(consoleCrumbs("/admin/staff/extra")).toEqual(nf);
   });
 });
 
 describe("shippedConsoleNav", () => {
-  it("keeps sidebar order and offers no door to an unbuilt page", () => {
+  it("keeps sidebar order, Staff activity included now its page exists", () => {
     const keys = shippedConsoleNav().map((r) => r.key);
-    expect(keys).toEqual(["overview", "companies", "analytics", "appsumo", "staff"]);
-    expect(keys).not.toContain("audit");
+    expect(keys).toEqual(["overview", "companies", "analytics", "appsumo", "staff", "audit"]);
+    expect(consoleCrumbs("/admin/audit")).toEqual([{ label: "Staff console", href: "/admin" }, { label: "Staff activity" }]);
   });
 });
 
