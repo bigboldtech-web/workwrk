@@ -48,7 +48,8 @@ import { planLabel } from "@/lib/staff-audit-helpers";
  *                 sign-in, a signup row or a staff change
  *   cancellations the last ten in the range: a Stripe subscription cancelled,
  *                 a workspace a staff member set to Cancelled, or a workspace
- *                 its Owner deleted (scheduled for deletion); each says
+ *                 its Owner deleted (scheduled for deletion, read from its
+ *                 audit row so a later restore does not erase it); each says
  *                 whether the company has been restored since
  *   biggest       top five by people; busiest = top five by use in the range
  *                 (the same definition as Still active)
@@ -71,6 +72,70 @@ async function namesFor(ids: string[]): Promise<Map<string, string>> {
   if (ids.length === 0) return new Map();
   const rows = await prisma.organization.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
   return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+/**
+ * Audit rows read for Owner deletions. Only ten cancellations are shown, but
+ * one company can hold several rows in a range (deleted, restored, deleted
+ * again), so more are read than kept.
+ */
+const OWNER_DELETION_LOG_CAP = 50;
+
+/** The name the delete route wrote into the audit row, for a company that no longer exists. */
+const DELETED_NAME = /^Scheduled organization "(.*)" for deletion/;
+
+/**
+ * Owner deletions from their audit rows (newest first), one per company,
+ * each joined to the company as it is now. The deletion still stands while
+ * the company is CANCELLED with a live deletion schedule: every restore
+ * clears that schedule, and only a newer deletion (whose own row is the
+ * newest, so the one kept) sets it again. A company that was restored and
+ * later cancelled by staff therefore reads "restored since" here, with the
+ * staff cancellation as its own row.
+ *
+ * A company the hard-delete cron has already removed has no row to join. Its
+ * deletion is still a fact in the range, so it is kept under the name the
+ * audit row recorded, with no plan and `gone` set (the page shows it without
+ * a link). In practice the audit row usually goes with it: its actor is the
+ * Owner, whose User row the company's deletion cascades.
+ */
+async function ownerDeletionRows(
+  logs: { targetId: string | null; organizationId: string; description: string; createdAt: Date }[],
+): Promise<Cancellation[]> {
+  const newest = new Map<string, (typeof logs)[number]>();
+  for (const l of logs) {
+    const id = l.targetId ?? l.organizationId;
+    if (!newest.has(id)) newest.set(id, l);
+  }
+  if (newest.size === 0) return [];
+  const orgs = await prisma.organization.findMany({
+    where: { id: { in: [...newest.keys()] } },
+    select: { id: true, name: true, plan: true, status: true, settings: true },
+  });
+  const byId = new Map(orgs.map((o) => [o.id, o]));
+  return [...newest].map(([id, l]) => {
+    const org = byId.get(id);
+    if (!org) {
+      return {
+        id,
+        name: DELETED_NAME.exec(l.description)?.[1] ?? "A deleted company",
+        plan: null,
+        canceledAt: l.createdAt.toISOString(),
+        what: "deleted" as const,
+        restored: false,
+        gone: true,
+      };
+    }
+    const scheduled = !!(org.settings as { cancelledAt?: unknown } | null)?.cancelledAt;
+    return {
+      id,
+      name: org.name,
+      plan: org.plan as string,
+      canceledAt: l.createdAt.toISOString(),
+      what: "deleted" as const,
+      restored: !(org.status === "CANCELLED" && scheduled),
+    };
+  });
 }
 
 async function ranked(groups: { organizationId: string | null; n: number }[]): Promise<RankedCompany[]> {
@@ -99,6 +164,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     windowCompanies,
     cancellationRows,
     staffCancellations,
+    ownerDeletionLogs,
     ownerDeletions,
     peopleGroups,
     actionGroups,
@@ -138,8 +204,22 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       select: { createdAt: true, targetCompany: { select: { id: true, name: true, plan: true, status: true } } },
     }),
     // The commonest churn: an Owner deleting their own workspace from
-    // Settings (status CANCELLED plus settings.cancelledAt, no Stripe row and
-    // no StaffAction). Still CANCELLED only: a restore clears the schedule.
+    // Settings (no Stripe row and no StaffAction). Its durable record is the
+    // audit row /api/organizations/delete writes; the live schedule in
+    // settings.cancelledAt is wiped by every restore (the Owner's, or a staff
+    // status change), so reading only that made a deletion that was later
+    // restored vanish from the range instead of reading "restored since".
+    // Newest first; several rows for one company (deleted, restored, deleted
+    // again) collapse to the newest in ownerDeletionRows.
+    prisma.activityLog.findMany({
+      where: { type: "organization_scheduled_deletion", createdAt: { gte: w.start, lte: now } },
+      orderBy: { createdAt: "desc" },
+      take: OWNER_DELETION_LOG_CAP,
+      select: { targetId: true, organizationId: true, description: true, createdAt: true },
+    }),
+    // The live schedule as well, so a deletion whose audit row failed to
+    // write (logActivity never throws) is still counted. Still CANCELLED
+    // only: a restore clears the schedule.
     prisma.$queryRaw<{ id: string; name: string; plan: string; cancelledAt: string }[]>`
       SELECT "id", "name", "plan"::text AS "plan", "settings"->>'cancelledAt' AS "cancelledAt"
       FROM "Organization"
@@ -182,9 +262,10 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
     w,
   );
 
-  const [biggest, busiest] = await Promise.all([
+  const [biggest, busiest, ownerDeleted] = await Promise.all([
     ranked(peopleGroups.map((g) => ({ organizationId: g.organizationId, n: g._count._all }))),
     ranked(actionGroups),
+    ownerDeletionRows(ownerDeletionLogs),
   ]);
 
   // One line per currency: every currency with an active subscription or a
@@ -286,6 +367,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
             ]
           : [],
       ),
+      ownerDeleted,
       ownerDeletions.map((r) => ({ id: r.id, name: r.name, plan: r.plan, canceledAt: r.cancelledAt, what: "deleted" as const, restored: false })),
     ),
     biggest,
@@ -303,12 +385,15 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
 type Cancellation = {
   id: string;
   name: string;
-  plan: string;
+  /** Null only for a company that no longer exists (`gone`). */
+  plan: string | null;
   canceledAt: string | null;
   /** subscription: Stripe; workspace: a staff member; deleted: its Owner scheduled deletion. */
   what: "subscription" | "workspace" | "deleted";
   /** True when the company is no longer cancelled (restored or resubscribed). */
   restored: boolean;
+  /** The company was deleted for good (hard-delete cron): no company page to link to. */
+  gone?: boolean;
 };
 
 /** Newest first, the last ten, one row per company and kind of cancellation. */
@@ -362,7 +447,7 @@ function analyticsCsv(a: Analytics): string {
     rows.push(["Retention", `${monthKeyLabel(c.month, "en-GB")} cancelled`, c.cancelled, ""]);
   }
   for (const c of a.cancellations)
-    rows.push(["Cancellations", c.name, `${cancellationWord(c.what)} ${planLabel(c.plan)} ${c.canceledAt?.slice(0, 10) ?? ""}${c.restored ? " (restored since)" : ""}`.trim(), ""]);
+    rows.push(["Cancellations", c.name, [cancellationWord(c.what), c.plan ? planLabel(c.plan) : null, c.canceledAt?.slice(0, 10), c.restored ? "(restored since)" : null, c.gone ? "(deleted for good)" : null].filter(Boolean).join(" "), ""]);
   for (const c of a.biggest) rows.push(["Biggest workspaces (people)", c.name, c.value, ""]);
   for (const c of a.busiest) rows.push(["Busiest workspaces (actions by people in the workspace)", c.name, c.value, ""]);
   for (const p of a.plans) rows.push(["Plans (companies)", planLabel(p.plan), p.count, ""]);

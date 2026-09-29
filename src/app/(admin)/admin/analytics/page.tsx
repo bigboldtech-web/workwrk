@@ -64,7 +64,17 @@ interface Analytics {
   growth: { newCompanies: number; newPeople: number; onTrial: number; byBucket: number[]; avgPeoplePerCompany: number; totalPeople: number; totalCompanies: number };
   funnel: { signedUp: number; finishedSetup: number; createdSomething: number; paying: number; windowDays: number };
   retention: { cohorts: CohortRow[]; from: string; partialFirst: boolean };
-  cancellations: { id: string; name: string; plan: string; canceledAt: string | null; what: "subscription" | "workspace" | "deleted"; restored: boolean }[];
+  cancellations: {
+    id: string;
+    name: string;
+    /** Null only for a company deleted for good (`gone`). */
+    plan: string | null;
+    canceledAt: string | null;
+    what: "subscription" | "workspace" | "deleted";
+    restored: boolean;
+    /** Deleted for good by the hard-delete cron: there is no company page to open. */
+    gone?: boolean;
+  }[];
   biggest: RankedCompany[];
   busiest: RankedCompany[];
   plans: { plan: string; count: number }[];
@@ -134,7 +144,14 @@ function AnalyticsInner() {
     <>
       <OsPageHeader
         title="Analytics"
-        actions={<NumbersMeta at={loadedAt} failed={failedRange !== null} prefs={datePrefs} onRetry={retry} />}
+        // The title row describes the numbers on screen, never another
+        // range's: loadedAt is the time of `data`, so it is shown only while
+        // `data` is this range's. After a failed range switch no card has
+        // numbers (each says "Could not load this" with Retry), so the header
+        // shows no time rather than the old range's "Updated just now". A
+        // failed background refresh of the range on screen still reads red
+        // "Updated X, Retry" over the older numbers.
+        actions={<NumbersMeta at={current ? loadedAt : null} failed={!!current && failed} prefs={datePrefs} onRetry={retry} />}
         toolbar={{
           left: (
             <SegmentedControl<AnalyticsRange>
@@ -590,17 +607,34 @@ function CancellationsCard({ data, loading, broken, nothing, onRetry, datePrefs 
           return (
             <ul className="m-0 -mx-2 flex list-none flex-col p-0">
               {data.cancellations.map((c) => (
-                <li key={`${c.id}-${c.what}-${c.canceledAt ?? ""}`} className="flex h-9 min-w-0 items-center gap-3 px-2">
-                  <Link href={`/admin/companies/${c.id}`} className="min-w-0 truncate text-row text-ink hover:underline">{c.name}</Link>
-                  <PlanChip plan={c.plan} />
-                  <span className="flex-1" />
-                  <span className="shrink-0 text-sm text-ink-2">
-                    {c.what === "workspace" ? "Workspace cancelled" : c.what === "deleted" ? "Deleted by its Owner" : "Subscription cancelled"}
-                    {c.restored ? ", restored since" : ""}
-                  </span>
-                  <span className="shrink-0 text-sm tabular-nums text-ink-2" title={c.canceledAt ? formatDateTitle(c.canceledAt, datePrefs) : undefined}>
-                    {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
-                  </span>
+                // Two lines on a phone (the company, then what happened and
+                // when), one h-9 line from sm up. The name keeps a minimum
+                // width and the status truncates before the date, so neither
+                // the name nor the date can be squeezed out of the card.
+                <li
+                  key={`${c.id}-${c.what}-${c.canceledAt ?? ""}`}
+                  className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5 sm:h-9 sm:flex-row sm:items-center sm:gap-3 sm:py-0"
+                >
+                  <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+                    {c.gone ? (
+                      <span className="min-w-[8ch] truncate text-row text-ink" title={c.name}>{c.name}</span>
+                    ) : (
+                      <Link href={`/admin/companies/${c.id}`} className="min-w-[8ch] truncate text-row text-ink hover:underline" title={c.name}>
+                        {c.name}
+                      </Link>
+                    )}
+                    {c.plan ? <PlanChip plan={c.plan} /> : null}
+                  </div>
+                  <div className="flex min-w-0 items-center gap-3 text-sm text-ink-2">
+                    <span className="min-w-0 truncate">
+                      {c.what === "workspace" ? "Workspace cancelled" : c.what === "deleted" ? "Deleted by its Owner" : "Subscription cancelled"}
+                      {c.restored ? ", restored since" : ""}
+                      {c.gone ? ", deleted for good" : ""}
+                    </span>
+                    <span className="shrink-0 tabular-nums" title={c.canceledAt ? formatDateTitle(c.canceledAt, datePrefs) : undefined}>
+                      {c.canceledAt ? formatDate(c.canceledAt, datePrefs, "date") : "Unknown"}
+                    </span>
+                  </div>
                 </li>
               ))}
             </ul>
