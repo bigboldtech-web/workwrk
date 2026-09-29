@@ -239,6 +239,8 @@ describe("isWorkspaceUseType", () => {
   it("never counts signup, signing in or out, switching, security, migrations or staff rows as use", () => {
     for (const t of [
       "organization_created",
+      "organization_scheduled_deletion",
+      "organization_deletion_cancelled",
       "login",
       "logout",
       "session.idle",
@@ -255,6 +257,12 @@ describe("isWorkspaceUseType", () => {
     ]) {
       expect(isWorkspaceUseType(t)).toBe(false);
     }
+  });
+  it("never counts an Owner deleting the workspace, or restoring it, as use", () => {
+    // The Owner belongs to the workspace, so only the type keeps a company
+    // deleted on day one out of "Still active" and "Busiest workspaces".
+    expect(isWorkspaceUseType("organization_scheduled_deletion")).toBe(false);
+    expect(isWorkspaceUseType("organization_deletion_cancelled")).toBe(false);
   });
   it("counts what people do in the workspace", () => {
     for (const t of ["task_created", "sop_created", "table.create", "okr_check_in", "kudos_given", "user.invited", "access.granted"]) {

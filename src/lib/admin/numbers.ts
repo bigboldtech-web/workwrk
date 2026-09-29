@@ -416,6 +416,8 @@ export function derivedRevenue(line: RevenueLine): { monthly: number; arr: numbe
 /**
  * ActivityLog rows that are not somebody using the workspace, so "Still
  * active" and "Busiest workspaces" never count them: the signup row itself,
+ * an Owner deleting the workspace or undoing that (lifecycle rows like the
+ * signup; without them a company deleted on day one read as retained),
  * signing in and out, switching between workspaces (written to the company a
  * person LEFT as well as the one they entered), a person's own security
  * settings, data migrations, and every row WorkwrK staff cause. The rest of
@@ -424,6 +426,8 @@ export function derivedRevenue(line: RevenueLine): { monthly: number; arr: numbe
  */
 export const NOT_USE_TYPES = [
   "organization_created",
+  "organization_scheduled_deletion",
+  "organization_deletion_cancelled",
   "login",
   "logout",
   "session.idle",

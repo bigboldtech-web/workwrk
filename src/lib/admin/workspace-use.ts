@@ -6,10 +6,14 @@
 //   1. its type is not a lifecycle, sign-in, security, migration or staff row
 //      (NOT_USE_TYPES and NOT_USE_PATTERNS in lib/admin/numbers.ts), and
 //   2. it names a person as its actor, and that person belongs to the
-//      workspace the row is in (their home workspace, or a membership).
-// So signing up, switching away from a company, a person from another
-// workspace, and anything WorkwrK staff do (those rows name no person, and
-// their types are staff.*) never make a company look used.
+//      workspace the row is in (their home workspace, or a membership), and
+//   3. the workspace is not CANCELLED (by its Owner or by staff). A cancelled
+//      company is churn, never retention: its last rows are still recent,
+//      and without this it counted as Still active and Cancelled at once,
+//      and ranked in Busiest workspaces.
+// So signing up, deleting the workspace, switching away from a company, a
+// person from another workspace, and anything WorkwrK staff do (those rows
+// name no person, and their types are staff.*) never make a company look used.
 //
 // Each id list travels as ONE array parameter (never an IN list), so a year
 // with any number of signups stays inside Postgres's bind-parameter limit.
@@ -25,7 +29,9 @@ export async function busiestByUse(since: Date, take = 12): Promise<{ organizati
   return prisma.$queryRaw<{ organizationId: string; n: number }[]>`
     SELECT a."organizationId" AS "organizationId", COUNT(*)::int AS n
     FROM "ActivityLog" a
+    JOIN "Organization" o ON o."id" = a."organizationId"
     WHERE a."createdAt" >= ${since}
+      AND o."status" <> 'CANCELLED'
       AND a."actorId" IS NOT NULL
       AND NOT (a."type" = ANY(${TYPES}::text[]))
       AND NOT (a."type" LIKE ANY(${PATTERNS}::text[]))
@@ -45,6 +51,7 @@ export async function usedCompanyIds(since: Date, createdFrom: Date): Promise<st
     FROM "ActivityLog" a
     JOIN "Organization" o ON o."id" = a."organizationId"
     WHERE o."createdAt" >= ${createdFrom}
+      AND o."status" <> 'CANCELLED'
       AND a."createdAt" >= ${since}
       AND a."actorId" IS NOT NULL
       AND NOT (a."type" = ANY(${TYPES}::text[]))
