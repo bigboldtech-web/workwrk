@@ -15,15 +15,19 @@ export function SignedInStrip({ continueHref = WORK_HOME_HREF, logoutCallback }:
   if (status !== "authenticated" || !email) return null;
   return (
     <AuthBanner tone="info" strip>
-      <p>
-        You are logged in as <strong>{email}</strong>.{" "}
-        <a className="wa-link" href={continueHref}>
-          Continue to WorkwrK
-        </a>{" "}
-        or{" "}
-        <button type="button" className="wa-link" onClick={() => void signOut({ callbackUrl: logoutCallback ?? (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/login") })}>
-          Log out
-        </button>
+      <p className="wa-strip__line">
+        <span className="wa-strip__who" title={email}>
+          Logged in as <strong>{email}</strong>
+        </span>
+        <span className="wa-strip__acts">
+          <a className="wa-link" href={continueHref}>
+            Continue
+          </a>{" "}
+          or{" "}
+          <button type="button" className="wa-link" onClick={() => void signOut({ callbackUrl: logoutCallback ?? (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/login") })}>
+            Log out
+          </button>
+        </span>
       </p>
     </AuthBanner>
   );

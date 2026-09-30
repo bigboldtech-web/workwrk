@@ -114,6 +114,20 @@
 .wa-panel__object { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--os-chrome-fg); }
 .wa-panel__skel { height: 14px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); }
 
+/* The same invitation facts inside the card, below 1024px only. */
+.wa-invite {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-surface-1);
+  font-size: 13px; line-height: 18px; color: var(--os-ink-2);
+}
+.wa-invite__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wa-invite__list li:first-child { color: var(--os-ink); font-weight: 500; }
+.wa-invite__object { display: flex; align-items: center; gap: 8px; color: var(--os-ink); }
+.wa-invite__object strong { font-weight: 600; }
+.wa-invite__muted { color: var(--os-ink-2); }
+.wa-invite__quote { margin: 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--os-line-strong); white-space: pre-wrap; }
+@media (min-width: 1024px) { .wa-invite { display: none; } }
+
 /* ── Card ────────────────────────────────────────────────────── */
 
 .wa-card { display: flex; flex-direction: column; gap: 24px; }
@@ -212,11 +226,18 @@ textarea.wa-input { height: auto; min-height: 72px; padding: 8px 12px; line-heig
 .wa-banner--warning { background: var(--os-warning-bg); color: var(--os-warning-text); }
 .wa-banner .wa-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .wa-strip { min-height: 44px; align-items: center; }
+/* The signed-in strip: one 44px line; a long address truncates, the two actions never wrap. */
+.wa-strip__line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wa-strip__who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-strip__acts { flex-shrink: 0; white-space: nowrap; }
+.wa-strip > div { min-width: 0; flex: 1; }
 
 /* ── Drawings, skeletons, loader ─────────────────────────────── */
 
 .wa-drawing { display: inline-flex; gap: 10px; align-items: center; height: 24px; width: 96px; }
-.wa-drawing i { display: block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--os-line-strong); }
+.wa-drawing i { display: block; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--os-line-strong); }
+/* A result screen (the drawing above the title) sets the title at 16/600. */
+.wa-card__head.is-result .wa-title { font-size: 16px; line-height: 24px; }
 .wa-skel { height: 12px; border-radius: 4px; background: var(--os-surface-hov); animation: waPulse 1.4s ease-in-out infinite; }
 .wa-skel--tall { height: 36px; border-radius: 6px; }
 @keyframes waPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -245,10 +266,19 @@ textarea.wa-input { height: auto; min-height: 72px; padding: 8px 12px; line-heig
 }
 .wz-head__right { justify-self: end; }
 .wz-steps { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--os-ink); }
-.wz-steps__dots { display: inline-flex; gap: 6px; }
-.wz-steps__dots i { display: block; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--os-line-strong); }
-.wz-steps__dots i.is-done { background: var(--os-brand); box-shadow: none; }
-.wz-steps__dots i.is-current { background: var(--os-brand); box-shadow: 0 0 0 2px var(--os-brand-soft); }
+.wz-steps__dots { display: inline-flex; align-items: center; }
+
+/* The Department picker's trigger: a field-shaped button that opens the
+   design-system Picker below it. */
+.wz-pick { position: relative; }
+.wz-pick__trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; cursor: pointer; }
+.wz-pick__trigger svg { flex-shrink: 0; color: var(--os-ink-2); }
+.wz-pick__none { color: var(--os-ink-2); }
+
+/* Leave setup? (the design-system Dialog, scoped to the light tokens). */
+.wz-leave { display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--os-surface); }
+.wz-leave__title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--os-ink); }
+.wz-leave__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .wz-steps__count { display: none; color: var(--os-ink-2); }
 @media (max-width: 899px) {
   .wz-steps__dots, .wz-steps__label { display: none; }

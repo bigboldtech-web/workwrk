@@ -491,9 +491,35 @@ export const authOptions: NextAuthOptions = {
           token.revoked = true;
         } else {
           token.revoked = false;
-          // Access-level changes (promotion / demotion) take effect in the
-          // same window instead of waiting for a fresh sign-in.
-          token.accessLevel = account_.accessLevel;
+
+          // The level this token acts with is the level held in the
+          // workspace it acts in. User.accessLevel is the level in the
+          // ANCHORED workspace; after a switch, a join or a create on another
+          // device the anchored workspace differs from this token's, and
+          // copying the anchored level in would make an Employee of company A
+          // an Admin of A because another company invited them as Admin (or
+          // quietly demote an Owner at home). So a token acting elsewhere
+          // reads its level from that workspace's membership row, and a token
+          // with no membership left there comes home to the anchored one
+          // (after the health check below, so a suspended or closed company
+          // still gets its notice). Promotions and demotions still take
+          // effect in the same window.
+          const tokenOrgId =
+            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          let noSeatThere = false;
+          if (tokenOrgId === account_.organizationId) {
+            token.accessLevel = account_.accessLevel;
+          } else {
+            const held = await prisma.organizationMembership.findUnique({
+              where: { userId_organizationId: { userId: token.id as string, organizationId: tokenOrgId } },
+              select: { role: true },
+            });
+            if (held) token.accessLevel = held.role;
+            else {
+              noSeatThere = true;
+              token.accessLevel = account_.accessLevel;
+            }
+          }
 
           // The workspace itself. A support suspension or a scheduled
           // deletion blocked new sign-ins but never touched a live session,
@@ -507,8 +533,7 @@ export const authOptions: NextAuthOptions = {
           // on another device the two differ, and a token still acting in a
           // suspended company must not keep working there.
           const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
-          const actingOrgId =
-            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          const actingOrgId = tokenOrgId;
           const acting =
             actingOrgId === account_.organizationId
               ? account_.organization
@@ -525,6 +550,7 @@ export const authOptions: NextAuthOptions = {
               // write its cookie lands on the next check, so it stamps too.
               token.organizationId = account_.organizationId;
               token.organizationName = account_.organization?.name;
+              token.accessLevel = account_.accessLevel;
               const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
               if (move) token.workspaceMove = move;
             } else {
@@ -554,6 +580,14 @@ export const authOptions: NextAuthOptions = {
                 token.revoked = true;
               }
             }
+          } else if (noSeatThere) {
+            // A healthy workspace this person no longer belongs to (removed
+            // there, or the membership row is gone): never act in it, and
+            // never at the anchored workspace's level. Home, as the
+            // database says.
+            token.organizationId = account_.organizationId;
+            token.organizationName = account_.organization?.name;
+            token.accessLevel = account_.accessLevel;
           }
         }
       }

@@ -54,7 +54,10 @@ describe("seedOrgDefaults' pure half", () => {
   it("seeds the six departments and the locale by the signup zone", () => {
     expect([...DEFAULT_DEPARTMENTS]).toEqual(["Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"]);
     expect(orgDefaultSettings({ timezone: "Asia/Kolkata" })).toMatchObject({ timezone: "Asia/Kolkata", currency: "INR", fiscalYearStart: 4 });
-    expect(orgDefaultSettings({ timezone: "Europe/London" })).toMatchObject({ timezone: "Europe/London", currency: "USD", fiscalYearStart: 1 });
+    expect(orgDefaultSettings({ timezone: "Europe/London" })).toMatchObject({ timezone: "Europe/London", currency: "GBP", fiscalYearStart: 4 });
+    expect(orgDefaultSettings({ timezone: "Europe/Berlin" })).toMatchObject({ currency: "EUR", fiscalYearStart: 1 });
+    expect(orgDefaultSettings({ timezone: "Australia/Sydney" })).toMatchObject({ currency: "AUD", fiscalYearStart: 7 });
+    expect(orgDefaultSettings({ timezone: "America/New_York" })).toMatchObject({ currency: "USD", fiscalYearStart: 1 });
     expect(orgDefaultSettings({ timezone: "Not/AZone" })).toMatchObject({ timezone: "Asia/Kolkata" });
     expect(validTimeZone("")).toBeNull();
   });

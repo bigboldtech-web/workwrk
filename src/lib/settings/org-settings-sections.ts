@@ -36,6 +36,11 @@ export const generalSectionSchema = z.strictObject({
   fiscalYearStart: z.union([z.number().int().min(1).max(12), z.string().regex(/^(0[1-9]|1[0-2])-01$/)]).optional(),
   language: shortText(16).optional(),
   reviewFrequency: shortText(32).optional(),
+  // The business profile the retired /setup wizard asked for. Its one
+  // editor now is Workspace settings > Identity & culture (Business type and
+  // Team size); Overview reads them. Free text, as the old wizard stored it.
+  businessType: shortText(120).optional(),
+  teamSize: shortText(40).optional(),
   // Accepted here for one release (settings spec 9.3); validated by the
   // same scoring validators as the scoring section, never written raw.
   scoreWeights: z.record(z.string(), z.number()).optional(),

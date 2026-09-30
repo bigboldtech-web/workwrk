@@ -7,10 +7,17 @@
 //               carries. Only facts that exist render; a Guest invitation
 //               shows the object and the role on it instead of employment
 //               facts (department, manager) a Guest does not have.
-// Server-safe: no hooks; /join passes the facts it fetched.
+// The navy column is hidden below 1024px, and a phone is where most people
+// open an invitation, so InvitationFactsInline repeats the same facts inside
+// the card at those widths: who sent it, the role (or a Guest's object and
+// role on it) and the message. A new hire can tell a real invitation from a
+// look-alike before typing a password.
+// No hooks; /join passes the facts it fetched.
 
-import { Check, Folder } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Check, ClipboardList, FileText, Folder, ListChecks, PenTool, Table2 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
+import { EntityTile } from "@/components/ui/entity-tile";
 
 export interface InvitationFacts {
   organizationName: string;
@@ -28,6 +35,67 @@ export interface InvitationFacts {
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "W";
+}
+
+/** The facts an invitation carries, as lines. A Guest has no employment facts. */
+export function invitationFactLines(invitation: InvitationFacts): string[] {
+  const guest = invitation.orgRole === "GUEST";
+  const facts: string[] = [];
+  if (invitation.inviterName) facts.push(`Invited by ${invitation.inviterName}`);
+  if (!guest && invitation.roleLabel) facts.push(`As a ${invitation.roleLabel}`);
+  if (!guest && invitation.departmentName) facts.push(`In ${invitation.departmentName}`);
+  if (!guest && invitation.managerName) facts.push(`Reporting to ${invitation.managerName}`);
+  return facts;
+}
+
+// The glyph for the shared object, by kind. A Space has its own initial
+// tile (EntityTile's name fallback), as it does in the sidebar.
+const OBJECT_GLYPHS: Record<string, LucideIcon> = {
+  folder: Folder,
+  list: ListChecks,
+  board: ListChecks,
+  doc: FileText,
+  table: Table2,
+  form: ClipboardList,
+  canvas: PenTool,
+  whiteboard: PenTool,
+};
+
+function ObjectTile({ kind, name }: { kind: string; name: string }) {
+  const glyph = OBJECT_GLYPHS[kind.toLowerCase()] ?? null;
+  return <EntityTile size="md" name={name} fallbackIcon={glyph} title={kind} />;
+}
+
+/**
+ * The invitation's facts inside the card, shown below 1024px only (the navy
+ * panel carries them above it). Same facts, same order, on the light ground.
+ */
+export function InvitationFactsInline({ invitation }: { invitation: InvitationFacts }) {
+  const facts = invitationFactLines(invitation);
+  const object = invitation.object;
+  if (facts.length === 0 && !object && !invitation.message) return null;
+  return (
+    <section className="wa-invite" aria-label="Your invitation">
+      {facts.length > 0 ? (
+        <ul className="wa-invite__list">
+          {facts.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      ) : null}
+      {object ? (
+        <div className="wa-invite__object">
+          <ObjectTile kind={object.kind} name={object.name} />
+          <span>
+            <strong>{object.name}</strong>
+            {invitation.objectRole ? <> · {invitation.objectRole}</> : null}
+            {object.containerName ? <span className="wa-invite__muted"> inside {object.containerName}</span> : null}
+          </span>
+        </div>
+      ) : null}
+      {invitation.message ? <blockquote className="wa-invite__quote">{invitation.message}</blockquote> : null}
+    </section>
+  );
 }
 
 const PROOF_LINES = [
@@ -48,12 +116,7 @@ export function AuthProofPanel({ variant = "proof", invitation, loading = false 
         </aside>
       );
     }
-    const guest = invitation.orgRole === "GUEST";
-    const facts: string[] = [];
-    if (invitation.inviterName) facts.push(`Invited by ${invitation.inviterName}`);
-    if (!guest && invitation.roleLabel) facts.push(`As a ${invitation.roleLabel}`);
-    if (!guest && invitation.departmentName) facts.push(`In ${invitation.departmentName}`);
-    if (!guest && invitation.managerName) facts.push(`Reporting to ${invitation.managerName}`);
+    const facts = invitationFactLines(invitation);
     return (
       <aside className="wa-panel" aria-label="Your invitation">
         <div className="wa-panel__inner">
@@ -78,9 +141,7 @@ export function AuthProofPanel({ variant = "proof", invitation, loading = false 
           {invitation.object ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span className="wa-panel__object">
-                <span className="wa-panel__tile wa-panel__tile--sm">
-                  <Folder size={12} aria-hidden />
-                </span>
+                <ObjectTile kind={invitation.object.kind} name={invitation.object.name} />
                 {invitation.object.name}
               </span>
               {invitation.objectRole ? (

@@ -14,6 +14,7 @@ const db = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   orgFindUnique: vi.fn(),
   membershipFindFirst: vi.fn(),
+  membershipFindUnique: vi.fn(),
   membershipUpsert: vi.fn(),
 }));
 
@@ -27,6 +28,7 @@ vi.mock("./prisma", () => {
     organization: { findUnique: (...a: unknown[]) => db.orgFindUnique(...a) },
     organizationMembership: {
       findFirst: (...a: unknown[]) => db.membershipFindFirst(...a),
+      findUnique: (...a: unknown[]) => db.membershipFindUnique(...a),
       upsert: (...a: unknown[]) => db.membershipUpsert(...a),
     },
   };
@@ -65,6 +67,7 @@ beforeEach(() => {
   for (const f of Object.values(db)) f.mockReset();
   db.userUpdate.mockResolvedValue({});
   db.membershipUpsert.mockResolvedValue({});
+  db.membershipFindUnique.mockResolvedValue(null);
 });
 
 describe("workspace move notice", () => {
@@ -152,6 +155,53 @@ describe("workspace move notice", () => {
     const token = await jwt({ token: {}, user });
     expect((await sessionOf(token)).workspaceMove).toMatchObject({
       message: "Sus Co is suspended, so you are now in Home Co. Contact Sus Co's Owner or WorkwrK support.",
+    });
+  });
+
+  // The level a token acts with is the level held in the workspace it acts
+  // in (Stage B review, the HIGH finding): after a join, switch or create on
+  // another device the anchored workspace differs from this token's, and
+  // the anchored level must never be copied in.
+  describe("the level follows the workspace the token acts in", () => {
+    const ACME = { id: "org-acme", name: "Acme", status: "ACTIVE" };
+    const EVIL = { id: "org-evil", name: "Evil Side", status: "ACTIVE" };
+    function anchoredIn(org: typeof ACME, level: string) {
+      return { ...account(org), ...legacyLevelRow(level as never), organizationId: org.id, organization: { status: org.status, name: org.name } };
+    }
+
+    it("an Employee of Acme invited to Evil as Admin stays an Employee in Acme on another device", async () => {
+      db.userFindUnique.mockResolvedValue(anchoredIn(EVIL, "COMPANY_ADMIN"));
+      db.orgFindUnique.mockResolvedValue({ status: ACME.status, name: ACME.name });
+      db.membershipFindUnique.mockResolvedValue({ role: "EMPLOYEE" });
+      const token = await jwt({ token: { id: "u1", organizationId: ACME.id, organizationName: ACME.name, accessLevel: "EMPLOYEE", tokenVersion: 0 } });
+      expect(token.organizationId).toBe(ACME.id);
+      expect(token.accessLevel).toBe("EMPLOYEE");
+      expect(token.revoked).toBe(false);
+    });
+
+    it("an Owner who joined elsewhere as a Member keeps their level at home on another device", async () => {
+      db.userFindUnique.mockResolvedValue(anchoredIn(EVIL, "EMPLOYEE"));
+      db.orgFindUnique.mockResolvedValue({ status: ACME.status, name: ACME.name });
+      db.membershipFindUnique.mockResolvedValue({ role: "COMPANY_ADMIN" });
+      const token = await jwt({ token: { id: "u1", organizationId: ACME.id, organizationName: ACME.name, accessLevel: "COMPANY_ADMIN", tokenVersion: 0 } });
+      expect(token.organizationId).toBe(ACME.id);
+      expect(token.accessLevel).toBe("COMPANY_ADMIN");
+    });
+
+    it("a token acting in a healthy workspace with no membership left comes home at the home level", async () => {
+      db.userFindUnique.mockResolvedValue(anchoredIn(EVIL, "EMPLOYEE"));
+      db.orgFindUnique.mockResolvedValue({ status: ACME.status, name: ACME.name });
+      db.membershipFindUnique.mockResolvedValue(null);
+      const token = await jwt({ token: { id: "u1", organizationId: ACME.id, organizationName: ACME.name, accessLevel: "COMPANY_ADMIN", tokenVersion: 0 } });
+      expect(token.organizationId).toBe(EVIL.id);
+      expect(token.accessLevel).toBe("EMPLOYEE");
+    });
+
+    it("the anchored workspace still reads the anchored level, so promotions land", async () => {
+      db.userFindUnique.mockResolvedValue(anchoredIn(ACME, "COMPANY_ADMIN"));
+      const token = await jwt({ token: { id: "u1", organizationId: ACME.id, organizationName: ACME.name, accessLevel: "EMPLOYEE", tokenVersion: 0 } });
+      expect(token.accessLevel).toBe("COMPANY_ADMIN");
+      expect(db.membershipFindUnique).not.toHaveBeenCalled();
     });
   });
 });

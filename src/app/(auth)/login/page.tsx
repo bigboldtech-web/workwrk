@@ -1,5 +1,5 @@
 // /login. On the admin host (ADMIN_HOST) it is the staff console's sign-in:
-// "Sign in to the WorkwrK staff console", no Start free link and no Google
+// "Log in to the WorkwrK staff console", no Start free link and no Google
 // button, since the admin host serves no sign-up (proxy.ts bounces /signup
 // back to /admin). Where ADMIN_HOST is unset (local development, where
 // /admin answers on the app host) the staff copy follows a callback into
@@ -32,7 +32,7 @@ export default async function LoginPage({
     staffConsole = typeof callback === "string" && (callback === "/admin" || callback.startsWith("/admin/") || callback.startsWith("/admin?"));
   }
   return (
-    <AuthShell panel={staffConsole ? "none" : "proof"}>
+    <AuthShell panel={staffConsole ? "none" : "proof"} hideFooterLinks={staffConsole}>
       <LoginForm staffConsole={staffConsole} />
     </AuthShell>
   );

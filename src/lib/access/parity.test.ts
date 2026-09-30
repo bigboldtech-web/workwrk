@@ -226,6 +226,35 @@ const EXPECTED_CASES: ParityCase[] = [
     }),
   },
   {
+    id: "dangling-task-doc-creator-follows-node-access",
+    expectKey: "dangling-task-doc-creator-follows-node-access",
+    description: "The creator of a doc whose task was deleted: resolveDoc let them in, node-access does not.",
+    helper: "resolveDoc",
+    input: base({
+      doc: {
+        id: "doc_orphan",
+        organizationId: ORG,
+        createdById: ME,
+        anchor: { entityType: "BOARD_ITEM", entityId: "item_gone" },
+      },
+    }),
+  },
+  {
+    id: "dangling-task-doc-admin-follows-node-access",
+    expectKey: "dangling-task-doc-admin-follows-node-access",
+    description: "An org admin opens a doc whose task was deleted, as node-access allows.",
+    helper: "docAccessible",
+    input: base({
+      accessLevel: "COMPANY_ADMIN",
+      doc: {
+        id: "doc_orphan",
+        organizationId: ORG,
+        createdById: "u_other",
+        anchor: { entityType: "BOARD_ITEM", entityId: "item_gone" },
+      },
+    }),
+  },
+  {
     id: "pivot-folder-visible-to-ignores-folder-grant",
     expectKey: "pivot-folder-visible-to-ignores-folder-grant",
     description: "folderVisibleTo hides a PRIVATE folder from the person it was shared with.",
@@ -507,6 +536,19 @@ const AGREEMENT_CASES: ParityCase[] = [
         organizationId: ORG,
         createdById: "u_other",
         anchor: { entityType: null, entityId: null },
+      },
+    }),
+  },
+  {
+    id: "agree-creator-of-a-doc-on-a-deleted-task-cannot-open-it",
+    description: "A doc whose task was deleted is not found for its creator (doc-access.ts via node-access; the case the parity job found).",
+    helper: "docAccessible",
+    input: base({
+      doc: {
+        id: "doc_orphan",
+        organizationId: ORG,
+        createdById: ME,
+        anchor: { entityType: "BOARD_ITEM", entityId: "item_gone" },
       },
     }),
   },

@@ -5,7 +5,7 @@
  *
  * Data plane (all endpoints already exist):
  *   GET   /api/settings                     → { organization:{name,domain,logo}, settings:{companyProfile} }
- *   PATCH /api/settings { section:"general", data:{ name, domain } }   ← org name + domain
+ *   PATCH /api/settings { section:"general", data:{ name, domain, businessType, teamSize } }   ← org name, domain, business profile
  *   PATCH /api/settings { companyProfile:{…} }                         ← mission/vision/about/industry/values
  *   POST  /api/settings/logo  (FormData: logo)  DELETE /api/settings/logo   ← org logo
  *
@@ -44,6 +44,8 @@ type IdentityState = {
   vision: string;
   about: string;
   industry: string;
+  businessType: string;
+  teamSize: string;
   values: string[]; // add/remove one at a time; stored as string[]
 };
 
@@ -91,7 +93,11 @@ function IdentityProfileTab() {
         mission: typeof profile.mission === "string" ? profile.mission : "",
         vision: typeof profile.vision === "string" ? profile.vision : "",
         about: typeof profile.about === "string" ? profile.about : "",
-        industry: typeof profile.industry === "string" ? profile.industry : "",
+        // The retired /setup wizard stored industry at settings.industry;
+        // it shows here until the first save moves it to the profile.
+        industry: typeof profile.industry === "string" && profile.industry ? profile.industry : typeof d?.settings?.industry === "string" ? d.settings.industry : "",
+        businessType: typeof d?.settings?.businessType === "string" ? d.settings.businessType : "",
+        teamSize: typeof d?.settings?.teamSize === "string" ? d.settings.teamSize : "",
         values: Array.isArray(profile.values) ? profile.values.filter((v: unknown): v is string => typeof v === "string" && v.trim().length > 0) : [],
       });
     } catch (e) { setLoadError(e instanceof Error ? e.message : "Network error"); }
@@ -111,7 +117,7 @@ function IdentityProfileTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           section: "general",
-          data: { name: state.name.trim(), domain: state.domain.trim() },
+          data: { name: state.name.trim(), domain: state.domain.trim(), businessType: state.businessType.trim(), teamSize: state.teamSize.trim() },
         }),
       });
       if (!gen.ok) throw new Error(await errText(gen));
@@ -272,6 +278,17 @@ function IdentityProfileTab() {
               label="Industry" value={state.industry} disabled={!canEdit}
               placeholder="e.g. SaaS · Manufacturing · Healthcare"
               onChange={(v) => set("industry", v)}
+            />
+            <TextField
+              label="Business type" value={state.businessType} disabled={!canEdit}
+              placeholder="e.g. Agency · Retail · Services"
+              onChange={(v) => set("businessType", v)}
+            />
+            <TextField
+              label="Team size" value={state.teamSize} disabled={!canEdit}
+              placeholder="e.g. 11 to 50"
+              hint="Shown on the Workspace settings overview."
+              onChange={(v) => set("teamSize", v)}
             />
             <AreaField
               label="Mission" value={state.mission} disabled={!canEdit}

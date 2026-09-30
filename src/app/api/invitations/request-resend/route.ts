@@ -3,7 +3,9 @@
 // The recovery on /join's "This invitation expired" screen (spec-account-
 // auth `/join`, B24): the invitee asks for a new link, and the person who
 // sent the invitation plus the workspace's Owners and Admins get an Inbox
-// row pointing at Pending invites, where Resend lives.
+// row pointing at Pending invites, where Resend lives (PATCH
+// /api/invitations { id, resend: true }: a new link and seven more days,
+// for anyone who may invite).
 //
 // Unauthenticated (the invitee has no account yet) and bound to the token:
 // only someone holding the emailed link can ask, and they can only ask about
@@ -57,7 +59,7 @@ export async function POST(req: Request) {
         data: targets.map((userId) => ({
           userId,
           title,
-          message: `${inv.email} opened an expired invitation and asked for a new one.`,
+          message: `${inv.email} opened an expired invitation and asked for a new one. Resend it from Pending invites.`,
           type: "invite_resend_request",
           link,
         })),

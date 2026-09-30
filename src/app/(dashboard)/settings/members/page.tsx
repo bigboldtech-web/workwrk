@@ -9,7 +9,7 @@
 
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Users, ShieldCheck, UserPlus, MailX } from "lucide-react";
+import { Search, Users, ShieldCheck, UserPlus, MailX, Send } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { useRole } from "@/hooks/use-role";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
@@ -59,8 +59,12 @@ const nameOf = (m: { firstName: string | null; lastName: string | null }) =>
   `${m.firstName ?? ""} ${m.lastName ?? ""}`.trim() || "Unnamed";
 
 export default function MembersPage() {
-  const { accessLevel } = useRole();
+  const { accessLevel, canInvite } = useRole();
   const canEdit = accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
+  // Resend and Revoke are invitation actions, gated like inviting itself
+  // (people.create on the server), not like editing the page: a People team
+  // inviter who reads this page read only can still renew their own invites.
+  const canManageInvites = canEdit || canInvite;
   const { toast } = useOsToast();
 
   const [members, setMembers] = useState<Member[] | null>(null);
@@ -86,6 +90,7 @@ export default function MembersPage() {
   }
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/users?scope=all&limit=500")
@@ -131,6 +136,23 @@ export default function MembersPage() {
       toast(e instanceof Error ? e.message : "Revoke failed");
     } finally {
       setRevokingId(null);
+    }
+  };
+
+  // A new link and seven more days (PATCH /api/invitations { id, resend }); the
+  // old link stops working. The row's expiry updates from the answer.
+  const resend = async (inv: PendingInvite) => {
+    setResendingId(inv.id);
+    try {
+      const res = await fetch("/api/invitations", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: inv.id, resend: true }) });
+      const d = (await res.json().catch(() => ({}))) as { error?: string; expiresAt?: string };
+      if (!res.ok || !d.expiresAt) throw new Error(d.error ?? "The invitation was not resent. Try again.");
+      setInvites((prev) => prev.map((i) => (i.id === inv.id ? { ...i, expiresAt: d.expiresAt as string } : i)));
+      toast(`New invitation sent to ${inv.email}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "The invitation was not resent. Try again.");
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -303,7 +325,7 @@ export default function MembersPage() {
                   <th className="px-3 py-2 font-semibold">Access level</th>
                   <th className="px-3 py-2 font-semibold">Invited</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
-                  {canEdit ? <th className="px-3 py-2" /> : null}
+                  {canManageInvites ? <th className="px-3 py-2" /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -327,8 +349,17 @@ export default function MembersPage() {
                           </span>
                         )}
                       </td>
-                      {canEdit ? (
+                      {canManageInvites ? (
                         <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void resend(inv)}
+                            disabled={resendingId === inv.id || revokingId === inv.id}
+                            className="me-1 inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50"
+                          >
+                            {resendingId === inv.id ? <Dots variant="pending" label="Resending" /> : <Send className="h-3.5 w-3.5" aria-hidden />}
+                            Resend
+                          </button>
                           <button
                             type="button"
                             onClick={() => void revoke(inv)}

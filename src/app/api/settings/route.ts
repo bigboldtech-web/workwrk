@@ -244,7 +244,7 @@ export async function PATCH(req: Request) {
 
         // Also store extended general settings in JSON
         const generalSettings: SettingsBlob = {};
-        for (const k of ["timezone", "currency", "fiscalYearStart", "language", "reviewFrequency", "scoreWeights", "scoringBands"] as const) {
+        for (const k of ["timezone", "currency", "fiscalYearStart", "language", "reviewFrequency", "scoreWeights", "scoringBands", "businessType", "teamSize"] as const) {
           if (d[k] !== undefined) generalSettings[k] = k === "currency" ? String(d[k]).toUpperCase() : d[k];
         }
 

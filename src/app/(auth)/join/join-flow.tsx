@@ -21,7 +21,7 @@ import { Check, Mail } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { AuthBanner, AuthCard } from "@/components/auth/auth-card";
 import { PasswordField } from "@/components/auth/password-field";
-import { AuthProofPanel, type InvitationFacts } from "@/components/auth/proof-panel";
+import { AuthProofPanel, InvitationFactsInline, type InvitationFacts } from "@/components/auth/proof-panel";
 import { joinVariant } from "@/lib/access/join-invite";
 import { parsePolicyView, passwordMeets, type PasswordPolicyView } from "@/lib/auth/password-rules";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
@@ -93,6 +93,10 @@ export function JoinProvider({ token, children }: { token: string | null; childr
       alive = false;
     };
   }, [token, attempt]);
+  // The tab title names the workspace, as the page title does (naming-canon "Join {Org}").
+  useEffect(() => {
+    if (state.kind === "ready") document.title = `Join ${state.invite.organizationName} | WorkwrK`;
+  }, [state]);
   const reload = useCallback(() => {
     setState({ kind: "loading" });
     setAttempt((n) => n + 1);
@@ -417,6 +421,7 @@ export function JoinCard() {
           </p>
         }
       >
+        <InvitationFactsInline invitation={invite} />
         <EmailStrip email={invite.email} signedIn />
         <p className="wa-text">Joining adds {org} to your workspaces. You can switch between them from the workspace menu.</p>
         {errorBanner}
@@ -430,7 +435,20 @@ export function JoinCard() {
 
   if (variant === "B") {
     return (
-      <AuthCard title={`Join ${org}`} subtitle={`You already have an account for ${invite.email}`} footer={loginFirstFooter}>
+      <AuthCard
+        title={`Join ${org}`}
+        subtitle={`You already have an account for ${invite.email}`}
+        footer={
+          <p>
+            Can&apos;t log in, or never made that account?{" "}
+            <Link href={`/forgot-password?email=${encodeURIComponent(invite.email)}`} className="wa-link">
+              Reset the password
+            </Link>{" "}
+            and the link goes to {invite.email}.
+          </p>
+        }
+      >
+        <InvitationFactsInline invitation={invite} />
         <EmailStrip email={invite.email} />
         <p className="wa-text">You already use WorkwrK with this address. Log in once and {org} is added to your workspaces.</p>
         <Link href={loginToJoin(token)} className="wa-btn wa-btn--primary wa-btn--block">
@@ -450,6 +468,7 @@ export function JoinCard() {
           void joinAsNew();
         }}
       >
+        <InvitationFactsInline invitation={invite} />
         <EmailStrip email={invite.email} />
         {errorBanner}
         <div className="wa-row2">

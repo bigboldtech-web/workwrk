@@ -22,11 +22,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getCsrfToken, getSession, useSession } from "next-auth/react";
-import { Check, MessageSquare, Table as TableIcon, X } from "lucide-react";
+import { Check, ChevronDown, MessageSquare, Table as TableIcon, X } from "lucide-react";
 import { Logo, LogoLockup } from "@/components/brand/logo";
 import { Dots } from "@/components/ui/dots";
+import { Picker } from "@/components/ui/picker";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { AuthBanner, FourDotsDrawing } from "@/components/auth/auth-card";
+import { useLayerStack } from "@/components/layout/os/shell-context";
 import { useViewer } from "@/lib/access/use-access";
+import { ORG_ROLE_BLURB } from "@/lib/access/labels";
 import { onboardView, readConsole, type ConsoleState } from "@/lib/setup/console-state";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
@@ -54,6 +58,8 @@ interface Chip {
 
 interface Loaded {
   orgName: string;
+  /** The one email domain invitations may go to (the invitations route's lock), or null when unknown. */
+  inviteDomain: string | null;
   logo: string | null;
   mission: string;
   console: ConsoleState;
@@ -72,15 +78,30 @@ async function patchSettings(section: string, data: Record<string, unknown>): Pr
   }
 }
 
-/** Commit typed or pasted text as chips: comma, space, semicolon and newline separate; a repeat is dropped; a bad address stays, in red. */
-function mergeDraft(prev: Chip[], text: string): Chip[] {
+/**
+ * Commit typed or pasted text as chips: comma, space, semicolon and newline
+ * separate; a repeat is dropped; a bad address stays, in red. An address on
+ * another domain is marked the moment it becomes a chip (the invitations
+ * route refuses it: outside people are invited from a share dialog), so
+ * nobody learns it only after pressing Continue.
+ */
+function mergeDraft(prev: Chip[], text: string, domain: string | null): Chip[] {
   const parts = text.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean);
   const next = [...prev];
   for (const p of parts) {
     const lower = p.toLowerCase();
     if (next.some((c) => c.email.toLowerCase() === lower)) continue;
     const ok = EMAIL_RE.test(p);
-    next.push({ email: p, state: ok ? "draft" : "invalid", reason: ok ? undefined : "Not an email address" });
+    if (!ok) {
+      next.push({ email: p, state: "invalid", reason: "Not an email address" });
+      continue;
+    }
+    const at = lower.split("@")[1] ?? "";
+    if (domain && at !== domain) {
+      next.push({ email: p, state: "invalid", reason: `Not @${domain}. Share with them instead` });
+      continue;
+    }
+    next.push({ email: p, state: "draft" });
   }
   return next;
 }
@@ -107,6 +128,7 @@ function useOnline(): boolean {
 
 export default function OnboardPage() {
   const viewer = useViewer();
+  const viewerEmail = useSession().data?.user?.email ?? null;
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -123,7 +145,7 @@ export default function OnboardPage() {
           return;
         }
         if (!sRes.ok) throw new Error("settings");
-        const s = (await sRes.json()) as { organization?: { name?: string; logo?: string | null }; settings?: { companyProfile?: { mission?: string } | null; console?: unknown } };
+        const s = (await sRes.json()) as { organization?: { name?: string; logo?: string | null; domain?: string | null }; settings?: { companyProfile?: { mission?: string } | null; console?: unknown } };
         const consoleState = readConsole({ console: s.settings?.console });
         let departments: Dept[] = [];
         const modulesOn: Record<string, boolean> = {};
@@ -136,8 +158,12 @@ export default function OnboardPage() {
           for (const i of m.installations ?? []) modulesOn[i.productSlug] = i.status === "ACTIVE";
         }
         if (!alive) return;
+        // The same lock POST /api/invitations applies: the org's stored
+        // domain, else the inviting admin's own.
+        const inviteDomain = (s.organization?.domain?.trim() || viewerEmail?.split("@")[1] || "").toLowerCase() || null;
         setLoaded({
           orgName: s.organization?.name ?? "your workspace",
+          inviteDomain,
           logo: s.organization?.logo ?? null,
           mission: s.settings?.companyProfile?.mission ?? "",
           console: consoleState,
@@ -151,7 +177,7 @@ export default function OnboardPage() {
     return () => {
       alive = false;
     };
-  }, [viewer.ready, isAdmin, attempt]);
+  }, [viewer.ready, isAdmin, attempt, viewerEmail]);
 
   if (loadError) {
     return (
@@ -198,11 +224,11 @@ function NothingToSetUp({ orgName, reason }: { orgName: string; reason: "not-adm
           <a href={WORK_HOME_HREF} className="wa-btn wa-btn--primary">
             Open my workspace
           </a>
-          {reason === "not-admin" ? null : (
+          {reason === "dismissed" ? (
             <Link href="/settings" className="wa-link wa-link--sm">
               Pick up where you left off
             </Link>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -214,7 +240,22 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
   const [step, setStep] = useState<Step>(startStep);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the error banner's "Try again" repeats: the action that failed (a
+  // module switch, a logo upload, Finish later), or, when null, the step's
+  // own Continue. It used to always submit the form, so a failed Talk switch
+  // on step 4 finished setup instead of retrying the switch.
+  const retryRef = useRef<(() => void) | null>(null);
+  const fail = useCallback((message: string, retry?: () => void) => {
+    retryRef.current = retry ?? null;
+    setError(message);
+  }, []);
   const [done, setDone] = useState<string[] | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  // What this run of the wizard actually wrote, for the Done screen: a line
+  // appears only for a write that succeeded, never for a default.
+  const [wrote, setWrote] = useState<{ renamed: boolean; mission: boolean; logo: boolean; deptAdded: number; deptRemoved: number; modules: string[] }>({ renamed: false, mission: false, logo: false, deptAdded: 0, deptRemoved: 0, modules: [] });
+  const [deptPickerOpen, setDeptPickerOpen] = useState(false);
+  const layers = useLayerStack();
 
   // Step 1
   const [name, setName] = useState(initial.orgName);
@@ -253,30 +294,52 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
 
   const sentCount = chips.filter((c) => c.state === "sent").length;
 
-  const finishLater = useCallback(async () => {
-    if (dirty && !window.confirm("Leave setup? What you typed on this step is not saved yet.")) return;
+  // The tab names the workspace (naming-canon "Set up {Org}").
+  useEffect(() => {
+    document.title = `Set up ${savedName} | WorkwrK`;
+  }, [savedName]);
+
+  // Finish later: the dismissal itself, once the person has chosen it.
+  const leave = useCallback(async () => {
+    setLeaveOpen(false);
     setSaving(true);
     const r = await patchSettings("console", { dismiss: true });
     if (!r.ok) {
       setSaving(false);
-      setError(r.error);
+      fail(r.error, () => void leave());
       return;
     }
     window.location.assign(WORK_HOME_HREF);
-  }, [dirty]);
+  }, [fail]);
 
+  // The "Finish later" link: straight out when nothing is unsaved, else ask
+  // first (in the design system's Dialog, not window.confirm).
+  const finishLater = useCallback(() => {
+    if (dirty) setLeaveOpen(true);
+    else void leave();
+  }, [dirty, leave]);
+
+  // Esc never leaves on its own. It closes the top layer (a Picker) first;
+  // otherwise it asks, always: a person pressing Esc to clear a field must
+  // never lose the wizard for good (a dismissed wizard does not come back).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) void finishLater();
+      if (e.key !== "Escape" || e.defaultPrevented || leaveOpen) return;
+      if (layers && layers.layerCount > 0) {
+        e.preventDefault();
+        layers.closeTopLayer();
+        return;
+      }
+      setLeaveOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [finishLater]);
+  }, [layers, leaveOpen]);
 
   async function advance(to: Step) {
     const r = await patchSettings("console", { setupStep: to });
     if (!r.ok) {
-      setError(r.error);
+      fail(r.error);
       return false;
     }
     setError(null);
@@ -286,43 +349,45 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
   }
 
   function commitDraft(text: string) {
-    setChips((prev) => mergeDraft(prev, text));
+    setChips((prev) => mergeDraft(prev, text, initial.inviteDomain));
     setDraft("");
   }
 
   async function saveStep1(): Promise<boolean> {
     if (!name.trim()) {
-      setError("The workspace needs a name.");
+      fail("The workspace needs a name.");
       return false;
     }
     if (name.trim() !== savedName) {
       const r = await patchSettings("general", { name: name.trim() });
       if (!r.ok) {
-        setError(r.error);
+        fail(r.error);
         return false;
       }
       setSavedName(name.trim());
+      setWrote((w) => ({ ...w, renamed: true }));
     }
     if (mission.trim() !== savedMission.trim()) {
       const r = await patchSettings("culture", { mission: mission.trim() });
       if (!r.ok) {
-        setError(r.error);
+        fail(r.error);
         return false;
       }
       setSavedMission(mission.trim());
+      setWrote((w) => ({ ...w, mission: mission.trim().length > 0 }));
     }
     return true;
   }
 
   async function saveStep2(): Promise<boolean> {
-    const list = draft.trim() ? mergeDraft(chips, draft) : chips;
+    const list = draft.trim() ? mergeDraft(chips, draft, initial.inviteDomain) : chips;
     if (draft.trim()) {
       setChips(list);
       setDraft("");
     }
     const pending = list.filter((c) => c.state === "draft" || c.state === "failed");
     if (list.some((c) => c.state === "invalid")) {
-      setError("Fix or remove the addresses in red first.");
+      fail("Fix or remove the addresses in red first.");
       return false;
     }
     let failed = 0;
@@ -355,7 +420,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
       setChips((prev) => prev.map((c) => (c.email === chip.email ? { ...c, state: ok ? "sent" : "failed", reason } : c)));
     }
     if (failed > 0) {
-      setError(`${failed} invitation${failed === 1 ? "" : "s"} did not go out. Fix or remove ${failed === 1 ? "it" : "them"}, then continue.`);
+      fail(`${failed} invitation${failed === 1 ? "" : "s"} did not go out. Fix or remove ${failed === 1 ? "it" : "them"}, then continue.`);
       return false;
     }
     return true;
@@ -373,6 +438,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
           const id = d.id ?? `new-${nm}`;
           setDepts((prev) => [...prev, { id, name: nm, members: 0, goals: 0 }]);
           setAdded((prev) => prev.filter((x) => x !== nm));
+          setWrote((w) => ({ ...w, deptAdded: w.deptAdded + 1 }));
         } else {
           const d = (await r.json().catch(() => ({}))) as { error?: string; code?: string };
           if (d.code === "duplicate") setAdded((prev) => prev.filter((x) => x !== nm));
@@ -389,6 +455,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
         const r = await fetch(`/api/departments/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (r.ok) {
           setDepts((prev) => prev.filter((d) => d.id !== id));
+          setWrote((w) => ({ ...w, deptRemoved: w.deptRemoved + 1 }));
           setUnchecked((prev) => {
             const n = new Set(prev);
             n.delete(id);
@@ -409,7 +476,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
     }
     setDeptWarn(warns);
     if (Object.keys(warns).length > 0) {
-      setError("Some department changes did not save. They are marked below.");
+      fail("Some department changes did not save. They are marked below.");
       return false;
     }
     return true;
@@ -423,12 +490,13 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
       const r = await fetch("/api/products/installations", { method: on ? "POST" : "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productSlug: slug }) });
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))) as { error?: string };
-        setError(d.error ? `That did not change: ${d.error}` : "That did not change. Try again.");
+        fail(d.error ? `That did not change: ${d.error}` : "That did not change.", () => void toggleModule(slug, on));
       } else {
         setModulesOn((m) => ({ ...m, [slug]: on }));
+        setWrote((w) => ({ ...w, modules: on ? [...w.modules.filter((x) => x !== slug), slug] : w.modules.filter((x) => x !== slug) }));
       }
     } catch {
-      setError("Can't reach WorkwrK. Check your connection.");
+      fail("Can't reach WorkwrK. Check your connection.", () => void toggleModule(slug, on));
     } finally {
       setModuleBusy(null);
     }
@@ -448,13 +516,31 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
       } else {
         const r = await patchSettings("console", { complete: true });
         if (!r.ok) {
-          setError(r.error);
+          fail(r.error);
           return;
         }
-        const lines = [`Workspace named ${savedName}`];
-        if (sentCount > 0) lines.push(`${sentCount} invitation${sentCount === 1 ? "" : "s"} sent`);
-        lines.push(`${depts.length} department${depts.length === 1 ? "" : "s"}`);
-        for (const m of MODULES) if (modulesOn[m.slug]) lines.push(`${m.name} is on`);
+        // Only what this wizard wrote and the server accepted. Invitations
+        // are read back from the server, so ones sent before a reload count
+        // (pending invites the workspace holds, none of them a claim).
+        let pendingInvites = sentCount;
+        try {
+          const inv = await fetch("/api/invitations", { cache: "no-store" });
+          if (inv.ok) {
+            const rows = (await inv.json().catch(() => [])) as Array<{ accepted?: boolean; expiresAt?: string }>;
+            if (Array.isArray(rows)) pendingInvites = rows.filter((x) => !x.accepted && (!x.expiresAt || Date.parse(x.expiresAt) > Date.now())).length;
+          }
+        } catch {
+          // keep this session's count
+        }
+        const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+        const lines: string[] = [];
+        if (wrote.renamed) lines.push(`Workspace renamed to ${savedName}`);
+        if (wrote.logo) lines.push("Logo added");
+        if (wrote.mission) lines.push("Mission line saved");
+        if (pendingInvites > 0) lines.push(`${plural(pendingInvites, "invitation")} waiting to be accepted`);
+        if (wrote.deptAdded > 0) lines.push(`${plural(wrote.deptAdded, "department")} added`);
+        if (wrote.deptRemoved > 0) lines.push(`${plural(wrote.deptRemoved, "department")} removed`);
+        for (const m of MODULES) if (wrote.modules.includes(m.slug) && modulesOn[m.slug]) lines.push(`${m.name} is on`);
         setDone(lines);
       }
     } finally {
@@ -484,15 +570,19 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
   async function uploadLogo(file: File) {
     setLogoBusy(true);
     setError(null);
+    retryRef.current = null;
     try {
       const fd = new FormData();
       fd.append("logo", file);
       const r = await fetch("/api/settings/logo", { method: "POST", body: fd });
       const d = (await r.json().catch(() => ({}))) as { logo?: string; error?: string };
-      if (!r.ok || !d.logo) setError(d.error || "The logo did not upload.");
-      else setLogo(d.logo);
+      if (!r.ok || !d.logo) fail(d.error || "The logo did not upload.", () => void uploadLogo(file));
+      else {
+        setLogo(d.logo);
+        setWrote((w) => ({ ...w, logo: true }));
+      }
     } catch {
-      setError("Can't reach WorkwrK. Check your connection.");
+      fail("Can't reach WorkwrK. Check your connection.", () => void uploadLogo(file));
     } finally {
       setLogoBusy(false);
     }
@@ -500,12 +590,15 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
 
   async function removeLogo() {
     setLogoBusy(true);
+    setError(null);
     try {
       const r = await fetch("/api/settings/logo", { method: "DELETE" });
-      if (r.ok) setLogo(null);
-      else setError("The logo was not removed.");
+      if (r.ok) {
+        setLogo(null);
+        setWrote((w) => ({ ...w, logo: false }));
+      } else fail("The logo was not removed.", () => void removeLogo());
     } catch {
-      setError("Can't reach WorkwrK. Check your connection.");
+      fail("Can't reach WorkwrK. Check your connection.", () => void removeLogo());
     } finally {
       setLogoBusy(false);
     }
@@ -521,14 +614,18 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
           <div className="wz-card wz-done">
             <FourDotsDrawing />
             <h1 className="wa-title">You are set up</h1>
-            <ul>
-              {done.map((l) => (
-                <li key={l}>
-                  <Check size={16} aria-hidden />
-                  {l}
-                </li>
-              ))}
-            </ul>
+            {done.length > 0 ? (
+              <ul>
+                {done.map((l) => (
+                  <li key={l}>
+                    <Check size={16} aria-hidden />
+                    {l}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="wa-help">You skipped the steps. {savedName} already has its departments and a General Space to start in.</p>
+            )}
             <a href={WORK_HOME_HREF} className="wa-btn wa-btn--primary">
               Open my workspace
             </a>
@@ -542,7 +639,10 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
   const titles: Record<Step, { title: string; sub: string }> = {
     1: { title: "Make it yours", sub: `How ${savedName} appears to everyone you invite.` },
     2: { title: "Invite your team", sub: "They get an email with a link to join. You can invite more people any time." },
-    3: { title: "Create your departments", sub: "We started you with six. Keep the ones you use and add your own." },
+    3: {
+      title: "Create your departments",
+      sub: depts.length === 0 ? "Add the departments your company has." : `You have ${depts.length === 1 ? "one" : depts.length}. Keep the ones you use and add your own.`,
+    },
     4: { title: "Turn on what you need", sub: "Both are optional and you can turn them on later." },
   };
 
@@ -552,9 +652,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
         <LogoLockup size={20} textColor="var(--os-ink)" />
         <div className="wz-steps" aria-label={`Step ${step} of 4: ${STEP_LABELS[step - 1]}`}>
           <span className="wz-steps__dots" aria-hidden>
-            {[1, 2, 3, 4].map((n) => (
-              <i key={n} className={n < step ? "is-done" : n === step ? "is-current" : undefined} />
-            ))}
+            <Dots variant="quad-steps" done={step - 1} total={4} label={`Step ${step} of 4`} />
           </span>
           <span className="wz-steps__label">{STEP_LABELS[step - 1]}</span>
           <span className="wz-steps__count">Step {step} of 4</span>
@@ -713,7 +811,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
                       Member
                     </button>
                   </div>
-                  <p className="wz-seg-help">{role === "ADMIN" ? "Runs the workspace day to day." : "Works here."}</p>
+                  <p className="wz-seg-help">{ORG_ROLE_BLURB[role]}</p>
                   {role === "MEMBER" ? (
                     <label className="wa-help" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                       <input type="checkbox" className="wz-check" checked={agent} onChange={(e) => setAgent(e.target.checked)} />
@@ -722,17 +820,36 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
                   ) : null}
                 </div>
                 <div className="wa-field">
-                  <label htmlFor="inviteDept" className="wa-label">
+                  <span className="wa-label" id="inviteDeptLabel">
                     Department <span style={{ color: "var(--os-ink-2)", fontWeight: 400 }}>(optional)</span>
-                  </label>
-                  <select id="inviteDept" className="wa-input" value={inviteDept} onChange={(e) => setInviteDept(e.target.value)}>
-                    <option value="">No department</option>
-                    {depts.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
+                  </span>
+                  <div className="wz-pick">
+                    <button
+                      type="button"
+                      id="inviteDept"
+                      className="wa-input wz-pick__trigger"
+                      aria-labelledby="inviteDeptLabel inviteDept"
+                      aria-haspopup="listbox"
+                      aria-expanded={deptPickerOpen}
+                      onClick={() => setDeptPickerOpen((v) => !v)}
+                    >
+                      <span className={inviteDept ? undefined : "wz-pick__none"}>{depts.find((d) => d.id === inviteDept)?.name ?? "No department"}</span>
+                      <ChevronDown size={16} aria-hidden />
+                    </button>
+                    <Picker
+                      open={deptPickerOpen}
+                      onClose={() => setDeptPickerOpen(false)}
+                      ariaLabel="Department"
+                      searchPlaceholder="Search departments"
+                      selected={inviteDept || "__none__"}
+                      sections={[{ options: [{ value: "__none__", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
+                      onSelect={(v) => {
+                        setDeptPickerOpen(false);
+                        setInviteDept(v === "__none__" ? "" : v);
+                      }}
+                      className="absolute start-0 top-10 z-50"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="wa-field">
@@ -873,7 +990,17 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
             <AuthBanner tone="danger">
               <p>
                 {error}{" "}
-                <button type="submit" className="wa-link">
+                <button
+                  type="button"
+                  className="wa-link"
+                  onClick={() => {
+                    const retry = retryRef.current;
+                    retryRef.current = null;
+                    setError(null);
+                    if (retry) retry();
+                    else void onContinue();
+                  }}
+                >
                   Try again
                 </button>
               </p>
@@ -900,6 +1027,23 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
           </div>
         </form>
       </main>
+
+      <Dialog open={leaveOpen} onOpenChange={(o) => { if (!o) setLeaveOpen(false); }}>
+        <DialogContent className="workwrk-auth wz-leave max-w-[420px]">
+          <DialogTitle className="wz-leave__title">Leave setup?</DialogTitle>
+          <p className="wa-help">
+            {dirty ? "What you typed on this step is not saved yet. " : ""}The remaining steps move to Workspace settings, where you can finish them any time.
+          </p>
+          <div className="wz-leave__actions">
+            <button type="button" className="wa-btn wa-btn--secondary" onClick={() => setLeaveOpen(false)}>
+              Stay
+            </button>
+            <button type="button" className="wa-btn wa-btn--primary" onClick={() => void leave()}>
+              Finish later
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

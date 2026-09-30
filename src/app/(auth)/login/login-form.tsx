@@ -282,7 +282,7 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
     <AuthCard
       banner={topStrip}
       title="Log in"
-      subtitle={staffConsole ? "Sign in to the WorkwrK staff console." : "Welcome back"}
+      subtitle={staffConsole ? "Log in to the WorkwrK staff console." : "Welcome back"}
       footer={
         staffConsole ? null : (
           <>

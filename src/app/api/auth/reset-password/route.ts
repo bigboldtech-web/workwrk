@@ -9,11 +9,13 @@ import { logAuditEvent } from "@/lib/activity";
 // POST /api/auth/reset-password { token, password }
 //
 // What holds here, and must keep holding (login hardening, 2026-09-08):
-//   - reset tokens are stored as their SHA-256 hash, so a database leak
-//     yields no working link;
+//   - reset tokens are stored as their SHA-256 hash, and the emailed copy
+//     of the link is cleared from EmailLog once it is sent (src/lib/email.ts
+//     SECRET_LINK_TEMPLATES), so a database leak yields no working link;
 //   - the new password meets the account's workspace policy;
 //   - tokenVersion is bumped, so every other session (an attacker's
-//     included) is logged out the moment the password changes.
+//     included) is logged out at its next session check (five minutes at
+//     most, REVALIDATE_MS in src/lib/auth.ts).
 // Phase 8 adds, without loosening any of those:
 //   - the token is CLAIMED atomically (used=false -> true in one statement)
 //     before the password is written, so two submits of one link cannot

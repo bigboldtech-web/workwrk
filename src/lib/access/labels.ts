@@ -31,7 +31,7 @@ export const ORG_ROLE_LABEL: Record<OrgRole, string> = {
 export const ORG_ROLE_BLURB: Record<OrgRole, string> = {
   OWNER: "Runs the company account: billing, ownership and security.",
   ADMIN: "Runs the workspace day to day.",
-  MEMBER: "Works here.",
+  MEMBER: "An employee: works in the Spaces they are added to and sees what is open to the workspace.",
   GUEST: "Outside the company, sees only what is shared.",
 };
 

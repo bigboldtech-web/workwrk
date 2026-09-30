@@ -23,3 +23,19 @@ export function reminderTemplate(vars: ReminderVars): { subject: string; html: s
     html,
   };
 }
+
+/**
+ * A reminder a person set for themselves (the topbar Reminder, or one on a
+ * task), fired by src/lib/reminders.ts: the same white card and blue button
+ * as every other email, with the reminder's own words and the page it opens.
+ */
+export function personalReminderTemplate(vars: { title: string; body?: string | null; link: string; openLabel: string }): { subject: string; html: string } {
+  const body = vars.body && vars.body.trim() ? `<p style="white-space:pre-wrap;">${escapeHtml(vars.body.trim())}</p>` : "";
+  const html = baseLayout(`
+    <h1>Reminder</h1>
+    <p><span class="highlight">${escapeHtml(vars.title)}</span></p>
+    ${body}
+    <p style="margin:24px 0 8px;">${emailButton(safeHref(vars.link), escapeHtml(vars.openLabel))}</p>
+  `);
+  return { subject: `Reminder: ${vars.title}`, html };
+}

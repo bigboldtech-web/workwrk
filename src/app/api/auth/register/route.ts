@@ -113,7 +113,7 @@ export async function POST(req: Request) {
       // exists (settings-architecture 11.1): the six departments, the
       // locale, the password rules, the access toggles, retention and the
       // setup console. The wizard is an offer from here on, never a gate.
-      await seedOrgDefaults(tx, { organizationId: organization.id, timezone: typeof timezone === "string" ? timezone : null });
+      await seedOrgDefaults(tx, { organizationId: organization.id, timezone: typeof timezone === "string" ? timezone : null, userId: user.id });
 
       return { organization, user };
     });

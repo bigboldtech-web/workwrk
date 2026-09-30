@@ -23,6 +23,17 @@ export async function POST(req: NextRequest) {
   const existing = await prisma.organization.findUnique({ where: { slug }, select: { id: true } });
   if (existing) slug = `${slug}-${Date.now().toString(36)}`;
 
+  // The locale follows the creator: the browser's zone when the menu sends
+  // it, else the zone of the workspace they are creating it from, so a
+  // London team's second workspace does not start in Asia/Kolkata and INR.
+  let timezone: string | null = typeof body.timezone === "string" ? body.timezone : null;
+  if (!timezone) {
+    const fromOrgId = (session.user as { organizationId?: string }).organizationId;
+    const from = fromOrgId ? await prisma.organization.findUnique({ where: { id: fromOrgId }, select: { settings: true } }) : null;
+    const tz = (from?.settings as { timezone?: unknown } | null)?.timezone;
+    timezone = typeof tz === "string" ? tz : null;
+  }
+
   const org = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
       data: { name, slug, status: "TRIAL" },
@@ -30,7 +41,7 @@ export async function POST(req: NextRequest) {
     // The same defaults a self-serve signup gets (settings-architecture
     // 11.1): departments, locale, password rules, access toggles, retention
     // and the setup console, so a workspace made here is complete too.
-    await seedOrgDefaults(tx, { organizationId: organization.id });
+    await seedOrgDefaults(tx, { organizationId: organization.id, timezone, userId });
     // The creator owns/admins the new workspace.
     await tx.organizationMembership.create({
       data: { userId, organizationId: organization.id, role: "COMPANY_ADMIN", isPrimary: false },

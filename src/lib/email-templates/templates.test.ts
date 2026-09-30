@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { invitationTemplate, passwordResetTemplate, reminderTemplate, verifyEmailTemplate, welcomeTemplate } from "./index";
+import { invitationTemplate, passwordResetTemplate, personalReminderTemplate, reminderTemplate, verifyEmailTemplate, welcomeTemplate } from "./index";
 import { escapeHtml, safeHref } from "./escape";
 
 const DIR = join(process.cwd(), "src/lib/email-templates");
@@ -49,5 +49,14 @@ describe("email templates", () => {
     expect(w).not.toContain("Organization");
     expect(w).not.toContain("Settings &rarr; Team");
     expect(w).toContain("Workspace settings &gt; Members");
+  });
+
+  it("sends the personal reminder in the branded layout, escaped, with an absolute button", () => {
+    const r = personalReminderTemplate({ title: "<b>Call Ana</b>", body: "Bring the <deck>", link: "https://app.example/home", openLabel: "Open WorkwrK" });
+    expect(r.subject).toBe("Reminder: <b>Call Ana</b>");
+    expect(r.html).toContain("&lt;b&gt;Call Ana&lt;/b&gt;");
+    expect(r.html).toContain("Bring the &lt;deck&gt;");
+    expect(r.html).toContain('href="https://app.example/home"');
+    expect(personalReminderTemplate({ title: "T", link: "/home", openLabel: "Open" }).html).toContain('href="#"');
   });
 });

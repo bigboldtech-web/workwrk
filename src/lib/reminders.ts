@@ -6,11 +6,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { personalReminderTemplate } from "@/lib/email-templates";
+import { absoluteUrl } from "@/lib/app-url";
 import { WORK_HOME_HREF } from "./nav/route-hub";
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] ?? c));
-}
 
 function fmtDue(d: Date): string {
   return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -59,10 +57,19 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
   if (r.notifyEmail) {
     const user = await prisma.user.findUnique({ where: { id: r.userId }, select: { email: true } });
     if (user?.email) {
+      // The branded template (white card, blue button to the page the
+      // bell row opens), never bare HTML. The link is absolute: an email
+      // client has no host to resolve a relative path against.
+      const { subject, html } = personalReminderTemplate({
+        title: r.title,
+        body: r.body,
+        link: absoluteUrl(link),
+        openLabel: link === WORK_HOME_HREF ? "Open WorkwrK" : "Open the task",
+      });
       await sendEmail({
         to: user.email,
-        subject: `Reminder: ${r.title}`,
-        html: `<p style="font-size:15px">${esc(r.title)}</p>${r.body ? `<p style="color:#555">${esc(r.body)}</p>` : ""}`,
+        subject,
+        html,
         template: "reminder",
       }).catch((e) => console.error("reminder email failed", e));
     }

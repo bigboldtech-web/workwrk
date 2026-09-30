@@ -125,7 +125,9 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     }))?.trim();
     if (!name || creating) return;
     setCreating(true);
-    const r = await apiFetch<{ data?: { organization?: { id?: string } }; organization?: { id?: string } }>("/api/organizations/create", { method: "POST", json: { name } });
+    // The browser's zone seeds the new workspace's locale (seedOrgDefaults).
+    const timezone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } })();
+    const r = await apiFetch<{ data?: { organization?: { id?: string } }; organization?: { id?: string } }>("/api/organizations/create", { method: "POST", json: { name, timezone } });
     if (!r.ok) {
       toast("Couldn't create workspace. Try again");
       setCreating(false);
@@ -134,7 +136,9 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     const newId = r.data?.data?.organization?.id ?? r.data?.organization?.id;
     if (newId) {
       const sw = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: newId } });
-      if (sw.ok) { await update?.(); window.location.href = WORK_HOME_HREF; return; }
+      // A brand new workspace opens on its setup wizard, the same offer a
+      // signup gets (never a gate: Finish later and Skip are one click).
+      if (sw.ok) { await update?.(); window.location.href = "/onboard"; return; }
     }
     window.location.reload();
   }, [creating, promptDialog, toast, update]);

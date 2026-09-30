@@ -841,8 +841,12 @@ async function loadDocFacts(viewer: Viewer, docId: string): Promise<ContainerRes
   }
 
   // Anchored: the doc inherits its anchor, which becomes the chain.
+  // A doc on a task that is gone reaches nobody but an org admin
+  // (node-access.ts, node-rules R6 anchorReach BOARD_ITEM gives NONE and the
+  // creator term needs the anchor to reach), so the owner rule is dropped.
   const anchor = await anchorChain(viewer, doc.entityType, doc.entityId);
-  return { object: base, chain: anchor.chain, grants: anchor.grants };
+  const object = anchor.dangling ? { ...base, ownerId: null } : base;
+  return { object, chain: anchor.chain, grants: anchor.grants };
 }
 
 /** The chain and grants of whatever a Doc, Table or Whiteboard hangs off. */
@@ -850,7 +854,7 @@ async function anchorChain(
   viewer: Viewer,
   entityType: string,
   entityId: string,
-): Promise<{ chain: ChainLink[]; grants: GrantFact[] }> {
+): Promise<{ chain: ChainLink[]; grants: GrantFact[]; dangling?: boolean }> {
   if (entityType === "SPACE") {
     const res = await loadSpaceFacts(viewer, entityId);
     return { chain: [objectAsLink(res.object), ...res.chain], grants: res.grants };
@@ -868,7 +872,7 @@ async function anchorChain(
       where: { id: entityId },
       select: { boardId: true },
     });
-    if (!item) return { chain: [], grants: [] };
+    if (!item) return { chain: [], grants: [], dangling: true };
     const res = await loadListFacts(viewer, item.boardId);
     return { chain: [objectAsLink(res.object), ...res.chain], grants: res.grants };
   }

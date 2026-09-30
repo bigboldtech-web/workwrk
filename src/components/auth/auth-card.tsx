@@ -40,7 +40,7 @@ export function AuthCard({
     <div className="wa-card">
       {banner}
       {drawing || title || subtitle ? (
-        <div className="wa-card__head">
+        <div className={drawing ? "wa-card__head is-result" : "wa-card__head"}>
           {drawing ? <FourDotsDrawing /> : null}
           {title ? <h1 className="wa-title">{title}</h1> : null}
           {subtitle ? <p className="wa-sub">{subtitle}</p> : null}

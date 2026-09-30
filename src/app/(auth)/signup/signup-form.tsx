@@ -30,7 +30,7 @@ function browserTimeZone(): string | undefined {
   }
 }
 
-function SignupFormInner() {
+function SignupFormInner({ planLine, termsHref, privacyHref }: SignupLinks) {
   const router = useRouter();
   const sp = useSearchParams();
   const token = sp.get("token");
@@ -160,7 +160,7 @@ function SignupFormInner() {
     <AuthCard
       banner={<SignedInStrip logoutCallback="/signup" />}
       title="Start your workspace"
-      subtitle="No card needed."
+      subtitle={planLine ?? undefined}
       footer={
         <>
           <p>
@@ -237,11 +237,11 @@ function SignupFormInner() {
         <PasswordField label="Password" value={form.password} onChange={(v) => set("password", v)} autoComplete="new-password" policy={policy} error={errors.password} />
         <p className="wa-help">
           By creating a workspace you agree to the{" "}
-          <a className="wa-link" href="/terms" target="_blank" rel="noreferrer">
+          <a className="wa-link" href={termsHref} target="_blank" rel="noreferrer">
             Terms
           </a>{" "}
           and the{" "}
-          <a className="wa-link" href="/privacy" target="_blank" rel="noreferrer">
+          <a className="wa-link" href={privacyHref} target="_blank" rel="noreferrer">
             Privacy Policy
           </a>
           .
@@ -255,10 +255,21 @@ function SignupFormInner() {
   );
 }
 
-export function SignupForm() {
+/**
+ * What the server page hands the form: the plan line (null when it is not
+ * true of the plan a new workspace is created on) and the Terms and Privacy
+ * links resolved through marketingHref, the same as the AuthShell footer.
+ */
+interface SignupLinks {
+  planLine: string | null;
+  termsHref: string;
+  privacyHref: string;
+}
+
+export function SignupForm(props: SignupLinks) {
   return (
     <Suspense>
-      <SignupFormInner />
+      <SignupFormInner {...props} />
     </Suspense>
   );
 }

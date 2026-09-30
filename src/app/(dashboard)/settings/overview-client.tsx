@@ -50,7 +50,7 @@ type ApiSettings = {
     scoringBands?: Array<{ label: string; min: number; max: number; color: string }>;
     notifications?: Record<string, unknown>;
     security?: { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean; sessionTimeout?: number; twoFactorEnabled?: boolean };
-    companyProfile?: { mission?: string } | null;
+    companyProfile?: { mission?: string; industry?: string } | null;
     console?: unknown;
   };
   usage?: { users?: number; sops?: number; aiQueries?: number };
@@ -143,7 +143,7 @@ export function SettingsOverviewClient() {
           fields: [
             { label: "Plan", value: org?.plan ?? "Starter" },
             { label: "Status", value: org?.status ?? "Active" },
-            { label: "Industry", value: set.industry ?? NOT_SET },
+            { label: "Industry", value: set.companyProfile?.industry || set.industry || NOT_SET },
           ],
         },
       ],
@@ -158,7 +158,7 @@ export function SettingsOverviewClient() {
           Icon: Boxes,
           fields: [
             { label: "Active", value: `${moduleCount} of ${MODULES.length} on` },
-            { label: "Team size", value: set.teamSize ?? NOT_SET },
+            { label: "Team size", value: set.teamSize || NOT_SET },
           ],
         },
         {
@@ -277,15 +277,15 @@ export function SettingsOverviewClient() {
         <SkeletonRows />
       ) : (
         <>
-        <SetupCard
-          orgName={org?.name ?? "your workspace"}
-          consoleRaw={set.console}
-          hasLogoOrMission={!!org?.logo || !!set.companyProfile?.mission?.trim()}
-          activeUsers={usage.users ?? 0}
-          activeModules={moduleCount}
-          onChanged={() => { void load(); }}
-        />
         <div className="settings">
+          <SetupCard
+            orgName={org?.name ?? "your workspace"}
+            consoleRaw={set.console}
+            hasLogoOrMission={!!org?.logo || !!set.companyProfile?.mission?.trim()}
+            activeUsers={usage.users ?? 0}
+            activeModules={moduleCount}
+            onChanged={() => { void load(); }}
+          />
           {sections.map((section) => (
             <section key={section.title} className="settings__section">
               <header className="settings__section-head">

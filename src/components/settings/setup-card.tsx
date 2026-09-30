@@ -2,15 +2,32 @@
 
 // "Set up {Org}" on Workspace settings > Overview (settings-architecture
 // 11.2, spec-account-auth `/onboard` "The wizard and the Overview card, one
-// rule"). With the dashboard's setup gate gone, this card is how an Owner or
-// Admin gets back to setup:
+// rule"). Built on SettingsCard, inside the Overview's own column, so its
+// edges are the section grid's edges.
+//
 //   wizard not finished and not dismissed   one line and "Continue setup"
 //                                           (the resume point is server side)
 //   "Finish later" was chosen               the four steps, each one click
 //                                           into the page that does it,
 //                                           ticked from DATA, never from
 //                                           "this step was visited"
-//   finished                                nothing
+//   finished (in this release)              "Setup complete", one line, with
+//                                           Dismiss; a workspace that finished
+//                                           an older wizard ("legacy") shows
+//                                           nothing, it was never offered
+//   finished and dismissed                  nothing
+//
+// One deviation from the spec's table, on purpose: with both flags null the
+// spec renders nothing here because the admin "is in the wizard". The
+// dashboard's setup gate is gone, so an admin who closed the tab mid-wizard
+// would otherwise have no way back but typing /onboard. The worst case of
+// showing it is one extra line; the worst case of hiding it is a workspace
+// left half set up with no prompt.
+//
+// The departments step ticks only once the list is no longer exactly the
+// six seedOrgDefaults made: a step ticked before anyone acted tells the
+// admin nothing.
+//
 // Admin-only by where it is mounted (the Overview is an Owner and Admin
 // page); its writes go through PATCH /api/settings { section: "console" }.
 
@@ -18,7 +35,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Circle } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { readConsole } from "@/lib/setup/console-state";
+import { isSeededDepartmentSet } from "@/lib/org/default-departments";
 
 interface Props {
   orgName: string;
@@ -29,9 +48,12 @@ interface Props {
   onChanged: () => void;
 }
 
+const GHOST = "inline-flex h-8 items-center gap-2 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50";
+const SECONDARY = "inline-flex h-8 items-center rounded-md border border-line-strong px-3 text-base font-medium text-ink hover:bg-hover";
+
 export function SetupCard({ orgName, consoleRaw, hasLogoOrMission, activeUsers, activeModules, onChanged }: Props) {
   const state = readConsole({ console: consoleRaw });
-  const [departments, setDepartments] = useState<number | null>(null);
+  const [departments, setDepartments] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,16 +63,15 @@ export function SetupCard({ orgName, consoleRaw, hasLogoOrMission, activeUsers, 
     let alive = true;
     fetch("/api/departments?fresh=1", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (alive && Array.isArray(d)) setDepartments(d.length);
+      .then((d: unknown) => {
+        const rows = Array.isArray(d) ? d : d && typeof d === "object" && Array.isArray((d as { data?: unknown }).data) ? (d as { data: unknown[] }).data : null;
+        if (alive && rows) setDepartments(rows.map((r) => (r && typeof r === "object" && typeof (r as { name?: unknown }).name === "string" ? (r as { name: string }).name : "")));
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, [showSteps]);
-
-  if (state.setupCompletedAt) return null;
 
   async function write(data: Record<string, unknown>) {
     setBusy(true);
@@ -66,64 +87,79 @@ export function SetupCard({ orgName, consoleRaw, hasLogoOrMission, activeUsers, 
     }
   }
 
-  const card: React.CSSProperties = {
-    margin: "0 24px 8px",
-    padding: 16,
-    border: "1px solid var(--os-line)",
-    borderRadius: 8,
-    background: "var(--os-surface)",
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  };
+  const errorLine = error ? (
+    <p className="text-sm text-danger-text" role="alert">
+      {error}
+    </p>
+  ) : null;
 
-  if (!showSteps) {
+  if (state.setupCompletedAt) {
+    if (state.setupCompletedAt === "legacy" || state.setupDismissedAt) return null;
     return (
-      <section style={card} aria-label={`Set up ${orgName}`}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--os-ink)" }}>Set up {orgName}</h2>
-            <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--os-ink-2)" }}>Four short steps. You are on step {state.setupStep} of 4.</p>
-          </div>
-          <button type="button" className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50" onClick={() => void write({ dismiss: true })} disabled={busy}>
+      <SettingsCard
+        title="Setup complete"
+        description={`${orgName} is set up. Everything the wizard did can be changed on the pages below.`}
+        actions={
+          <button type="button" className={GHOST} onClick={() => void write({ dismiss: true })} disabled={busy}>
             {busy ? <Dots variant="pending" label="Saving" /> : null}
             Dismiss
           </button>
-          <Link href="/onboard" className="inline-flex h-9 items-center rounded-lg border border-line-strong px-3 text-base font-medium text-ink hover:bg-hover">
-            Continue setup
-          </Link>
-        </div>
-        {error ? <p style={{ margin: 0, fontSize: 13, color: "var(--os-danger-text)" }}>{error}</p> : null}
-      </section>
+        }
+      >
+        {errorLine}
+      </SettingsCard>
+    );
+  }
+
+  if (!showSteps) {
+    return (
+      <SettingsCard
+        title={`Set up ${orgName}`}
+        description={`Four short steps. You are on step ${state.setupStep} of 4.`}
+        actions={
+          <>
+            <button type="button" className={GHOST} onClick={() => void write({ dismiss: true })} disabled={busy}>
+              {busy ? <Dots variant="pending" label="Saving" /> : null}
+              Dismiss
+            </button>
+            <Link href="/onboard" className={SECONDARY}>
+              Continue setup
+            </Link>
+          </>
+        }
+      >
+        {errorLine}
+      </SettingsCard>
     );
   }
 
   const steps = [
     { label: "Add your logo and mission", href: "/settings/identity", done: hasLogoOrMission },
     { label: "Invite your team", href: "/settings/members?invite=1", done: activeUsers >= 2 },
-    { label: "Create departments", href: "/settings/structure?tab=departments", done: (departments ?? 0) >= 1 },
+    { label: "Review your departments", href: "/settings/structure?tab=departments", done: departments !== null && departments.length > 0 && !isSeededDepartmentSet(departments) },
     { label: "Turn on Talk or Tables (both optional)", href: "/settings/apps#modules", done: activeModules > 0 },
   ];
   return (
-    <section style={card} aria-label={`Set up ${orgName}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <h2 style={{ margin: 0, flex: 1, fontSize: 15, fontWeight: 600, color: "var(--os-ink)" }}>Set up {orgName}</h2>
-        <button type="button" className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50" onClick={() => void write({ complete: true })} disabled={busy}>
+    <SettingsCard
+      title={`Set up ${orgName}`}
+      actions={
+        <button type="button" className={GHOST} onClick={() => void write({ complete: true })} disabled={busy}>
           {busy ? <Dots variant="pending" label="Saving" /> : null}
           Mark as done
         </button>
-      </div>
-      <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+      }
+    >
+      <ol className="m-0 flex list-none flex-col gap-2 p-0">
         {steps.map((s) => (
-          <li key={s.href} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-            {s.done ? <Check size={16} aria-label="Done" style={{ color: "var(--os-success-text)" }} /> : <Circle size={16} aria-label="Not done yet" style={{ color: "var(--os-ink-3)" }} />}
-            <Link href={s.href} style={{ color: "var(--os-brand-deep)", textDecoration: "none" }}>
+          <li key={s.href} className="flex items-center gap-2 text-base">
+            {s.done ? <Check className="h-4 w-4 text-success-text" aria-label="Done" /> : <Circle className="h-4 w-4 text-ink-3" aria-label="Not done yet" />}
+            <Link href={s.href} className="text-brand-deep hover:underline">
               {s.label}
             </Link>
           </li>
         ))}
       </ol>
-      {error ? <p style={{ margin: 0, fontSize: 13, color: "var(--os-danger-text)" }}>{error}</p> : null}
-    </section>
+      {errorLine}
+    </SettingsCard>
   );
 }

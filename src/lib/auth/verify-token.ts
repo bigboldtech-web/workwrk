@@ -1,7 +1,8 @@
 // Email verification tokens, hashed at rest like password reset tokens
 // (src/app/api/auth/forgot-password): the raw token lives only in the
-// emailed link and User.verifyToken holds its SHA-256, so a database leak
-// yields no working link. Server-only (node crypto).
+// emailed link and User.verifyToken holds its SHA-256, and the EmailLog copy
+// of the link is cleared once sent (src/lib/email.ts SECRET_LINK_TEMPLATES),
+// so a database leak yields no working link. Server-only (node crypto).
 
 import crypto from "crypto";
 

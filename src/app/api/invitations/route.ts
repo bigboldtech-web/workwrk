@@ -10,6 +10,8 @@ import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { inviteSender } from "@/lib/auth/invite-facts.server";
+import { canEditSpace } from "@/lib/space";
 
 export async function GET() {
   try {
@@ -137,25 +139,42 @@ export async function POST(req: Request) {
     const existingInvite = await prisma.invitation.findFirst({
       where: { email, organizationId: orgId, accepted: false },
     });
-    if (existingInvite) {
-      return NextResponse.json({ error: "Invitation already sent to this email" }, { status: 400 });
+    // A live pending invitation blocks a second one (Resend it instead). An
+    // EXPIRED one no longer does: it is the same person being invited again,
+    // so the row is renewed in place with a new token, a new week and what
+    // this invite asks for, instead of making the admin Revoke first. The
+    // renewal is conditional on the row still being unaccepted and expired.
+    const now = new Date();
+    if (existingInvite && existingInvite.expiresAt >= now) {
+      return NextResponse.json({ error: "Invitation already sent to this email. Resend it from Pending invites." }, { status: 400 });
     }
 
-    const invitation = await prisma.invitation.create({
-      data: {
-        email,
-        accessLevel: inviteLevel || "EMPLOYEE",
-        token: crypto.randomBytes(32).toString("hex"),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        organizationId: orgId,
-        departmentId: departmentId || null,
-        roleId: roleId || null,
-        managerId: managerId || null,
-        officeId: officeId || null,
-        kraIds: cleanKraIds,
-        sopIds: cleanSopIds,
-      },
-    });
+    const fields = {
+      accessLevel: inviteLevel || "EMPLOYEE",
+      token: crypto.randomBytes(32).toString("hex"),
+      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      departmentId: departmentId || null,
+      roleId: roleId || null,
+      managerId: managerId || null,
+      officeId: officeId || null,
+      kraIds: cleanKraIds,
+      sopIds: cleanSopIds,
+    };
+    let invitation;
+    if (existingInvite) {
+      const renewed = await prisma.invitation.updateMany({
+        where: { id: existingInvite.id, accepted: false, expiresAt: { lt: now } },
+        data: fields,
+      });
+      if (renewed.count !== 1) {
+        return NextResponse.json({ error: "Invitation already sent to this email. Resend it from Pending invites." }, { status: 400 });
+      }
+      invitation = await prisma.invitation.findUniqueOrThrow({ where: { id: existingInvite.id } });
+    } else {
+      invitation = await prisma.invitation.create({
+        data: { email, organizationId: orgId, ...fields },
+      });
+    }
 
     // Send invitation email
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
@@ -267,4 +286,99 @@ export async function DELETE(req: Request) {
     console.error("Invitations DELETE error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
+}
+
+// PATCH /api/invitations { id, resend: true }: Resend
+//
+// Resend lives on Workspace settings > Members > Pending invites, which is
+// where the "Invitation needs resending" Inbox row (request-resend) sends the
+// inviter and the admins. An expired invitation is the usual case: the old
+// row blocked a fresh invite ("Invitation already sent"), so before this the
+// only way through was Revoke and invite again.
+//
+// Who may resend: whoever may invite (people.create, the same gate as POST
+// and DELETE /api/invitations), plus, for an invitation to a Space, whoever
+// can edit that Space (the Space share dialog's own rule). The level rule is
+// applied again, so a person below Admin can never resend an Admin
+// invitation they could not have sent.
+//
+// A resend ROTATES the token and gives the invitation seven more days: the
+// link in the old email stops working, so a copy that leaked (a forwarded
+// email) cannot be accepted after the real person asked for a new one. The
+// rotation is a conditional update on accepted=false, so an invitation
+// accepted a moment earlier is never revived.
+
+const RESEND_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function PATCH(req: Request) {
+  const session = await getServerSession(authOptions);
+  const viewer = session?.user as { id?: string; organizationId?: string; accessLevel?: string; firstName?: string; lastName?: string; name?: string | null } | undefined;
+  if (!viewer?.id || !viewer.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const orgId = viewer.organizationId;
+  const reqBody = (await req.json().catch(() => null)) as { id?: unknown; resend?: unknown } | null;
+  const id = typeof reqBody?.id === "string" ? reqBody.id : "";
+  if (!id || reqBody?.resend !== true) return NextResponse.json({ error: "Send { id, resend: true }." }, { status: 400 });
+
+  const inv = await prisma.invitation.findFirst({
+    where: { id, organizationId: orgId, accepted: false },
+    select: { id: true, email: true, accessLevel: true, spaceId: true, organizationId: true },
+  });
+  if (!inv) return NextResponse.json({ error: "This invitation was accepted or revoked." }, { status: 404 });
+
+  const mayInvite = await hasPermission(session, "people", "create");
+  const maySpace = !mayInvite && inv.spaceId ? await canEditSpace(inv.spaceId, viewer.id, viewer.accessLevel ?? "EMPLOYEE") : false;
+  if (!mayInvite && !maySpace) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  if (!inv.spaceId) {
+    const level = resolveInviteLevel(viewer.accessLevel, inv.accessLevel);
+    if (!level.ok) return NextResponse.json({ error: level.error }, { status: level.status });
+  }
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + RESEND_WEEK_MS);
+  const claimed = await prisma.invitation.updateMany({
+    where: { id: inv.id, organizationId: orgId, accepted: false },
+    data: { token, expiresAt },
+  });
+  if (claimed.count !== 1) return NextResponse.json({ error: "This invitation was accepted or revoked." }, { status: 404 });
+
+  const [org, sender] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),
+    inviteSender(inv),
+  ]);
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const inviteLink = `${baseUrl}/join?token=${token}`;
+  const resender = `${viewer.firstName ?? ""} ${viewer.lastName ?? ""}`.trim() || viewer.name || undefined;
+  const { subject, html } = invitationTemplate({
+    companyName: org?.name || "Your team",
+    inviteLink,
+    accessLevel: inv.accessLevel,
+    inviterName: sender.inviterName ?? resender,
+    personalMessage: sender.message ?? undefined,
+  });
+  try {
+    await sendEmail({
+      to: inv.email,
+      subject,
+      html,
+      template: "invitation",
+      variables: { companyName: org?.name },
+      organizationId: orgId,
+      category: "invitation",
+    });
+  } catch (err) {
+    console.error("[Invitation] resend email failed:", err);
+    return NextResponse.json({ error: "The new link was made but the email did not go out. Try Resend again." }, { status: 502 });
+  }
+
+  logAuditEvent({
+    type: "user.invitation_resent",
+    actorId: viewer.id,
+    organizationId: orgId,
+    description: `Resent the invitation to ${inv.email}`,
+    targetId: inv.id,
+    targetType: "Invitation",
+    metadata: { email: inv.email, accessLevel: inv.accessLevel, expiresAt: expiresAt.toISOString() },
+  });
+
+  return NextResponse.json({ ok: true, id: inv.id, expiresAt: expiresAt.toISOString() });
 }

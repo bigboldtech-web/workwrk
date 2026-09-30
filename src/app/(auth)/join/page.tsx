@@ -7,7 +7,10 @@ import type { Metadata } from "next";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { JoinCard, JoinPanel, JoinProvider } from "./join-flow";
 
-export const metadata: Metadata = { title: "Join your team | WorkwrK" };
+// The tab reads "Join {Org}" (naming-canon) once the invitation is loaded
+// (JoinProvider sets it); before that, and on a failure screen, the neutral
+// title below.
+export const metadata: Metadata = { title: "Join a workspace | WorkwrK" };
 
 export default async function JoinPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const raw = (await searchParams).token;
