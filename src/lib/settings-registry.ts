@@ -423,6 +423,11 @@ export interface SettingEntry {
    * `gate` above); the door reads it to decide whether to list the row.
    */
   externalGate?: OrgAction;
+  /**
+   * The card behind it never renders for a Guest (Reports you receive: the
+   * API answers a Guest 404), so the index must not point a Guest at it.
+   */
+  notForGuests?: boolean;
 }
 
 function entry(e: SettingEntry): SettingEntry {
@@ -461,7 +466,7 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({ id: "notifications.inboxView", door: "me", page: "account/notifications", label: "How the Inbox behaves", description: "Grouping, clearing and where it opens.", href: "/account/notifications?tab=inbox#notifications.inboxView", keywords: ["inbox", "group", "clear"] }),
   entry({ id: "notifications.muted", door: "me", page: "account/notifications", label: "Muted items", description: "Spaces, Lists and channels you muted.", href: "/account/notifications?tab=inbox#notifications.muted", keywords: ["muted", "unmute"] }),
   entry({ id: "notifications.email", door: "me", page: "account/notifications", label: "Email notifications", description: "What WorkwrK emails you.", href: "/account/notifications?tab=email#notifications.email", keywords: ["email", "send me email"] }),
-  entry({ id: "reports", door: "me", page: "account/notifications", label: "Reports you receive", description: "Scheduled reports sent to you.", href: "/account/notifications?tab=email#reports", keywords: ["reports", "schedule", "digest"] }),
+  entry({ id: "reports", door: "me", page: "account/notifications", label: "Reports you receive", description: "Scheduled reports sent to you.", href: "/account/notifications?tab=email#reports", keywords: ["reports", "schedule", "digest"], notForGuests: true }),
   entry({ id: "notifications.desktop", door: "me", page: "account/notifications", label: "Desktop notifications", description: "Browser alerts and ringing for calls.", href: "/account/notifications?tab=desktop#notifications.desktop", keywords: ["desktop", "browser", "push", "ring", "calls"] }),
   entry({ id: "security.password", door: "me", page: "account/security", label: "Password", description: "Change your password.", href: "/account/security#security.password", keywords: ["password", "change password"] }),
   entry({ id: "security.mfa", door: "me", page: "account/security", label: "Two step verification", description: "An authenticator app code at log in.", href: "/account/security#security.mfa", keywords: ["2fa", "mfa", "authenticator", "two factor"] }),
@@ -517,12 +522,13 @@ export const SETTINGS_ENTRIES: Readonly<Record<string, SettingEntry>> = Object.f
  */
 export function filterSettingsEntries(
   query: string,
-  opts: { door?: SettingsDoor; allowedExternalGates?: readonly OrgAction[] } = {},
+  opts: { door?: SettingsDoor; allowedExternalGates?: readonly OrgAction[]; guest?: boolean } = {},
 ): SettingEntry[] {
   const q = query.trim().toLowerCase();
   const allowed = opts.allowedExternalGates ?? [];
   return SETTINGS_ENTRY_LIST.filter((e) => {
     if (opts.door && e.door !== opts.door) return false;
+    if (opts.guest && e.notForGuests) return false;
     if (e.externalGate && !allowed.includes(e.externalGate)) return false;
     if (!q) return true;
     if (e.label.toLowerCase().includes(q)) return true;

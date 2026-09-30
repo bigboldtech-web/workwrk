@@ -217,7 +217,8 @@ type ShellState = {
    */
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
-  setSidebarCollapsed: (v: boolean) => void;
+  /** Resolves true once the server kept it; false after a revert. */
+  setSidebarCollapsed: (v: boolean) => Promise<boolean>;
   sidebarWidth: number;
   setSidebarWidth: (w: number, opts?: { persist?: boolean }) => void;
 
@@ -258,7 +259,8 @@ type ShellState = {
 
   /** Presence (local until User.presenceStatus lands, settings spec 9.5). */
   presenceStatus: PresenceStatus;
-  setPresenceStatus: (s: PresenceStatus) => void;
+  /** Resolves true once the server kept it; false after a revert. */
+  setPresenceStatus: (s: PresenceStatus) => Promise<boolean>;
   statusModalOpen: boolean;
   openStatusModal: () => void;
   closeStatusModal: () => void;
@@ -357,6 +359,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(Boolean(boot.prefs.sidebar.collapsed));
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  useEffect(() => { sidebarCollapsedRef.current = sidebarCollapsed; }, [sidebarCollapsed]);
   const [sidebarWidth, setSidebarWidthState] = useState<number>(
     clampSidebarWidth(typeof boot.prefs.sidebar.width === "number" ? boot.prefs.sidebar.width : SIDEBAR_DEFAULT_WIDTH),
   );
@@ -462,9 +466,15 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Sidebar collapse and width persist through the same PATCH (1.2 rule 11).
-  const setSidebarCollapsed = useCallback((v: boolean) => {
+  // A refused write reverts the rail, so the screen never shows a state the
+  // server did not keep; the caller gets the result for its own Saved or
+  // Retry (settings-architecture 9.1).
+  const setSidebarCollapsed = useCallback(async (v: boolean): Promise<boolean> => {
+    const before = sidebarCollapsedRef.current;
     setSidebarCollapsedState(v);
-    void patchPrefs({ sidebar: { collapsed: v } });
+    const ok = await patchPrefs({ sidebar: { collapsed: v } });
+    if (!ok) setSidebarCollapsedState(before);
+    return ok;
   }, [patchPrefs]);
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsedState((prev) => {
@@ -677,13 +687,20 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     [activeModuleKeys, launcherKeys, isHubVisible, memberTeamsApp],
   );
 
-  const setPresenceStatus = useCallback((s: PresenceStatus) => {
+  const presenceRef = useRef(presenceStatus);
+  useEffect(() => { presenceRef.current = presenceStatus; }, [presenceStatus]);
+  const setPresenceStatus = useCallback(async (s: PresenceStatus): Promise<boolean> => {
+    const before = presenceRef.current;
     setPresenceStatusState(s);
     // ONE store (User.presenceStatus): this device, every other device and
     // the dots on the Directory, the Org chart and the record all read it.
     // The write queue retries a dropped connection; "Online" clears the dot.
+    // A write the server refused for good reverts the dot, so the screen
+    // never shows a status teammates do not see.
     const shared = encodePresence(s);
-    void recordWriteQueue().write("PUT", "/api/me/presence", { status: shared, until: shared ? s.expiresAt : null });
+    const r = await recordWriteQueue().write("PUT", "/api/me/presence", { status: shared, until: shared ? s.expiresAt : null });
+    if (!r.ok) setPresenceStatusState((cur) => (cur === s ? before : cur));
+    return r.ok;
   }, []);
   const openStatusModal = useCallback(() => setStatusModalOpen(true), []);
   const closeStatusModal = useCallback(() => setStatusModalOpen(false), []);

@@ -23906,7 +23906,7 @@ html[data-density="compact"] .os-tc__row:focus-within .os-tc__check { opacity: 1
 
 /* ───────────────────────── Calendar and connections (/account/connections)
    Phase 4, Time and Talk. Tokens only: no hex, no zinc, no gradient. */
-.cxn { padding: 16px 28px 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+.cxn { padding: 0 0 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
 .cxn__loading { display: flex; align-items: center; gap: 10px; padding: 32px 0; color: var(--os-ink-2); font-size: 13px; }
 .cxn__error {
   display: flex; align-items: center; gap: 8px; padding: 12px 14px;

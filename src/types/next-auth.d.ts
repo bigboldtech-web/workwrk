@@ -41,5 +41,7 @@ declare module "next-auth/jwt" {
     avatar: string | null;
     /** The one-shot workspace-move marker (lib/auth.ts, WorkspaceMove). */
     workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED"; to: string; at: number };
+    /** The workspace requires two step verification of this person and they have none (lib/auth/mfa-hold.ts). */
+    mfaHold?: boolean;
   }
 }

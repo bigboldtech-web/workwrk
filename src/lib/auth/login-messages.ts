@@ -37,6 +37,8 @@ export function friendlyError(code: string | null | undefined, opts: { email?: s
   if (err === "OAuthSignin" || err === "OAuthCallback" || err === "Callback" || err === "OAuthCreateAccount") {
     return "We could not finish logging you in with Google. Try again, or use your password.";
   }
+  // The Google sign-in refusal when the workspace requires two step verification (auth.ts signIn).
+  if (err === "MfaRequired") return "Your workspace requires two step verification. Log in with your email and password to use your code.";
   if (err === "SessionRequired") return "Log in to continue.";
   if (err === "Configuration") return "We could not log you in. Try again in a moment.";
   return "That email or password is not right.";
@@ -45,7 +47,7 @@ export function friendlyError(code: string | null | undefined, opts: { email?: s
 /** NextAuth writes these into ?error= itself; everything else is not a NextAuth outcome and is shown as the generic line. */
 export const NEXTAUTH_ERROR_CODES = new Set([
   "AccessDenied", "OAuthAccountNotLinked", "OAuthSignin", "OAuthCallback", "Callback",
-  "OAuthCreateAccount", "SessionRequired", "Configuration", "CredentialsSignin", "Verification", "Default",
+  "OAuthCreateAccount", "SessionRequired", "Configuration", "CredentialsSignin", "Verification", "Default", "MfaRequired",
 ]);
 
 /** The one-time success or info strip for the query flags, or null. */

@@ -90,7 +90,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const pathname = usePathname() || "";
   const router = useRouter();
   const { data: session } = useSession();
-  const { isAdmin } = useViewerRole();
+  const { isAdmin, isGuest } = useViewerRole();
   const { boot } = useBoot();
   const { mutedNotifications } = useOsShell();
   // Row badges (spec-account-auth door sidebar): "Muted" on Notifications
@@ -149,7 +149,8 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
     // links they can open, not two crumbs into the AdminOnly card.
     const pageDoor = isAdmin ? (current?.door ?? shownDoor) : "me";
     if (pageDoor === "me") {
-      if (firstName) items.push({ label: firstName, href: "/people/me" });
+      // A Guest cannot open the Teams hub, so their name crumb stays in the door.
+      if (firstName) items.push({ label: firstName, href: isGuest ? "/account/profile" : "/people/me" });
       items.push({ label: DOOR_LABELS.me, href: "/account/profile" });
     } else {
       items.push({ label: HUB_LABELS.settings, href: "/settings" });
@@ -167,15 +168,15 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       }
     }
     return items;
-  }, [current, shownDoor, firstName, isAdmin, pathname]);
+  }, [current, shownDoor, firstName, isAdmin, isGuest, pathname]);
 
   // Filter: rows by label, keyword, group and alias; plus the individual
   // settings (registry entries) the viewer's door lists beneath them.
   const q = query.trim();
   const matchKeys = useMemo(() => new Set(filterSettingsPages(q, shownDoor).map((p) => p.key)), [q, shownDoor]);
   const entryMatches: SettingEntry[] = useMemo(
-    () => (q ? filterSettingsEntries(q, { door: shownDoor, allowedExternalGates: isAdmin ? ["manage_process"] : [] }) : []),
-    [q, shownDoor, isAdmin],
+    () => (q ? filterSettingsEntries(q, { door: shownDoor, allowedExternalGates: isAdmin ? ["manage_process"] : [], guest: isGuest }) : []),
+    [q, shownDoor, isAdmin, isGuest],
   );
   const visibleGroups = groups
     .map((g) => ({

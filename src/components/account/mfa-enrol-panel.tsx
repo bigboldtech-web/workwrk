@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Copy } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { apiFetch } from "@/lib/api-client";
 import { normaliseMfaCode } from "@/lib/auth/login-messages";
 import { BackupCodesGrid } from "./backup-codes-grid";
@@ -31,6 +32,7 @@ export function MfaEnrolPanel({
   onPhase,
   onCancel,
   onEnabled,
+  inDialog = false,
 }: {
   source: EnrolSource;
   who: string;
@@ -41,7 +43,13 @@ export function MfaEnrolPanel({
   onCancel?: () => void;
   /** Called the moment the server has turned it on (before the codes are acknowledged). */
   onEnabled?: () => void;
+  /** Inside AccountDialog: the buttons sit in the same bordered footer row as every other account dialog. */
+  inDialog?: boolean;
 }) {
+  const { update: updateSession } = useSession();
+  const footerCls = inDialog
+    ? "-mx-5 -mb-5 mt-1 flex items-center justify-end gap-2 border-t border-line px-5 py-3"
+    : "flex justify-end gap-2";
   const [phase, setPhase] = useState<EnrolPhase>("scan");
   const [secret, setSecret] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -101,6 +109,9 @@ export function MfaEnrolPanel({
     }
     setLastCode(c);
     setCodes(r.data?.backupCodes ?? []);
+    // Re-check the session token now, so a workspace two step rule that held
+    // this session lifts at once instead of on the next five minute check.
+    if (source.kind === "session") void updateSession();
     onEnabled?.();
     go("codes");
   };
@@ -120,7 +131,7 @@ export function MfaEnrolPanel({
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-danger-text" role="alert">{failReason || "We could not set up two step verification."}</p>
-        <div className="flex justify-end gap-2">
+        <div className={footerCls}>
           {onCancel ? <button type="button" className={btn.ghost} onClick={onCancel}>Cancel</button> : null}
           <button type="button" className={btn.primary} onClick={() => { void start(); }}>Try again</button>
         </div>
@@ -133,7 +144,7 @@ export function MfaEnrolPanel({
       <div className="flex flex-col gap-4">
         <p className="text-base text-ink">Two step verification is on. Save these backup codes: they are shown once.</p>
         <BackupCodesGrid codes={codes} who={who} saved={saved} onSavedChange={setSaved} />
-        <div className="flex justify-end">
+        <div className={footerCls}>
           <button type="button" className={btn.primary} disabled={!saved} onClick={() => onFinished({ lastCode })}>
             {finishLabel}
           </button>
@@ -183,7 +194,7 @@ export function MfaEnrolPanel({
         />
         <FieldError>{codeError}</FieldError>
       </div>
-      <div className="flex justify-end gap-2">
+      <div className={footerCls}>
         {onCancel ? <button type="button" className={btn.ghost} onClick={onCancel}>Cancel</button> : null}
         <button type="submit" className={btn.primary} disabled={!secret || busy}>
           {busy ? <Pending label="Turning on" /> : null}

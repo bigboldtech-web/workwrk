@@ -27,50 +27,50 @@ describe("proxy: sign-in routes with AUTH_EDGE_GATE and HARD_HOST_SPLIT on", () 
     process.env = { ...saved };
   });
 
-  it("1. a marketing-host Start free (/signup) is sent to the app host with its query", () => {
-    const res = proxy(req("/signup?utm_content=hero", MKT));
+  it("1. a marketing-host Start free (/signup) is sent to the app host with its query", async () => {
+    const res = await proxy(req("/signup?utm_content=hero", MKT));
     expect(res.status).toBe(308);
     expect(res.headers.get("location")).toBe(`https://${APP}/signup?utm_content=hero`);
   });
 
-  it("2. /join?token= opens signed out on the app host (never bounced to /login)", () => {
-    const res = proxy(req("/join?token=abc", APP));
+  it("2. /join?token= opens signed out on the app host (never bounced to /login)", async () => {
+    const res = await proxy(req("/join?token=abc", APP));
     expect(res.headers.get("location")).toBeNull();
     expect(res.status).toBe(200);
     // and an invitation link on the marketing host reaches the app host first
-    const mk = proxy(req("/join?token=abc", MKT));
+    const mk = await proxy(req("/join?token=abc", MKT));
     expect(mk.headers.get("location")).toBe(`https://${APP}/join?token=abc`);
   });
 
-  it("3. /register?token= passes the proxy untouched so its 308 to /join can run (config + route twin)", () => {
-    const res = proxy(req("/register?token=abc", APP));
+  it("3. /register?token= passes the proxy untouched so its 308 to /join can run (config + route twin)", async () => {
+    const res = await proxy(req("/register?token=abc", APP));
     expect(res.headers.get("location")).toBeNull();
-    const mk = proxy(req("/register?token=abc", MKT));
+    const mk = await proxy(req("/register?token=abc", MKT));
     expect(mk.headers.get("location")).toBe(`https://${APP}/register?token=abc`);
   });
 
-  it("4. /onboard signed out still goes to /login with the callback", () => {
-    const res = proxy(req("/onboard", APP));
+  it("4. /onboard signed out still goes to /login with the callback", async () => {
+    const res = await proxy(req("/onboard", APP));
     expect(res.status).toBeGreaterThanOrEqual(300);
     const loc = new URL(res.headers.get("location")!);
     expect(loc.pathname).toBe("/login");
     expect(loc.searchParams.get("callbackUrl")).toBe("/onboard");
   });
 
-  it("keeps the old wizard URLs on the app host so their redirects can run there", () => {
+  it("keeps the old wizard URLs on the app host so their redirects can run there", async () => {
     for (const p of ["/welcome", "/setup"]) {
-      const mk = proxy(req(p, MKT));
+      const mk = await proxy(req(p, MKT));
       expect(mk.headers.get("location")).toBe(`https://${APP}${p}`);
     }
   });
 
-  it("a signed-in /onboard passes (the wizard needs a session, nothing more at the edge)", () => {
-    const res = proxy(req("/onboard", APP, "next-auth.session-token=x"));
+  it("a signed-in /onboard passes (the wizard needs a session, nothing more at the edge)", async () => {
+    const res = await proxy(req("/onboard", APP, "next-auth.session-token=x"));
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("/loader-preview is not an app path: never gated, never moved", () => {
-    const res = proxy(req("/loader-preview", APP));
+  it("/loader-preview is not an app path: never gated, never moved", async () => {
+    const res = await proxy(req("/loader-preview", APP));
     expect(res.headers.get("location")).toBeNull();
   });
 });

@@ -80,13 +80,8 @@ function useRowWrites() {
 
 export default function PreferencesPage() {
   return (
-    <SettingsPage pageKey="account/preferences" tabs={TABS}>
-      {(tab) => (
-        <>
-          <p className="-mt-2 mb-5 text-sm text-ink-2">These apply to you on every device.</p>
-          {tab === "region" ? <RegionTab /> : tab === "sidebar" ? <SidebarTab /> : <AppearanceTab />}
-        </>
-      )}
+    <SettingsPage pageKey="account/preferences" tabs={TABS} subtitle="These apply to you on every device.">
+      {(tab) => (tab === "region" ? <RegionTab /> : tab === "sidebar" ? <SidebarTab /> : <AppearanceTab />)}
     </SettingsPage>
   );
 }
@@ -286,9 +281,15 @@ function SidebarTab() {
   const { prefs, sidebarWidth, setSidebarWidth, sidebarCollapsed, setSidebarCollapsed } = useOsShell();
   const { isAdmin } = useViewerRole();
   const { write, row } = useRowWrites();
-  const [widthSavedAt, setWidthSavedAt] = useState<number | null>(null);
   const [collapsedSavedAt, setCollapsedSavedAt] = useState<number | null>(null);
+  const [collapsedFailed, setCollapsedFailed] = useState<boolean | null>(null);
   const widthTimer = useRef<number | null>(null);
+  // Width and Start collapsed show Saved only after the server kept the value,
+  // and Couldn't save with a Retry when it did not (the SAVE PATHS rule).
+  const saveCollapsed = async (v: boolean) => {
+    const ok = await setSidebarCollapsed(v);
+    if (ok) { setCollapsedSavedAt(Date.now()); setCollapsedFailed(null); } else setCollapsedFailed(v);
+  };
   useEffect(() => () => { if (widthTimer.current) window.clearTimeout(widthTimer.current); }, []);
 
   const pins = readToolPins(prefs.sidebar.quickTools);
@@ -321,7 +322,7 @@ function SidebarTab() {
             id="preferences.sidebar.width"
             label="Width"
             helper="Dragging the sidebar's edge changes the same value"
-            savedAt={widthSavedAt}
+            {...row("width")}
             control={
               <span className="inline-flex items-center gap-2">
                 <input
@@ -332,9 +333,13 @@ function SidebarTab() {
                   value={sidebarWidth}
                   aria-label="Sidebar width"
                   onChange={(e) => {
-                    setSidebarWidth(Number(e.target.value));
+                    const next = Number(e.target.value);
+                    setSidebarWidth(next, { persist: false });
                     if (widthTimer.current) window.clearTimeout(widthTimer.current);
-                    widthTimer.current = window.setTimeout(() => setWidthSavedAt(Date.now()), 700);
+                    widthTimer.current = window.setTimeout(() => {
+                      widthTimer.current = null;
+                      void write("width", { sidebar: { width: next } });
+                    }, 500);
                   }}
                   className="h-9 w-40 accent-[var(--os-brand)]"
                 />
@@ -347,7 +352,8 @@ function SidebarTab() {
             label="Start collapsed"
             helper="Open WorkwrK with only the rail showing"
             savedAt={collapsedSavedAt}
-            control={<Switch checked={sidebarCollapsed} onChange={(v) => { setSidebarCollapsed(v); setCollapsedSavedAt(Date.now()); }} aria-label="Start collapsed" />}
+            error={collapsedFailed !== null ? { message: "Couldn't save", onRetry: () => { void saveCollapsed(collapsedFailed); } } : null}
+            control={<Switch checked={sidebarCollapsed} onChange={(v) => { void saveCollapsed(v); }} aria-label="Start collapsed" />}
           />
         </div>
       </SettingsCard>

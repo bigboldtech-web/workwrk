@@ -48,8 +48,7 @@ function initialsOf(m: Pick<MeRecord, "firstName" | "lastName" | "email">): stri
 export default function AccountProfilePage() {
   const me = useMe();
   return (
-    <SettingsPage pageKey="account/profile">
-      <p className="-mt-2 mb-5 text-sm text-ink-2">Your details as your teammates see them.</p>
+    <SettingsPage pageKey="account/profile" subtitle="Your details as your teammates see them.">
       {me.status === "loading" ? (
         <SettingsCardStack>
           <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
@@ -68,7 +67,10 @@ export default function AccountProfilePage() {
 function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<void> }) {
   const { toast } = useOsToast();
   const { update: updateSession } = useSession();
-  const { isAdmin } = useViewerRole();
+  const { isAdmin, isGuest } = useViewerRole();
+  // A Guest never sees the Teams hub (avatar-menu.tsx), so the place links to
+  // /people/me would lead them to a page they cannot open: plain text instead.
+  const placeHref = isGuest ? null : "/people/me";
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [avatar, setAvatar] = useState<string | null>(me.avatar);
@@ -261,14 +263,16 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         <div className="w-full max-w-[560px]">
           <SettingsCard title={`Your place at ${me.organization.name}`} id="profile.place">
             <div>
-              <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} />} />
-              <SettingsRow label="Department" readOnlyValue={<PlaceChip value={me.department?.name} />} />
-              <SettingsRow label="Office" readOnlyValue={<PlaceChip value={me.office?.name} />} />
+              <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} href={placeHref} />} />
+              <SettingsRow label="Department" readOnlyValue={<PlaceChip value={me.department?.name} href={placeHref} />} />
+              <SettingsRow label="Office" readOnlyValue={<PlaceChip value={me.office?.name} href={placeHref} />} />
               <SettingsRow
                 label="Reports to"
                 readOnlyValue={
-                  reportsTo ? (
-                    <Link href="/people/me" className="inline-flex items-center gap-2 text-base text-ink hover:underline">
+                  reportsTo && !placeHref ? (
+                    <span className="text-base text-ink">{reportsTo}</span>
+                  ) : reportsTo && placeHref ? (
+                    <Link href={placeHref} className="inline-flex items-center gap-2 text-base text-ink hover:underline">
                       {me.manager?.avatar ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={me.manager.avatar} alt="" className="h-6 w-6 rounded-full object-cover" />
@@ -279,10 +283,10 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
                       )}
                       {reportsTo}
                     </Link>
-                  ) : <PlaceChip value={null} />
+                  ) : <PlaceChip value={null} href={placeHref} />
                 }
               />
-              <SettingsRow label="Workspace role" readOnlyValue={<PlaceChip value={roleLabel} />} />
+              <SettingsRow label="Workspace role" readOnlyValue={<PlaceChip value={roleLabel} href={placeHref} />} />
             </div>
           </SettingsCard>
           <p className="mt-2 text-sm text-ink-2">Ask your manager or the People team to change these.</p>
@@ -310,7 +314,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </SettingsCard>
       </SettingsCardStack>
 
-      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(saved); setFieldErr(null); }} onSave={save} className="max-w-[560px]" />
+      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(saved); setFieldErr(null); }} onSave={save} />
 
       <DeleteAccountDialog
         open={deleteOpen}
@@ -323,10 +327,12 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
   );
 }
 
-function PlaceChip({ value }: { value: string | null | undefined }) {
+function PlaceChip({ value, href }: { value: string | null | undefined; href: string | null }) {
   if (!value) return <span className="text-base text-ink-3">Not set</span>;
+  const cls = "inline-flex h-6 items-center rounded-md bg-hover px-2 text-sm font-medium text-ink";
+  if (!href) return <span className={cls}>{value}</span>;
   return (
-    <Link href="/people/me" className="inline-flex h-6 items-center rounded-md bg-hover px-2 text-sm font-medium text-ink hover:underline">
+    <Link href={href} className={`${cls} hover:underline`}>
       {value}
     </Link>
   );

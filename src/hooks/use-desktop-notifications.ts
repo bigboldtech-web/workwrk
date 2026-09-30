@@ -33,7 +33,9 @@ export function useDesktopNotifications() {
   const [permission, setPermission] = useState<BrowserPermission>("default");
   const { prefs, patchPrefs } = useOsShell();
   const pref = desktopPrefOf(prefs.home.notifications?.desktop);
-  const setPref = useCallback((v: "on" | "off") => { void patchPrefs({ home: { notifications: { desktop: v === "on" } } }); }, [patchPrefs]);
+  // Resolves true once the server kept it (patchPrefs reverts otherwise), so
+  // a caller can show Saved or Couldn't save rather than guessing.
+  const setPref = useCallback((v: "on" | "off") => patchPrefs({ home: { notifications: { desktop: v === "on" } } }), [patchPrefs]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -48,7 +50,6 @@ export function useDesktopNotifications() {
     if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
     if (Notification.permission === "granted") {
       setPermission("granted");
-      setPref("on");
       return "granted";
     }
     if (Notification.permission === "denied") {
@@ -57,7 +58,6 @@ export function useDesktopNotifications() {
     }
     const result = await Notification.requestPermission();
     setPermission(result as BrowserPermission);
-    if (result === "granted") setPref("on");
     return result as BrowserPermission;
   }, [setPref]);
 

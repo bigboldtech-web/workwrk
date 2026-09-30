@@ -36,11 +36,29 @@ export async function GET() {
   ]);
   if (!user || !facts) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  // A password changed before the passwordChangedAt column existed has only
+  // its security activity row. Read that as the date for the Password row,
+  // so the row and the activity table on the same page never contradict
+  // each other. Display only: the expiry hold keeps reading the column
+  // (null there means no hold, the safe direction).
+  let passwordChangedAt = user.passwordChangedAt;
+  if (!passwordChangedAt) {
+    const last = await prisma.activityLog
+      .findFirst({
+        where: { actorId: ctx.userId, type: { in: ["password_changed", "password_reset"] } },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      })
+      .catch(() => null);
+    passwordChangedAt = last?.createdAt ?? null;
+  }
+
   const { mfaBackupCodes, organization, ...rest } = user;
   return NextResponse.json(
     {
       user: {
         ...rest,
+        passwordChangedAt,
         orgRole: facts.orgRole,
         isAgent: facts.isAgent,
         isLastAdmin: facts.isLastAdmin,

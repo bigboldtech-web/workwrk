@@ -4,8 +4,8 @@
 // a header with the real presence dot, then Set status…, Do not disturb, Mute notifications
 // (a submenu of durations, or "Muted until … · Unmute"), My profile, My
 // settings, Workspace settings (Owner and Admin), the Theme segmented control
-// (and Chrome once CHROME_CONTROL_EXPOSED), Personal tools (each row runs the
-// tool; its check pins or unpins it on the bar's strip), Keyboard shortcuts,
+// (and Chrome once CHROME_CONTROL_EXPOSED), More appearance, Personal tools (each row runs the
+// tool; its check pins or unpins it on the bar's strip), Keyboard shortcuts (the page),
 // Help (the Help rows inline) and Log out. No Trash (a Work sidebar row), no
 // Preferences row (My settings › Preferences is one click inside the door,
 // and the Customize panel links there too).
@@ -21,7 +21,7 @@ import { signOut, useSession } from "next-auth/react";
 import { clearAllPerformanceDrafts } from "@/lib/people/draft-keys";
 import { leaveThen } from "@/lib/dirty-guard";
 import {
-  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, MinusCircle, Pin, PinOff, Settings, SmilePlus, Wrench,
+  Bell, BellOff, Building2, CircleHelp, CircleUser, Keyboard, LogOut, MinusCircle, Palette, Pin, PinOff, Settings, SmilePlus, Wrench,
 } from "lucide-react";
 import { MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -30,7 +30,6 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { cn } from "@/lib/utils";
 import { ChromePopover } from "./chrome-popover";
 import { HelpMenuRows } from "./help-menu";
-import { openShortcutsOverlay } from "./shell-shortcuts";
 import { DEFAULT_PRESENCE, DND_PRESENCE, useOsShell } from "./shell-context";
 import { useBoot, useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
@@ -202,6 +201,8 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
             />
           </div>
         ) : null}
+        {/* settings-architecture 2.4: the rest of Appearance lives on the page. */}
+        <MenuItem icon={Palette} label="More appearance" onClick={() => { close(); openSettings("/account/preferences?tab=appearance"); }} />
         <MenuSeparator />
         {/* Each row runs its tool; the pin at its end decides whether it
             also sits on the bar. Two controls, two things. */}
@@ -237,7 +238,9 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
             );
           })}
         </MenuSubmenu>
-        <MenuItem icon={Keyboard} label="Keyboard shortcuts" shortcut="?" onClick={() => { close(); openShortcutsOverlay(); }} />
+        {/* The row opens the page (spec-account-auth /account/shortcuts entry
+            points); the ? key it names still opens the overlay anywhere. */}
+        <MenuItem icon={Keyboard} label="Keyboard shortcuts" shortcut="?" onClick={() => { close(); openSettings("/account/shortcuts"); }} />
         <MenuSubmenu icon={CircleHelp} label={SHELL_LABELS.help} width={240}>
           <HelpMenuRows onDone={close} onPrivacy={onPrivacy} />
         </MenuSubmenu>

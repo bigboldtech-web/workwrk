@@ -297,20 +297,24 @@ export async function notifyItemStatusChanged(args: {
   const to = statusLabel(args.board, args.status);
   // Anyone who explicitly stopped watching is dropped last, so neither the
   // owner row nor the commenter list can quietly put them back on the thread.
-  const recipients = [args.ownerId, ...participants, ...watchers].filter(
-    (id): id is string => !!id && !watcherState.unwatchers.includes(id),
-  );
-  return emit({
+  const keep = (id: string | null | undefined): id is string => !!id && !watcherState.unwatchers.includes(id);
+  // The owner hears it under "Status changes on my tasks"; everyone else on
+  // the thread (watchers, past commenters) under "Status changes on tasks I
+  // follow" (decided addition c). One person is in one group only.
+  const mine = [args.ownerId].filter(keep);
+  const followed = [...participants, ...watchers].filter((id) => keep(id) && id !== args.ownerId);
+  const base = {
     organizationId: args.organizationId,
-    prefKey: "status_changes",
     type: "task_status_changed",
-    recipientIds: recipients,
     actorId: args.actorId,
     title: args.item.title,
     message: `${who} moved this from ${from} to ${to}`,
     link: itemLink(args.item.id),
     itemId: args.item.id,
-  });
+  };
+  const a = mine.length ? await emit({ ...base, prefKey: "status_changes", recipientIds: mine }) : 0;
+  const b = followed.length ? await emit({ ...base, prefKey: "followed_status", recipientIds: followed }) : 0;
+  return a + b;
 }
 
 /**
@@ -343,23 +347,26 @@ export async function notifyItemCommented(args: {
 }): Promise<number> {
   const state = readWatchers(args.metadata);
   const exclude = new Set(args.excludeUserIds ?? []);
-  const recipients = [...notifyTargets(state, args.actorId), ...(args.assigneeIds ?? [])].filter(
-    (id) => !!id && !state.unwatchers.includes(id) && !exclude.has(id),
-  );
-  if (recipients.length === 0) return 0;
+  const keep = (id: string | null | undefined): id is string => !!id && !state.unwatchers.includes(id) && !exclude.has(id);
+  // Assignees hear it under "Comments on my work"; watchers who are not
+  // assigned under "Comments on tasks I follow" (decided addition c).
+  const assignees = new Set((args.assigneeIds ?? []).filter(keep));
+  const followed = notifyTargets(state, args.actorId).filter((id) => keep(id) && !assignees.has(id));
+  if (assignees.size === 0 && followed.length === 0) return 0;
   const who = await actorName(args.actorId);
   const snippet = (args.preview ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
-  return emit({
+  const base = {
     organizationId: args.organizationId,
-    prefKey: "comments",
     type: "task_comment",
-    recipientIds: recipients,
     actorId: args.actorId,
     title: args.item.title,
     message: snippet ? `${who} commented: ${snippet}` : `${who} commented on this task`,
     link: itemLink(args.item.id, args.updateId),
     itemId: args.item.id,
-  });
+  };
+  const a = assignees.size ? await emit({ ...base, prefKey: "comments", recipientIds: [...assignees] }) : 0;
+  const b = followed.length ? await emit({ ...base, prefKey: "followed_comments", recipientIds: followed }) : 0;
+  return a + b;
 }
 
 /**
@@ -438,7 +445,7 @@ export async function notifyItemsDueToday(opts: {
       : 0;
     const wrote = await emit({
       organizationId: r.organizationId,
-      prefKey: "due_reminders",
+      prefKey: isOverdue ? "overdue" : "due_reminders",
       type,
       recipientIds: [r.ownerId],
       // Nobody "acted": a date arriving is not an actor's doing, so the

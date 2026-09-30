@@ -38,6 +38,7 @@ export function MfaEnrolDialog({
       {open ? (
         <MfaEnrolPanel
           source={{ kind: "session" }}
+          inDialog
           who={who}
           onPhase={setPhase}
           onEnabled={() => setEnabled(true)}

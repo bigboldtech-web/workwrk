@@ -13,7 +13,7 @@
 // changes?" with Save / Discard / Keep editing, and Save runs `onSave`. A
 // save that fails keeps the form dirty and the guard armed.
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import { cn } from "@/lib/utils";
 
@@ -32,13 +32,20 @@ export interface SaveBarProps {
 export function SaveBar({ dirty, saving, onDiscard, onSave, guardId, saveLabel = "Save changes", className }: SaveBarProps) {
   const save = useCallback(() => Promise.resolve(onSave()).catch(() => false), [onSave]);
   useDirtyGuard(dirty, { onSave: save, id: guardId });
+  // A Save-bar page never autosaves, so the offline strip must not promise
+  // that changes save on reconnect (offline-strip.tsx reads this marker).
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.saveMode = "explicit";
+    return () => { delete root.dataset.saveMode; };
+  }, []);
   if (!dirty) return null;
   return (
     <div
       role="region"
       aria-label="Unsaved changes"
       className={cn(
-        "sticky bottom-0 z-10 mt-6 flex h-14 items-center gap-3 border-t border-line bg-raised px-4",
+        "sticky bottom-0 z-10 mt-6 flex h-[56px] items-center gap-3 border-t border-line bg-raised px-4",
         className,
       )}
     >

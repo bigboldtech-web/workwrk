@@ -12,6 +12,7 @@
 // prefs hiccup can never silently drop a notification.
 
 import { prisma } from "@/lib/prisma";
+import { inboxKeyOn } from "@/lib/account/notification-presets";
 
 /** Keys shared with the settings page rows — keep in sync with
  *  src/app/(dashboard)/account/notifications/page.tsx. */
@@ -19,8 +20,11 @@ export type NotifyType =
   | "task_assigned"
   | "mentions"
   | "comments"
+  | "followed_comments"
   | "status_changes"
+  | "followed_status"
   | "due_reminders"
+  | "overdue"
   | "kudos";
 
 interface NotifPrefs {
@@ -48,7 +52,7 @@ async function loadPrefs(userId: string): Promise<NotifPrefs> {
 export async function shouldNotify(userId: string, type: NotifyType): Promise<boolean> {
   try {
     const p = await loadPrefs(userId);
-    return p.inbox?.[type] !== false; // default true
+    return inboxKeyOn(p.inbox, type); // default true; split keys read their parent
   } catch {
     return true; // fail open
   }
@@ -78,7 +82,7 @@ export async function filterNotifyUsers(userIds: string[], type: NotifyType): Pr
       select: { userId: true, home: true },
     });
     for (const r of rows) {
-      if (prefsOf(r.home).inbox?.[type] === false) allowed.delete(r.userId);
+      if (!inboxKeyOn(prefsOf(r.home).inbox, type)) allowed.delete(r.userId);
     }
   } catch {
     // fail open — keep everyone
@@ -97,7 +101,7 @@ export async function filterNotifyUsers(userIds: string[], type: NotifyType): Pr
 // muting a noisy Space must never be missing work handed to you.
 
 /** The notification kinds a per-object mute silences. */
-export const MUTABLE_NOTIFY_TYPES: ReadonlySet<NotifyType> = new Set<NotifyType>(["status_changes", "comments", "due_reminders"]);
+export const MUTABLE_NOTIFY_TYPES: ReadonlySet<NotifyType> = new Set<NotifyType>(["status_changes", "followed_status", "comments", "followed_comments", "due_reminders", "overdue"]);
 
 /** The muted object keys stored on a preference row (pure; tested). */
 export function mutedObjectKeys(home: unknown): string[] {

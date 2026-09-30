@@ -254,6 +254,9 @@ const providers = [
       if (!user.mfaEnabled && mfaRequiredFor(org.settings, orgRoleOf({ accessLevel: user.accessLevel }))) {
         const ticket = issueEnrolTicket(user.id, user.tokenVersion ?? 0);
         if (ticket) throw new Error(enrolRequiredError(ticket));
+        // No key to sign a ticket with: refuse rather than issue a session
+        // with no second factor against the org's rule (fail closed).
+        throw new Error("Sign in is unavailable right now. Please try again later.");
       }
 
       // Security activity: record the successful sign-in now that every check
@@ -391,6 +394,16 @@ export const authOptions: NextAuthOptions = {
       if (!existing) return false;
       // Mirror the credentials path: refuse sign-in for a soft-deleted org.
       if (existing.organization.status === "CANCELLED" || existing.organization.status === "SUSPENDED") return false;
+      // Google proves the email, not the second factor. When the workspace
+      // requires two step verification for this person's role, they sign in
+      // with their password and code (or enrol there), never around it.
+      const mfa = await prisma.user.findUnique({
+        where: { id: existing.id },
+        select: { accessLevel: true, organization: { select: { settings: true } } },
+      });
+      if (mfa && mfaRequiredFor(mfa.organization.settings, orgRoleOf({ accessLevel: mfa.accessLevel }))) {
+        return "/login?error=MfaRequired";
+      }
       return true;
     },
 
@@ -497,6 +510,7 @@ export const authOptions: NextAuthOptions = {
             accessLevel: true,
             tokenVersion: true,
             organizationId: true,
+            mfaEnabled: true,
             organization: { select: { status: true, name: true } },
           },
         });
@@ -608,6 +622,27 @@ export const authOptions: NextAuthOptions = {
             token.organizationId = account_.organizationId;
             token.organizationName = account_.organization?.name;
             token.accessLevel = account_.accessLevel;
+          }
+
+          // The server side of the workspace two step rule. authorize()
+          // refuses a password sign-in without the second factor, but a
+          // session issued before the rule was set, or through Google, only
+          // met the client-side hold dialog. The token carries the hold; the
+          // proxy refuses every API call but the few that let the person
+          // enrol or sign out (src/lib/auth/mfa-hold.ts), whatever the
+          // client does. Lifts on the next check after enrolment, which the
+          // enrol panel forces at once with session.update().
+          if (!token.revoked) {
+            const holdOrgId = typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+            let holdOrg: { settings: unknown } | null = null;
+            try {
+              holdOrg = await prisma.organization.findUnique({ where: { id: holdOrgId }, select: { settings: true } });
+            } catch {
+              holdOrg = null;
+            }
+            token.mfaHold =
+              !account_.mfaEnabled &&
+              mfaRequiredFor(holdOrg?.settings, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }));
           }
         }
       }

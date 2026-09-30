@@ -55,6 +55,7 @@ import {
   activeMute,
   isMuteForever,
   mutedUntilFor,
+  inboxKeyOn,
   presetOf,
   presetValues,
   type InboxPreset,
@@ -65,14 +66,20 @@ import {
 const TABS: readonly SettingsTab[] = settingsTabs("account/notifications");
 const selectCls = "h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink";
 
+// Decided addition (c): assigned, mentioned, status change and comment on
+// my task and on a task I follow, due soon and overdue. "Follow" is the task's
+// Watch button (and having commented on it), which is what the senders read.
 const WORK_ROWS: { key: TaskInboxKey; label: string; helper: string }[] = [
   { key: "task_assigned", label: "Tasks assigned to me", helper: "When a task is created for you or handed to you" },
   { key: "status_changes", label: "Status changes on my tasks", helper: "When a task you are assigned to changes status" },
-  { key: "due_reminders", label: "Due date reminders", helper: "When a task assigned to you is due today" },
+  { key: "followed_status", label: "Status changes on tasks I follow", helper: "Tasks you watch or have commented on" },
+  { key: "due_reminders", label: "Due soon", helper: "On the day a task assigned to you is due" },
+  { key: "overdue", label: "Overdue", helper: "Once a day while a task assigned to you is past its due date" },
 ];
 const PEOPLE_ROWS: { key: TaskInboxKey; label: string; helper: string }[] = [
   { key: "mentions", label: "Mentions of me", helper: "When someone mentions you in a comment or doc" },
   { key: "comments", label: "Comments on my work", helper: "When someone comments on a task assigned to you" },
+  { key: "followed_comments", label: "Comments on tasks I follow", helper: "Tasks you watch but are not assigned to" },
   { key: "kudos", label: "Kudos I receive", helper: "When a teammate recognises you" },
 ];
 
@@ -119,15 +126,13 @@ export default function NotificationSettingsPage() {
   }, [params, pathname, router]);
 
   return (
-    <SettingsPage pageKey="account/notifications" tabs={TABS}>
+    // Quiet covers all three channels, so it sits above the tabs (spec
+    // page header stack: title, subtitle, Quiet, then Inbox / Email / Desktop).
+    <SettingsPage pageKey="account/notifications" tabs={TABS} subtitle="Everything here applies to you only." lead={<QuietCard />}>
       {(tab) => (
-        <>
-          <p className="-mt-2 mb-5 text-sm text-ink-2">Everything here applies to you only.</p>
-          <SettingsCardStack>
-            <QuietCard />
-            {tab === "email" ? <EmailTab /> : tab === "desktop" ? <DesktopTab /> : <InboxTab />}
-          </SettingsCardStack>
-        </>
+        <SettingsCardStack>
+          {tab === "email" ? <EmailTab /> : tab === "desktop" ? <DesktopTab /> : <InboxTab />}
+        </SettingsCardStack>
       )}
     </SettingsPage>
   );
@@ -212,7 +217,8 @@ function InboxTab() {
   const inbox = prefs.home.notifications?.inbox ?? {};
   const view = prefs.home.notifications?.inboxView ?? {};
   const preset = presetOf(inbox);
-  const on = (k: string) => inbox[k] !== false;
+  // The same reader the senders use (split keys follow their parent until set).
+  const on = (k: string) => inboxKeyOn(inbox, k);
   const setKey = (k: string, v: boolean) => { void write(`inbox.${k}`, { home: { notifications: { inbox: { [k]: v } } } }); };
   const setView = (key: string, patch: NonNullable<NonNullable<NonNullable<PreferencesPatch["home"]>["notifications"]>["inboxView"]>) => {
     void write(`view.${key}`, { home: { notifications: { inboxView: patch } } });
@@ -220,7 +226,7 @@ function InboxTab() {
 
   return (
     <>
-      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps only what is aimed at you: tasks assigned to you and mentions.">
+      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps only what is aimed at you: tasks assigned to you, mentions and your overdue tasks.">
         <SettingsRow
           label="Preset"
           helper={preset === "custom" ? "Custom: your own mix of the switches below" : undefined}
@@ -230,7 +236,16 @@ function InboxTab() {
               label="Notification preset"
               value={preset}
               options={[{ value: "default", label: "Default" }, { value: "focused", label: "Focused" }, { value: "custom", label: "Custom" }]}
-              onChange={(v) => { if (v !== "custom") void write("preset", { home: { notifications: { inbox: presetValues(v) } } }); }}
+              onChange={(v) => {
+                // Custom is the switches themselves: choosing it takes you to them.
+                if (v === "custom") {
+                  const first = document.querySelector<HTMLElement>('[id="notifications.inbox.work"] [role="switch"]');
+                  first?.scrollIntoView({ block: "center", behavior: "smooth" });
+                  first?.focus({ preventScroll: true });
+                  return;
+                }
+                void write("preset", { home: { notifications: { inbox: presetValues(v) } } });
+              }}
             />
           }
         />
@@ -299,7 +314,7 @@ function InboxTab() {
 interface MutedItem { key: string; store: "pref" | "conversation"; kind: string; name: string; href: string | null }
 
 function MutedItemsCard() {
-  const { prefs, patchPrefs } = useOsShell();
+  const { patchPrefs } = useOsShell();
   const { toast } = useOsToast();
   const [state, setState] = useState<{ status: "loading" | "ready" | "error"; items: MutedItem[] }>({ status: "loading", items: [] });
   const [busy, setBusy] = useState<string | null>(null);
@@ -316,11 +331,20 @@ function MutedItemsCard() {
     setBusy(item.key);
     let ok = false;
     if (item.store === "pref") {
-      const list = (prefs.home.notifications?.muted ?? []).filter((k) => k !== item.key);
-      ok = await patchPrefs({ home: { notifications: { muted: list } } });
+      // The muted list is one array and arrays replace on write, so read the
+      // server's copy first: a tab open since this morning must not undo a
+      // mute made since on another tab or device.
+      const fresh = await apiFetch<{ effective?: { home?: { notifications?: { muted?: string[] } } } }>("/api/preferences", { cache: "no-store" });
+      if (fresh.ok) {
+        const list = (fresh.data?.effective?.home?.notifications?.muted ?? []).filter((k) => k !== item.key);
+        ok = await patchPrefs({ home: { notifications: { muted: list } } });
+      }
     } else {
+      // Back to the conversation's own default, never louder: a channel's is
+      // mentions only, a chat's is every message (conversation-view.tsx).
       const id = item.key.slice("conversation:".length);
-      const r = await apiFetch(`/api/conversations/${encodeURIComponent(id)}`, { method: "PATCH", json: { notifyLevel: "all" } });
+      const level = item.kind === "Channel" ? "mentions" : "all";
+      const r = await apiFetch(`/api/conversations/${encodeURIComponent(id)}`, { method: "PATCH", json: { notifyLevel: level } });
       ok = r.ok;
     }
     setBusy(null);
@@ -467,9 +491,11 @@ function EmailTab() {
 function DesktopTab() {
   const { prefs } = useOsShell();
   const desktop = useDesktopNotifications();
-  const { write, row } = useRowWrites();
+  const { write, run, row } = useRowWrites();
   const { toast } = useOsToast();
-  const on = desktop.pref === "on" && desktop.permission === "granted";
+  // The same value the bell's alert path reads (settings-architecture 9.1): a
+  // never-set choice with permission granted means alerts fire, so it reads On.
+  const on = desktop.enabled;
   const ring = prefs.home.notifications?.desktopRingCalls !== false;
 
   const permissionLine =
@@ -479,9 +505,10 @@ function DesktopTab() {
     : "Not asked yet";
 
   const toggle = async (v: boolean) => {
-    if (!v) { desktop.disable(); return; }
+    if (!v) { await run("desktop", () => desktop.disable()); return; }
     const result = await desktop.requestPermission();
-    if (result !== "granted") toast(result === "denied" ? "Your browser blocked notifications" : "Notifications were not allowed");
+    if (result !== "granted") { toast(result === "denied" ? "Your browser blocked notifications" : "Notifications were not allowed"); return; }
+    await run("desktop", () => desktop.enable());
   };
 
   return (
@@ -491,6 +518,7 @@ function DesktopTab() {
           id="notifications.desktop.on"
           label="Desktop notifications"
           helper={permissionLine}
+          {...row("desktop")}
           control={desktop.permission === "unsupported" || desktop.permission === "denied" ? undefined : <Switch checked={on} onChange={(v) => { void toggle(v); }} aria-label="Desktop notifications" />}
         />
         <SettingsRow
@@ -500,7 +528,7 @@ function DesktopTab() {
           {...row("ring")}
           control={<Switch checked={ring} onChange={(v) => { void write("ring", { home: { notifications: { desktopRingCalls: v } } }); }} aria-label="Ring for incoming calls" />}
         />
-        {desktop.permission === "granted" ? (
+        {desktop.enabled ? (
           <SettingsRow
             label="Send a test"
             helper="Switch to another tab to see it appear"
@@ -546,7 +574,7 @@ type ReceivedState =
   | { status: "loading" }
   | { status: "hidden" }
   | { status: "error"; message: string }
-  | { status: "ready"; rows: ReceivedReport[]; cronInstalled: boolean };
+  | { status: "ready"; rows: ReceivedReport[]; cronInstalled: boolean; loadedAt: number };
 
 function ReceivedReports() {
   const { toast } = useOsToast();
@@ -563,7 +591,7 @@ function ReceivedReports() {
       if (res.status === 404 || res.status === 503) { setState({ status: "hidden" }); return; }
       if (!res.ok) { setState({ status: "error", message: dashboardMessage(body, "Couldn't load the reports you receive.") }); return; }
       const d = body as { schedules?: ReceivedReport[]; cronInstalled?: boolean } | null;
-      setState({ status: "ready", rows: d?.schedules ?? [], cronInstalled: d?.cronInstalled !== false });
+      setState({ status: "ready", rows: d?.schedules ?? [], cronInstalled: d?.cronInstalled !== false, loadedAt: Date.now() });
     } catch {
       setState({ status: "error", message: "Couldn't reach the server. Check your connection and try again." });
     }
@@ -618,13 +646,23 @@ function ReceivedReports() {
             const sender = r.createdBy ? `${r.createdBy.firstName} ${r.createdBy.lastName}`.trim() : "";
             const readable = r.targetId !== null;
             const paused = r.active === false || !r.nextRunAt;
+            // Never a schedule that is not true: while sending is off for the
+            // workspace there is no next send, and a run time already past is
+            // waiting for the sender rather than planned.
+            const next = paused
+              ? "Paused"
+              : !state.cronInstalled
+                ? "Not sending yet"
+                : Date.parse(r.nextRunAt!) < state.loadedAt
+                  ? "Sending soon"
+                  : `Next ${formatRunTime(r.nextRunAt!, r.timezone, prefs)}`;
             return (
               <SettingsRow
                 key={r.id}
                 label={readable ? r.targetName ?? "Untitled report" : "A report you can no longer open"}
                 helper={
                   <>
-                    {[when, sender ? `from ${sender}` : "", paused ? "Paused" : `Next ${formatRunTime(r.nextRunAt!, r.timezone, prefs)}`].filter(Boolean).join(" · ")}
+                    {[when, sender ? `from ${sender}` : "", next].filter(Boolean).join(" · ")}
                     {!readable ? <span className="block">Nothing is sent to you while you can&apos;t open it. If your access comes back, it starts again.</span> : null}
                   </>
                 }

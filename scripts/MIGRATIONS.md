@@ -1249,7 +1249,7 @@ through `src/lib/local-prefs-migration-runner.ts`):
 | `workwrk:os:sidebar-width` | `sidebar.width` | carried when the row has none |
 | `workwrk:os:sidebar-collapsed` | `sidebar.collapsed` | same |
 | `workwrk:os:profile-tool-pins:v2` | `sidebar.quickTools` | same |
-| `workwrk:os:muted-notifs` ("1") | `home.notifications.mutedUntil` (a hundred years out, "Until I turn it back on") | same |
+| `workwrk:os:muted-notifs` ("1") | `home.notifications.mutedUntil` (24 hours from the carry, bounded so one stale browser cannot mute every device indefinitely) | same |
 | `desktop-notifications-pref` | `home.notifications.desktop` | same |
 | `workwrk:density` | `UserPreference.density` | same |
 | `workwrk:task-saved-filters` | `home.work.savedFilters` | same; nameless entries dropped |

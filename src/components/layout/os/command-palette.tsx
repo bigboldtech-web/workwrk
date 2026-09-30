@@ -598,7 +598,7 @@ function PaletteBody() {
       // who passes the entry's org gate, and only against a typed query, so
       // the empty-query Settings group stays the pages list.
       const entryRows: Row[] = text.trim()
-        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [] }).map((e) => ({
+        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [], guest: isGuest }).map((e) => ({
             id: `setting-${e.id}`,
             label: e.label,
             secondary: e.description,
@@ -608,7 +608,7 @@ function PaletteBody() {
         : [];
       return [...pageRows, ...entryRows];
     },
-    [isAdmin, canManageProcess, openSettings, router],
+    [isAdmin, isGuest, canManageProcess, openSettings, router],
   );
 
   const sections = useMemo<Section[]>(() => {

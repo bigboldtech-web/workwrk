@@ -28,7 +28,7 @@ describe("the one-time localStorage move", () => {
     );
     expect(plan.patch).toEqual({
       sidebar: { collapsed: true, width: 288, quickTools: ["notepad", "voice"] },
-      home: { notifications: { mutedUntil: "2126-09-30T10:00:00.000Z", desktop: false }, work: { savedFilters: [{ id: "a", name: "Mine" }] } },
+      home: { notifications: { mutedUntil: "2026-10-01T10:00:00.000Z", desktop: false }, work: { savedFilters: [{ id: "a", name: "Mine" }] } },
       density: "compact",
     });
     expect(plan.removeAfterWrite).toHaveLength(7);

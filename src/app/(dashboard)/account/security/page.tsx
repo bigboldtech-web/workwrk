@@ -26,7 +26,7 @@ import { Check, LogIn, LogOut, KeyRound, MoreHorizontal, RotateCcw, ShieldAlert,
 import { apiFetch } from "@/lib/api-client";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
-import { useViewerRole } from "@/components/layout/os/boot-context";
+import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
@@ -62,8 +62,7 @@ const EVENT_ICON: Record<string, typeof LogIn> = {
 export default function AccountSecurityPage() {
   const me = useMe();
   return (
-    <SettingsPage pageKey="account/security">
-      {me.status === "ready" ? <p className="-mt-2 mb-5 text-sm text-ink-2">{me.me.email}</p> : null}
+    <SettingsPage pageKey="account/security" subtitle={me.status === "ready" ? me.me.email : undefined}>
       {me.status === "loading" ? (
         <SettingsCardStack>
           <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
@@ -82,7 +81,13 @@ export default function AccountSecurityPage() {
 function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<void> }) {
   const params = useSearchParams();
   const prefs = useDatePrefs();
-  const { isAdmin } = useViewerRole();
+  const { isOwner, isAdmin } = useViewerRole();
+  const { boot } = useBoot();
+  // settings-architecture 4.4: Owners, and Admins holding the security scope.
+  // Until scoped admins exist (adminScopes empty) every Admin holds every
+  // scope, which is the gate /settings/security itself applies today.
+  const scopes = boot.viewer.adminScopes ?? [];
+  const canOpenPolicy = isOwner || (isAdmin && (scopes.length === 0 || scopes.includes("security")));
   const verify = useVerifyCooldown(me.email);
 
   const [enrolOpen, setEnrolOpen] = useState(false);
@@ -207,9 +212,9 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
               />
             </div>
           </SettingsCard>
-          {isAdmin ? (
+          {canOpenPolicy ? (
             <p className="mt-2 text-sm text-ink-2">
-              <Link href="/settings/security" className={btn.link}>Workspace sign-in policy</Link>
+              <Link href="/settings/security?tab=signin" className={btn.link}>Workspace sign-in policy</Link>
             </p>
           ) : null}
         </div>
@@ -325,18 +330,25 @@ function PresenceCard() {
   const { presenceStatus, setPresenceStatus, openStatusModal } = useOsShell();
   const prefs = useDatePrefs();
   const choice = presenceChoiceOf(presenceStatus);
-  const [clearAfter, setClearAfter] = useState<PresenceClearAfter>("never");
+  // null until the person picks one here: the select then shows the stored
+  // expiry ("Until ...") rather than a default that contradicts it.
+  const [clearAfter, setClearAfter] = useState<PresenceClearAfter | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [failed, setFailed] = useState<null | { c: PresenceChoice; after: PresenceClearAfter }>(null);
   const clearOptions = useMemo(() => presenceClearAfterOptions(), []);
 
-  const apply = (c: PresenceChoice, after: PresenceClearAfter) => {
+  // Saved only once the server kept it; a refusal reverts the dot and offers
+  // Retry on the row (the SAVE PATHS rule).
+  const apply = async (c: PresenceChoice, after: PresenceClearAfter) => {
     if (c === "custom") { openStatusModal(); return; }
     const now = new Date();
     const base: PresenceStatus =
       c === "active" ? DEFAULT_PRESENCE : c === "dnd" ? DND_PRESENCE : { emoji: "\u{1F319}", label: "Away", expiresAt: null };
-    setPresenceStatus({ ...base, expiresAt: c === "active" ? null : presenceExpiryFor(after, now) });
-    setSavedAt(Date.now());
+    const ok = await setPresenceStatus({ ...base, expiresAt: c === "active" ? null : presenceExpiryFor(after, now) });
+    if (ok) { setSavedAt(Date.now()); setFailed(null); } else setFailed({ c, after });
   };
+  const error = failed ? { message: "Couldn't save", onRetry: () => { void apply(failed.c, failed.after); } } : null;
+  const selectCls = "h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink";
 
   return (
     <SettingsCard title="Presence" id="security.presence" description="What teammates see on your avatar dot. The avatar menu changes the same status.">
@@ -345,35 +357,49 @@ function PresenceCard() {
           label="Show me as"
           helper={choice === "custom" ? `${presenceStatus.emoji ? `${presenceStatus.emoji} ` : ""}${presenceStatus.label}` : undefined}
           savedAt={savedAt}
+          error={error}
           control={
             <select
               aria-label="Show me as"
               value={choice}
-              onChange={(e) => apply(e.target.value as PresenceChoice, clearAfter)}
-              className="h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink"
+              onChange={(e) => { void apply(e.target.value as PresenceChoice, clearAfter ?? "never"); }}
+              className={selectCls}
             >
               {PRESENCE_CHOICES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           }
         />
-        <SettingsRow
-          label="Clear after"
-          helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
-          control={
-            <select
-              aria-label="Clear after"
-              value={clearAfter}
-              onChange={(e) => {
-                const next = e.target.value as PresenceClearAfter;
-                setClearAfter(next);
-                if (choice !== "active" && choice !== "custom") apply(choice, next);
-              }}
-              className="h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink"
-            >
-              {clearOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          }
-        />
+        {/* Clear after only means something for Away and Do not disturb here;
+            a custom status carries its own expiry, set where it is written,
+            and Active never expires. So no row that changes nothing. */}
+        {choice === "away" || choice === "dnd" ? (
+          <SettingsRow
+            label="Clear after"
+            helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
+            control={
+              <select
+                aria-label="Clear after"
+                value={clearAfter ?? (presenceStatus.expiresAt ? "current" : "never")}
+                onChange={(e) => {
+                  if (e.target.value === "current") return;
+                  const next = e.target.value as PresenceClearAfter;
+                  setClearAfter(next);
+                  void apply(choice, next);
+                }}
+                className={selectCls}
+              >
+                {clearAfter === null && presenceStatus.expiresAt ? <option value="current">Until {formatDate(presenceStatus.expiresAt, prefs, "datetime")}</option> : null}
+                {clearOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            }
+          />
+        ) : choice === "custom" ? (
+          <SettingsRow
+            label="Clear after"
+            helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
+            control={<button type="button" className={btn.secondary} onClick={openStatusModal}>Edit status</button>}
+          />
+        ) : null}
       </div>
     </SettingsCard>
   );

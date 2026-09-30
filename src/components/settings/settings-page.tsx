@@ -14,9 +14,9 @@
 // "Settings" chip, no "Back to settings" link: the takeover header is the
 // only chrome (settings-architecture 8.3).
 
-import { Suspense, useCallback, useMemo, type ReactNode } from "react";
+import { Suspense, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { OsPageHeader, type HeaderMenuEntry, type PrimaryAction } from "@/components/layout/os/page-header";
+import { OsPageHeader, OsViewsRow, type HeaderMenuEntry, type PrimaryAction } from "@/components/layout/os/page-header";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { leaveThen } from "@/lib/dirty-guard";
@@ -71,6 +71,13 @@ export interface SettingsPageProps {
   actions?: ReactNode;
   /** 760px form column (default) or the 1120px list column. */
   width?: "form" | "list";
+  /**
+   * One line under the title and ABOVE the tabs (spec-account-auth page
+   * header stacks: title, subtitle, then the views row).
+   */
+  subtitle?: ReactNode;
+  /** Content that applies to every tab, rendered above the tabs (Notifications' Quiet card). */
+  lead?: ReactNode;
   /** Page body. For a tabbed page a function receives the active tab key. */
   children: ReactNode | ((tab: string | null) => ReactNode);
   className?: string;
@@ -96,30 +103,51 @@ export function SettingsPage(props: SettingsPageProps) {
   );
 }
 
-function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width = "form", children, className }: SettingsPageProps) {
+function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width = "form", subtitle, lead, children, className }: SettingsPageProps) {
   const page = SETTINGS_PAGES[pageKey];
   const [active, setTab] = useSettingsTab(tabs);
   const activeTab = useMemo(() => tabs.find((t) => t.key === active) ?? null, [tabs, active]);
   const tabPrimary = tabs.length > 0 ? activeTab?.primary : primary;
   const tabMenu = tabs.length > 0 ? activeTab?.menu : menu;
 
+  // The Settings scope's "Switch tab 1 / 2 / 3" (the /account/shortcuts
+  // reference lists it): a digit while a tab has keyboard focus opens that
+  // tab. Only while the strip holds focus, so a digit typed in a field is
+  // never taken.
+  const onTabKey = (e: ReactKeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (!/^[1-9]$/.test(e.key)) return;
+    const t = tabs[Number(e.key) - 1];
+    if (!t) return;
+    e.preventDefault();
+    setTab(t.key);
+  };
+  const tabStrip =
+    tabs.length > 1 ? (
+      <div className="contents" onKeyDown={onTabKey}>
+        {tabs.map((t) => (
+          <ViewTab key={t.key} label={t.label} active={t.key === active} onClick={() => setTab(t.key)} />
+        ))}
+      </div>
+    ) : undefined;
+  // Title, subtitle, cross-tab content, then the tabs: the header draws no
+  // description line, so a page with a subtitle or lead draws its own views
+  // row under them (the same OsViewsRow the header would have used).
+  const splitViews = Boolean(tabStrip && (subtitle || lead));
+
   return (
     <div className={cn("w-full pb-16", width === "list" ? "max-w-[1168px]" : "max-w-[808px]", className)}>
       <OsPageHeader
         title={page?.label ?? pageKey}
         actions={actions}
-        views={
-          tabs.length > 1 ? (
-            <>
-              {tabs.map((t) => (
-                <ViewTab key={t.key} label={t.label} active={t.key === active} onClick={() => setTab(t.key)} />
-              ))}
-            </>
-          ) : undefined
-        }
+        views={splitViews ? undefined : tabStrip}
         primary={tabPrimary}
         menu={tabMenu}
+        className="max-[900px]:[&>div]:px-4"
       />
+      {subtitle ? <p className="mt-1 px-6 text-sm text-ink-2 max-[900px]:px-4">{subtitle}</p> : null}
+      {lead ? <div className="mt-4 px-6 max-[900px]:px-4">{lead}</div> : null}
+      {splitViews ? <OsViewsRow className="mt-3 max-[900px]:px-4" aria-label="Tabs">{tabStrip}</OsViewsRow> : null}
       <div className="mt-4 px-6 max-[900px]:px-4">{typeof children === "function" ? children(active) : children}</div>
     </div>
   );

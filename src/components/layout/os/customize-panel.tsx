@@ -111,6 +111,13 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
     else toast("Couldn't save. Try again", { action: { label: "Try again", onClick: () => { void write(key, patch); } } });
   };
 
+  // Saved only once the server kept it; the shell reverts the rail otherwise.
+  const saveCollapsed = async (v: boolean) => {
+    const ok = await setSidebarCollapsed(v);
+    if (ok) setSaved((s) => ({ ...s, sidebar: Date.now() }));
+    else toast("Couldn't save. Try again", { action: { label: "Try again", onClick: () => { void saveCollapsed(v); } } });
+  };
+
   const move = (key: string, dir: -1 | 1) => {
     const idx = visibleOrder.indexOf(key);
     const next = idx + dir;
@@ -129,7 +136,9 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
     void write("rows", { home: { cards: next } });
   };
 
-  const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/preferences";
+  // settings-architecture 2.4: this link opens the Sidebar tab, the one that
+  // holds the same rows as this panel plus width and quick actions.
+  const preferencesHref = `${settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/preferences"}?tab=sidebar`;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -220,7 +229,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   label="Sidebar"
                   value={sidebarCollapsed ? "collapsed" : "expanded"}
                   options={[{ value: "expanded", label: "Expanded" }, { value: "collapsed", label: "Icons only" }]}
-                  onChange={(v) => { setSidebarCollapsed(v === "collapsed"); setSaved((s) => ({ ...s, sidebar: Date.now() })); }}
+                  onChange={(v) => { void saveCollapsed(v === "collapsed"); }}
                 />
               </Row>
             </div>

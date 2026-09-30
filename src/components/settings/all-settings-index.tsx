@@ -19,6 +19,7 @@ import {
   type SettingsDoor,
 } from "@/lib/settings-registry";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 
 
 export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: SettingsDoor; allowedExternalGates?: readonly ("manage_process")[] }) {
@@ -27,9 +28,12 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
     const matched = new Set(filterSettingsPages(query, door).map((p) => p.key));
     return SETTINGS_PAGE_LIST.filter((p) => p.door === door && p.key !== "all" && p.key !== "account/all" && settingsHrefToday(p) !== null && matched.has(p.key));
   }, [door, query]);
+  const { isGuest } = useViewerRole();
   const entries = useMemo(
-    () => (query.trim() ? filterSettingsEntries(query, { door, allowedExternalGates }) : SETTINGS_ENTRY_LIST.filter((e) => e.door === door && (!e.externalGate || allowedExternalGates.includes(e.externalGate as "manage_process")))),
-    [door, query, allowedExternalGates],
+    () => (query.trim()
+      ? filterSettingsEntries(query, { door, allowedExternalGates, guest: isGuest })
+      : SETTINGS_ENTRY_LIST.filter((e) => e.door === door && !(isGuest && e.notForGuests) && (!e.externalGate || allowedExternalGates.includes(e.externalGate as "manage_process")))),
+    [door, query, allowedExternalGates, isGuest],
   );
 
   return (

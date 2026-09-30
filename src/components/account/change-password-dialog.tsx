@@ -11,7 +11,7 @@
 // never copies a version in any other way.
 
 import { useState } from "react";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Check, Circle, Eye, EyeOff } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { apiFetch } from "@/lib/api-client";
 import { passwordChecklist, passwordMeets, type PasswordPolicyView } from "@/lib/auth/password-rules";
@@ -157,7 +157,8 @@ export function ChangePasswordDialog({
           <ul className="mt-2 flex flex-col gap-1" aria-live="polite" aria-label="Password rules">
             {rules.map((r) => (
               <li key={r.key} className={cn("flex items-center gap-1.5 text-sm", r.met ? "text-success-text" : "text-ink-2")}>
-                <Check className={cn("h-4 w-4", r.met ? "opacity-100" : "opacity-40")} strokeWidth={2} aria-hidden />
+                {/* A tick only once met; an open ring before, so an empty field never reads as passing. */}
+                {r.met ? <Check className="h-4 w-4" strokeWidth={2} aria-hidden /> : <Circle className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-hidden />}
                 {r.label}
                 <span className="sr-only">{r.met ? ", met" : ", not met yet"}</span>
               </li>

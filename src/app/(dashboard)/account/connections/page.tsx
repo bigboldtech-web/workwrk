@@ -31,7 +31,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Calendar, CalendarPlus, Check, Copy, Link2, RefreshCw, Rss, Trash2, TriangleAlert } from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
+import { useSession } from "next-auth/react";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { Dots } from "@/components/ui/dots";
 import { Switch } from "@/components/ui/switch";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
@@ -39,7 +40,6 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { googleConnectSentence } from "@/lib/connect-errors";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
 
 type GoogleStatus = {
   available: boolean;
@@ -79,6 +79,7 @@ export default function ConnectionsPage() {
   const router = useRouter();
   const { toast } = useOsToast();
   const fmt = useFormat();
+  const { data: session } = useSession();
 
   // The parameters are read once into state and then STRIPPED from the URL,
   // so a reload, a bookmark or a Back does not re-announce a connection
@@ -211,13 +212,14 @@ export default function ConnectionsPage() {
     }
   }
 
+  // The same SettingsPage frame as every other My settings page (title from
+  // the registry, the door's left edge, the spec's subtitle).
+  const orgName = (session?.user as { organizationName?: string } | undefined)?.organizationName;
   return (
-    <>
-      {/* The registry's label, so the breadcrumb, the settings list row, the
-          settings search hit and the page title are one string rather than
-          four that drift (naming canon: "Calendar & connections"). */}
-      <OsPageHeader title={SETTINGS_PAGES["account/connections"].label} />
-
+    <SettingsPage
+      pageKey="account/connections"
+      subtitle={`Your own connections. Nobody else in ${orgName || "your workspace"} sees them.`}
+    >
       <div className="cxn">
         <ResultLine connected={outcome.connected} error={outcome.error} />
 
@@ -419,6 +421,6 @@ export default function ConnectionsPage() {
           </>
         )}
       </div>
-    </>
+    </SettingsPage>
   );
 }

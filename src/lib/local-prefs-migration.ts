@@ -56,7 +56,8 @@ export interface LocalMigrationPlan {
   removeNow: string[];
 }
 
-const MUTE_FOREVER_YEARS = 100;
+/** How long an old per-browser mute carries up to the server (see below). */
+const LEGACY_MUTE_CARRY_MS = 24 * 60 * 60 * 1000;
 const DENSITIES = new Set(["compact", "cozy", "comfortable"]);
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -117,12 +118,14 @@ export function planLocalPrefsMigration(
     (v) => { sidebar.quickTools = v; },
   );
 
-  // "1" was the old on/off mute with no end: the avatar menu's
-  // "Until I turn it back on" (a hundred years out). "0" carries nothing.
+  // "1" was the old on/off mute, kept per browser with no end. It carries up
+  // BOUNDED, for 24 hours: the server value silences every device, and one
+  // stale browser coming back months later must not mute the person
+  // everywhere indefinitely (the release before this one ignored the key
+  // entirely, so a returning browser was "not muted"). "0" carries nothing.
   const mutedRaw = local[LEGACY_KEYS.muted];
-  const forever = new Date(now.getTime());
-  forever.setFullYear(forever.getFullYear() + MUTE_FOREVER_YEARS);
-  decide(LEGACY_KEYS.muted, has(rowNotif, "mutedUntil"), mutedRaw === "1" ? forever.toISOString() : undefined, (v) => { notifications.mutedUntil = v; });
+  const carriedMute = new Date(now.getTime() + LEGACY_MUTE_CARRY_MS);
+  decide(LEGACY_KEYS.muted, has(rowNotif, "mutedUntil"), mutedRaw === "1" ? carriedMute.toISOString() : undefined, (v) => { notifications.mutedUntil = v; });
 
   const desktopRaw = local[LEGACY_KEYS.desktop];
   decide(LEGACY_KEYS.desktop, has(rowNotif, "desktop"), desktopRaw === "on" ? true : desktopRaw === "off" ? false : undefined, (v) => { notifications.desktop = v; });
