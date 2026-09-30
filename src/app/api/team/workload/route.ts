@@ -23,6 +23,7 @@
 // see never doubles a report's share.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { teamScopeFor } from "@/lib/people/team-scope.server";
@@ -173,7 +174,7 @@ export async function GET(req: NextRequest) {
         departmentId: p.departmentId,
         weeklyCapacityHours: extra.get(p.id)?.weeklyCapacityHours ?? null,
         workSchedule: extra.get(p.id)?.workSchedule ?? null,
-        canEditCapacity: canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier }),
+        canEditCapacity: canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),
       })),
       items,
       boards: boards.ids

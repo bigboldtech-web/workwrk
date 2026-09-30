@@ -11,7 +11,7 @@ import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
 
@@ -45,10 +45,11 @@ export async function GET(req: Request) {
       );
     }
     // The list names every invitee, their level and placement, so it is for
-    // the people who manage invitations: the manager tier, the same people
-    // Settings > Members (its one reader) admits. A Member gets a 403, not a
-    // way to enumerate pending Admin invites.
-    if (!legacyIsManagerLevel(viewer.accessLevel)) {
+    // the people who manage invitations: the same people Settings > Members
+    // (its one reader) admits, through the one door decision (the manager
+    // tier today, the engine's page table once ACCESS_V2_RESOLVER is on). A
+    // Member gets a 403, not a way to enumerate pending Admin invites.
+    if (!(await settingsDoorAllows("members", session))) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 

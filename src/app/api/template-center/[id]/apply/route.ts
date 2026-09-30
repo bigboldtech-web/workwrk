@@ -50,7 +50,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { templatesAppGate } from "@/lib/templates/gate";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
+import { mayCreateSpace, spaceCreateRefusal } from "@/lib/access/space-create";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { resolveCreate } from "@/lib/access/node-placement";
@@ -129,8 +129,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // The one kind with no container to gate on. Applying it IS creating a
       // Space, so it takes the same floor POST /api/spaces takes, and the
       // sentence is the same one, because it is the same rule.
-      if (!SPACE_CREATE_LEVELS.has(accessLevel)) {
-        return jsonError("Manager-level access required to create Spaces.", 403);
+      if (!(await mayCreateSpace(accessLevel))) {
+        return jsonError(spaceCreateRefusal(), 403);
       }
       const vis = body.visibility;
       const res = await applySpaceTemplate(payload as SpaceTemplatePayload, {

@@ -1,7 +1,7 @@
 import {
   Sparkles, Building2, Users, Target, BookOpen, Lock,
-  CheckSquare, BarChart3, Package, Award, FileText, Megaphone,
-  Lightbulb, Crosshair, Settings, User, TrendingUp,
+  CheckSquare, BarChart3, Package, Award, FileText,
+  Crosshair, User,
 } from "lucide-react";
 import type { TourStep } from "@/components/product-tour";
 import { WORK_HOME_HREF } from "./nav/route-hub";
@@ -14,7 +14,7 @@ export const ADMIN_TOUR_STEPS: TourStep[] = [
     title: "Welcome to WorkwrK 👋",
     description: "WorkwrK is your business operating system. It brings People, KRAs/KPIs, SOPs, Reviews, OKRs, Assets, Policies and AI into one place. Let's get you set up so your team can start using it today. This tour takes about 3 minutes.",
     icon: <Sparkles size={24} />,
-    highlight: "You're set as Company Admin, so you have full access to everything.",
+    highlight: "You run this workspace, so you can open every Space and every Workspace settings page.",
   },
   {
     title: "Step 1: Set up your Company Profile",
@@ -28,16 +28,16 @@ export const ADMIN_TOUR_STEPS: TourStep[] = [
     title: "Step 2: Invite your team",
     description: "Add the people who'll use WorkwrK. Go to Workspace settings, Members, and invite by email or import a list. Everyone is an Owner, an Admin or a Member; an agent account is a Member marked as an agent. You can change roles later.",
     icon: <Users size={24} />,
-    navigateTo: "/settings",
-    actionLabel: "Open Team Settings",
+    navigateTo: "/settings/members",
+    actionLabel: "Open Members",
     highlight: "Make someone an Admin to let them run the workspace day to day. Put the people who look after everyone's information on the People team.",
   },
   {
     title: "Step 3: Decide who can do what",
     description: "Everything you make is shared at one of four levels: Full access, Can edit, Can comment or Can view. Sharing flows down from a Space to its Folders and Lists. Workspace settings, Access holds the switches for the whole company, and Lock it down tightens them in one step.",
     icon: <Lock size={24} />,
-    navigateTo: "/settings",
-    actionLabel: "Open Access Control",
+    navigateTo: "/settings/access",
+    actionLabel: "Open Access",
     highlight: "Owners and Admins change the access switches. The People team can read them.",
   },
   {

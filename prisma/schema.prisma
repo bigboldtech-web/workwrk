@@ -6953,6 +6953,9 @@ model AccessGrant {
   // four-role ladder (FULL | EDIT | COMMENT | VIEW; NULL = derive from role).
   expiresAt      DateTime?
   objectRole     String?
+  // Phase 8 stage E fix: provenance ('copy.step7' the container copy,
+  // 'backfill.g5' the reach-preservation rows; NULL = written before).
+  source         String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
 

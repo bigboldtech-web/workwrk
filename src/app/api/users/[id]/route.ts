@@ -19,6 +19,7 @@
 // ever fed are no longer read here.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
@@ -43,6 +44,7 @@ import {
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
+import { pendingHandover } from "@/lib/people/handover.server";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -67,7 +69,7 @@ function accessFor(
   subject: { id: string; deletedAt: Date | null; accessLevel: string },
   subjectHasDob = false,
 ) {
-  const opts = { managerTierSelf: relation === "self" && ctx.managerTier };
+  const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const editable = Object.keys(PERSON_FIELD_GROUP).filter(
     (f) =>
       f !== "accessLevel" &&
@@ -329,13 +331,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const target = await prisma.user.findFirst({
     where: { id, organizationId: ctx.organizationId },
-    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true },
+    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true, status: true },
   });
   if (!target) return err(404, "User not found");
 
   const relation = relationTo(ctx, id);
   if (relation === "none") return err(403, "You can only edit your own record or your reports'.");
-  const opts = { managerTierSelf: relation === "self" && ctx.managerTier };
+  const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const { unknown, forbidden } = checkPersonPatch(body, relation, opts);
   if (unknown.length) return err(400, `Unknown field: ${unknown.join(", ")}`, { code: "unknown_field", fields: unknown });
   if (forbidden.length) {
@@ -465,6 +467,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const deactivating = data.status === "INACTIVE";
   if (deactivating) {
     if (id === ctx.userId) return err(400, "You cannot deactivate yourself.");
+    // The handover comes first, on every path (invariant 13): a leaver's
+    // open tasks, reports and containers are never orphaned by a direct API
+    // call. The Members transfer dialog and the Remove dialog run POST
+    // /api/users/[id]/handover before this PATCH, which empties all three.
+    if (target.status !== "INACTIVE") {
+      const left = await pendingHandover(ctx.organizationId, id);
+      if (left.openTasks + left.directReports + left.containers > 0) {
+        return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first", fields: ["status"], pending: left });
+      }
+    }
     data.tokenVersion = { increment: 1 };
   }
 

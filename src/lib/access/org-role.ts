@@ -108,14 +108,20 @@ export function orgRoleOfMembership(role: string | null | undefined): OrgRole {
  * workspace's Owner pick (ownerIdsOf: every SUPER_ADMIN, else the earliest
  * live COMPANY_ADMIN, computed live, the rule the Staff console and
  * SETTINGS_OWNER_SPLIT use) is an Owner. The stored User.orgRole column is
- * NOT read for this: it is the step-8 mirror the backfill writes, and a
+ * NOT read for the Owner and Admin rungs (it is read only to narrow a Member
+ * to a Guest, below): it is the step-8 mirror the backfill writes, and a
  * column a later role change or ownership transfer did not touch would
  * otherwise keep a previous Owner's reach. Worst case of this rule: none
  * beyond today's (the pick is the one every Owner-only page already uses).
  */
-export function effectiveOrgRole(accessLevel: string | null | undefined, isOwnerPick: boolean): OrgRole {
+export function effectiveOrgRole(accessLevel: string | null | undefined, isOwnerPick: boolean, stored?: string | null): OrgRole {
   const mirror = orgRoleOf({ accessLevel });
   if (mirror === "ADMIN" && isOwnerPick) return "OWNER";
+  // The stored column is read in ONE direction only: a person the column
+  // names a Guest is a Guest even though their level mirror says Member
+  // (the Guest invitation writes the column; Guest is not a level). The
+  // column never widens: a stale OWNER or ADMIN value is ignored.
+  if (mirror === "MEMBER" && stored === "GUEST") return "GUEST";
   return mirror;
 }
 
@@ -129,4 +135,27 @@ export function effectiveAdminScopes(orgRole: OrgRole, stored: string[] | null |
 /** The Agent flag follows the mirror (a stale column must not cap a person who is no longer an Agent). */
 export function effectiveIsAgent(accessLevel: string | null | undefined): boolean {
   return isAgentOf(accessLevel);
+}
+
+/**
+ * Is this person on the People team, as the engine answers it (resolve.ts
+ * isPeopleTeam over hydrate's viewer and loadOrgFacts' peopleTeamIds)?
+ *
+ *   ACCESS_V2_TABLES off   the configured list OR an HR-level person
+ *   ACCESS_V2_TABLES on    toggle 6 governs: a non-empty configured list is
+ *                          the People team (an Admin CAN take an HR person
+ *                          off it); an empty list falls back to HR
+ *
+ * /api/boot uses this so the frame's reader sidebar never lists a page the
+ * gate refuses.
+ */
+export function peopleTeamOf(input: {
+  userId: string;
+  accessLevel: string | null | undefined;
+  configured: readonly string[];
+  tablesOn: boolean;
+}): boolean {
+  const seeded = isSeededPeopleTeam(input.accessLevel);
+  if (input.tablesOn) return input.configured.length > 0 ? input.configured.includes(input.userId) : seeded;
+  return input.configured.includes(input.userId) || seeded;
 }

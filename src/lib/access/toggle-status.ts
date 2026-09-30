@@ -53,30 +53,40 @@ export function toggleStatuses(f: ToggleFlags): ToggleStatus[] {
     {
       key: "whoCanPublish",
       label: "Who can publish SOPs",
-      effect: "Anyone who can edit them, or Admins and the People team.",
+      effect: "Anyone who may publish them today, or only Admins and the People team.",
       live: f.resolver,
       enforcedAt: "PATCH /api/sops/[id], POST /api/sops/record",
       caption: f.resolver ? null : "Today the permission grid below decides who publishes. This switch takes over when the new access engine is on.",
     },
     { key: "whoCanDelete", label: "Who can delete things", effect: "Anyone with Full access, or only Admins.", live: false, enforcedAt: "the container DELETE routes", caption: NOT_YET },
-    { key: "guestExpiryDays", label: "Guest access ends after", effect: "Never, 30 days or 90 days.", live: false, enforcedAt: "grants.ts", caption: "Guest accounts arrive with the new roles; stored until then." },
+    { key: "guestExpiryDays", label: "Guest access ends after", effect: "Never, 30 days or 90 days.", live: false, enforcedAt: "Not read yet: no grant carries an end date in this release", caption: "Guest accounts arrive with the new roles; stored until then." },
     { key: "publicLinks", label: "Public links", effect: "Links that open without signing in, view only.", live: true, enforcedAt: "the public SOP, doc, table and form routes", caption: null },
   ];
 }
 
 /**
  * The Lock it down patch (spec 7.4): the preset, WITHOUT the People team keys,
- * so pressing it can never empty the People team list an Owner chose.
+ * so pressing it can never empty the People team list an Owner chose. With
+ * `only` (the switches enforced in this flag state), the patch changes those
+ * alone: pressing the button never silently rewrites a hidden switch that is
+ * not enforced yet, which would take effect unseen on the day it becomes live.
  */
-export function lockItDownPatch(): Partial<AccessSettings> {
+export function lockItDownPatch(only?: readonly ToggleKey[]): Partial<AccessSettings> {
   const { peopleTeamUserIds: _ids, peopleTeamDepartmentId: _dept, ...rest } = LOCK_IT_DOWN_ACCESS_SETTINGS;
   void _ids;
   void _dept;
-  return rest;
+  if (!only) return rest;
+  const keep = new Set<string>(only);
+  return Object.fromEntries(Object.entries(rest).filter(([k]) => keep.has(k))) as Partial<AccessSettings>;
 }
 
 /** The keys a Lock it down would change from the current values, for the confirm dialog. */
-export function lockItDownChanges(current: AccessSettings): ToggleKey[] {
-  const patch = lockItDownPatch();
+export function lockItDownChanges(current: AccessSettings, only?: readonly ToggleKey[]): ToggleKey[] {
+  const patch = lockItDownPatch(only);
   return (Object.keys(patch) as ToggleKey[]).filter((k) => JSON.stringify(current[k]) !== JSON.stringify(patch[k as keyof typeof patch]));
+}
+
+/** The switches a Lock it down may change in this flag state: the live ones. */
+export function liveToggleKeys(statuses: readonly ToggleStatus[]): ToggleKey[] {
+  return statuses.filter((s) => s.live).map((s) => s.key);
 }

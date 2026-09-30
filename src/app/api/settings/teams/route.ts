@@ -12,8 +12,9 @@ import { z } from "zod";
 import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sessionIsSettingsReader, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 const createSchema = z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(280).optional() }).strict();
@@ -22,7 +23,7 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
-  if (!sessionIsSettingsReader(session)) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE });
+  if (!(await settingsDoorAllows("members", session))) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE });
   const teams = await prisma.team.findMany({
     where: { organizationId: orgId, archivedAt: null },
     orderBy: { name: "asc" },
@@ -61,9 +62,34 @@ export async function POST(req: Request) {
   }
   const clash = await prisma.team.findFirst({ where: { organizationId: u.organizationId, name: { equals: parsed.data.name, mode: "insensitive" } }, select: { id: true, archivedAt: true } });
   if (clash && !clash.archivedAt) return NextResponse.json({ error: "name_taken", key: "name" }, { status: 409, headers: NO_STORE });
-  const team = clash
-    ? await prisma.team.update({ where: { id: clash.id }, data: { archivedAt: null, description: parsed.data.description ?? null } })
-    : await prisma.team.create({ data: { organizationId: u.organizationId, name: parsed.data.name, description: parsed.data.description ?? null, createdById: u.id } });
-  await logActivity({ organizationId: u.organizationId, actorId: u.id, type: "team.created", targetType: "Team", targetId: team.id, description: `Created the team ${team.name}` }).catch(() => {});
+  // Reusing an archived Team's name revives that row EMPTY: its old members
+  // are not carried back in unseen (the answer says members: [] and that is
+  // the truth). The ids that were on it go on the activity row.
+  let former: string[] = [];
+  let team: { id: string; name: string; description: string | null };
+  try {
+    team = clash
+      ? await prisma.$transaction(async (tx) => {
+          const rows = await tx.teamMember.findMany({ where: { teamId: clash.id }, select: { userId: true } });
+          former = rows.map((r) => r.userId);
+          await tx.teamMember.deleteMany({ where: { teamId: clash.id } });
+          return tx.team.update({ where: { id: clash.id }, data: { archivedAt: null, description: parsed.data.description ?? null } });
+        })
+      : await prisma.team.create({ data: { organizationId: u.organizationId, name: parsed.data.name, description: parsed.data.description ?? null, createdById: u.id } });
+  } catch (err) {
+    // Two Admins making the same name at once: the unique index answers the
+    // loser, and the loser gets the same 409 the clash check gives.
+    if ((err as { code?: string } | null)?.code === "P2002") return NextResponse.json({ error: "name_taken", key: "name" }, { status: 409, headers: NO_STORE });
+    throw err;
+  }
+  await logActivity({
+    organizationId: u.organizationId,
+    actorId: u.id,
+    type: "team.created",
+    targetType: "Team",
+    targetId: team.id,
+    description: clash ? `Made the team ${team.name} again (an archived team's name; it starts empty)` : `Created the team ${team.name}`,
+    ...(former.length ? { metadata: { revived: true, formerMemberIds: former } } : {}),
+  }).catch(() => {});
   return NextResponse.json({ team: { id: team.id, name: team.name, description: team.description, members: [] } }, { status: 201, headers: NO_STORE });
 }

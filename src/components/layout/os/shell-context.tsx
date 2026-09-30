@@ -641,7 +641,13 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const panelOpen = sidekickOpen && askAiVisible && !onAskAiPage && askAiPanelFits;
   useEffect(() => { sidekickOpenRef.current = panelOpen; }, [panelOpen]);
   const manageableOffModules = boot.manageableOffModules;
-  const canCreateSpace = accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
+  // The server's answer (boot viewer.canCreateSpace, the rule POST /api/spaces
+  // enforces, "Who can create Spaces" included); the tier is only the
+  // fallback for a payload from before the field.
+  const canCreateSpace =
+    typeof boot.viewer.canCreateSpace === "boolean"
+      ? boot.viewer.canCreateSpace
+      : accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
   const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
   // sidebar-map section 5: the Teams hub lands on /people for every Member.
   // This branch is only for a viewer whose rail does NOT carry Teams (an

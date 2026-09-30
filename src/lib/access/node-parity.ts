@@ -220,13 +220,41 @@ export const SETTINGS_EXPECTED_MISMATCHES: readonly NodeExpectation[] = [
  */
 export const MATRIX_EXPECTED_MISMATCHES: readonly NodeExpectation[] = [
   {
-    key: "matrix-cell-becomes-section-9-gate-rule",
+    key: "matrix-cell-narrows-to-section-9-gate-rule",
     reason:
-      "Spec 9: the enforced matrix cells become fixed gate rules (Owner and Admin, the People team, the manager chain, any Member for SOP content under the folder check, toggle 7 for publishing). With ACCESS_V2_RESOLVER on, hasPermission answers these cells from matrix-rules.ts; off, the stored matrix still decides.",
+      "Spec 9: the enforced matrix cells become fixed gate rules (Owner and Admin, the People team, the manager chain, toggle 7 for publishing). Where the rule takes a cell away from someone who holds it today, that is the decided narrowing. With ACCESS_V2_RESOLVER on, hasPermission answers these cells from matrix-rules.ts; off, the stored matrix still decides.",
     when: always,
-    match: (c) => c.section === "matrix",
+    match: (c) => c.section === "matrix" && c.truth === "VIEW" && c.engine === "none",
+  },
+  {
+    key: "matrix-cell-widens-by-named-decision",
+    reason:
+      "Spec 9 names who GAINS a cell: the People team on KRA definitions, Policies, org announcements and Assets, and the People team or a person with reports on the assign cells (the route then checks the target person). Only these cells may widen; any other widening (a SOP content cell, an Owner and Admin cell against a customised grid) is UNEXPECTED and blocks the flip.",
+    when: always,
+    match: (c) => {
+      if (c.section !== "matrix" || c.truth !== "none" || c.engine !== "VIEW") return false;
+      const rule = DECIDED_MATRIX_WIDENINGS[c.kind];
+      if (!rule) return false;
+      if (rule === "people-team") return c.viewer.peopleTeam;
+      return c.viewer.peopleTeam || c.viewer.hasReports;
+    },
   },
 ];
+
+/**
+ * The cells spec 9 decides to open wider than today's shipped grid, and to
+ * whom. A widening anywhere else is unexpected (see the row above).
+ */
+export const DECIDED_MATRIX_WIDENINGS: Readonly<Record<string, "people-team" | "people-team-or-reports">> = {
+  "kras.create": "people-team",
+  "kras.edit": "people-team",
+  "kras.assign": "people-team-or-reports",
+  "policies.create": "people-team",
+  "announcements.create": "people-team",
+  "assets.create": "people-team",
+  "assets.edit": "people-team",
+  "assets.assign": "people-team-or-reports",
+};
 
 export interface NodeParityReport {
   total: number;

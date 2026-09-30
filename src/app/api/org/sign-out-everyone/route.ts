@@ -19,13 +19,13 @@ export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   const su = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!su?.id || !su.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await sessionMayManageOwnerPage(session))) return NextResponse.json({ error: "Only workspace Owners can sign everyone out" }, { status: 403 });
+  if (!(await sessionMayManageOwnerPage(session, "security"))) return NextResponse.json({ error: "Only workspace Owners can sign everyone out" }, { status: 403 });
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: 'Type SIGN OUT to confirm' }, { status: 400 });
 
   const fresh = await freshWorkspaceActor(session);
   if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
-  if (!freshMayManageOwnerPage(fresh)) return NextResponse.json({ error: "Only workspace Owners can sign everyone out" }, { status: 403 });
+  if (!freshMayManageOwnerPage(fresh, "security")) return NextResponse.json({ error: "Only workspace Owners can sign everyone out" }, { status: 403 });
 
   // Everyone who belongs here: anchored in this workspace, AND everyone who
   // holds a membership here while switched into another one (they could

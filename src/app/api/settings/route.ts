@@ -18,6 +18,7 @@ import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import {
   cultureSectionSchema,
@@ -172,7 +173,13 @@ export async function GET() {
     // Security) and usage (the workspace menu). The access toggles, the
     // process taxonomies' admin config, the org's business profile and the
     // stored session fields stay with the doors that edit them.
-    if (!legacyIsManagerLevel((session.user as SessionUser).accessLevel)) {
+    // A reader the one door decision admits (the People team under the
+    // engine gate) reads the full blob as the manager tier does today.
+    if (
+      !legacyIsManagerLevel((session.user as SessionUser).accessLevel) &&
+      !(await settingsDoorAllows("access", session)) &&
+      !(await settingsDoorAllows("scoring", session))
+    ) {
       const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, signIn: _si, signInLegacy: _sl, users: _u, retention: _r, data: _d, work: _w, ...rest } = body.settings;
       void _access; void _process; void _b; void _i; void _t; void _si; void _sl; void _u; void _r; void _d; void _w;
       void security;
@@ -253,7 +260,9 @@ export async function PATCH(req: Request) {
       // Owner pages (settings spec 5.9 and 5.10: the sign-in policy, and the
       // purge windows that delete data). Every Admin until the Owner and
       // Admin split is approved (SETTINGS_OWNER_SPLIT, default OFF).
-      if (!freshMayManageOwnerPage(fresh)) {
+      // An Admin holding the Security scope edits the sign-in policy too
+      // (spec 6.6); retention stays the Owner's.
+      if (!freshMayManageOwnerPage(fresh, section === "security" ? "security" : undefined)) {
         return NextResponse.json({ error: "Only workspace Owners can change this" }, { status: 403 });
       }
     } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel) || !fresh.admin) {

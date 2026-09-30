@@ -20,7 +20,7 @@ import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
-import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
+import { hasPermission } from "@/lib/api-helpers";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { goalVisibilityOr } from "@/lib/goal-audience";
@@ -990,10 +990,11 @@ const invitePersonWithRole: ToolDefinition = {
     // Same gate as POST /api/invitations (the People create permission), and
     // the level comes from a closed list: the model's input can never mint an
     // admin, and a person who cannot invite from the UI cannot invite here.
+    // hasPermission itself, so the engine's rule answers here too once
+    // ACCESS_V2_RESOLVER is on (Owner and Admin), exactly as the route does.
     const level = await callerLevel(ctx);
-    const matrixOrg = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
-    const matrix = ((matrixOrg?.settings as { permissions?: unknown } | null)?.permissions ?? null) as Parameters<typeof checkPermission>[1];
-    if (!level || !checkPermission(level as PermAccessLevel, matrix, "people", "create")) {
+    const caller = await callerSession(ctx);
+    if (!level || !caller || !(await hasPermission(caller, "people", "create"))) {
       return { error: "You can't invite people. Ask an admin to send the invitation." };
     }
     // The level follows the ONE invite rule (src/lib/access/invite-level.ts),

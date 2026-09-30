@@ -31,7 +31,7 @@ const VALID_SCOPES: ApiKeyScope[] = ["READ", "WRITE", "ADMIN"];
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session, "security"))) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const orgId = getOrgId(session);
@@ -59,7 +59,7 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
 
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const url = new URL(req.url);
@@ -164,7 +164,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const body = (await req.json().catch(() => null)) as { id?: unknown; rateLimitPerMinute?: unknown; rateLimitPerDay?: unknown } | null;

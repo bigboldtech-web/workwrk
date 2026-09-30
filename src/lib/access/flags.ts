@@ -10,10 +10,15 @@
 //   ACCESS_V2_TABLES     steps 4 and 7. The engine's loader answers node
 //                        objects (Space, Folder, List, task, Doc, Table,
 //                        Canvas, Form) from node-access, which already unions
-//                        AccessGrant with the member tables, reads
-//                        User.orgRole when the column holds a value, and
-//                        grants.ts mirrors every container grant into
-//                        AccessGrant. Default OFF.
+//                        the Table, Canvas and Form AccessGrant rows with the
+//                        member tables. The org role: the live Owner pick
+//                        refines the level mirror, the stored User.orgRole is
+//                        read only to narrow a Member to a Guest (org-role.ts
+//                        effectiveOrgRole), and the stored Admin scopes count.
+//                        NOT read in this release: the step-7 container
+//                        copies and the G5 rows in AccessGrant (a snapshot;
+//                        the member tables stay the store, see
+//                        container-copy-plan.ts). Default OFF.
 //   SETTINGS_GATE_LOG_ONLY  the settings door gate's first week: the engine's
 //                        answer is computed and every disagreement is logged,
 //                        while today's answer still decides. Default OFF.

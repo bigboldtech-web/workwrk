@@ -56,18 +56,25 @@ export async function PATCH(req: Request, { params }: Params) {
     const live = await prisma.user.count({ where: { id: { in: wanted }, organizationId: a.organizationId, deletedAt: null } });
     if (live !== wanted.length) return NextResponse.json({ error: "not_in_org", key: "add" }, { status: 400, headers: NO_STORE });
   }
-  await prisma.$transaction(async (tx) => {
-    if (name !== undefined || description !== undefined) {
-      await tx.team.update({ where: { id }, data: { ...(name !== undefined ? { name } : {}), ...(description !== undefined ? { description } : {}) } });
-    }
-    for (const userId of add) {
-      await tx.teamMember.upsert({ where: { teamId_userId: { teamId: id, userId } }, create: { teamId: id, userId }, update: {} });
-    }
-    if (remove.length) await tx.teamMember.deleteMany({ where: { teamId: id, userId: { in: remove } } });
-    if (lead) {
-      await tx.teamMember.upsert({ where: { teamId_userId: { teamId: id, userId: lead.userId } }, create: { teamId: id, userId: lead.userId, lead: lead.lead }, update: { lead: lead.lead } });
-    }
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (name !== undefined || description !== undefined) {
+        await tx.team.update({ where: { id }, data: { ...(name !== undefined ? { name } : {}), ...(description !== undefined ? { description } : {}) } });
+      }
+      for (const userId of add) {
+        await tx.teamMember.upsert({ where: { teamId_userId: { teamId: id, userId } }, create: { teamId: id, userId }, update: {} });
+      }
+      if (remove.length) await tx.teamMember.deleteMany({ where: { teamId: id, userId: { in: remove } } });
+      if (lead) {
+        await tx.teamMember.upsert({ where: { teamId_userId: { teamId: id, userId: lead.userId } }, create: { teamId: id, userId: lead.userId, lead: lead.lead }, update: { lead: lead.lead } });
+      }
+    });
+  } catch (err) {
+    // A rename racing another Admin's team of the same name: the same 409
+    // the clash check gives, never a 500.
+    if ((err as { code?: string } | null)?.code === "P2002") return NextResponse.json({ error: "name_taken", key: "name" }, { status: 409, headers: NO_STORE });
+    throw err;
+  }
   const type = add.length || remove.length ? "team.members_changed" : "team.updated";
   await logActivity({
     organizationId: a.organizationId,

@@ -93,3 +93,22 @@ export async function runHandover(input: { organizationId: string; fromId: strin
 }
 
 export { unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
+
+/**
+ * What a deactivation would leave behind without a handover: open tasks the
+ * person owns, people who report to them, and Spaces, Folders and Lists they
+ * own (the same three runHandover moves and the Members transfer dialog
+ * counts). PATCH /api/users/[id] refuses { status: "INACTIVE" } while any is
+ * non-zero, so no route can orphan a leaver's work (invariant 13): every UI
+ * path runs POST /api/users/[id]/handover first, which empties all three.
+ */
+export async function pendingHandover(organizationId: string, id: string): Promise<{ openTasks: number; directReports: number; containers: number }> {
+  const [items, reports, spaces, folders, boards] = await Promise.all([
+    prisma.item.findMany({ where: { organizationId, ownerId: id, archivedAt: null }, select: { status: true } }),
+    prisma.user.count({ where: { organizationId, managerId: id, deletedAt: null } }),
+    prisma.space.count({ where: { organizationId, ownerId: id } }),
+    prisma.folder.count({ where: { organizationId, ownerId: id } }),
+    prisma.board.count({ where: { organizationId, ownerId: id } }),
+  ]);
+  return { openTasks: items.filter((it) => isOpenStatus(it.status)).length, directReports: reports, containers: spaces + folders + boards };
+}

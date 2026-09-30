@@ -271,7 +271,15 @@ visibility/membership bucket before the rest). `--allow-remote` is only
 needed if `DATABASE_URL` does not point at localhost:
 
 ```
-15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --sections legacy,node --node-per-kind 40 --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --sections legacy,node --node-per-kind 40 --prove-tables --prove-resolver --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+
+Phase 8 stage E fix: `--prove-tables --prove-resolver` evaluate the flip
+state in the job's own process (the session stays read-only; the server's
+environment is never touched). Without `--prove-tables` the node section
+cannot fail: with ACCESS_V2_TABLES off the engine reads the old tables and
+one named row explains every node case, so a week of flag-off runs would
+prove nothing for Spaces, Folders, Lists, Docs, Tables, Canvases and Forms.
+The job prints a WARNING line when it runs the node section with the flag off.
 
 Phase 8 stage E: the job now has two sections. `legacy` is the Phase 0
 comparison with a live tie-break; `node` compares can() against the live

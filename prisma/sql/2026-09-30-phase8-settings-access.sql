@@ -222,3 +222,14 @@ BEGIN
   END IF;
 END
 $$;
+
+-- Stage E fix: where an "AccessGrant" row came from. The step-7 container
+-- copy (scripts/access-migrate-container-rows.ts) diffs only its own rows
+-- ('copy.step7'); the step-4 backfill's reach-preservation rows
+-- ('backfill.g5', the Space owner's Full on a Private List) have no member
+-- twin by design and must never be read as orphaned copies. NULL is every
+-- row written before this column (the share dialog's Table, Canvas and Form
+-- grants, and any earlier run); the copy script adopts an untagged container
+-- row only when it is not a G5-shaped row (objectRole FULL). Additive,
+-- nullable, no row written.
+ALTER TABLE "AccessGrant" ADD COLUMN IF NOT EXISTS "source" TEXT;

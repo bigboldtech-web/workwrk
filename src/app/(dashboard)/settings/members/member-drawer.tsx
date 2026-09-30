@@ -25,6 +25,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/settings/settings-form";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 export function MemberDrawer({
@@ -33,6 +34,7 @@ export function MemberDrawer({
   canEditPeople,
   viewerId,
   viewerIsOwner,
+  scopesLive = false,
   owners,
   lookups,
   onClose,
@@ -46,6 +48,8 @@ export function MemberDrawer({
   viewerId: string;
   /** Only an Owner changes, deactivates or removes an Owner (the server says so too). */
   viewerIsOwner: boolean;
+  /** The Admin scopes are read (Owner split on and ACCESS_V2_TABLES on). */
+  scopesLive?: boolean;
   owners: number;
   lookups: { roles: Lookup[]; depts: Lookup[]; offices: Lookup[] };
   onClose: () => void;
@@ -55,6 +59,9 @@ export function MemberDrawer({
 }) {
   const { toast } = useOsToast();
   const [m, setM] = useState(member);
+  const showUpcoming = useShowUpcoming();
+  // The scopes a failed save meant to set, so Retry sends them again.
+  const failedScopes = useRef<string[] | null>(null);
   const [saved, setSaved] = useState<Record<string, number>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [confirmRole, setConfirmRole] = useState<{ role: MemberRole; tier: string | null } | null>(null);
@@ -88,8 +95,10 @@ export function MemberDrawer({
     if (!r.ok) {
       setM(prev);
       setErrs((e) => ({ ...e, scopes: r.error }));
+      failedScopes.current = scopes;
       return;
     }
+    failedScopes.current = null;
     setErrs((e) => { const n = { ...e }; delete n.scopes; return n; });
     setSaved((x) => ({ ...x, scopes: Date.now() }));
     onChanged();
@@ -144,12 +153,16 @@ export function MemberDrawer({
             />
           }
         />
-        {m.role === "ADMIN" && viewerIsOwner ? (
+        {m.role === "ADMIN" && viewerIsOwner && (scopesLive || showUpcoming) ? (
           <SettingsRow
             label="Admin scopes"
-            helper="Let this Admin open Billing, or Security and API keys. Read by the new access engine; until it is on, Owner pages follow the Owner split."
+            helper={
+              scopesLive
+                ? "Let this Admin open Billing, or Security and API keys, as an Owner does."
+                : "Let this Admin open Billing, or Security and API keys. Not read yet: until the Owner and Admin split and the new access roles are both on, every Admin opens those pages. What you tick is kept for then."
+            }
             savedAt={saved.scopes}
-            error={errs.scopes ? { message: errs.scopes, onRetry: () => setErrs((e) => { const n = { ...e }; delete n.scopes; return n; }) } : null}
+            error={errs.scopes ? { message: errs.scopes, onRetry: () => { if (failedScopes.current) void saveScopes(failedScopes.current); } } : null}
             control={
               <span className="inline-flex items-center gap-3">
                 {(["billing", "security"] as const).map((scope) => (

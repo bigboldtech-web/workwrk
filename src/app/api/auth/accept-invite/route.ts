@@ -37,7 +37,7 @@ import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { recordSpaceInviteAccepted } from "@/lib/access/grants";
 import { reanchorUser } from "@/lib/access/workspace-anchor";
 import { cleanPersonName, inviteFailure, inviteOrgRole, inviteRoleLabel, joinLanding, spaceObjectRoleLabel } from "@/lib/access/join-invite";
-import { isAgentOf } from "@/lib/access/org-role";
+import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { policyView } from "@/lib/auth/password-rules";
 import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor } from "@/lib/auth/invite-facts.server";
 import { appBaseUrl } from "@/lib/auth/send-verification";
@@ -318,6 +318,8 @@ export async function POST(req: NextRequest) {
             lastName,
             organizationId: inv.organizationId,
             accessLevel: inv.accessLevel,
+            // The org-role mirror, written with the level (spec 10 step 0).
+            orgRole: orgRoleOf({ accessLevel: inv.accessLevel }),
             departmentId: inv.departmentId,
             roleId: inv.roleId,
             managerId: inv.managerId,

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { accessV2Resolver } from "@/lib/access/flags";
+import { engineMatrixCells } from "@/lib/access/matrix-engine";
 import { PROTECTED_ADMIN_ROLES, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
 
 // GET — return the full matrix (custom + defaults merged on the client)
@@ -18,8 +20,13 @@ export async function GET() {
   const settings = (org?.settings as any) || {};
   const matrix: PermissionMatrix | null = settings.permissions || null;
 
-  return NextResponse.json({ matrix }, {
-    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" },
+  // ACCESS_V2_RESOLVER (default OFF): the cells the engine owns, answered for
+  // this person exactly as the server gates answer them, so the client never
+  // shows a control whose handler is refused (or hides one it allows).
+  const cells = accessV2Resolver() ? await engineMatrixCells(session) : null;
+
+  return NextResponse.json({ matrix, cells }, {
+    headers: { "Cache-Control": cells ? "private, no-store" : "private, max-age=60, stale-while-revalidate=300" },
   });
 }
 

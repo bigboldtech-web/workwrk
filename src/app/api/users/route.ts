@@ -192,6 +192,8 @@ export async function POST(req: NextRequest) {
       departmentId,
       roleId,
       accessLevel: level,
+      // The org-role mirror, written with the level (spec 10 step 0).
+      orgRole: orgRoleOf({ accessLevel: level }),
       managerId,
       organizationId: getOrgId(session),
     },

@@ -18,6 +18,14 @@
 // stay Owner and Admin until step 6 moves those calls onto requireCan with the
 // object.
 //
+// The SOP content cells (create, edit, publish) are `narrowOnly`: the engine
+// rule may take reach away but never adds it, so the answer is the rule AND
+// the stored matrix. The reason is the unfiled SOP: the routes' object check
+// (canWriteToFolder) passes for a SOP with no folder, so "any Member" at the
+// org level would let every Member read, rewrite and publish other people's
+// unfiled drafts on flip day. Those cells widen only when step 6 moves the
+// SOP routes onto requireCan with the SOP in hand (author Full on own drafts).
+//
 // Pure: imports only types and the toggle schema's type.
 
 import type { AccessSettings, OrgRole } from "./types";
@@ -42,6 +50,11 @@ export interface MatrixCellRow {
   rule: MatrixRule;
   /** Where the rule comes from, in one line, for the parity report and the export. */
   note: string;
+  /**
+   * The rule only narrows: the answer is the rule AND the stored matrix, so
+   * nobody gains a cell they do not hold today (the SOP content cells).
+   */
+  narrowOnly?: boolean;
 }
 
 export const MATRIX_CELL_RULES: readonly MatrixCellRow[] = [
@@ -51,9 +64,9 @@ export const MATRIX_CELL_RULES: readonly MatrixCellRow[] = [
   { module: "kras", action: "edit", rule: "owner-admin-people-team", note: "KRA definitions: Owner, Admin and the People team." },
   { module: "kras", action: "delete", rule: "owner-admin", note: "Delete a KRA: Admin." },
   { module: "kras", action: "assign", rule: "owner-admin-people-team-reports", note: "EDIT on the target person: the manager chain, the People team, Admin (the route checks the person)." },
-  { module: "sops", action: "create", rule: "member", note: "EDIT on the SOP folder (the route's canWriteToFolder); unfiled = any Member." },
-  { module: "sops", action: "edit", rule: "member", note: "EDIT on the SOP folder (the route's canWriteToFolder); unfiled = any Member." },
-  { module: "sops", action: "publish", rule: "publish-toggle", note: "Toggle 7: editors, or Admins and the People team." },
+  { module: "sops", action: "create", rule: "member", narrowOnly: true, note: "EDIT on the SOP folder (the route's canWriteToFolder); never wider than today's cell until step 6 checks the SOP itself." },
+  { module: "sops", action: "edit", rule: "member", narrowOnly: true, note: "EDIT on the SOP folder (the route's canWriteToFolder); never wider than today's cell, so no Member edits another person's unfiled draft." },
+  { module: "sops", action: "publish", rule: "publish-toggle", narrowOnly: true, note: "Toggle 7: editors, or Admins and the People team; never wider than today's cell." },
   { module: "sops", action: "delete", rule: "owner-admin", note: "Full on the folder or the author (spec 9) needs the object; Owner and Admin until step 6." },
   { module: "policies", action: "create", rule: "owner-admin-people-team", note: "Policies: Admin and the People team." },
   { module: "announcements", action: "create", rule: "owner-admin-people-team", note: "Org announcements: Admin and the People team (a Space announcement needs Full on the Space)." },
@@ -95,4 +108,23 @@ export function matrixCellAllowed(
     case "publish-toggle":
       return access.whoCanPublish === "editors" ? true : admin || v.peopleTeam;
   }
+}
+
+/**
+ * The answer hasPermission gives under ACCESS_V2_RESOLVER for a cell this
+ * table owns: the rule, or for a `narrowOnly` row the rule AND today's stored
+ * answer. Null when the table does not own the cell. The parity job calls
+ * this same function, so the report measures what the server enforces.
+ */
+export function matrixCellDecision(
+  module: string,
+  action: string,
+  v: MatrixViewer,
+  access: Pick<AccessSettings, "whoCanPublish">,
+  stored: boolean,
+): boolean | null {
+  const row = matrixCellRow(module, action);
+  if (!row) return null;
+  const rule = matrixCellAllowed(module, action, v, access) === true;
+  return row.narrowOnly ? rule && stored : rule;
 }

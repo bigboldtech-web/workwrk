@@ -64,7 +64,10 @@ export async function PATCH(req: Request, { params }: Params) {
     if (!sessionIsWorkspaceAdmin(session) && target.ownerId !== u.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
     }
-    await close(request.id, "DENIED", u.id);
+    // Claim the answer first: one conditional update, so when two people
+    // answer at once exactly one wins and the other is told it is closed
+    // (no decline row for access that was granted, no second inbox row).
+    if (!(await claim(request.id, "DENIED", u.id))) return closedNow(request.id);
     await tell(request.requesterId, `${actorName} declined your request`, "Ask them directly if you still need it.", target.link);
     await logActivity({
       organizationId: u.organizationId,
@@ -84,13 +87,18 @@ export async function PATCH(req: Request, { params }: Params) {
   const ctx = await nodeCtxFromSession();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   const role = parsed.data.role ?? (request.role as "VIEW" | "COMMENT" | "EDIT");
+  // Claim the answer BEFORE the grant is written, so a decline racing this
+  // grant loses (409) instead of both succeeding. If the grant is then
+  // refused (not a Full holder, a Private note, ...), the claim is released
+  // and the request is pending again for someone who can answer it.
+  if (!(await claim(request.id, "APPROVED", u.id))) return closedNow(request.id);
   try {
     await setNodeGrant(ctx, node, { userId: request.requesterId, role, mode: "raise" }, "dialog");
   } catch (err) {
+    await release(request.id, u.id);
     if (err instanceof GrantError) return NextResponse.json({ error: err.code, message: err.message }, { status: err.status, headers: NO_STORE });
     throw err;
   }
-  await close(request.id, "APPROVED", u.id);
   // grants.ts already tells the requester ("Shared with you", access_granted).
   const word = role === "EDIT" ? "Can edit" : role === "COMMENT" ? "Can comment" : "Can view";
   await logActivity({
@@ -105,8 +113,28 @@ export async function PATCH(req: Request, { params }: Params) {
   return NextResponse.json({ ok: true, status: "APPROVED", role }, { headers: NO_STORE });
 }
 
-async function close(id: string, status: "APPROVED" | "DENIED", deciderId: string) {
-  await prisma.accessRequest.updateMany({ where: { id, status: "PENDING" }, data: { status, decidedById: deciderId, decidedAt: new Date() } });
+/** Move a PENDING request to its answer. False when someone else answered it first. */
+async function claim(id: string, status: "APPROVED" | "DENIED", deciderId: string): Promise<boolean> {
+  const r = await prisma.accessRequest.updateMany({ where: { id, status: "PENDING" }, data: { status, decidedById: deciderId, decidedAt: new Date() } });
+  return r.count === 1;
+}
+
+/**
+ * Undo this person's APPROVED claim after the grant was refused. If the
+ * requester opened a fresh request meanwhile (the one-PENDING index then
+ * refuses the revert), this row closes as CANCELLED and the fresh one stands.
+ */
+async function release(id: string, deciderId: string): Promise<void> {
+  try {
+    await prisma.accessRequest.updateMany({ where: { id, status: "APPROVED", decidedById: deciderId }, data: { status: "PENDING", decidedById: null, decidedAt: null } });
+  } catch {
+    await prisma.accessRequest.updateMany({ where: { id, status: "APPROVED", decidedById: deciderId }, data: { status: "CANCELLED" } }).catch(() => {});
+  }
+}
+
+async function closedNow(id: string) {
+  const row = await prisma.accessRequest.findUnique({ where: { id }, select: { status: true } });
+  return NextResponse.json({ error: "closed", status: row?.status ?? "CANCELLED" }, { status: 409, headers: NO_STORE });
 }
 
 async function tell(userId: string, title: string, message: string, link: string | null) {

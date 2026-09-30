@@ -100,6 +100,8 @@ export async function hydrate(
         accessLevel: true,
         // Phase 8 stage E: the Admin scopes, read only with ACCESS_V2_TABLES on.
         adminScopes: true,
+        // ACCESS_V2_TABLES: read only to narrow a Member to a Guest (org-role.ts).
+        orgRole: true,
       },
     }),
     reportTreeFor(viewer.userId),
@@ -122,7 +124,7 @@ export async function hydrate(
   let v2: Pick<Viewer, "orgRole" | "isAgent" | "adminScopes"> | null = null;
   if (accessV2Tables() && row && storedLevel) {
     const pick = orgRoleOf({ accessLevel: storedLevel }) === "ADMIN" ? (await ownerIdsFor(viewer.organizationId)).includes(viewer.userId) : false;
-    const role = effectiveOrgRole(storedLevel, pick);
+    const role = effectiveOrgRole(storedLevel, pick, row.orgRole);
     v2 = { orgRole: role, isAgent: effectiveIsAgent(storedLevel), adminScopes: effectiveAdminScopes(role, row.adminScopes) };
   }
 

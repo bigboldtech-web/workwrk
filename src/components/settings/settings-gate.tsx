@@ -23,61 +23,35 @@
 
 import type { ReactNode } from "react";
 import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
-import { isOrgAdminViewer, requireManagerTierViewer } from "@/lib/route-guard";
 import { AdminOnly, AskAnAdminStrip } from "@/components/access";
 import { listOrgAdmins } from "@/lib/access/admins";
-import { sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { sessionIsSettingsReader, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsDoorAllows, settingsReaderPagesFor } from "@/lib/access/settings-door";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
-import { LEGACY_SETTINGS_RULES, OWNER_SETTINGS_PAGES as OWNER_PAGES, type LegacySettingsRule } from "@/lib/access/settings-legacy";
+import { LEGACY_SETTINGS_RULES, type LegacySettingsRule } from "@/lib/access/settings-legacy";
 import type { SettingsPageKey } from "@/lib/access/types";
-import { can, viewerFromSession } from "@/lib/access/index";
-import { accessV2Resolver, delegateOn, settingsGateLogOnly } from "@/lib/access/flags";
-import { SETTINGS_PAGE_GATES } from "@/lib/access/settings";
-import { engineWithOwnerFloor, logSettingsGateDisagreement, settingsGateDecision, settingsGateMode } from "@/lib/access/settings-gate-engine";
+import { delegateOn } from "@/lib/access/flags";
 import AccountProfilePage from "@/app/(dashboard)/account/profile/page";
 import { ActiveSettingsRow } from "./settings-active-row";
 
 export type { LegacySettingsRule };
 export { LEGACY_SETTINGS_RULES };
 
-async function legacySettingsGate(page: SettingsPageKey): Promise<boolean> {
-  const rule = LEGACY_SETTINGS_RULES[page];
-  if (!rule) return true;
-  const ok = rule === "admin" ? await isOrgAdminViewer() : await requireManagerTierViewer();
-  if (!ok || !OWNER_PAGES.has(page)) return ok;
-  // With SETTINGS_OWNER_SPLIT on, an Admin who is not an Owner gets the
-  // AdminOnly card on these three; off (the default), every Admin opens them.
-  return sessionMayManageOwnerPage(await getServerSession(authOptions));
-}
-
 /**
- * The door gate. Today's table while the flags are off; with
- * SETTINGS_GATE_LOG_ONLY on the engine is asked too and every disagreement
- * is logged (today still decides); with ACCESS_V2_RESOLVER on (log-only off)
- * the engine decides, the Owner split's floor kept (settings-gate-engine.ts).
+ * The door gate: ONE decision shared with the reader sidebar in /api/boot and
+ * the data APIs behind the reader pages (src/lib/access/settings-door.ts).
+ * Today's table while the flags are off; with SETTINGS_GATE_LOG_ONLY on the
+ * engine is asked too and every disagreement is logged (today still decides);
+ * with ACCESS_V2_RESOLVER on (log-only off) the engine decides, the Owner
+ * split's floor kept (settings-gate-engine.ts).
  */
 export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean> {
-  const legacy = await legacySettingsGate(page);
-  const mode = settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() });
-  if (mode === "legacy" || !LEGACY_SETTINGS_RULES[page]) return legacy;
   const session = await getServerSession(authOptions);
-  const viewer = await viewerFromSession();
-  if (!viewer) return legacy;
-  const decision = await can(viewer, "view", { type: "settings", page });
-  const ownerPage = OWNER_PAGES.has(page);
-  const inputs = {
-    legacy,
-    engine: decision.allowed,
-    ownerPage,
-    workspaceAdmin: sessionIsWorkspaceAdmin(session),
-    mayManageOwnerPage: ownerPage ? await sessionMayManageOwnerPage(session) : false,
-  };
-  const verdict = settingsGateDecision(mode, inputs);
-  if (verdict.disagree) {
-    logSettingsGateDisagreement({ userId: viewer.userId, organizationId: viewer.organizationId, page, legacy, engine: engineWithOwnerFloor(inputs), mode });
-  }
-  return verdict.allowed;
+  // Signed out: the sign-in page, as the route-guard gates this replaced did.
+  if (!session?.user) redirect("/login");
+  return settingsDoorAllows(page, session);
 }
 
 /**
@@ -106,12 +80,10 @@ export async function SettingsDenied({ page }: { page: SettingsPageKey }) {
   // (the manager tier opens none); under today's table the manager-tier three.
   let openable: { label: string; href: string }[] | undefined;
   if (delegateOn("settings")) {
-    const viewer = await viewerFromSession();
-    openable = viewer?.peopleTeam
-      ? (Object.entries(SETTINGS_PAGE_GATES) as [SettingsPageKey, { peopleTeamRead?: boolean }][])
-          .filter(([, g]) => g.peopleTeamRead === true)
-          .map(([k]) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href }))
-      : undefined;
+    // The pages the one door decision opens for them (settings-door.ts), the
+    // same list the frame's reader sidebar draws.
+    const pages = await settingsReaderPagesFor(session);
+    openable = pages.length > 0 ? pages.map((k) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href })) : undefined;
   } else {
     openable = sessionIsSettingsReader(session)
       ? (Object.entries(LEGACY_SETTINGS_RULES) as [SettingsPageKey, LegacySettingsRule][])

@@ -137,6 +137,8 @@ export async function POST(req: NextRequest) {
       lastName: familyName,
       status: active ? "ACTIVE" : "INACTIVE",
       passwordHash: unmatchablePasswordHash(),
+      // The org-role mirror, written with the level (spec 10 step 0).
+      orgRole: "MEMBER",
       // Every provisioned person arrives as a Member (the schema default
       // level). Owner, Admin and Agent are set in WorkwrK, never by the
       // identity provider (settings-architecture 5.9).

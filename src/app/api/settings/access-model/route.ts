@@ -14,15 +14,21 @@ import { accessV2Resolver, accessV2Tables, settingsGateLogOnly } from "@/lib/acc
 import { parseAccessSettings } from "@/lib/access/settings";
 import { toggleStatuses } from "@/lib/access/toggle-status";
 import { hasStoredMatrix } from "@/lib/access/matrix-retire";
-import { ownerSplitOn, sessionIsSettingsReader, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { ownerSplitOn, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!sessionIsSettingsReader(session)) return NextResponse.json({ error: "no_access", page: "access" }, { status: 403 });
+  if (!(await settingsDoorAllows("access", session))) return NextResponse.json({ error: "no_access", page: "access" }, { status: 403 });
   const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
   const settings = (org?.settings as Record<string, unknown> | null) ?? {};
+  const retired = await prisma.activityLog.findFirst({
+    where: { organizationId: orgId, type: "access.matrix_retired" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
   const flags = { resolver: accessV2Resolver(), tables: accessV2Tables(), logOnly: settingsGateLogOnly(), ownerSplit: ownerSplitOn() };
   return NextResponse.json(
     {
@@ -33,6 +39,11 @@ export async function GET() {
       statuses: toggleStatuses(flags),
       matrixDecides: !flags.resolver,
       matrixStored: hasStoredMatrix(settings),
+      // Whether the retired grid's copy is on Data > Export yet, and whether
+      // THIS reader may open Data to download it (Owner only; every Admin
+      // until the Owner split), so the Access page never links a denial.
+      matrixRetiredAt: retired?.createdAt.toISOString() ?? null,
+      mayExportMatrix: await sessionMayManageOwnerPage(session),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

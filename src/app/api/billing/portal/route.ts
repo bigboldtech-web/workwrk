@@ -12,7 +12,7 @@ import { createPortalSession, isBillingLive } from "@/services/billing";
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session, "billing"))) {
     return jsonError("Only admins can manage billing", 403);
   }
   if (!isBillingLive) {

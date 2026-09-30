@@ -22,6 +22,14 @@
  * copied until the next run (see container-copy-plan.ts for why the loader
  * does not read them in this release).
  *
+ * ONLY ITS OWN ROWS: every copy is tagged source 'copy.step7', and the diff
+ * re-roles or deletes only those (plus untagged rows from before the column
+ * that are not G5-shaped, which it adopts and tags). The step-4 backfill's
+ * reach-preservation rows (source 'backfill.g5': the Space owner's Full on a
+ * Private List, which has no member twin by design) and any row another
+ * writer made are never touched, and the write asserts their count is the
+ * same after as before.
+ *
  *   DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" \
  *     npx tsx scripts/access-migrate-container-rows.ts [--org <id>] [--out report.json] [--write | --verify]
  */
@@ -29,7 +37,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
-import { copyAssertions, diffContainerCopies, GOAL_COPY_ROLE, type CopyObjectType, type CopyRow, type MemberRow } from "../src/lib/access/container-copy-plan";
+import { copyAssertions, COPY_SOURCE, diffContainerCopies, GOAL_COPY_ROLE, isStep7Copy, type CopyObjectType, type CopyRow, type MemberRow } from "../src/lib/access/container-copy-plan";
 
 const prisma = scriptPrisma();
 const args = process.argv.slice(2);
@@ -60,7 +68,7 @@ async function memberRows(organizationId: string): Promise<{ rows: MemberRow[]; 
 
 async function copyRows(organizationId: string, db: { $queryRaw: typeof prisma.$queryRaw } = prisma): Promise<CopyRow[]> {
   return db.$queryRaw<CopyRow[]>`
-    SELECT "id", "objectType", "objectId", "subjectId", "role"::text AS "role"
+    SELECT "id", "objectType", "objectId", "subjectId", "role"::text AS "role", "source", "objectRole"
     FROM "AccessGrant"
     WHERE "organizationId" = ${organizationId} AND "subjectType" = 'USER' AND "objectType" IN ('SPACE', 'FOLDER', 'LIST', 'GOAL')`;
 }
@@ -79,9 +87,13 @@ async function main() {
   let failed = 0;
   for (const o of orgs) {
     const { rows, goalGroupRows } = await memberRows(o.id);
-    const copies = await copyRows(o.id);
-    const diff = diffContainerCopies(rows, copies);
+    const all = await copyRows(o.id);
+    const copies = all.filter((r) => isStep7Copy(r));
+    const untagged = copies.filter((r) => r.source !== COPY_SOURCE).map((r) => r.id);
+    const diff = diffContainerCopies(rows, all);
     const members = countBy(rows);
+    const heldKeys = new Set(all.filter((r) => !isStep7Copy(r)).map((r) => `${r.objectType}:${r.objectId}:${r.subjectId}`));
+    const held = countBy(rows.filter((r) => heldKeys.has(`${r.objectType}:${r.objectId}:${r.userId}`)));
     const entry: Record<string, unknown> = {
       organizationId: o.id,
       name: o.name,
@@ -91,12 +103,18 @@ async function main() {
       update: diff.update.length,
       remove: diff.remove.length,
       equal: diff.equal,
+      protectedKept: diff.protectedKept,
+      heldByProtected: diff.heldByProtected,
+      adoptUntagged: untagged.length,
       goalGroupRowsKept: goalGroupRows,
     };
-    const changes = diff.insert.length + diff.update.length + diff.remove.length;
-    drift += changes;
+    // Drift is a copy that differs from its member row. Tagging an untagged
+    // copy from a run before the source column is bookkeeping a --write does,
+    // not drift, so --verify does not fail on it.
+    const changes = diff.insert.length + diff.update.length + diff.remove.length + untagged.length;
+    drift += diff.insert.length + diff.update.length + diff.remove.length;
     if (rows.length || copies.length) {
-      console.log(`${o.name} (${o.id}): members ${JSON.stringify(members)}  insert ${diff.insert.length}  re-role ${diff.update.length}  delete ${diff.remove.length}  equal ${diff.equal}  goal group rows kept in GoalAssignee ${goalGroupRows}`);
+      console.log(`${o.name} (${o.id}): members ${JSON.stringify(members)}  insert ${diff.insert.length}  re-role ${diff.update.length}  delete ${diff.remove.length}  equal ${diff.equal}  protected kept ${diff.protectedKept}  tag ${untagged.length}  goal group rows kept in GoalAssignee ${goalGroupRows}`);
     }
     if (WRITE && changes > 0) {
       try {
@@ -104,22 +122,28 @@ async function main() {
           const now = new Date();
           for (const m of diff.insert) {
             await tx.$executeRaw`
-              INSERT INTO "AccessGrant" ("id", "organizationId", "objectType", "objectId", "subjectType", "subjectId", "role", "objectRole", "createdAt", "updatedAt")
-              VALUES (${randomUUID()}, ${o.id}, ${m.objectType}, ${m.objectId}, 'USER', ${m.userId}, ${m.role}::"SpaceRole", ${m.objectType === "GOAL" ? "VIEW" : null}, ${m.createdAt}, ${now})
-              ON CONFLICT ("objectType", "objectId", "subjectType", "subjectId") DO UPDATE SET "role" = EXCLUDED."role", "updatedAt" = EXCLUDED."updatedAt"`;
+              INSERT INTO "AccessGrant" ("id", "organizationId", "objectType", "objectId", "subjectType", "subjectId", "role", "objectRole", "source", "createdAt", "updatedAt")
+              VALUES (${randomUUID()}, ${o.id}, ${m.objectType}, ${m.objectId}, 'USER', ${m.userId}, ${m.role}::"SpaceRole", ${m.objectType === "GOAL" ? "VIEW" : null}, ${COPY_SOURCE}, ${m.createdAt}, ${now})
+              ON CONFLICT ("objectType", "objectId", "subjectType", "subjectId") DO UPDATE SET "role" = EXCLUDED."role", "updatedAt" = EXCLUDED."updatedAt"
+              WHERE "AccessGrant"."source" = ${COPY_SOURCE}`;
           }
           for (const u of diff.update) {
-            await tx.$executeRaw`UPDATE "AccessGrant" SET "role" = ${u.role}::"SpaceRole", "updatedAt" = ${now} WHERE "id" = ${u.id}`;
+            await tx.$executeRaw`UPDATE "AccessGrant" SET "role" = ${u.role}::"SpaceRole", "source" = ${COPY_SOURCE}, "updatedAt" = ${now} WHERE "id" = ${u.id}`;
+          }
+          if (untagged.length) {
+            // Adopt the untagged copies from a run before the source column.
+            await tx.$executeRaw`UPDATE "AccessGrant" SET "source" = ${COPY_SOURCE} WHERE "id" = ANY(${untagged}::text[]) AND "source" IS NULL`;
           }
           if (diff.remove.length) {
-            await tx.$executeRaw`DELETE FROM "AccessGrant" WHERE "id" = ANY(${diff.remove.map((r) => r.id)}::text[])`;
+            await tx.$executeRaw`DELETE FROM "AccessGrant" WHERE "id" = ANY(${diff.remove.map((r) => r.id)}::text[]) AND ("source" = ${COPY_SOURCE} OR "source" IS NULL)`;
           }
           const after = await copyRows(o.id, tx);
-          const problems = copyAssertions(members, countBy(after));
+          const afterCopies = after.filter((r) => isStep7Copy(r));
+          const problems = copyAssertions(members, countBy(afterCopies), held, all.length - copies.length, after.length - afterCopies.length);
           if (problems.length) throw new Error(`assertion failed: ${problems.join("; ")}`);
         });
         entry.written = true;
-        console.log("  WRITTEN (one transaction; copies equal member rows per type)");
+        console.log("  WRITTEN (one transaction; copies equal member rows per type; protected rows unchanged)");
       } catch (err) {
         failed++;
         entry.written = false;

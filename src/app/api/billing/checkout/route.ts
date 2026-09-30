@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   // Only org admins can initiate billing.
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session, "billing"))) {
     return jsonError("Only admins can manage billing", 403);
   }
 

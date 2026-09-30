@@ -65,6 +65,9 @@ if (flag("--help")) {
       "  --sections a,b          legacy (transcription against the engine) and/or node (node-access, item-gate,",
       "                          sop-access, canSeeGoal and the settings door against the engine); default both",
       "  --node-per-kind N       objects per kind per org in the node section (default 60; 400 with --all)",
+      "  --prove-tables          evaluate as if ACCESS_V2_TABLES=true (this job's process only, still read-only):",
+      "                          the node section proves nothing with the flag off, so the nightly row passes this",
+      "  --prove-resolver        evaluate as if ACCESS_V2_RESOLVER=true (this job's process only, still read-only)",
     ].join("\n"),
   );
   process.exit(0);
@@ -82,11 +85,21 @@ function dayOfYear(d = new Date()) {
   return Math.floor((d.getTime() - start) / 86400000);
 }
 const OFFSET = flag("--rotate") ? dayOfYear() : Math.max(0, Number(option("--offset", "0")) || 0);
+// The flag state to PROVE, set in this process only (the server's own
+// environment is never touched; the session stays read-only). With
+// ACCESS_V2_TABLES off the node section's engine reads the old tables and the
+// row "tables-off-engine-reads-old-tables" explains every node case, so a
+// flag-off run cannot fail there: the week of nightly runs before the flip
+// runs with --prove-tables (scripts/CRON-SETUP.md).
+const PROVE_TABLES = flag("--prove-tables");
+const PROVE_RESOLVER = flag("--prove-resolver");
 
 // ── Environment and the read-only connection ──────────────────────
 
 dotenv.config({ path: join(ROOT, ".env.local") });
 dotenv.config({ path: join(ROOT, ".env") });
+if (PROVE_TABLES) process.env.ACCESS_V2_TABLES = "true";
+if (PROVE_RESOLVER) process.env.ACCESS_V2_RESOLVER = "true";
 
 const rawUrl = process.env.DATABASE_URL;
 if (!rawUrl) {
@@ -133,9 +146,12 @@ const prisma = baseClient.$extends({
     },
   },
 });
-// src/lib/prisma.ts reuses a cached client from globalThis when it carries
-// every model delegate, which the extended client does.
+// src/lib/prisma.ts reuses the client cached for ITS PrismaClient class in
+// globalThis.prismaByClass (src/lib/prisma-cache.ts) when the shape matches,
+// so the app modules the job loads run on this read-only, write-refusing
+// client too. The older globalThis.prisma key is kept for any reader of it.
 globalThis.prisma = prisma;
+globalThis.prismaByClass = new WeakMap([[PrismaClient, prisma]]);
 
 const [{ prisma: appPrisma }, facts, harness] = await Promise.all([
   import(pathToFileURL(join(ROOT, "src/lib/prisma.ts")).href),
@@ -440,7 +456,10 @@ if (DRY_RUN) {
 }
 
 const { flagSummary } = await import(pathToFileURL(join(ROOT, "src/lib/access/flags.ts")).href);
-console.log(`flags: ${flagSummary()}`);
+console.log(`flags: ${flagSummary()}${PROVE_TABLES || PROVE_RESOLVER ? "   (proved in this job's process only)" : ""}`);
+if (SECTIONS.has("node") && process.env.ACCESS_V2_TABLES !== "true") {
+  console.log("WARNING: ACCESS_V2_TABLES is off, so the node section cannot fail (every node case is explained by tables-off-engine-reads-old-tables). Pass --prove-tables to prove the flip state.");
+}
 
 const cases = [];
 if (SECTIONS.has("legacy")) for (const pair of pairs) cases.push(...(await casesFor(pair)));

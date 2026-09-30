@@ -12,6 +12,7 @@
 // line's manager_cycle check (PATCH /api/users/[id]) never saw dotted lines.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
@@ -58,7 +59,7 @@ async function peopleBelow(organizationId: string, subjectId: string): Promise<S
 /** The same writers as PUT: the pickers only ask for `below` when they can write. */
 function writesDottedLines(ctx: PeopleCtx, id: string): boolean {
   const relation = relationTo(ctx, id);
-  return canWritePersonGroup("placement", relation, { managerTierSelf: false }) && relation !== "self";
+  return canWritePersonGroup("placement", relation, { managerTierSelf: false, chainWritesMembership: !accessV2Resolver() }) && relation !== "self";
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

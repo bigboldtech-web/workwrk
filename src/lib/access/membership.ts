@@ -233,10 +233,14 @@ async function applyRoleChangeIn(
   }
   await db.user.update({
     where: { id: target.id },
-    // Phase 8 stage E: a role change clears the step-8 mirror columns (the
-    // backfill's orgRole and any Admin scopes), so a stale value can never
-    // outlive the level it was written for.
-    data: { accessLevel: plan.level as never, orgRole: null, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
+    // Phase 8 stage E: the org-role mirror is dual-written with the level on
+    // every role change (spec 10 step 0), from the plan computed under the
+    // role lock, and the Admin scopes are cleared (a scope is granted to an
+    // Admin, never carried through a role change). The column is not an
+    // authority in this release: the live Owner pick decides (org-role.ts
+    // effectiveOrgRole), and step 8 re-derives every row from the live rule
+    // before the column ever decides (scripts/MIGRATIONS.md).
+    data: { accessLevel: plan.level as never, orgRole: plan.afterRole, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
   });
   // The membership row for this workspace mirrors the role (the workspace
   // switcher and the fallback out of a suspended workspace read it).

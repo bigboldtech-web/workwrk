@@ -99,7 +99,7 @@ const TOGGLE_ENFORCEMENT: Record<`toggle.${ToggleKey}`, string> = {
   "toggle.peopleTeam": "can(person), review / policy / survey / asset routes",
   "toggle.whoCanPublish": "PATCH /api/sops/[id], PATCH /api/policies/[id]",
   "toggle.whoCanDelete": "container DELETE routes",
-  "toggle.guestExpiryDays": "grants.ts (default expiresAt on Guest grants)",
+  "toggle.guestExpiryDays": "NOT YET: planned in grants.ts (a default expiresAt on Guest grants); nothing writes expiresAt today, and only the engine's resolve.ts (rule 20) reads it, not access-grant-store.ts",
   "toggle.publicLinks": "SOP.shareToken, DataTable.isPublic, FormDefinition.isPublic",
 };
 

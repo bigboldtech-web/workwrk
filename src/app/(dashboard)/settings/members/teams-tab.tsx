@@ -1,11 +1,12 @@
 "use client";
 
 // Members > Teams (access-model-spec 3.4, Phase 8 stage E): named groups of
-// people. Owners and Admins make a Team, rename it, add and remove people,
-// mark a lead and archive it; everyone who opens Members reads them. The
-// caption is honest about what a Team does today: it is a saved group, and
-// sharing with a whole Team arrives with the new access engine (a Team is not
-// yet a principal in the share dialog).
+// people. Owners and Admins make a Team, rename it (Rename in the card
+// header), add and remove people, mark a lead and archive it; everyone who
+// opens Members reads them. The caption is honest about what a Team does
+// today: it is a saved group, and sharing with a whole Team arrives with the
+// new access engine (a Team is not yet a principal in the share dialog). The
+// Lead mark is a label on the Team today: nothing else reads it yet.
 
 import { useCallback, useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
@@ -113,6 +114,8 @@ function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; 
   const [results, setResults] = useState<PickerOption[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(team.name);
   const confirm = useConfirm();
 
   useEffect(() => {
@@ -127,16 +130,23 @@ function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; 
     return () => { alive = false; clearTimeout(t); };
   }, [open, q, team.members]);
 
-  const patch = async (body: Record<string, unknown>) => {
+  const patch = async (body: Record<string, unknown>): Promise<boolean> => {
     setBusy(true);
     setErr(null);
     const r = await apiFetch(`/api/settings/teams/${team.id}`, { method: "PATCH", json: body });
     setBusy(false);
     if (!r.ok) {
-      setErr(r.error || "Couldn't save");
-      return;
+      setErr(r.status === 409 ? "A team with that name already exists." : r.error || "Couldn't save");
+      return false;
     }
     onChanged();
+    return true;
+  };
+
+  const rename = async () => {
+    const next = nameDraft.trim();
+    if (!next || next === team.name) { setRenaming(false); setNameDraft(team.name); return; }
+    if (await patch({ name: next })) setRenaming(false);
   };
 
   const archive = async () => {
@@ -150,8 +160,33 @@ function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; 
   return (
     <section className="rounded-lg border border-line bg-raised p-4" aria-label={team.name}>
       <header className="mb-3 flex items-center gap-2">
-        <h3 className="m-0 min-w-0 flex-1 truncate text-row font-semibold text-ink">{team.name}</h3>
+        {renaming ? (
+          <form className="flex min-w-0 flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); void rename(); }}>
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") { setRenaming(false); setNameDraft(team.name); } }}
+              maxLength={80}
+              autoFocus
+              aria-label={`New name for ${team.name}`}
+              className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-base text-ink"
+            />
+            <button type="submit" disabled={busy || !nameDraft.trim()} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-brand-deep hover:bg-hover disabled:text-ink-3">
+              Save
+            </button>
+            <button type="button" onClick={() => { setRenaming(false); setNameDraft(team.name); }} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <h3 className="m-0 min-w-0 flex-1 truncate text-row font-semibold text-ink">{team.name}</h3>
+        )}
         <span className="text-sm text-ink-2">{team.members.length === 1 ? "1 person" : `${team.members.length} people`}</span>
+        {canEdit && !renaming ? (
+          <button type="button" onClick={() => { setNameDraft(team.name); setRenaming(true); }} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+            Rename
+          </button>
+        ) : null}
         {canEdit ? (
           <button type="button" onClick={() => { void archive(); }} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
             Archive

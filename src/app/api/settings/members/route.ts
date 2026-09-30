@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sessionIsSettingsReader, sessionIsWorkspaceOwner } from "@/lib/access/workspace-admin";
+import { ownerSplitOn, sessionIsWorkspaceOwner } from "@/lib/access/workspace-admin";
+import { accessV2Tables } from "@/lib/access/flags";
 import { listMembers, peopleTeamIdsFor, MEMBER_SORTS, type MemberQuery, type MemberSort } from "@/lib/access/members-list.server";
 import { roleCountsFor } from "@/lib/access/role-counts";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
 
 // GET /api/settings/members: the Members list (settings spec `/settings/
 // members`). Server search, filters, sort and pages of 50. The whole org for
@@ -18,7 +20,7 @@ export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!sessionIsSettingsReader(session)) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403 });
+  if (!(await settingsDoorAllows("members", session))) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403 });
   const ctx = await peopleCtx();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -55,6 +57,10 @@ export async function GET(req: NextRequest) {
       counts,
       scope: orgWide ? "org" : "team",
       viewer: { id: ctx.userId, isOwner, canEdit: ctx.isAdmin, canEditPeopleFields: ctx.isAdmin || ctx.peopleTeam },
+      // Admin scopes open Billing, or Security and API keys, only while the
+      // Owner split is on AND the scopes are read (ACCESS_V2_TABLES): the
+      // drawer shows the control as live only then.
+      scopesLive: ownerSplitOn() && accessV2Tables(),
       peopleTeam: { configured: team.configured, ids: [...team.ids] },
     },
     { headers: { "Cache-Control": "no-store" } },

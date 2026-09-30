@@ -95,6 +95,19 @@ export interface OrgBackfillPlan {
     adminKeysWithNonAdminCreator: { id: string; name: string; creatorId: string; creatorLevel: string | null }[];
     widenedAccessToggles: boolean;
     noOwner: boolean;
+    /** Live people in the workspace (a no-Owner workspace with people needs the Staff console's Set Owner). */
+    livePeople: number;
+    /**
+     * The decided rule (the Owner is the earliest COMPANY_ADMIN) and today's
+     * pick disagree: an earlier SUPER_ADMIN keeps the earliest COMPANY_ADMIN
+     * out of Owner. The report names it for the founder's decision; the pick
+     * itself is not changed here, because the same pick guards role changes
+     * with the flags off (a later hire would otherwise become an Owner over a
+     * founder who is SUPER_ADMIN).
+     */
+    ownerPickConflict: { earliestCompanyAdmin: { id: string; name: string }; earlierSuperAdmins: { id: string; name: string }[] } | null;
+    /** People below the manager tier who gain New Space when the stored toggle 1 reads Everyone and the resolver is on. */
+    everyoneCreatesSpacesWiderThanToday: number;
     cLevelLosesSettingsWrite: { id: string; name: string }[];
   };
   userUpdates: { id: string; orgRole: OrgRole; isAgent: boolean }[];
@@ -109,6 +122,19 @@ export interface OrgBackfillPlan {
 }
 
 const EXEC_LEVELS = new Set(["C_LEVEL", "VP", "DIRECTOR"]);
+/** Who creates Spaces today (src/lib/template-center.ts SPACE_CREATE_LEVELS, copied: this file is pure). */
+const SPACE_CREATE_TODAY = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD"]);
+
+/** The earliest live COMPANY_ADMIN when an earlier SUPER_ADMIN keeps them out of today's Owner pick; else null. */
+export function ownerPickConflictOf(live: readonly Pick<BackfillUser, "id" | "name" | "accessLevel" | "createdAt">[]): OrgBackfillPlan["preflight"]["ownerPickConflict"] {
+  const t = (u: { createdAt: Date | string }) => new Date(u.createdAt).getTime();
+  const cas = live.filter((u) => u.accessLevel === "COMPANY_ADMIN").sort((a, b) => t(a) - t(b) || a.id.localeCompare(b.id));
+  const first = cas[0];
+  if (!first) return null;
+  const earlier = live.filter((u) => u.accessLevel === "SUPER_ADMIN" && (t(u) < t(first) || (t(u) === t(first) && u.id.localeCompare(first.id) < 0)));
+  if (earlier.length === 0) return null;
+  return { earliestCompanyAdmin: { id: first.id, name: first.name }, earlierSuperAdmins: earlier.map((u) => ({ id: u.id, name: u.name })) };
+}
 const MANAGER_LEVELS = new Set(["MANAGER", "TEAM_LEAD"]);
 
 /** Descendant counts over the manager graph, cycle-safe. */
@@ -210,6 +236,12 @@ export function planOrgBackfill(s: BackfillSnapshot): OrgBackfillPlan {
         .map((k) => ({ id: k.id, name: k.name, creatorId: k.createdById, creatorLevel: byId.get(k.createdById)?.accessLevel ?? null })),
       widenedAccessToggles: hasAccess && (parsed.findableSpaces || parsed.editorsCanShare),
       noOwner: ownerIds.size === 0,
+      livePeople: live.length,
+      ownerPickConflict: ownerPickConflictOf(live),
+      everyoneCreatesSpacesWiderThanToday:
+        (hasAccess ? parsed.whoCanCreateSpaces : TODAY_EQUIVALENT_ACCESS_SETTINGS.whoCanCreateSpaces) === "everyone"
+          ? live.filter((u) => !SPACE_CREATE_TODAY.has(u.accessLevel) && u.accessLevel !== "AGENT").length
+          : 0,
       cLevelLosesSettingsWrite: live.filter((u) => u.accessLevel === "C_LEVEL").map((u) => ({ id: u.id, name: u.name })),
     },
     userUpdates,

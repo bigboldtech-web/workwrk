@@ -5,7 +5,7 @@ import { FlaggedAppKeyGate } from "@/components/access/app-key-gate";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <FlaggedAppKeyGate appKey="kudos" label="Kudos" callbackUrl="/kudos" back={{ fallbackHref: "/home", label: "Home" }}>
+    <FlaggedAppKeyGate appKey="kudos" label="Kudos" callbackUrl="/kudos" back={{ fallbackHref: "/people", label: "Directory" }}>
       {children}
     </FlaggedAppKeyGate>
   );

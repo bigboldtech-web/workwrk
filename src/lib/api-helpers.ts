@@ -122,14 +122,15 @@ export async function hasPermission(
 ): Promise<boolean> {
   // ACCESS_V2_RESOLVER (default OFF): the section 9 gate rule for the cells
   // src/lib/access/matrix-rules.ts owns; every other cell keeps the matrix.
-  if (accessV2Resolver()) {
-    const { engineMatrixCell } = await import("@/lib/access/matrix-engine");
-    const engine = await engineMatrixCell(session, module, action);
-    if (engine !== null) return engine;
-  }
   const accessLevel = session.user.accessLevel as PermAccessLevel;
   const matrix = await getOrgPermissionMatrix(session);
-  return checkPermission(accessLevel, matrix, module, action);
+  const stored = checkPermission(accessLevel, matrix, module, action);
+  if (accessV2Resolver()) {
+    const { engineMatrixCell } = await import("@/lib/access/matrix-engine");
+    const engine = await engineMatrixCell(session, module, action, stored);
+    if (engine !== null) return engine;
+  }
+  return stored;
 }
 
 /**

@@ -25,7 +25,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { apiFetch } from "@/lib/api-fetch";
-import { lockItDownChanges, lockItDownPatch, type ToggleKey, type ToggleStatus } from "@/lib/access/toggle-status";
+import { liveToggleKeys, lockItDownChanges, lockItDownPatch, type ToggleKey, type ToggleStatus } from "@/lib/access/toggle-status";
 import type { AccessSettings } from "@/lib/access/types";
 
 interface AccessModel {
@@ -34,9 +34,14 @@ interface AccessModel {
   toggles: AccessSettings;
   statuses: ToggleStatus[];
   matrixDecides: boolean;
+  matrixStored?: boolean;
+  matrixRetiredAt?: string | null;
+  mayExportMatrix?: boolean;
 }
 
-type RowState = { savedAt?: number; error?: string | null };
+// `intended` is the value the person picked when a save failed, so Retry
+// sends THAT value again (the row shows the stored value meanwhile).
+type RowState = { savedAt?: number; error?: string | null; intended?: unknown };
 
 const OPTIONS: Partial<Record<ToggleKey, { value: string; label: string }[]>> = {
   whoCanCreateSpaces: [
@@ -76,6 +81,8 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
   const [model, setModel] = useState<AccessModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<Partial<Record<ToggleKey, RowState>>>({});
+  const [lockError, setLockError] = useState<{ message: string; keys: ToggleKey[] } | null>(null);
+  const [locking, setLocking] = useState(false);
   const showUpcoming = useShowUpcoming();
   const confirm = useConfirm();
 
@@ -97,13 +104,15 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
 
   const save = async (key: ToggleKey, value: unknown) => {
     if (!model) return;
-    const prev = model.toggles;
-    setModel({ ...model, toggles: { ...prev, [key]: value } as AccessSettings });
+    // Roll back THIS key alone on a failure: a second switch saved meanwhile
+    // keeps its own value.
+    const before = model.toggles[key];
+    setModel((m) => (m ? { ...m, toggles: { ...m.toggles, [key]: value } as AccessSettings } : m));
     setRows((r) => ({ ...r, [key]: { error: null } }));
     const res = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: { [key]: value } } });
     if (!res.ok) {
-      setModel((m) => (m ? { ...m, toggles: prev } : m));
-      setRows((r) => ({ ...r, [key]: { error: res.error || "Couldn't save" } }));
+      setModel((m) => (m ? { ...m, toggles: { ...m.toggles, [key]: before } as AccessSettings } : m));
+      setRows((r) => ({ ...r, [key]: { error: res.error || "Couldn't save", intended: value } }));
       return;
     }
     setRows((r) => ({ ...r, [key]: { savedAt: Date.now(), error: null } }));
@@ -111,7 +120,9 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
 
   const lockItDown = async () => {
     if (!model) return;
-    const changes = lockItDownChanges(model.toggles);
+    setLockError(null);
+    const liveKeys = liveToggleKeys(model.statuses);
+    const changes = lockItDownChanges(model.toggles, liveKeys);
     if (changes.length === 0) return;
     const labels = changes.map((k) => model.statuses.find((s) => s.key === k)?.label ?? k).join(", ");
     const ok = await confirm({
@@ -121,9 +132,21 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
       destructive: false,
     });
     if (!ok) return;
-    const res = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: lockItDownPatch() } });
-    if (res.ok) await load();
-    else setError(res.error || "Couldn't lock it down");
+    await applyLock(liveKeys);
+  };
+
+  const applyLock = async (liveKeys: ToggleKey[]) => {
+    setLocking(true);
+    const res = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: lockItDownPatch(liveKeys) } });
+    setLocking(false);
+    if (res.ok) {
+      setLockError(null);
+      await load();
+    } else {
+      // Nothing changed on the server (one PATCH, one statement): say so, and
+      // offer the same change again.
+      setLockError({ message: res.error || "Couldn't lock it down", keys: liveKeys });
+    }
   };
 
   if (error && !model) {
@@ -190,7 +213,7 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
       readOnlyValue={readOnly(s)}
       enforcedAt={s.enforcedAt}
       savedAt={rows[s.key]?.savedAt ?? null}
-      error={rows[s.key]?.error ? { message: rows[s.key]?.error ?? undefined, onRetry: () => { void save(s.key, model.toggles[s.key]); } } : null}
+      error={rows[s.key]?.error ? { message: rows[s.key]?.error ?? undefined, onRetry: () => { const st = rows[s.key]; void save(s.key, st && "intended" in st ? st.intended : model.toggles[s.key]); } } : null}
     />
   );
 
@@ -200,7 +223,7 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
     <button
       type="button"
       onClick={() => { void lockItDown(); }}
-      disabled={lockItDownChanges(model.toggles).length === 0}
+      disabled={locking || lockItDownChanges(model.toggles, liveToggleKeys(model.statuses)).length === 0}
       className="os-chrome inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:cursor-default disabled:text-ink-3"
     >
       <ShieldCheck className="h-4 w-4" strokeWidth={1.5} aria-hidden />
@@ -213,9 +236,26 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
       title="Access switches"
       id="access.toggles"
       wide="access.toggles"
-      description={model.flags.resolver ? "Who creates, shares, publishes and invites. Every switch here is enforced." : "The switches the product reads today. The rest arrive with the new access engine."}
+      description={
+        later.length === 0
+          ? "Who creates, shares, publishes and invites. Every switch here is enforced."
+          : "The switches the product reads today. The rest arrive with the new access engine, under Show upcoming features."
+      }
       actions={model.flags.resolver ? lockButton : undefined}
     >
+      {lockError ? (
+        <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger-text">
+          <span>{lockError.message}. Nothing was changed.</span>
+          <button
+            type="button"
+            onClick={() => { void applyLock(lockError.keys); }}
+            disabled={locking}
+            className="font-medium underline-offset-2 hover:underline disabled:opacity-60"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
       <div className="flex flex-col">{live.map(row)}</div>
       {showUpcoming && later.length > 0 ? (
         <div className="mt-4 flex flex-col">

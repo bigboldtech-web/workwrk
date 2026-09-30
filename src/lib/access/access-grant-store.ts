@@ -95,7 +95,11 @@ export interface ObjectGrantRow {
  * by scripts/access-migrate-container-rows.ts); those are read only through
  * the engine's loader behind ACCESS_V2_TABLES, never here, so the filter keeps
  * every caller of this function seeing exactly the rows it saw before.
- * An expired row contributes nothing (rule 20).
+ * expiresAt is NOT filtered here: nothing writes it in this release (the
+ * Guest expiry switch sits behind Show upcoming features). The first writer
+ * of expiresAt must add the "expiresAt IS NULL OR expiresAt > now" predicate
+ * to this read and to objectGrants below in the same change (rule 20; only
+ * the engine's resolve.ts honours it today).
  */
 export async function viewerObjectGrants(organizationId: string, userId: string): Promise<ObjectGrantRow[]> {
   return guarded(

@@ -76,7 +76,12 @@ export default function AccessSettingsPage() {
   // enforced cells (matrix-rules.ts), so the grid retires from this page;
   // off, it keeps deciding and stays editable here.
   const [matrixDecides, setMatrixDecides] = useState(true);
-  const onModel = useCallback((m: { matrixDecides: boolean }) => setMatrixDecides(m.matrixDecides), []);
+  const [retired, setRetired] = useState<{ stored: boolean; at: string | null; mayExport: boolean }>({ stored: false, at: null, mayExport: false });
+  const [showRetired, setShowRetired] = useState(false);
+  const onModel = useCallback((m: { matrixDecides: boolean; matrixStored?: boolean; matrixRetiredAt?: string | null; mayExportMatrix?: boolean }) => {
+    setMatrixDecides(m.matrixDecides);
+    setRetired({ stored: !!m.matrixStored, at: m.matrixRetiredAt ?? null, mayExport: !!m.mayExportMatrix });
+  }, []);
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
@@ -129,7 +134,7 @@ export default function AccessSettingsPage() {
   const otherRows = (Object.entries(PERMISSION_MODULES) as [PermissionModule, (typeof PERMISSION_MODULES)[PermissionModule]][])
     .flatMap(([mod, def]) => (Object.entries(def.actions) as [string, string][]).filter(([a]) => !ENFORCED.has(`${mod}.${a}`)).map(([action, label]) => ({ mod, action, label: `${def.label}: ${label}` })));
 
-  const grid = (rows: { mod: PermissionModule; action: string; label: string }[], ariaLabel: string) => (
+  const grid = (rows: { mod: PermissionModule; action: string; label: string }[], ariaLabel: string, readOnly = false) => (
     <div className="overflow-x-auto rounded-lg border border-line">
       <table className="w-full border-collapse text-sm" aria-label={ariaLabel}>
         <thead>
@@ -151,7 +156,7 @@ export default function AccessSettingsPage() {
                   <td key={l.value} className="px-2 py-2 text-center">
                     {locked ? (
                       <Lock className="mx-auto h-3.5 w-3.5 text-ink-3" strokeWidth={1.5} aria-label={`${LEVEL_WORD[l.value]} always can`} />
-                    ) : canEdit ? (
+                    ) : canEdit && !readOnly ? (
                       <input type="checkbox" checked={on} onChange={() => toggle(l.value, r.mod, r.action)} className="h-4 w-4 accent-[var(--os-brand)]" aria-label={`${LEVEL_WORD[l.value]}: ${r.label}`} />
                     ) : (
                       <span className="text-ink-2">{on ? "Yes" : "No"}</span>
@@ -200,10 +205,37 @@ export default function AccessSettingsPage() {
 
         {!matrixDecides ? (
           <SettingsCard title="The old permissions grid" id="access.legacy">
-            <p className="text-base text-ink">
-              The grid has retired: the switches above and the fixed rules decide now. A copy of the grid as this workspace stored it is on{" "}
-              <Link href="/settings/data?tab=export" className="font-medium text-brand-deep hover:underline">Data &gt; Export</Link> once it has been exported.
-            </p>
+            <div className="flex flex-col gap-3">
+              <p className="m-0 text-base text-ink">
+                The grid has retired: the switches above and the fixed rules decide now.{" "}
+                {!retired.stored
+                  ? "This workspace never changed it, so it followed the shipped defaults."
+                  : retired.at && retired.mayExport
+                    ? <>A copy as this workspace stored it is on <Link href="/settings/data?tab=export" className="font-medium text-brand-deep hover:underline">Data &gt; Export</Link>.</>
+                    : retired.at
+                      ? "A copy as this workspace stored it is kept on Data > Export, which an Owner can download."
+                      : "The copy for Data > Export has not been written yet; the grid as stored is below, read-only."}
+              </p>
+              <div>
+                <button type="button" className="text-sm font-medium text-brand-deep hover:underline" aria-expanded={showRetired} onClick={() => setShowRetired((v) => !v)}>
+                  {showRetired ? "Hide" : "Show"} the grid as it stood (read-only)
+                </button>
+                {showRetired ? (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {loadError ? (
+                      <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
+                    ) : loading ? (
+                      <SkeletonRows rows={6} />
+                    ) : (
+                      <>
+                        {grid(legacyRows, "Retired enforced permissions", true)}
+                        {grid(otherRows, "Retired other permissions", true)}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </SettingsCard>
         ) : (
         <section aria-label="Legacy" id="access.legacy">

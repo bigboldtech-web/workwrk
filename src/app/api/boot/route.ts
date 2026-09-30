@@ -16,8 +16,9 @@
 // boot screen renders as ErrorState, never a trip to /onboard.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
-import { delegateOn } from "@/lib/access/flags";
-import { SETTINGS_PAGE_GATES } from "@/lib/access/settings";
+import { accessV2Tables, delegateOn } from "@/lib/access/flags";
+import { settingsReaderPagesFor } from "@/lib/access/settings-door";
+import { mayCreateSpace } from "@/lib/access/space-create";
 import type { SettingsPageKey } from "@/lib/access/types";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
@@ -33,7 +34,7 @@ import { getEffectivePreferences, type EffectivePreferences } from "@/lib/prefer
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
-import { orgRoleOf, isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import { orgRoleOf, isAgentOf, peopleTeamOf } from "@/lib/access/org-role";
 import { parseAccessSettings } from "@/lib/access/settings";
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { ActiveTimer } from "@/lib/realtime-events";
@@ -88,6 +89,8 @@ export interface BootPayload {
     /** Reports, solid or dotted (the access engine's rule). */
     hasReports: boolean;
     peopleTeam: boolean;
+    /** May create a Space: the answer POST /api/spaces gives (src/lib/access/space-create.ts). Optional for an older payload. */
+    canCreateSpace?: boolean;
     /**
      * Opens the Workspace Members, Access and Scoring pages below Admin (the
      * legacy manager tier, People team included: settings-gate.tsx
@@ -363,9 +366,12 @@ export async function GET(req: NextRequest) {
     // counts (spec 10 step 0 "People team = users at HR until toggle 6
     // exists"). Boot used to read a stale key alone, so an HR person's chrome
     // disagreed with every server gate that let them in.
-    const peopleTeam =
-      parseAccessSettings(settings.access).peopleTeamUserIds.includes(userId) ||
-      isSeededPeopleTeam(user.accessLevel ?? null);
+    const peopleTeam = peopleTeamOf({
+      userId,
+      accessLevel: user.accessLevel ?? null,
+      configured: parseAccessSettings(settings.access).peopleTeamUserIds,
+      tablesOn: accessV2Tables(),
+    });
 
     const accessLevel = user.accessLevel ?? null;
     const activeModules = new Set(prefs.modules.activeAppKeys);
@@ -389,7 +395,10 @@ export async function GET(req: NextRequest) {
         adminScopes: [],
         hasReports: cf.teams.hasReports,
         peopleTeam,
-        ...settingsReaderFor(accessLevel, peopleTeam),
+        // Who creates a Space: the answer POST /api/spaces gives (every New
+        // Space control reads this, never a tier of its own).
+        canCreateSpace: orgRoleOf({ accessLevel }) !== "GUEST" && !isAgentOf(accessLevel) && (await mayCreateSpace(accessLevel)),
+        ...(await settingsReaderFor(accessLevel, session)),
         candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
@@ -450,12 +459,11 @@ export async function GET(req: NextRequest) {
  * (SETTINGS_PAGE_GATES peopleTeamRead), so the frame never lists a page the
  * gate refuses.
  */
-function settingsReaderFor(accessLevel: string | null, peopleTeam: boolean): { settingsReader: boolean; settingsReaderPages?: SettingsPageKey[] } {
+async function settingsReaderFor(accessLevel: string | null, session: unknown): Promise<{ settingsReader: boolean; settingsReaderPages?: SettingsPageKey[] }> {
   if (legacyIsAdminLevel(accessLevel)) return { settingsReader: false };
   if (!delegateOn("settings")) return { settingsReader: legacyIsManagerLevel(accessLevel) };
-  if (!peopleTeam) return { settingsReader: false, settingsReaderPages: [] };
-  const pages = (Object.entries(SETTINGS_PAGE_GATES) as [SettingsPageKey, { peopleTeamRead?: boolean }][])
-    .filter(([, g]) => g.peopleTeamRead === true)
-    .map(([k]) => k);
+  // The same door decision the page gate and the reader APIs ask
+  // (src/lib/access/settings-door.ts), page by page.
+  const pages = await settingsReaderPagesFor(session);
   return { settingsReader: pages.length > 0, settingsReaderPages: pages };
 }

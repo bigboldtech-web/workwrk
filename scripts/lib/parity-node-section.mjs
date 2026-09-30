@@ -200,12 +200,14 @@ export async function runNodeSection({ root, prisma, orgs, all, perKind, viewers
       // The permission matrix's live cells (matrix-rules.ts) against the stored matrix.
       for (const row of matrixRules.MATRIX_CELL_RULES) {
         const legacy = permissions.checkPermission(level, orgMatrix, row.module, row.action);
-        const eng = matrixRules.matrixCellAllowed(row.module, row.action, {
+        // matrixCellDecision is what hasPermission enforces (a narrowOnly
+        // row intersects the rule with today's stored answer).
+        const eng = matrixRules.matrixCellDecision(row.module, row.action, {
           orgRole: viewer.orgRole,
           isAgent: viewer.isAgent,
           peopleTeam: !!viewer.peopleTeam || orgAccess.peopleTeamUserIds.includes(u.id),
           hasReports: resolve.hasReports(viewer),
-        }, orgAccess);
+        }, orgAccess, legacy);
         cases.push({
           id: `matrix:${row.module}.${row.action}:${u.id}`,
           section: "matrix",

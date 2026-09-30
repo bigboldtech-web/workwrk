@@ -5,9 +5,9 @@
 // the owner can share it. An object type with no page gets no link.
 
 import { prisma } from "@/lib/prisma";
-import { addressHref } from "@/lib/nav/object-href";
+import { addressHref, workDoorHref } from "@/lib/nav/object-href";
 
-export const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | "goal" | null> = {
+export const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | "goal" | "doc" | "table" | "canvas" | "form" | null> = {
   space: "space",
   board: "board",
   list: "board",
@@ -25,6 +25,14 @@ export const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | 
   // The goal page's read-only banner (spec-goals /okrs/[id]): a Can view
   // viewer asks the goal's owner for Can edit (no owner: the admins).
   goal: "goal",
+  // Docs, Tables, Canvases and Forms ask their creator (the Full holder by
+  // rule 5), and the inbox row opens the object's Work address, where the
+  // Manage access dialog shares it. No creator: the workspace admins.
+  doc: "doc",
+  table: "table",
+  canvas: "canvas",
+  whiteboard: "canvas",
+  form: "form",
 };
 
 export type RequestTarget = { ownerId: string | null; link: string | null };
@@ -66,6 +74,22 @@ export async function requestTargetFor(type: string, id: string, organizationId:
     if (model === "goal") {
       const g = await prisma.oKR.findFirst({ where, select: { ownerId: true } });
       return { ownerId: g?.ownerId ?? null, link: g ? `/okrs/${id}` : null };
+    }
+    if (model === "doc") {
+      const d = await prisma.doc.findFirst({ where, select: { createdById: true } });
+      return { ownerId: d?.createdById ?? null, link: d ? workDoorHref("doc", id) : null };
+    }
+    if (model === "table") {
+      const t = await prisma.dataTable.findFirst({ where, select: { createdById: true } });
+      return { ownerId: t?.createdById ?? null, link: t ? workDoorHref("table", id) : null };
+    }
+    if (model === "canvas") {
+      const w = await prisma.whiteboard.findFirst({ where, select: { ownerId: true } });
+      return { ownerId: w?.ownerId ?? null, link: w ? workDoorHref("canvas", id) : null };
+    }
+    if (model === "form") {
+      const f = await prisma.formDefinition.findFirst({ where, select: { createdById: true } });
+      return { ownerId: f?.createdById ?? null, link: f ? workDoorHref("form", id) : null };
     }
     if (model === "contract") {
       const a = await prisma.agreement.findFirst({ where, select: { createdById: true } });

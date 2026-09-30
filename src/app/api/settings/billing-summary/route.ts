@@ -15,7 +15,7 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await sessionMayManageOwnerPage(session))) return NextResponse.json({ error: "no_access", page: "billing" }, { status: 403 });
+  if (!(await sessionMayManageOwnerPage(session, "billing"))) return NextResponse.json({ error: "no_access", page: "billing" }, { status: 403 });
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const [org, members, sops, ai] = await Promise.all([

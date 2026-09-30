@@ -596,7 +596,7 @@ function HomeSidebar() {
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const activeHref = useActiveRowHref(WORK_ROWS);
-  const { counts } = useBoot();
+  const { boot, counts } = useBoot();
   const { prefs, patchPrefs } = useOsShell();
   const inboxUnread = counts.inboxUnread;
   const pathname = usePathname() || "";
@@ -605,10 +605,10 @@ function HomeSidebar() {
   // A failed Spaces read shows the one-line error with Try again (spec-shell
   // 1.2 rule 7); the section never renders empty on a failed fetch.
   const [spacesError, setSpacesError] = useState(false);
-  // POST /api/spaces refuses below the manager tier, so the Space creates
-  // (section "+", ghost row) exist only for the tier that can use them
-  // (spec-shell 2.10: a row that appears always works).
-  const canCreateSpace = canAccessTier("manager", accessLevel);
+  // The Space creates (section "+", ghost row) exist only for the people POST
+  // /api/spaces lets in (spec-shell 2.10: a row that appears always works):
+  // boot's viewer.canCreateSpace is that route's own answer.
+  const canCreateSpace = typeof boot.viewer.canCreateSpace === "boolean" ? boot.viewer.canCreateSpace : canAccessTier("manager", accessLevel);
   const [favoriteBoards, setFavoriteBoards] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteSpaces, setFavoriteSpaces] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteDocs, setFavoriteDocs] = useState<Array<{ id: string; title: string; excerpt: string | null }>>([]);

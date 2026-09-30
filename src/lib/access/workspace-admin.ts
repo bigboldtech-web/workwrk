@@ -19,6 +19,7 @@
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "./legacy-levels";
 import { ownerIdsFor } from "@/lib/admin/company-detail";
 import { prisma } from "@/lib/prisma";
+import { accessV2Tables } from "./flags";
 
 type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } } | null | undefined;
 
@@ -49,14 +50,35 @@ export async function sessionIsWorkspaceOwner(session: unknown): Promise<boolean
   return owners.includes(u.id);
 }
 
-export async function sessionMayManageOwnerPage(session: unknown): Promise<boolean> {
+/**
+ * The Owner-only pages and actions. `scope` names the Admin scope that opens
+ * this one to a non-Owner Admin (spec 6.6: "billing" for Billing, "security"
+ * for Security and API). A scope counts only while ACCESS_V2_TABLES is on,
+ * the same state in which the engine's settings gate loads the scopes, so a
+ * page the gate opens is never refused by its API and the other way round.
+ */
+export async function sessionMayManageOwnerPage(session: unknown, scope?: AdminScopeKey): Promise<boolean> {
   if (!sessionIsWorkspaceAdmin(session)) return false;
   if (!ownerSplitOn()) return true;
-  return sessionIsWorkspaceOwner(session);
+  if (await sessionIsWorkspaceOwner(session)) return true;
+  if (!scope || !accessV2Tables()) return false;
+  const u = (session as SessionLike)?.user;
+  if (!u?.id) return false;
+  const row = await prisma.user.findUnique({ where: { id: u.id }, select: { accessLevel: true, adminScopes: true, organizationId: true, deletedAt: true } });
+  return !!row && !row.deletedAt && row.organizationId === u.organizationId && row.accessLevel === "COMPANY_ADMIN" && (row.adminScopes ?? []).includes(scope);
+}
+
+export type AdminScopeKey = "billing" | "security";
+
+/** The Admin scope that opens an Owner settings page, or none (Owner only). */
+export function scopeForOwnerPage(page: string): AdminScopeKey | undefined {
+  if (page === "billing") return "billing";
+  if (page === "security" || page === "api") return "security";
+  return undefined;
 }
 
 export type FreshActor =
-  | { ok: true; level: string; admin: boolean; owner: boolean }
+  | { ok: true; level: string; admin: boolean; owner: boolean; scopes?: string[] }
   | { ok: false; status: 401 | 403; error: string; code: "stale_session" };
 
 const STALE: FreshActor = {
@@ -84,7 +106,7 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
   if (!u?.id || !u.organizationId) return { ok: false, status: 401, error: "Unauthorized", code: "stale_session" };
   const row = await prisma.user.findUnique({
     where: { id: u.id },
-    select: { deletedAt: true, status: true, accessLevel: true, organizationId: true, tokenVersion: true },
+    select: { deletedAt: true, status: true, accessLevel: true, organizationId: true, tokenVersion: true, adminScopes: true },
   });
   if (!row || row.deletedAt || row.status === "INACTIVE") return STALE;
   if (typeof u.tokenVersion === "number" && u.tokenVersion !== row.tokenVersion) return STALE;
@@ -104,12 +126,16 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
   const admin = legacyIsAdminLevel(level) && legacyIsAdminLevel(u.accessLevel);
   if (legacyIsAdminLevel(u.accessLevel) && !admin) return STALE;
   const owner = admin && (level === "SUPER_ADMIN" || (await ownerIdsFor(u.organizationId)).includes(u.id));
-  return { ok: true, level, admin, owner };
+  // Scopes are held on the person's home row; they count only there.
+  const scopes = row.organizationId === u.organizationId && level === "COMPANY_ADMIN" ? [...(row.adminScopes ?? [])] : [];
+  return { ok: true, level, admin, owner, scopes };
 }
 
 /** freshWorkspaceActor, then the Owner page rule (every Admin until SETTINGS_OWNER_SPLIT). */
-export function freshMayManageOwnerPage(a: FreshActor): boolean {
-  return a.ok && a.admin && (!ownerSplitOn() || a.owner);
+export function freshMayManageOwnerPage(a: FreshActor, scope?: AdminScopeKey): boolean {
+  if (!a.ok || !a.admin) return false;
+  if (!ownerSplitOn() || a.owner) return true;
+  return !!scope && accessV2Tables() && (a.scopes ?? []).includes(scope);
 }
 
 /**

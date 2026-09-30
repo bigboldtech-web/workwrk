@@ -104,6 +104,9 @@ export async function POST(req: Request) {
           lastName,
           organizationId: organization.id,
           accessLevel: "COMPANY_ADMIN",
+          // The workspace's first admin is its Owner (spec 2.1, the earliest
+          // COMPANY_ADMIN); the org-role mirror is written with the level.
+          orgRole: "OWNER",
           termsAcceptedAt: now,
           passwordChangedAt: now,
         },

@@ -60,6 +60,7 @@ type ListBody = {
   counts: Counts;
   scope: "org" | "team";
   viewer: { id: string; isOwner?: boolean; canEdit: boolean; canEditPeopleFields: boolean };
+  scopesLive?: boolean;
   peopleTeam: { configured: boolean; ids: string[] };
 };
 
@@ -411,6 +412,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
           canEditPeople={canEditPeople}
           viewerId={data.viewer.id}
           viewerIsOwner={!!data.viewer.isOwner}
+          scopesLive={!!data.scopesLive}
           owners={data.counts.owners}
           lookups={lookups}
           onClose={() => { setOpenRow(null); if (params.get("open")) router.replace("/settings/members"); }}
