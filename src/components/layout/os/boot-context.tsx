@@ -17,6 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BootCounts, BootPayload } from "@/app/api/boot/route";
 import { apiFetch } from "@/lib/api-fetch";
 import { FALLBACK_POLL_MS, WINDOW_EVENTS, type ActiveTimer, type RealtimeEvent } from "@/lib/realtime-events";
+import { clearsTier, parseViewerTiers, type ViewerTiers } from "@/lib/access/viewer-tiers";
 
 export type { BootCounts, BootPayload };
 
@@ -99,6 +100,18 @@ export function useBoot(): BootState {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useBoot must be used within BootProvider");
   return ctx;
+}
+
+/**
+ * Does the viewer clear a display tier (the rail's and the create menus'
+ * "manager", "hr-admin", "org-admin")? Answered from boot, never the session.
+ */
+export function useViewerTiers(): { tiers: ViewerTiers; clears: (tier: string | null | undefined) => boolean } {
+  const { boot } = useBoot();
+  const raw = boot.viewer.tiers;
+  const tiers = useMemo(() => parseViewerTiers(raw), [raw]);
+  const clears = useCallback((tier: string | null | undefined) => clearsTier(tiers, tier), [tiers]);
+  return { tiers, clears };
 }
 
 /** The viewer's org role from boot, for chrome that branches on Guest / Admin. */

@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Anthropic from "@anthropic-ai/sdk";
-import { getSessionOrFail, getOrgId, getUserId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { hasFeature } from "@/lib/enterprise-features";
 import { Prisma } from "@/generated/prisma";
 import { encryptSecret, keyHint } from "@/lib/secrets-crypto";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 /**
  * /api/organization/byok — Anthropic key management for the org.
@@ -53,7 +54,8 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Only org admins can manage AI keys", 403);
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const denied = await gate(orgId);
   if (denied) return denied;
@@ -113,7 +115,8 @@ export async function PUT(req: NextRequest) {
 export async function DELETE() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Only org admins can revoke AI keys", 403);
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const denied = await gate(orgId);
   if (denied) return denied;

@@ -250,13 +250,13 @@ export function AppearanceDefaults() {
         <div className="space-y-8">
           {/* ── Appearance defaults ─────────────────────────── */}
           <section>
-            <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-ink-3">
               Default appearance
             </h2>
-            <div className="rounded-xl border border-zinc-200 bg-white p-4">
+            <div className="rounded-lg border border-line bg-raised p-4">
               {/* Appearance */}
               <div className="mb-5">
-                <h3 className="mb-2 text-base font-semibold text-zinc-800">Theme</h3>
+                <h3 className="mb-2 text-base font-semibold text-ink">Theme</h3>
                 <div className="grid grid-cols-3 gap-3">
                   {APPEARANCE_CARDS.map((opt) => {
                     const active = state.appearance === opt.value;
@@ -266,17 +266,13 @@ export function AppearanceDefaults() {
                         type="button"
                         disabled={saving}
                         onClick={() => pickAppearance(opt.value)}
-                        style={{
-                          background: "#fff",
-                          border: active ? "1px solid #0073EA" : "1px solid #e4e4e7",
-                          boxShadow: active ? "0 0 0 3px rgba(0,115,234,0.15)" : "none",
-                        }}
-                        className={`flex flex-col items-start gap-2 rounded-xl p-3 text-left transition-all ${
-                          saving ? "opacity-60" : "hover:border-zinc-300"
-                        }`}
+                        aria-pressed={active}
+                        className={`flex flex-col items-start gap-2 rounded-lg border bg-raised p-3 text-left transition-colors ${
+                          active ? "border-brand bg-brand-soft" : "border-line"
+                        } ${saving ? "opacity-60" : active ? "" : "hover:bg-hover"}`}
                       >
-                        <opt.Icon className="h-4 w-4 text-zinc-600" />
-                        <span className="text-base font-medium text-zinc-900">{opt.label}</span>
+                        <opt.Icon className="h-4 w-4 text-ink-2" />
+                        <span className="text-base font-medium text-ink">{opt.label}</span>
                       </button>
                     );
                   })}
@@ -289,7 +285,7 @@ export function AppearanceDefaults() {
                   nobody sees. */}
               {ACCENT_CHOICE_OFFERED ? (
               <div className="mb-5">
-                <h3 className="mb-2 text-base font-semibold text-zinc-800">Accent color</h3>
+                <h3 className="mb-2 text-base font-semibold text-ink">Accent color</h3>
                 <div className="flex flex-wrap gap-2.5">
                   {ACCENT_OPTIONS.map((a) => {
                     const active = state.accent === a.key;
@@ -304,7 +300,7 @@ export function AppearanceDefaults() {
                         aria-pressed={active}
                         style={{
                           background: a.swatch,
-                          boxShadow: active ? "0 0 0 2px #fff, 0 0 0 4px #18181b" : "none",
+                          boxShadow: active ? "0 0 0 2px var(--os-surface, var(--os-bg)), 0 0 0 4px var(--os-ink)" : "none",
                         }}
                         className={`flex h-9 w-9 items-center justify-center rounded-full transition-transform ${
                           saving ? "opacity-60" : active ? "" : "hover:brightness-110"
@@ -315,7 +311,7 @@ export function AppearanceDefaults() {
                     );
                   })}
                 </div>
-                <p className="mt-2 text-xs text-zinc-400">
+                <p className="mt-2 text-xs text-ink-3">
                   Brand-safe swatches only. WorkwrK is the default brand blue.
                 </p>
               </div>
@@ -323,10 +319,9 @@ export function AppearanceDefaults() {
 
               {/* Density */}
               <div>
-                <h3 className="mb-2 text-base font-semibold text-zinc-800">Density</h3>
+                <h3 className="mb-2 text-base font-semibold text-ink">Density</h3>
                 <div
-                  className="inline-flex rounded-lg p-0.5"
-                  style={{ background: "#f4f4f5", border: "1px solid #e4e4e7" }}
+                  className="inline-flex rounded-lg border border-line bg-hover p-0.5"
                 >
                   {DENSITY_OPTIONS.map((opt) => {
                     const active = state.density === opt.value;
@@ -336,13 +331,10 @@ export function AppearanceDefaults() {
                         type="button"
                         disabled={saving}
                         onClick={() => pickDensity(opt.value)}
-                        style={{
-                          background: active ? "#fff" : "transparent",
-                          boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-                        }}
+                        aria-pressed={active}
                         className={`rounded-md px-4 py-1.5 text-base font-medium transition-colors ${
                           saving ? "opacity-60" : ""
-                        } ${active ? "text-zinc-900" : "text-zinc-600 hover:text-zinc-900"}`}
+                        } ${active ? "bg-raised text-ink" : "text-ink-2 hover:text-ink"}`}
                       >
                         {opt.label}
                       </button>
@@ -355,7 +347,7 @@ export function AppearanceDefaults() {
 
           {/* ── Locks ───────────────────────────────────────── */}
           <section>
-            <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-ink-3">
               Locked controls
             </h2>
 
@@ -369,27 +361,27 @@ export function AppearanceDefaults() {
               </p>
             </div>
 
-            <ul className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <ul className="overflow-hidden rounded-lg border border-line bg-raised">
               {LOCK_GROUPS.map((g, i) => {
                 const locked = isGroupLocked(g.paths);
                 return (
                   <li
                     key={g.key}
-                    className={`flex items-start gap-3 px-4 py-3.5 ${i > 0 ? "border-t border-zinc-100" : ""}`}
+                    className={`flex items-start gap-3 px-4 py-3.5 ${i > 0 ? "border-t border-line-soft" : ""}`}
                   >
-                    <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-500">
+                    <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-hover text-ink-2">
                       <g.Icon className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-base font-semibold text-zinc-900">{g.label}</span>
+                        <span className="text-base font-semibold text-ink">{g.label}</span>
                         {locked && (
-                          <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-xs font-semibold text-[#0073EA]">
+                          <span className="inline-flex items-center gap-1 rounded bg-brand-soft px-1.5 py-0.5 text-xs font-semibold text-brand-deep">
                             <Lock className="h-2.5 w-2.5" /> Locked
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-base leading-relaxed text-zinc-500">{g.desc}</p>
+                      <p className="mt-0.5 text-base leading-relaxed text-ink-2">{g.desc}</p>
                     </div>
                     <div className="mt-0.5 shrink-0">
                       <Switch
@@ -403,9 +395,9 @@ export function AppearanceDefaults() {
                 );
               })}
             </ul>
-            <p className="mt-2 text-xs text-zinc-400">
+            <p className="mt-2 text-xs text-ink-3">
               Members tune their own look in{" "}
-              <Link href="/account/preferences?tab=appearance" className="text-[#0073EA] hover:underline">
+              <Link href="/account/preferences?tab=appearance" className="font-medium text-brand-deep hover:underline">
                 My settings, Preferences
               </Link>
               . A locked setting there always reverts to the workspace default above.

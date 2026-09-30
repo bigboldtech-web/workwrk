@@ -49,14 +49,28 @@ export async function AppKeyGate({
 }
 
 /**
- * Access step 3 for the app pages that had no gate (Phase 8 stage E): the
- * same AppKeyGate, applied only with ACCESS_V2_RESOLVER on, so the shipped
- * default leaves these pages exactly as open as they were. With the flag on,
- * a hidden or floored app locks its routes too (spec 7.1), and a Guest meets
- * the in-shell 404.
+ * Access step 3 for the app pages that had no gate (Phase 8 stages E and F,
+ * settings-architecture S7: rail floors and hides become real gates), in the
+ * same three states as the Workspace settings door (settings-gate-engine.ts):
+ *
+ *   flags off (the default)       the page is exactly as open as it was
+ *   SETTINGS_GATE_LOG_ONLY=true   still open; the engine is asked and every
+ *                                 would-be denial is logged (stderr, sampled,
+ *                                 and one audit row per person per app per
+ *                                 day), so the week before enforcement names
+ *                                 everyone a hide or floor would lock out
+ *   ACCESS_V2_RESOLVER=true       AppKeyGate: a hidden or floored app locks
+ *   (log-only off)                its routes too (spec 7.1), and a Guest
+ *                                 meets the in-shell 404
  */
 export async function FlaggedAppKeyGate(props: Parameters<typeof AppKeyGate>[0]) {
-  const { accessV2Resolver } = await import("@/lib/access/flags");
-  if (!accessV2Resolver()) return <>{props.children}</>;
-  return <AppKeyGate {...props} />;
+  const { accessV2Resolver, settingsGateLogOnly } = await import("@/lib/access/flags");
+  const { settingsGateMode } = await import("@/lib/access/settings-gate-engine");
+  const mode = settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() });
+  if (mode === "engine") return <AppKeyGate {...props} />;
+  if (mode === "observe") {
+    const { observeAppRoute } = await import("@/lib/access/app-route-observe");
+    await observeAppRoute(props.appKey, props.label);
+  }
+  return <>{props.children}</>;
 }

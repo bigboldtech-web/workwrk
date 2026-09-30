@@ -42,7 +42,7 @@ import { DueDateDialog } from "@/components/process/due-date-dialog";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { apiFetch } from "@/lib/api-fetch";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { LEDGER_SORTS, LEDGER_STATUS_COLOR, LEDGER_STATUS_LABEL, LEDGER_VIEWS, LEDGER_VIEW_LABEL, parseLedgerSort, parseLedgerView, type LedgerView } from "@/lib/policy-ledger-view";
 import type { LedgerRow } from "@/lib/policy-ledger";
@@ -67,7 +67,7 @@ export default function PolicyLedgerPage() {
   const confirm = useConfirm();
   const fmt = useFormat();
   // "Remind everyone pending" is FULL (Owner, Admin, People team: today's
-  // admin tier in hooks/use-role); a manager who reaches the ledger through
+  // admin tier in lib/access/use-legacy-permissions useRole); a manager who reaches the ledger through
   // their chain reminds per row instead.
   const { isAdmin: full } = useRole();
 

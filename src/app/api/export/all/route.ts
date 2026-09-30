@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { zipFiles, zipTextFile } from "@/lib/zip";
-import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 function toCsv(headers: string[], rows: Record<string, unknown>[]): string {
   const escape = (val: unknown) => {
@@ -27,12 +27,8 @@ export async function GET(req: NextRequest) {
   // level, tasks, reviews, activity) is an Admin export, as the Data page
   // says it is. This route used to answer any signed-in person, Agents and
   // Guests included.
-  if (!legacyIsAdminLevel((session.user as { accessLevel?: string }).accessLevel)) {
-    return new Response(JSON.stringify({ error: "Only a workspace Admin can export the whole workspace" }), {
-      status: 403,
-      headers: { "content-type": "application/json" },
-    });
-  }
+  const writeGate = await settingsWriteGate(session, "data");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 

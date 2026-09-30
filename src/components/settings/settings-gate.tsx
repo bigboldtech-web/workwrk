@@ -12,9 +12,9 @@
 // this one table.
 //
 // THE RULE TABLE IS TODAY'S, UNCHANGED (Stage A of Phase 8 consolidates, it
-// does not move anyone's access). `admin` is route-guard isOrgAdminViewer
-// (SUPER_ADMIN, COMPANY_ADMIN); `manager-tier` is requireManagerTierViewer
-// (everyone above Employee and Agent). The engine gate (gatePage over
+// does not move anyone's access). `admin` is SUPER_ADMIN and COMPANY_ADMIN; `manager-tier` is everyone
+// above Employee and Agent (settings-legacy.ts; route-guard.ts, which held
+// the same two answers, is deleted). The engine gate (gatePage over
 // SETTINGS_PAGE_GATES, first week log-only under SETTINGS_GATE_LOG_ONLY) is
 // the next stage and replaces this table, not the call sites.
 //
@@ -51,7 +51,7 @@ export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean
   const session = await getServerSession(authOptions);
   // Signed out: the sign-in page, as the route-guard gates this replaced did.
   if (!session?.user) redirect("/login");
-  return settingsDoorAllows(page, session);
+  return settingsDoorAllows(page, session, { visit: true });
 }
 
 /**

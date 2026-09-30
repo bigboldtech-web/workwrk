@@ -44,7 +44,7 @@
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { SopKindCards } from "@/components/sops/sop-kind-chooser";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 
 export default function NewSopPage() {
   // `canManageSOPs` is `can("sops", "create")`, the exact question POST

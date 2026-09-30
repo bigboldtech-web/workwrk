@@ -22,10 +22,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { parseWorkSchedule, WORK_SCHEDULE_DEFAULTS } from "@/lib/work-schedule";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+import { sessionMayEditSettings, settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -35,13 +36,14 @@ export async function GET() {
   // Friday" from "nobody has been here yet" without a second request, and
   // lets a reader tell a real answer from the fallback.
   const configured = schedule !== WORK_SCHEDULE_DEFAULTS;
-  return jsonSuccess({ schedule, configured, canEdit: isOrgAdmin(session) });
+  return jsonSuccess({ schedule, configured, canEdit: sessionMayEditSettings(session) });
 }
 
 export async function PUT(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Only an Owner or an Admin can change the working calendar.", 403);
+  const writeGate = await settingsWriteGate(session, "locale");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   let body: unknown;

@@ -91,6 +91,14 @@ export default function AppsSettingsPage() {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  // "N people lose access to {app}" (settings-architecture 5.3, S7): a hide
+  // or a raised minimum role is counted first and saved only after the Admin
+  // has read who it takes the app away from. A change nobody loses to saves
+  // straight away, as before.
+  const [impact, setImpact] = useState<
+    | { app: AppEntry; next: State; okMsg: string; sentence: string | null; names: string[]; count: number; error: string | null; checking: boolean; enforced?: boolean }
+    | null
+  >(null);
 
   const byKey = useMemo(() => new Map<string, AppEntry>(APPS.map((a) => [a.key, a])), []);
 
@@ -146,12 +154,41 @@ export default function AppsSettingsPage() {
     [state, toast],
   );
 
+  // Count who a narrowing change takes the app away from, then either save
+  // (nobody loses it) or ask first. A failed count still lets the Admin save,
+  // saying the count is unknown, so a broken preview never blocks the page.
+  const saveNarrowing = async (app: AppEntry, next: State, okMsg: string) => {
+    setImpact({ app, next, okMsg, sentence: null, names: [], count: 0, error: null, checking: true });
+    setSavingKey(app.key);
+    const r = await apiFetch<{ count: number; names: string[]; sentence: string; rule?: string }>("/api/settings/apps/impact", {
+      method: "POST",
+      json: { app: app.key, hidden: next.hidden.includes(app.key), floor: next.minAccess[app.key] ?? null },
+    });
+    setSavingKey(null);
+    if (r.ok && r.data.count === 0) {
+      setImpact(null);
+      void persist(next, app.key, okMsg);
+      return;
+    }
+    setImpact({
+      app, next, okMsg, checking: false,
+      sentence: r.ok ? r.data.sentence : null,
+      names: r.ok ? r.data.names : [],
+      count: r.ok ? r.data.count : 0,
+      enforced: r.ok && r.data.rule === "engine",
+      error: r.ok ? null : r.error || "Couldn't count who loses access.",
+    });
+  };
+
   const setVisible = (app: AppEntry, visible: boolean) => {
     if (!state || app.alwaysPinned) return;
     const set = new Set(state.hidden);
     if (visible) set.delete(app.key);
     else set.add(app.key);
-    void persist({ ...state, hidden: [...set] }, app.key, visible ? `${app.label} shows in the rail` : `${app.label} hidden from the rail`);
+    const next = { ...state, hidden: [...set] };
+    const okMsg = visible ? `${app.label} shows in the rail` : `${app.label} hidden from the rail`;
+    if (visible) void persist(next, app.key, okMsg);
+    else void saveNarrowing(app, next, okMsg);
   };
 
   const setFloor = (app: AppEntry, value: string) => {
@@ -159,11 +196,11 @@ export default function AppsSettingsPage() {
     const minAccess = { ...state.minAccess };
     if (isTier(value)) minAccess[app.key] = value;
     else delete minAccess[app.key];
-    void persist(
-      { ...state, minAccess },
-      app.key,
-      isTier(value) ? `${app.label}: ${TIER_OPTIONS.find((t) => t.value === value)?.label.toLowerCase()}` : `${app.label}: everyone`,
-    );
+    const next = { ...state, minAccess };
+    const okMsg = isTier(value) ? `${app.label}: ${TIER_OPTIONS.find((t) => t.value === value)?.label.toLowerCase()}` : `${app.label}: everyone`;
+    // Back to Everyone never takes the app from anyone.
+    if (!isTier(value)) void persist(next, app.key, okMsg);
+    else void saveNarrowing(app, next, okMsg);
   };
 
   // Reorder inside one group (hubs among hubs, apps among apps); the saved
@@ -310,6 +347,35 @@ export default function AppsSettingsPage() {
           <Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link>
         </p>
       </div>
+
+      <ConfirmDialog
+        open={impact !== null && !impact.checking}
+        onOpenChange={(v) => { if (!v) setImpact(null); }}
+        title={impact ? `Change who sees ${impact.app.label}?` : "Change who sees this app?"}
+        confirmLabel="Save"
+        onConfirm={() => {
+          const cur = impact;
+          setImpact(null);
+          if (cur) void persist(cur.next, cur.app.key, cur.okMsg);
+        }}
+      >
+        {impact?.error ? (
+          <p>{impact.error} Saving still works; the people it affects will not see {impact.app.label} in their rail.</p>
+        ) : impact ? (
+          <>
+            <p className="font-medium text-ink">{impact.sentence}</p>
+            {impact.names.length > 0 ? (
+              <p className="mt-1 text-ink-2">
+                {impact.names.join(", ")}
+                {impact.count > impact.names.length ? ` and ${impact.count - impact.names.length} more` : ""}.
+              </p>
+            ) : null}
+            <p className="mt-2 text-ink-2">
+              {impact.enforced ? "It leaves their rail and its pages close to them." : "It leaves their rail now."} Nothing is deleted, and you can turn it back on here at any time.
+            </p>
+          </>
+        ) : null}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={resetOpen}

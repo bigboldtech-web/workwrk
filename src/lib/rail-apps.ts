@@ -8,16 +8,17 @@
 //
 //   visible = catalog
 //     MINUS  config.hidden                (org switched the app off)
-//     FILTER canAccessApp(app, level)     (catalog baseline — never weakened)
+//     FILTER app.requiredAccess vs tiers (catalog baseline, never weakened)
 //     FILTER config.minAccess[app.key]    (org floor ON TOP of the baseline)
 //     ORDER  config.order, then catalog order for the rest
 //
 // alwaysPinned apps (Home) ignore hidden/minAccess entirely — they are the
 // escape hatch that guarantees the rail is never empty for any access level.
 //
-// hidden/minAccess are DISPLAY-level in v1: they remove rail entries only.
-// Routes stay reachable by URL; the catalog's requiredAccess plus the
-// per-page gates (src/lib/page-gates.ts) keep doing the real enforcement.
+// hidden/minAccess remove rail entries here; the routes are gated by access
+// rule 2 (gatePage over the app key, and the app route gate for the pages
+// that had none: src/lib/access/app-route-gate.ts, enforcing once
+// ACCESS_V2_RESOLVER is on and the log-only week is over).
 //
 // Imports are RELATIVE (not "@/") on purpose: vitest's node environment has
 // no path-alias resolution, and this module's colocated test mocks the
@@ -25,8 +26,6 @@
 
 import {
   APPS,
-  canAccessApp,
-  canAccessTier,
   isAlwaysPinned,
   type AccessTier,
   type AppEntry,
@@ -38,11 +37,11 @@ import { MODULE_APP_KEYS } from "./modules";
 // this rather than the catalog's re-export so it also runs on the SERVER
 // (/api/boot): apps-catalog.tsx is a "use client" module, and its function
 // exports are client references, not callables, inside a route handler.
-import { legacyTierAllows, type LegacyTier } from "./access/legacy-levels";
+import { clearsTier, type ViewerTiers } from "./access/viewer-tiers";
 
 // Re-export so the rail and the admin page have ONE import for the whole
 // access story instead of splitting it across this module and the catalog.
-export { APPS, canAccessApp, canAccessTier, isAlwaysPinned };
+export { APPS, isAlwaysPinned };
 export type { AccessTier, AppEntry };
 
 /**
@@ -60,9 +59,10 @@ export type AppLike = {
   hubKey?: string;
 };
 
-function tierAllows(tier: AccessTier | undefined, accessLevel: string | null | undefined): boolean {
-  if (!tier) return true;
-  return legacyTierAllows(tier as LegacyTier, accessLevel);
+// The viewer's tiers come from /api/boot (src/lib/access/viewer-tiers.ts):
+// the ladder runs once on the server, and this resolver never sees a level.
+function tierAllows(tier: AccessTier | undefined, tiers: ViewerTiers | null | undefined): boolean {
+  return clearsTier(tiers, tier);
 }
 
 /**
@@ -174,7 +174,8 @@ export function visibleRailApps<T extends AppLike = AppEntry>(opts: {
   // undefined tolerated (= {}) so callers can pass a not-yet-hydrated
   // config without a guard — the rail must render something immediately.
   config: OrgAppsConfig | undefined;
-  accessLevel: string | undefined;
+  /** The viewer's display tiers (boot `viewer.tiers`, or tiersOfLevel on the server). */
+  tiers: ViewerTiers | null | undefined;
   apps?: readonly T[];
   // The rail app keys of the premium modules the org has ACTIVE. undefined
   // until /api/preferences answers; a module app is hidden while unknown so an
@@ -187,7 +188,7 @@ export function visibleRailApps<T extends AppLike = AppEntry>(opts: {
   // app the org hid or the viewer cannot access never resurfaces this way.
   includeFolded?: boolean;
 }): T[] {
-  const { accessLevel, activeModules, includeFolded } = opts;
+  const { tiers, activeModules, includeFolded } = opts;
   const config = opts.config ?? {};
   const catalog = (opts.apps ?? (APPS as unknown as readonly T[])) as readonly T[];
   const hidden = new Set(config.hidden ?? []);
@@ -197,9 +198,9 @@ export function visibleRailApps<T extends AppLike = AppEntry>(opts: {
   // that keeps a module hub alive.
   const allowed = (cfg: OrgAppsConfig, hiddenSet: Set<string>, app: AppLike): boolean => {
     if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
-    if (!tierAllows(app.requiredAccess, accessLevel)) return false;
+    if (!tierAllows(app.requiredAccess, tiers)) return false;
     const floor = orgFloor(cfg, app);
-    return !(floor && !tierAllows(floor, accessLevel));
+    return !(floor && !tierAllows(floor, tiers));
   };
 
   const resolve = (cfg: OrgAppsConfig, hiddenSet: Set<string>) =>

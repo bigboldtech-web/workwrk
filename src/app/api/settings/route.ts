@@ -17,8 +17,9 @@ import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { canManageProcess } from "@/lib/process-scope";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
+import { scoringWriteAllowed, sessionScoringWriteAllowed } from "@/lib/access/settings-legacy";
+import { delegateOn } from "@/lib/access/flags";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import {
   cultureSectionSchema,
@@ -45,10 +46,10 @@ import {
   usersSettingsOf,
   workSettingsOf,
 } from "@/lib/settings/org-policy";
-import { freshMayManageOwnerPage, freshWorkspaceActor, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
-type SessionUser = { id: string; organizationId: string; accessLevel?: string };
+type SessionUser = { id: string; organizationId: string };
 /** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -176,7 +177,7 @@ export async function GET() {
     // A reader the one door decision admits (the People team under the
     // engine gate) reads the full blob as the manager tier does today.
     if (
-      !legacyIsManagerLevel((session.user as SessionUser).accessLevel) &&
+      !sessionIsSettingsReader(session) &&
       !(await settingsDoorAllows("access", session)) &&
       !(await settingsDoorAllows("scoring", session))
     ) {
@@ -201,8 +202,8 @@ export async function GET() {
     const viewer = {
       isOwner: admin ? await sessionIsWorkspaceOwner(session) : false,
       mayManageOwnerPages: admin ? await sessionMayManageOwnerPage(session) : false,
-      // The scoring section's own write rule (PATCH below): Admins and C-level.
-      canEditScoring: ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes((session.user as SessionUser).accessLevel ?? ""),
+      // The scoring section's own write rule (PATCH below), one function.
+      canEditScoring: sessionScoringWriteAllowed(session, { admin, engineDoor: delegateOn("settings") }),
     };
     return NextResponse.json({ ...body, viewer });
   } catch (error) {
@@ -218,7 +219,6 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const accessLevel = (session.user as SessionUser).accessLevel ?? "";
     const orgId = (session.user as SessionUser).organizationId;
     const body = await req.json().catch(() => null);
 
@@ -252,8 +252,10 @@ export async function PATCH(req: Request) {
     } else if (section === "scoring") {
       // Scoring is the one other section a non-admin could save from its
       // page yesterday (the manager-tier Scoring page, C_LEVEL writes), so it
-      // keeps that reach; everyone else on the tier reads it only.
-      if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
+      // keeps that reach while today's door table decides; once the engine's
+      // door decides, the write follows the page to Owners and Admins
+      // (scoringWriteAllowed, access-model-spec 10.1).
+      if (!scoringWriteAllowed(fresh.level, { admin: fresh.admin, engineDoor: delegateOn("settings") })) {
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
       }
     } else if (section === "security" || section === "retention") {
@@ -265,7 +267,7 @@ export async function PATCH(req: Request) {
       if (!freshMayManageOwnerPage(fresh, section === "security" ? "security" : undefined)) {
         return NextResponse.json({ error: "Only workspace Owners can change this" }, { status: 403 });
       }
-    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel) || !fresh.admin) {
+    } else if (!fresh.admin) {
       // general, culture, security, access: Admin only (settings-architecture
       // 9.2; Owner for security once SETTINGS_OWNER_SPLIT is on). The pages
       // that write them (Identity, Locale, Access) were admin-gated already,

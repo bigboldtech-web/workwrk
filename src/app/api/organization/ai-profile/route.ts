@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const ai = await getAnthropicForOrg(orgId);
   const body = await req.json();

@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { hasFeature } from "@/lib/enterprise-features";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 /**
  * /api/organization/branding
@@ -45,8 +46,8 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Only org admins can edit branding", 403);
-
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const wl = await hasFeature(orgId, "whiteLabel");
   if (!wl.enabled) {

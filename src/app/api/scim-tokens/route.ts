@@ -10,16 +10,16 @@ import {
   getUserId,
   jsonError,
   jsonSuccess,
-  isOrgAdmin,
 } from "@/lib/api-helpers";
 import { generateScimTokenRaw } from "@/lib/scim-auth";
 import { logAuditEvent } from "@/lib/activity";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "security");
+  if (!writeGate.ok) return writeGate.response;
   const tokens = await prisma.scimToken.findMany({
     where: { organizationId: getOrgId(session) },
     orderBy: { createdAt: "desc" },
@@ -40,8 +40,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "security");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
   const body = await req.json();

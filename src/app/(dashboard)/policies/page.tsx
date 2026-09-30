@@ -46,7 +46,7 @@ import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { NewPolicyDialog } from "@/components/policies/new-policy-dialog";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import {

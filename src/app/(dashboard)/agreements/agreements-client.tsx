@@ -42,7 +42,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
 import { NewContractDialog } from "@/components/agreements/new-contract-dialog";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { CONTRACTS_SORTS, CONTRACTS_VIEWS, CONTRACTS_VIEW_LABEL, CONTRACT_STATUSES, CONTRACT_STATUS_COLOR, CONTRACT_STATUS_LABEL, contractsViewHref, parseContractsSort, parseContractsView, type ContractStatus, type ContractsView } from "@/lib/contracts";

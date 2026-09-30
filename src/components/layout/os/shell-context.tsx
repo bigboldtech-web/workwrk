@@ -2,10 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { getApp, type AppEntry } from "./apps-catalog";
-import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
-import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
+import { parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
+import { clearsTier, parseViewerTiers } from "@/lib/access/viewer-tiers";
+import { settingsReaderLanding, hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
 import { decodePresence, encodePresence } from "@/lib/people/presence-codec";
 import { runLocalPrefsMigration } from "@/lib/local-prefs-migration-runner";
 import { apiFetch } from "@/lib/api-fetch";
@@ -322,10 +322,11 @@ const WIDTH_PERSIST_MS = 500;
 
 export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const { boot } = useBoot();
-  const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  // The display tiers from boot (src/lib/access/viewer-tiers.ts): the rail
+  // never reads the level off the session (access step 6, the Nav batch).
+  const viewerTiers = useMemo(() => parseViewerTiers(boot.viewer.tiers), [boot.viewer.tiers]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
   const sidekickOpenRef = useRef(false);
@@ -617,17 +618,17 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     [prefs.modules],
   );
   const railApps = useMemo<AppEntry[]>(
-    () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys) }),
-    [railConfig, accessLevel, activeModuleKeys],
+    () => visibleRailApps({ config: railConfig, tiers: viewerTiers, activeModules: new Set(activeModuleKeys) }),
+    [railConfig, viewerTiers, activeModuleKeys],
   );
   // The palette's JUMP TO list and every sidebar's "is this key open" check.
   // The Phase 7 keys also answer to their APP_RULES audience (access 5.2.1),
   // which no tier can express (Assets is "anyone with reports, the People
   // team and Admin"), so the palette never offers a page that would 404.
   const launcherApps = useMemo<AppEntry[]>(
-    () => visibleRailApps({ config: railConfig, accessLevel, activeModules: new Set(activeModuleKeys), includeFolded: true })
+    () => visibleRailApps({ config: railConfig, tiers: viewerTiers, activeModules: new Set(activeModuleKeys), includeFolded: true })
       .filter((a) => !AUDIENCE_KEYS.has(a.key) || launcherAudienceAllows(a.key, boot.viewer)),
-    [railConfig, accessLevel, activeModuleKeys, boot.viewer],
+    [railConfig, viewerTiers, activeModuleKeys, boot.viewer],
   );
   const askAiVisible = useMemo(
     () => railApps.some((a) => a.key === "ai") && boot.org.aiEnabled !== false && boot.viewer.orgRole !== "GUEST",
@@ -647,7 +648,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const canCreateSpace =
     typeof boot.viewer.canCreateSpace === "boolean"
       ? boot.viewer.canCreateSpace
-      : accessLevel !== undefined && !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && canAccessTier("manager", accessLevel);
+      : !boot.viewer.isAgent && boot.viewer.orgRole !== "GUEST" && clearsTier(viewerTiers, "manager");
   const railKeys = useMemo(() => new Set(railApps.map((a) => a.key)), [railApps]);
   // sidebar-map section 5: the Teams hub lands on /people for every Member.
   // This branch is only for a viewer whose rail does NOT carry Teams (an
@@ -664,13 +665,18 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
         return hubDefaultHref(appKey, {
           talkModuleOn: activeModuleKeys.includes("chat"),
           tablesModuleOn: activeModuleKeys.includes("tables"),
-          canManageWorkspace: accessLevel === undefined ? true : canAccessTier("org-admin", accessLevel),
+          // The per-viewer landing (settings-architecture 2.3): Owners and
+          // Admins open Workspace settings, a reader below Admin (the pages
+          // boot's one door decision opens for them) opens the first of
+          // those, everyone else opens My settings. Never a tier of its own.
+          canManageWorkspace: boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN",
+          settingsReaderHref: settingsReaderLanding(boot.viewer),
           askAiOn: askAiVisible,
         });
       }
       return getApp(appKey)?.defaultHref ?? "/";
     },
-    [activeModuleKeys, accessLevel, memberTeamsHub, askAiVisible],
+    [activeModuleKeys, boot.viewer, memberTeamsHub, askAiVisible],
   );
   const launcherKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
   const isHubVisible = useCallback((hubKey: string): boolean => railKeys.has(hubKey), [railKeys]);

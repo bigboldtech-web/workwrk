@@ -31,7 +31,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { AnnouncementComposer } from "./composer-dialog";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useFormat } from "@/lib/format/use-date-prefs";

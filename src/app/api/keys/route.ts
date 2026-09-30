@@ -4,14 +4,13 @@ import {
   getSessionOrFail,
   getOrgId,
   getUserId,
-  hasRole,
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { generateApiKey } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
 import type { ApiKeyScope } from "@/generated/prisma";
-import { freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 /**
  * API key management.
@@ -31,9 +30,8 @@ const VALID_SCOPES: ApiKeyScope[] = ["READ", "WRITE", "ADMIN"];
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session, "security"))) {
-    return jsonError("Only workspace Owners can manage API keys", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const keys = await prisma.apiKey.findMany({
     where: { organizationId: orgId },
@@ -59,9 +57,8 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
-    return jsonError("Only workspace Owners can manage API keys", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
@@ -127,9 +124,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
-    return jsonError("Only workspace Owners can manage API keys", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return jsonError("id required");
@@ -164,9 +160,8 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session), "security")) {
-    return jsonError("Only workspace Owners can manage API keys", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const body = (await req.json().catch(() => null)) as { id?: unknown; rateLimitPerMinute?: unknown; rateLimitPerDay?: unknown } | null;
   const id = typeof body?.id === "string" ? body.id : "";
   if (!id) return jsonError("id required");

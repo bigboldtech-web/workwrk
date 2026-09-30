@@ -56,19 +56,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import {
   FileText, User, Users, Clock, Star, Frame, Folder, Mic,
   MoreHorizontal, ChevronRight, Plus, ScrollText, ListChecks,
   ShieldCheck, BookOpenCheck, FileSignature, Workflow, BarChart3,
   LayoutTemplate, Trash2, Link2, type LucideIcon,
 } from "lucide-react";
-import { canAccessTier } from "./access-tiers";
 import { useActiveRowHref } from "./use-active-row";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
-import { useBoot } from "./boot-context";
+import { useBoot, useViewerTiers } from "./boot-context";
 import {
   SidebarRow, SidebarGhostRow, SidebarSectionLabel, SidebarEmptyLine,
   SidebarErrorLine, SidebarSkeletonRows,
@@ -85,6 +83,7 @@ import {
   isSectionCollapsed, toggleSectionCollapsed, toggleExpanded,
 } from "@/lib/docs-prefs";
 import { useOsToast } from "./toast";
+import { useSession } from "next-auth/react";
 
 type DocRow = {
   id: string;
@@ -242,9 +241,10 @@ export function DocsSidebar() {
   const pathname = usePathname() || "";
   const { query } = useSidebarSearch();
   const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
-  const isManager = canAccessTier("manager", accessLevel);
+  // The display tiers from boot (never the level off the session).
+  const { clears } = useViewerTiers();
+  const isHrAdmin = clears("hr-admin");
+  const isManager = clears("manager");
   const activeHref = useActiveRowHref(ALL_ROWS);
   const noteMenu = useDocRowMenu();
   const { prefs, patchPrefs, launcherApps } = useOsShell();

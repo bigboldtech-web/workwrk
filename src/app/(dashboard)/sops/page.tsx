@@ -45,7 +45,7 @@ import { DateField } from "@/components/ui/date-field";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { SopKindChooser, sopKinds } from "@/components/sops/sop-kind-chooser";
 import { AssignDialog } from "@/components/process/assign-dialog";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { SOP_KIND_LABEL, SOP_STATUS_COLOR, SOP_STATUS_LABEL, type SopKind, type SopStatus } from "@/lib/sop-kind";

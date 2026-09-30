@@ -10,8 +10,8 @@ import {
   getOrgId,
   jsonError,
   jsonSuccess,
-  isOrgAdmin,
 } from "@/lib/api-helpers";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function PATCH(
   req: NextRequest,
@@ -19,8 +19,8 @@ export async function PATCH(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "tasks");
+  if (!writeGate.ok) return writeGate.response;
   const { id } = await params;
   const orgId = getOrgId(session);
 
@@ -57,8 +57,8 @@ export async function DELETE(
 ) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "tasks");
+  if (!writeGate.ok) return writeGate.response;
   const { id } = await params;
   const orgId = getOrgId(session);
   const tag = await prisma.tag.findFirst({ where: { id, organizationId: orgId } });

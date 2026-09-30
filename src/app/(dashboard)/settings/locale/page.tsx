@@ -64,7 +64,8 @@ function dateExample(f: DateFormat): string {
   return f === "MDY" ? `${m}/${d}/${y}` : f === "YMD" ? `${y}-${m}-${d}` : `${d}/${m}/${y}`;
 }
 function timeExample(f: TimeFormat): string {
-  return SAMPLE.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: f === "12h" });
+  // hourCycle, never hour12: false (Node 20 renders midnight as "24:00" with it).
+  return SAMPLE.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: f === "12h" ? "h12" : "h23" });
 }
 
 export default function LocaleSettingsPage() {

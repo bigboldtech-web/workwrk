@@ -1,14 +1,13 @@
 import { NextRequest } from "next/server";
-import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
   jsonError,
   jsonSuccess,
-  hasRole,
-} from "@/lib/api-helpers";
+  } from "@/lib/api-helpers";
 import { createCheckoutSession, isBillingLive, type BillingKey } from "@/services/billing";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 type Body = {
   key?: BillingKey;
@@ -23,10 +22,10 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  // Only org admins can initiate billing.
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session, "billing"))) {
-    return jsonError("Only admins can manage billing", 403);
-  }
+  // The Billing page rule (an Owner, or an Admin holding the Billing scope
+  // once the Owner split is on), the actor re-read.
+  const writeGate = await settingsWriteGate(session, "billing");
+  if (!writeGate.ok) return writeGate.response;
 
   if (!isBillingLive) {
     return jsonError(

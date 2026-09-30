@@ -27,7 +27,7 @@ export async function tieBreak({ root, cases, unexpected }) {
     imp("src/lib/board.ts"),
     imp("src/lib/folder.ts"),
     imp("src/lib/doc-access.ts"),
-    imp("src/lib/access.ts"),
+    imp("src/lib/access/legacy-resolve.ts"),
     imp("src/lib/item-gate.ts"),
   ]);
   const saved = process.env.ACCESS_V2_RESOLVER;

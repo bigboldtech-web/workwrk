@@ -175,6 +175,17 @@ function appEnforcement(): Record<`app.${AppKey}`, string> {
   // can() through their own gate instead of gatePage.
   out["app.team"] = `src/app/(dashboard)/team/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "team" }) with LockedPage)`;
   out["app.workload"] = `src/app/(dashboard)/team/workload/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "workload" }) with LockedPage)`;
+  // The app pages that had no server gate (Phase 8 stages E and F,
+  // settings-architecture S7): the route layout's FlaggedAppKeyGate, open as
+  // before with the flags off, logging would-be denials under
+  // SETTINGS_GATE_LOG_ONLY, enforcing under ACCESS_V2_RESOLVER.
+  const flagged: Partial<Record<AppKey, string>> = {
+    planner: "planner", docs: "docs", library: "files", clips: "notetaker", goals: "okrs", timesheets: "timesheets",
+    meetings: "meetings", clock: "clock", sops: "sops", policies: "policies", kudos: "kudos", announcements: "announcements",
+  };
+  for (const [key, dir] of Object.entries(flagged) as [AppKey, string][]) {
+    out[`app.${key}`] = `src/app/(dashboard)/${dir}/layout.tsx via FlaggedAppKeyGate (src/components/access/app-key-gate.tsx; gatePage("view", { type: "app", key: "${key}" }) under ACCESS_V2_RESOLVER, observeAppRoute under SETTINGS_GATE_LOG_ONLY)`;
+  }
   return out;
 }
 

@@ -4,12 +4,12 @@ import {
   getSessionOrFail,
   getOrgId,
   getUserId,
-  hasRole,
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { generateWebhookSecret } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 /**
  * Webhook subscription management (admin-only).
@@ -37,9 +37,8 @@ const VALID_EVENTS = [
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage webhooks", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const subs = await prisma.webhookSubscription.findMany({
     where: { organizationId: orgId },
@@ -63,9 +62,8 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage webhooks", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
   const body = (await req.json().catch(() => ({}))) as {
@@ -123,9 +121,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage webhooks", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "api");
+  if (!writeGate.ok) return writeGate.response;
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return jsonError("id required");

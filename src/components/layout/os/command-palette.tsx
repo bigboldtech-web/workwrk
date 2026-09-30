@@ -23,7 +23,7 @@
 // retired labels Today, My tasks, My Priorities, AI Notetaker.
 
 import { useRouter } from "next/navigation";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import {
   useCallback,
   useEffect,
@@ -297,7 +297,7 @@ function PaletteBody() {
   const { isAdmin, isGuest } = useViewerRole();
   // The `manage_process` rule (Owner, Admin, People team) the acknowledgement
   // default entries carry as their externalGate: today's admin tier in
-  // hooks/use-role (SUPER_ADMIN, COMPANY_ADMIN, C_LEVEL, HR), the same set
+  // useRole in lib/access/use-legacy-permissions (SUPER_ADMIN, COMPANY_ADMIN, C_LEVEL, HR), the same set
   // lib/process-scope canManageProcess checks on the server.
   const { isAdmin: canManageProcess } = useRole();
   const { openSettings } = useSettingsNav();

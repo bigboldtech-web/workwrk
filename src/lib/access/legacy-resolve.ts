@@ -1,3 +1,14 @@
+// MOVED (Phase 8 stage F, access step 6): this was src/lib/access.ts, the
+// legacy central resolver. As a FILE beside the engine's DIRECTORY it shadowed
+// the engine: `from "@/lib/access"` resolved here, type-checked, and silently
+// gave callers resolveAccess instead of can(). Its last product importer
+// (GET /api/me/access, a debug endpoint no client called) is deleted; POST
+// /api/access/check answers "what is my role here, and why" instead. It now
+// lives here, beside parity.ts, for one reader: the parity job's live
+// tie-break (scripts/lib/parity-live-tiebreak.mjs), which calls resolveX as
+// the resolver shipped. `@/lib/access` now resolves to ./index.ts. Deleted
+// with the rest of the legacy layer at access step 8.
+//
 // Central access resolver — the architectural lid.
 //
 // Every page and API can call `resolveAccess(viewer, resource)` to

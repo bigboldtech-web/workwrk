@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 // A cell a spreadsheet would run as a formula (= + - @, tab, CR) is prefixed
 // with a quote, so a name like "=HYPERLINK(...)" stays text in Excel.
@@ -12,8 +13,8 @@ function cell(v: string): string {
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
-
+  const writeGate = await settingsWriteGate(session, "data");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
 
   const users = await prisma.user.findMany({

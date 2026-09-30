@@ -17,7 +17,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { LEGACY_SETTINGS_RULES, OWNER_SETTINGS_PAGES, legacySettingsAllows } from "./settings-legacy";
 import { accessV2Resolver, settingsGateLogOnly } from "./flags";
-import { engineWithOwnerFloor, logSettingsGateDisagreement, settingsGateDecision, settingsGateMode } from "./settings-gate-engine";
+import { SETTINGS_GATE_AUDIT_COLLAPSE_MS, engineWithOwnerFloor, logSettingsGateDisagreement, settingsGateAuditRow, settingsGateDecision, settingsGateMode } from "./settings-gate-engine";
+import { logActivity } from "@/lib/activity";
 import { scopeForOwnerPage, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "./workspace-admin";
 import type { SettingsPageKey } from "./types";
 
@@ -34,7 +35,7 @@ async function legacyDoor(page: SettingsPageKey, session: SessionLike): Promise<
  * May the signed-in person open this Workspace settings page (and read the
  * data its cards load)? Pass the session when the caller already holds it.
  */
-export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unknown): Promise<boolean> {
+export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unknown, opts: { visit?: boolean } = {}): Promise<boolean> {
   const session = (sessionIn ?? (await getServerSession(authOptions))) as SessionLike;
   if (!session?.user?.id) return false;
   const legacy = await legacyDoor(page, session);
@@ -54,7 +55,27 @@ export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unkn
   };
   const verdict = settingsGateDecision(mode, inputs);
   if (verdict.disagree) {
-    logSettingsGateDisagreement({ userId: viewer.userId, organizationId: viewer.organizationId, page, legacy, engine: engineWithOwnerFloor(inputs), mode });
+    const engine = engineWithOwnerFloor(inputs);
+    logSettingsGateDisagreement({ userId: viewer.userId, organizationId: viewer.organizationId, page, legacy, engine, mode });
+    // The log-only week also leaves an audit row per person per page per day
+    // (Workspace settings > Audit log, filter "access.settings_gate"), so the
+    // founder reads the would-be denials from the product, not only stderr.
+    // Only a real page visit writes one (the page gate passes `visit`): boot's
+    // reader sidebar and the reader APIs ask about pages nobody opened. The
+    // one-row-a-day collapse dedupes (the stderr sample above is shared with
+    // those callers, so it cannot).
+    if (mode === "observe" && opts.visit) {
+      const { SETTINGS_PAGES } = await import("@/lib/settings-registry");
+      const row = settingsGateAuditRow({ page, label: SETTINGS_PAGES[page]?.label, legacy, engine });
+      void logActivity({
+        ...row,
+        actorId: viewer.userId,
+        organizationId: viewer.organizationId,
+        targetType: "SettingsPage",
+        targetId: page,
+        collapseWithinMs: SETTINGS_GATE_AUDIT_COLLAPSE_MS,
+      });
+    }
   }
   return verdict.allowed;
 }

@@ -36,7 +36,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { usePrompt } from "@/components/ui/dialog-provider";
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { apiFetch } from "@/lib/api-fetch";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";

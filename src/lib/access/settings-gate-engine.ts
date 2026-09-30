@@ -88,6 +88,48 @@ export function logSettingsGateDisagreement(entry: {
   return true;
 }
 
+/** One audit row a day per person per page is enough to read the week by. */
+export const SETTINGS_GATE_AUDIT_COLLAPSE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The audit row the log-only week writes for one disagreement. The page's
+ * label is the registry's, resolved by the reader; the row carries the key.
+ * Nothing changed for the person: today's answer still decided.
+ */
+export function settingsGateAuditRow(d: { page: string; label?: string; legacy: boolean; engine: boolean }): {
+  type: string;
+  description: string;
+  severity: "info";
+  metadata: Record<string, unknown>;
+} {
+  const wouldDeny = d.legacy && !d.engine;
+  const name = d.label ?? d.page;
+  return {
+    type: wouldDeny ? "access.settings_gate.would_deny" : "access.settings_gate.would_allow",
+    description: wouldDeny
+      ? `Opened ${name} in Workspace settings, which the new access rules would refuse (log only, nothing changed)`
+      : `Was refused ${name} in Workspace settings, which the new access rules would open (log only, nothing changed)`,
+    severity: "info",
+    metadata: { page: d.page, today: d.legacy, engine: d.engine, logOnly: true },
+  };
+}
+
+/** The audit row for one would-be denial on an app route. Pure. */
+export function appRouteAuditRow(appKey: string, via: string, label?: string): { type: string; description: string; severity: "info"; metadata: Record<string, unknown> } {
+  const why =
+    via === "app-off"
+      ? "the app is hidden or has a minimum role in Apps & modules"
+      : via === "module-off"
+        ? "its module is off"
+        : "it is outside this person's role";
+  return {
+    type: "access.app_gate.would_deny",
+    description: `Opened ${label ?? appKey}, which the new access rules would refuse because ${why} (log only, nothing changed)`,
+    severity: "info",
+    metadata: { app: appKey, via, logOnly: true },
+  };
+}
+
 /** Test seam. */
 export function resetSettingsGateLog(): void {
   lastLogged.clear();

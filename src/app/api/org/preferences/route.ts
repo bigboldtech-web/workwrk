@@ -11,19 +11,19 @@ import { z } from "zod";
 import { partitionLockedKeys } from "@/lib/preferences-locks";
 import { logAuditEvent } from "@/lib/activity";
 import { getOrgPreferenceRow, setOrgPreference } from "@/lib/preferences";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
-const ORG_ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
 async function ctx() {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
+  const u = session.user as { id?: string; organizationId?: string };
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { userId: u.id, organizationId: u.organizationId, session };
 }
 
 export async function GET() {
@@ -77,9 +77,11 @@ const patchSchema = z.strictObject({
 export async function PATCH(req: Request) {
   const c = await ctx();
   if ("error" in c) return c.error;
-  if (!ORG_ADMIN_LEVELS.has(c.accessLevel)) {
-    return NextResponse.json({ error: "Org admin access required" }, { status: 403 });
-  }
+  // The org defaults live on Apps & modules (the rail) and My settings'
+  // Preferences defaults card for Admins: one Owner or Admin rule, the actor
+  // re-read (settings-write.ts).
+  const writeGate = await settingsWriteGate(c.session, "apps");
+  if (!writeGate.ok) return writeGate.response;
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {

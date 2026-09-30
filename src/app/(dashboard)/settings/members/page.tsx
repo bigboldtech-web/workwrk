@@ -29,7 +29,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";

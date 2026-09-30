@@ -1,5 +1,14 @@
 "use client";
 
+// The legacy client permission hooks (useRole, usePermission, usePermissions),
+// moved beside the engine in access step 6 (Phase 8 stage F) from
+// src/hooks/use-role.ts and src/hooks/use-permission.ts, unchanged in what
+// they answer. They are the one place on the client that still reads the
+// level and the stored permission grid; the ESLint rule forbids that reading
+// everywhere outside src/lib/access/, so no new copy can appear. They are
+// replaced call site by call site with useAccess(ref) / useViewer() as each
+// surface moves onto an ObjectRef, and deleted at access step 8.
+
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { checkPermission, type PermissionMatrix, type PermissionModule, type AccessLevel } from "@/lib/permissions";
@@ -62,7 +71,7 @@ export function usePermission(module: PermissionModule, action: string): boolean
 
   if (matrix === undefined) return null;
 
-  const accessLevel = ((session?.user as any)?.accessLevel || "EMPLOYEE") as AccessLevel;
+  const accessLevel = ((session?.user as { accessLevel?: string } | undefined)?.accessLevel || "EMPLOYEE") as AccessLevel;
   return decide(accessLevel, matrix, module, action);
 }
 
@@ -80,7 +89,7 @@ export function usePermissions() {
     }
   }, [matrix]);
 
-  const accessLevel = ((session?.user as any)?.accessLevel || "EMPLOYEE") as AccessLevel;
+  const accessLevel = ((session?.user as { accessLevel?: string } | undefined)?.accessLevel || "EMPLOYEE") as AccessLevel;
 
   return {
     loading: matrix === undefined,
@@ -89,5 +98,63 @@ export function usePermissions() {
       if (matrix === undefined) return false;
       return decide(accessLevel, matrix, module, action);
     },
+  };
+}
+
+// ── useRole (was src/hooks/use-role.ts) ──
+
+
+const MANAGER_ROLES = [
+  "SUPER_ADMIN",
+  "COMPANY_ADMIN",
+  "C_LEVEL",
+  "VP",
+  "DIRECTOR",
+  "MANAGER",
+  "TEAM_LEAD",
+  "HR",
+];
+
+const ADMIN_ROLES = [
+  "SUPER_ADMIN",
+  "COMPANY_ADMIN",
+  "C_LEVEL",
+  "HR",
+];
+
+export function useRole() {
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel || "EMPLOYEE";
+  const { can, loading } = usePermissions();
+
+  const isExecutive = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL"].includes(accessLevel);
+  const isMgr = MANAGER_ROLES.includes(accessLevel);
+  const isAdm = ADMIN_ROLES.includes(accessLevel);
+  const isSuperAdm = accessLevel === "SUPER_ADMIN";
+
+  // While permissions are loading, fall back to role-based defaults so the
+  // UI doesn't flicker. Once loaded, we use the actual permission matrix.
+
+  return {
+    accessLevel,
+    isManager: isMgr,
+    isAdmin: isAdm,
+    isSuperAdmin: isSuperAdm,
+    isEmployee: accessLevel === "EMPLOYEE" || accessLevel === "AGENT",
+    isExecutive,
+    canManagePeople: loading ? isMgr : can("people", "edit"),
+    canManageSOPs: loading ? isMgr : can("sops", "create"),
+    // PATCH /api/sops/[id] asks for sops.edit, and the permission matrix
+    // shows "Edit SOPs" as its own cell, so the edit doors on the SOP page
+    // ask the same question instead of borrowing sops.create.
+    canEditSOPs: loading ? isMgr : can("sops", "edit"),
+    // POST /api/policies asks for exactly this, so the "New policy" primary
+    // can ask the same question the route answers instead of guessing a tier.
+    canManagePolicies: loading ? isMgr : can("policies", "create"),
+    canPublishSOPs: loading ? isMgr : can("sops", "publish"),
+    canManageReviews: loading ? isMgr : can("reviews", "create"),
+    canManageKRAs: loading ? isMgr : can("kras", "create"),
+    canInvite: loading ? isMgr : can("people", "create"),
+    canViewAnalytics: loading ? isMgr : can("analytics", "view"),
   };
 }

@@ -32,6 +32,7 @@ import { countPoliciesToAck } from "@/lib/policies-to-ack";
 import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { getEffectivePreferences, type EffectivePreferences } from "@/lib/preferences";
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
+import { tiersOfLevel, type ViewerTiers } from "@/lib/access/viewer-tiers";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf, peopleTeamOf } from "@/lib/access/org-role";
@@ -88,6 +89,12 @@ export interface BootPayload {
     adminScopes: string[];
     /** Reports, solid or dotted (the access engine's rule). */
     hasReports: boolean;
+    /**
+     * The display tiers the rail, hub sidebars and create menus read
+     * (src/lib/access/viewer-tiers.ts), answered here so no client surface
+     * reads the level. Optional for an older payload (none cleared).
+     */
+    tiers?: ViewerTiers;
     peopleTeam: boolean;
     /** May create a Space: the answer POST /api/spaces gives (src/lib/access/space-create.ts). Optional for an older payload. */
     canCreateSpace?: boolean;
@@ -378,8 +385,11 @@ export async function GET(req: NextRequest) {
     const railConfig = parseOrgAppsConfig(prefs.sidebar.apps);
     // The same resolver the client rail runs, over the pure catalog mirror
     // (src/lib/app-access.ts): the client catalog is a "use client" module.
-    const apps = visibleRailApps({ config: railConfig, accessLevel: accessLevel ?? undefined, activeModules, apps: APP_ACCESS }).map((a) => a.key);
-    const launcherApps = visibleRailApps({ config: railConfig, accessLevel: accessLevel ?? undefined, activeModules, includeFolded: true, apps: APP_ACCESS }).map((a) => a.key);
+    // The display tiers, answered once here and shipped to the client
+    // (viewer.tiers), so no client surface reads the level (access step 6).
+    const tiers = tiersOfLevel(accessLevel);
+    const apps = visibleRailApps({ config: railConfig, tiers, activeModules, apps: APP_ACCESS }).map((a) => a.key);
+    const launcherApps = visibleRailApps({ config: railConfig, tiers, activeModules, includeFolded: true, apps: APP_ACCESS }).map((a) => a.key);
     const manageableOffModules = legacyIsAdminLevel(accessLevel)
       ? [...MODULE_APP_KEYS].filter((k) => !activeModules.has(k))
       : [];
@@ -394,6 +404,7 @@ export async function GET(req: NextRequest) {
         active: user.status === "ACTIVE",
         adminScopes: [],
         hasReports: cf.teams.hasReports,
+        tiers,
         peopleTeam,
         // Who creates a Space: the answer POST /api/spaces gives (every New
         // Space control reads this, never a tier of its own).

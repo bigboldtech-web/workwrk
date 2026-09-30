@@ -24,7 +24,7 @@ import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { SopEditorPage } from "@/components/sops/sop-editor-page";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { isMalformedLegacySopId, legacySopEditorTarget } from "@/lib/nav/retired-views";
 import type { SopKind } from "@/lib/sop-kind";
 

@@ -11,19 +11,19 @@
 // prisma, so a client component must import them from "@/lib/access/use-access"
 // directly.
 //
-// STATUS: step 0 of the spec's section 10 migration order. The engine is
-// complete and tested but INERT: nothing outside src/lib/access/ calls it yet.
+// STATUS: the app and settings halves of decide() are LIVE (gatePage and
+// requireCan on app and settings refs, the settings door); object refs reach
+// can() only through the delegates behind ACCESS_V2_RESOLVER and
+// ACCESS_V2_TABLES (flags.ts), both default OFF.
 // Step 1 turns the ~37 legacy helpers into one-line delegates over this file;
 // step 2's parity harness (./parity.ts) is what proves that pivot changes no
 // answers before it happens.
 //
-// IMPORT PATH, until src/lib/access.ts is deleted (spec 10 step 8): the
-// specifier "@/lib/access" resolves to the FILE src/lib/access.ts, not to this
-// directory, under both TypeScript and webpack. So every import of the engine
-// has to name a subpath: `from "@/lib/access/index"` for this surface, or the
-// module directly (`@/lib/access/resolve`, `@/lib/access/gate`, ...). Steps 3
-// to 6 must not write `from "@/lib/access"` and expect can(): they will get
-// the legacy resolver and it will type-check.
+// IMPORT PATH: the legacy FILE src/lib/access.ts that used to shadow this
+// directory (the specifier "@/lib/access" resolved to it) moved to
+// ./legacy-resolve.ts in Phase 8 stage F, so "@/lib/access" is this module
+// now. Naming a subpath (`@/lib/access/index`, `@/lib/access/gate`) still
+// works and stays the convention.
 //
 // Server-only: this module's transitive imports include prisma. The pure half
 // (types, labels, org-role, settings, enforcement, resolve, guards, parity)

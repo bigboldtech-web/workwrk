@@ -46,3 +46,23 @@ export function legacySettingsAllows(page: SettingsPageKey, accessLevel: string 
   if (!rule) return true;
   return rule === "admin" ? legacyIsAdminLevel(accessLevel) : legacyIsManagerLevel(accessLevel);
 }
+
+/**
+ * Who saves the Scoring section of PATCH /api/settings (and sees its controls
+ * live). Owners and Admins always. C-level kept the write the manager-tier
+ * Scoring page gave it while today's door table decides; once the engine's
+ * door decides (ACCESS_V2_RESOLVER on, log-only off) the page itself closes
+ * to C-level unless they are on the People team, so the write goes with it
+ * (access-model-spec 10.1: C-level loses the accidental settings PATCH; the
+ * backfill pre-flight names every C-level person this touches).
+ */
+export function scoringWriteAllowed(accessLevel: string | null | undefined, opts: { admin: boolean; engineDoor: boolean }): boolean {
+  if (opts.admin) return true;
+  if (opts.engineDoor) return false;
+  return accessLevel === "C_LEVEL";
+}
+
+/** scoringWriteAllowed over a session (GET /api/settings's canEditScoring flag). */
+export function sessionScoringWriteAllowed(session: unknown, opts: { admin: boolean; engineDoor: boolean }): boolean {
+  return scoringWriteAllowed((session as { user?: { accessLevel?: string } } | null)?.user?.accessLevel, opts);
+}

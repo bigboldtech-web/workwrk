@@ -11,7 +11,7 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { requireSessionUser } from "@/lib/page-gates";
-import { isGuestViewer, isOrgAdminViewer } from "@/lib/route-guard";
+import { pageViewerIsGuest, pageViewerIsWorkspaceAdmin } from "@/lib/access/page-viewer";
 import { isModuleActive } from "@/lib/entitlements";
 import { MODULE_BY_SLUG } from "@/lib/modules";
 import { listOrgAdmins } from "@/lib/access/admins";
@@ -31,9 +31,9 @@ const MOD = MODULE_BY_SLUG["workwrk-tables"];
  */
 export async function tablesModuleOffView(user: { organizationId: string }): Promise<ReactNode | null> {
   if (await isModuleActive(user.organizationId, MOD.productSlug)) return null;
-  // The tier reads live in route-guard (the one transcription), not here.
-  if (await isGuestViewer()) notFound();
-  const canEnable = await isOrgAdminViewer();
+  // The role reads live in src/lib/access/page-viewer.ts, not here.
+  if (await pageViewerIsGuest()) notFound();
+  const canEnable = await pageViewerIsWorkspaceAdmin();
   const admins = canEnable ? [] : await listOrgAdmins(user.organizationId);
   return (
     <ModuleOff

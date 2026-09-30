@@ -40,7 +40,7 @@ import { SaveBar } from "@/components/settings/save-bar";
 import { ErrorState } from "@/components/ui/error-state";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-client";
-import { invalidatePermissionCache } from "@/hooks/use-permission";
+import { invalidatePermissionCache } from "@/lib/access/use-legacy-permissions";
 
 /** The cells the server enforces (settings-architecture 5.7, the 14). */
 export const ENFORCED_CELLS: readonly (readonly [PermissionModule, string])[] = [

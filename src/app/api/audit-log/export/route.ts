@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getOrgId,
-  hasRole,
   jsonError,
 } from "@/lib/api-helpers";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 /**
  * GET /api/audit-log/export
@@ -28,9 +28,8 @@ import {
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can export the audit log", 403);
-  }
+  const writeGate = await settingsWriteGate(session, "audit");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
 
   const url = new URL(req.url);

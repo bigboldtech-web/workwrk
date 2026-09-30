@@ -30,7 +30,7 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
 import { RECORDER_URL } from "@/components/sops/sop-kind-chooser";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 
 const HOW = [
   "Press Start recording and switch to the tab where you do the task.",

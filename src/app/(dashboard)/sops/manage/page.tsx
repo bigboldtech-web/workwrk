@@ -29,7 +29,7 @@ import { NotFoundView } from "@/components/access/not-found-view";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { SopFoldersTagsManager } from "@/components/settings/sop-folders-tags-manager";
 import { OrganizeListTab } from "@/components/settings/organize-list-tab";
 import { OrganizeDefaults } from "@/components/settings/organize-defaults";

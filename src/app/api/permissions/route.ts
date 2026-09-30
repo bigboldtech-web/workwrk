@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { accessV2Resolver } from "@/lib/access/flags";
 import { engineMatrixCells } from "@/lib/access/matrix-engine";
-import { PROTECTED_ADMIN_ROLES, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
+import { ACCESS_LEVELS, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 // GET — return the full matrix (custom + defaults merged on the client)
 export async function GET() {
@@ -35,11 +37,9 @@ export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  // Only COMPANY_ADMIN and SUPER_ADMIN can edit access control
-  const accessLevel = (session.user as any).accessLevel;
-  if (!PROTECTED_ADMIN_ROLES.includes(accessLevel)) {
-    return jsonError("Only Company Admin can manage access control", 403);
-  }
+  // The Access page rule (an Owner or an Admin), the actor re-read.
+  const writeGate = await settingsWriteGate(session, "access");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const body = await req.json();
@@ -51,7 +51,10 @@ export async function PATCH(req: NextRequest) {
 
   // Sanitize: only allow known modules and actions
   const sanitized: any = {};
+  const knownLevels = new Set<string>(ACCESS_LEVELS.map((l) => l.value));
   for (const [level, modules] of Object.entries(matrix)) {
+    // Only the ladder's own levels: a stray key used to be stored as is.
+    if (!knownLevels.has(level)) continue;
     if (!modules || typeof modules !== "object") continue;
     sanitized[level] = {};
     for (const [mod, actions] of Object.entries(modules as any)) {
@@ -71,6 +74,16 @@ export async function PATCH(req: NextRequest) {
   // Only the `permissions` key of the shared settings column, in one
   // statement, so no other writer's key is lost to a concurrent save.
   await writeOrgSettingsKeys(orgId, { permissions: sanitized });
+  // A change to who can do what is an audit event (it had none).
+  void logAuditEvent({
+    type: "settings.updated.permissions",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: "Changed the old permissions grid",
+    targetType: "Organization",
+    targetId: orgId,
+    metadata: { levels: Object.keys(sanitized) },
+  });
 
   return jsonSuccess({ matrix: sanitized });
 }

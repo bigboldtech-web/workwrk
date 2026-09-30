@@ -55,6 +55,7 @@ vi.mock("../components/layout/os/apps-catalog", () => {
 });
 
 import { orderedCatalogForAdmin, parseOrgAppsConfig, visibleRailApps } from "./rail-apps";
+import { tiersOfLevel } from "./access/viewer-tiers";
 import { APPS } from "../components/layout/os/apps-catalog";
 
 const keys = (apps: AppEntry[]) => apps.map((a) => a.key);
@@ -97,45 +98,45 @@ describe("parseOrgAppsConfig", () => {
 
 describe("visibleRailApps", () => {
   it("empty config = catalog order, gated only by the catalog baseline", () => {
-    expect(keys(visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN" })))
+    expect(keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("SUPER_ADMIN") })))
       .toEqual(["home", "planner", "docs", "teams", "reviews", "more-tile"]);
     // EMPLOYEE never sees manager/hr-admin apps — org config or not.
-    expect(keys(visibleRailApps({ config: {}, accessLevel: "EMPLOYEE" })))
+    expect(keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("EMPLOYEE") })))
       .toEqual(["home", "planner", "docs", "more-tile"]);
   });
 
   it("hidden removes an app for everyone, but alwaysPinned is immune", () => {
     const config = { hidden: ["planner", "home"] };
-    expect(keys(visibleRailApps({ config, accessLevel: "SUPER_ADMIN" })))
+    expect(keys(visibleRailApps({ config, tiers: tiersOfLevel("SUPER_ADMIN") })))
       .toEqual(["home", "docs", "teams", "reviews", "more-tile"]);
   });
 
   it("minAccess floors on top of the baseline and never weakens it", () => {
     // Floor an open app at manager: EMPLOYEE loses it, TEAM_LEAD keeps it.
     const floored = { minAccess: { docs: "manager" } };
-    expect(keys(visibleRailApps({ config: floored, accessLevel: "EMPLOYEE" })))
+    expect(keys(visibleRailApps({ config: floored, tiers: tiersOfLevel("EMPLOYEE") })))
       .toEqual(["home", "planner", "more-tile"]);
-    expect(keys(visibleRailApps({ config: floored, accessLevel: "TEAM_LEAD" })))
+    expect(keys(visibleRailApps({ config: floored, tiers: tiersOfLevel("TEAM_LEAD") })))
       .toContain("docs");
 
     // "Weakening" attempt: reviews requires hr-admin; an org floor of
     // manager must NOT open it to a plain manager tier.
     const weakened = { minAccess: { reviews: "manager" } };
-    expect(keys(visibleRailApps({ config: weakened, accessLevel: "TEAM_LEAD" })))
+    expect(keys(visibleRailApps({ config: weakened, tiers: tiersOfLevel("TEAM_LEAD") })))
       .not.toContain("reviews");
-    expect(keys(visibleRailApps({ config: weakened, accessLevel: "HR" })))
+    expect(keys(visibleRailApps({ config: weakened, tiers: tiersOfLevel("HR") })))
       .toContain("reviews");
   });
 
   it("alwaysPinned apps cannot be floored", () => {
     const config = { minAccess: { home: "org-admin" } };
-    expect(keys(visibleRailApps({ config, accessLevel: "EMPLOYEE" })))
+    expect(keys(visibleRailApps({ config, tiers: tiersOfLevel("EMPLOYEE") })))
       .toContain("home");
   });
 
   it("orders by config.order, ignores unknown keys, appends the rest in catalog order", () => {
     const config = { order: ["ghost-app", "docs", "planner", "docs"] };
-    expect(keys(visibleRailApps({ config, accessLevel: "SUPER_ADMIN" })))
+    expect(keys(visibleRailApps({ config, tiers: tiersOfLevel("SUPER_ADMIN") })))
       .toEqual(["docs", "planner", "home", "teams", "reviews", "more-tile"]);
   });
 
@@ -144,14 +145,14 @@ describe("visibleRailApps", () => {
       hidden: ["home", "planner", "docs", "teams", "reviews", "more-tile"],
       minAccess: { planner: "org-admin", docs: "org-admin" },
     };
-    expect(keys(visibleRailApps({ config, accessLevel: "EMPLOYEE" })))
+    expect(keys(visibleRailApps({ config, tiers: tiersOfLevel("EMPLOYEE") })))
       .toEqual(["home"]);
   });
 
   it("never renders empty: even a catalog with no alwaysPinned falls back to the baseline", () => {
     const bare = APPS.filter((a) => !a.alwaysPinned);
     const config = { hidden: bare.map((a) => a.key), order: ["docs", "planner"] };
-    const out = visibleRailApps({ config, accessLevel: "EMPLOYEE", apps: bare });
+    const out = visibleRailApps({ config, tiers: tiersOfLevel("EMPLOYEE"), apps: bare });
     // hidden/minAccess are abandoned, baseline + order kept.
     expect(keys(out)).toEqual(["docs", "planner", "more-tile"]);
   });
@@ -201,7 +202,7 @@ describe("visibleRailApps — premium module gating", () => {
   const withModule = [mk("home", { alwaysPinned: true }), mk("planner"), mk("tables")];
 
   it("hides a premium module until it is active", () => {
-    const out = keys(visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: withModule }));
+    const out = keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("SUPER_ADMIN"), apps: withModule }));
     expect(out).toContain("home");
     expect(out).toContain("planner");
     expect(out).not.toContain("tables");
@@ -211,7 +212,7 @@ describe("visibleRailApps — premium module gating", () => {
     const out = keys(
       visibleRailApps({
         config: {},
-        accessLevel: "SUPER_ADMIN",
+        tiers: tiersOfLevel("SUPER_ADMIN"),
         apps: withModule,
         activeModules: new Set(["tables"]),
       }),
@@ -229,18 +230,18 @@ describe("visibleRailApps — premium module gating", () => {
   ];
 
   it("keeps the Talk hub with the module off when the viewer may see Announcements", () => {
-    const out = keys(visibleRailApps({ config: {}, accessLevel: "HR", apps: withTalk }));
+    const out = keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("HR"), apps: withTalk }));
     expect(out).toContain("chat");
   });
 
   it("drops the Talk hub with the module off when the viewer may not", () => {
-    const out = keys(visibleRailApps({ config: {}, accessLevel: "EMPLOYEE", apps: withTalk }));
+    const out = keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("EMPLOYEE"), apps: withTalk }));
     expect(out).not.toContain("chat");
   });
 
   it("drops the Talk hub with the module off when the org hid Announcements", () => {
     const out = keys(
-      visibleRailApps({ config: { hidden: ["announcements"] }, accessLevel: "HR", apps: withTalk }),
+      visibleRailApps({ config: { hidden: ["announcements"] }, tiers: tiersOfLevel("HR"), apps: withTalk }),
     );
     expect(out).not.toContain("chat");
   });
@@ -249,7 +250,7 @@ describe("visibleRailApps — premium module gating", () => {
     const out = keys(
       visibleRailApps({
         config: {},
-        accessLevel: "EMPLOYEE",
+        tiers: tiersOfLevel("EMPLOYEE"),
         apps: withTalk,
         activeModules: new Set(["chat"]),
       }),
@@ -264,7 +265,7 @@ describe("visibleRailApps — premium module gating", () => {
     const out = keys(
       visibleRailApps({
         config: { hidden: ["planner", "tables"] },
-        accessLevel: "SUPER_ADMIN",
+        tiers: tiersOfLevel("SUPER_ADMIN"),
         apps: noPin,
       }),
     );
@@ -292,25 +293,25 @@ describe("visibleRailApps — folded apps (hubKey)", () => {
   ];
 
   it("keeps a folded app off the rail", () => {
-    const out = keys(visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: catalog }));
+    const out = keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("SUPER_ADMIN"), apps: catalog }));
     expect(out).toEqual(["home", "docs"]);
   });
 
   it("treats an app with no hubKey as a hub", () => {
-    const out = keys(visibleRailApps({ config: {}, accessLevel: "MEMBER", apps: catalog }));
+    const out = keys(visibleRailApps({ config: {}, tiers: tiersOfLevel("MEMBER"), apps: catalog }));
     expect(out).toContain("docs");
   });
 
   it("returns folded apps for a launcher when asked", () => {
     const out = keys(
-      visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: catalog, includeFolded: true }),
+      visibleRailApps({ config: {}, tiers: tiersOfLevel("SUPER_ADMIN"), apps: catalog, includeFolded: true }),
     );
     expect(out).toEqual(["home", "docs", "library", "policies"]);
   });
 
   it("still hides a folded app the viewer cannot access", () => {
     const out = keys(
-      visibleRailApps({ config: {}, accessLevel: "MEMBER", apps: catalog, includeFolded: true }),
+      visibleRailApps({ config: {}, tiers: tiersOfLevel("MEMBER"), apps: catalog, includeFolded: true }),
     );
     expect(out).toEqual(["home", "docs", "library"]);
     expect(out).not.toContain("policies");
@@ -320,7 +321,7 @@ describe("visibleRailApps — folded apps (hubKey)", () => {
     const out = keys(
       visibleRailApps({
         config: { hidden: ["library"] },
-        accessLevel: "SUPER_ADMIN",
+        tiers: tiersOfLevel("SUPER_ADMIN"),
         apps: catalog,
         includeFolded: true,
       }),

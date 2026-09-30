@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, createContext, useContext } from "rea
 import { useSession } from "next-auth/react";
 import { ProductTour } from "./product-tour";
 import { ADMIN_TOUR_STEPS, EMPLOYEE_TOUR_STEPS } from "@/lib/tour-content";
+import { useViewer } from "@/lib/access/use-access";
 
 type TourType = "admin" | "employee";
 
@@ -27,9 +28,10 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [tourType, setTourType] = useState<TourType>("employee");
 
-  const userId = (session?.user as any)?.id;
-  const accessLevel = ((session?.user as any)?.accessLevel || "EMPLOYEE") as string;
-  const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  // The org role from the engine's client viewer (Owner or Admin), never the level.
+  const viewer = useViewer();
+  const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
 
   const storageKey = userId ? `${STORAGE_KEY_PREFIX}-${userId}` : null;
 

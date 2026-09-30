@@ -12,13 +12,13 @@
 
 import Link from "next/link";
 import { TalkSidebar } from "./talk-sidebar";
-import { canAccessTier, type AccessTier } from "./access-tiers";
+import type { ViewerTier } from "@/lib/access/viewer-tiers";
 import type { PermissionModule } from "@/lib/permissions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-// Re-exported so existing consumers (rail-apps.ts) keep importing the access
-// ladder from the catalog while the definitions live in ./access-tiers.
-export { canAccessTier };
-export type { AccessTier };
+// The display tier vocabulary ("manager" | "hr-admin" | "org-admin"). The
+// ladder itself runs on the server (src/lib/access/viewer-tiers.ts) and the
+// client reads the answer from boot (useViewerTiers), never the level.
+export type AccessTier = ViewerTier;
 import {
   Home, House, Lock, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock, Timer, AlarmClock, CircleUser, Frame, Mic,
@@ -40,7 +40,6 @@ import {
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { DocsSidebar } from "./docs-sidebar";
@@ -56,7 +55,7 @@ import { createNewTable, newTableHref } from "@/lib/sheet-new";
 import { apiFetch } from "@/lib/api-fetch";
 import { Dots } from "@/components/ui/dots";
 import { useSidebarSearch } from "./sidebar-search-context";
-import { useBoot, useViewerRole } from "./boot-context";
+import { useBoot, useViewerRole, useViewerTiers } from "./boot-context";
 import { useOsShell } from "./shell-context";
 import { readSidebarCards } from "@/lib/home-prefs";
 import { goalsGroupExpanded, goalsGroupHeld, goalsParentLit } from "@/lib/people-prefs";
@@ -82,7 +81,7 @@ import {
 } from "./sidebar-primitives";
 
 /** Access tiers reused by app entries and per-action gates. */
-// AccessTier is defined in ./access-tiers and re-exported above.
+// AccessTier is the display tier vocabulary (src/lib/access/viewer-tiers.ts), aliased above.
 
 /**
  * Shell helpers handed to a CreateAction's `onSelect` so catalog-level
@@ -224,11 +223,6 @@ export interface AppEntry {
   requiredAccess?: AccessTier;
 }
 
-// MANAGER_LEVELS + canAccessTier now live in ./access-tiers (imported above).
-
-export function canAccessApp(app: AppEntry, accessLevel: string | null | undefined): boolean {
-  return canAccessTier(app.requiredAccess, accessLevel);
-}
 
 /** Window event name format for per-app "new" actions. */
 export const NEW_EVENT_PREFIX = "workwrk:os:new:";
@@ -593,10 +587,9 @@ const FAVORITES_SECTION_KEY = "work:favorites";
 
 function HomeSidebar() {
   const router = useRouter();
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const activeHref = useActiveRowHref(WORK_ROWS);
   const { boot, counts } = useBoot();
+  const { clears } = useViewerTiers();
   const { prefs, patchPrefs } = useOsShell();
   const inboxUnread = counts.inboxUnread;
   const pathname = usePathname() || "";
@@ -608,7 +601,7 @@ function HomeSidebar() {
   // The Space creates (section "+", ghost row) exist only for the people POST
   // /api/spaces lets in (spec-shell 2.10: a row that appears always works):
   // boot's viewer.canCreateSpace is that route's own answer.
-  const canCreateSpace = typeof boot.viewer.canCreateSpace === "boolean" ? boot.viewer.canCreateSpace : canAccessTier("manager", accessLevel);
+  const canCreateSpace = typeof boot.viewer.canCreateSpace === "boolean" ? boot.viewer.canCreateSpace : clears("manager");
   const [favoriteBoards, setFavoriteBoards] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteSpaces, setFavoriteSpaces] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteDocs, setFavoriteDocs] = useState<Array<{ id: string; title: string; excerpt: string | null }>>([]);
@@ -1236,8 +1229,8 @@ function HomeSidebar() {
             only doors to those two pages in this hub, and a door with no way
             to restore it is a removal. Access still decides: Guests get
             neither. */}
-        {!isGuest && accessLevel ? <li aria-hidden className="my-2 h-px bg-line" /> : null}
-        {!isGuest && accessLevel ? (
+        {!isGuest && boot.viewer.id ? <li aria-hidden className="my-2 h-px bg-line" /> : null}
+        {!isGuest && boot.viewer.id ? (
           <NavItem href="/templates" Icon={LayoutTemplate} label="Templates" active={activeHref === "/templates"} />
         ) : null}
         {!isGuest ? (
@@ -1355,15 +1348,20 @@ type PlannerCounts = {
 
 function CalendarSidebar() {
   const activeHref = useActiveRowHref(PLANNER_ALL_ROWS);
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  const { clears } = useViewerTiers();
+  // A folded app the org hid or floored (Settings > Apps & modules) leaves
+  // this sidebar too, as it leaves the launcher and the palette: hiding
+  // Clock in/out removes its row, never leaves a door to a locked page.
+  const { launcherApps } = useOsShell();
+  const appKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
+  const showApp = (key: string) => appKeys.size === 0 || appKeys.has(key);
   // sidebar-map row 5 and 6 audience: anyone with at least one report, the
   // People team, an Owner or an Admin. The manager tier is the closest the
   // catalog can ask without a server round trip; the pages and the APIs
   // enforce the relationship itself, so a manager with no reports sees the
   // rows and lands on the page's own "shows the people who report to you"
   // notice rather than on a denial.
-  const showTeam = canAccessTier("manager", accessLevel);
+  const showTeam = clears("manager");
 
   const [counts, setCounts] = useState<PlannerCounts>({ meetings: null, approvals: null, punchSince: null });
   const fmt = useFormat();
@@ -1406,8 +1404,8 @@ function CalendarSidebar() {
     <>
       <ul>
         <NavItem href="/planner" Icon={Calendar} label="Calendar" active={activeHref === "/planner"} />
-        <NavItem href="/meetings" Icon={Video} label="Meetings" active={activeHref === "/meetings"} badge={counts.meetings ?? undefined} />
-        <NavItem href="/timesheets" Icon={Clock} label="Timesheets" active={activeHref === "/timesheets"} />
+        {showApp("meetings") ? <NavItem href="/meetings" Icon={Video} label="Meetings" active={activeHref === "/meetings"} badge={counts.meetings ?? undefined} /> : null}
+        {showApp("timesheets") ? <NavItem href="/timesheets" Icon={Clock} label="Timesheets" active={activeHref === "/timesheets"} /> : null}
         {/* sidebar-map section 2 row 4: "when clocked in: a 6px Dots live
             then 'since 9:02'". It rides the LABEL rather than `dot` or
             `trailing`, and both alternatives are wrong for a reason: `dot`
@@ -1415,6 +1413,7 @@ function CalendarSidebar() {
             in is a running state rather than something waiting to be read;
             `trailing` is the hover affordance slot and is invisible until
             the pointer is over the row, which is no use for a status. */}
+        {showApp("clock") ? (
         <SidebarRow
           href="/clock"
           icon={Timer}
@@ -1439,6 +1438,7 @@ function CalendarSidebar() {
             )
           }
         />
+        ) : null}
       </ul>
       {showTeam ? (
         <>
