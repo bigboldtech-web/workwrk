@@ -22,11 +22,16 @@
 // 404 (nothing under /settings 404s for a signed-in person).
 
 import type { ReactNode } from "react";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { isOrgAdminViewer, requireManagerTierViewer } from "@/lib/route-guard";
-import { AdminOnly } from "@/components/access";
-import { SHELL_LABELS } from "@/lib/nav/labels";
+import { AdminOnly, AskAnAdminStrip } from "@/components/access";
+import { listOrgAdmins } from "@/lib/access/admins";
+import { sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import type { SettingsPageKey } from "@/lib/access/types";
+import AccountProfilePage from "@/app/(dashboard)/account/profile/page";
+import { ActiveSettingsRow } from "./settings-active-row";
 
 export type LegacySettingsRule = "admin" | "manager-tier";
 
@@ -36,6 +41,8 @@ export const LEGACY_SETTINGS_RULES: Readonly<Partial<Record<SettingsPageKey, Leg
   identity: "admin",
   locale: "admin",
   apps: "admin",
+  // Structure gated inside its page before; the same admin rule, now here.
+  structure: "admin",
   // Members, Access and Scoring admitted the manager tier (read-only below
   // Admin; the invitations API admits the tier). Kept until the engine gate
   // narrows them to Owner, Admin and the People team with its logged week.
@@ -51,20 +58,49 @@ export const LEGACY_SETTINGS_RULES: Readonly<Partial<Record<SettingsPageKey, Leg
   all: "admin",
 };
 
+/** The Owner-or-scope pages (settings spec 1.2 rows 10, 13, 14). */
+const OWNER_PAGES: ReadonlySet<SettingsPageKey> = new Set<SettingsPageKey>(["security", "api", "billing"]);
+
 export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean> {
   const rule = LEGACY_SETTINGS_RULES[page];
   if (!rule) return true;
-  return rule === "admin" ? isOrgAdminViewer() : requireManagerTierViewer();
+  const ok = rule === "admin" ? await isOrgAdminViewer() : await requireManagerTierViewer();
+  if (!ok || !OWNER_PAGES.has(page)) return ok;
+  // With SETTINGS_OWNER_SPLIT on, an Admin who is not an Owner gets the
+  // AdminOnly card on these three; off (the default), every Admin opens them.
+  return sessionMayManageOwnerPage(await getServerSession(authOptions));
+}
+
+/**
+ * What a signed-in person who may not open a Workspace page sees at the URL
+ * they typed (spec-settings-workspace 1.4, the two denial views):
+ *
+ *   an Admin (a page an Owner-only scope holds)  the AdminOnly card, inside
+ *                                                the Workspace door
+ *   everyone else                                the Ask-an-admin strip over
+ *                                                their own My settings >
+ *                                                Profile, fully working
+ *
+ * Never a redirect, never a 404.
+ */
+export async function SettingsDenied({ page }: { page: SettingsPageKey }) {
+  const label = SETTINGS_PAGES[page]?.label ?? "This page";
+  const session = await getServerSession(authOptions);
+  if (sessionIsWorkspaceAdmin(session)) {
+    return <AdminOnly page={label} managedBy="Owners" back={{ fallbackHref: "/settings", label: "Back to Overview" }} />;
+  }
+  const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId ?? null;
+  const admins = orgId ? await listOrgAdmins(orgId, 5) : [];
+  return (
+    <>
+      <ActiveSettingsRow pageKey="account/profile" />
+      <AskAnAdminStrip pageLabel={label === SETTINGS_PAGES.overview.label ? "Workspace settings" : label} admins={admins} />
+      <AccountProfilePage />
+    </>
+  );
 }
 
 export async function SettingsGate({ page, children }: { page: SettingsPageKey; children: ReactNode }) {
-  if (!(await settingsGateAllows(page))) {
-    return (
-      <AdminOnly
-        page={SETTINGS_PAGES[page]?.label ?? "This page"}
-        back={{ fallbackHref: "/account/profile", label: SHELL_LABELS.mySettings }}
-      />
-    );
-  }
+  if (!(await settingsGateAllows(page))) return <SettingsDenied page={page} />;
   return <>{children}</>;
 }

@@ -43,5 +43,14 @@ declare module "next-auth/jwt" {
     workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED"; to: string; at: number };
     /** The workspace requires two step verification of this person and they have none (lib/auth/mfa-hold.ts). */
     mfaHold?: boolean;
+    /** The password is past the workspace's maximum age (Security > Passwords). */
+    passwordHold?: boolean;
+    /** The session clock (lib/auth/session-policy.ts). */
+    authAt?: number;
+    seenAt?: number;
+    idleMin?: number;
+    maxDays?: number;
+    policyEnded?: boolean;
+    policyEndedReason?: "idle" | "lifetime";
   }
 }

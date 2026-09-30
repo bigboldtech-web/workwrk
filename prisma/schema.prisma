@@ -2411,8 +2411,15 @@ model KudosReaction {
 model ActivityLog {
   id             String   @id @default(cuid())
   type           String // task_completed, review_submitted, kra_assigned, sop_completed, meeting_created, person_added, checkin_submitted, etc.
-  actorId        String
-  actor          User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  // Null only for a row no person of this organisation wrote (a WorkwrK
+  // staff change, src/lib/staff-audit.ts); actorType and actorLabel then
+  // say who. Phase 8 (prisma/sql/2026-09-30-phase8-settings-access.sql).
+  actorId        String?
+  actor          User?    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  // user | api_key | agent | system | scim | platform_staff
+  actorType      String   @default("user")
+  actorLabel     String?
+  actingForId    String?
   targetId       String? // ID of the affected entity
   targetType     String? // "task", "review", "sop", "meeting", "user", etc.
   description    String

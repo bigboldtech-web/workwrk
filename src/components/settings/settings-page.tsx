@@ -16,7 +16,7 @@
 
 import { Suspense, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { OsPageHeader, OsViewsRow, type HeaderMenuEntry, type PrimaryAction } from "@/components/layout/os/page-header";
+import { OsPageHeader, OsToolbar, OsViewsRow, type HeaderMenuEntry, type PrimaryAction } from "@/components/layout/os/page-header";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { leaveThen } from "@/lib/dirty-guard";
@@ -137,6 +137,11 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width =
   // description line, so a page with a subtitle or lead draws its own views
   // row under them (the same OsViewsRow the header would have used).
   const splitViews = Boolean(tabStrip && (subtitle || lead));
+  // With a subtitle or lead the header draws only the title row; the toolbar
+  // (the one blue button and the "..." square) follows the subtitle and the
+  // tabs, so the page reads title, subtitle, tabs, toolbar, never a button
+  // row floating between the title and its own subtitle.
+  const splitToolbar = Boolean((subtitle || lead) && (tabPrimary || tabMenu?.length));
 
   return (
     <div className={cn("w-full pb-16", width === "list" ? "max-w-[1168px]" : "max-w-[808px]", className)}>
@@ -144,13 +149,14 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width =
         title={page?.label ?? pageKey}
         actions={actions}
         views={splitViews ? undefined : tabStrip}
-        primary={tabPrimary}
-        menu={tabMenu}
+        primary={splitToolbar ? undefined : tabPrimary}
+        menu={splitToolbar ? undefined : tabMenu}
         className="max-[900px]:[&>div]:px-[16px]"
       />
       {subtitle ? <p className="mt-1 px-[24px] text-sm text-ink-2 max-[900px]:px-[16px]">{subtitle}</p> : null}
       {lead ? <div className="mt-4 px-[24px] max-[900px]:px-[16px]">{lead}</div> : null}
       {splitViews ? <OsViewsRow className="mt-3 px-[24px] max-[900px]:px-[16px]" aria-label="Tabs">{tabStrip}</OsViewsRow> : null}
+      {splitToolbar ? <OsToolbar className="mt-2 px-[24px] max-[900px]:px-[16px]" primary={tabPrimary} menu={tabMenu} /> : null}
       <div className="mt-4 px-[24px] max-[900px]:px-[16px]">{typeof children === "function" ? children(active) : children}</div>
     </div>
   );

@@ -1,12 +1,10 @@
-import { isOrgAdminViewer } from "@/lib/route-guard";
-import { AdminOnly } from "@/components/access";
-import { SHELL_LABELS } from "@/lib/nav/labels";
+import { settingsGateAllows, SettingsDenied } from "@/components/settings/settings-gate";
 import { SettingsOverviewClient } from "./overview-client";
 import { permanentRedirect } from "next/navigation";
 import { settingsRedirectFor, settingsRedirectTarget } from "@/lib/settings-registry";
 
 // The Workspace settings Overview (registry gate owner-admin). A signed-in
-// person below Admin who types /settings gets the AdminOnly card at the same
+// person below Admin who types /settings gets the Ask-an-admin strip over their own Profile at the same
 // URL (spec-shell 1.6, 2.8): never a redirect and never a 404, because the
 // personal door shares the prefix. The card body is overview-client.tsx.
 // The avatar menu's old query rows (/settings?tab=themes, ?tab=shortcuts)
@@ -25,8 +23,6 @@ export default async function SettingsOverviewPage({ searchParams }: { searchPar
   const moved = settingsRedirectFor("/settings", search);
   if (moved) permanentRedirect(settingsRedirectTarget(moved, search));
 
-  if (!(await isOrgAdminViewer())) {
-    return <AdminOnly page="Workspace settings" back={{ fallbackHref: "/account/profile", label: SHELL_LABELS.mySettings }} />;
-  }
+  if (!(await settingsGateAllows("overview"))) return <SettingsDenied page="overview" />;
   return <SettingsOverviewClient />;
 }

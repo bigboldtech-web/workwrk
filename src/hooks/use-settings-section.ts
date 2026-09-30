@@ -20,7 +20,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 
-export type SettingsSectionKey = "general" | "culture" | "scoring" | "security" | "access" | "process";
+import type { LiveSettingsSection } from "@/lib/settings/org-settings-sections";
+
+export type SettingsSectionKey = LiveSettingsSection;
 
 /** The GET /api/settings body, loosely typed (each page selects its own part). */
 export interface SettingsGetBody {

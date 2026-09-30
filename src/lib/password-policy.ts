@@ -1,12 +1,14 @@
 // password-policy — enforce an organization's password rules wherever a person
 // CHOOSES a password (signup, invite-accept, reset). The rules live in
-// Organization.settings.security and are surfaced read-only in Settings →
-// Security and Account → Security; until now nothing actually enforced them.
+// Organization.settings.security, edited in Workspace settings > Security and
+// shown as a live checklist wherever a password is chosen.
 
 export type SecurityPolicy = {
   minPasswordLength?: number;
   requireUppercase?: boolean;
   requireNumbers?: boolean;
+  /** Workspace settings > Security > Require a symbol (default off). */
+  requireSymbol?: boolean;
 };
 
 // The baseline every account meets, and what a brand-new org (no settings yet)
@@ -15,6 +17,7 @@ export const DEFAULT_PASSWORD_POLICY: Required<SecurityPolicy> = {
   minPasswordLength: 8,
   requireUppercase: true,
   requireNumbers: true,
+  requireSymbol: false,
 };
 
 /** Pull the security policy out of an org's `settings` JSON, with defaults. */
@@ -24,8 +27,12 @@ export function policyFromOrgSettings(settings: unknown): SecurityPolicy {
     minPasswordLength: sec?.minPasswordLength ?? DEFAULT_PASSWORD_POLICY.minPasswordLength,
     requireUppercase: sec?.requireUppercase ?? DEFAULT_PASSWORD_POLICY.requireUppercase,
     requireNumbers: sec?.requireNumbers ?? DEFAULT_PASSWORD_POLICY.requireNumbers,
+    requireSymbol: sec?.requireSymbol ?? DEFAULT_PASSWORD_POLICY.requireSymbol,
   };
 }
+
+/** A character that is not a letter, a digit or a space. */
+export const SYMBOL_RE = /[^A-Za-z0-9\s]/;
 
 /**
  * Validate a candidate password against a policy. Returns a human-readable
@@ -44,6 +51,9 @@ export function validatePassword(password: string, policy?: SecurityPolicy): str
   }
   if (p.requireNumbers && !/[0-9]/.test(password)) {
     return "Password must include a number.";
+  }
+  if (p.requireSymbol && !SYMBOL_RE.test(password)) {
+    return "Password must include a symbol, like ! or #.";
   }
   return null;
 }

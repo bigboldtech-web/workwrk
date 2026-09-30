@@ -50,3 +50,12 @@ export function mfaHoldAllowsPage(path: string): boolean {
   const p = clean(path);
   return OPEN_PAGE_PREFIX.some((x) => underPrefix(p, x));
 }
+
+/** The page an expired password is sent to (Workspace settings > Security > Password expires after). */
+export const PASSWORD_HOLD_PAGE = "/account/security?change=1";
+
+/** May a session whose password expired call this API path? Everything a held MFA session may, plus changing the password. */
+export function passwordHoldAllowsApi(path: string): boolean {
+  const p = clean(path);
+  return mfaHoldAllowsApi(p) || p === "/api/me/change-password";
+}

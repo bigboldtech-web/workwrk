@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const accessLevel = (session as any).user.accessLevel;
+  const accessLevel = (session as { user: { accessLevel?: string } }).user.accessLevel ?? "";
   if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
     return jsonError("Insufficient permissions", 403);
   }
@@ -54,7 +54,7 @@ export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const accessLevel = (session as any).user.accessLevel;
+  const accessLevel = (session as { user: { accessLevel?: string } }).user.accessLevel ?? "";
   if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
     return jsonError("Insufficient permissions", 403);
   }

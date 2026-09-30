@@ -125,6 +125,11 @@
 // and /api/kpi-records/[id]/manager-review. The unit files still listed below
 // keep a real legacy read (an isManager or accessLevel check) that changes
 // behaviour if removed; they leave with access step 6.
+// Phase 8 Stage D (2026-09-30) NET SHRINK of nine. The rebuilt Settings pages
+// (API, Billing, Identity, Locale, Structure), the settings shell,
+// the org delete and restore routes and the SCIM Users collection now gate
+// through src/lib/access/workspace-admin.ts and no longer read the legacy
+// signals themselves.
 export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/calls/status/route.ts",
   "src/app/api/people/pick/route.ts",
@@ -141,14 +146,10 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/(dashboard)/folders/\\[id\\]/page.tsx",
   "src/app/(dashboard)/okrs/\\[id\\]/page.tsx",
   "src/app/(dashboard)/people/roles/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/settings/api/page.tsx",
-  "src/app/(dashboard)/settings/billing/page.tsx",
-  "src/app/(dashboard)/settings/identity/page.tsx",
-  "src/app/(dashboard)/settings/locale/page.tsx",
   "src/app/(dashboard)/settings/members/page.tsx",
-  // Phase 8 Stage A: /settings/permissions moved here unchanged.
+  // Phase 8 Stage A: /settings/permissions moved here; the transitional
+  // page still draws the legacy grid through checkPermission.
   "src/app/(dashboard)/settings/access/page.tsx",
-  "src/app/(dashboard)/settings/structure/page.tsx",
   "src/app/(dashboard)/spaces/\\[slug\\]/page.tsx",
   "src/app/(dashboard)/spaces/page.tsx",
   "src/app/(dashboard)/tables/layout.tsx",
@@ -317,8 +318,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/organization/branding/route.ts",
   "src/app/api/organization/byok/route.ts",
   "src/app/api/organization/work-schedule/route.ts",
-  "src/app/api/organizations/delete/route.ts",
-  "src/app/api/organizations/restore/route.ts",
   "src/app/api/ownership-areas/\\[id\\]/route.ts",
   "src/app/api/ownership-areas/route.ts",
   "src/app/api/people/backfill-role-defs/route.ts",
@@ -368,7 +367,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/role-instances/route.ts",
   "src/app/api/scim-tokens/\\[id\\]/route.ts",
   "src/app/api/scim-tokens/route.ts",
-  "src/app/api/scim/v2/Users/route.ts",
   "src/app/api/scopes/\\[id\\]/route.ts",
   "src/app/api/scopes/route.ts",
   "src/app/api/search/route.ts",
@@ -463,7 +461,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/components/layout/os/hub-sidebar.tsx",
   "src/components/layout/os/docs-sidebar.tsx",
   "src/components/layout/os/invite-modal.tsx",
-  "src/components/layout/os/settings-shell.tsx",
   "src/components/layout/os/share-board-dialog.tsx",
   "src/components/layout/os/shell-context.tsx",
   "src/components/layout/os/workspace-menu.tsx",

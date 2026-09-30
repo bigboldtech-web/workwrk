@@ -8,7 +8,9 @@ import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
-import { mfaRequiredFor } from "@/lib/auth/security-policy";
+import { mfaRequiredFor, passwordAgeOf, passwordMaxAgeDaysOf } from "@/lib/auth/security-policy";
+import { signInPolicyOf } from "@/lib/settings/org-policy";
+import { sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
 import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
 import { reanchorUser } from "./access/workspace-anchor";
 import { orgRoleOf } from "./access/org-role";
@@ -151,9 +153,12 @@ const providers = [
         throw new Error("Invalid credentials");
       }
 
+      // The workspace's own lockout rule, known now the account is (Workspace
+      // settings > Security; the built-in 8 and 15 stay the floor).
+      const lockout = signInPolicyOf(user.organization?.settings);
       const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
       if (!isValid) {
-        recordLoginFailure(key);
+        recordLoginFailure(key, lockout);
         throw new Error("Invalid credentials");
       }
 
@@ -183,7 +188,7 @@ const providers = [
           ? false
           : await verifyAndConsumeBackupCode(user.id, code, user.mfaBackupCodes);
         if (!totpOk && !backupOk) {
-          recordLoginFailure(key);
+          recordLoginFailure(key, lockout);
           throw new Error("Invalid authentication code");
         }
       }
@@ -283,6 +288,10 @@ const providers = [
         avatar: user.avatar,
         tokenVersion: user.tokenVersion,
         workspaceMove,
+        // The workspace's session rules (Workspace settings > Security),
+        // carried into the token at sign-in; the revalidation refreshes them.
+        sessionIdleMinutes: signInPolicyOf(org.settings).sessionIdleMinutes,
+        sessionMaxDays: signInPolicyOf(org.settings).sessionMaxDays,
       };
     },
   }),
@@ -418,6 +427,14 @@ export const authOptions: NextAuthOptions = {
         token.lastName = u.lastName;
         token.avatar = u.avatar;
         token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
+        // The session clock (src/lib/auth/session-policy.ts): signed in now.
+        const signedInAt = Date.now();
+        token.authAt = signedInAt;
+        token.seenAt = signedInAt;
+        token.policyEnded = false;
+        const sp = user as unknown as { sessionIdleMinutes?: number; sessionMaxDays?: number };
+        if (typeof sp.sessionIdleMinutes === "number") token.idleMin = sp.sessionIdleMinutes;
+        if (typeof sp.sessionMaxDays === "number") token.maxDays = sp.sessionMaxDays;
         const move = (user as unknown as { workspaceMove?: WorkspaceMove }).workspaceMove;
         if (move) token.workspaceMove = move;
       }
@@ -511,6 +528,7 @@ export const authOptions: NextAuthOptions = {
             tokenVersion: true,
             organizationId: true,
             mfaEnabled: true,
+            passwordChangedAt: true,
             organization: { select: { status: true, name: true } },
           },
         });
@@ -643,7 +661,31 @@ export const authOptions: NextAuthOptions = {
             token.mfaHold =
               !account_.mfaEnabled &&
               mfaRequiredFor(holdOrg?.settings, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }));
+            // The rest of the sign-in policy, refreshed with the same read:
+            // the session windows, and the password age hold (an expired
+            // password reaches only My settings > Security until changed;
+            // a password with no recorded change date is never held).
+            if (holdOrg) {
+              const policy = signInPolicyOf(holdOrg.settings);
+              token.idleMin = policy.sessionIdleMinutes;
+              token.maxDays = policy.sessionMaxDays;
+              token.passwordHold = passwordAgeOf(account_.passwordChangedAt, passwordMaxAgeDaysOf(holdOrg.settings)).kind === "expired";
+            }
           }
+        }
+      }
+
+      // The session windows (idle and absolute), checked on every read of
+      // the token. An ended session stays ended; the revalidation above never
+      // clears policyEnded.
+      if (token.id && !token.policyEnded) {
+        const verdict = sessionVerdict({ authAt: token.authAt, seenAt: token.seenAt, idleMin: token.idleMin, maxDays: token.maxDays });
+        if (verdict.ended) {
+          token.policyEnded = true;
+          token.policyEndedReason = verdict.reason;
+        } else {
+          token.authAt = verdict.authAt;
+          token.seenAt = verdict.seenAt;
         }
       }
 
@@ -653,9 +695,13 @@ export const authOptions: NextAuthOptions = {
       // Revoked (removed / deactivated) — hand back a session with no
       // identity. requireSessionUser() and every API gate check for an id,
       // so this reads as signed out everywhere without a special case.
-      if (token.revoked) {
+      if (token.revoked || token.policyEnded) {
         return { ...session, user: undefined } as unknown as typeof session;
       }
+      // The idle warning arms on `expires`: the workspace's idle window when
+      // it is shorter than NextAuth's 12h ceiling.
+      const until = sessionIdleUntil({ authAt: token.authAt, seenAt: token.seenAt, idleMin: token.idleMin, maxDays: token.maxDays });
+      if (Number.isFinite(until) && until < new Date(session.expires).getTime()) session.expires = new Date(until).toISOString();
       if (session.user) {
         Object.assign(session.user, {
           id: token.id,

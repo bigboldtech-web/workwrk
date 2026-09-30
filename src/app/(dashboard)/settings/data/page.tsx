@@ -1,47 +1,57 @@
 "use client";
 
-/* Settings · Data & compliance — Admin-only export + data-governance hub.
- *
- * Every download here targets a REAL, already-shipped export endpoint.
- * No new export APIs are invented on the page; it only surfaces the
- * ones that exist and were previously dead code (no UI):
- *
- *   GET /api/export/all               → org-wide ZIP (people, tasks,
- *                                        reviews, SOPs, KRAs, meetings,
- *                                        activity + manifest.json)
- *   GET /api/export/people            → people roster CSV
- *   GET /api/export/[type]            → per-type CSV; supported types are
- *                                        timesheets | purchase-orders |
- *                                        invoices | audit
- *
- * The two governance links point at the existing import surface
- * (/imports) and the org recycle bin (/trash). Server-gated to the two
- * protected admin tiers by layout.tsx (requireOrgAdminOrRedirect).
- */
+// Workspace settings > Data (spec-settings-workspace `/settings/data`,
+// settings-architecture 5.10). Tabs:
+//
+//   Export               Full workspace (ZIP: people, Spaces, Folders,
+//                        Lists, every task, Docs, Tables, Goals, reviews,
+//                        SOPs, KRAs, meetings), People (CSV), Timesheets
+//                        (CSV), Audit log (CSV); under Legacy, Purchase
+//                        orders and Invoices only for an org that holds
+//                        them; Recent exports from the data.exported rows
+//                        every download writes. The one-time "Previous
+//                        permissions grid" download appears here once the
+//                        grid is retired (access.matrix_retired).
+//   Import               the /imports hub content (a CSV into a table, People
+//                        from a CSV inline) and the Marketing legacy import
+//                        (?legacy=marketing scrolls to it and pulses it)
+//   Retention & privacy  trash window (the trash-purge cron), the audit log
+//                        window (the audit-purge cron; unset keeps it
+//                        forever), AI features for everyone (read by every AI
+//                        entry point), and the org's own AI key (Enterprise
+//                        byok flag)
+//   Trash                a link card to /trash
+//
+// The two retention rows are Owner rows (every Admin until the Owner and
+// Admin split); every download keeps the 401, 403, 503 and empty guards.
 
-import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import {
-  Database,
-  Users,
-  Clock,
-  ShoppingCart,
-  Receipt,
-  ScrollText,
-  Upload,
-  Trash2,
-  Download,
-  ChevronRight,
-  Megaphone,
-  type LucideIcon,
-} from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Download, Megaphone, type LucideIcon } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { NativeSelect, NumberInput, Pending, btn } from "@/components/settings/settings-form";
+import { ByokManager } from "@/components/settings/byok-manager";
 import { settingsTabs } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Switch } from "@/components/ui/switch";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { DotsArt } from "@/components/ui/dots-art";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { useOsShell } from "@/components/layout/os/shell-context";
+import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
+import { objectHrefNow } from "@/components/layout/os/use-object-href";
+import { PeopleImport, usePeopleImport } from "@/components/people/people-import";
+import { useSettingsSection } from "@/hooks/use-settings-section";
+import { RETENTION_BOUNDS } from "@/lib/settings/org-policy";
+import { formatRelative } from "@/lib/format/date";
 import type { LegacyMarketingCounts, LegacyMarketingReport, LegacyPending } from "@/lib/marketing/legacy-import";
 import { LIST_NAME, MARKETING_KINDS, type MarketingKind } from "@/lib/marketing/legacy-map";
 
@@ -49,93 +59,24 @@ type ExportRow = {
   key: string;
   href: string;
   fallbackName: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
   title: string;
   desc: string;
 };
 
-// Full-org archive — the heaviest, most sensitive export. Kept in its
-// own section so the ZIP scope reads clearly before the granular CSVs.
-const FULL_EXPORT: ExportRow = {
-  key: "all",
-  href: "/api/export/all",
-  fallbackName: "workwrk-export.zip",
-  icon: Database,
-  title: "Full organization export",
-  desc: "Everything as a ZIP of CSVs + manifest: people, departments, tasks, SOPs, reviews, meetings, KRAs, activity.",
-};
-
-// Granular CSVs. Each maps to a supported export endpoint; the four
-// per-type rows all resolve through /api/export/[type], which only
-// accepts these four type slugs.
-const CSV_EXPORTS: ExportRow[] = [
-  {
-    key: "people",
-    href: "/api/export/people",
-    fallbackName: "people-export.csv",
-    icon: Users,
-    title: "People roster",
-    desc: "Active members with department, role, join date and rolling performance score.",
-  },
-  {
-    key: "timesheets",
-    href: "/api/export/timesheets",
-    fallbackName: "timesheets.csv",
-    icon: Clock,
-    title: "Timesheets",
-    desc: "Submitted timesheets with total hours, status and approver.",
-  },
-  {
-    key: "purchase-orders",
-    href: "/api/export/purchase-orders",
-    fallbackName: "purchase-orders.csv",
-    icon: ShoppingCart,
-    title: "Purchase orders",
-    desc: "Purchase orders with vendor, amount, status, requester and approver.",
-  },
-  {
-    key: "invoices",
-    href: "/api/export/invoices",
-    fallbackName: "invoices.csv",
-    icon: Receipt,
-    title: "Invoices",
-    desc: "Invoices with vendor, linked PO, due date, amount and payment status.",
-  },
-  {
-    key: "audit",
-    href: "/api/export/audit",
-    fallbackName: "audit.csv",
-    icon: ScrollText,
-    title: "Audit trail",
-    desc: "Full activity log as CSV: actor, action, severity, target and IP.",
-  },
+const EXPORTS: ExportRow[] = [
+  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "Everything in this workspace: people, Spaces, Lists, every task, Docs, Tables, Goals, reviews and SOPs." },
+  { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
+  { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
+  { key: "audit", href: "/api/export/audit", fallbackName: "audit.csv", title: "Audit log (CSV)", desc: "The activity log: who, what, when, the target and the IP." },
+];
+const LEGACY_EXPORTS: ExportRow[] = [
+  { key: "purchase-orders", href: "/api/export/purchase-orders", fallbackName: "purchase-orders.csv", title: "Purchase orders (CSV)", desc: "Vendor, amount, status, requester and approver." },
+  { key: "invoices", href: "/api/export/invoices", fallbackName: "invoices.csv", title: "Invoices (CSV)", desc: "Vendor, linked order, due date, amount and payment status." },
 ];
 
-// The Import tab (the old /settings/import-export 308s here). /imports keeps
-// its own URL inside the takeover until the inline importer ships (S5); its
-// People card opens the Directory's Import people (Phase 6).
-const IMPORTS = [
-  {
-    href: "/imports",
-    icon: Upload,
-    title: "Import data",
-    desc: "Bring a CSV file into a table, or invite people from a CSV.",
-  },
-] as const;
-
-// Governance destinations that already have their own pages.
-const GOVERNANCE = [
-  {
-    href: "/trash",
-    icon: Trash2,
-    title: "Trash",
-    desc: "Recover deleted documents, tables and files within their retention window.",
-  },
-] as const;
-
 // Parse the download filename from Content-Disposition, tolerating both
-// `filename="x"` and RFC 5987 `filename*=UTF-8''x` forms. Falls back to
-// the caller-supplied name when the header is absent.
+// `filename="x"` and RFC 5987 `filename*=UTF-8''x` forms.
 function filenameFromDisposition(cd: string, fallback: string): string {
   const star = /filename\*=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
   if (star?.[1]) {
@@ -147,27 +88,28 @@ function filenameFromDisposition(cd: string, fallback: string): string {
 
 const DATA_TABS: readonly SettingsTab[] = settingsTabs("data");
 
-function LinkCard({ href, icon: Icon, title, desc }: { href: string; icon: LucideIcon; title: string; desc: string }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3 hover:border-line-strong hover:bg-hover"
-    >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-active text-ink-2">
-        <Icon className="h-[18px] w-[18px]" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-base font-medium text-ink">{title}</div>
-        <div className="text-base text-ink-2">{desc}</div>
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-ink-3" />
-    </Link>
-  );
-}
+type Summary = {
+  legacy: { purchaseOrders: number; invoices: number };
+  recentExports: { id: string; when: string; who: string; what: string; kind: string | null }[];
+  matrixRetired: { id: string; at: string } | null;
+  canPurge: boolean;
+};
 
-export default function DataCompliancePage() {
+export default function DataSettingsPage() {
   const { toast } = useOsToast();
   const [busy, setBusy] = useState<string | null>(null);
+  const [summary, setSummary] = useState<Summary | null | "error">(null);
+  const flow = usePeopleImport();
+  const ready = flow.state.staged?.summary.ready ?? 0;
+
+  const loadSummary = useCallback(async () => {
+    const r = await apiFetch<Summary>("/api/settings/data-summary", { cache: "no-store" });
+    setSummary(r.ok ? r.data : "error");
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { void loadSummary(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadSummary]);
 
   const download = useCallback(async (row: ExportRow) => {
     if (busy) return;
@@ -177,8 +119,8 @@ export default function DataCompliancePage() {
       if (!res.ok) {
         let msg = `Export failed (HTTP ${res.status})`;
         if (res.status === 403) msg = "You don't have permission to run this export.";
-        else if (res.status === 401) msg = "Your session expired — sign in again.";
-        else if (res.status === 503) msg = "Export is temporarily unavailable. Try again shortly.";
+        else if (res.status === 401) msg = "Your session expired. Log in again.";
+        else if (res.status === 503) msg = "Export is unavailable right now. Try again shortly.";
         else {
           const body = await res.json().catch(() => null);
           if (body && typeof body.error === "string") msg = body.error;
@@ -187,14 +129,8 @@ export default function DataCompliancePage() {
         return;
       }
       const blob = await res.blob();
-      if (blob.size === 0) {
-        toast("Nothing to export yet — this dataset is empty.");
-        return;
-      }
-      const filename = filenameFromDisposition(
-        res.headers.get("Content-Disposition") ?? "",
-        row.fallbackName,
-      );
+      if (blob.size === 0) { toast("Nothing to export yet: this is empty."); return; }
+      const filename = filenameFromDisposition(res.headers.get("Content-Disposition") ?? "", row.fallbackName);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -204,56 +140,274 @@ export default function DataCompliancePage() {
       a.remove();
       URL.revokeObjectURL(url);
       toast(`Exported ${filename}`);
+      void loadSummary();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Export failed");
     } finally {
       setBusy(null);
     }
-  }, [busy, toast]);
+  }, [busy, toast, loadSummary]);
+
+  const tabs: SettingsTab[] = DATA_TABS.map((t) =>
+    t.key === "import" && flow.state.step === "review" && ready > 0
+      ? { ...t, primary: { label: `Import ${ready} ${ready === 1 ? "person" : "people"}`, onClick: () => { void flow.commit(); }, busy: flow.state.busy } }
+      : t,
+  );
 
   return (
-    <SettingsPage pageKey="data" tabs={DATA_TABS}>
+    <SettingsPage pageKey="data" tabs={tabs}>
       {(tab) =>
         tab === "import" ? (
-          <div className="max-w-2xl space-y-7">
-            <Section label="Import">
-              {IMPORTS.map((c) => <LinkCard key={c.href} {...c} />)}
-            </Section>
-
-            {/* The Marketing importer lives on Import, where its entry link
-                (LEGACY_IMPORT_HREF, /settings/data?tab=import&legacy=marketing)
-                lands; the Export tab keeps the same section for its legacy
-                CSV downloads. It renders only for a workspace holding rows. */}
-            <LegacyMarketingSection busy={busy} onExport={download} />
-          </div>
+          <ImportTab flow={flow} busy={busy} onExport={download} />
+        ) : tab === "retention" ? (
+          <RetentionTab canPurge={summary && summary !== "error" ? summary.canPurge : false} />
+        ) : tab === "trash" ? (
+          <TrashTab />
         ) : (
-          <>
-            <p className="mb-6 max-w-2xl text-base text-ink-2">
-              Download a full copy of this organization&rsquo;s data for compliance,
-              backup or migration. Every export is admin-only and recorded in the audit trail.
-            </p>
-
-            <div className="max-w-2xl space-y-7">
-              <Section label="Full export">
-                <ExportButton row={FULL_EXPORT} busy={busy} onRun={download} />
-              </Section>
-
-              <Section label="Data exports (CSV)">
-                {CSV_EXPORTS.map((row) => (
-                  <ExportButton key={row.key} row={row} busy={busy} onRun={download} />
-                ))}
-              </Section>
-
-              <LegacyMarketingSection busy={busy} onExport={download} />
-
-              <Section label="Governance">
-                {GOVERNANCE.map((c) => <LinkCard key={c.href} {...c} />)}
-              </Section>
-            </div>
-          </>
+          <ExportTab summary={summary} busy={busy} onRun={download} onRetry={() => { setSummary(null); void loadSummary(); }} />
         )
       }
     </SettingsPage>
+  );
+}
+
+/* ───────────────────────── Export ───────────────────────── */
+
+function ExportTab({ summary, busy, onRun, onRetry }: { summary: Summary | null | "error"; busy: string | null; onRun: (r: ExportRow) => void; onRetry: () => void }) {
+  const s = summary && summary !== "error" ? summary : null;
+  const lastFor = (key: string) => s?.recentExports.find((e) => e.kind === key || (key === "all" && e.kind === "workspace"));
+  const legacy = s ? LEGACY_EXPORTS.filter((r) => (r.key === "invoices" ? s.legacy.invoices : s.legacy.purchaseOrders) > 0) : [];
+  const columns: TableColumn<Summary["recentExports"][number]>[] = [
+    { key: "when", label: "When", width: "150px", render: (e) => <span title={new Date(e.when).toLocaleString()}>{formatRelative(e.when)}</span> },
+    { key: "who", label: "Who", width: "180px", render: (e) => e.who },
+    { key: "what", label: "What", title: true, render: (e) => e.what },
+  ];
+  return (
+    <SettingsCardStack>
+      <SettingsCard wide="data.exports" id="data.export">
+        {EXPORTS.map((row) => {
+          const last = lastFor(row.key);
+          return (
+            <SettingsRow
+              key={row.key}
+              id={`data.export.${row.key}`}
+              label={row.title}
+              helper={<>{row.desc}{last ? <span className="block">Last exported by {last.who}, {formatRelative(last.when)}</span> : null}</>}
+              control={<ExportButton row={row} busy={busy} onRun={onRun} />}
+            />
+          );
+        })}
+        {legacy.length > 0 || s?.matrixRetired ? (
+          <>
+            <div className="mt-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
+            {legacy.map((row) => (
+              <SettingsRow key={row.key} label={row.title} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onRun} />} />
+            ))}
+            {s?.matrixRetired ? (
+              <SettingsRow
+                label="Previous permissions grid (JSON)"
+                helper={`The old permission grid as it stood when it was retired, ${new Date(s.matrixRetired.at).toLocaleDateString()}.`}
+                control={<ExportButton row={{ key: "matrix", href: `/api/settings/matrix-export?id=${s.matrixRetired.id}`, fallbackName: "permissions-grid.json", title: "", desc: "" }} busy={busy} onRun={onRun} />}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </SettingsCard>
+
+      <section>
+        <h2 className="mb-2 text-lg font-semibold text-ink">Recent exports</h2>
+        {summary === "error" ? (
+          <ErrorState compact what="recent exports" onRetry={onRetry} />
+        ) : (
+          <TableCard
+            ariaLabel="Recent exports"
+            columns={columns}
+            rows={s ? s.recentExports : null}
+            rowKey={(e) => e.id}
+            empty={<span>No exports yet</span>}
+            footer={s ? { total: s.recentExports.length, noun: "exports", from: s.recentExports.length ? 1 : 0, to: s.recentExports.length, hidePaging: true, trailing: s.recentExports.length >= 20 ? "The last 20. The Audit log has every one." : undefined } : undefined}
+          />
+        )}
+      </section>
+    </SettingsCardStack>
+  );
+}
+
+/* ───────────────────────── Import ───────────────────────── */
+
+function ImportTab({ flow, busy, onExport }: { flow: ReturnType<typeof usePeopleImport>; busy: string | null; onExport: (r: ExportRow) => void }) {
+  const router = useRouter();
+  const showUpcoming = useShowUpcoming();
+  const { prefs } = useOsShell();
+  const tablesOn = Array.isArray(prefs.modules?.activeAppKeys) && prefs.modules.activeAppKeys.includes("tables");
+  const [csvOpen, setCsvOpen] = useState(false);
+  const step = flow.state.step;
+  return (
+    <SettingsCardStack>
+      <SettingsCard title="People from a CSV" description="Each row is checked first, and everyone ready gets an invitation. Nobody joins until they accept, and everyone joins as a Member." wide="data.import" id="data.import.people">
+        <PeopleImport flow={flow} container="page" />
+        {step === "map" ? (
+          <div className="flex gap-2">
+            <button type="button" className={btn.ghost} onClick={flow.back} disabled={flow.state.busy}>Back</button>
+            <button type="button" className={btn.secondary} disabled={flow.state.busy || flow.missing.length > 0} onClick={() => { void flow.stage(); }}>
+              {flow.state.busy ? <Pending label="Checking" /> : null}
+              Check the file
+            </button>
+          </div>
+        ) : step === "review" ? (
+          <div className="flex gap-2">
+            <button type="button" className={btn.ghost} onClick={flow.back} disabled={flow.state.busy}>Back</button>
+          </div>
+        ) : step === "done" ? (
+          <div><button type="button" className={btn.secondary} onClick={flow.reset}>Import another file</button></div>
+        ) : null}
+      </SettingsCard>
+
+      <SettingsCard title="A CSV into a table" description="Create a new table from a CSV file, or add its rows to a table you already have. You check a preview and the column types before anything is written." id="data.import.table">
+        {tablesOn ? (
+          <div><button type="button" className={btn.secondary} onClick={() => setCsvOpen(true)}>Choose a CSV</button></div>
+        ) : (
+          <p className="text-sm text-ink-2">
+            Tables is turned off for this workspace. <Link href="/settings/apps#modules" className="font-medium text-brand-deep hover:underline">Turn it on in Apps &amp; modules</Link> to import a CSV into a table.
+          </p>
+        )}
+      </SettingsCard>
+
+      <LegacyMarketingSection busy={busy} onExport={onExport} />
+
+      {showUpcoming ? (
+        <p className="text-sm text-ink-3">Coming soon: imports from ClickUp, Monday, Asana and Trello.</p>
+      ) : null}
+
+      {tablesOn ? (
+        <CsvImportDialog
+          open={csvOpen}
+          onClose={() => setCsvOpen(false)}
+          onDone={({ tableId, created }) => { if (created) router.push(objectHrefNow("table", tableId)); }}
+        />
+      ) : null}
+    </SettingsCardStack>
+  );
+}
+
+/* ───────────────────────── Retention & privacy ───────────────────────── */
+
+type RetentionData = { retention: { trashDays: number; auditDays: number | null }; data: { aiEnabled: boolean } };
+
+function RetentionTab({ canPurge }: { canPurge: boolean }) {
+  const { toast } = useOsToast();
+  const ret = useSettingsSection("retention", (b) => {
+    const st = (b.settings ?? {}) as Partial<RetentionData>;
+    return { retention: st.retention ?? { trashDays: 60, auditDays: null }, data: st.data ?? { aiEnabled: true } } as RetentionData;
+  });
+  const dataSec = useSettingsSection("data", () => null);
+  const [trash, setTrash] = useState<number | "" | null>(null);
+  const [auditMode, setAuditMode] = useState<"forever" | "days" | null>(null);
+  const [auditDays, setAuditDays] = useState<number | "" | null>(null);
+  const [ai, setAi] = useState<boolean | null>(null);
+  const [saved, setSaved] = useState<Record<string, number>>({});
+  const [errs, setErrs] = useState<Record<string, string>>({});
+  const timers = useRef<Record<string, number>>({});
+
+  if (ret.status === "error") return <ErrorState what="the retention settings" hint={ret.error ?? undefined} onRetry={ret.retry} />;
+  if (!ret.data) return <SkeletonRows rows={4} className="max-w-[760px]" />;
+  const cur = ret.data;
+  const trashShown = trash ?? cur.retention.trashDays;
+  const mode = auditMode ?? (cur.retention.auditDays ? "days" : "forever");
+  const auditShown = auditDays ?? cur.retention.auditDays ?? 365;
+  const aiShown = ai ?? cur.data.aiEnabled;
+
+  const write = (key: string, run: () => Promise<{ ok: boolean; error?: string }>, revert: () => void) => {
+    window.clearTimeout(timers.current[key]);
+    timers.current[key] = window.setTimeout(async () => {
+      const r = await run();
+      if (!r.ok) { revert(); setErrs((e) => ({ ...e, [key]: r.error ?? "Couldn't save" })); toast(r.error ?? "Couldn't save"); return; }
+      setErrs((e) => { const n = { ...e }; delete n[key]; return n; });
+      setSaved((x) => ({ ...x, [key]: Date.now() }));
+    }, 400);
+  };
+
+  const b = RETENTION_BOUNDS;
+  return (
+    <SettingsCardStack>
+      <SettingsCard wide="data.retention" title="Retention" id="data.retention">
+        <SettingsRow
+          id="data.retention.trashDays"
+          label="Keep deleted items in Trash for"
+          helper="After this, a nightly job removes them for good."
+          savedAt={saved.trash}
+          error={errs.trash ? { message: errs.trash, onRetry: () => write("trash", () => ret.save({ trashDays: trashShown }), () => setTrash(null)) } : null}
+          readOnlyValue={canPurge ? undefined : `${cur.retention.trashDays} days`}
+          control={
+            <NumberInput value={trashShown} min={b.trashDays.min} max={b.trashDays.max} suffix="days" ariaLabel="Days in Trash"
+              onChange={(n) => {
+                setTrash(n);
+                if (n === "" || n < b.trashDays.min || n > b.trashDays.max) return;
+                write("trash", () => ret.save({ trashDays: n }), () => setTrash(null));
+              }} />
+          }
+        />
+        <SettingsRow
+          id="data.retention.auditDays"
+          label="Keep the audit log for"
+          helper={mode === "forever" ? "Every entry is kept." : `Entries older than this are removed by a nightly job, at least ${b.auditDays.min} days.`}
+          savedAt={saved.audit}
+          error={errs.audit ? { message: errs.audit, onRetry: () => write("audit", () => ret.save({ auditDays: mode === "forever" ? null : auditShown }), () => { setAuditMode(null); setAuditDays(null); }) } : null}
+          readOnlyValue={canPurge ? undefined : cur.retention.auditDays ? `${cur.retention.auditDays} days` : "Forever"}
+          control={
+            <span className="flex items-center gap-2">
+              <NativeSelect value={mode} ariaLabel="Audit log retention" options={[{ value: "forever", label: "Forever" }, { value: "days", label: "A number of days" }]}
+                onChange={(m) => {
+                  setAuditMode(m);
+                  write("audit", () => ret.save({ auditDays: m === "forever" ? null : (typeof auditShown === "number" ? auditShown : 365) }), () => { setAuditMode(null); setAuditDays(null); });
+                }} />
+              {mode === "days" ? (
+                <NumberInput value={auditShown} min={b.auditDays.min} max={b.auditDays.max} suffix="days" ariaLabel="Days of audit log"
+                  onChange={(n) => {
+                    setAuditDays(n);
+                    if (n === "" || n < b.auditDays.min || n > b.auditDays.max) return;
+                    write("audit", () => ret.save({ auditDays: n }), () => setAuditDays(null));
+                  }} />
+              ) : null}
+            </span>
+          }
+        />
+      </SettingsCard>
+      <SettingsCard title="Privacy" id="data.privacy">
+        <SettingsRow
+          id="data.aiEnabled"
+          label="AI features for everyone"
+          helper="Ask AI, drafting and summaries. Off hides every AI entry point in the workspace."
+          savedAt={saved.ai}
+          error={errs.ai ? { message: errs.ai, onRetry: () => write("ai", () => dataSec.save({ aiEnabled: aiShown }), () => setAi(null)) } : null}
+          control={<Switch checked={aiShown} aria-label="AI features for everyone" onChange={(v) => { setAi(v); write("ai", () => dataSec.save({ aiEnabled: v }), () => setAi(null)); }} />}
+        />
+      </SettingsCard>
+      <ByokManager />
+    </SettingsCardStack>
+  );
+}
+
+/* ───────────────────────── Trash ───────────────────────── */
+
+function TrashTab() {
+  const [info, setInfo] = useState<{ total: number; capped: boolean; retentionDays: number } | null | "error">(null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void apiFetch<{ total: number; capped: boolean; retentionDays: number }>("/api/trash?limit=1", { cache: "no-store" }).then((r) => setInfo(r.ok ? r.data : "error"));
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+  const i = info && info !== "error" ? info : null;
+  return (
+    <section className="flex max-w-[760px] items-start gap-4 rounded-lg border border-line bg-raised p-6">
+      <DotsArt arrangement="stack" size={96} />
+      <div className="flex flex-col gap-2">
+        <p className="text-base text-ink">Deleted Spaces, Lists, Docs and tasks wait in Trash{i ? ` for ${i.retentionDays} days` : ""}.</p>
+        <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>
+        {i ? <p className="text-sm text-ink-2">{i.total}{i.capped ? "+" : ""} {i.total === 1 ? "item" : "items"} in Trash</p> : null}
+      </div>
+    </section>
   );
 }
 
@@ -552,9 +706,11 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
           </div>
         </div>
       </div>
-      {LEGACY_CSV.map((row) => (
-        <ExportButton key={row.key} row={row} busy={busy} onRun={onExport} />
-      ))}
+      <div className="rounded-lg border border-line bg-raised px-4">
+        {LEGACY_CSV.map((row) => (
+          <SettingsRow key={row.key} label={`${LIST_NAME[row.key.slice("marketing-".length) as MarketingKind] ?? row.title} as a CSV`} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onExport} />} />
+        ))}
+      </div>
     </Section>
   );
 }
@@ -562,8 +718,8 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-        {label}
+      <div className="mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">
+        {label}<span className="h-px flex-1 bg-line" aria-hidden />
       </div>
       <div className="space-y-2">{children}</div>
     </section>
@@ -577,28 +733,11 @@ function ExportButton({
   busy: string | null;
   onRun: (row: ExportRow) => void;
 }) {
-  const Icon = row.icon;
   const isBusy = busy === row.key;
-  const disabled = busy !== null;
   return (
-    <button
-      type="button"
-      onClick={() => onRun(row)}
-      disabled={disabled}
-      className="flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left hover:border-zinc-300 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-500">
-        <Icon className="h-[18px] w-[18px]" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-base font-medium text-zinc-900">{row.title}</div>
-        <div className="text-base text-zinc-500">{row.desc}</div>
-      </div>
-      {isBusy ? (
-        <Dots variant="pending" />
-      ) : (
-        <Download className="h-4 w-4 shrink-0 text-zinc-400" />
-      )}
+    <button type="button" onClick={() => onRun(row)} disabled={busy !== null} className={btn.secondary} aria-label={row.title ? `Download ${row.title}` : "Download"}>
+      {isBusy ? <Pending label="Preparing" /> : <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
+      Download
     </button>
   );
 }

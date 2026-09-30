@@ -13,6 +13,19 @@ interface LogActivityParams {
   oldValue?: Record<string, any> | null;
   newValue?: Record<string, any> | null;
   severity?: "info" | "warning" | "critical";
+  /** Who wrote it when not a person: "api_key" | "agent" | "system" | "scim" | "platform_staff". */
+  actorType?: string;
+  /** The name shown for a non-person actor ("API key wk_ab12"). */
+  actorLabel?: string | null;
+  /** The person a key or agent acted as. */
+  actingForId?: string | null;
+  /**
+   * Collapse window (settings spec 1.8): a repeat of the same event by the
+   * same actor on the same target and the same keys inside this many
+   * milliseconds UPDATES the previous row (its new value and time) instead
+   * of adding one, so a person nudging a number five times leaves one row.
+   */
+  collapseWithinMs?: number;
 }
 
 export async function logActivity({
@@ -28,8 +41,29 @@ export async function logActivity({
   oldValue,
   newValue,
   severity = "info",
+  actorType,
+  actorLabel,
+  actingForId,
+  collapseWithinMs,
 }: LogActivityParams) {
   try {
+    if (collapseWithinMs && collapseWithinMs > 0) {
+      const since = new Date(Date.now() - collapseWithinMs);
+      const prev = await prisma.activityLog.findFirst({
+        where: { organizationId, actorId, type, targetId: targetId ?? null, createdAt: { gte: since } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, metadata: true },
+      });
+      const sameKeys = (a: unknown, b: unknown) =>
+        JSON.stringify(((a as { keys?: unknown } | null)?.keys ?? null)) === JSON.stringify(((b as { keys?: unknown } | null)?.keys ?? null));
+      if (prev && sameKeys(prev.metadata, metadata)) {
+        await prisma.activityLog.update({
+          where: { id: prev.id },
+          data: { description, newValue: newValue || undefined, metadata: metadata || undefined, createdAt: new Date() },
+        });
+        return;
+      }
+    }
     await prisma.activityLog.create({
       data: {
         type,
@@ -44,6 +78,9 @@ export async function logActivity({
         oldValue: oldValue || undefined,
         newValue: newValue || undefined,
         severity,
+        ...(actorType ? { actorType } : {}),
+        ...(actorLabel ? { actorLabel } : {}),
+        ...(actingForId ? { actingForId } : {}),
       },
     });
   } catch (err) {

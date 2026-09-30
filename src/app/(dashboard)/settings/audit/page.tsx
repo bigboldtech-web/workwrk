@@ -1,384 +1,374 @@
 "use client";
 
-/* Settings · Audit log — org-wide activity feed.
- *
- *  Reads the real ActivityLog engine:
- *    GET /api/audit         — cursor-paginated, filter by type/actor/date
- *    GET /api/audit-log/export — admin-only signed JSONL export
- *
- *  No sample/demo data: every row shown is a persisted ActivityLog row
- *  scoped to the caller's organization.
- */
+// Workspace settings > Audit log (spec-settings-workspace `/settings/audit`,
+// settings-architecture 5.12): what happened, who did it, what changed.
+//
+//   Tabs          All, Access, Security, Data, Settings: server-side type
+//                 families (src/lib/audit-families.ts), never client state
+//   Toolbar       a search field sent to the server as ?q= (debounced 300ms),
+//                 Filter (Type from GET /api/audit/types, the whole set;
+//                 Actor; Severity; Date range) and Sort (Newest, Oldest);
+//                 the "..." square holds Export (CSV) and Retention settings
+//   Table         Time, Actor ("WorkwrK Support", "API key", "System" when the
+//                 actor is not a person), Event (the sentence), Target,
+//                 Severity; server cursor pagination
+//   Drawer        520px: the sentence, time, actor and acting-for, IP and
+//                 user agent, the target, and the before and after values
+//
+// Export honours EVERY active filter, the actor included (?format=csv).
+// No blue button: nothing is created here. The retention window is on
+// Data > Retention & privacy.
 
-import { Dots } from "@/components/ui/dots";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Activity, Search, Hash, ChevronRight, User as UserIcon, Edit3, Trash2,
-  Plus, Eye, ShieldAlert, Key, FileText, Calendar as CalendarIcon, Download, X,
-} from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { useOsShell } from "@/components/layout/os/shell-context";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { Search, X } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
-import { SkeletonRows } from "@/components/ui/skeleton";
-
-type AuditActor = {
-  id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  email?: string | null;
-};
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { OsToolbar } from "@/components/layout/os/page-header";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { ErrorState } from "@/components/ui/error-state";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { Drawer } from "@/components/ui/drawer";
+import { formatRelative } from "@/lib/format/date";
+import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, type AuditFamily } from "@/lib/audit-families";
 
 type AuditRow = {
   id: string;
   type: string;
   description: string;
-  /** Access rows: who got or lost what, on which node (GET /api/audit writes it). */
-  summary?: string | null;
-  targetType?: string | null;
-  targetId?: string | null;
-  severity: string;
-  oldValue?: unknown;
-  newValue?: unknown;
-  ipAddress?: string | null;
-  userAgent?: string | null;
+  summary: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  severity: "info" | "warning" | "critical" | string;
+  oldValue: unknown;
+  newValue: unknown;
+  ipAddress: string | null;
+  userAgent: string | null;
   createdAt: string;
-  actor?: AuditActor | null;
+  actorType: string;
+  actorLabel: string | null;
+  actingForId: string | null;
+  actorName: string;
+  actor: { id: string; firstName: string | null; lastName: string | null; email: string | null; avatar?: string | null } | null;
 };
 
-type AuditResponse = { items?: AuditRow[]; nextCursor?: string | null };
-
+const TABS: SettingsTab[] = AUDIT_FAMILIES.map((f) => ({ key: f, label: AUDIT_FAMILY_LABELS[f] }));
 const RANGES = [
-  { key: "all", label: "All time", ms: 0 },
-  { key: "24h", label: "24h", ms: 86_400_000 },
-  { key: "7d", label: "7 days", ms: 7 * 86_400_000 },
-  { key: "30d", label: "30 days", ms: 30 * 86_400_000 },
-  { key: "90d", label: "90 days", ms: 90 * 86_400_000 },
-] as const;
-type RangeKey = (typeof RANGES)[number]["key"];
-const RANGE_MS: Record<RangeKey, number> = {
-  all: 0, "24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000, "90d": 90 * 86_400_000,
-};
-
-// Icon derived from the activity type verb. Types are free-form strings
-// (e.g. "okr_created", "review_cycle.create", "user_removed"), so we
-// match on the verb rather than an exact key.
-function typeIcon(type: string): typeof Activity {
-  const t = type.toLowerCase();
-  if (/(delete|remov|revok|archiv)/.test(t)) return Trash2;
-  if (/(create|add|insert|restor|invit)/.test(t)) return Plus;
-  if (/(update|edit|change|check.?in|assign|submit)/.test(t)) return Edit3;
-  if (/(login|logout|auth|session|mfa)/.test(t)) return Key;
-  if (/(export|download|report)/.test(t)) return FileText;
-  if (/(role|permission|access|grant)/.test(t)) return ShieldAlert;
-  if (/(view|read|open)/.test(t)) return Eye;
-  return Activity;
-}
-
-// Row accent is keyed to the real `severity` column, not a guessed hue.
-function severityHue(severity: string): string {
-  if (severity === "critical") return "var(--os-c-red)";
-  if (severity === "warning") return "var(--os-c-orange)";
-  return "var(--os-brand)";
-}
-
-function humanType(type: string): string {
-  return type.replace(/[._]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function actorName(r: AuditRow): string {
-  const a = r.actor;
-  if (!a) return "System";
-  const n = [a.firstName, a.lastName].filter(Boolean).join(" ").trim();
-  return n || a.email || "Unknown";
-}
-
-function relativeDate(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const day = 86_400_000;
-  if (ms < 60_000) return "just now";
-  if (ms < 60 * 60_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 24 * 60 * 60_000) return `${Math.floor(ms / (60 * 60_000))}h ago`;
-  if (ms < 7 * day) return `${Math.floor(ms / day)}d ago`;
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-// Reference point for the "last 24h" stat tile. Captured once at module
-// load so the stats memo stays pure (react-hooks/purity forbids
-// Date.now() during render).
-const PAGE_LOADED_AT = Date.now();
+  { value: "today", label: "Today" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "90d", label: "Last 90 days" },
+];
+const SEVERITIES = ["info", "warning", "critical"] as const;
+const SEVERITY_LABEL: Record<string, string> = { info: "Info", warning: "Warning", critical: "Critical" };
+const PAGE = 50;
 
 export default function AuditLogPage() {
-  const [rows, setRows] = useState<AuditRow[] | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  return (
+    <SettingsPage pageKey="audit" tabs={TABS} width="list">
+      {(tab) => <AuditBody family={(tab as AuditFamily) ?? "all"} />}
+    </SettingsPage>
+  );
+}
 
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [actorFilter, setActorFilter] = useState<{ id: string; name: string } | null>(null);
-  const [range, setRange] = useState<RangeKey>("all");
-  // Types seen on the most recent *unfiltered* load, so the chip bar
-  // stays stable while a single type is selected.
-  const [knownTypes, setKnownTypes] = useState<string[]>([]);
-
-  const { rowVersion } = useOsShell();
+function AuditBody({ family }: { family: AuditFamily }) {
   const { toast } = useOsToast();
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [types, setTypes] = useState<string[]>([]);
+  const [allTypes, setAllTypes] = useState<{ type: string; count: number }[] | null>(null);
+  const [actor, setActor] = useState<PickPerson | null>(null);
+  const [actorOn, setActorOn] = useState(false);
+  const [severity, setSeverity] = useState<string | null>(null);
+  const [range, setRange] = useState<string | null>(null);
+  const [order, setOrder] = useState<"desc" | "asc">("desc");
+  const [rows, setRows] = useState<AuditRow[] | null>(null);
+  const [total, setTotal] = useState<number>(0);
+  const [pages, setPages] = useState<(string | null)[]>([null]);
+  const [pageIdx, setPageIdx] = useState(0);
+  const [next, setNext] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<AuditRow | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const reqId = useRef(0);
 
-  const buildQuery = useCallback((cursor: string | null): string => {
-    const p = new URLSearchParams();
-    p.set("limit", "100");
-    if (typeFilter) p.set("type", typeFilter);
-    if (actorFilter) p.set("actorId", actorFilter.id);
-    const ms = RANGE_MS[range];
-    if (ms) p.set("startDate", new Date(Date.now() - ms).toISOString());
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const params = useCallback((cursor: string | null) => {
+    const p = new URLSearchParams({ family, limit: String(PAGE), order });
+    if (debounced) p.set("q", debounced);
+    if (types.length) p.set("type", types.join(","));
+    if (actorOn && actor) p.set("actor", actor.id);
+    if (severity) p.set("severity", severity);
+    if (range) p.set("range", range);
     if (cursor) p.set("cursor", cursor);
-    return `/api/audit?${p.toString()}`;
-  }, [typeFilter, actorFilter, range]);
+    return p;
+  }, [family, order, debounced, types, actor, actorOn, severity, range]);
 
-  const load = useCallback(async () => {
-    setErrorMsg(null);
-    try {
-      const res = await fetch(buildQuery(null), { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d: AuditResponse = await res.json();
-      const items = Array.isArray(d.items) ? d.items : [];
-      setRows(items);
-      setNextCursor(d.nextCursor ?? null);
-      if (!typeFilter) {
-        setKnownTypes(Array.from(new Set(items.map((i) => i.type))).sort());
-      }
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "Failed to load");
-      setRows([]);
-      setNextCursor(null);
-    }
-  }, [buildQuery, typeFilter]);
+  const load = useCallback(async (cursor: string | null) => {
+    const id = ++reqId.current;
+    setRows(null);
+    setError(null);
+    const r = await apiFetch<{ items: AuditRow[]; total: number | null; nextCursor: string | null }>(`/api/audit?${params(cursor).toString()}`, { cache: "no-store" });
+    if (id !== reqId.current) return;
+    if (!r.ok) { setError(r.error); return; }
+    setRows(r.data.items);
+    if (typeof r.data.total === "number") setTotal(r.data.total);
+    setNext(r.data.nextCursor);
+  }, [params]);
 
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("settings");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+  // Any filter change goes back to the first page.
+  useEffect(() => {
+    const t = setTimeout(() => { setPages([null]); setPageIdx(0); void load(null); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  const loadMore = useCallback(async () => {
-    if (!nextCursor) return;
-    setLoadingMore(true);
-    try {
-      const res = await fetch(buildQuery(nextCursor), { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d: AuditResponse = await res.json();
-      const items = Array.isArray(d.items) ? d.items : [];
-      setRows((prev) => [...(prev ?? []), ...items]);
-      setNextCursor(d.nextCursor ?? null);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't load more");
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [nextCursor, buildQuery, toast]);
+  useEffect(() => {
+    if (!filterOpen || allTypes) return;
+    void apiFetch<{ types: { type: string; count: number }[] }>("/api/audit/types").then((r) => setAllTypes(r.ok ? r.data.types : []));
+  }, [filterOpen, allTypes]);
 
-  const exportLog = useCallback(async () => {
+  const activeCount = (types.length ? 1 : 0) + (actorOn && actor ? 1 : 0) + (severity ? 1 : 0) + (range ? 1 : 0);
+  const clearAll = () => { setTypes([]); setActor(null); setActorOn(false); setSeverity(null); setRange(null); };
+
+  const exportCsv = async () => {
     setExporting(true);
     try {
-      const p = new URLSearchParams();
-      if (typeFilter) p.set("type", typeFilter);
-      const ms = RANGE_MS[range];
-      if (ms) p.set("from", new Date(Date.now() - ms).toISOString());
-      const res = await fetch(`/api/audit-log/export?${p.toString()}`, { cache: "no-store" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `Export failed (HTTP ${res.status})`);
-      }
+      const p = params(null);
+      p.set("format", "csv");
+      p.delete("limit");
+      p.delete("cursor");
+      const res = await fetch(`/api/audit?${p.toString()}`, { cache: "no-store" });
+      if (!res.ok) { toast(res.status === 403 ? "You can't export the audit log." : "Couldn't export. Try again."); return; }
       const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") ?? "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      const filename = m?.[1] ?? "audit-log.jsonl";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename;
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      const count = res.headers.get("X-Audit-Row-Count");
-      toast(count ? `Exported ${count} audit row${count === "1" ? "" : "s"}` : "Audit log exported");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Export failed");
+      toast("Audit log exported");
     } finally {
       setExporting(false);
     }
-  }, [typeFilter, range, toast]);
+  };
 
-  const filtered = useMemo(() => {
-    const list = rows ?? [];
-    const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((r) =>
-      r.type.toLowerCase().includes(q) ||
-      (r.description ?? "").toLowerCase().includes(q) ||
-      (r.summary ?? "").toLowerCase().includes(q) ||
-      (r.targetType ?? "").toLowerCase().includes(q) ||
-      actorName(r).toLowerCase().includes(q));
-  }, [rows, search]);
+  const columns: TableColumn<AuditRow>[] = useMemo(() => [
+    { key: "time", label: "Time", width: "140px", render: (r) => <span className="tabular-nums" title={new Date(r.createdAt).toLocaleString()}>{formatRelative(r.createdAt)}</span> },
+    { key: "actor", label: "Actor", width: "minmax(160px,0.8fr)", render: (r) => <ActorCell row={r} /> },
+    { key: "event", label: "Event", title: true, width: "minmax(260px,2fr)", render: (r) => <span className="line-clamp-2">{r.summary ?? r.description}</span> },
+    { key: "target", label: "Target", width: "minmax(120px,0.7fr)", hideBelow: 900, render: (r) => (r.targetType ? <span className="text-ink-2">{r.targetType}</span> : "·") },
+    { key: "severity", label: "Severity", width: "110px", render: (r) => <SeverityChip severity={r.severity} /> },
+  ], []);
 
-  const stats = useMemo(() => {
-    const list = rows ?? [];
-    const day = 86_400_000;
-    const today = list.filter((l) => PAGE_LOADED_AT - new Date(l.createdAt).getTime() < day).length;
-    const warnings = list.filter((l) => l.severity === "warning").length;
-    const critical = list.filter((l) => l.severity === "critical").length;
-    return { inView: list.length, today, warnings, critical };
-  }, [rows]);
+  const from = rows && rows.length ? pageIdx * PAGE + 1 : 0;
+  const to = rows ? pageIdx * PAGE + rows.length : 0;
 
   return (
-    <>
-      <OsPageHeader
-        title={SETTINGS_PAGES.audit.label}
-        actions={
-          <div className="adt__head-actions">
-            <button type="button" className="os-head__link" onClick={exportLog} disabled={exporting}>
-              <Download /> {exporting ? "Exporting" : "Export"}
-            </button>
-          </div>
+    <div className="flex flex-col gap-2">
+      <OsToolbar
+        className="!px-0"
+        left={
+          <label className="flex h-9 w-[320px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+            <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events" aria-label="Search events" className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none" />
+            {q ? <button type="button" aria-label="Clear search" onClick={() => setQ("")} className="text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" /></button> : null}
+          </label>
         }
+        filter={{ open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: activeCount }}
+        sort={{ onClick: () => setOrder((o) => (o === "desc" ? "asc" : "desc")), label: order === "desc" ? "Newest first" : "Oldest first", active: order === "asc" }}
+        menu={[
+          { label: exporting ? "Exporting" : "Export (CSV)", onClick: () => { void exportCsv(); }, disabled: exporting },
+          { label: "Retention settings", href: "/settings/data?tab=retention" },
+        ]}
       />
-
-      <div className="adt">
-        <div className="adt__kpis">
-          <KpiTile accent="var(--os-brand)"     Icon={CalendarIcon} label="Today"    value={`${stats.today}`}    sub="last 24h · in view" />
-          <KpiTile accent="var(--os-c-orange)"  Icon={ShieldAlert}  label="Warnings" value={`${stats.warnings}`} sub="severity · in view" />
-          <KpiTile accent="var(--os-c-red)"     Icon={ShieldAlert}  label="Critical" value={`${stats.critical}`} sub="severity · in view" />
-          <KpiTile accent="var(--os-c-blue)"    Icon={Hash}         label="In view"  value={`${stats.inView}`}   sub={nextCursor ? "more available" : "all matches"} />
+      <div className="flex items-start gap-4">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="events" activeCount={activeCount} onClearAll={clearAll}>
+          <ul className="flex flex-col">
+            <FilterGroup label="Date range">
+              {RANGES.map((r) => (
+                <FilterRow key={r.value} label={r.label} checked={range === r.value} onCheckedChange={(on) => setRange(on ? r.value : null)} />
+              ))}
+            </FilterGroup>
+            <FilterGroup label="Severity">
+              {SEVERITIES.map((s) => (
+                <FilterRow key={s} label={SEVERITY_LABEL[s]} checked={severity === s} onCheckedChange={(on) => setSeverity(on ? s : null)} />
+              ))}
+            </FilterGroup>
+            <FilterGroup label="Actor">
+              <FilterRow label="One person" checked={actorOn} onCheckedChange={(on) => { setActorOn(on); if (!on) setActor(null); }}>
+                <PeoplePickerField ariaLabel="Actor" value={actor ? [actor.id] : []} people={actor ? [actor] : []} placeholder="Pick a person" onChange={(_i, picked) => setActor(picked[0] ?? null)} />
+              </FilterRow>
+            </FilterGroup>
+            <FilterGroup label="Type">
+              {allTypes === null ? (
+                <li className="px-2 py-1 text-sm text-ink-2">Reading the event types</li>
+              ) : allTypes.length === 0 ? (
+                <li className="px-2 py-1 text-sm text-ink-2">No events yet</li>
+              ) : (
+                allTypes.map((t) => (
+                  <FilterRow key={t.type} label={t.type} count={t.count} checked={types.includes(t.type)}
+                    onCheckedChange={(on) => setTypes((cur) => (on ? [...cur, t.type] : cur.filter((x) => x !== t.type)))} />
+                ))
+              )}
+            </FilterGroup>
+          </ul>
+        </FilterPanel>
+        <div className="min-w-0 flex-1">
+          {error ? (
+            <ErrorState what="the audit log" hint={error} onRetry={() => { void load(pages[pageIdx]); }} />
+          ) : (
+            <TableCard
+              ariaLabel="Audit log"
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.id}
+              onRowClick={(r) => setOpen(r)}
+              empty={
+                activeCount || debounced ? (
+                  <span>No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span>
+                ) : (
+                  <span>No events yet</span>
+                )
+              }
+              footer={{
+                total,
+                noun: "events",
+                from,
+                to,
+                onPrev: pageIdx > 0 ? () => { const i = pageIdx - 1; setPageIdx(i); void load(pages[i]); } : undefined,
+                onNext: next ? () => { const i = pageIdx + 1; setPages((p) => { const n = [...p]; n[i] = next; return n; }); setPageIdx(i); void load(next); } : undefined,
+              }}
+            />
+          )}
         </div>
-
-        <div className="adt__toolbar">
-          <div className="adt__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search actor, action, entity…" />
-          </div>
-        </div>
-
-        <div className="adt__cats">
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              className={`adt__cat${range === r.key ? " is-active" : ""}`}
-              onClick={() => setRange(r.key)}
-            >
-              <CalendarIcon /> {r.label}
-            </button>
-          ))}
-        </div>
-
-        {(knownTypes.length > 0 || actorFilter) && (
-          <div className="adt__cats">
-            <button
-              type="button"
-              className={`adt__cat${typeFilter === null ? " is-active" : ""}`}
-              onClick={() => setTypeFilter(null)}
-            >
-              <Hash /> All types
-            </button>
-            {knownTypes.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`adt__cat${typeFilter === t ? " is-active" : ""}`}
-                style={{ ["--cat-c" as unknown as string]: severityHue("info") }}
-                onClick={() => setTypeFilter(typeFilter === t ? null : t)}
-              >
-                <span className="adt__cat-dot" />
-                {humanType(t)}
-              </button>
-            ))}
-            {actorFilter && (
-              <button
-                type="button"
-                className="adt__cat is-active"
-                onClick={() => setActorFilter(null)}
-                title="Clear actor filter"
-              >
-                <UserIcon /> {actorFilter.name} <X />
-              </button>
-            )}
-          </div>
-        )}
-
-        {rows === null ? (
-          <SkeletonRows />
-        ) : errorMsg ? (
-          <OsEmptyView
-            variant="error"
-            title="Couldn't load the audit log"
-            hint={errorMsg}
-          />
-        ) : filtered.length === 0 ? (
-          <OsEmptyView
-            context="list"
-            title="No audit events"
-            hint="Events appear here as soon as someone takes action in this organization."
-          />
-        ) : (
-          <>
-            <div className="adt__list">
-              {filtered.map((l) => {
-                const Icon = typeIcon(l.type);
-                return (
-                  <article key={l.id} className="adt__row" style={{ ["--r-c" as unknown as string]: severityHue(l.severity) }}>
-                    <span className="adt__row-icon"><Icon /></span>
-                    <div className="adt__row-main">
-                      <div className="adt__row-title">
-                        <strong>{humanType(l.type)}</strong>
-                        {(l.summary || l.description) && <span>· {l.summary || l.description}</span>}
-                      </div>
-                      <div className="adt__row-meta">
-                        <button
-                          type="button"
-                          onClick={() => l.actor && setActorFilter({ id: l.actor.id, name: actorName(l) })}
-                          title={l.actor ? "Filter by this person" : undefined}
-                          disabled={!l.actor}
-                        >
-                          <UserIcon /> {actorName(l)}
-                        </button>
-                        <span><CalendarIcon /> {relativeDate(l.createdAt)}</span>
-                        {l.targetType && <span>{l.targetType}</span>}
-                        {l.severity && l.severity !== "info" && <span>{l.severity}</span>}
-                        {l.ipAddress && <span>IP {l.ipAddress}</span>}
-                      </div>
-                    </div>
-                    <ChevronRight className="adt__row-arrow" />
-                  </article>
-                );
-              })}
-            </div>
-
-            {nextCursor && (
-              <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
-                <button type="button" className="adt__nav-link" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? <Dots variant="pending" label="Loading more" /> : "Load more"}
-                </button>
-              </div>
-            )}
-          </>
-        )}
       </div>
-    </>
+      <p className="text-sm text-ink-2">
+        Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep hover:underline">Retention &amp; privacy</Link> says.
+      </p>
+      <EventDrawer row={open} onClose={() => setOpen(null)} />
+    </div>
   );
 }
 
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Activity; label: string; value: string; sub: string }) {
+function ActorCell({ row }: { row: AuditRow }) {
+  const person = row.actor;
+  const initials = person ? `${person.firstName?.[0] ?? ""}${person.lastName?.[0] ?? ""}`.toUpperCase() || "?" : "";
   return (
-    <div className="adt__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="adt__kpi-accent" aria-hidden="true" />
-      <div className="adt__kpi-row">
-        <div className="adt__kpi-icon"><Icon /></div>
-        <div className="adt__kpi-label">{label}</div>
+    <span className="flex min-w-0 items-center gap-2">
+      {person ? (
+        person.avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={person.avatar} alt="" className="h-5 w-5 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-hover text-[10px] font-semibold text-ink-2" aria-hidden>{initials}</span>
+        )
+      ) : (
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-semibold text-ink-2" aria-hidden>W</span>
+      )}
+      <span className="truncate">{row.actorName}</span>
+    </span>
+  );
+}
+
+/** The pale StatusChip shape on the semantic tokens (design-system 5.9). */
+function SeverityChip({ severity }: { severity: string }) {
+  const cls =
+    severity === "critical"
+      ? "bg-[var(--os-danger-bg)] text-danger-text"
+      : severity === "warning"
+        ? "bg-[var(--os-warning-bg)] text-warning-text"
+        : "bg-hover text-ink-2";
+  return (
+    <span className={`inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-medium ${cls}`}>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden />
+      {SEVERITY_LABEL[severity] ?? severity}
+    </span>
+  );
+}
+
+function Diff({ oldValue, newValue }: { oldValue: unknown; newValue: unknown }) {
+  const o = oldValue && typeof oldValue === "object" ? (oldValue as Record<string, unknown>) : {};
+  const n = newValue && typeof newValue === "object" ? (newValue as Record<string, unknown>) : {};
+  const keys = [...new Set([...Object.keys(o), ...Object.keys(n)])];
+  if (keys.length === 0) return null;
+  const show = (v: unknown) => (v === undefined ? "·" : typeof v === "string" ? v : JSON.stringify(v));
+  return (
+    <div className="rounded-lg border border-line">
+      <div className="grid grid-cols-3 gap-2 border-b border-line bg-hover px-3 py-2 text-sm font-medium text-ink-2">
+        <span>Setting</span><span>Before</span><span>After</span>
       </div>
-      <div className="adt__kpi-value">{value}</div>
-      <div className="adt__kpi-sub">{sub}</div>
+      {keys.map((k) => {
+        const changed = JSON.stringify(o[k]) !== JSON.stringify(n[k]);
+        return (
+          <div key={k} className="grid grid-cols-3 gap-2 border-b border-line-soft px-3 py-2 text-sm last:border-b-0">
+            <span className={changed ? "font-medium text-ink" : "text-ink-2"}>{k}</span>
+            <span className="break-words text-ink-2">{show(o[k])}</span>
+            <span className={`break-words ${changed ? "font-medium text-ink" : "text-ink-2"}`}>{show(n[k])}</span>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function EventDrawer({ row, onClose }: { row: AuditRow | null; onClose: () => void }) {
+  const { toast } = useOsToast();
+  if (!row) return null;
+  const facts: [string, React.ReactNode][] = [
+    ["Time", new Date(row.createdAt).toLocaleString()],
+    ["Actor", `${row.actorName}${row.actor ? "" : row.actorType !== "user" ? ` (${row.actorType.replace(/_/g, " ")})` : ""}`],
+    ...(row.actingForId ? ([["Acting for", row.actingForId]] as [string, string][]) : []),
+    ["Event", row.type],
+    ["Severity", SEVERITY_LABEL[row.severity] ?? row.severity],
+    ...(row.targetType ? ([["Target", `${row.targetType}${row.targetId ? ` ${row.targetId}` : ""}`]] as [string, string][]) : []),
+    ...(row.ipAddress ? ([["IP", row.ipAddress]] as [string, string][]) : []),
+    ...(row.userAgent ? ([["Browser", row.userAgent]] as [string, string][]) : []),
+  ];
+  return (
+    <Drawer
+      open
+      onClose={onClose}
+      width={520}
+      layerId="audit-drawer"
+      ariaLabel="Audit event"
+      header={
+        <>
+          <span className="min-w-0 flex-1 truncate text-base font-semibold text-ink">Event</span>
+          <button type="button" aria-label="Close" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+            <X className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </>
+      }
+      footer={
+        <div className="flex justify-end px-4 py-3">
+          <button type="button" className="inline-flex h-8 items-center rounded-lg px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink"
+            onClick={() => { void navigator.clipboard?.writeText(row.id).then(() => toast("Event ID copied")); }}>
+            Copy event ID
+          </button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 p-5">
+        <h2 className="text-lg font-semibold text-ink">{row.summary ?? row.description}</h2>
+        <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 text-base">
+          {facts.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-ink-2">{k}</dt>
+              <dd className="min-w-0 break-words text-ink">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <Diff oldValue={row.oldValue} newValue={row.newValue} />
+      </div>
+    </Drawer>
   );
 }

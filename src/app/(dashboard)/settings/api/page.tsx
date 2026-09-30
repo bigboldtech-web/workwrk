@@ -1,45 +1,36 @@
 "use client";
 
-/* Settings · API keys — manage org-wide API keys.
- *
- * This page is a thin client over the production key engine at /api/keys:
- *   GET    /api/keys        — list org keys (plaintext never returned)
- *   POST   /api/keys        — mint a key; plaintext returned ONCE
- *   DELETE /api/keys?id=    — revoke (soft delete via revokedAt)
- * Admin-only, mirroring the route's own SUPER_ADMIN / COMPANY_ADMIN gate.
- * There is NO client-side key fabrication and NO local-only revoke: every
- * row, secret, and revocation round-trips the real backend. */
+// Workspace settings > API & webhooks (spec-settings-workspace
+// `/settings/api`, settings-architecture 5.13). Owner page (every Admin until
+// the Owner and Admin split).
+//
+//   API keys   the key engine at /api/keys: list, generate (plaintext shown
+//              ONCE), edit the two rate limits (PATCH), revoke; revoked keys
+//              are hidden until "Show revoked keys" is ticked
+//   Webhooks   NOT in the tab row: it ships only after an end-to-end delivery
+//              is verified (the spec's honesty rule); under "Show upcoming
+//              features" one line says it is coming
+//   AI keys    the workspace's own Anthropic key, only for orgs with the
+//              Enterprise byok flag (the same card as Data > Retention)
+//
+// Footer: Integrations (/integrations), the catalogue every Member can
+// browse and request from.
 
-import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Key,
-  Plus,
-  Copy,
-  Trash2,
-  Activity,
-  Clock,
-  ShieldCheck,
-  AlertTriangle,
-  Search,
-  Ban,
-  Lock,
-  Check,
-} from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { SETTINGS_PAGES } from "@/lib/settings-registry";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { Copy, TriangleAlert, X } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
-import { useConfirm } from "@/components/ui/dialog-provider";
-import { useRole } from "@/hooks/use-role";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { ConfirmDialog, Field, NumberInput, Pending, TextInput, btn } from "@/components/settings/settings-form";
+import { ByokManager } from "@/components/settings/byok-manager";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { Drawer } from "@/components/ui/drawer";
+import { ErrorState } from "@/components/ui/error-state";
+import { useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { formatRelative } from "@/lib/format/date";
 
 type Scope = "READ" | "WRITE" | "ADMIN";
-
 type ApiKeyRow = {
   id: string;
   name: string;
@@ -48,470 +39,238 @@ type ApiKeyRow = {
   rateLimitPerMinute: number;
   rateLimitPerDay: number;
   lastUsedAt: string | null;
-  lastUsedIp: string | null;
   requestCount: number;
   revokedAt: string | null;
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null } | null;
 };
 
-const SCOPE_OPTIONS: { value: Scope; label: string; hint: string }[] = [
-  { value: "READ", label: "Read", hint: "Read organization data through the API" },
-  { value: "WRITE", label: "Write", hint: "Create and update records" },
-  { value: "ADMIN", label: "Admin", hint: "Full administrative access — grant sparingly" },
+const SCOPES: { value: Scope; label: string; hint: string }[] = [
+  { value: "READ", label: "Read", hint: "Read workspace data through the API." },
+  { value: "WRITE", label: "Write", hint: "Create and update records." },
+  { value: "ADMIN", label: "Admin", hint: "Everything, key management included. Give it sparingly." },
 ];
+const SCOPE_LABEL: Record<Scope, string> = { READ: "Read", WRITE: "Write", ADMIN: "Admin" };
 
-function relativeDate(iso?: string | null): string {
-  if (!iso) return "never";
-  const ms = Date.now() - new Date(iso).getTime();
-  const day = 86_400_000;
-  if (ms < 60_000) return "just now";
-  if (ms < 60 * 60_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 24 * 60 * 60_000) return `${Math.floor(ms / (60 * 60_000))}h ago`;
-  if (ms < 7 * day) return `${Math.floor(ms / day)}d ago`;
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+export default function ApiSettingsPage() {
+  const [byok, setByok] = useState(false);
+  const [createSignal, setCreateSignal] = useState(0);
+  useEffect(() => {
+    void apiFetch<{ features: { byok?: boolean } }>("/api/organization/features").then((r) => { if (r.ok) setByok(!!r.data.features?.byok); });
+  }, []);
+  const tabs: SettingsTab[] = [
+    { key: "keys", label: "API keys", primary: { label: "Generate key", onClick: () => setCreateSignal((n) => n + 1) } },
+    ...(byok ? [{ key: "ai", label: "AI keys" }] : []),
+  ];
+  return (
+    <SettingsPage pageKey="api" tabs={tabs} width="list" subtitle="Keys for anything that connects to your workspace from outside.">
+      {(tab) => (
+        <div className="flex flex-col gap-4">
+          {tab === "ai" && byok ? <ByokManager /> : <KeysTab createSignal={createSignal} />}
+          <p className="text-sm"><Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link></p>
+        </div>
+      )}
+    </SettingsPage>
+  );
 }
 
-function initialsOf(u: ApiKeyRow["createdBy"]): string {
-  if (!u) return "—";
-  const a = (u.firstName ?? "").trim();
-  const b = (u.lastName ?? "").trim();
-  const s = `${a.charAt(0)}${b.charAt(0)}`.toUpperCase();
-  return s || "—";
-}
-
-export default function ApiKeysPage() {
-  const { accessLevel } = useRole();
-  const canManage = accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
-
-  const [keys, setKeys] = useState<ApiKeyRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-
-  // Create-key modal
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newScopes, setNewScopes] = useState<Scope[]>(["READ"]);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-
-  // Reveal-once secret (never persisted; cleared when the dialog closes)
-  const [revealed, setRevealed] = useState<{ name: string; prefix: string; plaintext: string } | null>(null);
-  const [revealCopied, setRevealCopied] = useState(false);
-
+function KeysTab({ createSignal }: { createSignal: number }) {
   const { toast } = useOsToast();
-  const confirm = useConfirm();
+  const showUpcoming = useShowUpcoming();
+  const [keys, setKeys] = useState<ApiKeyRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showRevoked, setShowRevoked] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [scopes, setScopes] = useState<Scope[]>(["READ"]);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<{ name: string; plaintext: string } | null>(null);
+  const [open, setOpen] = useState<ApiKeyRow | null>(null);
+  const [revoking, setRevoking] = useState<ApiKeyRow | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const res = await fetch("/api/keys");
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? "Failed to load API keys");
-      setKeys((body?.data ?? []) as ApiKeyRow[]);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load API keys");
-      setKeys([]);
-    } finally {
-      setLoading(false);
-    }
+    setError(null);
+    const r = await apiFetch<{ data: ApiKeyRow[] }>("/api/keys", { cache: "no-store" });
+    if (!r.ok) { setError(r.error); return; }
+    setKeys(r.data.data ?? []);
   }, []);
-
   useEffect(() => {
-    if (canManage) void load();
-    else setLoading(false);
-  }, [canManage, load]);
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
+  useEffect(() => {
+    if (createSignal <= 0) return;
+    const t = setTimeout(() => { setName(""); setScopes(["READ"]); setFormError(null); setCreateOpen(true); }, 0);
+    return () => clearTimeout(t);
+  }, [createSignal]);
 
-  const stats = useMemo(() => {
-    const live = keys.filter((k) => !k.revokedAt);
-    const active = live.filter(
-      (k) => k.lastUsedAt && Date.now() - new Date(k.lastUsedAt).getTime() < 7 * 86_400_000,
-    ).length;
-    const stale = live.filter(
-      (k) => !k.lastUsedAt || Date.now() - new Date(k.lastUsedAt).getTime() > 30 * 86_400_000,
-    ).length;
-    const revoked = keys.filter((k) => k.revokedAt).length;
-    return { total: live.length, active, stale, revoked };
-  }, [keys]);
+  const rows = useMemo(() => (keys ? keys.filter((k) => showRevoked || !k.revokedAt) : null), [keys, showRevoked]);
+  const revokedCount = keys?.filter((k) => k.revokedAt).length ?? 0;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return keys;
-    return keys.filter(
-      (k) => k.name.toLowerCase().includes(q) || k.prefix.toLowerCase().includes(q),
-    );
-  }, [keys, search]);
+  const create = async () => {
+    if (!name.trim()) { setFormError("Give the key a name you will recognise."); return; }
+    setBusy(true);
+    setFormError(null);
+    const r = await apiFetch<{ name: string; plaintext: string }>("/api/keys", { method: "POST", json: { name: name.trim(), scopes: scopes.length ? scopes : ["READ"] } });
+    setBusy(false);
+    if (!r.ok || !r.data?.plaintext) { setFormError(r.ok ? "The key was not returned. Try again." : r.error); return; }
+    setCreateOpen(false);
+    setRevealed({ name: r.data.name, plaintext: r.data.plaintext });
+    void load();
+  };
+  const revoke = async () => {
+    if (!revoking) return;
+    setBusy(true);
+    const r = await apiFetch(`/api/keys?id=${encodeURIComponent(revoking.id)}`, { method: "DELETE" });
+    setBusy(false);
+    if (!r.ok) { toast(r.error); return; }
+    setRevoking(null);
+    setOpen(null);
+    toast("Key revoked");
+    void load();
+  };
 
-  function toggleScope(s: Scope) {
-    setNewScopes((prev) =>
-      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
-    );
-  }
+  const columns: TableColumn<ApiKeyRow>[] = [
+    { key: "name", label: "Name", title: true, width: "minmax(180px,1.2fr)", render: (k) => k.name },
+    { key: "prefix", label: "Prefix", width: "150px", render: (k) => <span className="font-mono text-sm">{k.prefix}</span> },
+    { key: "scopes", label: "Scopes", width: "160px", render: (k) => k.scopes.map((s) => SCOPE_LABEL[s]).join(", ") },
+    { key: "rate", label: "Rate limit", width: "170px", hideBelow: 900, render: (k) => `${k.rateLimitPerMinute}/min · ${k.rateLimitPerDay}/day` },
+    { key: "used", label: "Last used", width: "120px", render: (k) => (k.lastUsedAt ? <span title={new Date(k.lastUsedAt).toLocaleString()}>{formatRelative(k.lastUsedAt)}</span> : "Never") },
+    { key: "by", label: "Created by", width: "150px", hideBelow: 1000, render: (k) => (k.createdBy ? `${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim() : "·") },
+    { key: "status", label: "Status", width: "100px", render: (k) => (k.revokedAt ? <span className="text-danger-text">Revoked</span> : "Active") },
+  ];
 
-  function openCreate() {
-    setNewName("");
-    setNewScopes(["READ"]);
-    setCreateError(null);
-    setCreateOpen(true);
-  }
-
-  async function submitCreate() {
-    const name = newName.trim();
-    if (!name) {
-      setCreateError("Give the key a name so you can recognize it later.");
-      return;
-    }
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const res = await fetch("/api/keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, scopes: newScopes.length ? newScopes : ["READ"] }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.plaintext) {
-        throw new Error(body?.error ?? "Could not create the key.");
-      }
-      setCreateOpen(false);
-      setRevealCopied(false);
-      setRevealed({ name: body.name, prefix: body.prefix, plaintext: body.plaintext });
-      await load();
-    } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "Could not create the key.");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  async function revoke(k: ApiKeyRow) {
-    if (k.revokedAt) return;
-    const ok = await confirm({
-      title: "Revoke key",
-      description: `Revoke “${k.name}”? Any service using it will immediately stop working. This cannot be undone.`,
-      destructive: true,
-      confirmLabel: "Revoke",
-    });
-    if (!ok) return;
-    try {
-      const res = await fetch(`/api/keys?id=${encodeURIComponent(k.id)}`, { method: "DELETE" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? "Could not revoke the key.");
-      toast("Key revoked");
-      await load();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not revoke the key.");
-    }
-  }
-
-  function copyText(text: string, label: string) {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      void navigator.clipboard.writeText(text);
-      toast(label);
-    }
-  }
-
-  function copyRevealed() {
-    if (!revealed) return;
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      void navigator.clipboard.writeText(revealed.plaintext);
-      setRevealCopied(true);
-      toast("Key copied — store it now");
-    }
-  }
+  if (error) return <ErrorState what="API keys" hint={error} onRetry={() => { void load(); }} />;
 
   return (
     <>
-      <OsPageHeader
-        title={SETTINGS_PAGES.api.label}
-        primary={canManage ? { label: "Generate key", onClick: openCreate } : undefined}
-      />
-
-      <div className="apk">
-        {!canManage ? (
-          <div className="apk__warn" role="status">
-            <Lock />
-            <span>
-              <strong>Admins only.</strong> API keys are managed by organization
-              administrators. Ask a company admin if you need programmatic access.
-            </span>
-          </div>
-        ) : (
-          <>
-            <div className="apk__kpis">
-              <KpiTile accent="var(--os-brand)"    Icon={Key}      label="Active"  value={`${stats.total}`}   sub="live keys" />
-              <KpiTile accent="var(--os-c-green)"  Icon={Activity} label="In use"  value={`${stats.active}`}  sub="used in 7d" />
-              <KpiTile accent="var(--os-c-orange)" Icon={Clock}    label="Stale"   value={`${stats.stale}`}   sub="> 30d unused" />
-              <KpiTile accent="var(--os-c-red)"    Icon={Ban}      label="Revoked" value={`${stats.revoked}`} sub="disabled" />
-            </div>
-
-            <div className="apk__warn">
-              <ShieldCheck />
-              <span>
-                <strong>A key&apos;s secret is shown once, at creation.</strong> Store it in a
-                secret manager — there is no way to recover it later. Only the prefix is kept.
-              </span>
-            </div>
-
-            <div className="apk__toolbar">
-              <div className="apk__search">
-                <Search />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search keys…"
-                />
-              </div>
-            </div>
-
-            {loading ? (
-              <SkeletonRows />
-            ) : loadError ? (
-              <div className="apk__no-match"><AlertTriangle /> {loadError}</div>
-            ) : keys.length === 0 ? (
-              <OsEmptyView
-                context="list"
-                title="No API keys yet"
-                hint="Generate a key to access the WorkwrK API from scripts, webhooks, or integrations."
-                action={{ label: "Generate key", onClick: openCreate }}
-              />
-            ) : filtered.length === 0 ? (
-              <div className="apk__no-match"><Search /> No keys match.</div>
-            ) : (
-              <div className="apk__table">
-                <div className="apk__row apk__row--head">
-                  <span>Name</span>
-                  <span>Key prefix</span>
-                  <span>Scopes</span>
-                  <span>Last used</span>
-                  <span>Created</span>
-                  <span></span>
-                </div>
-                {filtered.map((k) => {
-                  const isRevoked = !!k.revokedAt;
-                  const stale =
-                    !isRevoked &&
-                    (!k.lastUsedAt || Date.now() - new Date(k.lastUsedAt).getTime() > 30 * 86_400_000);
-                  const lastUsedTitle = k.lastUsedAt
-                    ? `${new Date(k.lastUsedAt).toLocaleString()}${k.lastUsedIp ? ` · ${k.lastUsedIp}` : ""} · ${k.requestCount.toLocaleString()} request${k.requestCount === 1 ? "" : "s"}`
-                    : "Never used";
-                  return (
-                    <div key={k.id} className={`apk__row${isRevoked || stale ? " is-stale" : ""}`}>
-                      <div className="apk__row-name">
-                        {k.name}
-                        {isRevoked ? (
-                          <span
-                            className="apk__scope apk__scope--admin"
-                            style={{ marginLeft: 8 }}
-                            title={`Revoked ${relativeDate(k.revokedAt)}`}
-                          >
-                            revoked
-                          </span>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        className="apk__row-prefix"
-                        onClick={() => copyText(k.prefix, "Prefix copied")}
-                        title="Copy prefix"
-                      >
-                        <code>{k.prefix}…</code>
-                        <Copy />
-                      </button>
-                      <div className="apk__row-scopes">
-                        {k.scopes.map((s) => (
-                          <span key={s} className={`apk__scope apk__scope--${s.toLowerCase()}`}>
-                            {s.toLowerCase()}
-                          </span>
-                        ))}
-                      </div>
-                      <span className="apk__row-last" title={lastUsedTitle}>
-                        {relativeDate(k.lastUsedAt)}
-                      </span>
-                      <span
-                        className="apk__row-created"
-                        title={`Created ${new Date(k.createdAt).toLocaleString()} by ${initialsOf(k.createdBy)}`}
-                      >
-                        {new Date(k.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </span>
-                      {isRevoked ? (
-                        <span className="apk__row-revoke" title="Key revoked" aria-hidden="true" style={{ opacity: 0.5, cursor: "default" }}>
-                          <Ban />
-                        </span>
-                      ) : (
-                        <button type="button" className="apk__row-revoke" onClick={() => revoke(k)} title="Revoke key">
-                          <Trash2 />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-        {/* The settings hub of links at /settings/integrations 308s here; its two
-            other destinations stay one click away. */}
-        <p className="mt-6 text-sm text-ink-2">
-          Connecting apps lives in{" "}
-          <Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link>
-          ; your own calendar feeds live in{" "}
-          <Link href="/account/connections" className="font-medium text-brand-deep hover:underline">My settings, Calendar &amp; connections</Link>.
-        </p>
+      <div className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--os-warning-bg)] px-4 py-2 text-sm text-ink">
+        <TriangleAlert className="h-4 w-4 shrink-0 text-warning-text" strokeWidth={1.5} aria-hidden />
+        A key acts as the person who made it and never gets more than they have. Revoking a key takes effect immediately.
       </div>
+      <TableCard
+        ariaLabel="API keys"
+        columns={columns}
+        rows={rows}
+        rowKey={(k) => k.id}
+        onRowClick={(k) => setOpen(k)}
+        empty={
+          <span>
+            No API keys yet · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setName(""); setScopes(["READ"]); setCreateOpen(true); }}>Generate a key</button>
+          </span>
+        }
+        footer={
+          rows
+            ? {
+                total: rows.length,
+                noun: "keys",
+                from: rows.length ? 1 : 0,
+                to: rows.length,
+                hidePaging: true,
+                trailing: revokedCount > 0 ? (
+                  <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+                    <input type="checkbox" className="h-4 w-4" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} />
+                    Show revoked keys ({revokedCount})
+                  </label>
+                ) : undefined,
+              }
+            : undefined
+        }
+      />
+      {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: webhooks, once delivery is verified end to end.</p> : null}
 
-      {/* Create-key modal */}
-      <Dialog open={createOpen} onOpenChange={(o) => { if (!creating) setCreateOpen(o); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Generate API key</DialogTitle>
-            <DialogDescription>
-              Name the key and choose its scopes. You&apos;ll see the secret exactly once.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-4 pt-1">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-semibold text-foreground">Name</span>
-              <input
-                autoFocus
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !creating) void submitCreate(); }}
-                placeholder="e.g. Production · Backend"
-                maxLength={80}
-                className="h-9 rounded-lg border border-border bg-surface px-3 text-base text-foreground outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/25"
-              />
+      <ConfirmDialog open={createOpen} onOpenChange={setCreateOpen} title="Generate an API key" width={560} confirmLabel="Generate key" onConfirm={create} busy={busy} error={formError}>
+        <Field label="Name" htmlFor="key-name" required helper="Where it is used, so you know what breaks if it is revoked.">
+          <TextInput id="key-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1.5 text-sm font-medium text-ink">Scopes</legend>
+          {SCOPES.map((s) => (
+            <label key={s.value} className="flex items-start gap-3 rounded-lg border border-line p-3">
+              <input type="checkbox" className="mt-1 h-4 w-4" checked={scopes.includes(s.value)} onChange={(e) => setScopes((cur) => (e.target.checked ? [...cur, s.value] : cur.filter((x) => x !== s.value)))} />
+              <span><span className="block text-base font-medium text-ink">{s.label}</span><span className="text-sm text-ink-2">{s.hint}</span></span>
             </label>
+          ))}
+          <p className="text-sm text-ink-2">Scopes cannot be changed after a key is made. Make a new key instead.</p>
+        </fieldset>
+      </ConfirmDialog>
 
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-semibold text-foreground">Scopes</span>
-              <div className="flex flex-col gap-2">
-                {SCOPE_OPTIONS.map((opt) => {
-                  const on = newScopes.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => toggleScope(opt.value)}
-                      className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors ${
-                        on
-                          ? "border-[#0073EA] bg-[#0073EA]/[0.06]"
-                          : "border-border bg-surface hover:bg-surface-2"
-                      }`}
-                    >
-                      <span
-                        className={`mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded border ${
-                          on ? "border-[#0073EA] bg-[#0073EA] text-white" : "border-border bg-transparent"
-                        }`}
-                        aria-hidden="true"
-                      >
-                        {on ? <Check className="h-3 w-3" /> : null}
-                      </span>
-                      <span className="flex flex-col">
-                        <span className="text-base font-medium text-foreground">{opt.label}</span>
-                        <span className="text-xs text-muted">{opt.hint}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your new key" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)}>
+        <p>This is the only time {revealed?.name ? `"${revealed.name}"` : "the key"} is shown. Store it somewhere safe now.</p>
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-hover px-3 py-2 font-mono text-sm">{revealed?.plaintext}</code>
+          <button type="button" className={btn.secondary} onClick={() => { if (revealed) void navigator.clipboard?.writeText(revealed.plaintext).then(() => toast("Key copied")); }}>
+            <Copy className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy
+          </button>
+        </div>
+      </ConfirmDialog>
 
-            {createError ? (
-              <div className="flex items-center gap-2 rounded-lg border border-[#E2445C]/30 bg-[#E2445C]/[0.06] px-3 py-2 text-sm text-[#E2445C]">
-                <AlertTriangle className="h-3.5 w-3.5 flex-none" /> {createError}
-              </div>
-            ) : null}
-          </div>
+      {open ? <KeyDrawer k={open} onClose={() => setOpen(null)} onRevoke={() => setRevoking(open)} onSaved={() => { void load(); }} /> : null}
 
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(false)}
-              disabled={creating}
-              className="h-9 rounded-lg border border-border bg-surface px-4 text-base font-medium text-foreground hover:bg-surface-2 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void submitCreate()}
-              disabled={creating || !newName.trim()}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0073EA] px-4 text-base font-semibold text-white hover:bg-[#0060B9] disabled:opacity-50"
-            >
-              {creating ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
-              Generate key
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reveal-once secret modal */}
-      <Dialog open={!!revealed} onOpenChange={(o) => { if (!o) { setRevealed(null); setRevealCopied(false); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Copy your API key now</DialogTitle>
-            <DialogDescription>
-              {revealed ? <><strong className="text-foreground">{revealed.name}</strong> is ready. </> : null}
-              This is the only time the full secret is shown.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex items-start gap-2 rounded-lg border border-[#F5A623]/35 bg-[#F5A623]/[0.08] px-3 py-2.5 text-sm text-foreground">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-[#F5A623]" />
-            <span>
-              <strong>You won&apos;t be able to see this key again.</strong> Store it in a secret
-              manager. If you lose it, revoke this key and generate a new one.
-            </span>
-          </div>
-
-          <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
-            <code className="flex-1 break-all font-mono text-base text-foreground">
-              {revealed?.plaintext}
-            </code>
-            <button
-              type="button"
-              onClick={copyRevealed}
-              title="Copy key"
-              className={`inline-flex h-8 flex-none items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold ${
-                revealCopied
-                  ? "bg-[#00A96E]/15 text-[#00A96E]"
-                  : "bg-[#0073EA] text-white hover:bg-[#0060B9]"
-              }`}
-            >
-              {revealCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {revealCopied ? "Copied" : "Copy"}
-            </button>
-          </div>
-
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => { setRevealed(null); setRevealCopied(false); }}
-              className="h-9 rounded-lg bg-[#0073EA] px-4 text-base font-semibold text-white hover:bg-[#0060B9]"
-            >
-              Done — I&apos;ve saved it
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog open={!!revoking} onOpenChange={(v) => { if (!v) setRevoking(null); }} title="Revoke this key?" danger confirmLabel="Revoke key" onConfirm={revoke} busy={busy}>
+        <p>Anything using &quot;{revoking?.name}&quot; stops working at once. This cannot be undone.</p>
+      </ConfirmDialog>
     </>
   );
 }
 
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Key; label: string; value: string; sub: string }) {
+function KeyDrawer({ k, onClose, onRevoke, onSaved }: { k: ApiKeyRow; onClose: () => void; onRevoke: () => void; onSaved: () => void }) {
+  const { toast } = useOsToast();
+  const [perMin, setPerMin] = useState<number | "">(k.rateLimitPerMinute);
+  const [perDay, setPerDay] = useState<number | "">(k.rateLimitPerDay);
+  const [saving, setSaving] = useState(false);
+  const dirty = perMin !== k.rateLimitPerMinute || perDay !== k.rateLimitPerDay;
+  const save = async () => {
+    if (perMin === "" || perDay === "") return;
+    setSaving(true);
+    const r = await apiFetch("/api/keys", { method: "PATCH", json: { id: k.id, rateLimitPerMinute: perMin, rateLimitPerDay: perDay } });
+    setSaving(false);
+    if (!r.ok) { toast(r.error); return; }
+    toast("Rate limits saved");
+    onSaved();
+  };
   return (
-    <div className="apk__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="apk__kpi-accent" aria-hidden="true" />
-      <div className="apk__kpi-row">
-        <div className="apk__kpi-icon"><Icon /></div>
-        <div className="apk__kpi-label">{label}</div>
+    <Drawer
+      open
+      onClose={onClose}
+      width={520}
+      layerId="api-key-drawer"
+      ariaLabel="API key"
+      header={
+        <>
+          <span className="min-w-0 flex-1 truncate text-base font-semibold text-ink">{k.name}</span>
+          <button type="button" aria-label="Close" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"><X className="h-4 w-4" strokeWidth={1.5} /></button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4 p-5">
+        <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-base">
+          <dt className="text-ink-2">Prefix</dt><dd className="font-mono text-sm">{k.prefix}</dd>
+          <dt className="text-ink-2">Scopes</dt><dd>{k.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}</dd>
+          <dt className="text-ink-2">Created</dt><dd>{new Date(k.createdAt).toLocaleDateString()}{k.createdBy ? ` by ${`${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim()}` : ""}</dd>
+          <dt className="text-ink-2">Requests</dt><dd className="tabular-nums">{k.requestCount}</dd>
+          <dt className="text-ink-2">Status</dt><dd>{k.revokedAt ? `Revoked ${new Date(k.revokedAt).toLocaleDateString()}` : "Active"}</dd>
+        </dl>
+        <p className="text-sm text-ink-2">Scopes cannot be changed after a key is made. Make a new key instead.</p>
+        {k.revokedAt ? null : (
+          <>
+            <div className="flex flex-wrap items-center gap-4">
+              <Field label="Requests a minute"><NumberInput value={perMin} min={1} max={10000} onChange={setPerMin} ariaLabel="Requests a minute" /></Field>
+              <Field label="Requests a day"><NumberInput value={perDay} min={1} max={10000000} width={120} onChange={setPerDay} ariaLabel="Requests a day" /></Field>
+            </div>
+            <div className="flex gap-2">
+              {dirty ? (
+                <button type="button" className={btn.secondary} disabled={saving} onClick={() => { void save(); }}>
+                  {saving ? <Pending label="Saving" /> : null}
+                  Save limits
+                </button>
+              ) : null}
+              <button type="button" className={btn.dangerGhost} onClick={onRevoke}>Revoke</button>
+            </div>
+          </>
+        )}
       </div>
-      <div className="apk__kpi-value">{value}</div>
-      <div className="apk__kpi-sub">{sub}</div>
-    </div>
+    </Drawer>
   );
 }

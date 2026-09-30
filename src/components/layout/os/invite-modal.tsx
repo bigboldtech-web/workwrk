@@ -52,6 +52,10 @@ function personLabel(p: PersonOption): string {
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Members > Invite rules: the allowed domains (else the inviter's own). */
+  allowedDomains?: string[];
+  /** Members > Invite rules: the level preselected for a new invite. */
+  defaultLevel?: AccessLevel;
   /** Called after at least one invite went through — refresh pending lists. */
   onSent?: () => void;
 }
@@ -72,7 +76,7 @@ export function inviteLevelOptionText(l: { label: string; description: string })
   return `${l.label}: ${description}`;
 }
 
-export function InviteModal({ open, onOpenChange, onSent }: Props) {
+export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaultLevel }: Props) {
   const { toast } = useOsToast();
 
   const [emails, setEmails] = useState<string[]>([]);
@@ -83,8 +87,10 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   // Company-domain lock: invitees must share the workspace's email
   // domain (the server enforces org.domain ?? inviter's; the signed-in
   // user's domain is the client's best mirror of that rule).
-  const companyDomain = sessionData?.user?.email?.split("@")[1]?.toLowerCase() ?? null;
-  const [accessLevel, setAccessLevel] = useState<AccessLevel>("EMPLOYEE");
+  const ownDomain = sessionData?.user?.email?.split("@")[1]?.toLowerCase() ?? null;
+  const domains = allowedDomains && allowedDomains.length > 0 ? allowedDomains : ownDomain ? [ownDomain] : [];
+  const companyDomain = domains.length > 0 ? domains.map((d) => d).join(", @") : null;
+  const [accessLevel, setAccessLevel] = useState<AccessLevel>(defaultLevel ?? "EMPLOYEE");
   const [message, setMessage] = useState("");
 
   // Placement — all optional. The Invitation model + POST /api/invitations
@@ -147,7 +153,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
       for (const t of tokens) {
         const lower = t.toLowerCase();
         if (!EMAIL_RE.test(lower)) { bad.push(t); continue; }
-        if (companyDomain && lower.split("@")[1] !== companyDomain) { offDomain.push(t); continue; }
+        if (domains.length > 0 && !domains.includes(lower.split("@")[1] ?? "")) { offDomain.push(t); continue; }
         good.push(lower);
       }
       if (good.length > 0) {
@@ -157,7 +163,8 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
       setWrongDomain(offDomain);
       setDraft([...bad, ...offDomain].length > 0 ? [...bad, ...offDomain].join(" ") : "");
     },
-    [companyDomain],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domains.join(",")],
   );
 
   const onDraftKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

@@ -3,7 +3,7 @@ import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { isSignedOutAppPath } from "@/lib/nav/public-app-paths";
 import { staffWriteOriginRefused, STAFF_WRITE_ORIGIN_REFUSAL } from "@/lib/admin/staff-write-origin";
 import { getToken } from "next-auth/jwt";
-import { MFA_HOLD_PAGE, mfaHoldAllowsApi, mfaHoldAllowsPage } from "@/lib/auth/mfa-hold";
+import { MFA_HOLD_PAGE, PASSWORD_HOLD_PAGE, mfaHoldAllowsApi, mfaHoldAllowsPage, passwordHoldAllowsApi } from "@/lib/auth/mfa-hold";
 
 /**
  * Host routing for WorkwrK's three surfaces:
@@ -277,6 +277,21 @@ export async function proxy(req: NextRequest) {
       }
       const url = req.nextUrl.clone();
       const [holdPath, holdQuery] = MFA_HOLD_PAGE.split("?");
+      url.pathname = holdPath;
+      url.search = holdQuery ? `?${holdQuery}` : "";
+      return NextResponse.redirect(url);
+    }
+    // The password age rule, the same way: an expired password reaches My
+    // settings > Security and the change-password route, nothing else.
+    if (token?.passwordHold === true && token.revoked !== true && !(apiPath && passwordHoldAllowsApi(path))) {
+      if (apiPath) {
+        return NextResponse.json(
+          { error: "Your password has expired. Choose a new one in My settings, Security.", code: "password_expired" },
+          { status: 403, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      const url = req.nextUrl.clone();
+      const [holdPath, holdQuery] = PASSWORD_HOLD_PAGE.split("?");
       url.pathname = holdPath;
       url.search = holdQuery ? `?${holdQuery}` : "";
       return NextResponse.redirect(url);

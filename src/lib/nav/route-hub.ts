@@ -47,13 +47,12 @@ export function isHubKey(key: string): key is HubKey {
 /**
  * The takeover prefixes (spec-shell 2.8). `OsShell` renders the settings frame
  * when one of these matches, `resolveHub` rule 1 reads the same list, and
- * `lastAppPath` excludes it. `/imports` is the one member outside the two door
- * prefixes: it renders inside the takeover with the Data row active until it
- * 308s into `/settings/data?tab=import`, when its entry here, its
- * `alsoActiveOn` and its `ROUTE_HUB` row are deleted together. A test pins the
- * array to exactly these three so a fourth can never be added by accident.
+ * `lastAppPath` excludes it. Exactly the two door prefixes: `/imports` was a
+ * third until the Data > Import tab shipped (Phase 8 Stage D); it now 308s to
+ * `/settings/data?tab=import`, and its entry here, its `alsoActiveOn` and its
+ * `ROUTE_HUB` row went in the same change. A test pins the array.
  */
-export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/imports"];
+export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account"];
 
 /**
  * URLs under `(dashboard)` that are resolved by a redirect before a hub is ever
@@ -91,6 +90,9 @@ export const REDIRECT_ROUTES: readonly string[] = [
   // renders (spec-tools-misc section 1, "delete the /marketing prefix from
   // the home row"; naming-canon retires "Marketing (as an app)").
   "/marketing",
+  // Phase 8 Stage D: /imports 308s to Workspace settings > Data > Import
+  // (a route-handler twin of the next.config.ts row).
+  "/imports",
 ];
 
 /**
@@ -198,7 +200,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // ── Settings ──────────────────────────────────────────────────────
   "/settings": "settings",
   "/account": "settings",
-  "/imports": "settings",
 };
 
 /**
@@ -272,7 +273,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/forms": "Forms",
   "/settings": "Workspace settings",
   "/account": "My settings",
-  "/imports": "Import",
 
   // ── Nested static directories (the hierarchy under a hub row) ──────
   //

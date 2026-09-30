@@ -48,6 +48,10 @@ export const PERSON_FIELD_GROUP: Record<string, PersonFieldGroup> = {
   managerId: "reports-to",
   status: "status",
   "accessLevel": "access",
+  // The four-role write (Members drawer): Owner, Admin or Member, and the
+  // member tier; src/lib/access/membership.ts applies every guard.
+  orgRole: "access",
+  memberTier: "access",
 };
 
 /** Every key PATCH /api/users/[id] accepts. Anything else is a 400. */

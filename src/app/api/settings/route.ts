@@ -7,6 +7,7 @@ import { logAuditEvent } from "@/lib/activity";
 import {
   getReviewCadences,
   getBehavioralAnchors,
+  getScoringBands,
   validateScoreWeights,
   validateScoringBands,
 } from "@/lib/review-cadence";
@@ -24,7 +25,24 @@ import {
   consoleSectionSchema,
   scoringSectionSchema,
   securitySectionSchema,
+  profileSectionSchema,
+  localeSectionSchema,
+  workSectionSchema,
+  usersSectionSchema,
+  retentionSectionSchema,
+  dataSectionSchema,
 } from "@/lib/settings/org-settings-sections";
+import {
+  dataSettingsOf,
+  localeSettingsOf,
+  normalizeDomain,
+  retentionOf,
+  scoreWeightsOf,
+  signInPolicyOf,
+  usersSettingsOf,
+  workSettingsOf,
+} from "@/lib/settings/org-policy";
+import { sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
@@ -92,19 +110,17 @@ export async function GET() {
         // This line used to say "INR" while boot said USD, so Settings >
         // Locale showed rupees for an org whose register priced in dollars.
         currency: orgCurrencyFromSettings(settings),
-        fiscalYearStart: settings.fiscalYearStart || 4,
+        // A number, whatever was stored ("04-01" from the old Locale page
+        // migrates on read, settings spec section 4).
+        fiscalYearStart: localeSettingsOf(settings).fiscalYearStart,
         language: settings.language || "en",
         reviewFrequency: settings.reviewFrequency || "QUARTERLY",
-        scoreWeights: settings.scoreWeights || {
-          kpi: 40, manager: 25, peer: 10, self: 5, sopCompliance: 20,
-        },
-        scoringBands: settings.scoringBands || [
-          { label: "Exceptional", min: 90, max: 100, color: "green" },
-          { label: "Good", min: 75, max: 89, color: "blue" },
-          { label: "Meets Expectations", min: 60, max: 74, color: "lime" },
-          { label: "Needs Improvement", min: 40, max: 59, color: "orange" },
-          { label: "Underperforming", min: 0, max: 39, color: "red" },
-        ],
+        // The four weights the page edits and the review cycle reads; the
+        // older five-key default is migrated on read (org-policy.ts).
+        scoreWeights: scoreWeightsOf(settings),
+        // The bands the review engine actually uses (getScoringBands: the
+        // stored list, else DEFAULT_SCORING_BANDS), never a second default.
+        scoringBands: getScoringBands(settings),
         reviewCadences: getReviewCadences(settings),
         behavioralAnchors: getBehavioralAnchors(settings),
         // `notifications` (org defaults) is retired: no UI and no reader
@@ -117,6 +133,15 @@ export async function GET() {
           sessionTimeout: 30,
           twoFactorEnabled: false,
         },
+        // The normalized Workspace settings values, defaults filled in
+        // (src/lib/settings/org-policy.ts): the pages render these, never
+        // the raw blob, so a missing key reads as today's behaviour.
+        signIn: signInPolicyOf(settings),
+        locale: localeSettingsOf(settings, orgCurrencyFromSettings(settings)),
+        work: workSettingsOf(settings),
+        users: usersSettingsOf(settings, org.domain),
+        retention: retentionOf(settings),
+        data: dataSettingsOf(settings),
         // The ten access toggles (access-model-spec section 8), defaults
         // filled in, so a settings surface can render them without a
         // second parse.
@@ -143,8 +168,8 @@ export async function GET() {
     // process taxonomies' admin config, the org's business profile and the
     // stored session fields stay with the doors that edit them.
     if (!legacyIsManagerLevel((session.user as SessionUser).accessLevel)) {
-      const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, ...rest } = body.settings;
-      void _access; void _process; void _b; void _i; void _t;
+      const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, signIn: _si, users: _u, retention: _r, data: _d, work: _w, ...rest } = body.settings;
+      void _access; void _process; void _b; void _i; void _t; void _si; void _u; void _r; void _d; void _w;
       const sec = (security ?? {}) as { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean };
       return NextResponse.json({
         ...body,
@@ -154,7 +179,16 @@ export async function GET() {
         },
       });
     }
-    return NextResponse.json(body);
+    // Who is asking, for the Owner-only rows (Danger zone, Security):
+    // answered by the one rule in src/lib/access/workspace-admin.ts.
+    const admin = sessionIsWorkspaceAdmin(session);
+    const viewer = {
+      isOwner: admin ? await sessionIsWorkspaceOwner(session) : false,
+      mayManageOwnerPages: admin ? await sessionMayManageOwnerPage(session) : false,
+      // The scoring section's own write rule (PATCH below): Admins and C-level.
+      canEditScoring: ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes((session.user as SessionUser).accessLevel ?? ""),
+    };
+    return NextResponse.json({ ...body, viewer });
   } catch (error) {
     console.error("Settings GET error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -199,6 +233,13 @@ export async function PATCH(req: Request) {
       // keeps that reach; everyone else on the tier reads it only.
       if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+    } else if (section === "security" || section === "retention") {
+      // Owner pages (settings spec 5.9 and 5.10: the sign-in policy, and the
+      // purge windows that delete data). Every Admin until the Owner and
+      // Admin split is approved (SETTINGS_OWNER_SPLIT, default OFF).
+      if (!(await sessionMayManageOwnerPage(session))) {
+        return NextResponse.json({ error: "Only workspace Owners can change this" }, { status: 403 });
       }
     } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel)) {
       // general, culture, security, access: Admin only (settings-architecture
@@ -269,6 +310,75 @@ export async function PATCH(req: Request) {
         break;
       }
 
+      case "profile": {
+        // Identity & culture > Profile: ONE request for the whole tab.
+        const parsed = profileSectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "profile"), issues: parsed.error.issues }, { status: 400 });
+        const d = parsed.data;
+        const orgPatch: { name?: string; domain?: string | null } = {};
+        if (d.name !== undefined) orgPatch.name = d.name;
+        if (d.domain !== undefined) orgPatch.domain = d.domain === null || d.domain === "" ? null : normalizeDomain(d.domain);
+        const keys: SettingsBlob = {};
+        for (const k of ["industry", "businessType", "teamSize"] as const) if (d[k] !== undefined) keys[k] = d[k];
+        // The AI prompt block reads companyProfile.industry before
+        // settings.industry (api/kras/ai-generate), so both move together.
+        if (d.industry !== undefined) {
+          const cp = currentSettings.companyProfile && typeof currentSettings.companyProfile === "object" ? currentSettings.companyProfile : {};
+          keys.companyProfile = { ...cp, industry: d.industry };
+        }
+        await prisma.$transaction(async (tx) => {
+          if (Object.keys(orgPatch).length > 0) await tx.organization.update({ where: { id: orgId }, data: orgPatch });
+          if (Object.keys(keys).length > 0) await writeOrgSettingsKeys(orgId, keys, tx);
+        });
+        changedKeys = Object.keys(d);
+        break;
+      }
+
+      case "locale": {
+        // Locale & work week. The fiscal month is written as a NUMBER; the
+        // "MM-01" string writer is gone and old values migrate on read.
+        const parsed = localeSectionSchema.safeParse(data);
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "locale"), issues: parsed.error.issues }, { status: 400 });
+        const d = parsed.data;
+        const keys: SettingsBlob = {};
+        if (d.timezone !== undefined) keys.timezone = d.timezone;
+        if (d.currency !== undefined) keys.currency = d.currency.toUpperCase();
+        if (d.fiscalYearStart !== undefined) keys.fiscalYearStart = d.fiscalYearStart;
+        if (d.language !== undefined) keys.language = d.language;
+        if (d.weekStart !== undefined || d.dateFormat !== undefined || d.timeFormat !== undefined) {
+          const cur = currentSettings.locale && typeof currentSettings.locale === "object" ? currentSettings.locale : {};
+          keys.locale = {
+            ...cur,
+            ...(d.weekStart !== undefined ? { weekStart: d.weekStart } : {}),
+            ...(d.dateFormat !== undefined ? { dateFormat: d.dateFormat } : {}),
+            ...(d.timeFormat !== undefined ? { timeFormat: d.timeFormat } : {}),
+          };
+        }
+        if (Object.keys(keys).length > 0) await writeOrgSettingsKeys(orgId, keys);
+        changedKeys = Object.keys(d);
+        break;
+      }
+
+      case "work":
+      case "users":
+      case "retention":
+      case "data": {
+        // Merged into their own top-level key, so a partial save keeps the
+        // rest of the key (Invite rules sends its five fields; Apps sends
+        // only the automations pause).
+        const schema = { work: workSectionSchema, users: usersSectionSchema, retention: retentionSectionSchema, data: dataSectionSchema }[section];
+        const parsed = schema.safeParse(data ?? {});
+        if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, section), issues: parsed.error.issues }, { status: 400 });
+        const d = parsed.data as SettingsBlob;
+        if (section === "users" && Array.isArray(d.allowedDomains)) {
+          d.allowedDomains = [...new Set((d.allowedDomains as string[]).map((x) => normalizeDomain(x)).filter(Boolean))];
+        }
+        const cur = currentSettings[section] && typeof currentSettings[section] === "object" ? currentSettings[section] : {};
+        await writeOrgSettingsKeys(orgId, { [section]: { ...cur, ...d } });
+        changedKeys = Object.keys(d);
+        break;
+      }
+
       case "scoring": {
         // Editable Scoring & reviews config (weights, bands, cadences,
         // behavioral anchors). Validate the numeric invariants so a bad
@@ -300,8 +410,29 @@ export async function PATCH(req: Request) {
         const parsed = securitySectionSchema.safeParse(data);
         if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "security"), issues: parsed.error.issues }, { status: 400 });
         const current = currentSettings.security && typeof currentSettings.security === "object" ? currentSettings.security : {};
-        await writeOrgSettingsKeys(orgId, { security: { ...current, ...parsed.data } });
+        const next = { ...current, ...parsed.data };
+        await writeOrgSettingsKeys(orgId, { security: next });
         changedKeys = Object.keys(parsed.data);
+        // The sign-in policy is the one section whose every change is a
+        // security event (settings spec 5.12): old and new values, so the
+        // Audit log drawer can show exactly what moved.
+        const before = signInPolicyOf({ security: current });
+        const after = signInPolicyOf({ security: next });
+        const moved = (Object.keys(after) as (keyof typeof after)[]).filter((k) => before[k] !== after[k]);
+        if (moved.length > 0) {
+          logAuditEvent({
+            type: "security.policy.updated",
+            actorId: (session.user as SessionUser).id,
+            organizationId: orgId,
+            description: `Changed the sign-in policy: ${moved.join(", ")}`,
+            targetType: "Organization",
+            targetId: orgId,
+            severity: "warning",
+            oldValue: Object.fromEntries(moved.map((k) => [k, before[k]])),
+            newValue: Object.fromEntries(moved.map((k) => [k, after[k]])),
+            metadata: { keys: moved },
+          });
+        }
         break;
       }
 
@@ -317,7 +448,13 @@ export async function PATCH(req: Request) {
         if (!partial.success) {
           return NextResponse.json({ error: describeIssue(partial.error, "access"), issues: partial.error.issues }, { status: 400 });
         }
-        const merged = { ...parseAccessSettings(currentSettings.access), ...partial.data };
+        // Merged over the STORED keys only, never over the filled-in
+        // defaults: saving one toggle must not quietly persist the other
+        // nine at their defaults (a later read flip would then widen an org
+        // nobody chose to widen). Readers fill defaults with
+        // parseAccessSettings, so today's behaviour is unchanged.
+        const stored = currentSettings.access && typeof currentSettings.access === "object" && !Array.isArray(currentSettings.access) ? currentSettings.access : {};
+        const merged = { ...stored, ...partial.data };
         await writeOrgSettingsKeys(orgId, { access: merged });
         changedKeys = Object.keys(partial.data);
         break;
@@ -369,6 +506,7 @@ export async function PATCH(req: Request) {
       targetType: "Organization",
       targetId: orgId,
       metadata: { section, keys: changedKeys },
+      collapseWithinMs: 60_000,
     });
 
     return NextResponse.json({ success: true, ok: true });

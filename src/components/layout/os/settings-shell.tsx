@@ -47,21 +47,16 @@ import { hasDirty, leaveThen, setLeaveConfirmer, type LeaveDecision } from "@/li
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import {
-  ArrowLeft, BarChart3, Bell, Boxes, Building2, CalendarCheck, CircleUser, CreditCard, Database, FileCheck, Globe,
-  Key, Keyboard, LayoutGrid, List, Network, Search, Shapes, Shield, ShieldCheck, SlidersHorizontal, Users, X,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowLeft, Search, X, type LucideIcon } from "lucide-react";
+import { SETTINGS_ICONS } from "@/components/settings/settings-icons";
 import { Breadcrumb, type BreadcrumbItem } from "./top-bar/breadcrumb";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
 import { MAIN_ID, SIDEBAR_ID } from "./skip-links";
 import { useBoot, useViewerRole } from "./boot-context";
+import { useActiveSettingsRowOverride } from "@/components/settings/settings-active-row";
 import { useOsShell } from "./shell-context";
 
-const ICONS: Record<SettingsShellIconName, LucideIcon> = {
-  LayoutGrid, Building2, Globe, Boxes, Users, Network, ShieldCheck, Shapes, BarChart3, Shield, Database, FileCheck,
-  Key, CreditCard, List, CircleUser, SlidersHorizontal, Bell, CalendarCheck, Keyboard,
-};
+const ICONS: Record<SettingsShellIconName, LucideIcon> = SETTINGS_ICONS;
 
 /** The three-choice leave dialog the dirty guard asks (settings spec 8.5). */
 function useLeaveDialog() {
@@ -84,7 +79,9 @@ function useLeaveDialog() {
 
 
 /** Crumb for a route shown inside another page's row (its alsoActiveOn). */
-const ALSO_ACTIVE_CRUMBS: Record<string, string> = { "/imports": "Import" };
+// Empty since /imports 308s into Data > Import (Phase 8 Stage D); kept so a
+// route that renders inside another page's row can name itself again.
+const ALSO_ACTIVE_CRUMBS: Record<string, string> = {};
 
 export function SettingsShell({ children, door = "me" }: { children: ReactNode; door?: SettingsDoorProp }) {
   const pathname = usePathname() || "";
@@ -138,7 +135,8 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   // (/settings?tab=themes, ?tab=shortcuts) redirect before they render, and
   // reading the query here would need a Suspense boundary around the frame.
   const current = resolveSettingsPage(pathname);
-  const activeKey = current && current.door === shownDoor ? current.key : null;
+  const override = useActiveSettingsRowOverride();
+  const activeKey = override ?? (current && current.door === shownDoor ? current.key : null);
   const firstName = (session?.user as { firstName?: string } | undefined)?.firstName;
 
   const crumbs = useMemo<BreadcrumbItem[]>(() => {
@@ -282,7 +280,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
                 <ul>
                   {group.rows.map((row) => {
                     const on = !!row.pageKey && row.pageKey === activeKey;
-                    const Icon = ICONS[row.icon] ?? List;
+                    const Icon = ICONS[row.icon] ?? SETTINGS_ICONS.List;
                     return (
                       <li key={row.key}>
                         <Link

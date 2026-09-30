@@ -246,11 +246,12 @@ export async function GET(
 
   // Audit-log the export itself.
   logActivity({
-    type: "csv_exported",
+    type: "data.exported",
     actorId: userId,
     organizationId: orgId,
     description: `Exported ${type} CSV (${rows.length} rows)`,
     targetType: "export",
+    metadata: { kind: type, rows: rows.length },
     severity: rows.length > 1000 ? "warning" : "info",
   });
 

@@ -11,15 +11,19 @@ import {
 import { generateApiKey } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
 import type { ApiKeyScope } from "@/generated/prisma";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 
 /**
  * API key management.
  *
  * GET  /api/keys        — list (plaintext never returned)
  * POST /api/keys        — create; plaintext returned ONCE in the response
+ * PATCH /api/keys       — { id, rateLimitPerMinute?, rateLimitPerDay? }: the
+ *                         two limits are the only thing that changes after
+ *                         a key is made (its scopes never do)
  * DELETE /api/keys?id=  — revoke (soft delete via revokedAt)
  *
- * Admin-only. Keys are scoped to the admin's own organization.
+ * Owner page (API & webhooks; every Admin until the Owner and Admin split). Keys are scoped to the admin's own organization.
  */
 
 const VALID_SCOPES: ApiKeyScope[] = ["READ", "WRITE", "ADMIN"];
@@ -27,8 +31,8 @@ const VALID_SCOPES: ApiKeyScope[] = ["READ", "WRITE", "ADMIN"];
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage API keys", 403);
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+    return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const orgId = getOrgId(session);
   const keys = await prisma.apiKey.findMany({
@@ -55,8 +59,8 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage API keys", 403);
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+    return jsonError("Only workspace Owners can manage API keys", 403);
   }
 
   const orgId = getOrgId(session);
@@ -123,8 +127,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage API keys", 403);
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+    return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
@@ -155,4 +159,45 @@ export async function DELETE(req: NextRequest) {
   });
 
   return jsonSuccess({ revoked: true });
+}
+
+export async function PATCH(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+    return jsonError("Only workspace Owners can manage API keys", 403);
+  }
+  const body = (await req.json().catch(() => null)) as { id?: unknown; rateLimitPerMinute?: unknown; rateLimitPerDay?: unknown } | null;
+  const id = typeof body?.id === "string" ? body.id : "";
+  if (!id) return jsonError("id required");
+  const allowed = new Set(["id", "rateLimitPerMinute", "rateLimitPerDay"]);
+  const extra = Object.keys(body ?? {}).filter((k) => !allowed.has(k));
+  if (extra.length) return jsonError(`Unknown key: ${extra.join(", ")}`);
+  const perMin = body?.rateLimitPerMinute;
+  const perDay = body?.rateLimitPerDay;
+  const data: { rateLimitPerMinute?: number; rateLimitPerDay?: number } = {};
+  if (perMin !== undefined) {
+    if (typeof perMin !== "number" || !Number.isInteger(perMin) || perMin < 1 || perMin > 10000) return jsonError("rateLimitPerMinute: 1 to 10000");
+    data.rateLimitPerMinute = perMin;
+  }
+  if (perDay !== undefined) {
+    if (typeof perDay !== "number" || !Number.isInteger(perDay) || perDay < 1 || perDay > 10_000_000) return jsonError("rateLimitPerDay: 1 to 10000000");
+    data.rateLimitPerDay = perDay;
+  }
+  const orgId = getOrgId(session);
+  const key = await prisma.apiKey.findFirst({ where: { id, organizationId: orgId }, select: { id: true, name: true, prefix: true, revokedAt: true, rateLimitPerMinute: true, rateLimitPerDay: true } });
+  if (!key) return jsonError("Key not found", 404);
+  if (key.revokedAt) return jsonError("A revoked key cannot change");
+  const updated = await prisma.apiKey.update({ where: { id }, data, select: { id: true, rateLimitPerMinute: true, rateLimitPerDay: true } });
+  logAuditEvent({
+    type: "api_key_updated",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: `Changed the rate limits of API key "${key.name}" (prefix ${key.prefix})`,
+    targetId: id,
+    targetType: "api_key",
+    oldValue: { rateLimitPerMinute: key.rateLimitPerMinute, rateLimitPerDay: key.rateLimitPerDay },
+    newValue: { rateLimitPerMinute: updated.rateLimitPerMinute, rateLimitPerDay: updated.rateLimitPerDay },
+  });
+  return jsonSuccess({ data: updated });
 }

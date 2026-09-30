@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   // Only org admins can initiate billing.
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
     return jsonError("Only admins can manage billing", 403);
   }
 

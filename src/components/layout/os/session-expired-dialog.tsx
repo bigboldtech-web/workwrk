@@ -18,7 +18,7 @@
 // flushed (useDraftOnExpiry writes under the workwrk:draft: prefix), and the
 // sign-out-all variant renders when the 401 named a revocation.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useSession } from "next-auth/react";
 import { apiFetch } from "@/lib/api-fetch";
@@ -165,11 +165,33 @@ export function SessionIdleWarning() {
   // Arm (and re-arm on every refetch) from the session's own expiry.
   useEffect(() => scheduleIdleWarning(expires), [expires]);
 
+  // Someone who is working is not idle: the workspace's idle window
+  // (Workspace settings > Security) can be as short as 30 minutes, and only
+  // GET /api/auth/session moves it. A click or key in the last five minutes
+  // renews the session quietly instead of asking.
+  const lastInput = useRef(0);
+  useEffect(() => {
+    const mark = () => { lastInput.current = Date.now(); };
+    window.addEventListener("pointerdown", mark, { passive: true });
+    window.addEventListener("keydown", mark, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", mark);
+      window.removeEventListener("keydown", mark);
+    };
+  }, []);
+
   useEffect(() => {
     const onWarn = (e: Event) => {
       const detail = (e as CustomEvent<IdleWarningDetail>).detail;
       if (!detail?.idleUntil) return;
       if (isSessionExpired()) return;
+      if (Date.now() - lastInput.current < 5 * 60_000) {
+        void apiFetch<{ user?: unknown; expires?: string }>(SESSION_RENEW_URL).then((r) => {
+          if (r.ok && r.data?.user) scheduleIdleWarning(r.data.expires ?? null);
+          else setVisible(true);
+        });
+        return;
+      }
       setVisible(true);
     };
     const onExpired = () => setVisible(false);

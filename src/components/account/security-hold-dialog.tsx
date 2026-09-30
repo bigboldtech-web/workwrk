@@ -53,7 +53,7 @@ export function SecurityHoldDialog({
   const openPassword = async () => {
     // The dialog prints the org's own rules; read them fresh.
     const r = await apiFetch<{ user?: { policy?: { password?: PasswordPolicyView } } }>("/api/me", { cache: "no-store" });
-    setPolicy(r.ok && r.data?.user?.policy?.password ? r.data.user.policy.password : { minLength: 8, requireUppercase: true, requireNumbers: true });
+    setPolicy(r.ok && r.data?.user?.policy?.password ? r.data.user.policy.password : { minLength: 8, requireUppercase: true, requireNumbers: true, requireSymbol: false });
     setInner(true);
   };
 

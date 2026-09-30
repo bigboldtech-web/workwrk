@@ -25,6 +25,7 @@ import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import { formatHm } from "@/lib/time-format";
 import {
   WORK_SCHEDULE_DEFAULTS,
@@ -83,8 +84,8 @@ export function WorkWeekCard() {
     void run();
   }, [load]);
 
-  async function save() {
-    if (!schedule) return;
+  async function save(): Promise<boolean> {
+    if (!schedule) return true;
     setSaving(true);
     setError(null);
     const r = await apiFetchWithRetry<Record<string, unknown>>(
@@ -97,17 +98,22 @@ export function WorkWeekCard() {
       // The typed schedule stays on screen. The server's own sentence when
       // there is one: only it can say the SQL file has not been applied.
       setError(r.error);
-      return;
+      return false;
     }
     setSaved(schedule);
     toast("Working calendar saved");
     // The Timesheets week card and the Workload grid both read this.
     window.dispatchEvent(new CustomEvent("workwrk:work-schedule-changed"));
+    return true;
   }
+
+  // The card's own unsaved edits ask "Save your changes?" on the way out,
+  // like every Save-bar section (settings spec 1.5).
+  useDirtyGuard(schedule !== null && saved !== null && !sameSchedule(schedule, saved), { onSave: save, id: "work-week" });
 
   if (schedule === null) {
     return (
-      <section className="mt-6 max-w-xl rounded-lg border border-line bg-raised p-5">
+      <section className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6">
         <span className="inline-block h-5 w-40 rounded bg-skeleton os-skeleton-pulse" />
         <span className="sr-only">Loading the working calendar</span>
       </section>
@@ -140,7 +146,7 @@ export function WorkWeekCard() {
   };
 
   return (
-    <section className="mt-6 max-w-xl rounded-lg border border-line bg-raised p-5">
+    <section className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6">
       <header className="mb-1 flex items-center gap-2">
         <CalendarDays className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
         <h2 className="text-base font-semibold text-ink">Work week</h2>
@@ -275,18 +281,21 @@ export function WorkWeekCard() {
         ) : null}
       </div>
 
-      {canEdit ? (
+      {/* Its own record and its own save, shown only while there is
+          something to save, as a secondary button: the page's one blue
+          button is the Save bar above. */}
+      {canEdit && dirty ? (
         <div className="mt-5 flex items-center gap-3">
           <button
             type="button"
             onClick={() => { void save(); }}
-            disabled={!dirty || saving}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-40"
+            disabled={saving}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover disabled:opacity-50"
           >
             {saving ? <Dots variant="pending" /> : null}
             Save work week
           </button>
-          {dirty && !saving ? <span className="text-base text-ink-3">Unsaved changes</span> : null}
+          <span className="text-base text-ink-2">Unsaved changes</span>
         </div>
       ) : null}
     </section>

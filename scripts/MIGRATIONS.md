@@ -1296,3 +1296,81 @@ people whose browser value, if they still hold one, will be carried up). Local r
   menus) is now READ: status, comment and due-date notifications about work in a muted
   place stop; a task assigned to the person and a mention still arrive.
 - `home.notifications.desktopRingCalls` is now read by the incoming call card.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage D: Workspace settings; four guarded statements, no backfill
+
+**Schema.** Stage D appends to `prisma/sql/2026-09-30-phase8-settings-access.sql` (the one
+Phase 8 file, already in the deploy manifest):
+
+```
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorType" TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorLabel" TEXT;
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actingForId" TEXT;
+ALTER TABLE "ActivityLog" ALTER COLUMN "actorId" DROP NOT NULL;
+```
+
+Every existing row reads as `actorType = 'user'` with its actor unchanged, so there is
+no backfill and nothing to dry-run. Apply it before the code: the new release writes
+the three columns (SCIM deprovisioning writes `scim` / "Identity provider", the audit
+purge writes `system`, the Staff console's tenant audit row now lands through
+`writeTenantRow`) and may write a null actor. Applied locally 2026-09-30 with
+`prisma db execute`. **Rollback:** drop the three columns (only the label of non-person
+rows is lost); `SET NOT NULL` on `actorId` succeeds only while no null row exists, so
+roll back the code first, then delete or reassign the null-actor rows, then restore
+the constraint.
+
+**Flags.** One new flag, read at request time, default OFF, in no `.env`:
+`SETTINGS_OWNER_SPLIT`. Off, every Admin counts as an Owner for the Owner pages
+(Security, API, Billing, Retention, Delete workspace), exactly as today. On, only the
+real Owners (SUPER_ADMIN, else the earliest live COMPANY_ADMIN) open them. Role changes,
+ownership transfer, and deactivating or removing an Owner use the real Owner in both
+states.
+
+**Settings keys written for the first time** (all inside `Organization.settings`, strict
+zod sections in `src/lib/settings/org-settings-sections.ts`, absent reads as the old
+behaviour): `security.{minPasswordLength, requireUppercase, requireNumbers,
+requireSymbol, passwordMaxAgeDays, sessionIdleMinutes, sessionMaxDays, mfaRequired,
+lockoutThreshold, lockoutMinutes}`, `profile`, `locale`, `work.automationsPaused`,
+`users.{allowedDomains, inviteDefaultRole, inviteExpiryDays}` (plus `autoJoin` and `defaultSpaceIds`, stored but read by nothing yet),
+`retention.{trashDays, auditDays}`, `data.{aiEnabled, selfExport}`, `scoreWeights`
+(read through `scoreWeightsOf`, which migrates the old five-key shape on read, never
+on write).
+
+**Behaviour changes with no data step**, for the release note:
+- Sign-in policy is enforced: the password rules (with an optional symbol rule) apply
+  at signup, join, reset and change; a password older than the max age puts the
+  person on the change-password hold (proxy 403 `password_expired` on APIs, redirect
+  on pages); the idle limit and the absolute session lifetime are checked on every
+  token refresh (the lifetime counts from the first check after deploy for sessions
+  already open); the lockout threshold and minutes apply per org and can only be made
+  STRICTER than the built-in floor (8 failures, 15 minutes). `ENFORCE_MFA_AT_LOGIN`
+  stays the floor for enrolled people; `mfaRequired` adds the audience (off, admins,
+  everyone). Existing orgs stay "off".
+- Role changes go through `src/lib/access/membership.ts`: only an Owner makes or
+  changes an Owner, a workspace always keeps one Owner (409 `last_owner`), SUPER_ADMIN
+  is never a pickable tier, and every change that is not a strict promotion bumps
+  `tokenVersion` (the person's sessions end on their next check; a promotion lands
+  within the five-minute revalidation). Audited `org_role.changed`.
+- Only an Owner deactivates or removes an Owner (403 `owner_only`).
+- `POST /api/org/sign-out-everyone` (typed "SIGN OUT", Owner page) bumps `tokenVersion`
+  for everyone anchored to the org. Audited `security.sign_out_all`.
+- SCIM deprovisioning (DELETE, or `active: false`) now hands open tasks, reports and
+  owned Spaces, Folders and Lists to the person's manager, else the first Owner,
+  refuses the last Owner, sets INACTIVE and bumps `tokenVersion`.
+- `GET /api/audit?format=csv` exports up to 50,000 rows (audited `data.exported`);
+  `GET /api/export/all` is the whole-workspace export (Spaces, Folders, Lists, tasks
+  paged to 200,000, Docs, Tables, Goals) with the CSV formula guard.
+- `POST /api/cron/audit-purge` (new, `?dry=1` supported) deletes audit rows older than
+  `retention.auditDays` for orgs that set it, in batches, and writes one `audit.purged`
+  row. The default is keep for ever, so it deletes nothing until an Owner chooses a
+  period. The crontab row is NOT installed; see `scripts/CRON-SETUP.md`.
+- `PATCH /api/offices` accepts only the office fields (mass-assignment fix) and keeps
+  one headquarters.
+- `/imports` is a 308 to `/settings/data?tab=import`. New `GET /api/org/admins` (the
+  ask-an-admin strip: names of the workspace's Owners and Admins, any signed-in member).
+
+**Next step for custom roles** (not in this stage): the Members drawer still offers the
+legacy seniority tier under Member so no capability is lost. When the access engine's
+roles switch on (access step 4 and 5), the tier select is replaced by the role
+picker, the matrix export on Data > Export ships the retired grid, and the transitional
+Access page's legacy grid is removed.

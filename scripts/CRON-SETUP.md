@@ -216,6 +216,28 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
 the schedule.
 
+
+### Audit log retention (Phase 8, NOT INSTALLED)
+
+`POST /api/cron/audit-purge` deletes Audit log rows older than the window an
+Owner chose in Settings > Data > Retention & privacy ("Keep the audit log
+for"). It acts ONLY on orgs that set `settings.retention.auditDays`; an org
+that never chose keeps its log forever, so adding this row deletes nothing
+anyone did not ask to delete. The window is floored at 90 days, deletes run in
+batches of 5000, and each org gets one `audit.purged` row naming how many
+entries went. Until the row is installed the setting is stored and shown, but
+nothing is removed; the Retention tab says so.
+
+| Job | Schedule | Command |
+|---|---|---|
+| Purge audit rows past each org's chosen window | `10 4 * * *` (4:10 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/audit-purge` |
+
+Dry run first (reads only):
+
+```
+curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "https://workwrk.com/api/cron/audit-purge?dry=1"
+```
+
 ## Access parity job (NOT INSTALLED: the founder adds this row)
 
 `scripts/access-parity-job.mjs` is the step-2 job from

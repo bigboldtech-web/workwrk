@@ -369,6 +369,9 @@ const nextConfig: NextConfig = {
       { source: "/settings/defaults", destination: "/settings/identity?tab=appearance", permanent: true },
       { source: "/settings/permissions", destination: "/settings/access", permanent: true },
       { source: "/settings/import-export", destination: "/settings/data?tab=import", permanent: true },
+      // /imports: the Import tab ships (Stage D), so the old hub 308s into it
+      // (spec-settings-workspace section 0, its S5 row).
+      { source: "/imports", destination: "/settings/data?tab=import", permanent: true },
       { source: "/settings/integrations", destination: "/settings/api", permanent: true },
       // The reverse of the old in-page redirect: personal preferences belong
       // in the personal door. The page file moved in the same change, so

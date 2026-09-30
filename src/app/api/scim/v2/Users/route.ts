@@ -11,6 +11,7 @@
 // "..."` — the only filters Okta/Azure actually send.
 
 import crypto from "crypto";
+import { usersSettingsOf } from "@/lib/settings/org-policy";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
@@ -114,6 +115,15 @@ export async function POST(req: NextRequest) {
   // The customer's identity provider vouches for this address, not the
   // mailbox owner, so a WorkwrK staff address is refused (platform-admin.ts).
   if (await isReservedStaffAddress(email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
+  // Domain lock (settings-architecture 5.9): an address outside the allowed
+  // domains (Members > Invite rules, else the workspace's own domain) is
+  // refused. A workspace with no domain on file keeps today's behaviour.
+  const org = await prisma.organization.findUnique({ where: { id: auth.organizationId }, select: { settings: true, domain: true } });
+  const allowed = usersSettingsOf(org?.settings, org?.domain).allowedDomains;
+  const at = email.slice(email.lastIndexOf("@") + 1);
+  if (allowed.length > 0 && !allowed.includes(at)) {
+    return scimError(400, `${at} is not one of this workspace's allowed domains`, "invalidValue");
+  }
 
   // We deliberately don't set a password here — SCIM-provisioned
   // users sign in via SAML, not local auth. NextAuth's Credentials
@@ -127,9 +137,9 @@ export async function POST(req: NextRequest) {
       lastName: familyName,
       status: active ? "ACTIVE" : "INACTIVE",
       passwordHash: unmatchablePasswordHash(),
-      // Schema defaults take care of accessLevel; SCIM doesn't carry
-      // role/access info in the core User schema. Group push handles
-      // that separately.
+      // Every provisioned person arrives as a Member (the schema default
+      // level). Owner, Admin and Agent are set in WorkwrK, never by the
+      // identity provider (settings-architecture 5.9).
     },
     select: {
       id: true,

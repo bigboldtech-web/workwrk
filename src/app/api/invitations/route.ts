@@ -1,3 +1,4 @@
+import { usersSettingsOf } from "@/lib/settings/org-policy";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -93,16 +94,21 @@ export async function POST(req: Request) {
     // workspace joins on the company's own email domain. The domain is
     // the org's stored one, falling back to the inviting admin's — so
     // an @cashkr.com admin can only invite @cashkr.com addresses.
+    // Members > Invite rules (settings.users.allowedDomains) widens it to a
+    // list; an empty list keeps the rule above, so clearing the chips never
+    // opens the workspace to any address.
     const orgDomainRow = await prisma.organization.findUnique({
       where: { id: orgId },
-      select: { domain: true },
+      select: { domain: true, settings: true },
     });
     const inviterEmail = (session.user as { email?: string }).email;
-    const allowedDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
+    const rules = usersSettingsOf(orgDomainRow?.settings, orgDomainRow?.domain);
+    const fallbackDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
+    const allowedDomains = rules.allowedDomains.length > 0 ? rules.allowedDomains : fallbackDomain ? [fallbackDomain] : [];
     const inviteDomain = String(email).split("@")[1]?.toLowerCase() ?? "";
-    if (allowedDomain && inviteDomain !== allowedDomain) {
+    if (allowedDomains.length > 0 && !allowedDomains.includes(inviteDomain)) {
       return NextResponse.json(
-        { error: `Only @${allowedDomain} addresses can join this workspace` },
+        { error: `Only ${allowedDomains.map((d) => `@${d}`).join(", ")} addresses can join this workspace` },
         { status: 400 },
       );
     }
@@ -152,7 +158,8 @@ export async function POST(req: Request) {
     const fields = {
       accessLevel: inviteLevel || "EMPLOYEE",
       token: crypto.randomBytes(32).toString("hex"),
-      expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      // Members > Invite rules > Invitation expiry (default 7 days).
+      expiresAt: new Date(now.getTime() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000),
       departmentId: departmentId || null,
       roleId: roleId || null,
       managerId: managerId || null,

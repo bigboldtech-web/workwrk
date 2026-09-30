@@ -1778,7 +1778,7 @@ export const APPS: AppEntry[] = [
       // /imports): workspace imports live behind the Owner and Admin door.
       // It points at /imports, which keeps its URL inside the settings
       // takeover until the settings unit's Data > Import tab lands and 308s it.
-      { label: "Import data", icon: ImportIcon, requiredAccess: "org-admin", href: "/imports" },
+      { label: "Import data", icon: ImportIcon, requiredAccess: "org-admin", href: "/settings/data?tab=import" },
     ] },
   // "Library" is retired as a word (naming-canon 2.8); the key survives as
   // the gate for Files, and that is the label and door the palette prints.

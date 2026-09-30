@@ -33,8 +33,16 @@ describe("password rules", () => {
   });
 
   it("reads a wire view defensively as the platform default", () => {
-    expect(parsePolicyView(null)).toEqual({ minLength: 8, requireUppercase: true, requireNumbers: true });
-    expect(parsePolicyView({ minLength: "12", requireUppercase: "no" })).toEqual({ minLength: 8, requireUppercase: true, requireNumbers: true });
-    expect(parsePolicyView({ minLength: 14, requireUppercase: false, requireNumbers: false })).toEqual({ minLength: 14, requireUppercase: false, requireNumbers: false });
+    expect(parsePolicyView(null)).toEqual({ minLength: 8, requireUppercase: true, requireNumbers: true, requireSymbol: false });
+    expect(parsePolicyView({ minLength: "12", requireUppercase: "no" })).toEqual({ minLength: 8, requireUppercase: true, requireNumbers: true, requireSymbol: false });
+    expect(parsePolicyView({ minLength: 14, requireUppercase: false, requireNumbers: false })).toEqual({ minLength: 14, requireUppercase: false, requireNumbers: false, requireSymbol: false });
+  });
+
+  it("adds the symbol rule when the workspace requires it, and the server agrees", () => {
+    const view = policyView({ requireSymbol: true });
+    expect(passwordChecklist("Abcdefg1", view).map((r) => [r.key, r.met])).toContainEqual(["symbol", false]);
+    expect(passwordMeets("Abcdefg1", view)).toBe(false);
+    expect(passwordMeets("Abcdefg1!", view)).toBe(true);
+    expect(validatePassword("Abcdefg1", { requireSymbol: true })).toMatch(/symbol/);
   });
 });

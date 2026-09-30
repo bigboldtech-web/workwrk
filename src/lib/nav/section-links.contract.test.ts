@@ -90,8 +90,9 @@ describe("call sites that build or follow object links", () => {
     "src/components/docs/blocknote-blocks/subpage-block.tsx",
     "src/components/docs/blocknote-canvas.tsx",
     "src/components/tables/csv-import-dialog.tsx",
-    // The Settings takeover's CSV import: a new table opens at its Work door.
-    "src/app/(dashboard)/imports/page.tsx",
+    // The Settings takeover's CSV import (Data > Import since /imports 308s
+    // there): a new table opens at its Work door.
+    "src/app/(dashboard)/settings/data/page.tsx",
   ];
 
   it("never push, replace or open a literal canonical object URL", () => {

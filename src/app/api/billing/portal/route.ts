@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import {
   getSessionOrFail,
   getOrgId,
@@ -11,7 +12,7 @@ import { createPortalSession, isBillingLive } from "@/services/billing";
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
     return jsonError("Only admins can manage billing", 403);
   }
   if (!isBillingLive) {

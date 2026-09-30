@@ -25,7 +25,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Hash, Lock, ShieldCheck } from "lucide-react";
+import { Hash, Info, Lock, ShieldCheck } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
 import { BackButton } from "@/components/ui/back-button";
 import { cn } from "@/lib/utils";
@@ -335,6 +335,73 @@ export function AdminOnly({ page, managedBy = "Owners and Admins", back, childre
     >
       {children}
     </DenialBlock>
+  );
+}
+
+/* ───────────────────────────── Ask-an-admin strip ───────────────────────────── */
+
+export interface AskAnAdminStripProps {
+  /** The Workspace page the viewer typed (its registry label). */
+  pageLabel: string;
+  /** Real Owners and Admins, earliest first (listOrgAdmins). */
+  admins: OrgAdmin[];
+}
+
+/** "Ana, Ben and Cy" from the first three names (pure; tested). */
+export function adminNamesSentence(names: string[]): string {
+  const n = names.filter(Boolean).slice(0, 3);
+  if (n.length === 0) return "your workspace Owners and Admins";
+  if (n.length === 1) return n[0];
+  if (n.length === 2) return `${n[0]} and ${n[1]}`;
+  return `${n[0]}, ${n[1]} and ${n[2]}`;
+}
+
+/**
+ * The second denial view under /settings (spec-settings-workspace 1.4 item
+ * 2, access 5.5 item 3): a 44px brand-soft strip ABOVE the viewer's own
+ * My settings > Profile, at the Workspace URL they typed. An explanation,
+ * not a wall: nothing of the Workspace page is revealed beyond its label,
+ * and the page under it is a destination, so it carries no BackButton.
+ */
+export function AskAnAdminStrip({ pageLabel, admins }: AskAnAdminStripProps) {
+  const who = adminNamesSentence(admins.map((a) => a.name));
+  return (
+    <div
+      role="note"
+      className="os-chrome mx-6 mt-4 flex min-h-11 items-center gap-3 rounded-lg bg-brand-soft px-4 py-2 text-base text-ink max-[900px]:mx-4"
+    >
+      <Info className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 flex-1">
+        {pageLabel === "Workspace settings"
+          ? <>Workspace settings are looked after by {who}. Ask them if you need something changed.</>
+          : <>{pageLabel} is part of Workspace settings, which {who} look{admins.length === 1 ? "s" : ""} after. Ask them if you need something changed.</>}
+      </span>
+      <AdminFaces admins={admins} />
+    </div>
+  );
+}
+
+function AdminFaces({ admins }: { admins: OrgAdmin[] }) {
+  if (admins.length === 0) return null;
+  const face = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink";
+  return (
+    <span className="inline-flex shrink-0 -space-x-1.5">
+      {admins.slice(0, 5).map((a) => {
+        const inner = a.avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={a.avatar} alt="" className="h-full w-full object-cover" />
+        ) : (
+          a.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()
+        );
+        return a.email ? (
+          <a key={a.id} href={`mailto:${a.email}`} title={`Email ${a.name}`} aria-label={`Email ${a.name}`} className={face}>
+            {inner}
+          </a>
+        ) : (
+          <span key={a.id} title={a.name} className={face}>{inner}</span>
+        );
+      })}
+    </span>
   );
 }
 

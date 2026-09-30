@@ -7,17 +7,18 @@
 //
 // Pure and client-safe: password-policy.ts has no imports.
 
-import { DEFAULT_PASSWORD_POLICY, type SecurityPolicy, validatePassword } from "@/lib/password-policy";
+import { DEFAULT_PASSWORD_POLICY, SYMBOL_RE, type SecurityPolicy, validatePassword } from "@/lib/password-policy";
 
 /** What GET /api/auth/password-policy returns: the policy as the checklist needs it. */
 export interface PasswordPolicyView {
   minLength: number;
   requireUppercase: boolean;
   requireNumbers: boolean;
+  requireSymbol: boolean;
 }
 
 export interface PasswordRule {
-  key: "length" | "uppercase" | "number";
+  key: "length" | "uppercase" | "number" | "symbol";
   label: string;
   met: boolean;
 }
@@ -29,6 +30,7 @@ export function policyView(policy?: SecurityPolicy | null): PasswordPolicyView {
     minLength: Math.max(8, Number.isFinite(p.minPasswordLength) ? Number(p.minPasswordLength) : 8),
     requireUppercase: p.requireUppercase !== false,
     requireNumbers: p.requireNumbers !== false,
+    requireSymbol: p.requireSymbol === true,
   };
 }
 
@@ -39,6 +41,7 @@ export function parsePolicyView(raw: unknown): PasswordPolicyView {
     minPasswordLength: typeof r.minLength === "number" ? r.minLength : undefined,
     requireUppercase: typeof r.requireUppercase === "boolean" ? r.requireUppercase : undefined,
     requireNumbers: typeof r.requireNumbers === "boolean" ? r.requireNumbers : undefined,
+    requireSymbol: typeof r.requireSymbol === "boolean" ? r.requireSymbol : undefined,
   });
 }
 
@@ -48,6 +51,7 @@ export function passwordChecklist(password: string, view: PasswordPolicyView): P
   ];
   if (view.requireUppercase) rules.push({ key: "uppercase", label: "One uppercase letter", met: /[A-Z]/.test(password) });
   if (view.requireNumbers) rules.push({ key: "number", label: "One number", met: /[0-9]/.test(password) });
+  if (view.requireSymbol) rules.push({ key: "symbol", label: "One symbol, like ! or #", met: SYMBOL_RE.test(password) });
   return rules;
 }
 
@@ -58,6 +62,7 @@ export function passwordMeets(password: string, view: PasswordPolicyView): boole
       minPasswordLength: view.minLength,
       requireUppercase: view.requireUppercase,
       requireNumbers: view.requireNumbers,
+      requireSymbol: view.requireSymbol,
     }) === null
   );
 }

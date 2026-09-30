@@ -25,3 +25,28 @@
 
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "termsAcceptedAt" TIMESTAMP(3);
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordChangedAt" TIMESTAMP(3);
+
+-- Stage D (workspace settings): WHO DID IT, ON EVERY AUDIT ROW.
+--
+--   * "ActivityLog"."actorType": what kind of actor wrote the row: 'user'
+--     (a person, every row before this release), 'api_key', 'agent',
+--     'system', 'scim' or 'platform_staff' (a WorkwrK staff change from the
+--     Staff console). NOT NULL with a constant default, so every existing
+--     row reads 'user' without a rewrite (Postgres 11+ stores the default in
+--     the catalogue; no table rewrite, no lock beyond the brief ALTER).
+--   * "ActivityLog"."actorLabel": the name shown when the actor is not a
+--     person ("WorkwrK Support", "API key wk_ab12"). Null for people.
+--   * "ActivityLog"."actingForId": the person a key or an agent acted as.
+--   * "ActivityLog"."actorId" becomes NULLABLE: a WorkwrK staff row names no
+--     user of the customer's organisation (src/lib/staff-audit.ts held those
+--     rows until this column set existed). Relaxing NOT NULL rewrites
+--     nothing and loses nothing; every existing row keeps its actor.
+--
+-- Rollback (only if the release is rolled back AND no staff row was
+-- written): DELETE the rows WHERE "actorId" IS NULL, then
+-- ALTER COLUMN "actorId" SET NOT NULL. The three new columns can stay.
+
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorType" TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorLabel" TEXT;
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actingForId" TEXT;
+ALTER TABLE "ActivityLog" ALTER COLUMN "actorId" DROP NOT NULL;

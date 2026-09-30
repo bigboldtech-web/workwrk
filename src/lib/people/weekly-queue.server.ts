@@ -322,7 +322,7 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
 
   let decidedBy: WeeklyReviewDetail["decidedBy"] = null;
   const lastMeta = lastDecision?.metadata as { decision?: string } | null;
-  if (lastDecision && lastMeta?.decision !== "REOPEN" && row.status === "ACKNOWLEDGED") {
+  if (lastDecision?.actorId && lastMeta?.decision !== "REOPEN" && row.status === "ACKNOWLEDGED") {
     const who = await prisma.user.findUnique({ where: { id: lastDecision.actorId }, select: { id: true, firstName: true, lastName: true } });
     if (who) decidedBy = { id: who.id, name: `${who.firstName} ${who.lastName}`.trim() };
   }
