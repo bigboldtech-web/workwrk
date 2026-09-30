@@ -111,3 +111,28 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
 export function freshMayManageOwnerPage(a: FreshActor): boolean {
   return a.ok && a.admin && (!ownerSplitOn() || a.owner);
 }
+
+/**
+ * The target of an Admin scopes change (Phase 8 stage E): a live person of
+ * this workspace who is an Admin and not one of its Owners (Owners hold both
+ * scopes implicitly). Null with the reason otherwise.
+ */
+export async function adminScopeTarget(
+  organizationId: string,
+  userId: string,
+): Promise<{ ok: true; id: string; name: string; scopes: string[] } | { ok: false; status: 400 | 404; error: string }> {
+  const target = await prisma.user.findFirst({
+    where: { id: userId, organizationId, deletedAt: null },
+    select: { id: true, accessLevel: true, adminScopes: true, firstName: true, lastName: true },
+  });
+  if (!target) return { ok: false, status: 404, error: "Not found" };
+  if (target.accessLevel !== "COMPANY_ADMIN" || (await ownerIdsFor(organizationId)).includes(target.id)) {
+    return { ok: false, status: 400, error: "not_an_admin" };
+  }
+  return {
+    ok: true,
+    id: target.id,
+    name: `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || "an Admin",
+    scopes: [...(target.adminScopes ?? [])].sort(),
+  };
+}

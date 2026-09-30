@@ -80,6 +80,8 @@ function scanWrittenTypes(): Map<string, string[]> {
  * really is, so this list can never become a quiet escape hatch.
  */
 const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
+  "access.request.granted": "an ActivityLog type beside the access_declined notification in api/access-requests/[id]",
+  "access.request.declined": "an ActivityLog type beside the access_declined notification in api/access-requests/[id]",
   BOARD_ITEM: "EntityLink / Reminder entityType, beside the mention write in api/items/[id]/updates",
   FILE: "EntityLinkType in the same handler",
   all: "the audience selector in api/email/send-reminders",

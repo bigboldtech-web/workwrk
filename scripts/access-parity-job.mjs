@@ -61,15 +61,22 @@ if (flag("--help")) {
       "  --offset N              shift the object window by N (default 0)",
       "  --viewers-per-object N  viewers paired with each object, rotating through the ladder (default 4)",
       "  --allow-remote          permit a DATABASE_URL host other than localhost",
+      "  --all                   every org, every live person, every object up to the window (the broad local run)",
+      "  --sections a,b          legacy (transcription against the engine) and/or node (node-access, item-gate,",
+      "                          sop-access, canSeeGoal and the settings door against the engine); default both",
+      "  --node-per-kind N       objects per kind per org in the node section (default 60; 400 with --all)",
     ].join("\n"),
   );
   process.exit(0);
 }
-const LIMIT = Math.max(1, Number(option("--limit", "200")) || 200);
+const ALL = flag("--all");
+const SECTIONS = new Set(String(option("--sections", "legacy,node")).split(",").map((x) => x.trim()));
+const NODE_PER_KIND = Math.max(1, Number(option("--node-per-kind", ALL ? "400" : "60")) || 60);
+const LIMIT = ALL ? Number.MAX_SAFE_INTEGER : Math.max(1, Number(option("--limit", "200")) || 200);
 const DRY_RUN = flag("--dry-run");
 const ONLY_ORG = option("--org", null);
 const OUT = option("--out", null);
-const VIEWERS_PER_OBJECT = Math.max(1, Number(option("--viewers-per-object", "4")) || 4);
+const VIEWERS_PER_OBJECT = ALL ? Number.MAX_SAFE_INTEGER : Math.max(1, Number(option("--viewers-per-object", "4")) || 4);
 function dayOfYear(d = new Date()) {
   const start = Date.UTC(d.getUTCFullYear(), 0, 0);
   return Math.floor((d.getTime() - start) / 86400000);
@@ -98,7 +105,7 @@ parsed.searchParams.set("options", "-c default_transaction_read_only=on");
 const READ_ONLY_URL = parsed.toString();
 process.env.DATABASE_URL = READ_ONLY_URL;
 
-register("./lib/ts-hooks.mjs", import.meta.url, { data: { root: ROOT } });
+register("./lib/ts-hooks.mjs", import.meta.url, { data: { root: ROOT, stubAuth: true } });
 
 const { PrismaClient } = await import(pathToFileURL(join(ROOT, "src/generated/prisma/index.js")).href);
 const { PrismaPg } = await import("@prisma/adapter-pg");
@@ -149,9 +156,9 @@ if (ro !== "on") {
 // ── Sampling ──────────────────────────────────────────────────────
 
 const KINDS = ["space", "folder", "board", "item", "doc"];
-const MAX_ORGS = 5;
-const MAX_VIEWERS_PER_ORG = 10;
-const VIEWERS_PER_LEVEL = 2;
+const MAX_ORGS = ALL ? Number.MAX_SAFE_INTEGER : 5;
+const MAX_VIEWERS_PER_ORG = ALL ? Number.MAX_SAFE_INTEGER : 10;
+const VIEWERS_PER_LEVEL = ALL ? Number.MAX_SAFE_INTEGER : 2;
 
 /** Tenants with the most users first (an org with one user exercises nothing), id as the tiebreak. */
 async function sampleOrgs() {
@@ -159,7 +166,7 @@ async function sampleOrgs() {
   const rows = await prisma.organization.findMany({
     select: { id: true },
     orderBy: [{ users: { _count: "desc" } }, { id: "asc" }],
-    take: MAX_ORGS,
+    ...(ALL ? {} : { take: MAX_ORGS }),
   });
   return rows.map((r) => r.id);
 }
@@ -432,15 +439,53 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
+const { flagSummary } = await import(pathToFileURL(join(ROOT, "src/lib/access/flags.ts")).href);
+console.log(`flags: ${flagSummary()}`);
+
 const cases = [];
-for (const pair of pairs) cases.push(...(await casesFor(pair)));
+if (SECTIONS.has("legacy")) for (const pair of pairs) cases.push(...(await casesFor(pair)));
 const report = harness.runParity(cases);
+// Phase 8 stage E: the transcription is no longer what 23 of the 24 helpers
+// run; an unexpected mismatch where the LIVE helper agrees with the engine is
+// stale history, not a difference (scripts/lib/parity-live-tiebreak.mjs).
+let superseded = [];
+let oldTables = [];
+if (report.unexpected.length) {
+  const { tieBreak } = await import(pathToFileURL(join(ROOT, "scripts/lib/parity-live-tiebreak.mjs")).href);
+  const tb = await tieBreak({ root: ROOT, cases, unexpected: report.unexpected });
+  superseded = tb.superseded;
+  // What is left on a NODE helper is the pure engine over the old tables
+  // (factsFromLegacy) disagreeing with today's live helper (node-access or
+  // item-gate). That engine never answers a node helper: node delegation
+  // needs ACCESS_V2_TABLES, where can() reads node-access through the bridge
+  // (flags.ts delegateOn("node"), node-bridge.ts), and the node section below
+  // is what proves that state. Counted under the node section's row of the
+  // same name, with the live answer kept in the report.
+  const NODE_HELPERS = new Set(["getSpaceForReader", "canEditSpace", "canEditSpace@create_child", "canContributeSpace", "getBoardForReader", "canReadBoard", "canEditBoard", "canContributeBoard", "folderReadable", "docAccessible", "resolveSpace", "resolveFolder", "resolveBoard", "resolveDoc", "resolveItem", "itemRead", "itemWrite"]);
+  oldTables = tb.still.filter((m) => NODE_HELPERS.has(m.helper));
+  report.unexpected = tb.still.filter((m) => !NODE_HELPERS.has(m.helper));
+}
 
 const expectedByKey = {};
 for (const m of report.expected) expectedByKey[m.expected.key] = (expectedByKey[m.expected.key] ?? 0) + 1;
 
 console.log("");
-console.log(`cases: ${report.total}   agreed: ${report.agreed}   expected mismatches: ${report.expected.length}   UNEXPECTED: ${report.unexpected.length}`);
+console.log(`cases: ${report.total}   agreed: ${report.agreed}   expected mismatches: ${report.expected.length}   superseded (live helper agrees with the engine): ${superseded.length}   UNEXPECTED: ${report.unexpected.length}`);
+if (oldTables.length) {
+  console.log(`tables-off-engine-reads-old-tables (legacy section; node helpers never delegate to this engine): ${oldTables.length}`);
+  const pat = {};
+  for (const m of oldTables) {
+    const c = cases.find((x) => x.id === m.caseId);
+    const k = `${m.helper} legacy=${fmtAnswer(m.legacy)} engine=${fmtAnswer(m.engine)} live=${m.live ? fmtAnswer(m.live) : "n/a"} ${c ? fmtInput(c.input).replace(/ status=\S+ reports=\S+/, "") : ""}`;
+    pat[k] = (pat[k] ?? 0) + 1;
+  }
+  for (const [k, n] of Object.entries(pat).sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`  ${n.toString().padStart(5)}  ${k}`);
+}
+if (superseded.length) {
+  const byHelper = {};
+  for (const m of superseded) byHelper[m.helper] = (byHelper[m.helper] ?? 0) + 1;
+  console.log(`superseded by helper (the transcription differs, today's live helper answers what the engine answers): ${JSON.stringify(byHelper)}`);
+}
 if (report.expected.length) {
   console.log("\nexpected mismatches by key (each named in parity.ts EXPECTED_MISMATCHES):");
   for (const [key, n] of Object.entries(expectedByKey).sort((a, b) => b[1] - a[1])) console.log(`  ${n.toString().padStart(4)}  ${key}`);
@@ -450,10 +495,35 @@ if (report.unexpected.length) {
   for (const m of report.unexpected) {
     const c = cases.find((x) => x.id === m.caseId);
     console.log(`  ${m.caseId}`);
-    console.log(`      legacy=${fmtAnswer(m.legacy)}  engine=${fmtAnswer(m.engine)}  ${c ? fmtInput(c.input) : ""}`);
+    console.log(`      legacy=${fmtAnswer(m.legacy)}  engine=${fmtAnswer(m.engine)}  live=${m.live ? fmtAnswer(m.live) : "n/a"}  ${c ? fmtInput(c.input) : ""}`);
   }
 }
 console.log(`\nexpectations not exercised by this sample: ${report.unusedExpectations.length} (informational; a sample cannot reach every fixture)`);
+
+// ── The node-access section (Phase 8 stage E) ─────────────────────
+let node = null;
+if (SECTIONS.has("node")) {
+  const { runNodeSection } = await import(pathToFileURL(join(ROOT, "scripts/lib/parity-node-section.mjs")).href);
+  console.log("\nnode-access section: can() against the live resolvers (node-access, item-gate, sop-access, canSeeGoal, the settings door)");
+  node = await runNodeSection({ root: ROOT, prisma, orgs, all: ALL, perKind: NODE_PER_KIND, viewersPerOrg: MAX_VIEWERS_PER_ORG, log: (l) => console.log(l) });
+  const nr = node.report;
+  console.log(`node cases: ${nr.total}   agreed: ${nr.agreed}   expected: ${Object.values(nr.expectedByKey).reduce((a, b) => a + b, 0)}   UNEXPECTED: ${nr.unexpected.length}   errors: ${node.errors.length}`);
+  console.log(`by section: ${JSON.stringify(node.bySection)}`);
+  if (Object.keys(nr.expectedByKey).length) {
+    console.log("expected (each named in src/lib/access/node-parity.ts):");
+    for (const [key, n] of Object.entries(nr.expectedByKey).sort((a, b) => b[1] - a[1])) console.log(`  ${n.toString().padStart(5)}  ${key}`);
+  }
+  console.log("mismatch breakdown (informational, expected and unexpected together):");
+  for (const [k, n] of Object.entries(node.breakdown).sort((a, b) => b[1] - a[1]).slice(0, 60)) console.log(`  ${n.toString().padStart(5)}  ${k}`);
+  if (nr.unexpected.length) {
+    console.log("UNEXPECTED node mismatches (first 40):");
+    for (const c of nr.unexpected.slice(0, 40)) console.log(`  ${c.id}  truth=${c.truth}(${c.truthVia ?? "-"}) engine=${c.engine}(${c.engineVia ?? "-"}) level=${c.viewer.accessLevel}`);
+  }
+  if (node.errors.length) {
+    console.log("errors (first 10):");
+    for (const e of node.errors.slice(0, 10)) console.log(`  ${e}`);
+  }
+}
 
 if (OUT) {
   writeFileSync(
@@ -475,6 +545,20 @@ if (OUT) {
           input: cases.find((x) => x.id === m.caseId)?.input ?? null,
         })),
         unusedExpectations: report.unusedExpectations,
+        superseded: superseded.length,
+        tablesOffEngineReadsOldTables: oldTables.length,
+        node: node
+          ? {
+              flags: node.flagState,
+              total: node.report.total,
+              agreed: node.report.agreed,
+              expectedByKey: node.report.expectedByKey,
+              bySection: node.bySection,
+              breakdown: node.breakdown,
+              unexpected: node.report.unexpected,
+              errors: node.errors,
+            }
+          : null,
       },
       null,
       2,
@@ -484,4 +568,4 @@ if (OUT) {
 }
 
 await baseClient.$disconnect();
-process.exit(report.unexpected.length ? 1 : 0);
+process.exit(report.unexpected.length || (node && (node.report.unexpected.length || node.errors.length)) ? 1 : 0);

@@ -29,39 +29,19 @@ import { AdminOnly, AskAnAdminStrip } from "@/components/access";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { LEGACY_SETTINGS_RULES, OWNER_SETTINGS_PAGES as OWNER_PAGES, type LegacySettingsRule } from "@/lib/access/settings-legacy";
 import type { SettingsPageKey } from "@/lib/access/types";
+import { can, viewerFromSession } from "@/lib/access/index";
+import { accessV2Resolver, delegateOn, settingsGateLogOnly } from "@/lib/access/flags";
+import { SETTINGS_PAGE_GATES } from "@/lib/access/settings";
+import { engineWithOwnerFloor, logSettingsGateDisagreement, settingsGateDecision, settingsGateMode } from "@/lib/access/settings-gate-engine";
 import AccountProfilePage from "@/app/(dashboard)/account/profile/page";
 import { ActiveSettingsRow } from "./settings-active-row";
 
-export type LegacySettingsRule = "admin" | "manager-tier";
+export type { LegacySettingsRule };
+export { LEGACY_SETTINGS_RULES };
 
-/** Today's rule per Workspace page (the per-directory layouts it replaces). */
-export const LEGACY_SETTINGS_RULES: Readonly<Partial<Record<SettingsPageKey, LegacySettingsRule>>> = {
-  overview: "admin",
-  identity: "admin",
-  locale: "admin",
-  apps: "admin",
-  // Structure gated inside its page before; the same admin rule, now here.
-  structure: "admin",
-  // Members, Access and Scoring admitted the manager tier (read-only below
-  // Admin; the invitations API admits the tier). Kept until the engine gate
-  // narrows them to Owner, Admin and the People team with its logged week.
-  members: "manager-tier",
-  access: "manager-tier",
-  scoring: "manager-tier",
-  tasks: "admin",
-  security: "admin",
-  data: "admin",
-  audit: "admin",
-  api: "admin",
-  billing: "admin",
-  all: "admin",
-};
-
-/** The Owner-or-scope pages (settings spec 1.2 rows 10, 13, 14). */
-const OWNER_PAGES: ReadonlySet<SettingsPageKey> = new Set<SettingsPageKey>(["security", "api", "billing"]);
-
-export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean> {
+async function legacySettingsGate(page: SettingsPageKey): Promise<boolean> {
   const rule = LEGACY_SETTINGS_RULES[page];
   if (!rule) return true;
   const ok = rule === "admin" ? await isOrgAdminViewer() : await requireManagerTierViewer();
@@ -69,6 +49,35 @@ export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean
   // With SETTINGS_OWNER_SPLIT on, an Admin who is not an Owner gets the
   // AdminOnly card on these three; off (the default), every Admin opens them.
   return sessionMayManageOwnerPage(await getServerSession(authOptions));
+}
+
+/**
+ * The door gate. Today's table while the flags are off; with
+ * SETTINGS_GATE_LOG_ONLY on the engine is asked too and every disagreement
+ * is logged (today still decides); with ACCESS_V2_RESOLVER on (log-only off)
+ * the engine decides, the Owner split's floor kept (settings-gate-engine.ts).
+ */
+export async function settingsGateAllows(page: SettingsPageKey): Promise<boolean> {
+  const legacy = await legacySettingsGate(page);
+  const mode = settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() });
+  if (mode === "legacy" || !LEGACY_SETTINGS_RULES[page]) return legacy;
+  const session = await getServerSession(authOptions);
+  const viewer = await viewerFromSession();
+  if (!viewer) return legacy;
+  const decision = await can(viewer, "view", { type: "settings", page });
+  const ownerPage = OWNER_PAGES.has(page);
+  const inputs = {
+    legacy,
+    engine: decision.allowed,
+    ownerPage,
+    workspaceAdmin: sessionIsWorkspaceAdmin(session),
+    mayManageOwnerPage: ownerPage ? await sessionMayManageOwnerPage(session) : false,
+  };
+  const verdict = settingsGateDecision(mode, inputs);
+  if (verdict.disagree) {
+    logSettingsGateDisagreement({ userId: viewer.userId, organizationId: viewer.organizationId, page, legacy, engine: engineWithOwnerFloor(inputs), mode });
+  }
+  return verdict.allowed;
 }
 
 /**
@@ -93,11 +102,23 @@ export async function SettingsDenied({ page }: { page: SettingsPageKey }) {
   const admins = orgId ? await listOrgAdmins(orgId, 5) : [];
   // A reader below Admin (the manager tier) is told which Workspace pages
   // they DO open, so the strip is never a dead end (sidebar-map 8a).
-  const openable = sessionIsSettingsReader(session)
-    ? (Object.entries(LEGACY_SETTINGS_RULES) as [SettingsPageKey, LegacySettingsRule][])
-        .filter(([, r]) => r === "manager-tier")
-        .map(([k]) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href }))
-    : undefined;
+  // Under the engine gate the reader's pages are the People team's four
+  // (the manager tier opens none); under today's table the manager-tier three.
+  let openable: { label: string; href: string }[] | undefined;
+  if (delegateOn("settings")) {
+    const viewer = await viewerFromSession();
+    openable = viewer?.peopleTeam
+      ? (Object.entries(SETTINGS_PAGE_GATES) as [SettingsPageKey, { peopleTeamRead?: boolean }][])
+          .filter(([, g]) => g.peopleTeamRead === true)
+          .map(([k]) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href }))
+      : undefined;
+  } else {
+    openable = sessionIsSettingsReader(session)
+      ? (Object.entries(LEGACY_SETTINGS_RULES) as [SettingsPageKey, LegacySettingsRule][])
+          .filter(([, r]) => r === "manager-tier")
+          .map(([k]) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href }))
+      : undefined;
+  }
   return (
     <>
       <ActiveSettingsRow pageKey="account/profile" />

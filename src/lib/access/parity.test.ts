@@ -255,6 +255,23 @@ const EXPECTED_CASES: ParityCase[] = [
     }),
   },
   {
+    id: "folder-visible-to-is-the-folder-half",
+    expectKey: "folder-visible-to-is-the-folder-half",
+    description: "A WORKSPACE Folder in a Space the person holds no role on: the helper's Folder half says visible, the engine's whole answer says no.",
+    helper: "folderVisibleTo",
+    input: base({
+      space: workspaceSpace,
+      folder: {
+        id: "folder_1",
+        organizationId: ORG,
+        spaceId: "space_1",
+        visibility: "WORKSPACE",
+        ownerId: "u_other",
+        memberRole: null,
+      },
+    }),
+  },
+  {
     id: "pivot-folder-visible-to-ignores-folder-grant",
     expectKey: "pivot-folder-visible-to-ignores-folder-grant",
     description: "folderVisibleTo hides a PRIVATE folder from the person it was shared with.",

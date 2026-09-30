@@ -101,6 +101,10 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // for a downgrade, a removal or a change you made yourself).
   access_granted: k("access_granted", "Shared with you", "UserPlus", "primary", "requests"),
   access_expiring: k("access_expiring", "Access expiring", "KeyRound", "primary", "requests"),
+  // Written by PATCH /api/access-requests/[id] when the owner or an Admin
+  // declines a Request access (Phase 8 stage E). A grant is told by
+  // grants.ts as access_granted.
+  access_declined: k("access_declined", "Request declined", "KeyRound", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),

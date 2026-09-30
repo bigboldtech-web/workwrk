@@ -10,6 +10,8 @@
 // POST /api/spaces — create a Space. Manager+ only; creator becomes OWNER.
 
 import { NextResponse } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
+import { engineOrgAllows } from "@/lib/access/matrix-engine";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -67,7 +69,14 @@ const createSchema = z.object({
 export async function POST(req: Request) {
   const c = await ctx();
   if ("error" in c) return c.error;
-  if (!MANAGER_LEVELS.has(c.accessLevel)) {
+  // ACCESS_V2_RESOLVER (default OFF): access toggle 1 ("Who can create
+  // Spaces": everyone, or Owners and Admins) through the engine's
+  // create_space verb; off, today's manager-tier rule.
+  if (accessV2Resolver()) {
+    if (!(await engineOrgAllows("create_space"))) {
+      return NextResponse.json({ error: "Only Owners and Admins create Spaces here." }, { status: 403 });
+    }
+  } else if (!MANAGER_LEVELS.has(c.accessLevel)) {
     return NextResponse.json({ error: "Manager-level access required to create Spaces." }, { status: 403 });
   }
   const body = await req.json().catch(() => null);

@@ -1186,6 +1186,21 @@ const CLASSIFIERS: ReadonlyArray<{ key: string; matches: (ctx: MismatchContext) 
       widens(ctx),
   },
   {
+    // Phase 8 stage E, the broad local run (every person against every
+    // Folder): folderVisibleTo is the Folder HALF of the question (a PRIVATE
+    // Folder hides from non-owners); the Space half is asked first by each of
+    // its three call sites. The engine answers the whole question, so a
+    // person with no role on the Space reads "not visible" there and
+    // "visible" here.
+    key: "folder-visible-to-is-the-folder-half",
+    matches: (ctx) =>
+      ctx.helper === "folderVisibleTo" &&
+      ctx.input.folder?.visibility !== "PRIVATE" &&
+      !ctx.input.space?.memberRole &&
+      ctx.input.space?.visibility !== "ORG" &&
+      narrows(ctx),
+  },
+  {
     key: "audit-1.6-c-folder-grantee-board",
     matches: (ctx) =>
       (READ_HELPERS.has(ctx.helper) || RESOLVER_HELPERS.has(ctx.helper)) &&
@@ -1493,6 +1508,13 @@ export const EXPECTED_MISMATCHES: Record<string, ExpectedMismatch> = {
     reason:
       "The transcription of the old docAccessible denied an org admin a doc whose task is gone, because the missing board was checked before the admin ladder. node-access, which docAccessible now calls, gives an org admin every doc in the workspace first (R1), so an admin can still open and clean up an orphaned doc. The engine follows node-access.",
     direction: "widens",
+  },
+  "folder-visible-to-is-the-folder-half": {
+    key: "folder-visible-to-is-the-folder-half",
+    source: "folder.ts:20-25 (its own comment); the Phase 8 stage E broad parity run",
+    reason:
+      "folderVisibleTo answers only the Folder's PRIVATE predicate; each of its three call sites (api/spaces/[id]/children, spaces/[slug]/page.tsx, folders/[id]/page.tsx) has already required the Space, so the helper never decides for a person outside it. The engine answers the whole question and says no. No person's reach changes: the helper is synchronous and is not delegated (flags.ts).",
+    direction: "narrows",
   },
   "pivot-folder-visible-to-ignores-folder-grant": {
     key: "pivot-folder-visible-to-ignores-folder-grant",

@@ -13,7 +13,7 @@ import { signInPolicyOf } from "@/lib/settings/org-policy";
 import { sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
 import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
 import { reanchorUser } from "./access/workspace-anchor";
-import { orgRoleOf } from "./access/org-role";
+import { adminScopesOf, isAgentOf, orgRoleOf } from "./access/org-role";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -675,6 +675,19 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
+      // Access step 0 / Phase 8 stage E: the four-role claims, derived from
+      // the final accessLevel on every read of the token (the mirror, spec
+      // 10.1), so every path above that sets the level (sign-in, a workspace
+      // switch, the revalidation) carries them without its own copy. A claim
+      // never widens anything: the server re-reads the row (viewer.ts
+      // hydrate) and only refines an Admin to Owner from User.orgRole there.
+      if (token.accessLevel) {
+        const role = orgRoleOf({ accessLevel: token.accessLevel as AccessLevel });
+        token.orgRole = role;
+        token.isAgent = isAgentOf(token.accessLevel);
+        token.adminScopes = adminScopesOf(role, null);
+      }
+
       // The session windows (idle and absolute), checked on every read of
       // the token. An ended session stays ended; the revalidation above never
       // clears policyEnded.
@@ -712,6 +725,7 @@ export const authOptions: NextAuthOptions = {
           lastName: token.lastName,
           avatar: token.avatar,
         } satisfies Partial<AuthIdentity>);
+        Object.assign(session.user, { orgRole: token.orgRole, isAgent: token.isAgent, adminScopes: token.adminScopes });
         // The version this token was issued at, so a route that changes who
         // can do what refuses a token the account has moved past without
         // waiting for the five-minute check (freshWorkspaceActor). Reading

@@ -64,7 +64,8 @@ const CASES: Case[] = [
     file: "src/app/api/cron/form-daily-summary/route.ts",
     doors: [{ kind: "form", near: /`\$\{addressHref\("form"[^`]*\}\?tab=responses`/ }],
   },
-  { file: "src/app/api/access-requests/route.ts", doors: [{ kind: "sop", near: /link:\s*s\s*\?\s*addressHref\("sop"/ }] },
+  // Phase 8 stage E: the owner lookup moved out of the route so the decision route shares it.
+  { file: "src/lib/access/access-request-target.ts", doors: [{ kind: "sop", near: /link:\s*s\s*\?\s*addressHref\("sop"/ }] },
   { file: "src/app/api/ai/signals/route.ts", doors: [{ kind: "sop", near: /href:\s*addressHref\("sop"/ }] },
   { file: "src/app/api/calendar/route.ts", doors: [{ kind: "sop", near: /url:\s*a\.sop\?\.id\s*\?\s*addressHref\("sop"/ }] },
   { file: "src/app/api/docs/[id]/mention/route.ts", doors: [{ kind: "doc", near: /link:\s*addressHref\("doc"/ }] },

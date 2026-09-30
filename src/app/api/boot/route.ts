@@ -16,6 +16,9 @@
 // boot screen renders as ErrorState, never a trip to /onboard.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
+import { delegateOn } from "@/lib/access/flags";
+import { SETTINGS_PAGE_GATES } from "@/lib/access/settings";
+import type { SettingsPageKey } from "@/lib/access/types";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
 import { passwordMaxAgeDaysOf, securityHoldFor, type SecurityHold } from "@/lib/auth/security-policy";
@@ -92,6 +95,13 @@ export interface BootPayload {
      * (sidebar-map 8a) instead of the My settings list.
      */
     settingsReader?: boolean;
+    /**
+     * Phase 8 stage E: with the engine deciding the settings door
+     * (ACCESS_V2_RESOLVER on, the log-only week over), the pages this reader
+     * opens: the People team's four (Members, Structure, Access, Scoring),
+     * nothing for the manager tier. Absent under today's table.
+     */
+    settingsReaderPages?: SettingsPageKey[];
     /**
      * Phase 6: in scope of an open candor session, or answered one, or an
      * organiser by the legacy manager tier (the Candor row). The organiser
@@ -379,7 +389,7 @@ export async function GET(req: NextRequest) {
         adminScopes: [],
         hasReports: cf.teams.hasReports,
         peopleTeam,
-        settingsReader: !legacyIsAdminLevel(accessLevel) && legacyIsManagerLevel(accessLevel),
+        ...settingsReaderFor(accessLevel, peopleTeam),
         candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
@@ -431,4 +441,21 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/**
+ * Who reads Workspace settings below Admin, by the gate that decides the
+ * door: today's table (the manager tier) until ACCESS_V2_RESOLVER is on and
+ * the log-only week is over, then the engine's People-team pages
+ * (SETTINGS_PAGE_GATES peopleTeamRead), so the frame never lists a page the
+ * gate refuses.
+ */
+function settingsReaderFor(accessLevel: string | null, peopleTeam: boolean): { settingsReader: boolean; settingsReaderPages?: SettingsPageKey[] } {
+  if (legacyIsAdminLevel(accessLevel)) return { settingsReader: false };
+  if (!delegateOn("settings")) return { settingsReader: legacyIsManagerLevel(accessLevel) };
+  if (!peopleTeam) return { settingsReader: false, settingsReaderPages: [] };
+  const pages = (Object.entries(SETTINGS_PAGE_GATES) as [SettingsPageKey, { peopleTeamRead?: boolean }][])
+    .filter(([, g]) => g.peopleTeamRead === true)
+    .map(([k]) => k);
+  return { settingsReader: pages.length > 0, settingsReaderPages: pages };
 }

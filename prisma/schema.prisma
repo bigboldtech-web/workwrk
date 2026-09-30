@@ -508,6 +508,16 @@ model User {
   //     reset, change password), for the password age row and policy.
   termsAcceptedAt   DateTime?
   passwordChangedAt DateTime?
+  // Phase 8 stage E (access-model-spec 10 step 4): the four org roles. NULL
+  // until scripts/access-backfill.ts writes it; readers fall back to
+  // orgRoleOf(accessLevel) while NULL, and read it at all only with
+  // ACCESS_V2_TABLES on. OWNER | ADMIN | MEMBER | GUEST (CHECK in the SQL).
+  orgRole           String?
+  isAgent           Boolean   @default(false)
+  // billing | security (CHECK in the SQL). Owners hold both implicitly.
+  adminScopes       String[]  @default([])
+  teamMemberships   TeamMember[]
+  accessRequests    AccessRequest[] @relation("AccessRequestRequester")
 
   // MFA — TOTP (Google Authenticator / Authy / 1Password).
   // Secret stored base32-encoded, only persisted when enrolment completes.
@@ -744,6 +754,11 @@ model Invitation {
   // a lighter intent than full org-onboarding.
   spaceId        String?
   spaceRole      SpaceRole?
+  // Phase 8 stage E: what the invite makes the person (ADMIN | MEMBER |
+  // GUEST) and the Agent flag. NULL / false on rows sent before; accept then
+  // keeps using accessLevel.
+  orgRole        String?
+  isAgent        Boolean      @default(false)
   createdAt      DateTime     @default(now())
 
   @@index([token])
@@ -4607,6 +4622,10 @@ model Space {
   // (visible to SpaceMembers + org admins), can be widened to ORG
   // (anyone in the org) or narrowed to PRIVATE (members only).
   visibility     Visibility   @default(WORKSPACE)
+  // Phase 8 stage E (spec 3.2): written by scripts/access-backfill.ts, read
+  // only with ACCESS_V2_TABLES on; visibility stays the authority until step 8.
+  restricted     Boolean      @default(false)
+  findable       Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -4655,6 +4674,10 @@ model Board {
   // composes this with Space.visibility + SpaceMember + reporting
   // line + org role to decide whether the viewer can read/edit.
   visibility     Visibility   @default(WORKSPACE)
+  // Phase 8 stage E (spec 3.2): written by scripts/access-backfill.ts, read
+  // only with ACCESS_V2_TABLES on; visibility stays the authority until step 8.
+  restricted     Boolean      @default(false)
+  findable       Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -4894,6 +4917,10 @@ model Folder {
   // 🆕 Make private — a PRIVATE folder (and its boards) is visible only to its
   // owner + org admins. WORKSPACE (default) inherits the Space's rules.
   visibility     Visibility   @default(WORKSPACE)
+  // Phase 8 stage E (spec 3.2): written by scripts/access-backfill.ts, read
+  // only with ACCESS_V2_TABLES on; visibility stays the authority until step 8.
+  restricted     Boolean      @default(false)
+  findable       Boolean      @default(false)
   position       Float        @default(0) // fractional ordering — Linear pattern, no renumber on drop
   archivedAt     DateTime?
   /// Who archived it. Null for rows archived before this column existed and
@@ -6922,10 +6949,63 @@ model AccessGrant {
   subjectId      String
   role           SpaceRole
   grantedById    String?
+  // Phase 8 stage E: rule 20 (an expired row contributes nothing) and the
+  // four-role ladder (FULL | EDIT | COMMENT | VIEW; NULL = derive from role).
+  expiresAt      DateTime?
+  objectRole     String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
 
   @@unique([objectType, objectId, subjectType, subjectId])
   @@index([organizationId, subjectType, subjectId])
   @@index([objectType, objectId])
+}
+
+// Phase 8 stage E (access-model-spec 3.4): a named group of people, shown on
+// Settings > Members > Teams. prisma/sql/2026-09-30-phase8-settings-access.sql.
+model Team {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  createdById    String?
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+  members        TeamMember[]
+
+  @@unique([organizationId, name])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}
+
+// Phase 8 stage E (access-model-spec 5.6): one row per Request access. One
+// PENDING row per person per object (partial unique index in the SQL file).
+model AccessRequest {
+  id             String    @id @default(cuid())
+  organizationId String
+  requesterId    String
+  requester      User      @relation("AccessRequestRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  objectType     String
+  objectId       String
+  role           String    @default("VIEW")
+  message        String?
+  status         String    @default("PENDING")
+  decidedById    String?
+  decidedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([organizationId, status])
 }

@@ -88,13 +88,22 @@ export interface ObjectGrantRow {
   createdAt: Date;
 }
 
-/** Every object grant one person holds in an org (path discovery and the favourites). */
+/**
+ * Every object grant one person holds in an org (path discovery and the
+ * favourites), for the three kinds this store answers. Phase 8 stage E widened
+ * the table to hold container copies (SPACE, FOLDER, LIST, GOAL, ... written
+ * by scripts/access-migrate-container-rows.ts); those are read only through
+ * the engine's loader behind ACCESS_V2_TABLES, never here, so the filter keeps
+ * every caller of this function seeing exactly the rows it saw before.
+ * An expired row contributes nothing (rule 20).
+ */
 export async function viewerObjectGrants(organizationId: string, userId: string): Promise<ObjectGrantRow[]> {
   return guarded(
     () => prisma.$queryRaw<ObjectGrantRow[]>`
       SELECT "objectType", "objectId", "subjectId", "role"::text AS "role", "grantedById", "createdAt"
       FROM "AccessGrant"
-      WHERE "organizationId" = ${organizationId} AND "subjectType" = 'USER' AND "subjectId" = ${userId}`,
+      WHERE "organizationId" = ${organizationId} AND "subjectType" = 'USER' AND "subjectId" = ${userId}
+        AND "objectType" IN ('TABLE', 'WHITEBOARD', 'FORM')`,
     [],
   );
 }

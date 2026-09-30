@@ -55,8 +55,8 @@ export const SETTINGS_READER_PAGES: readonly SettingsPageKey[] = ["members", "ac
  * never an orphan, then the reader's pages under their own group labels
  * (PEOPLE, WORK) and no others.
  */
-export function readerShellGroups(): SettingsShellGroup[] {
-  const pages = settingsSidebar("workspace").filter((p) => SETTINGS_READER_PAGES.includes(p.key));
+export function readerShellGroups(readerPages: readonly SettingsPageKey[] = SETTINGS_READER_PAGES): SettingsShellGroup[] {
+  const pages = settingsSidebar("workspace").filter((p) => readerPages.includes(p.key));
   const groups: SettingsShellGroup[] = [
     { rows: [{ key: "me-door", label: DOOR_LABELS.me, href: "/account/profile", icon: "CircleUser", pageKey: null }] },
   ];
@@ -67,8 +67,8 @@ export function readerShellGroups(): SettingsShellGroup[] {
   return groups;
 }
 
-export function settingsShellGroups(door: SettingsDoorProp, isAdmin: boolean, reader = false): SettingsShellGroup[] {
-  if (door === "workspace" && !isAdmin && reader) return readerShellGroups();
+export function settingsShellGroups(door: SettingsDoorProp, isAdmin: boolean, reader = false, readerPages: readonly SettingsPageKey[] = SETTINGS_READER_PAGES): SettingsShellGroup[] {
+  if (door === "workspace" && !isAdmin && reader) return readerShellGroups(readerPages);
   if (door === "workspace" && isAdmin) {
     const pages = settingsSidebar("workspace");
     const groups: SettingsShellGroup[] = [{ rows: pages.filter((p) => !p.group && p.key !== "all").map(rowOf) }];

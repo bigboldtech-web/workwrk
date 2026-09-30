@@ -17,9 +17,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { transformSync } from "esbuild";
 
 let ROOT = "";
+let STUB_AUTH = false;
 
 export function initialize(data) {
   ROOT = data.root;
+  STUB_AUTH = data.stubAuth === true;
 }
 
 const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", ".js", ".mjs", "/index.ts", "/index.tsx", "/index.js"];
@@ -50,9 +52,23 @@ export async function resolve(specifier, context, nextResolve) {
   }
   if (base) {
     const file = asFile(base);
+    if (file && STUB_AUTH && file === join(ROOT, "src", "lib", "auth.ts")) {
+      return { url: pathToFileURL(join(ROOT, "scripts", "lib", "auth-stub.mjs")).href, shortCircuit: true };
+    }
     if (file) return { url: pathToFileURL(file).href, shortCircuit: true };
   }
-  return nextResolve(specifier, context);
+  try {
+    return await nextResolve(specifier, context);
+  } catch (err) {
+    // A bare package subpath written without its extension ("next/server",
+    // "next-auth/providers/credentials") resolves under the app's bundler but
+    // not under Node's ESM rules; retry once with ".js".
+    const bare = !specifier.startsWith(".") && !specifier.startsWith("/") && !specifier.startsWith("node:") && specifier.includes("/");
+    if (bare && err?.code === "ERR_MODULE_NOT_FOUND" && !/\.[cm]?js$/.test(specifier)) {
+      return nextResolve(`${specifier}.js`, context);
+    }
+    throw err;
+  }
 }
 
 export async function load(url, context, nextLoad) {

@@ -12,6 +12,7 @@
 // Server-only.
 
 import { prisma } from "@/lib/prisma";
+import { delegatedNodeRole } from "@/lib/access/delegate";
 import {
   canCreateDocAt as canCreateDocAtNode,
   docRoleFor,
@@ -53,7 +54,8 @@ export async function docAccessible(
     doc.organizationId ??
     (await prisma.doc.findUnique({ where: { id: doc.id }, select: { organizationId: true } }))?.organizationId;
   if (!orgId) return false;
-  return (await docAccess(nodeCtxFromLevel(userId, orgId, accessLevel), doc.id)) !== null;
+  const info = await docRoleFor(nodeCtxFromLevel(userId, orgId, accessLevel), doc.id);
+  return roleAtLeast(await delegatedNodeRole(userId, orgId, accessLevel, { kind: "doc", id: doc.id }, info.unlockedRole), "VIEW");
 }
 
 /**

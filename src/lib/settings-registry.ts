@@ -248,7 +248,7 @@ export const SETTINGS_TAB_LABELS: Readonly<Partial<Record<SettingsPageKey, Reado
   structure: { departments: "Departments", titles: "Job titles", offices: "Offices", fields: "Profile fields", chart: "Org chart" },
   tasks: { types: "Task types", tags: "Tags", templates: "Templates" },
   data: { export: "Export", import: "Import", retention: "Retention & privacy", trash: "Trash" },
-  members: { people: "People", guests: "Guests", pending: "Pending invites" },
+  members: { people: "People", guests: "Guests", teams: "Teams", pending: "Pending invites" },
   security: { signin: "Sign-in policy", provisioning: "Provisioning" },
   audit: { all: "All", access: "Access", security: "Security", data: "Data", settings: "Settings" },
   api: { keys: "API keys" },

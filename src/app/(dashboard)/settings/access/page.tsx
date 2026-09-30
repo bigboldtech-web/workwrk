@@ -31,6 +31,8 @@ import {
   type AccessLevel, type PermissionModule, type PermissionMatrix,
 } from "@/lib/permissions";
 import { PublicLinksCard } from "@/components/settings/public-links-card";
+import { AccessTogglesCard } from "@/components/settings/access-toggles-card";
+import { AccessRequestsCard } from "@/components/settings/access-requests-card";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
@@ -70,6 +72,11 @@ export default function AccessSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [showOthers, setShowOthers] = useState(false);
   const [counts, setCounts] = useState<Counts | null>(null);
+  // Phase 8 stage E: with ACCESS_V2_RESOLVER on the engine answers the grid's
+  // enforced cells (matrix-rules.ts), so the grid retires from this page;
+  // off, it keeps deciding and stays editable here.
+  const [matrixDecides, setMatrixDecides] = useState(true);
+  const onModel = useCallback((m: { matrixDecides: boolean }) => setMatrixDecides(m.matrixDecides), []);
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
@@ -183,10 +190,22 @@ export default function AccessSettingsPage() {
           </div>
         </SettingsCard>
 
+        <AccessTogglesCard onModel={onModel} />
+
         <div className="w-full max-w-[560px]" id="access.publicLinks">
           <PublicLinksCard canEdit={canEdit} />
         </div>
 
+        <AccessRequestsCard />
+
+        {!matrixDecides ? (
+          <SettingsCard title="The old permissions grid" id="access.legacy">
+            <p className="text-base text-ink">
+              The grid has retired: the switches above and the fixed rules decide now. A copy of the grid as this workspace stored it is on{" "}
+              <Link href="/settings/data?tab=export" className="font-medium text-brand-deep hover:underline">Data &gt; Export</Link> once it has been exported.
+            </p>
+          </SettingsCard>
+        ) : (
         <section aria-label="Legacy" id="access.legacy">
           <div className="mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
           <p className="mb-1 text-sm text-ink-2">These are the rules from the old permissions grid that the server actually checks. They become part of the access model above.</p>
@@ -214,8 +233,9 @@ export default function AccessSettingsPage() {
             </div>
           )}
         </section>
+        )}
       </SettingsCardStack>
-      {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => setMatrix(original)} onSave={save} /> : null}
+      {canEdit && matrixDecides ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => setMatrix(original)} onSave={save} /> : null}
     </SettingsPage>
   );
 }

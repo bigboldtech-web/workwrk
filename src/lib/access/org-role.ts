@@ -100,3 +100,33 @@ export function adminScopesOf(orgRole: OrgRole, stored: string[] | null | undefi
 export function orgRoleOfMembership(role: string | null | undefined): OrgRole {
   return orgRoleOf({ accessLevel: role });
 }
+
+/**
+ * Phase 8 stage E: the org role with ACCESS_V2_TABLES on.
+ *
+ * The accessLevel mirror decides, refined in ONE way: an Admin who is the
+ * workspace's Owner pick (ownerIdsOf: every SUPER_ADMIN, else the earliest
+ * live COMPANY_ADMIN, computed live, the rule the Staff console and
+ * SETTINGS_OWNER_SPLIT use) is an Owner. The stored User.orgRole column is
+ * NOT read for this: it is the step-8 mirror the backfill writes, and a
+ * column a later role change or ownership transfer did not touch would
+ * otherwise keep a previous Owner's reach. Worst case of this rule: none
+ * beyond today's (the pick is the one every Owner-only page already uses).
+ */
+export function effectiveOrgRole(accessLevel: string | null | undefined, isOwnerPick: boolean): OrgRole {
+  const mirror = orgRoleOf({ accessLevel });
+  if (mirror === "ADMIN" && isOwnerPick) return "OWNER";
+  return mirror;
+}
+
+/** Scopes count only for an Admin (Owners hold both); a demoted person's stored scopes are inert. */
+export function effectiveAdminScopes(orgRole: OrgRole, stored: string[] | null | undefined): AdminScope[] {
+  if (orgRole === "OWNER") return ["billing", "security"];
+  if (orgRole !== "ADMIN") return [];
+  return adminScopesOf(orgRole, stored);
+}
+
+/** The Agent flag follows the mirror (a stale column must not cap a person who is no longer an Agent). */
+export function effectiveIsAgent(accessLevel: string | null | undefined): boolean {
+  return isAgentOf(accessLevel);
+}

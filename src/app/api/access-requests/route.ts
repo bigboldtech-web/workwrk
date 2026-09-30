@@ -11,8 +11,10 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
-import { addressHref } from "@/lib/nav/object-href";
 import { canSeeGoal } from "@/lib/goal-audience";
+import { recordAccessRequest, requestNodeRef, REQUEST_TTL_MS } from "@/lib/access/access-requests";
+import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
+import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 
 const bodySchema = z.object({
   objectType: z.string().min(1).max(40),
@@ -20,76 +22,6 @@ const bodySchema = z.object({
   role: z.enum(["VIEW", "EDIT", "COMMENT"]).default("VIEW"),
   message: z.string().max(500).optional(),
 });
-
-const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | "goal" | null> = {
-  space: "space",
-  board: "board",
-  list: "board",
-  folder: "folder",
-  // The process unit's read-only banner (spec-process section 1): a Can
-  // view / Can comment viewer of a SOP asks its author (a filed SOP asks
-  // the folder's managers, who are the org admins today).
-  sop: "sop",
-  sop_folder: "sop_folder",
-  // A Member party on /agreements/[id] asks the contract's sender.
-  contract: "contract",
-  // The Tool drawer's read-only banner (spec-tools-misc 2.1): a Can view
-  // holder asks whoever added the tool.
-  tool: "tool",
-  // The goal page's read-only banner (spec-goals /okrs/[id]): a Can view
-  // viewer asks the goal's owner for Can edit (no owner: the admins).
-  goal: "goal",
-};
-
-type RequestTarget = { ownerId: string | null; link: string | null };
-
-/**
- * Who to notify and where the notification opens: the object's own page,
- * where the owner can share it (a Space or List by slug, a Folder by id).
- * An object type with no page gets no link rather than a dead one.
- */
-async function targetFor(type: string, id: string, organizationId: string): Promise<RequestTarget> {
-  const model = OWNER_FIELD[type] ?? null;
-  if (!model) return { ownerId: null, link: null };
-  const where = { id, organizationId } as const;
-  try {
-    if (model === "space") {
-      const s = await prisma.space.findFirst({ where, select: { ownerId: true, slug: true } });
-      return { ownerId: s?.ownerId ?? null, link: s ? `/spaces/${s.slug}` : null };
-    }
-    if (model === "board") {
-      const b = await prisma.board.findFirst({ where, select: { ownerId: true, slug: true } });
-      return { ownerId: b?.ownerId ?? null, link: b ? `/boards/${b.slug}` : null };
-    }
-    if (model === "folder") {
-      const f = await prisma.folder.findFirst({ where, select: { ownerId: true } });
-      return { ownerId: f?.ownerId ?? null, link: f ? `/folders/${id}` : null };
-    }
-    if (model === "sop") {
-      const s = await prisma.sOP.findFirst({ where, select: { createdById: true } });
-      return { ownerId: s?.createdById ?? null, link: s ? addressHref("sop", id, { scope: "work" }) : null };
-    }
-    if (model === "sop_folder") {
-      const f = await prisma.sOPFolder.findFirst({ where, select: { id: true } });
-      return { ownerId: null, link: f ? "/sops/manage?tab=sop-folders" : null };
-    }
-    if (model === "tool") {
-      const t = await prisma.tool.findFirst({ where, select: { addedBy: true } });
-      return { ownerId: t?.addedBy ?? null, link: t ? `/tools?tool=${id}` : null };
-    }
-    if (model === "goal") {
-      const g = await prisma.oKR.findFirst({ where, select: { ownerId: true } });
-      return { ownerId: g?.ownerId ?? null, link: g ? `/okrs/${id}` : null };
-    }
-    if (model === "contract") {
-      const a = await prisma.agreement.findFirst({ where, select: { createdById: true } });
-      return { ownerId: a?.createdById ?? null, link: a ? `/agreements/${id}` : null };
-    }
-  } catch {
-    // A model without ownerId, or a table this org never wrote: fall through.
-  }
-  return { ownerId: null, link: null };
-}
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -108,10 +40,24 @@ export async function POST(req: Request) {
     if (!g || !(await canSeeGoal(session, g))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const { ownerId, link } = await targetFor(objectType, objectId, u.organizationId);
+  // Phase 8 stage E: the request itself, one PENDING row per person per
+  // object, which the deciders list and answer (GET below, PATCH [id]).
+  // Only for an object that exists in this org (a link was found) or a node
+  // kind grants.ts owns; an id probe never leaves a row behind.
+  let requestId: string | null = null;
+  const knownKind = objectType in OWNER_FIELD || requestNodeRef(objectType, objectId) !== null;
+  const exists = link ? true : requestNodeRef(objectType, objectId) ? await nodeExists(objectType, objectId, u.organizationId) : false;
+  if (exists) {
+    requestId = (await recordAccessRequest({ organizationId: u.organizationId, requesterId: u.id, objectType, objectId, role, message: message ?? null })).id;
+  } else if (knownKind) {
+    // A known kind whose object is not in this workspace: the same answer a
+    // real request gets, and nobody's inbox fills up from an id probe.
+    return NextResponse.json({ ok: true, notified: 0, requestId: null }, { status: 201 });
+  }
   const targets = ownerId && ownerId !== u.id
     ? [ownerId]
     : (await listOrgAdmins(u.organizationId, 10)).map((a) => a.id).filter((id) => id !== u.id);
-  if (targets.length === 0) return NextResponse.json({ ok: true, notified: 0 });
+  if (targets.length === 0) return NextResponse.json({ ok: true, notified: 0, requestId });
 
   const requester = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.name || "Someone";
   const title = `${requester} asked for access`;
@@ -124,10 +70,74 @@ export async function POST(req: Request) {
     where: { userId: { in: targets }, type: "access_request", link, title, createdAt: { gte: since } },
     select: { id: true },
   });
-  if (recent) return NextResponse.json({ ok: true, notified: 0, throttled: true });
+  if (recent) return NextResponse.json({ ok: true, notified: 0, throttled: true, requestId });
 
   await prisma.notification.createMany({
     data: targets.map((userId) => ({ userId, title, message: text, type: "access_request", link })),
   });
-  return NextResponse.json({ ok: true, notified: targets.length }, { status: 201 });
+  return NextResponse.json({ ok: true, notified: targets.length, requestId }, { status: 201 });
+}
+
+/** Does this node exist in the org? (docs, tables, canvases and forms have no targetFor link.) */
+async function nodeExists(objectType: string, id: string, organizationId: string): Promise<boolean> {
+  const where = { id, organizationId };
+  switch (requestNodeRef(objectType, id)?.kind) {
+    case "doc":
+      return !!(await prisma.doc.findFirst({ where, select: { id: true } }));
+    case "table":
+      return !!(await prisma.dataTable.findFirst({ where, select: { id: true } }));
+    case "canvas":
+      return !!(await prisma.whiteboard.findFirst({ where, select: { id: true } }));
+    case "form":
+      return !!(await prisma.formDefinition.findFirst({ where, select: { id: true } }));
+    default:
+      return false;
+  }
+}
+
+/**
+ * GET /api/access-requests: the open requests this person may answer
+ * (incoming: every request in the workspace for an Owner or Admin, else the
+ * requests on objects they own) and their own (outgoing). Expired rows (14
+ * days) are left out.
+ */
+export async function GET() {
+  const session = await getServerSession(authOptions);
+  const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
+  if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const admin = sessionIsWorkspaceAdmin(session);
+  const since = new Date(Date.now() - REQUEST_TTL_MS);
+  const [pending, mine] = await Promise.all([
+    prisma.accessRequest.findMany({
+      where: { organizationId: u.organizationId, status: "PENDING", createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: { requester: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } } },
+    }),
+    prisma.accessRequest.findMany({
+      where: { requesterId: u.id, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { id: true, objectType: true, objectId: true, role: true, status: true, createdAt: true, decidedAt: true },
+    }),
+  ]);
+  const incoming = [];
+  for (const r of pending) {
+    if (r.requesterId === u.id) continue;
+    const t = await targetFor(r.objectType, r.objectId, u.organizationId);
+    if (!admin && t.ownerId !== u.id) continue;
+    incoming.push({
+      id: r.id,
+      objectType: r.objectType,
+      objectId: r.objectId,
+      role: r.role,
+      message: r.message,
+      createdAt: r.createdAt,
+      link: t.link,
+      name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
+      grantable: requestNodeRef(r.objectType, r.objectId) !== null,
+      requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },
+    });
+  }
+  return NextResponse.json({ incoming, outgoing: mine }, { headers: { "Cache-Control": "no-store" } });
 }

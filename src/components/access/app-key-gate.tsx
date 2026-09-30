@@ -47,3 +47,16 @@ export async function AppKeyGate({
   // apps is an object the viewer could request, so it is the in-shell 404.
   notFound();
 }
+
+/**
+ * Access step 3 for the app pages that had no gate (Phase 8 stage E): the
+ * same AppKeyGate, applied only with ACCESS_V2_RESOLVER on, so the shipped
+ * default leaves these pages exactly as open as they were. With the flag on,
+ * a hidden or floored app locks its routes too (spec 7.1), and a Guest meets
+ * the in-shell 404.
+ */
+export async function FlaggedAppKeyGate(props: Parameters<typeof AppKeyGate>[0]) {
+  const { accessV2Resolver } = await import("@/lib/access/flags");
+  if (!accessV2Resolver()) return <>{props.children}</>;
+  return <AppKeyGate {...props} />;
+}

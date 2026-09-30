@@ -53,6 +53,8 @@ export interface MemberRow {
   lastSignInAt: string | null;
   joinedAt: string;
   weeklyCapacityHours: number | null;
+  /** Admin scopes an Owner gave (billing, security); empty for everyone else. */
+  adminScopes: string[];
 }
 
 /** The People team: the configured list, else everyone at HR (access step 0). */
@@ -130,7 +132,7 @@ export async function listMembers(
       skip: page * limit,
       take: limit,
       select: {
-        id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, createdAt: true, weeklyCapacityHours: true,
+        id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, createdAt: true, weeklyCapacityHours: true, adminScopes: true,
         role: { select: { id: true, title: true } },
         department: { select: { id: true, name: true } },
         office: { select: { id: true, name: true } },
@@ -164,6 +166,7 @@ export async function listMembers(
       lastSignInAt: lastLogin.get(u.id)?.toISOString() ?? null,
       joinedAt: u.createdAt.toISOString(),
       weeklyCapacityHours: u.weeklyCapacityHours ?? null,
+      adminScopes: role === "ADMIN" ? u.adminScopes ?? [] : [],
     };
   });
   return { rows, total, page, pageCount: Math.max(1, Math.ceil(total / limit)) };

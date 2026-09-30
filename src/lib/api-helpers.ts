@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 import { AccessLevel } from "@/generated/prisma";
@@ -119,6 +120,13 @@ export async function hasPermission(
   module: PermissionModule,
   action: string
 ): Promise<boolean> {
+  // ACCESS_V2_RESOLVER (default OFF): the section 9 gate rule for the cells
+  // src/lib/access/matrix-rules.ts owns; every other cell keeps the matrix.
+  if (accessV2Resolver()) {
+    const { engineMatrixCell } = await import("@/lib/access/matrix-engine");
+    const engine = await engineMatrixCell(session, module, action);
+    if (engine !== null) return engine;
+  }
   const accessLevel = session.user.accessLevel as PermAccessLevel;
   const matrix = await getOrgPermissionMatrix(session);
   return checkPermission(accessLevel, matrix, module, action);

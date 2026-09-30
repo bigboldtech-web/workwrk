@@ -181,7 +181,12 @@ function appEnforcement(): Record<`app.${AppKey}`, string> {
 function settingsEnforcement(): Record<`settings.${SettingsPageKey}`, string> {
   const out = {} as Record<`settings.${SettingsPageKey}`, string>;
   for (const page of SETTINGS_PAGE_KEYS) {
-    out[`settings.${page}`] = `src/app/(dashboard)/settings/layout.tsx via SETTINGS_PAGE_GATES["${page}"]`;
+    // Each Workspace segment's layout renders SettingsGate (a parent layout
+    // cannot see the pathname); today's table decides until
+    // ACCESS_V2_RESOLVER, then SETTINGS_PAGE_GATES (settings-gate-engine.ts).
+    out[`settings.${page}`] = page.startsWith("account/")
+      ? `src/app/(dashboard)/account/layout.tsx (personal, every signed-in person)`
+      : `src/components/settings/settings-gate.tsx SettingsGate (settings-legacy.ts, then SETTINGS_PAGE_GATES["${page}"] under ACCESS_V2_RESOLVER)`;
   }
   return out;
 }

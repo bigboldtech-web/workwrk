@@ -81,6 +81,20 @@ export function MemberDrawer({
     return true;
   };
 
+  const saveScopes = async (scopes: string[]) => {
+    const prev = m;
+    setM({ ...m, adminScopes: scopes });
+    const r = await apiFetch("/api/settings/members/scopes", { method: "PATCH", json: { userId: m.id, scopes } });
+    if (!r.ok) {
+      setM(prev);
+      setErrs((e) => ({ ...e, scopes: r.error }));
+      return;
+    }
+    setErrs((e) => { const n = { ...e }; delete n.scopes; return n; });
+    setSaved((x) => ({ ...x, scopes: Date.now() }));
+    onChanged();
+  };
+
   const askRole = (role: MemberRole, tier: string | null) => {
     const sensitive = role === "OWNER" || m.role === "OWNER" || m.id === viewerId;
     if (sensitive) { setConfirmRole({ role, tier }); return; }
@@ -130,6 +144,32 @@ export function MemberDrawer({
             />
           }
         />
+        {m.role === "ADMIN" && viewerIsOwner ? (
+          <SettingsRow
+            label="Admin scopes"
+            helper="Let this Admin open Billing, or Security and API keys. Read by the new access engine; until it is on, Owner pages follow the Owner split."
+            savedAt={saved.scopes}
+            error={errs.scopes ? { message: errs.scopes, onRetry: () => setErrs((e) => { const n = { ...e }; delete n.scopes; return n; }) } : null}
+            control={
+              <span className="inline-flex items-center gap-3">
+                {(["billing", "security"] as const).map((scope) => (
+                  <label key={scope} className="inline-flex items-center gap-1.5 text-base text-ink">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--os-brand)]"
+                      checked={(m.adminScopes ?? []).includes(scope)}
+                      onChange={(e) => {
+                        const next = e.target.checked ? [...new Set([...(m.adminScopes ?? []), scope])] : (m.adminScopes ?? []).filter((x) => x !== scope);
+                        void saveScopes(next);
+                      }}
+                    />
+                    {scope === "billing" ? "Billing" : "Security"}
+                  </label>
+                ))}
+              </span>
+            }
+          />
+        ) : null}
         {m.role === "MEMBER" ? (
           <SettingsRow
             label="Tier"

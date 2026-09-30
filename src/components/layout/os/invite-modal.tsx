@@ -64,7 +64,9 @@ interface Props {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // SUPER_ADMIN is the system owner — never something you invite someone in as.
-const INVITE_LEVELS = ACCESS_LEVELS.filter((l) => l.value !== "SUPER_ADMIN");
+// AGENT is the "This is an agent account" checkbox below the select (access
+// spec 2.4: a Member with the Agent flag), not a rung of its own.
+const INVITE_LEVELS = ACCESS_LEVELS.filter((l) => l.value !== "SUPER_ADMIN" && l.value !== "AGENT");
 
 // The text of one Access level option: "Employee: Standard employees".
 // The shared ACCESS_LEVELS catalog (lib/permissions) still joins some
@@ -116,7 +118,9 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
   // server refuses anyone else inviting an Admin).
   const ruleLevel: AccessLevel = defaultLevel ?? (rules?.inviteDefaultRole === "ADMIN" && isAdmin ? ("COMPANY_ADMIN" as AccessLevel) : "EMPLOYEE");
   const [picked, setAccessLevel] = useState<AccessLevel | null>(null);
-  const accessLevel: AccessLevel = picked ?? ruleLevel;
+  const [agent, setAgent] = useState(false);
+  const chosenLevel: AccessLevel = picked ?? ruleLevel;
+  const accessLevel: AccessLevel = agent ? ("AGENT" as AccessLevel) : chosenLevel;
   const [message, setMessage] = useState("");
 
   // Placement — all optional. The Invitation model + POST /api/invitations
@@ -155,6 +159,7 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
     setDraft("");
     setInvalidTokens([]);
     setAccessLevel(null);
+    setAgent(false);
     setMessage("");
     setDepartmentId("");
     setRoleId("");
@@ -326,7 +331,8 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
             Access level
           </label>
           <select
-            value={accessLevel}
+            value={chosenLevel}
+            disabled={agent}
             onChange={(e) => setAccessLevel(e.target.value as AccessLevel)}
             className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-base text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
           >
@@ -336,6 +342,13 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
               </option>
             ))}
           </select>
+          <label className="mt-2 flex items-start gap-2 text-base text-ink">
+            <input type="checkbox" checked={agent} onChange={(e) => setAgent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--os-brand)]" />
+            <span>
+              This is an agent account
+              <span className="block text-sm text-ink-2">A bot or service that works as a Member. It can edit what it is given, never has Full access, and never exports or invites.</span>
+            </span>
+          </label>
         </div>
 
         {/* Placement — optional. Department / Role / Manager are carried

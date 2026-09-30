@@ -113,5 +113,7 @@ export function useViewerRole() {
     isAgent: boot.viewer.isAgent,
     /** Opens Members, Access and Scoring below Admin (boot settingsReader). */
     isSettingsReader: boot.viewer.settingsReader === true,
+    /** The Workspace pages that reader opens (the engine gate names them; absent: Members, Access, Scoring). */
+    settingsReaderPages: boot.viewer.settingsReaderPages,
   };
 }

@@ -1426,3 +1426,79 @@ legacy seniority tier under Member so no capability is lost. When the access eng
 roles switch on (access step 4 and 5), the tier select is replaced by the role
 picker, the matrix export on Data > Export ships the retired grid, and the transitional
 Access page's legacy grid is removed.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage E: the access flip, flag-gated
+
+Everything in this stage ships OFF. With the three flags off the product answers every access question exactly as the previous release did (proven by the parity run with the flags off, below). The production order is the founder's, one step at a time, each gated on the step before it.
+
+### Schema (append to `prisma/sql/2026-09-30-phase8-settings-access.sql`, already in the deploy manifest)
+
+Additive only; the running release names none of it, so it lands before the code:
+
+- `User.orgRole` (TEXT, NULL, CHECK OWNER/ADMIN/MEMBER/GUEST), `User.isAgent` (BOOLEAN NOT NULL DEFAULT false), `User.adminScopes` (TEXT[] NOT NULL DEFAULT '{}', CHECK subset of billing/security).
+- `Invitation.orgRole` (TEXT, NULL, CHECK ADMIN/MEMBER/GUEST), `Invitation.isAgent` (BOOLEAN NOT NULL DEFAULT false). POST /api/invitations writes both from the level it already stores; accept still applies `accessLevel`.
+- `Space`, `Folder`, `Board`: `restricted`, `findable` (BOOLEAN NOT NULL DEFAULT false). Read by nothing yet; `visibility` stays the authority until step 8.
+- `AccessGrant.expiresAt` (TIMESTAMP NULL, rule 20) and `AccessGrant.objectRole` (TEXT NULL, CHECK FULL/EDIT/COMMENT/VIEW). The two CHECKs are WIDENED, never narrowed: objectType gains SPACE, FOLDER, LIST, SOP_FOLDER, GOAL, TOOL, TEAM (new constraint `AccessGrant_objectType_v2_check` added before the old one is dropped), role gains OWNER (`AccessGrant_role_v2_check`). subjectType stays USER only and the subjectId foreign key to "User" stays.
+- New tables `Team`, `TeamMember` (Members > Teams) and `AccessRequest` (the Request access flow; a partial unique index keeps one PENDING row per person per object).
+
+Applied locally 2026-09-30 (twice, idempotent). Rollback: in the block's own comment (drop the three tables; delete the AccessGrant rows of the new types BEFORE restoring the narrow CHECKs).
+
+`src/lib/access/access-grant-store.ts` `viewerObjectGrants` now filters to TABLE, WHITEBOARD and FORM, so a container copy (step 7) can never reach the path-discovery code that maps those three kinds. Ship this code before running step 7 anywhere.
+
+### Flags (all read at request time, default OFF, never in `.env`)
+
+| Flag | What it switches | Rollback |
+|---|---|---|
+| `SETTINGS_GATE_LOG_ONLY=true` | The Workspace settings door asks the engine too and logs every disagreement (`access.settings_gate.disagree`, one line per person per page per 10 minutes, on stderr); today's table still decides. The decided first week. | unset |
+| `ACCESS_V2_RESOLVER=true` | Step 1: the settings door decides by the engine (SETTINGS_PAGE_GATES, with the Owner split's floor: while `SETTINGS_OWNER_SPLIT` is off every Admin still opens Billing, Security and API); `hasPermission` answers the 16 cells in `src/lib/access/matrix-rules.ts` by the section 9 rules (every other cell keeps the stored grid); POST /api/spaces follows access toggle 1; the Access page retires the grid and shows the enforced switches. Node helpers delegate ONLY when `ACCESS_V2_TABLES` is also on. | unset; takes effect on the next request |
+| `ACCESS_V2_TABLES=true` | Step 4: `loadFacts` takes a node object's role from node-access (`src/lib/access/node-bridge.ts`, tasks from item-gate), with the engine's rules around it; `hydrate` refines an Admin to Owner by the live Owner pick (every SUPER_ADMIN, else the earliest live COMPANY_ADMIN; the same rule as the Staff console and `SETTINGS_OWNER_SPLIT`), reads `adminScopes`, and takes the People team from the configured list (an empty list still means everyone at HR). With `ACCESS_V2_RESOLVER` also on, the node helpers (space.ts, board.ts, folder.ts, doc-access.ts, access.ts resolveX) answer through can(). | unset |
+| `SETTINGS_OWNER_SPLIT` | Stage D's flag, unchanged. Turn on only after the pre-flight report's Owner list is approved. | unset |
+
+Order for production: deploy (flags off) -> parity job nightly for a week with the flags off (criterion below) -> `SETTINGS_GATE_LOG_ONLY=true` for a week, read the disagreement lines -> backfill pre-flight approved -> backfill `--write` -> `ACCESS_V2_TABLES=true` (the parity job run again with it on must be clean) -> `ACCESS_V2_RESOLVER=true`, `SETTINGS_GATE_LOG_ONLY` unset -> the org-wide tokenVersion bump (below) -> `SETTINGS_OWNER_SPLIT=true` once the Owner list is approved.
+
+### The parity job (`scripts/access-parity-job.mjs`)
+
+Two sections now. The **legacy** section is the Phase 0 comparison (the transcription against the pure engine); every unexpected mismatch on a helper node-access answers is tie-broken against the LIVE helper (called with the resolver forced off, `scripts/lib/parity-live-tiebreak.mjs`): the live helper agreeing with the engine is "superseded" (the transcription is stale), the rest is the pure engine over the old tables, which no node helper ever delegates to. The **node** section (`scripts/lib/parity-node-section.mjs`, rows in `src/lib/access/node-parity.ts`) compares can() against the live resolvers: node-access for Space, Folder, List, Doc, Table, Canvas and Form, item-gate for tasks, sop-access for SOP folders, canSeeGoal for goals, the settings door's table, and the 16 matrix cells. `--all` runs every live person against every object (up to 400 per kind per org); `--sections legacy,node` picks. The job stays read-only three ways (read-only session, a Prisma extension that throws on writes, loaders only) and stubs `src/lib/auth.ts` (it never reads a session).
+
+Criterion for each flag: zero UNEXPECTED in both sections, run with that flag state. Local runs 2026-09-30 (reports under `phase8-reports/` in the session scratchpad):
+
+- `parity-before.txt` (flags off): legacy 183,648 cases, 0 unexpected; node 61,790 cases, 0 unexpected.
+- `parity-resolver-on.txt` (ACCESS_V2_RESOLVER on): identical counts, 0 unexpected (the resolver alone changes no node answer; the matrix and settings differences are the named rows).
+- `parity-tables-on.txt` (both on): legacy 183,648 cases, 0 unexpected; node 61,790 cases, 59,363 agreed, 2,427 expected (1,473 the archived cap, 717 deactivated people item-gate never meets, 194 matrix cells, 28 settings door rows, 15 goals), 0 unexpected.
+- `parity-tables-on-after-backfill.txt` (both on, after the local `--write` of the backfill and the container copies): identical, 0 unexpected.
+
+Behaviour the flags change on purpose, for the release note (each is a named row in `src/lib/access/node-parity.ts`): with both flags on, anything inside an archived Space, Folder or List reads as Can view unless the person holds Full access (spec rule 13; today node-access keeps their role and some routes allow the write); Members, Access and Scoring close to the manager tier and open to the People team; Structure opens to the People team; the 16 matrix cells follow section 9 (managers lose invite, KRA and asset writes unless on the People team; Members gain SOP create and edit, which the folder check still narrows); Space creation follows toggle 1 (default everyone).
+
+The nightly crontab row in `scripts/CRON-SETUP.md` gains `--sections legacy,node`; `--all` is for a local or staging run (on production keep `--limit 500 --rotate`).
+
+### Step 4: `scripts/access-backfill.ts` (dry run by default)
+
+```
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --out /tmp/backfill.json            # pre-flight + plan
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --write --out /tmp/backfill.json    # after approval
+```
+
+The pre-flight report is printed first, per workspace: the Owner(s) chosen (SUPER_ADMIN, else the earliest live COMPANY_ADMIN), every SUPER_ADMIN, every C-level/VP/Director whose report tree is not the whole workspace (default for them: the People team, D6), every Manager and Team lead with no reports, every ADMIN-scope API key whose creator is not an Owner or Admin, the C-level people who lose the settings write, and a workspace whose stored toggles read the two widening values. **The founder approves this report before `--write` in production.** A `--write` runs each workspace in one transaction with row-count assertions and one `access.migrated` activity row (the audit purge never deletes it); a failed assertion rolls that workspace back. A workspace with no admin at all is reported and skipped. It writes: `User.orgRole`/`isAgent` (the step-8 mirror; a later role change through membership.ts clears `orgRole` and `adminScopes`, and nothing reads `orgRole` at runtime: the Owner comes from the live pick), `settings.access` ONLY where absent and at TODAY'S enforced values (never the section 8 defaults, which would widen an existing workspace), the People team seeded with HR where empty, `restricted` (PRIVATE Folders and Lists) and `findable` (ORG Spaces), `ownerId` from the OWNER member row where null, and the USER-subject AccessGrant rows (SOPFolderAccess mapped; G5's explicit Full for the Space owner on every Private List). The EVERYONE rows (ORG Spaces and Lists, org-visible standalone Docs, org-wide Whiteboards, unscoped Tables) are counted and NOT written: the subject foreign key allows only a User until step 8's file replaces it, and until then the visibility columns grant exactly those rows. Local dry run 2026-09-30: 49 workspaces, 135 org roles to write, 0 grants, 12 workspaces with no admin (test fixtures). Local `--write` the same day: 37 workspaces written (each one transaction, assertions passed, `access.migrated` recorded), 12 skipped with no Owner; a second dry run plans 3 roles, all in the skipped workspaces (idempotent). Rollback: `UPDATE "User" SET "orgRole" = NULL`, `UPDATE "Space"/"Folder"/"Board" SET restricted = false, findable = false`; the settings.access written at today's values is behaviour-neutral and can stay.
+
+**The org-wide tokenVersion bump (founder's step, after ACCESS_V2_TABLES is on):** `UPDATE "User" SET "tokenVersion" = "tokenVersion" + 1 WHERE "deletedAt" IS NULL;` so every session re-reads the row once (spec 10.1). It signs everyone out once; announce it. Rollback: none needed.
+
+### Step 7: `scripts/access-migrate-container-rows.ts` (dry run by default)
+
+Copies SpaceMember, FolderMember, BoardMember and USER GoalAssignee rows into AccessGrant (SPACE, FOLDER, LIST, GOAL; a goal audience row as Can view), diffing exactly both ways (insert missing, re-role changed, delete orphaned copies), one transaction per workspace with the per-type row-count assertion. `--verify` reports drift and exits 1 on any. The old tables are never written. Department, Role and Tag goal audiences stay in GoalAssignee (the subject key is a User). Local dry run 2026-09-30: 186 copies to write across 49 workspaces; `--write` wrote them (0 failed); `--verify` right after: 0 drift.
+
+**Deviation to ratify:** the loader does NOT read the copies in this release, with either flag. A copy that outlived its member row would hand a removed person their access back the day a reader switched to the copies, and a dozen code paths write the member tables (the dialog, the member routes, invites, Space creation, offboarding, SCIM); keeping the copies equal at write time needs a database-level mirror on the four member tables, which was not installed on the shared local database. The founder's decision before any reader moves to the copies: install that mirror (or move every writer onto grants.ts), then `--verify` must report zero drift. Until then the copies are a verified snapshot and node-access (which already unions the Table, Canvas and Form AccessGrant rows) stays the loader.
+
+### The permission matrix: `scripts/access-retire-matrix.ts`
+
+Dry run lists every cell each workspace changed from the shipped grid and the section 9 rule it becomes. `--write` writes one `access.matrix_retired` activity row holding the grid exactly as stored (the Data > Export "previous permissions grid" download, `GET /api/settings/matrix-export`, reads it) and keeps `settings.permissions`. `--write --strip` also removes `settings.permissions` in the same transaction, and refuses unless `ACCESS_V2_RESOLVER=true` in its own environment. Local 2026-09-30: 0 workspaces store a grid, nothing to export. Production: run the dry run to count, `--write` any time, `--strip` only after the resolver has run clean.
+
+### Request access, Check access, Teams (no data step)
+
+- POST /api/access-requests now also records an `AccessRequest` row (one PENDING per person per object; an id probe with no object leaves none). GET lists the open requests the person may answer (Owners and Admins: all; others: the objects they own); PATCH /api/access-requests/[id] `{ decision: "grant" | "decline", role? }` grants through grants.ts setNodeGrant (mode raise) so the Manage access dialog's rules hold, resolves the request, tells the requester, and writes `access.request.granted` / `access.request.declined`. Requests expire after 14 days at read time (no cron row needed). The Access page has an Access requests card.
+- POST /api/access/check (the viewer's own role on up to 50 nodes, or Check access for one person, answered by node-access with a one-sentence reason) and GET /api/access/peek (kind, name and owner's name only, for a node the viewer can see or is on the way to; 404 otherwise). The Manage access dialog gains a Check access section for people who manage access there.
+- Members > Teams: GET/POST /api/settings/teams, PATCH/DELETE /api/settings/teams/[id] (Owner and Admin; audited `team.*`). A Team is a saved group today; sharing with a Team arrives with the engine.
+- The invite dialog's Agent is a checkbox ("This is an agent account"), no longer a rung in the level list.
+
+### Documented only: step 8 (drops), NOT done
+
+A future file `prisma/sql/<date>-access-step8-drops.sql`, after the resolver and tables flags have run clean in production for a release: replace `AccessGrant.subjectId`'s User foreign key with a subject check (so EVERYONE, TEAM, DEPARTMENT, ROLE, TAG rows can land), write the deferred EVERYONE rows, move the loader onto the copies (with the mirror in place), then drop `User.accessLevel`, `Invitation.accessLevel`, `Role.level`, `Space/Folder/Board.visibility`, the tables `SpaceMember`, `FolderMember`, `BoardMember`, `SOPFolderAccess`, `HRSegment`, `GoalAssignee`, the enums `AccessLevel`, `SpaceRole`, `SOPFolderRole`, `Visibility`, `settings.permissions` (after `--strip`), and the code listed in access-model-spec 10 step 8. Custom roles over the four-role ladder are the next step after the engine is proven on in production; not built here.

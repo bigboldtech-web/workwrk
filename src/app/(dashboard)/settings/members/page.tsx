@@ -2,7 +2,7 @@
 
 // Workspace settings > Members (spec-settings-workspace `/settings/members`,
 // settings-architecture 5.5): everyone who works here, what they can do and
-// who they report to. Tabs People, Guests and Pending invites.
+// who they report to. Tabs People, Guests, Teams and Pending invites.
 //
 //   People     a server list (GET /api/settings/members: search, filters,
 //              sort, pages of 50; the old 500-row cap is gone), a filter
@@ -49,6 +49,7 @@ import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { Avatar, MemberDrawer } from "./member-drawer";
+import { TeamsTab } from "./teams-tab";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, TransferDialog, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
 
 type ListBody = {
@@ -65,6 +66,7 @@ type ListBody = {
 const TABS: SettingsTab[] = [
   { key: "people", label: "People" },
   { key: "guests", label: "Guests" },
+  { key: "teams", label: "Teams" },
   { key: "pending", label: "Pending invites" },
 ];
 const SORTS = [
@@ -110,6 +112,8 @@ export default function MembersPage() {
             <PendingTab canEdit={canEdit} canManageInvites={canEdit || canInvite} onInvite={() => setInviteOpen(true)} />
           ) : tab === "guests" ? (
             <GuestsTab />
+          ) : tab === "teams" ? (
+            <TeamsTab />
           ) : (
             <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canEdit || canInvite} onInvite={() => setInviteOpen(true)} />
           )}

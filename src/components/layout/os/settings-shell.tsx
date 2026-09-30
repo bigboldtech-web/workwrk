@@ -88,7 +88,8 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const pathname = usePathname() || "";
   const router = useRouter();
   const { data: session } = useSession();
-  const { isAdmin, isGuest, isSettingsReader } = useViewerRole();
+  const { isAdmin, isGuest, isSettingsReader, settingsReaderPages } = useViewerRole();
+  const readerPages = settingsReaderPages ?? SETTINGS_READER_PAGES;
   const { boot } = useBoot();
   const { mutedNotifications } = useOsShell();
   // Row badges (spec-account-auth door sidebar): "Muted" on Notifications
@@ -140,9 +141,9 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   // other Workspace URL they are shown the denial over Profile, inside the
   // My settings list, as before.
   const readerOnPage =
-    door === "workspace" && !isAdmin && isSettingsReader && !!current && current.door === "workspace" && SETTINGS_READER_PAGES.includes(current.key);
+    door === "workspace" && !isAdmin && isSettingsReader && !!current && current.door === "workspace" && readerPages.includes(current.key);
   const shownDoor: SettingsDoorProp = (door === "workspace" && isAdmin) || readerOnPage ? "workspace" : "me";
-  const groups = useMemo(() => settingsShellGroups(door, isAdmin, readerOnPage), [door, isAdmin, readerOnPage]);
+  const groups = useMemo(() => settingsShellGroups(door, isAdmin, readerOnPage, readerPages), [door, isAdmin, readerOnPage, readerPages]);
   const override = useActiveSettingsRowOverride();
   const activeKey = override ?? (current && current.door === shownDoor ? current.key : null);
   const firstName = (session?.user as { firstName?: string } | undefined)?.firstName;

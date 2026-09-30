@@ -66,6 +66,8 @@ const MAX_CHAIN = 8;
 // accessibleIds cannot drift apart on what a SpaceRole means. Re-exported here
 // because this is the module the mapping historically belonged to.
 export { roleFromSpaceRole, roleFromSopRole } from "./id-sets";
+import { accessV2Tables } from "./flags";
+import { nodeBridgeGrants } from "./node-bridge";
 
 function userGrant(
   objectType: ObjectType,
@@ -1033,12 +1035,35 @@ export async function loadFacts(viewer: Viewer, ref: ObjectRef): Promise<AccessF
   if (appKey) loaded.object.appKey = appKey;
   const relationships = await loadRelationships(viewer, ref, loaded.object, org, null);
 
+  // Step 4 behind ACCESS_V2_TABLES (default OFF): a node object's grant is the
+  // viewer's node-access role, the one resolver that already unions
+  // AccessGrant, the member tables, docSharing and the Private rule
+  // (node-bridge.ts). Off, the old-table grants below stand, exactly as before.
+  // node-access already folds ownership (the owner rung, the creator of a
+  // doc or canvas, the Private rule's owner) into that role, so the engine's
+  // own rule 5 must not add a second owner source over it: a creator whom
+  // node-access no longer lets in (a doc left behind in a Space they left)
+  // would otherwise read as Full access.
+  let grants = loaded.grants;
+  let object = loaded.object;
+  let chain = loaded.chain;
+  let rel = relationships;
+  if (accessV2Tables()) {
+    const bridged = await nodeBridgeGrants(viewer, ref, loaded);
+    if (bridged) {
+      grants = bridged;
+      object = { ...loaded.object, ownerId: null };
+      chain = loaded.chain.map((l) => ({ ...l, ownerId: null }));
+      rel = { ...relationships, isCreator: false };
+    }
+  }
+
   return {
     viewer,
-    object: loaded.object,
-    chain: loaded.chain,
-    grants: loaded.grants,
-    relationships,
+    object,
+    chain,
+    grants,
+    relationships: rel,
     org,
     now,
   };

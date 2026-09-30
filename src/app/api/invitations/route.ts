@@ -1,4 +1,5 @@
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -175,8 +176,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invitation already sent to this email. Resend it from Pending invites." }, { status: 400 });
     }
 
+    const level = inviteLevel || "EMPLOYEE";
+    const mirrorRole = orgRoleOf({ accessLevel: level });
     const fields = {
-      accessLevel: inviteLevel || "EMPLOYEE",
+      accessLevel: level,
+      // Phase 8 stage E: what the invite makes the person, in the four-role
+      // vocabulary (the step-8 mirror; accept still applies accessLevel).
+      orgRole: mirrorRole === "OWNER" ? "ADMIN" : mirrorRole,
+      isAgent: isAgentOf(level),
       token: crypto.randomBytes(32).toString("hex"),
       // Members > Invite rules > Invitation expiry (default 7 days).
       expiresAt: new Date(now.getTime() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000),

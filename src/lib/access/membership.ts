@@ -233,7 +233,10 @@ async function applyRoleChangeIn(
   }
   await db.user.update({
     where: { id: target.id },
-    data: { accessLevel: plan.level as never, ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
+    // Phase 8 stage E: a role change clears the step-8 mirror columns (the
+    // backfill's orgRole and any Admin scopes), so a stale value can never
+    // outlive the level it was written for.
+    data: { accessLevel: plan.level as never, orgRole: null, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
   });
   // The membership row for this workspace mirrors the role (the workspace
   // switcher and the fallback out of a suspended workspace read it).

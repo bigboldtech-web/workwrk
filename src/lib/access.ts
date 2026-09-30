@@ -18,6 +18,7 @@
 // /team pages as proof; subsequent phases will refactor more.
 
 import { prisma } from "@/lib/prisma";
+import { delegatedNodeRole } from "@/lib/access/delegate";
 import { getEffectiveReportTree, isInReportTree } from "@/lib/reporting-line";
 import { hrCanReadUser } from "@/lib/hr-segment";
 import type { AccessLevel } from "@/generated/prisma";
@@ -165,7 +166,11 @@ function reasonFor(d: NodeDecision, ref: NodeRef, name: (r: NodeRef) => string):
 async function resolveNode(viewer: ViewerContext, ref: NodeRef): Promise<AccessDecision> {
   const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, String(viewer.accessLevel));
   const decisions = await nodeRoles(ctx, [ref]);
-  const d = decisions.get(`${ref.kind}:${ref.id}`);
+  const live = decisions.get(`${ref.kind}:${ref.id}`);
+  // Step 1 under ACCESS_V2_RESOLVER + ACCESS_V2_TABLES: can()'s role (the
+  // same node-access answer plus the engine's caps); otherwise the live one.
+  const delegated = live ? await delegatedNodeRole(viewer.userId, viewer.organizationId, String(viewer.accessLevel), ref, live.role) : null;
+  const d = live && delegated !== null && delegated !== live.role ? { ...live, role: delegated } : live;
   if (!d || d.role === "none") {
     const exists = await nodeExists(viewer.organizationId, ref);
     if (!exists) return { permission: "none", reason: `${ref.kind === "list" ? "board" : ref.kind} not found in your org` };

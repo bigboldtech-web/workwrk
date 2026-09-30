@@ -30,6 +30,8 @@ export interface MemberRow {
   lastSignInAt: string | null;
   joinedAt: string;
   weeklyCapacityHours: number | null;
+  /** Admin scopes an Owner gave (billing, security). */
+  adminScopes?: string[];
 }
 
 export interface Counts { owners: number; admins: number; members: number; guests: number; peopleTeam: number }

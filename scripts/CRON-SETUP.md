@@ -271,7 +271,16 @@ visibility/membership bucket before the rest). `--allow-remote` is only
 needed if `DATABASE_URL` does not point at localhost:
 
 ```
-15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --sections legacy,node --node-per-kind 40 --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+
+Phase 8 stage E: the job now has two sections. `legacy` is the Phase 0
+comparison with a live tie-break; `node` compares can() against the live
+resolvers (node-access, item-gate, sop-access, canSeeGoal, the settings door,
+the matrix cells). `--node-per-kind 40` keeps the nightly node section to
+about the size of the legacy one on a large tenant. Run it once more by hand
+with the production flag state you are about to turn on (for example
+`ACCESS_V2_TABLES=true ACCESS_V2_RESOLVER=true node scripts/access-parity-job.mjs ...`):
+the criterion is zero UNEXPECTED in both sections with that state.
 ```
 
 Read the log the next morning: a line `UNEXPECTED: 0` is the pass. The
