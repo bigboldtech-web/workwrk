@@ -44,6 +44,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell, useLayer } from "@/components/layout/os/shell-context";
 import { useViewerRole } from "@/components/layout/os/boot-context";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { AddPeopleDialog } from "@/components/talk/add-people-dialog";
@@ -153,6 +154,7 @@ export function ConversationView({
   const myName = session?.user?.name ?? null;
   const { activeCall, startCall: startGlobalCall } = useOsShell();
   const { isAdmin } = useViewerRole();
+  const { openSettings } = useSettingsNav();
   const fmt = useFormat();
   const callOpen = activeCall?.conversationId === id;
 
@@ -1723,7 +1725,7 @@ export function ConversationView({
         onClose={() => setCallsOffOpen(false)}
         onConfirm={() => {
           setCallsOffOpen(false);
-          if (isAdmin) router.push("/settings/apps");
+          if (isAdmin) openSettings("/settings/apps");
         }}
         title="Calls aren't set up for this workspace"
         description={isAdmin

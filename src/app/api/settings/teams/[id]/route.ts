@@ -11,6 +11,7 @@ import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
@@ -32,6 +33,10 @@ async function actor() {
   const u = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!u?.id || !u.organizationId) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE }) } as const;
   if (!sessionIsWorkspaceAdmin(session)) return { error: NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE }) } as const;
+  // Re-read the actor from the database (a demotion lands now, not at the
+  // five-minute session check).
+  const gate = await settingsWriteGate(session, "members");
+  if (!gate.ok) return { error: gate.response } as const;
   return { userId: u.id, organizationId: u.organizationId } as const;
 }
 

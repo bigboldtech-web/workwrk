@@ -24,6 +24,7 @@ import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { AccessNodeKind } from "@/lib/access/access-panel";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
 import { actorLabelOf, auditKeyWords, familyWhere, humanizeAuditSentence, isAuditFamily, rangeStart, targetTypeWord } from "@/lib/audit-families";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -41,6 +42,11 @@ export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only workspace Owners and Admins can read the audit log", 403);
+  // The actor as the database has them now: the log carries every person's
+  // email, security events and IPs, so an Admin demoted a moment ago is
+  // refused at once, not at the five-minute session check.
+  const gate = await settingsWriteGate(session, "audit", { read: true });
+  if (!gate.ok) return gate.response;
 
   const orgId = getOrgId(session);
   const sp = new URL(req.url).searchParams;
@@ -109,6 +115,11 @@ export async function GET(req: NextRequest) {
     const lines = [header.map(csvCell).join(",")];
     for (const r of rows) {
       lines.push([r.createdAt.toISOString(), actorLabelOf(r), r.actorType, humanizeAuditSentence(r.description), r.type, r.severity, r.targetType ?? "", r.targetId ?? "", r.ipAddress ?? ""].map(csvCell).join(","));
+    }
+    // Say so IN the file when the cap cut it, so a reader never takes the
+    // newest 50,000 events for the whole log.
+    if (rows.length >= CSV_CAP) {
+      lines.push([`Only the newest ${CSV_CAP.toLocaleString("en-US")} events are in this file. Narrow the date range to export older ones.`].map(csvCell).join(","));
     }
     logActivity({
       type: "data.exported",

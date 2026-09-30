@@ -598,13 +598,20 @@ function PaletteBody() {
       // who passes the entry's org gate, and only against a typed query, so
       // the empty-query Settings group stays the pages list.
       const entryRows: Row[] = text.trim()
-        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [], guest: isGuest }).map((e) => ({
-            id: `setting-${e.id}`,
-            label: e.label,
-            secondary: e.description,
-            glyph: <Glyph icon={Settings2} />,
-            action: () => void leaveThen(() => router.push(e.href)),
-          }))
+        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [], guest: isGuest })
+            // Workspace settings entries are for an Owner or Admin only
+            // (settings-architecture 8.2), like the pages list above; an
+            // entry that lives outside the doors keeps its own org gate.
+            .filter((e) => isAdmin || e.door === "me" || !!e.externalGate)
+            .map((e) => ({
+              id: `setting-${e.id}`,
+              label: e.label,
+              secondary: e.description,
+              glyph: <Glyph icon={Settings2} />,
+              action: /^\/(settings|account)(\/|\?|$)/.test(e.href)
+                ? () => openSettings(e.href)
+                : () => void leaveThen(() => router.push(e.href)),
+            }))
         : [];
       return [...pageRows, ...entryRows];
     },

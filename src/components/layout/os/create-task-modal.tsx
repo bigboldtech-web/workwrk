@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import {
@@ -37,6 +36,8 @@ import {
   Target,
 } from "lucide-react";
 import { useLayer, useOsShell } from "./shell-context";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { useViewerRole } from "./boot-context";
 import { usePrompt } from "@/components/ui/dialog-provider";
 import { useRouter } from "next/navigation";
 import { Chip, StatusChip } from "@/components/ui/chip";
@@ -225,6 +226,8 @@ export function CreateTaskModal() {
   const { createTaskOpen, closeCreateTask, createTaskPreselect, createTaskTemplate } = useOsShell();
   const promptDialog = usePrompt();
   const router = useRouter();
+  const { openSettings } = useSettingsNav();
+  const { isAdmin: isWorkspaceAdmin } = useViewerRole();
   const { data: session } = useSession();
   const me: Person | null = useMemo(() => {
     const u = session?.user as (Person & { id?: string }) | undefined;
@@ -1094,9 +1097,13 @@ export function CreateTaskModal() {
                       </button>
                     );
                   })}
-                  <Link href="/settings/tasks?tab=types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
-                    <SettingsIcon className="w-3.5 h-3.5" /> Manage task types
-                  </Link>
+                  {/* Admins only (settings-architecture 2.4), through the
+                      settings door so Back to app returns here. */}
+                  {isWorkspaceAdmin ? (
+                    <button type="button" onClick={() => { setOpenMenu(null); openSettings("/settings/tasks?tab=types"); }} className="mt-1 flex w-full items-center gap-2 border-t border-line px-3 py-2 text-start text-sm text-ink-2 hover:bg-hover">
+                      <SettingsIcon className="w-3.5 h-3.5" /> Manage task types
+                    </button>
+                  ) : null}
                 </div>
               )}
             </div>

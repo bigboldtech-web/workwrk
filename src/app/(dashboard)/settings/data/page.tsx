@@ -68,7 +68,7 @@ const EXPORTS: ExportRow[] = [
   { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "One CSV each for people, Spaces, Folders, Lists, tasks, Docs, Tables, Goals, reviews and SOPs: ids, titles, owners, statuses and dates. Doc text, task descriptions, comments, custom field values, table rows and files are not in it yet." },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
-  { key: "audit", href: "/api/export/audit", fallbackName: "audit.csv", title: "Audit log (CSV)", desc: "The activity log: who, what, when, the target and the IP." },
+  { key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)", desc: "The activity log: who acted (a person, your identity provider or WorkwrK staff), what, when, the target and the IP. The newest 50,000 events." },
 ];
 const LEGACY_EXPORTS: ExportRow[] = [
   { key: "purchase-orders", href: "/api/export/purchase-orders", fallbackName: "purchase-orders.csv", title: "Purchase orders (CSV)", desc: "Vendor, amount, status, requester and approver." },

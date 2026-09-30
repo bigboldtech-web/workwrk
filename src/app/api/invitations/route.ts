@@ -12,6 +12,7 @@ import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
 
@@ -78,7 +79,17 @@ export async function POST(req: Request) {
 
     const orgId = (session.user as { organizationId: string }).organizationId;
 
-    const allowed = await hasPermission(session, "people", "create");
+    // The actor as the database has them NOW (freshWorkspaceActor): an
+    // invitation outlives the session that sends it (seven days, and it can
+    // carry Admin), so a person demoted a moment ago must not mint one on the
+    // level their five-minute-old token still claims. The permission and the
+    // level rule below both read the fresh level.
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) {
+      return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    }
+    const freshSession = { ...session, user: { ...session.user, accessLevel: fresh.level } };
+    const allowed = await hasPermission(freshSession, "people", "create");
     if (!allowed) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
@@ -98,7 +109,7 @@ export async function POST(req: Request) {
     // The level an invitation may carry (src/lib/access/invite-level.ts):
     // never WorkwrK staff, an Admin only from an Admin, and otherwise at or
     // below the inviter's own rung. It used to be stored as sent.
-    const levelCheck = resolveInviteLevel((session.user as { accessLevel?: string }).accessLevel, requestedLevel);
+    const levelCheck = resolveInviteLevel(fresh.level, requestedLevel);
     if (!levelCheck.ok) {
       return NextResponse.json({ error: levelCheck.error }, { status: levelCheck.status });
     }

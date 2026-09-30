@@ -90,7 +90,9 @@ export async function PUT(
 
   // Deprovisioning goes through the one handover path; the other fields
   // (a name change riding along) are written after it.
-  if (data.status === "INACTIVE" && existing.status !== "INACTIVE") {
+  // Called when already INACTIVE too: a retry after a failed handover
+  // finishes it there (scimDeprovision's resume path), else it is a no-op.
+  if (data.status === "INACTIVE") {
     const out = await scimDeprovision(auth.organizationId, id);
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;
@@ -191,7 +193,9 @@ export async function PATCH(
 
   // Deprovisioning goes through the one handover path; the other fields
   // (a name change riding along) are written after it.
-  if (data.status === "INACTIVE" && existing.status !== "INACTIVE") {
+  // Called when already INACTIVE too: a retry after a failed handover
+  // finishes it there (scimDeprovision's resume path), else it is a no-op.
+  if (data.status === "INACTIVE") {
     const out = await scimDeprovision(auth.organizationId, id);
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;

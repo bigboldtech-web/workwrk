@@ -1,8 +1,9 @@
 // Any /settings/* path no page owns lands on the Workspace settings Overview
 // (spec-settings-workspace section 3, AskAnAdminStrip row: "no 404 anywhere
 // under /settings/*"). The Overview carries its own gate, so an Owner or Admin
-// sees the Overview and everyone else sees the AdminOnly card with its way to
-// My settings, the same denial as every other Workspace page. Next resolves a
+// sees the Overview and everyone else sees the Ask-an-admin strip over their
+// own My settings > Profile, the same denial as every other Workspace page
+// (settings-gate.tsx SettingsDenied). Next resolves a
 // catch-all last, so this never shadows a real page; a moved old URL answers
 // from the registry twin first, with its exact target.
 //

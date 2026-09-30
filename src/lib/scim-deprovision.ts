@@ -21,6 +21,12 @@
 // (lockOrgRoles), so a SCIM call racing an admin's role change can never
 // leave the workspace with nobody.
 //
+// A handover that fails after the deactivation committed is never lost: the
+// deactivation and a membership.handover_pending row commit TOGETHER, and a
+// retry from the identity provider (it retries on the 500) finds the person
+// already INACTIVE with that row still the latest word, and finishes the
+// handover then. The row stays in the Audit log if it never finishes.
+//
 // Reactivation (active:true) restores the row, writes its own audit row
 // (scimReactivated) and transfers nothing back: the row says so.
 
@@ -35,8 +41,8 @@ export type DeprovisionOutcome =
 export async function scimDeprovision(organizationId: string, userId: string): Promise<DeprovisionOutcome> {
   const person = await prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true, status: true, firstName: true, lastName: true } });
   if (!person) return { ok: false, status: 409, error: "User not found" };
-  if (person.status === "INACTIVE") return { ok: true, alreadyInactive: true, recipientId: null };
   const name = `${person.firstName} ${person.lastName}`.trim();
+  if (person.status === "INACTIVE") return resumePendingHandover(organizationId, userId, name);
 
   type Gate = { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string };
   const gate: Gate = await prisma.$transaction(async (tx) => {
@@ -55,6 +61,22 @@ export async function scimDeprovision(organizationId: string, userId: string): P
       });
       return { kind: "owner" as const, ownersNow: names };
     }
+    // Committed WITH the deactivation, so a handover that fails below is
+    // finished by the identity provider's retry (resumePendingHandover).
+    await tx.activityLog.create({
+      data: {
+        type: PENDING,
+        actorId: null,
+        actorType: "scim",
+        actorLabel: "Identity provider",
+        organizationId,
+        description: `Your identity provider deactivated ${name}. Their work is being handed over.`,
+        targetType: "user",
+        targetId: userId,
+        severity: "warning",
+        metadata: { recipientId },
+      },
+    });
     return { kind: "member" as const, recipientId: recipientId as string };
   });
 
@@ -96,8 +118,42 @@ export async function scimDeprovision(organizationId: string, userId: string): P
     return { ok: true, alreadyInactive: false, recipientId: null };
   }
 
-  const recipientId = gate.recipientId;
-  const result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null });
+  await finishHandover(organizationId, userId, name, gate.recipientId, person.status);
+  return { ok: true, alreadyInactive: false, recipientId: gate.recipientId };
+}
+
+const PENDING = "membership.handover_pending";
+
+/**
+ * The person is INACTIVE already. When the latest identity-provider row about
+ * them is a pending handover (the deactivation committed, the handover did
+ * not), finish it now, to their manager or the first Owner as they are today.
+ * Otherwise there is nothing to do: a deactivation from Members, or a finished
+ * handover, is never redone.
+ */
+async function resumePendingHandover(organizationId: string, userId: string, name: string): Promise<DeprovisionOutcome> {
+  const last = await prisma.activityLog.findFirst({
+    where: { organizationId, targetType: "user", targetId: userId, actorType: "scim", type: { in: [PENDING, "membership.changed", "membership.refused"] } },
+    orderBy: { createdAt: "desc" },
+    select: { type: true },
+  });
+  if (last?.type !== PENDING) return { ok: true, alreadyInactive: true, recipientId: null };
+  const recipientId = await unattendedRecipient(organizationId, userId);
+  if (!recipientId) return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
+  await finishHandover(organizationId, userId, name, recipientId, "ACTIVE");
+  return { ok: true, alreadyInactive: true, recipientId };
+}
+
+async function finishHandover(organizationId: string, userId: string, name: string, recipientId: string, oldStatus: string): Promise<void> {
+  let result: Awaited<ReturnType<typeof runHandover>>;
+  try {
+    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null });
+  } catch (e) {
+    // The pending row stays the latest word, so the identity provider's
+    // retry of this call finishes the handover. The error goes back to it.
+    console.error("SCIM handover failed; the next retry resumes it", e);
+    throw e;
+  }
   const recipient = await prisma.user.findUnique({ where: { id: recipientId }, select: { firstName: true, lastName: true } });
   await prisma.activityLog.create({
     data: {
@@ -110,12 +166,11 @@ export async function scimDeprovision(organizationId: string, userId: string): P
       targetType: "user",
       targetId: userId,
       severity: "warning",
-      oldValue: { status: person.status },
+      oldValue: { status: oldStatus },
       newValue: { status: "INACTIVE" },
       metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length },
     },
   });
-  return { ok: true, alreadyInactive: false, recipientId };
 }
 
 /**

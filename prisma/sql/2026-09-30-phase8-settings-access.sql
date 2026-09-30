@@ -42,9 +42,22 @@ ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordChangedAt" TIMESTAMP(3);
 --     rows until this column set existed). Relaxing NOT NULL rewrites
 --     nothing and loses nothing; every existing row keeps its actor.
 --
--- Rollback (only if the release is rolled back AND no staff row was
--- written): DELETE the rows WHERE "actorId" IS NULL, then
--- ALTER COLUMN "actorId" SET NOT NULL. The three new columns can stay.
+-- A ONE-WAY DOOR for the founder to ratify before deploy (scripts/
+-- MIGRATIONS.md, "Phase 8 close"): once a row with no person as its actor
+-- exists (SCIM, the audit purge, a Staff console action), a release older
+-- than stage D, whose Prisma client declares the actor as required, throws on
+-- every query that includes the actor over that row.
+--
+-- Rollback, never deleting an audit row: first copy the null-actor rows into
+-- a hold table and take them out of the log, then restore the constraint;
+-- put them back when rolling forward again:
+--   CREATE TABLE IF NOT EXISTS "ActivityLogNullActorHold" (LIKE "ActivityLog" INCLUDING ALL);
+--   INSERT INTO "ActivityLogNullActorHold" SELECT * FROM "ActivityLog" WHERE "actorId" IS NULL ON CONFLICT DO NOTHING;
+--   DELETE FROM "ActivityLog" a USING "ActivityLogNullActorHold" h WHERE a."id" = h."id";
+--   ALTER TABLE "ActivityLog" ALTER COLUMN "actorId" SET NOT NULL;
+-- and on the way forward, after this file runs again:
+--   INSERT INTO "ActivityLog" SELECT * FROM "ActivityLogNullActorHold" ON CONFLICT DO NOTHING;
+-- The three new columns can stay.
 
 ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorType" TEXT NOT NULL DEFAULT 'user';
 ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorLabel" TEXT;

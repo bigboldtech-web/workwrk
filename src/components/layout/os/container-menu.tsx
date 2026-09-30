@@ -75,6 +75,8 @@ import { ListDefaultsPanel } from "@/components/board-view/list-settings/list-de
 import { RowColorRulesPanel } from "@/components/board-view/list-settings/row-color-rules-panel";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { useViewerRole } from "./boot-context";
 import { refreshSidebar } from "./sidebar-refresh";
 import { treeChanged } from "@/lib/work/container-events";
 import { objectHrefNow } from "./use-object-href";
@@ -455,6 +457,8 @@ function ContainerMenuBody({
   onRequestSettings: (panel: "defaults" | "colors") => void;
 }) {
   const router = useRouter();
+  const { openSettings } = useSettingsNav();
+  const { isAdmin: isWorkspaceAdmin } = useViewerRole();
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const { openTemplateCenter, openCreateList, openCreateSprint } = useOsShell();
@@ -1041,8 +1045,14 @@ function ContainerMenuBody({
                     />
                   ))
                 )}
-                <MenuSeparator />
-                <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); router.push("/settings/tasks?tab=types"); }} />
+                {/* Task types live in Workspace settings (Owner and Admin);
+                    the door is absent for everyone else (spec 2.4). */}
+                {isWorkspaceAdmin ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem icon={Settings} label="Manage types" onClick={() => { onClose(); openSettings("/settings/tasks?tab=types"); }} />
+                  </>
+                ) : null}
               </MenuSubmenu>
             );
 

@@ -192,6 +192,21 @@ async function gateNode(actor: NodeCtx, ref: NodeRef): Promise<NodeGate> {
   };
 }
 
+/**
+ * Whether the actor clears the same manage bar a grant on this node needs
+ * (gateNode). The access-request decline asks this, so declining a request
+ * never needs more power than granting it.
+ */
+export async function mayManageNode(actor: NodeCtx, ref: NodeRef): Promise<boolean> {
+  try {
+    await gateNode(actor, ref);
+    return true;
+  } catch (err) {
+    if (err instanceof GrantError) return false;
+    throw err;
+  }
+}
+
 /** SELECT ... FOR UPDATE on the node (docs lock the Organization row that holds their sharing). */
 async function lockNode(tx: Tx, orgId: string, ref: NodeRef): Promise<void> {
   switch (ref.kind) {

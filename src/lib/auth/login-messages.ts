@@ -38,7 +38,7 @@ export function friendlyError(code: string | null | undefined, opts: { email?: s
     return "We could not finish logging you in with Google. Try again, or use your password.";
   }
   // The Google sign-in refusal when the workspace requires two step verification (auth.ts signIn).
-  if (err === "MfaRequired") return "Your workspace requires two step verification. Log in with your email and password to use your code.";
+  if (err === "MfaRequired") return "Signing in to this account needs two step verification. Sign in with your email and password to use your code, or to set it up.";
   if (err === "SessionRequired") return "Log in to continue.";
   if (err === "Configuration") return "We could not log you in. Try again in a moment.";
   return "That email or password is not right.";

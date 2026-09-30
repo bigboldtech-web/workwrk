@@ -61,6 +61,6 @@ declare module "next-auth/jwt" {
     idleMin?: number;
     maxDays?: number;
     policyEnded?: boolean;
-    policyEndedReason?: "idle" | "lifetime";
+    policyEndedReason?: "idle" | "lifetime" | "signed_out";
   }
 }

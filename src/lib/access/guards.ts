@@ -10,6 +10,7 @@
 // Pure: imports ./types only. Nothing here writes anything.
 
 import type { AccessSettings, Action, Decision, ObjectRef, ObjectRole, OrgRole } from "./types";
+import { APP_ACCESS_BY_KEY } from "@/lib/app-access";
 
 export interface GuardResult {
   ok: boolean;
@@ -183,9 +184,12 @@ export function denialTarget(ref: ObjectRef): { type: string; id: string } {
 /** The audit row for one denial (pure, for the tests). */
 export function denialAuditRow(action: Action, ref: ObjectRef, decision: Pick<Decision, "via" | "reason">) {
   const t = denialTarget(ref);
+  // An app is named by its one label (principle 16: "Timesheets", never the
+  // key "timesheets"); the key stays in targetId for filters.
+  const named = t.type === "app" ? `the ${APP_ACCESS_BY_KEY[t.id]?.label ?? t.id} app` : `${t.type} ${t.id}`;
   return {
     type: "access.denied",
-    description: `Refused ${action} on ${t.type} ${t.id}: ${decision.reason}`,
+    description: `Refused ${action} on ${named}: ${decision.reason}`,
     targetType: t.type,
     targetId: t.id,
     metadata: { action, via: decision.via, reason: decision.reason },

@@ -224,5 +224,6 @@ describe("access.denied (spec 5.1)", () => {
     expect(row.targetId).toBe("docs");
     expect(row.metadata).toEqual({ action: "view", via: "app-off", reason: "This app is hidden." });
     expect(row.description).not.toMatch(/—|--/);
+    expect(row.description).toBe("Refused view on the Docs app: This app is hidden.");
   });
 });

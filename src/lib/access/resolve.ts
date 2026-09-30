@@ -395,7 +395,12 @@ function rule2(facts: AccessFacts): Decision | null {
         allowed: false,
         role: "none",
         via: "app-off",
-        reason: "This app is switched off for your workspace.",
+        // Which switch, in words (the AppOff card's three cases).
+        reason: aiOff
+          ? "AI features for members are turned off for your workspace."
+          : hidden
+            ? "This app is hidden in your workspace."
+            : "This app is limited to some roles in your workspace.",
         discoverable: !guest,
         context: { app: appKey },
         enforcedAt: ENFORCED_AT["rule.2.module-off"],

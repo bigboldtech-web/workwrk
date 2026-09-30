@@ -15,7 +15,8 @@ import {
 } from "@/lib/review-cadence";
 import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings";
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
-import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { lockOrgSettings } from "@/lib/access/access-grant-store";
 import { canManageProcess } from "@/lib/process-scope";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { scoringWriteAllowed, sessionScoringWriteAllowed } from "@/lib/access/settings-legacy";
@@ -442,9 +443,17 @@ export async function PATCH(req: Request) {
         // Merged over the stored policy (a partial write keeps the rest).
         const parsed = securitySectionSchema.safeParse(data);
         if (!parsed.success) return NextResponse.json({ error: describeIssue(parsed.error, "security"), issues: parsed.error.issues }, { status: 400 });
-        const current = currentSettings.security && typeof currentSettings.security === "object" ? currentSettings.security : {};
-        const next = { ...current, ...parsed.data };
-        await writeOrgSettingsKeys(orgId, { security: next });
+        // Read, merge and write under the Organization row lock, so two
+        // Admins saving different Security fields at the same instant both
+        // land (neither merge starts from a copy the other is replacing).
+        const { current, next } = await prisma.$transaction(async (tx) => {
+          await lockOrgSettings(tx, orgId);
+          const row = await tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+          const stored = settingsKey(row?.settings, "security");
+          const merged = { ...stored, ...parsed.data };
+          await writeOrgSettingsKeys(orgId, { security: merged }, tx);
+          return { current: stored, next: merged };
+        });
         changedKeys = Object.keys(parsed.data);
         // The sign-in policy is the one section whose every change is a
         // security event (settings spec 5.12): old and new values, so the

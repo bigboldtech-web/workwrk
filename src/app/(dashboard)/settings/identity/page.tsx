@@ -18,7 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { Image as ImageIcon } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -419,7 +420,22 @@ function DangerTab() {
     setBusy(false);
     if (!r.ok) { setError(r.error); return; }
     setDeleteOpen(false);
+    // Out of the workspace at once (it was the workspace menu's behaviour):
+    // into another workspace this person belongs to, else signed out. The
+    // session check would move them within five minutes anyway.
+    const orgs = await apiFetch<{ memberships?: { isCurrent: boolean; organization: { id: string; name: string } }[] }>("/api/me/orgs", { cache: "no-store" });
+    const other = orgs.ok ? (orgs.data?.memberships ?? []).find((m) => !m.isCurrent)?.organization : undefined;
+    if (other) {
+      toast(`The workspace is scheduled for deletion. Switching you to ${other.name}`);
+      const sw = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: other.id } });
+      if (sw.ok) {
+        await updateSession();
+        window.location.href = WORK_HOME_HREF;
+        return;
+      }
+    }
     toast("The workspace is scheduled for deletion");
+    void signOut({ callbackUrl: "/login" });
   }
 
   return (

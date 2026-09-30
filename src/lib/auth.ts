@@ -4,6 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { verifySync } from "otplib";
 import { prisma } from "./prisma";
+import { settingsKey } from "@/lib/org-settings-write";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
@@ -408,9 +409,13 @@ export const authOptions: NextAuthOptions = {
       // with their password and code (or enrol there), never around it.
       const mfa = await prisma.user.findUnique({
         where: { id: existing.id },
-        select: { accessLevel: true, organization: { select: { settings: true } } },
+        select: { accessLevel: true, mfaEnabled: true, mfaSecret: true, organization: { select: { settings: true } } },
       });
-      if (mfa && mfaRequiredFor(mfa.organization.settings, orgRoleOf({ accessLevel: mfa.accessLevel }))) {
+      // Also the live floor: with ENFORCE_MFA_AT_LOGIN on, a person enrolled
+      // in two step verification is asked for their code on the password
+      // path, so Google must not be a way around it either.
+      const enrolledUnderFloor = !!mfa && process.env.ENFORCE_MFA_AT_LOGIN === "true" && mfa.mfaEnabled && !!mfa.mfaSecret;
+      if (mfa && (enrolledUnderFloor || mfaRequiredFor(mfa.organization.settings, orgRoleOf({ accessLevel: mfa.accessLevel })))) {
         return "/login?error=MfaRequired";
       }
       return true;
@@ -665,6 +670,15 @@ export const authOptions: NextAuthOptions = {
             // the session windows, and the password age hold (an expired
             // password reaches only My settings > Security until changed;
             // a password with no recorded change date is never held).
+            // Workspace settings > Security > Sign everyone out, for a
+            // session that acts here but whose account was not bumped
+            // (anchored in another company when the button was pressed):
+            // signed in before the stamp ends now, and stays ended.
+            const signedOutAt = Date.parse(String(settingsKey(holdOrg?.settings, "security").signedOutEveryoneAt ?? ""));
+            if (Number.isFinite(signedOutAt) && typeof token.authAt === "number" && token.authAt < signedOutAt) {
+              token.policyEnded = true;
+              token.policyEndedReason = "signed_out";
+            }
             if (holdOrg) {
               const policy = signInPolicyOf(holdOrg.settings);
               token.idleMin = policy.sessionIdleMinutes;
@@ -692,7 +706,7 @@ export const authOptions: NextAuthOptions = {
       // the token. An ended session stays ended; the revalidation above never
       // clears policyEnded.
       if (token.id && !token.policyEnded) {
-        const verdict = sessionVerdict({ authAt: token.authAt, seenAt: token.seenAt, idleMin: token.idleMin, maxDays: token.maxDays });
+        const verdict = sessionVerdict({ authAt: token.authAt, seenAt: token.seenAt, issuedAt: typeof token.iat === "number" ? token.iat * 1000 : undefined, idleMin: token.idleMin, maxDays: token.maxDays });
         if (verdict.ended) {
           token.policyEnded = true;
           token.policyEndedReason = verdict.reason;
@@ -713,7 +727,7 @@ export const authOptions: NextAuthOptions = {
       }
       // The idle warning arms on `expires`: the workspace's idle window when
       // it is shorter than NextAuth's 12h ceiling.
-      const until = sessionIdleUntil({ authAt: token.authAt, seenAt: token.seenAt, idleMin: token.idleMin, maxDays: token.maxDays });
+      const until = sessionIdleUntil({ authAt: token.authAt, seenAt: token.seenAt, issuedAt: typeof token.iat === "number" ? token.iat * 1000 : undefined, idleMin: token.idleMin, maxDays: token.maxDays });
       if (Number.isFinite(until) && until < new Date(session.expires).getTime()) session.expires = new Date(until).toISOString();
       if (session.user) {
         Object.assign(session.user, {

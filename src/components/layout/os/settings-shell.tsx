@@ -23,7 +23,7 @@
 // one click apart. The active row is derived from the URL alone.
 //
 // The breadcrumb lives on the navy bar, declared from here:
-//   Settings > Workspace settings > {Page}
+//   {Org} > Workspace settings > {Page}      (the org name links to the Overview)
 //   {First name} > My settings > {Page}     (the name links to /people/me)
 // Below 900px the list becomes a "Pages" select in the takeover bar. Exits
 // call closeSettings() (the origin rule, settings spec 8.3); rows and the
@@ -48,7 +48,7 @@ import { hasDirty, leaveThen, setLeaveConfirmer, type LeaveDecision } from "@/li
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Search, X, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Lock, Search, X, type LucideIcon } from "lucide-react";
 import { SETTINGS_ICONS } from "@/components/settings/settings-icons";
 import { Breadcrumb, type BreadcrumbItem } from "./top-bar/breadcrumb";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
@@ -88,7 +88,10 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const pathname = usePathname() || "";
   const router = useRouter();
   const { data: session } = useSession();
-  const { isAdmin, isGuest, isSettingsReader, settingsReaderPages } = useViewerRole();
+  const { isAdmin, isGuest, isSettingsReader, settingsReaderPages, settingsLockedPages } = useViewerRole();
+  // Owner pages this Admin cannot open (sidebar-map 8a, spec 1.2): a lock on
+  // the row and ". Owners only" in the narrow-screen Pages select.
+  const locked = useMemo(() => new Set<string>(settingsLockedPages ?? []), [settingsLockedPages]);
   const readerPages = settingsReaderPages ?? SETTINGS_READER_PAGES;
   const { boot } = useBoot();
   const { mutedNotifications } = useOsShell();
@@ -147,6 +150,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const override = useActiveSettingsRowOverride();
   const activeKey = override ?? (current && current.door === shownDoor ? current.key : null);
   const firstName = (session?.user as { firstName?: string } | undefined)?.firstName;
+  const orgName = (session?.user as { organizationName?: string } | undefined)?.organizationName;
 
   const crumbs = useMemo<BreadcrumbItem[]>(() => {
     const items: BreadcrumbItem[] = [];
@@ -165,7 +169,9 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       items.push({ label: DOOR_LABELS.me, href: "/account/profile" });
     } else {
       const home = readerOnPage ? "/settings/members" : "/settings";
-      items.push({ label: HUB_LABELS.settings, href: home });
+      // settings-architecture section 4: {Org} > Workspace settings > {Page},
+      // the twin of the My settings door's {First name} > My settings.
+      items.push({ label: orgName || HUB_LABELS.settings, href: home });
       items.push({ label: DOOR_LABELS.workspace, href: home });
     }
     const overridePage = override ? (SETTINGS_PAGES as Record<string, { label: string } | undefined>)[override] : undefined;
@@ -186,7 +192,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       }
     }
     return items;
-  }, [current, shownDoor, firstName, isAdmin, isGuest, pathname, readerOnPage, override]);
+  }, [current, shownDoor, firstName, orgName, isAdmin, isGuest, pathname, readerOnPage, override]);
 
   // Filter: rows by label, keyword, group and alias; plus the individual
   // settings (registry entries) the viewer's door lists beneath them.
@@ -244,7 +250,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
             {groups.map((g, gi) => (
               <optgroup key={g.label ?? `g${gi}`} label={g.label ?? (shownDoor === "me" && gi === 0 ? DOOR_LABELS.me : DOOR_LABELS.workspace)}>
                 {g.rows.map((r) => (
-                  <option key={r.key} value={r.href}>{r.label}</option>
+                  <option key={r.key} value={r.href}>{r.pageKey && locked.has(r.pageKey) ? `${r.label}. Owners only` : r.label}</option>
                 ))}
               </optgroup>
             ))}
@@ -316,6 +322,9 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
                           <span className="min-w-0 flex-1 truncate">{row.label}</span>
                           {row.pageKey === "account/notifications" && mutedNotifications ? (
                             <span className="shrink-0 text-xs font-medium text-ink-2">Muted</span>
+                          ) : null}
+                          {row.pageKey && locked.has(row.pageKey) ? (
+                            <Lock className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-label="Owners only" />
                           ) : null}
                           {row.pageKey === "account/security" && mfaHold ? (
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--os-attention)]" aria-label="Needs attention" />

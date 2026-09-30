@@ -25,16 +25,10 @@ import { readConsole } from "@/lib/setup/console-state";
 // Every value is counted or read, never invented; a value the product does
 // not hold says so in words.
 
-const NEW_SPACE_LABELS: Record<string, string> = {
-  everyone_edit: "open, Can edit",
-  everyone_view: "open, Can view",
-  private: "private",
-};
-const GUEST_INVITE_LABELS: Record<string, string> = {
-  full_access: "anyone with Full access",
-  admins: "Admins only",
-  nobody: "nobody",
-};
+// The Access tile names only switches the product reads in every flag state
+// (toggle-status.ts: the People team and Public links). The rest are stored
+// but not enforced yet, so the Access page keeps them behind Show upcoming
+// features and this tile never states them as if they held.
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
@@ -110,7 +104,7 @@ async function overview() {
     apps: [`${modulesOn} of ${MODULE_SLUGS.length} modules on`, plural(hidden, "app") + " hidden"],
     members: [plural(members, "member"), plural(pending, "pending invite")],
     structure: [plural(departments, "department"), `${plural(titles, "job title")} · ${plural(offices, "office")}`],
-    access: [`New Spaces: ${NEW_SPACE_LABELS[access.newSpaceDefault] ?? access.newSpaceDefault}`, `Guest invites: ${GUEST_INVITE_LABELS[access.whoCanInviteGuests] ?? access.whoCanInviteGuests}`],
+    access: [`People team: ${plural(access.peopleTeamUserIds.length, "person", "people")} named`, `Public links: ${access.publicLinks === "view" ? "on, view only" : "off"}`],
     tasks: [plural(itemTypes, "task type"), plural(tags, "tag")],
     scoring: [onCadences.length ? onCadences.map(cap).join(", ") : "No review cadence on", `Weights sum to ${weightsTotal(weights)}`],
     security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${signIn.sessionIdleMinutes} minutes`],
@@ -132,6 +126,9 @@ async function overview() {
       setup: {
         console: readConsole(settings),
         consoleRaw: settings.console ?? null,
+        // Finished either old wizard (settings.setupCompleted): the card reads
+        // it with the console key, so a finished workspace is never offered setup.
+        legacyCompleted: settings.setupCompleted === true,
         hasLogoOrMission: !!org.logo || !!profile.mission?.trim() || values > 0,
         activeUsers: members,
         activeModules: modulesOn,

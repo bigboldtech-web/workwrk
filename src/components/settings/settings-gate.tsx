@@ -94,7 +94,15 @@ export async function SettingsDenied({ page }: { page: SettingsPageKey }) {
   return (
     <>
       <ActiveSettingsRow pageKey="account/profile" />
-      <AskAnAdminStrip pageLabel={label === SETTINGS_PAGES.overview.label ? "Workspace settings" : label} admins={admins} openable={openable} />
+      <AskAnAdminStrip
+        pageLabel={label === SETTINGS_PAGES.overview.label ? "Workspace settings" : label}
+        admins={admins}
+        openable={openable}
+        // Data > Import took over /imports, whose card pointed a Member at
+        // the table importer: that pointer stays, so an old bookmark is
+        // never a dead end.
+        instead={page === "data" ? { label: "Import a CSV into a table", href: "/tables?import=1" } : undefined}
+      />
       <AccountProfilePage />
     </>
   );

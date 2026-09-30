@@ -131,7 +131,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   }),
   page("workspace", "members", "Members", "/settings/members", "Users", {
     group: "People",
-    tabs: ["people", "guests", "pending"],
+    tabs: ["people", "guests", "teams", "pending"],
     keywords: ["people", "invite", "guests", "teams", "roles", "deactivate"],
   }),
   page("workspace", "structure", "Structure", "/settings/structure", "Network", {
@@ -504,6 +504,7 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({ id: "apps.rail", door: "workspace", page: "apps", label: "Rail apps: order, hide and who can see", description: "What shows in everyone's rail.", href: "/settings/apps#rail", keywords: ["rail", "hide", "order", "floor", "apps"] }),
   entry({ id: "apps.automations", door: "workspace", page: "apps", label: "Pause all automations", description: "Stops every automation in the workspace.", href: "/settings/apps#apps.automations", keywords: ["automation", "pause", "workflows", "runs"] }),
   entry({ id: "members.people", door: "workspace", page: "members", label: "People and their roles", description: "Owner, Admin or Member, job title, department and manager.", href: "/settings/members?tab=people", keywords: ["people", "roles", "deactivate", "remove", "reports to"] }),
+  entry({ id: "members.teams", door: "workspace", page: "members", label: "Teams", description: "Named groups of people: who is in each and who leads it.", href: "/settings/members?tab=teams", keywords: ["teams", "groups", "lead"] }),
   entry({ id: "members.inviteRules", door: "workspace", page: "members", label: "Invite rules", description: "Allowed domains, default role and invitation expiry.", href: "/settings/members?tab=pending#members.inviteRules", keywords: ["invite", "domains", "expiry", "default role"] }),
   entry({ id: "structure.departments", door: "workspace", page: "structure", label: "Departments", description: "The departments people belong to.", href: "/settings/structure?tab=departments", keywords: ["departments", "functions", "teams"] }),
   entry({ id: "structure.titles", door: "workspace", page: "structure", label: "Job titles", description: "The job titles people hold.", href: "/settings/structure?tab=titles", keywords: ["job titles", "roles", "seniority"] }),

@@ -328,7 +328,7 @@ export interface AdminOnlyProps {
   managedBy?: "Owners" | "Owners and Admins";
   back: BackTarget;
   /** Under the sentence: the one thing a Member CAN do instead, so the card
-   *  is not a dead end (the /imports "Import a CSV into a table" link). */
+   *  is not a dead end. */
   children?: ReactNode;
 }
 
@@ -354,6 +354,8 @@ export interface AskAnAdminStripProps {
   admins: OrgAdmin[];
   /** Workspace pages this viewer CAN open (a reader below Admin), linked after the sentence. */
   openable?: { label: string; href: string }[];
+  /** The one thing this viewer CAN do instead, outside settings (Data: "Import a CSV into a table"). */
+  instead?: { label: string; href: string };
 }
 
 /** "Ana, Ben and Cy" from the first three names (pure; tested). */
@@ -372,8 +374,9 @@ export function adminNamesSentence(names: string[]): string {
  * not a wall: nothing of the Workspace page is revealed beyond its label,
  * and the page under it is a destination, so it carries no BackButton.
  */
-export function AskAnAdminStrip({ pageLabel, admins, openable }: AskAnAdminStripProps) {
+export function AskAnAdminStrip({ pageLabel, admins, openable, instead }: AskAnAdminStripProps) {
   const who = adminNamesSentence(admins.map((a) => a.name));
+  const look = admins.filter((a) => a.name).length === 1 ? "looks" : "look";
   return (
     <div
       role="note"
@@ -381,7 +384,11 @@ export function AskAnAdminStrip({ pageLabel, admins, openable }: AskAnAdminStrip
     >
       <Info className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden />
       <span className="min-w-0 flex-1">
-        {pageLabel === "Workspace settings" ? "Workspace settings are" : `${pageLabel} is`} looked after by {who}. Ask them to change it.
+        {/* spec-settings-workspace 1.4: the page is part of Workspace
+            settings, which named people look after. */}
+        {pageLabel === "Workspace settings"
+          ? `Workspace settings are looked after by ${who}. Ask them if you need something changed.`
+          : `${pageLabel} is part of Workspace settings, which ${who} ${look} after. Ask them if you need something changed.`}
         {openable && openable.length > 0 ? (
           <>
             {" "}You can open{" "}
@@ -392,6 +399,12 @@ export function AskAnAdminStrip({ pageLabel, admins, openable }: AskAnAdminStrip
               </span>
             ))}
             .
+          </>
+        ) : null}
+        {instead ? (
+          <>
+            {" "}
+            <Link href={instead.href} className="font-medium text-brand-deep underline-offset-2 hover:underline">{instead.label}</Link>
           </>
         ) : null}
       </span>

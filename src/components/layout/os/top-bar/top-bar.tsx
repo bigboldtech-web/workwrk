@@ -197,11 +197,18 @@ export function TopBar({ onMenu, menuOpen }: { onMenu?: () => void; menuOpen?: b
         </div>
       </div>
 
+      {/* Inside a settings door the door sidebar's own "Find a setting"
+          field is the search (and the Overview adds its Search settings), so
+          the bar draws no third one on wide screens; Cmd K still focuses the
+          sidebar field. The narrow icon below stays: it focuses that field. */}
       <button
         type="button"
         onClick={onSearch}
         aria-label={inSettings ? SHELL_LABELS.settingsSearchPlaceholder : SHELL_LABELS.search}
-        className="hidden h-8 w-[240px] shrink-0 items-center gap-2 rounded-md border border-chrome-line bg-chrome-field px-3 text-start text-base text-chrome-field-ph hover:bg-chrome-hov lg:flex xl:w-[400px]"
+        className={cn(
+          "hidden h-8 w-[240px] shrink-0 items-center gap-2 rounded-md border border-chrome-line bg-chrome-field px-3 text-start text-base text-chrome-field-ph hover:bg-chrome-hov xl:w-[400px]",
+          !inSettings && "lg:flex",
+        )}
       >
         <Search className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
         <span className="min-w-0 flex-1 truncate">{inSettings ? SHELL_LABELS.settingsSearchPlaceholder : SHELL_LABELS.searchPlaceholder}</span>

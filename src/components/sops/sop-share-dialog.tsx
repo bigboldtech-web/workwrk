@@ -17,7 +17,6 @@
 // access unit's step 5 lands; the button and the rows stay where they are.
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Globe, Link2, Users } from "lucide-react";
 import Link from "next/link";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -26,6 +25,7 @@ import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { apiFetch } from "@/lib/api-fetch";
 import { OBJECT_ROLE_LABEL } from "@/lib/access/labels";
@@ -45,7 +45,7 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
   const { toast } = useOsToast();
   const { boot } = useBoot();
   const confirm = useConfirm();
-  const router = useRouter();
+  const { openSettings } = useSettingsNav();
   const [rows, setRows] = useState<AccessRow[] | null | "hidden">(null);
   const [busy, setBusy] = useState<"mint" | "revoke" | null>(null);
 
@@ -79,7 +79,7 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
       // can turn it on. Never a bare "Couldn't create".
       const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
       if (!r.ok && r.status === 409 && isAdmin) {
-        toast(r.error, { tone: "danger", action: { label: "Open Access settings", onClick: () => router.push("/settings/access") } });
+        toast(r.error, { tone: "danger", action: { label: "Open Access settings", onClick: () => openSettings("/settings/access") } });
         return;
       }
       toast(r.ok ? "Couldn't create a public link" : r.error || "Couldn't create a public link", { tone: "danger" });

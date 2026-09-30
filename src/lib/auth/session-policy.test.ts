@@ -27,4 +27,11 @@ describe("sessionVerdict", () => {
     expect(sessionIdleUntil({ seenAt: now, idleMin: 30 }, now)).toBe(now + 30 * 60_000);
     expect(sessionIdleUntil({ seenAt: now, idleMin: 600, authAt: now - 30 * 24 * H + 60_000, maxDays: 30 }, now)).toBe(now + 60_000);
   });
+  it("idle-times a token with no seenAt from its issue time, never from now", () => {
+    const now = 100 * H;
+    expect(sessionVerdict({ issuedAt: now - 13 * H }, now)).toEqual({ ended: true, reason: "idle" });
+    expect(sessionVerdict({ issuedAt: now - 60_000 }, now).ended).toBe(false);
+    expect(sessionVerdict({ seenAt: now - 60_000, issuedAt: now - 13 * H }, now).ended).toBe(false);
+    expect(sessionIdleUntil({ issuedAt: now - H, idleMin: 120 }, now)).toBe(now + H);
+  });
 });

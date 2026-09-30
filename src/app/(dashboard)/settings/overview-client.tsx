@@ -41,7 +41,7 @@ interface OverviewBody {
   pendingInvites: number;
   cards: Partial<Record<SettingsPageKey, [string, string]>>;
   ownerOnly: string[];
-  setup: { consoleRaw: unknown; hasLogoOrMission: boolean; activeUsers: number; activeModules: number };
+  setup: { consoleRaw: unknown; legacyCompleted?: boolean; hasLogoOrMission: boolean; activeUsers: number; activeModules: number };
 }
 
 /** One line per page, what it is for (the tile's 13/400 line). */
@@ -191,6 +191,7 @@ export function SettingsOverviewClient() {
               <SetupCard
                 orgName={data.org.name}
                 consoleRaw={data.setup.consoleRaw}
+                legacyCompleted={data.setup.legacyCompleted === true}
                 hasLogoOrMission={data.setup.hasLogoOrMission}
                 activeUsers={data.setup.activeUsers}
                 activeModules={data.setup.activeModules}

@@ -42,6 +42,8 @@ import { isSeededDepartmentSet } from "@/lib/org/default-departments";
 interface Props {
   orgName: string;
   consoleRaw: unknown;
+  /** settings.setupCompleted: the workspace finished one of the old wizards. */
+  legacyCompleted?: boolean;
   hasLogoOrMission: boolean;
   activeUsers: number;
   activeModules: number;
@@ -51,8 +53,8 @@ interface Props {
 const GHOST = "inline-flex h-8 items-center gap-2 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50";
 const SECONDARY = "inline-flex h-8 items-center rounded-md border border-line-strong px-3 text-base font-medium text-ink hover:bg-hover";
 
-export function SetupCard({ orgName, consoleRaw, hasLogoOrMission, activeUsers, activeModules, onChanged }: Props) {
-  const state = readConsole({ console: consoleRaw });
+export function SetupCard({ orgName, consoleRaw, legacyCompleted = false, hasLogoOrMission, activeUsers, activeModules, onChanged }: Props) {
+  const state = readConsole({ console: consoleRaw, setupCompleted: legacyCompleted });
   const [departments, setDepartments] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

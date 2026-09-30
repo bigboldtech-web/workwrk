@@ -45,6 +45,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { InviteModal } from "@/components/layout/os/invite-modal";
 import { useSettingsSection } from "@/hooks/use-settings-section";
+import { settingsTabs } from "@/lib/settings-registry";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -64,12 +65,8 @@ type ListBody = {
   peopleTeam: { configured: boolean; ids: string[] };
 };
 
-const TABS: SettingsTab[] = [
-  { key: "people", label: "People" },
-  { key: "guests", label: "Guests" },
-  { key: "teams", label: "Teams" },
-  { key: "pending", label: "Pending invites" },
-];
+// The registry holds the tab keys and labels (settings-registry.ts, ONE place).
+const TABS: SettingsTab[] = settingsTabs("members");
 const SORTS = [
   { value: "name_asc", label: "Name A to Z" },
   { value: "name_desc", label: "Name Z to A" },

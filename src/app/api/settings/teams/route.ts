@@ -13,6 +13,7 @@ import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
 
@@ -55,6 +56,8 @@ export async function POST(req: Request) {
   const u = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   if (!sessionIsWorkspaceAdmin(session)) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE });
+  const gate = await settingsWriteGate(session, "members");
+  if (!gate.ok) return gate.response;
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     const key = issueKey(parsed.error.issues[0]);

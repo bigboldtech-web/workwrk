@@ -184,7 +184,7 @@ export default function OrgChartClient() {
             ...(data?.viewer.canExport ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
             ...(isAdmin ? [
               { label: "Manage members", icon: ExternalLink, onClick: () => openSettings("/settings/members") },
-              { label: "Org settings", icon: Settings2, onClick: () => openSettings("/settings/structure") },
+              { label: "Structure", icon: Settings2, onClick: () => openSettings("/settings/structure") },
             ] : []),
           ],
         }}

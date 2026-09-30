@@ -3,7 +3,8 @@
 //   - shapes the rows for human-readable column headers
 //   - logs the export to the audit trail (who exported what, when)
 //
-// Authorization is per-type: manager+ across the board.
+// Authorization is per-type. type=audit is Owner and Admin only and hands
+// over to the Audit log page export (/api/audit?format=csv).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -21,6 +22,7 @@ import { weekStartUTC } from "@/lib/timesheet-week";
 import { isOrgWideTimesheetReader } from "@/lib/timesheet-scope";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { logActivity } from "@/lib/activity";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 const SUPPORTED = new Set([
   "timesheets",
@@ -212,36 +214,21 @@ export async function GET(
       "Paid at": inv.paidAt?.toISOString() ?? "",
     }));
   } else if (type === "audit") {
-    if (!isManager(session)) return jsonError("Forbidden", 403);
+    // ONE audit export: the Audit log page's own (/api/audit?format=csv),
+    // which is Owner and Admin only on the fresh actor, labels every row
+    // whose actor was not a person (identity provider, WorkwrK staff, the
+    // retention purge) and says in the log when it was capped. This branch
+    // used to be the legacy manager tier with its own, unlabelled columns.
+    // It answers old links by sending them there with the same date range.
+    const gate = await settingsWriteGate(session, "audit", { read: true });
+    if (!gate.ok) return gate.response;
+    const target = new URL("/api/audit", req.url);
+    target.searchParams.set("format", "csv");
     const startDate = sp.get("startDate");
     const endDate = sp.get("endDate");
-    const where: Record<string, unknown> = { organizationId: orgId };
-    if (startDate || endDate) {
-      const created: Record<string, Date> = {};
-      if (startDate) created.gte = new Date(startDate);
-      if (endDate) created.lte = new Date(endDate);
-      where.createdAt = created;
-    }
-    const events = await prisma.activityLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: 10_000,
-      include: {
-        actor: { select: { firstName: true, lastName: true, email: true } },
-      },
-    });
-    columns = ["When", "Type", "Severity", "Actor", "Email", "Description", "Target type", "Target ID", "IP"];
-    rows = events.map((e) => ({
-      "When": e.createdAt.toISOString(),
-      "Type": e.type,
-      "Severity": e.severity,
-      "Actor": e.actor ? `${e.actor.firstName} ${e.actor.lastName}` : "",
-      "Email": e.actor?.email ?? "",
-      "Description": e.description,
-      "Target type": e.targetType ?? "",
-      "Target ID": e.targetId ?? "",
-      "IP": e.ipAddress ?? "",
-    }));
+    if (startDate) target.searchParams.set("from", startDate);
+    if (endDate) target.searchParams.set("to", endDate);
+    return Response.redirect(target, 307);
   }
 
   // Audit-log the export itself.

@@ -128,5 +128,9 @@ export function useViewerRole() {
     isSettingsReader: boot.viewer.settingsReader === true,
     /** The Workspace pages that reader opens (the engine gate names them; absent: Members, Access, Scoring). */
     settingsReaderPages: boot.viewer.settingsReaderPages,
+    /** Owner pages this Admin cannot open (SETTINGS_OWNER_SPLIT on, no scope): the sidebar's lock rows. */
+    settingsLockedPages: boot.viewer.settingsLockedPages,
+    /** Identity > Danger zone is closed to this Admin (the Owner split on, not an Owner). */
+    ownerActionsLocked: boot.viewer.ownerActionsLocked === true,
   };
 }

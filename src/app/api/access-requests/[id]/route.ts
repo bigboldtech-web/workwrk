@@ -19,10 +19,10 @@ import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { nodeCtxFromSession } from "@/lib/access/node-access";
-import { GrantError, setNodeGrant } from "@/lib/access/grants";
+import { GrantError, mayManageNode, setNodeGrant } from "@/lib/access/grants";
 import { requestExpired, requestNodeRef } from "@/lib/access/access-requests";
 import { requestTargetFor } from "@/lib/access/access-request-target";
-import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
@@ -59,9 +59,19 @@ export async function PATCH(req: Request, { params }: Params) {
 
   if (parsed.data.decision === "decline") {
     // Only someone who could have granted it declines it: the owner, an
-    // Owner or Admin, or (for a node) a Full holder, which gateNode checks
-    // on a grant; a decline asks the cheaper question of owner or admin.
-    if (!sessionIsWorkspaceAdmin(session) && target.ownerId !== u.id) {
+    // Owner or Admin (re-read from the database, so an Admin demoted a moment
+    // ago is refused now), or for a node anyone who clears the grant's own
+    // manage bar (mayManageNode, the check setNodeGrant makes).
+    let mayDecline = target.ownerId === u.id;
+    if (!mayDecline && sessionIsWorkspaceAdmin(session)) {
+      const fresh = await freshWorkspaceActor(session);
+      mayDecline = fresh.ok && fresh.admin;
+    }
+    if (!mayDecline && node) {
+      const managerCtx = await nodeCtxFromSession();
+      mayDecline = !!managerCtx && (await mayManageNode(managerCtx, node));
+    }
+    if (!mayDecline) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
     }
     // Claim the answer first: one conditional update, so when two people

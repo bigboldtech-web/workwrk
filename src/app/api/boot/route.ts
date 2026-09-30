@@ -39,6 +39,7 @@ import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf, peopleTeamOf } from "@/lib/access/org-role";
 import { parseAccessSettings } from "@/lib/access/settings";
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { ownerSplitOn, scopeForOwnerPage, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 
@@ -119,6 +120,15 @@ export interface BootPayload {
      * nothing for the manager tier. Absent under today's table.
      */
     settingsReaderPages?: SettingsPageKey[];
+    /**
+     * Phase 8: the Owner pages (Security, API & webhooks, Plan & billing) this
+     * Admin cannot open (only with SETTINGS_OWNER_SPLIT on, and only for an
+     * Admin without the page's scope). The Workspace sidebar draws a lock on
+     * these rows, as the Overview tiles do. Absent when nothing is locked.
+     */
+    settingsLockedPages?: SettingsPageKey[];
+    /** Phase 8: the Owner-only actions (Identity > Danger zone: delete, transfer) are closed to this Admin (the split on, not an Owner). */
+    ownerActionsLocked?: boolean;
     /**
      * Phase 6: in scope of an open candor session, or answered one, or an
      * organiser by the legacy manager tier (the Candor row). The organiser
@@ -429,6 +439,7 @@ export async function GET(req: NextRequest) {
         // Space control reads this, never a tier of its own).
         canCreateSpace: orgRoleOf({ accessLevel }) !== "GUEST" && !isAgentOf(accessLevel) && (await mayCreateSpace(accessLevel)),
         ...(await settingsReaderFor(accessLevel, session)),
+        ...(await settingsLockedFor(accessLevel, session)),
         candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
@@ -489,6 +500,18 @@ export async function GET(req: NextRequest) {
  * (SETTINGS_PAGE_GATES peopleTeamRead), so the frame never lists a page the
  * gate refuses.
  */
+/** The Owner pages this Admin cannot open (the lock glyph); the same rule sessionMayManageOwnerPage applies. */
+async function settingsLockedFor(accessLevel: string | null, session: unknown): Promise<{ settingsLockedPages?: SettingsPageKey[]; ownerActionsLocked?: boolean }> {
+  if (!legacyIsAdminLevel(accessLevel) || !ownerSplitOn()) return {};
+  const pages: SettingsPageKey[] = ["security", "api", "billing"];
+  const locked: SettingsPageKey[] = [];
+  for (const p of pages) {
+    if (!(await sessionMayManageOwnerPage(session, scopeForOwnerPage(p)))) locked.push(p);
+  }
+  const ownerActionsLocked = !(await sessionMayManageOwnerPage(session));
+  return { ...(locked.length ? { settingsLockedPages: locked } : {}), ...(ownerActionsLocked ? { ownerActionsLocked } : {}) };
+}
+
 async function settingsReaderFor(accessLevel: string | null, session: unknown): Promise<{ settingsReader: boolean; settingsReaderPages?: SettingsPageKey[] }> {
   if (legacyIsAdminLevel(accessLevel)) return { settingsReader: false };
   if (!delegateOn("settings")) return { settingsReader: legacyIsManagerLevel(accessLevel) };
