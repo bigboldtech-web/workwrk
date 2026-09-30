@@ -1,3 +1,5 @@
+import { policyFromOrgSettings } from "@/lib/password-policy";
+import { auditKeyWords } from "@/lib/audit-families";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -42,7 +44,7 @@ import {
   usersSettingsOf,
   workSettingsOf,
 } from "@/lib/settings/org-policy";
-import { sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
 type SessionUser = { id: string; organizationId: string; accessLevel?: string };
@@ -137,6 +139,9 @@ export async function GET() {
         // (src/lib/settings/org-policy.ts): the pages render these, never
         // the raw blob, so a missing key reads as today's behaviour.
         signIn: signInPolicyOf(settings),
+        // The older "two-factor required" key, which nothing enforces
+        // (security-policy.ts), so the Security page can say so.
+        signInLegacy: { twoFactorEnabled: (settings.security as { twoFactorEnabled?: unknown } | undefined)?.twoFactorEnabled === true },
         locale: localeSettingsOf(settings, orgCurrencyFromSettings(settings)),
         work: workSettingsOf(settings),
         users: usersSettingsOf(settings, org.domain),
@@ -168,14 +173,18 @@ export async function GET() {
     // process taxonomies' admin config, the org's business profile and the
     // stored session fields stay with the doors that edit them.
     if (!legacyIsManagerLevel((session.user as SessionUser).accessLevel)) {
-      const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, signIn: _si, users: _u, retention: _r, data: _d, work: _w, ...rest } = body.settings;
-      void _access; void _process; void _b; void _i; void _t; void _si; void _u; void _r; void _d; void _w;
-      const sec = (security ?? {}) as { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean };
+      const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, signIn: _si, signInLegacy: _sl, users: _u, retention: _r, data: _d, work: _w, ...rest } = body.settings;
+      void _access; void _process; void _b; void _i; void _t; void _si; void _sl; void _u; void _r; void _d; void _w;
+      void security;
+      // The rules as enforced (password-policy.ts, defaults filled in), not
+      // the raw blob: after a partial Security save the raw blob can lack a
+      // key the checklist then reads as off.
+      const sec = policyFromOrgSettings(settings);
       return NextResponse.json({
         ...body,
         settings: {
           ...rest,
-          security: { minPasswordLength: sec.minPasswordLength, requireUppercase: sec.requireUppercase, requireNumbers: sec.requireNumbers },
+          security: { minPasswordLength: sec.minPasswordLength, requireUppercase: sec.requireUppercase, requireNumbers: sec.requireNumbers, requireSymbol: sec.requireSymbol },
         },
       });
     }
@@ -218,6 +227,12 @@ export async function PATCH(req: Request) {
     const { section } = envelope;
     const data = envelope.data;
 
+    // Every workspace setting is a write about the whole workspace: the
+    // actor is re-read from the database, so an Admin demoted a moment ago
+    // (or signed out elsewhere) is refused now, not in five minutes.
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+
     // The `process` section is the one OrgAction `manage_process` gates
     // (spec-process section 1: Owner, Admin, People team; never Guests or
     // Agents). The People team (HR) may write it; every other section keeps
@@ -238,10 +253,10 @@ export async function PATCH(req: Request) {
       // Owner pages (settings spec 5.9 and 5.10: the sign-in policy, and the
       // purge windows that delete data). Every Admin until the Owner and
       // Admin split is approved (SETTINGS_OWNER_SPLIT, default OFF).
-      if (!(await sessionMayManageOwnerPage(session))) {
+      if (!freshMayManageOwnerPage(fresh)) {
         return NextResponse.json({ error: "Only workspace Owners can change this" }, { status: 403 });
       }
-    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel)) {
+    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel) || !fresh.admin) {
       // general, culture, security, access: Admin only (settings-architecture
       // 9.2; Owner for security once SETTINGS_OWNER_SPLIT is on). The pages
       // that write them (Identity, Locale, Access) were admin-gated already,
@@ -391,7 +406,11 @@ export async function PATCH(req: Request) {
         if (d.scoreWeights !== undefined) {
           const v = validateScoreWeights(d.scoreWeights);
           if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
-          scoring.scoreWeights = d.scoreWeights;
+          // Merged over the stored weights: the monthly performance score
+          // (services/performanceScoreService.ts) still reads the older
+          // manager and self keys, so a save here never deletes them.
+          const prior = currentSettings.scoreWeights && typeof currentSettings.scoreWeights === "object" ? (currentSettings.scoreWeights as Record<string, unknown>) : {};
+          scoring.scoreWeights = { ...prior, ...d.scoreWeights };
         }
         if (d.scoringBands !== undefined) {
           const v = validateScoringBands(d.scoringBands);
@@ -424,7 +443,7 @@ export async function PATCH(req: Request) {
             type: "security.policy.updated",
             actorId: (session.user as SessionUser).id,
             organizationId: orgId,
-            description: `Changed the sign-in policy: ${moved.join(", ")}`,
+            description: `Changed the sign-in policy: ${moved.map((k) => auditKeyWords(k).toLowerCase()).join(", ")}`,
             targetType: "Organization",
             targetId: orgId,
             severity: "warning",

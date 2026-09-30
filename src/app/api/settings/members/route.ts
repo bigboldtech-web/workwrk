@@ -26,6 +26,13 @@ export async function GET(req: NextRequest) {
   const filters = (sp.get("filter") ?? "").split(",").map((f) => f.trim()).filter(Boolean);
   const roleF = filters.find((f) => f.startsWith("role:"))?.slice(5).toUpperCase();
   const sort = sp.get("sort");
+  // A status outside the list is the caller's mistake: a 400 that names it,
+  // never a 500 from the database layer.
+  const statusParam = sp.get("status");
+  const STATUSES = ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"];
+  if (statusParam && !STATUSES.includes(statusParam)) {
+    return NextResponse.json({ error: `Unknown status: ${statusParam.slice(0, 40)}`, field: "status" }, { status: 400 });
+  }
   const query: MemberQuery = {
     q: (sp.get("q") ?? "").slice(0, 80) || undefined,
     sort: sort && (MEMBER_SORTS as readonly string[]).includes(sort) ? (sort as MemberSort) : "name_asc",
@@ -33,7 +40,7 @@ export async function GET(req: NextRequest) {
     departmentId: sp.get("department"),
     officeId: sp.get("office"),
     roleId: sp.get("title"),
-    status: sp.get("status"),
+    status: statusParam,
     noManager: filters.includes("unlinked") || filters.includes("nomanager"),
     peopleTeam: filters.includes("peopleteam"),
     inactive30: filters.includes("inactive30"),

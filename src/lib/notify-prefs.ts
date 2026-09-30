@@ -12,7 +12,7 @@
 // prefs hiccup can never silently drop a notification.
 
 import { prisma } from "@/lib/prisma";
-import { inboxKeyOn } from "@/lib/account/notification-presets";
+import { activeMute, inboxKeyOn } from "@/lib/account/notification-presets";
 
 /** Keys shared with the settings page rows — keep in sync with
  *  src/app/(dashboard)/account/notifications/page.tsx. */
@@ -30,6 +30,8 @@ export type NotifyType =
 interface NotifPrefs {
   inbox?: Record<string, boolean>;
   email?: Record<string, boolean>;
+  /** My settings > Notifications > Mute everything until (ISO), or null. */
+  mutedUntil?: string | null;
 }
 
 function prefsOf(home: unknown): NotifPrefs {
@@ -62,7 +64,11 @@ export async function shouldNotify(userId: string, type: NotifyType): Promise<bo
  *  Honors the master email switch, then the per-type toggle. */
 export async function shouldEmail(userId: string, type: NotifyType): Promise<boolean> {
   try {
-    const e = (await loadPrefs(userId)).email;
+    const p = await loadPrefs(userId);
+    // "Mute everything until" holds the emails too, not only the pings the
+    // shell draws: nothing new reaches the person while the mute runs.
+    if (activeMute(typeof p.mutedUntil === "string" ? p.mutedUntil : null)) return false;
+    const e = p.email;
     if (e?.master === false) return false;
     return e?.[type] !== false; // default true
   } catch {

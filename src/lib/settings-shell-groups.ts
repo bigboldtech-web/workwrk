@@ -42,7 +42,33 @@ function rowOf(p: SettingsPage): SettingsShellRow {
   return { key: p.key, label: p.label, href: p.href, icon: p.icon, pageKey: p.key };
 }
 
-export function settingsShellGroups(door: SettingsDoorProp, isAdmin: boolean): SettingsShellGroup[] {
+/**
+ * The Workspace pages a reader below Admin opens today (settings-gate.tsx
+ * LEGACY_SETTINGS_RULES "manager-tier"; sidebar-map 8a lists the People
+ * team's rows as Members, Structure, Access and Scoring, and Structure
+ * joins when the engine gate gives it to the People team).
+ */
+export const SETTINGS_READER_PAGES: readonly SettingsPageKey[] = ["members", "access", "scoring"];
+
+/**
+ * The reader list (sidebar-map 8a): a first row "My settings" so the list is
+ * never an orphan, then the reader's pages under their own group labels
+ * (PEOPLE, WORK) and no others.
+ */
+export function readerShellGroups(): SettingsShellGroup[] {
+  const pages = settingsSidebar("workspace").filter((p) => SETTINGS_READER_PAGES.includes(p.key));
+  const groups: SettingsShellGroup[] = [
+    { rows: [{ key: "me-door", label: DOOR_LABELS.me, href: "/account/profile", icon: "CircleUser", pageKey: null }] },
+  ];
+  for (const g of WORKSPACE_GROUP_ORDER) {
+    const rows = pages.filter((p) => p.group === g).map(rowOf);
+    if (rows.length) groups.push({ label: g, rows });
+  }
+  return groups;
+}
+
+export function settingsShellGroups(door: SettingsDoorProp, isAdmin: boolean, reader = false): SettingsShellGroup[] {
+  if (door === "workspace" && !isAdmin && reader) return readerShellGroups();
   if (door === "workspace" && isAdmin) {
     const pages = settingsSidebar("workspace");
     const groups: SettingsShellGroup[] = [{ rows: pages.filter((p) => !p.group && p.key !== "all").map(rowOf) }];

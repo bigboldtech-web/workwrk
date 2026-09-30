@@ -104,8 +104,23 @@ describe("scoreWeightsOf", () => {
     expect(w).toEqual({ kpi: 40, sopCompliance: 20, behavioral: 30, peer: 10 });
     expect(weightsTotal(w)).toBe(100);
   });
+  it("shows the review engine's behavioural default for a custom five-key blob", () => {
+    const w = scoreWeightsOf({ scoreWeights: { kpi: 50, manager: 20, peer: 10, self: 0, sopCompliance: 20 } });
+    expect(w.behavioral).toBe(30);
+  });
   it("keeps a saved four-key shape exactly", () => {
     const w = scoreWeightsOf({ scoreWeights: { kpi: 50, sopCompliance: 10, behavioral: 25, peer: 15 } });
     expect(w).toEqual({ kpi: 50, sopCompliance: 10, behavioral: 25, peer: 15 });
+  });
+});
+
+import { inviteDomainsOf } from "./org-policy";
+
+describe("inviteDomainsOf", () => {
+  it("always keeps the workspace's own domain and adds the rules' domains", () => {
+    expect(inviteDomainsOf({ users: { allowedDomains: ["gmail.com"] } }, "acme.com")).toEqual(["acme.com", "gmail.com"]);
+    expect(inviteDomainsOf({ users: { allowedDomains: [] } }, "acme.com")).toEqual(["acme.com"]);
+    expect(inviteDomainsOf({}, null, "ana@beta.io")).toEqual(["beta.io"]);
+    expect(inviteDomainsOf({}, null, null)).toEqual([]);
   });
 });

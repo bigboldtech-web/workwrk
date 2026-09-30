@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
-import { sessionIsWorkspaceOwner } from "@/lib/access/workspace-admin";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { transferOwnership } from "@/lib/access/membership";
 import { issueTokenVersionProof } from "@/lib/session-proof";
 
@@ -32,7 +32,9 @@ export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   const su = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!su?.id || !su.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await sessionIsWorkspaceOwner(session))) {
+  const fresh = await freshWorkspaceActor(session);
+  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.owner) {
     return NextResponse.json({ error: "Only a workspace Owner can transfer ownership" }, { status: 403 });
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
@@ -58,6 +60,22 @@ export async function POST(req: Request) {
     newValue: { role: "OWNER" },
     metadata: { selfDemoted: result.selfDemoted },
   });
+  // Each implicit Owner written as an explicit one gets its own row: their
+  // effective role did not change, but the stored one did.
+  for (const f of result.frozen) {
+    logAuditEvent({
+      type: "org_role.changed",
+      actorId: su.id,
+      organizationId: su.organizationId,
+      description: `Kept ${f.name} an Owner while ownership moved (stored as an explicit Owner)`,
+      targetType: "user",
+      targetId: f.id,
+      severity: "warning",
+      oldValue: { role: "OWNER", level: "COMPANY_ADMIN" },
+      newValue: { role: "OWNER", level: "SUPER_ADMIN" },
+      metadata: { ownershipTransfer: true },
+    });
+  }
 
   const proof = result.selfVersion ? issueTokenVersionProof(su.id, result.selfVersion.from, result.selfVersion.to) : null;
   return NextResponse.json({ ok: true, tokenVersionProof: proof });

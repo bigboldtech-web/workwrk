@@ -160,7 +160,7 @@ export default function ScoringSettingsPage() {
           </p>
         </SettingsCard>
 
-        <SettingsCard title="Score weights" description="How each part weighs into a person's composite score." id="scoring.weights" wide="scoring.weights" actions={resetBtn("weights")}>
+        <SettingsCard title="Score weights" description="How each part weighs into a person's review score. The monthly performance score on profiles also weighs the manager and self parts, which stay as they are." id="scoring.weights" wide="scoring.weights" actions={resetBtn("weights")}>
           {SCORE_WEIGHT_KEYS.map((k) => (
             <div key={k} className="flex items-center gap-3">
               <span className="w-44 shrink-0 text-base text-ink">{METRIC_LABELS[k]}</span>

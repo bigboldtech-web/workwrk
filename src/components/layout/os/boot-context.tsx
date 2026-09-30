@@ -111,5 +111,7 @@ export function useViewerRole() {
     isAdmin: role === "OWNER" || role === "ADMIN",
     isGuest: role === "GUEST",
     isAgent: boot.viewer.isAgent,
+    /** Opens Members, Access and Scoring below Admin (boot settingsReader). */
+    isSettingsReader: boot.viewer.settingsReader === true,
   };
 }

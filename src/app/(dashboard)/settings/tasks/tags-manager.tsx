@@ -40,7 +40,6 @@ import {
   ArchiveRestore,
   Trash2,
   Pencil,
-  Tag as TagIcon,
 } from "lucide-react";
 
 export type TagRow = {
@@ -183,16 +182,12 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <TagIcon size={20} /> Dimensional tags
-          </h1>
-          <p className="text-muted text-xs mt-1 max-w-prose">
-            Cost centers, business units, regions, projects, and any custom
-            dimensions you want to slice reports by. Tags travel across People,
-            Tasks, KRAs, and OKRs.
-          </p>
-        </div>
+        {/* The page title and tab already name this; one line says what it is. */}
+        <p className="max-w-prose text-base text-ink-2">
+          Cost centers, business units, regions, projects, and any custom
+          dimensions you want to slice reports by. Tags travel across People,
+          Tasks, KRAs, and OKRs.
+        </p>
         <div className="flex flex-shrink-0 items-center gap-2">
           <input
             type="search"
@@ -215,7 +210,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
       {TYPE_ORDER.map((type) => {
         const rows = byType.get(type) ?? [];
         return (
-          <Card key={type}>
+          <Card key={type} className="border-line bg-raised shadow-none">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div>

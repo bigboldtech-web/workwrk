@@ -20,7 +20,9 @@
 //
 // Owner and Admin edit everything; the People team edits the people fields
 // (job title, department, office, reports to, capacity); the rest of the
-// manager tier reads their own team.
+// manager tier reads their own team. Anyone the Access settings let invite
+// (the people.create cell) invites and manages pending invites here, and the
+// copy says exactly that.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -45,6 +47,7 @@ import { InviteModal } from "@/components/layout/os/invite-modal";
 import { useSettingsSection } from "@/hooks/use-settings-section";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
+import { useFormat } from "@/lib/format/use-date-prefs";
 import { Avatar, MemberDrawer } from "./member-drawer";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, TransferDialog, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
 
@@ -80,11 +83,6 @@ export default function MembersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [list, setList] = useState<ListBody | null>(null);
   const [inviteSignal, setInviteSignal] = useState(0);
-  const users = useSettingsSection("users", (b) => {
-    const st = (b.settings ?? {}) as { users?: { allowedDomains: string[]; inviteDefaultRole: string } };
-    return st.users ?? { allowedDomains: [], inviteDefaultRole: "MEMBER" };
-  });
-
   const router = useRouter();
   useEffect(() => {
     const t = setTimeout(() => {
@@ -103,10 +101,9 @@ export default function MembersPage() {
   // The People tab's one blue button (Invite) sits in the tab's own toolbar
   // row beside Filter, so the header draws no second toolbar.
   const tabs: SettingsTab[] = TABS;
-  const defaultLevel = users.data?.inviteDefaultRole === "ADMIN" ? "COMPANY_ADMIN" : "EMPLOYEE";
 
   return (
-    <SettingsPage pageKey="members" tabs={tabs} width="list" actions={list ? <CountStrip counts={list.counts} /> : undefined}>
+    <SettingsPage pageKey="members" tabs={tabs} width="list" actions={list && list.scope === "org" ? <CountStrip counts={list.counts} /> : undefined}>
       {(tab) => (
         <>
           {tab === "pending" ? (
@@ -120,8 +117,6 @@ export default function MembersPage() {
             open={inviteOpen}
             onOpenChange={setInviteOpen}
             onSent={() => setInviteSignal((n) => n + 1)}
-            allowedDomains={users.data?.allowedDomains}
-            defaultLevel={defaultLevel as never}
           />
         </>
       )}
@@ -159,6 +154,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
   const router = useRouter();
   const params = useSearchParams();
   const { toast } = useOsToast();
+  const fmt = useFormat();
   const lookups = useLookups();
   const initialFilter = params.get("filter") ?? "";
   const [q, setQ] = useState("");
@@ -291,10 +287,18 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         </span>
       ),
     },
-    { key: "role", label: "Role", width: "130px", render: (m) => <span>{ROLE_WORD[m.role]}{m.role === "MEMBER" && m.tier && m.tier !== "EMPLOYEE" ? <span className="block text-sm text-ink-2">{m.tierLabel}</span> : null}</span> },
-    { key: "title", label: "Job title", width: "minmax(120px,1fr)", hideBelow: 900, render: (m) => m.jobTitle?.title ?? "·" },
-    { key: "dept", label: "Department", width: "minmax(120px,1fr)", hideBelow: 760, render: (m) => m.department?.name ?? "·" },
-    { key: "manager", label: "Reports to", width: "minmax(120px,1fr)", hideBelow: 1000, render: (m) => m.manager?.name ?? "·" },
+    {
+      key: "role", label: "Role", width: "130px",
+      render: (m) => (
+        <span className="block min-w-0" title={m.role === "MEMBER" && m.tier && m.tier !== "EMPLOYEE" ? `${ROLE_WORD[m.role]}, ${m.tierLabel}` : undefined}>
+          <span className="block truncate">{ROLE_WORD[m.role]}</span>
+          {m.role === "MEMBER" && m.tier && m.tier !== "EMPLOYEE" ? <span className="block truncate text-sm text-ink-2">{m.tierLabel}</span> : null}
+        </span>
+      ),
+    },
+    { key: "title", label: "Job title", width: "minmax(120px,1fr)", hideBelow: 900, render: (m) => <span className="block truncate" title={m.jobTitle?.title}>{m.jobTitle?.title ?? "·"}</span> },
+    { key: "dept", label: "Department", width: "minmax(120px,1fr)", hideBelow: 760, render: (m) => <span className="block truncate" title={m.department?.name}>{m.department?.name ?? "·"}</span> },
+    { key: "manager", label: "Reports to", width: "minmax(120px,1fr)", hideBelow: 1000, render: (m) => <span className="block truncate" title={m.manager?.name}>{m.manager?.name ?? "·"}</span> },
     {
       key: "pt", label: "People team", width: "110px", align: "center",
       render: (m) => canEdit ? (
@@ -303,12 +307,16 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       ) : m.peopleTeam ? "Yes" : "",
     },
     { key: "status", label: "Status", width: "120px", render: (m) => <span className={m.status === "INACTIVE" ? "text-danger-text" : ""}>{STATUS_WORD[m.status] ?? m.status}</span> },
-    { key: "seen", label: "Last sign-in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={new Date(m.lastSignInAt).toLocaleString()}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
+    { key: "seen", label: "Last sign-in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
   ];
 
   return (
     <div className="flex flex-col gap-2">
-      {data?.scope === "team" ? <SettingsReadOnlyBanner>You see your own team here, read only. Owners and Admins see everyone.</SettingsReadOnlyBanner> : data && !canEdit ? <SettingsReadOnlyBanner /> : null}
+      {data?.scope === "team" ? (
+        <SettingsReadOnlyBanner>
+          You see your own team here. {canInvite ? "You can invite people and look after pending invites; " : ""}roles, placement and removals are for Owners and Admins, who see everyone.
+        </SettingsReadOnlyBanner>
+      ) : data && !canEdit ? <SettingsReadOnlyBanner /> : null}
       <OsToolbar
         className="!px-0"
         left={
@@ -333,6 +341,8 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
               {(["owner", "admin", "member"] as const).map((r) => (
                 <FilterRow key={r} label={ROLE_WORD[r.toUpperCase() as MemberRole]} checked={role === r} onCheckedChange={(on) => setRole(on ? r : null)} />
               ))}
+              {/* The Guests count links here (role:guest); the row keeps that filter visible and clearable. */}
+              <FilterRow label="Guest" checked={role === "guest"} onCheckedChange={(on) => setRole(on ? "guest" : null)} />
             </FilterGroup>
             <FilterGroup label="Placement">
               <FilterRow label="Department" checked={!!dept} onCheckedChange={(on) => setDept(on ? lookups.depts[0]?.id ?? null : null)}>
@@ -477,6 +487,7 @@ const LEVEL_WORD: Record<string, string> = { SUPER_ADMIN: "Owner", COMPANY_ADMIN
 
 function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void }) {
   const { toast } = useOsToast();
+  const fmt = useFormat();
   const showUpcoming = useShowUpcoming();
   const [invites, setInvites] = useState<PendingInvite[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -503,13 +514,17 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
   const saveRules = useCallback(async () => {
     if (!draft) return true;
     setSaving(true);
-    const r = await rules.save({ allowedDomains: draft.allowedDomains, inviteDefaultRole: draft.inviteDefaultRole, inviteExpiryDays: draft.inviteExpiryDays });
+    // Only what changed: sending the domain list on an expiry-only save
+    // would freeze today's fallback domain into the stored rules.
+    const patch: Partial<Rules> = { inviteDefaultRole: draft.inviteDefaultRole, inviteExpiryDays: draft.inviteExpiryDays };
+    if (!base || JSON.stringify(draft.allowedDomains) !== JSON.stringify(base.allowedDomains)) patch.allowedDomains = draft.allowedDomains;
+    const r = await rules.save(patch);
     setSaving(false);
     if (!r.ok) { setRuleErr(r.error ?? "Couldn't save"); return false; }
     setDraft(null);
     toast("Invite rules saved");
     return true;
-  }, [draft, rules, toast]);
+  }, [draft, base, rules, toast]);
 
   const revoke = async (inv: PendingInvite) => {
     setBusyId(inv.id);
@@ -534,7 +549,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
     { key: "role", label: "Role", width: "120px", render: (i) => LEVEL_WORD[i.accessLevel] ?? "Member" },
     { key: "to", label: "Invited to", width: "120px", hideBelow: 900, render: (i) => (i.spaceId ? "A Space" : "Workspace") },
     { key: "sent", label: "Sent", width: "120px", render: (i) => formatRelative(i.createdAt) },
-    { key: "expires", label: "Expires", width: "120px", render: (i) => new Date(i.expiresAt).toLocaleDateString() },
+    { key: "expires", label: "Expires", width: "120px", render: (i) => <span title={fmt.title(i.expiresAt)}>{fmt.date(i.expiresAt, "date")}</span> },
     { key: "status", label: "Status", width: "100px", render: (i) => (new Date(i.expiresAt).getTime() < now ? <span className="text-warning-text">Expired</span> : "Pending") },
   ];
 
@@ -544,7 +559,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
         <ErrorState what="the invite rules" hint={rules.error ?? undefined} onRetry={rules.retry} />
       ) : form ? (
         <SettingsCard title="Invite rules" id="members.inviteRules">
-          <Field label="Allowed email domains" helper="Invitations go only to these addresses. Empty uses the workspace's own domain." id="members.allowedDomains">
+          <Field label="Allowed email domains" helper="The workspace's own domain is always allowed. Add other domains invitations may go to." id="members.allowedDomains">
             {canEdit ? (
               <ChipsInput
                 values={form.allowedDomains}
@@ -571,7 +586,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
             ) : <p className="text-base text-ink">{form.inviteExpiryDays} days</p>}
           </Field>
           <p className="text-sm text-ink-2">
-            Members are invited by Owners and Admins. See <Link href="/settings/access" className="font-medium text-brand-deep hover:underline">Access</Link> for who can share.
+            Owners and Admins invite people, and so does anyone <Link href="/settings/access" className="font-medium text-brand-deep hover:underline">Access</Link> lets invite (Add new people / invite). Access also decides who can share.
           </p>
           {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: anyone with an allowed-domain email joins on their own; new members added to chosen Spaces.</p> : null}
           {ruleErr ? <p role="alert" className="text-sm text-danger-text">{ruleErr}</p> : null}
@@ -579,6 +594,12 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
       ) : null}
       {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); }} onSave={saveRules} /> : null}
 
+      {canManageInvites && invites && invites.length > 0 ? (
+        <div className="flex justify-end">
+          {/* Secondary on purpose: the tab's one blue button is Save changes. */}
+          <button type="button" className={btn.secondary} onClick={onInvite}>Invite people</button>
+        </div>
+      ) : null}
       {error ? (
         <ErrorState what="pending invitations" hint={error} onRetry={() => { void load(); }} />
       ) : (

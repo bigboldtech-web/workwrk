@@ -11,7 +11,7 @@
 // "..."` — the only filters Okta/Azure actually send.
 
 import crypto from "crypto";
-import { usersSettingsOf } from "@/lib/settings/org-policy";
+import { inviteDomainsOf } from "@/lib/settings/org-policy";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
   // domains (Members > Invite rules, else the workspace's own domain) is
   // refused. A workspace with no domain on file keeps today's behaviour.
   const org = await prisma.organization.findUnique({ where: { id: auth.organizationId }, select: { settings: true, domain: true } });
-  const allowed = usersSettingsOf(org?.settings, org?.domain).allowedDomains;
+  const allowed = inviteDomainsOf(org?.settings, org?.domain);
   const at = email.slice(email.lastIndexOf("@") + 1);
   if (allowed.length > 0 && !allowed.includes(at)) {
     return scimError(400, `${at} is not one of this workspace's allowed domains`, "invalidValue");

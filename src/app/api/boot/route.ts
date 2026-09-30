@@ -86,6 +86,13 @@ export interface BootPayload {
     hasReports: boolean;
     peopleTeam: boolean;
     /**
+     * Opens the Workspace Members, Access and Scoring pages below Admin (the
+     * legacy manager tier, People team included: settings-gate.tsx
+     * LEGACY_SETTINGS_RULES), so the settings frame shows those rows
+     * (sidebar-map 8a) instead of the My settings list.
+     */
+    settingsReader?: boolean;
+    /**
      * Phase 6: in scope of an open candor session, or answered one, or an
      * organiser by the legacy manager tier (the Candor row). The organiser
      * part is the same predicate the /candor page gate and POST /api/candor
@@ -372,6 +379,7 @@ export async function GET(req: NextRequest) {
         adminScopes: [],
         hasReports: cf.teams.hasReports,
         peopleTeam,
+        settingsReader: !legacyIsAdminLevel(accessLevel) && legacyIsManagerLevel(accessLevel),
         candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",

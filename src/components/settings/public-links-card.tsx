@@ -81,8 +81,12 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
           {state === "failed" ? <span className="text-danger-text">Not saved</span> : null}
           {value === null ? (
             <span className="inline-block h-5 w-9 rounded-full bg-skeleton os-skeleton-pulse" aria-hidden />
+          ) : canEdit ? (
+            <Switch checked={value === "view"} disabled={state === "saving"} onChange={(on) => void change(on)} aria-label="Public links" />
           ) : (
-            <Switch checked={value === "view"} disabled={!canEdit || state === "saving"} onChange={(on) => void change(on)} aria-label="Public links" />
+            // Read-only is the value as text, never a faded control
+            // (access-model-spec 5.4).
+            <span className="text-base font-medium text-ink">{value === "view" ? "On" : "Off"}</span>
           )}
         </span>
       </div>

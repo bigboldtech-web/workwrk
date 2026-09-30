@@ -25,7 +25,7 @@ import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { AccessNodeKind } from "@/lib/access/access-panel";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
-import { actorLabelOf, familyWhere, humanizeAuditSentence, isAuditFamily, rangeStart } from "@/lib/audit-families";
+import { actorLabelOf, auditKeyWords, familyWhere, humanizeAuditSentence, isAuditFamily, rangeStart, targetTypeWord } from "@/lib/audit-families";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 const VALID_SEVERITY = new Set(["info", "warning", "critical"]);
@@ -144,7 +144,44 @@ export async function GET(req: NextRequest) {
   const user = session.user as { id?: string; accessLevel?: string };
   const summaries = await accessSummaries(orgId, user.id ?? "", user.accessLevel ?? null, rows).catch(() => new Map<string, string>());
   // metadata stays on the server: the summary is what the audit shows of it.
-  const page = rows.map(({ metadata: _metadata, ...r }) => ({ ...r, description: humanizeAuditSentence(r.description), actorName: actorLabelOf(r), summary: summaries.get(r.id) ?? null }));
+  // The target and the acting-for person by NAME, with a link where the
+  // auditor can open the thing (a person opens in Members): an admin never
+  // decodes an id to learn who was affected.
+  const personIds = [
+    ...new Set(
+      rows
+        .flatMap((r) => [r.targetType && r.targetType.toLowerCase() === "user" ? r.targetId : null, r.actingForId])
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const people = personIds.length
+    ? await prisma.user.findMany({ where: { id: { in: personIds }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true, email: true } })
+    : [];
+  const personName = new Map(people.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email]));
+  const page = rows.map(({ metadata: _metadata, ...r }) => {
+    const isPerson = !!r.targetType && r.targetType.toLowerCase() === "user" && !!r.targetId;
+    const name = isPerson ? personName.get(r.targetId as string) ?? null : null;
+    // Rows written before the role sentence named the person ("Changed a
+    // role from admin to member") read with the name now known.
+    let description = humanizeAuditSentence(r.description);
+    const oldRole = /^Changed a role from (\w+) to (\w+)( \(bulk\))?$/.exec(description);
+    if (oldRole && name) {
+      const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+      description = `Changed ${name}'s role from ${cap(oldRole[1])} to ${cap(oldRole[2])}${oldRole[3] ? " (bulk change)" : ""}`;
+    }
+    const policy = /^Changed the sign-in policy: (.+)$/.exec(description);
+    if (policy) description = `Changed the sign-in policy: ${policy[1].split(/,\s*/).map((k) => (/^[a-z]+[A-Z]/.test(k) ? auditKeyWords(k).toLowerCase() : k)).join(", ")}`;
+    return {
+      ...r,
+      description,
+      actorName: actorLabelOf(r),
+      summary: summaries.get(r.id) ?? null,
+      targetWord: targetTypeWord(r.targetType),
+      targetName: name,
+      targetHref: isPerson && name ? `/settings/members?open=${encodeURIComponent(r.targetId as string)}` : null,
+      actingForName: r.actingForId ? personName.get(r.actingForId) ?? null : null,
+    };
+  });
 
   return jsonSuccess({
     items: page,

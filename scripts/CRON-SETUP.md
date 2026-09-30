@@ -225,8 +225,12 @@ for"). It acts ONLY on orgs that set `settings.retention.auditDays`; an org
 that never chose keeps its log forever, so adding this row deletes nothing
 anyone did not ask to delete. The window is floored at 90 days, deletes run in
 batches of 5000, and each org gets one `audit.purged` row naming how many
-entries went. Until the row is installed the setting is stored and shown, but
-nothing is removed; the Retention tab says so.
+entries went. It never deletes the rows features read back (weekly review
+decisions, goal creators, invitations, shares, the retired permissions grid,
+consent and staff rows: `src/lib/audit-retention.ts`). Until this row AND the
+trash-purge row are installed, both retention rows sit behind Show upcoming
+features on Data > Retention, captioned "Not enforced yet"; once both rows are
+in, move them out (data/page.tsx RetentionTab).
 
 | Job | Schedule | Command |
 |---|---|---|

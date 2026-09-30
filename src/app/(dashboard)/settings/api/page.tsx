@@ -16,11 +16,13 @@
 // Footer: Integrations (/integrations), the catalogue every Member can
 // browse and request from.
 
+import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Copy, TriangleAlert, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { ConfirmDialog, Field, NumberInput, Pending, TextInput, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
@@ -28,7 +30,6 @@ import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { Drawer } from "@/components/ui/drawer";
 import { ErrorState } from "@/components/ui/error-state";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
-import { formatRelative } from "@/lib/format/date";
 
 type Scope = "READ" | "WRITE" | "ADMIN";
 type ApiKeyRow = {
@@ -53,6 +54,7 @@ const SCOPES: { value: Scope; label: string; hint: string }[] = [
 const SCOPE_LABEL: Record<Scope, string> = { READ: "Read", WRITE: "Write", ADMIN: "Admin" };
 
 export default function ApiSettingsPage() {
+  const { boot } = useBoot();
   const [byok, setByok] = useState(false);
   const [createSignal, setCreateSignal] = useState(0);
   useEffect(() => {
@@ -63,7 +65,7 @@ export default function ApiSettingsPage() {
     ...(byok ? [{ key: "ai", label: "AI keys" }] : []),
   ];
   return (
-    <SettingsPage pageKey="api" tabs={tabs} width="list" subtitle="Keys for anything that connects to your workspace from outside.">
+    <SettingsPage pageKey="api" tabs={tabs} width="list" subtitle={`Keys for anything that connects to ${boot.org.name || "your workspace"} from outside.`}>
       {(tab) => (
         <div className="flex flex-col gap-4">
           {tab === "ai" && byok ? <ByokManager /> : <KeysTab createSignal={createSignal} />}
@@ -136,7 +138,7 @@ function KeysTab({ createSignal }: { createSignal: number }) {
     { key: "prefix", label: "Prefix", width: "150px", render: (k) => <span className="font-mono text-sm">{k.prefix}</span> },
     { key: "scopes", label: "Scopes", width: "160px", render: (k) => k.scopes.map((s) => SCOPE_LABEL[s]).join(", ") },
     { key: "rate", label: "Rate limit", width: "170px", hideBelow: 900, render: (k) => `${k.rateLimitPerMinute}/min · ${k.rateLimitPerDay}/day` },
-    { key: "used", label: "Last used", width: "120px", render: (k) => (k.lastUsedAt ? <span title={new Date(k.lastUsedAt).toLocaleString()}>{formatRelative(k.lastUsedAt)}</span> : "Never") },
+    { key: "used", label: "Last used", width: "120px", render: (k) => <DateText value={k.lastUsedAt} style="relative" fallback="Never" /> },
     { key: "by", label: "Created by", width: "150px", hideBelow: 1000, render: (k) => (k.createdBy ? `${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim() : "·") },
     { key: "status", label: "Status", width: "100px", render: (k) => (k.revokedAt ? <span className="text-danger-text">Revoked</span> : "Active") },
   ];
@@ -248,9 +250,9 @@ function KeyDrawer({ k, onClose, onRevoke, onSaved }: { k: ApiKeyRow; onClose: (
         <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-base">
           <dt className="text-ink-2">Prefix</dt><dd className="font-mono text-sm">{k.prefix}</dd>
           <dt className="text-ink-2">Scopes</dt><dd>{k.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}</dd>
-          <dt className="text-ink-2">Created</dt><dd>{new Date(k.createdAt).toLocaleDateString()}{k.createdBy ? ` by ${`${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim()}` : ""}</dd>
+          <dt className="text-ink-2">Created</dt><dd><DateText value={k.createdAt} />{k.createdBy ? ` by ${`${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim()}` : ""}</dd>
           <dt className="text-ink-2">Requests</dt><dd className="tabular-nums">{k.requestCount}</dd>
-          <dt className="text-ink-2">Status</dt><dd>{k.revokedAt ? `Revoked ${new Date(k.revokedAt).toLocaleDateString()}` : "Active"}</dd>
+          <dt className="text-ink-2">Status</dt><dd>{k.revokedAt ? <>Revoked <DateText value={k.revokedAt} /></> : "Active"}</dd>
         </dl>
         <p className="text-sm text-ink-2">Scopes cannot be changed after a key is made. Make a new key instead.</p>
         {k.revokedAt ? null : (

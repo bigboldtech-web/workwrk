@@ -10,6 +10,7 @@
 //   PUT    /api/organization/byok   { apiKey, preferredModel } (tested against Anthropic first)
 //   DELETE /api/organization/byok
 
+import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -84,7 +85,7 @@ export function ByokManager() {
       {hasKey ? (
         <SettingsRow
           label="Anthropic key"
-          helper={`${state.key?.keyHint ?? ""}${state.key?.lastUsedAt ? ` · last used ${new Date(state.key.lastUsedAt).toLocaleDateString()}` : ""}`}
+          helper={<>{state.key?.keyHint ?? ""}{state.key?.lastUsedAt ? <> · last used <DateText value={state.key.lastUsedAt} /></> : null}</>}
           control={<button type="button" className={btn.dangerGhost} onClick={() => setRevokeOpen(true)}>Remove</button>}
         />
       ) : null}

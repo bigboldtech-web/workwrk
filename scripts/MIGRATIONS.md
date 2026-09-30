@@ -1317,7 +1317,12 @@ purge writes `system`, the Staff console's tenant audit row now lands through
 `prisma db execute`. **Rollback:** drop the three columns (only the label of non-person
 rows is lost); `SET NOT NULL` on `actorId` succeeds only while no null row exists, so
 roll back the code first, then delete or reassign the null-actor rows, then restore
-the constraint.
+the constraint. **Order matters for a rollback of the CODE too:** once the first
+null-actor row exists (a SCIM change, an audit purge, a Staff console action), the
+previous release's Prisma client, which declares `actor` as required, throws on ANY
+query that includes `actor` over that row (the Audit log, the activity feeds), not
+only on the `SET NOT NULL` step. So a code rollback to a release before stage D must
+first reassign those rows to a real person (for example the Owner) or delete them.
 
 **Flags.** One new flag, read at request time, default OFF, in no `.env`:
 `SETTINGS_OWNER_SPLIT`. Off, every Admin counts as an Owner for the Owner pages
@@ -1368,6 +1373,53 @@ on write).
   one headquarters.
 - `/imports` is a 308 to `/settings/data?tab=import`. New `GET /api/org/admins` (the
   ask-an-admin strip: names of the workspace's Owners and Admins, any signed-in member).
+
+**Stage D review fixes (behaviour, no schema):**
+- Every change to who holds Owner or Admin (role change, bulk change, ownership
+  transfer, deactivate or remove, SCIM deprovisioning) runs under one transaction-scoped
+  advisory lock per workspace (`lockOrgRoles`, key `org-roles:<orgId>`) and re-reads, under
+  the lock, whether the ACTOR is still an Owner or Admin. Two Owners demoting each other
+  at once can no longer leave a workspace with nobody.
+- The routes that change who can do what (role changes, ownership, sign-out-everyone,
+  every workspace settings PATCH, API keys, workspace delete and restore) re-read the
+  actor from the database (`freshWorkspaceActor`): a demoted Admin, or a session whose
+  `tokenVersion` the account has moved past, is refused at once (403 `stale_session`)
+  instead of at the five-minute session check. The session now carries its own
+  `tokenVersion` (read-only; adopting a new one still needs the signed proof).
+- One Owner set everywhere: `liveAdminsOf` counts admins anchored here AND admins by
+  membership who are switched into another workspace (the same set as `ownerIdsFor`).
+- "Log out everywhere" (sign-out-everyone) also ends the sessions of members switched
+  into another workspace.
+- SCIM deprovisioning of an Owner who is not the last one deactivates them (every
+  session ends) but does NOT hand their work over unattended, and the audit row names
+  who holds Owner now; a person hands an Owner's work over from Members. SCIM
+  reactivation writes its own audit row ("work handed over stays where it went").
+- The audit purge never deletes rows features read back: `weekly_review_decided`,
+  `okr_created`, `user.invited`, `access.invited`, `access.matrix_retired`,
+  `access.migrated`, `audit.purged`, `terms.*`, `staff.*` (`src/lib/audit-retention.ts`).
+  Both retention rows now sit behind Show upcoming features, captioned "Not enforced
+  yet", until the two cron rows are installed.
+- The score-weights save merges into the stored weights, so the monthly performance
+  score's `manager` and `self` keys survive; `scoreWeightsOf` shows the behavioural
+  weight the review engine really uses (the default 30) for an older five-key blob.
+- Invite rules: the workspace's own domain is always allowed and Invite rules ADD
+  domains (`inviteDomainsOf`, one answer for invitations, SCIM create and the invite
+  dialogs); a resent invitation lives as long as Invitation expiry says (was always 7
+  days); every invite dialog starts on the Default role for invites
+  (`GET /api/invitations?rules=1`).
+- **Decision to ratify: the legacy `security.twoFactorEnabled: true` is NOT migrated to
+  `mfaRequired: "everyone"`**, contrary to settings-architecture 5.10 and access-model-spec
+  (migrate-on-read). Nothing ever enforced the old key, and honouring it now would hold
+  every un-enrolled person at their next click in a workspace whose Owner never saw the
+  rule. Worst case of this choice: an Owner who believes the old switch is on. So the
+  Security page shows a note on any org that stored it ("an older setting says ... it
+  was never enforced ... choose Everyone to require it"). To count the affected orgs
+  before deciding: `SELECT count(*) FROM "Organization" WHERE settings->'security'->>'twoFactorEnabled' = 'true' AND settings->'security'->'mfaRequired' IS NULL;`
+- Whole-workspace export copy now says what the ZIP holds (one CSV per object with ids,
+  titles, owners, statuses and dates; no doc text, descriptions, comments, field
+  values, table rows or files yet). The route still builds the ZIP in memory (up to
+  200,000 tasks); a streamed or background export is the next step before large
+  enterprise workspaces use it.
 
 **Next step for custom roles** (not in this stage): the Members drawer still offers the
 legacy seniority tier under Member so no capability is lost. When the access engine's

@@ -10,7 +10,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { scimDeprovision } from "@/lib/scim-deprovision";
+import { scimDeprovision, scimReactivated } from "@/lib/scim-deprovision";
 import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
@@ -95,6 +95,7 @@ export async function PUT(
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;
   }
+  const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
   const updated = await prisma.user.update({
     where: { id },
@@ -109,6 +110,7 @@ export async function PUT(
       updatedAt: true,
     },
   });
+  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
 
@@ -194,6 +196,7 @@ export async function PATCH(
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;
   }
+  const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
   const updated = await prisma.user.update({
     where: { id },
@@ -208,6 +211,7 @@ export async function PATCH(
       updatedAt: true,
     },
   });
+  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
 

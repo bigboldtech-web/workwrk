@@ -39,13 +39,17 @@ export function TemplatesTab() {
   }, [load]);
 
   const current = types?.find((t) => t.isDefault)?.id ?? "";
+  // The last choice that failed, so Retry sends THAT choice again (the
+  // shown value falls back to the stored one on failure).
+  const [failedId, setFailedId] = useState<string | null>(null);
   const setDefault = async (id: string) => {
     if (!id || id === current) return;
     setBusy(true);
     setRowError(null);
     const r = await apiFetch(`/api/item-types/${id}`, { method: "PATCH", json: { isDefault: true } });
     setBusy(false);
-    if (!r.ok) { setRowError(r.error); return; }
+    if (!r.ok) { setFailedId(id); setRowError(r.error); return; }
+    setFailedId(null);
     setSavedAt(Date.now());
     toast("Default task type saved");
     void load();
@@ -58,7 +62,7 @@ export function TemplatesTab() {
           <DotsArt arrangement="stack" size={96} />
           <div className="flex flex-col gap-2">
             <p className="text-base text-ink">Templates live in the Template Center.</p>
-            <Link href="/templates?scope=workspace" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
+            <Link href="/templates?kind=task" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
           </div>
         </div>
         {error ? (
@@ -69,7 +73,7 @@ export function TemplatesTab() {
             label="Default task type for new tasks"
             helper="A List can have its own default in its ••• menu."
             savedAt={savedAt}
-            error={rowError ? { message: rowError, onRetry: () => { void setDefault(current); } } : null}
+            error={rowError ? { message: rowError, onRetry: () => { if (failedId) void setDefault(failedId); } } : null}
             control={
               types ? (
                 <NativeSelect
@@ -87,7 +91,7 @@ export function TemplatesTab() {
       <SettingsCard title="Statuses and fields" id="tasks.statuses">
         <p className="text-base text-ink">Both belong to a List, so each team can run its own way: open a List, then its ••• menu › Statuses or Fields.</p>
         <p className="text-base text-ink-2">A List template carries both, so a company-wide default is a template you apply.</p>
-        <Link href="/templates?scope=workspace&type=list" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
+        <Link href="/templates?kind=list" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
       </SettingsCard>
     </SettingsCardStack>
   );

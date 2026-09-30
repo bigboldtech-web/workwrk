@@ -249,7 +249,7 @@ export async function GET(
     type: "data.exported",
     actorId: userId,
     organizationId: orgId,
-    description: `Exported ${type} CSV (${rows.length} rows)`,
+    description: `Exported ${type} CSV (${rows.length} ${rows.length === 1 ? "row" : "rows"})`,
     targetType: "export",
     metadata: { kind: type, rows: rows.length },
     severity: rows.length > 1000 ? "warning" : "info",

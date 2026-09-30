@@ -44,7 +44,7 @@ export const TIER_OPTIONS = [
   { value: "DIRECTOR", label: "Director" },
   { value: "VP", label: "VP" },
   { value: "C_LEVEL", label: "Executive" },
-  { value: "HR", label: "People team (HR)" },
+  { value: "HR", label: "People team" },
   { value: "AGENT", label: "Agent" },
 ] as const;
 

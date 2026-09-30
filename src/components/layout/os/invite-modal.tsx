@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
 import { useOsToast } from "./toast";
+import { useViewerRole } from "./boot-context";
 import { Dots } from "@/components/ui/dots";
 
 interface DeptOption {
@@ -88,9 +89,34 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
   // domain (the server enforces org.domain ?? inviter's; the signed-in
   // user's domain is the client's best mirror of that rule).
   const ownDomain = sessionData?.user?.email?.split("@")[1]?.toLowerCase() ?? null;
-  const domains = allowedDomains && allowedDomains.length > 0 ? allowedDomains : ownDomain ? [ownDomain] : [];
+  // Members > Invite rules, read on every open (GET /api/invitations?rules=1,
+  // the server's own answer), so every dialog, the topbar one included,
+  // starts on the workspace's default role and accepts the domains the
+  // server accepts. Props, when a caller passes them, win.
+  const [rules, setRules] = useState<{ allowedDomains: string[]; inviteDefaultRole: "ADMIN" | "MEMBER" } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    fetch("/api/invitations?rules=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (live) setRules(d && Array.isArray(d.allowedDomains) ? d : null); })
+      .catch(() => { if (live) setRules(null); });
+    return () => { live = false; };
+  }, [open]);
+  const { isAdmin } = useViewerRole();
+  const domains =
+    allowedDomains && allowedDomains.length > 0
+      ? allowedDomains
+      : rules && rules.allowedDomains.length > 0
+        ? rules.allowedDomains
+        : ownDomain ? [ownDomain] : [];
   const companyDomain = domains.length > 0 ? domains.map((d) => d).join(", @") : null;
-  const [accessLevel, setAccessLevel] = useState<AccessLevel>(defaultLevel ?? "EMPLOYEE");
+  // The default is only a starting point: what the person picks wins, and a
+  // close forgets the pick. Only an Owner or Admin starts on Admin (the
+  // server refuses anyone else inviting an Admin).
+  const ruleLevel: AccessLevel = defaultLevel ?? (rules?.inviteDefaultRole === "ADMIN" && isAdmin ? ("COMPANY_ADMIN" as AccessLevel) : "EMPLOYEE");
+  const [picked, setAccessLevel] = useState<AccessLevel | null>(null);
+  const accessLevel: AccessLevel = picked ?? ruleLevel;
   const [message, setMessage] = useState("");
 
   // Placement — all optional. The Invitation model + POST /api/invitations
@@ -128,7 +154,7 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
     setEmails([]);
     setDraft("");
     setInvalidTokens([]);
-    setAccessLevel("EMPLOYEE");
+    setAccessLevel(null);
     setMessage("");
     setDepartmentId("");
     setRoleId("");

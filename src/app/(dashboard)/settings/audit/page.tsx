@@ -32,7 +32,8 @@ import { ErrorState } from "@/components/ui/error-state";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { Drawer } from "@/components/ui/drawer";
 import { formatRelative } from "@/lib/format/date";
-import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, type AuditFamily } from "@/lib/audit-families";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, auditKeyWords, auditValueWords, type AuditFamily } from "@/lib/audit-families";
 
 type AuditRow = {
   id: string;
@@ -51,6 +52,11 @@ type AuditRow = {
   actorLabel: string | null;
   actingForId: string | null;
   actorName: string;
+  /** The target in words ("Person", "Export"), its name and a link when there is one. */
+  targetWord?: string;
+  targetName?: string | null;
+  targetHref?: string | null;
+  actingForName?: string | null;
   actor: { id: string; firstName: string | null; lastName: string | null; email: string | null; avatar?: string | null } | null;
 };
 
@@ -75,6 +81,7 @@ export default function AuditLogPage() {
 
 function AuditBody({ family }: { family: AuditFamily }) {
   const { toast } = useOsToast();
+  const fmt = useFormat();
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -162,12 +169,12 @@ function AuditBody({ family }: { family: AuditFamily }) {
   };
 
   const columns: TableColumn<AuditRow>[] = useMemo(() => [
-    { key: "time", label: "Time", width: "140px", render: (r) => <span className="tabular-nums" title={new Date(r.createdAt).toLocaleString()}>{formatRelative(r.createdAt)}</span> },
+    { key: "time", label: "Time", width: "140px", render: (r) => <span className="tabular-nums" title={fmt.title(r.createdAt)}>{formatRelative(r.createdAt)}</span> },
     { key: "actor", label: "Actor", width: "minmax(160px,0.8fr)", render: (r) => <ActorCell row={r} /> },
     { key: "event", label: "Event", title: true, width: "minmax(260px,2fr)", render: (r) => <span className="line-clamp-2">{r.summary ?? r.description}</span> },
-    { key: "target", label: "Target", width: "minmax(120px,0.7fr)", hideBelow: 900, render: (r) => (r.targetType ? <span className="text-ink-2">{r.targetType}</span> : "·") },
+    { key: "target", label: "Target", width: "minmax(120px,0.7fr)", hideBelow: 900, render: (r) => <TargetCell row={r} /> },
     { key: "severity", label: "Severity", width: "110px", render: (r) => <SeverityChip severity={r.severity} /> },
-  ], []);
+  ], [fmt]);
 
   const from = rows && rows.length ? pageIdx * PAGE + 1 : 0;
   const to = rows ? pageIdx * PAGE + rows.length : 0;
@@ -300,7 +307,7 @@ function Diff({ oldValue, newValue }: { oldValue: unknown; newValue: unknown }) 
   const n = newValue && typeof newValue === "object" ? (newValue as Record<string, unknown>) : {};
   const keys = [...new Set([...Object.keys(o), ...Object.keys(n)])];
   if (keys.length === 0) return null;
-  const show = (v: unknown) => (v === undefined ? "·" : typeof v === "string" ? v : JSON.stringify(v));
+  const show = auditValueWords;
   return (
     <div className="rounded-lg border border-line">
       <div className="grid grid-cols-3 gap-2 border-b border-line bg-hover px-3 py-2 text-sm font-medium text-ink-2">
@@ -310,7 +317,7 @@ function Diff({ oldValue, newValue }: { oldValue: unknown; newValue: unknown }) 
         const changed = JSON.stringify(o[k]) !== JSON.stringify(n[k]);
         return (
           <div key={k} className="grid grid-cols-3 gap-2 border-b border-line-soft px-3 py-2 text-sm last:border-b-0">
-            <span className={changed ? "font-medium text-ink" : "text-ink-2"}>{k}</span>
+            <span className={changed ? "font-medium text-ink" : "text-ink-2"}>{auditKeyWords(k)}</span>
             <span className="break-words text-ink-2">{show(o[k])}</span>
             <span className={`break-words ${changed ? "font-medium text-ink" : "text-ink-2"}`}>{show(n[k])}</span>
           </div>
@@ -322,14 +329,14 @@ function Diff({ oldValue, newValue }: { oldValue: unknown; newValue: unknown }) 
 
 function EventDrawer({ row, onClose }: { row: AuditRow | null; onClose: () => void }) {
   const { toast } = useOsToast();
+  const fmt = useFormat();
   if (!row) return null;
   const facts: [string, React.ReactNode][] = [
-    ["Time", new Date(row.createdAt).toLocaleString()],
+    ["Time", fmt.date(row.createdAt, "datetime")],
     ["Actor", `${row.actorName}${row.actor ? "" : row.actorType !== "user" ? ` (${row.actorType.replace(/_/g, " ")})` : ""}`],
-    ...(row.actingForId ? ([["Acting for", row.actingForId]] as [string, string][]) : []),
-    ["Event", row.type],
+    ...(row.actingForId ? ([["Acting for", row.actingForName ?? "A person no longer in this workspace"]] as [string, string][]) : []),
     ["Severity", SEVERITY_LABEL[row.severity] ?? row.severity],
-    ...(row.targetType ? ([["Target", `${row.targetType}${row.targetId ? ` ${row.targetId}` : ""}`]] as [string, string][]) : []),
+    ...(row.targetType ? ([["Target", <TargetCell key="t" row={row} />]] as [string, React.ReactNode][]) : []),
     ...(row.ipAddress ? ([["IP", row.ipAddress]] as [string, string][]) : []),
     ...(row.userAgent ? ([["Browser", row.userAgent]] as [string, string][]) : []),
   ];
@@ -371,4 +378,18 @@ function EventDrawer({ row, onClose }: { row: AuditRow | null; onClose: () => vo
       </div>
     </Drawer>
   );
+}
+
+/** The target in words: a person's name linking to their Members drawer, else the kind of thing. */
+function TargetCell({ row }: { row: AuditRow }) {
+  if (!row.targetType) return <>·</>;
+  if (row.targetName && row.targetHref) {
+    return (
+      <Link href={row.targetHref} onClick={(e) => e.stopPropagation()} className="truncate text-ink hover:text-brand-deep hover:underline">
+        {row.targetName}
+      </Link>
+    );
+  }
+  if (row.targetName) return <span className="truncate text-ink">{row.targetName}</span>;
+  return <span className="truncate text-ink-2">{row.targetWord || row.targetType}</span>;
 }

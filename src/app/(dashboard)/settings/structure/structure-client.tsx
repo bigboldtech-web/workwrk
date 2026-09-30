@@ -26,7 +26,10 @@ export function StructureClient({ counts, unlinked, canEdit }: { counts: RoleCou
     <SettingsPage pageKey="structure" tabs={tabs} width="list">
       {(tab) => (
         <div className="flex flex-col gap-6">
-          <RoleStrip counts={counts} />
+          {/* One block: the Phase 6 managers render several siblings (toolbar,
+              picker anchor, body), which must not each take this column's
+              24px gap (the toolbar sits 8px above its table). */}
+          <div className="flex flex-col">
           <Suspense>
             {tab === "titles" ? (
               <JobTitlesList door="settings" />
@@ -40,6 +43,10 @@ export function StructureClient({ counts, unlinked, canEdit }: { counts: RoleCou
               <DepartmentsManager door="settings" />
             )}
           </Suspense>
+          </div>
+          {/* Below the tab's own list, so every tab's toolbar and its one
+              blue button sit in the same place, straight under the tabs. */}
+          <RoleStrip counts={counts} />
         </div>
       )}
     </SettingsPage>

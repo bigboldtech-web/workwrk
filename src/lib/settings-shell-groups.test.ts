@@ -34,3 +34,19 @@ describe("settingsShellGroups", () => {
     for (const r of settingsShellGroups("me", false)[0].rows) expect(r.href.startsWith("/account/")).toBe(true);
   });
 });
+
+import { readerShellGroups } from "./settings-shell-groups";
+
+describe("reader list (sidebar-map 8a)", () => {
+  it("starts with My settings, then only the pages a reader opens", () => {
+    const g = settingsShellGroups("workspace", false, true);
+    expect(g).toEqual(readerShellGroups());
+    expect(g[0].rows[0]).toMatchObject({ label: "My settings", href: "/account/profile" });
+    const keys = g.flatMap((x) => x.rows.map((r) => r.pageKey)).filter(Boolean);
+    expect(keys.sort()).toEqual(["access", "members", "scoring"]);
+  });
+  it("never shows the reader list to an admin or outside the Workspace door", () => {
+    expect(settingsShellGroups("workspace", true, true)[0].rows[0].label).not.toBe("My settings");
+    expect(settingsShellGroups("me", false, true)[0].rows.every((r) => r.href.startsWith("/account/"))).toBe(true);
+  });
+});

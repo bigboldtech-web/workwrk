@@ -712,6 +712,11 @@ export const authOptions: NextAuthOptions = {
           lastName: token.lastName,
           avatar: token.avatar,
         } satisfies Partial<AuthIdentity>);
+        // The version this token was issued at, so a route that changes who
+        // can do what refuses a token the account has moved past without
+        // waiting for the five-minute check (freshWorkspaceActor). Reading
+        // it never adopts anything: adoption still needs the signed proof.
+        if (typeof token.tokenVersion === "number") (session.user as { tokenVersion?: number }).tokenVersion = token.tokenVersion;
       }
       // Only the sentence and the marker's id reach the client; the ack
       // sends the id back (see WorkspaceMove).

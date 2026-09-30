@@ -26,6 +26,7 @@
 //   Single sign-on   not in the tab row until a SAML sign-in is verified end
 //                    to end; under "Show upcoming features" one line says so.
 
+import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Copy } from "lucide-react";
@@ -72,8 +73,8 @@ function SignInTab() {
   const { toast } = useOsToast();
   const showUpcoming = useShowUpcoming();
   const s = useSettingsSection("security", (b: SettingsGetBody) => {
-    const st = (b.settings ?? {}) as { signIn?: SignInPolicy; users?: { allowedDomains?: string[] } };
-    return { policy: st.signIn ?? DEFAULT_SIGN_IN_POLICY, domains: st.users?.allowedDomains ?? [] };
+    const st = (b.settings ?? {}) as { signIn?: SignInPolicy; users?: { allowedDomains?: string[] }; signInLegacy?: { twoFactorEnabled?: boolean } };
+    return { policy: st.signIn ?? DEFAULT_SIGN_IN_POLICY, domains: st.users?.allowedDomains ?? [], legacyTwoFactor: st.signInLegacy?.twoFactorEnabled === true };
   });
   const [summary, setSummary] = useState<Summary | null>(null);
   const [draft, setDraft] = useState<SignInPolicy | null>(null);
@@ -152,6 +153,16 @@ function SignInTab() {
               onChange={(v) => set("mfaRequired", v)}
             />
           </Field>
+          {s.data?.legacyTwoFactor && base?.mfaRequired === "off" ? (
+            // An older settings page stored "two-factor required" in a key
+            // nothing ever enforced (src/lib/auth/security-policy.ts). It is
+            // still not enforced, on purpose: switching a rule on under
+            // people who never saw it would hold them at their next click.
+            // Said here, so an Owner who believes it is on can choose.
+            <p role="note" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-ink">
+              An older setting says two step verification is required for everyone, but it was never enforced and is not now. Choose Everyone above and save to require it.
+            </p>
+          ) : null}
           {summary ? (
             <p className="text-sm text-ink-2">
               {form.mfaRequired === "off"
@@ -167,11 +178,11 @@ function SignInTab() {
           <SettingsRow label="Keep it locked for" control={num("lockoutMinutes", b.lockoutMinutes, "minutes", "Lockout minutes")} />
         </SettingsCard>
 
-        <SettingsCard title="Sign-in domains" id="security.domains">
+        <SettingsCard title="Invitation domains" id="security.domains">
           <SettingsRow
-            label="Allowed domains"
+            label="Who can be invited"
             readOnlyValue={s.data?.domains.length ? s.data.domains.join(", ") : "The workspace's own domain"}
-            helper={<Link href="/settings/members?tab=pending" className="font-medium text-brand-deep hover:underline">Manage in Members, Invite rules</Link>}
+            helper={<>Invitations and new accounts from your identity provider. People already in the workspace sign in whatever their domain. <Link href="/settings/members?tab=pending" className="font-medium text-brand-deep hover:underline">Manage in Members, Invite rules</Link></>}
           />
         </SettingsCard>
 
@@ -179,9 +190,9 @@ function SignInTab() {
 
         <SettingsCard title="Danger zone" danger id="signin.signOutAll">
           <SettingsRow
-            label="Sign everyone out"
+            label="Log everyone out"
             helper="Every session on every device ends within five minutes. Everyone, including you, signs in again."
-            control={<button type="button" className={btn.dangerGhost} onClick={() => setSignOutOpen(true)}>Sign out all devices</button>}
+            control={<button type="button" className={btn.dangerGhost} onClick={() => setSignOutOpen(true)}>Log out everywhere</button>}
           />
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
@@ -190,16 +201,16 @@ function SignInTab() {
 
       <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title="You have not set up two step verification" confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
         <p>This rule covers you. Within five minutes you will be asked to set it up before you can do anything else, so have your phone ready.</p>
-        <p className="text-ink-2"><Link href="/account/security?enrol=1" className="font-medium text-brand-deep hover:underline">Set it up now</Link> instead, then come back.</p>
+        <p className="text-ink-2"><Link href="/account/security?enrol=mfa" className="font-medium text-brand-deep hover:underline">Set it up now</Link> instead, then come back.</p>
       </ConfirmDialog>
 
       <ConfirmDialog
         open={signOutOpen}
         onOpenChange={setSignOutOpen}
-        title="Sign everyone out?"
+        title="Log everyone out?"
         danger
         typed="SIGN OUT"
-        confirmLabel="Sign out all devices"
+        confirmLabel="Log out everywhere"
         busy={signingOut}
         onConfirm={async () => {
           setSigningOut(true);
@@ -277,7 +288,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
     { key: "prefix", label: "Prefix", width: "140px", render: (t) => <span className="font-mono text-sm">{t.tokenPrefix}</span> },
     { key: "created", label: "Created", width: "120px", render: (t) => formatRelative(t.createdAt) },
     { key: "used", label: "Last used", width: "120px", render: (t) => (t.lastUsedAt ? formatRelative(t.lastUsedAt) : "Never") },
-    { key: "expires", label: "Expires", width: "120px", render: (t) => (t.expiresAt ? new Date(t.expiresAt).toLocaleDateString() : "Never") },
+    { key: "expires", label: "Expires", width: "120px", render: (t) => <DateText value={t.expiresAt} fallback="Never" /> },
   ];
 
   return (

@@ -23,8 +23,11 @@ export const DEFAULT_PASSWORD_POLICY: Required<SecurityPolicy> = {
 /** Pull the security policy out of an org's `settings` JSON, with defaults. */
 export function policyFromOrgSettings(settings: unknown): SecurityPolicy {
   const sec = (settings as { security?: SecurityPolicy } | null | undefined)?.security;
+  // Floored at 8 here too (validatePassword's floor), so the checklist a
+  // person sees and the Security editor never disagree about a legacy 6.
+  const min = typeof sec?.minPasswordLength === "number" && Number.isFinite(sec.minPasswordLength) ? sec.minPasswordLength : DEFAULT_PASSWORD_POLICY.minPasswordLength;
   return {
-    minPasswordLength: sec?.minPasswordLength ?? DEFAULT_PASSWORD_POLICY.minPasswordLength,
+    minPasswordLength: Math.max(8, Math.round(min)),
     requireUppercase: sec?.requireUppercase ?? DEFAULT_PASSWORD_POLICY.requireUppercase,
     requireNumbers: sec?.requireNumbers ?? DEFAULT_PASSWORD_POLICY.requireNumbers,
     requireSymbol: sec?.requireSymbol ?? DEFAULT_PASSWORD_POLICY.requireSymbol,

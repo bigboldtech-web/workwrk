@@ -43,7 +43,8 @@ export async function GET() {
         id: e.id,
         when: e.createdAt.toISOString(),
         who: e.actor ? `${e.actor.firstName} ${e.actor.lastName}`.trim() : e.actorLabel ?? "System",
-        what: e.description,
+        // Older rows were written "1 skill rows" / "(1 rows)": read in the singular.
+        what: e.description.replace(/\b1 (\w+ )?rows\b/g, (_m, w: string | undefined) => `1 ${w ?? ""}row`),
         kind: (e.metadata as { kind?: string } | null)?.kind ?? null,
       })),
       matrixRetired: matrix ? { id: matrix.id, at: matrix.createdAt.toISOString() } : null,

@@ -81,7 +81,7 @@ const LEVEL_WORDS: Record<string, string> = {
   TEAM_LEAD: "Team lead",
   EMPLOYEE: "Member",
   AGENT: "Agent",
-  HR: "People team (HR)",
+  HR: "People team",
 };
 
 /**
@@ -91,4 +91,81 @@ const LEVEL_WORDS: Record<string, string> = {
  */
 export function humanizeAuditSentence(text: string): string {
   return text.replace(/\b(SUPER_ADMIN|COMPANY_ADMIN|C_LEVEL|TEAM_LEAD|EMPLOYEE|DIRECTOR|MANAGER|AGENT|VP)\b/g, (m) => LEVEL_WORDS[m] ?? m);
+}
+
+/**
+ * The word the log shows for a stored target type ("user" is "Person",
+ * "scim_token" is "SCIM token"), never the raw key (tested). Unknown types
+ * are spaced and capitalised rather than shown as code.
+ */
+const TARGET_WORDS: Record<string, string> = {
+  user: "Person",
+  organization: "Workspace",
+  invitation: "Invitation",
+  export: "Export",
+  scim_token: "SCIM token",
+  api_key: "API key",
+  apikey: "API key",
+  webhook_subscription: "Webhook",
+  identity_provider: "Identity provider",
+  okr: "Goal",
+  kra: "KRA",
+  sop: "SOP",
+  doc: "Doc",
+  file: "File",
+  datatable: "Table",
+  formdefinition: "Form",
+  reviewcycle: "Review cycle",
+  review_cycle: "Review cycle",
+  weekly_review: "Weekly review",
+  process_run: "Process run",
+  talent_assessment: "Talent assessment",
+  candor_session: "Candor session",
+  budget_plan: "Budget plan",
+  purchase_order: "Purchase order",
+  fiscal_year: "Fiscal year",
+  appsumo_code: "AppSumo code",
+  space: "Space",
+  folder: "Folder",
+  board: "List",
+  list: "List",
+};
+
+export function targetTypeWord(type: string | null | undefined): string {
+  if (!type) return "";
+  const k = type.toLowerCase();
+  if (TARGET_WORDS[k]) return TARGET_WORDS[k];
+  const spaced = type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_.]+/g, " ").trim().toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+const VALUE_WORDS: Record<string, string> = {
+  ...LEVEL_WORDS,
+  OWNER: "Owner",
+  ADMIN: "Admin",
+  MEMBER: "Member",
+  GUEST: "Guest",
+  ACTIVE: "Active",
+  INACTIVE: "Deactivated",
+  ON_LEAVE: "On leave",
+  PROBATION: "Probation",
+  PIP: "Improvement plan",
+  NOTICE_PERIOD: "Notice period",
+};
+
+/** A before or after value in words: enums become the words a person reads, objects stay compact (tested). */
+export function auditValueWords(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "·";
+  if (typeof v === "string") return VALUE_WORDS[v] ?? humanizeAuditSentence(v);
+  if (typeof v === "boolean") return v ? "On" : "Off";
+  if (typeof v === "number") return String(v);
+  if (Array.isArray(v)) return v.length === 0 ? "None" : v.map((x) => auditValueWords(x)).join(", ");
+  return JSON.stringify(v);
+}
+
+/** A before/after key in words ("inviteExpiryDays" is "Invite expiry days"). */
+export function auditKeyWords(k: string): string {
+  if (k === "level") return "Tier";
+  const spaced = k.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_.]+/g, " ").trim().toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

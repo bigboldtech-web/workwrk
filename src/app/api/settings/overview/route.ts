@@ -113,9 +113,9 @@ async function overview() {
     access: [`New Spaces: ${NEW_SPACE_LABELS[access.newSpaceDefault] ?? access.newSpaceDefault}`, `Guest invites: ${GUEST_INVITE_LABELS[access.whoCanInviteGuests] ?? access.whoCanInviteGuests}`],
     tasks: [plural(itemTypes, "task type"), plural(tags, "tag")],
     scoring: [onCadences.length ? onCadences.map(cap).join(", ") : "No review cadence on", `Weights sum to ${weightsTotal(weights)}`],
-    security: [`Two-factor: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${signIn.sessionIdleMinutes} minutes`],
+    security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${signIn.sessionIdleMinutes} minutes`],
     data: [`Trash kept ${retention.trashDays} days`, `Last export ${relative(lastExport?.createdAt ?? null)}`],
-    audit: [plural(events7, "event") + " in the last 7 days", retention.auditDays ? `Kept ${retention.auditDays} days` : "Kept forever"],
+    audit: [plural(events7, "event") + " in the last 7 days", retention.auditDays ? `${retention.auditDays}-day window, not enforced yet` : "Kept forever"],
     api: [plural(keys, "active key"), plural(hooks, "webhook")],
     billing: [`${cap(String(org.plan).toLowerCase())} · ${String(org.status).toLowerCase()}`, seats && seats < 99999 ? `${members} of ${seats} seats` : `${plural(members, "seat")} in use`],
   };

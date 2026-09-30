@@ -189,7 +189,10 @@ export default function AccessSettingsPage() {
 
         <section aria-label="Legacy" id="access.legacy">
           <div className="mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
-          <p className="mb-3 text-sm text-ink-2">These are the rules from the old permissions grid that the server actually checks. They become part of the access model above.</p>
+          <p className="mb-1 text-sm text-ink-2">These are the rules from the old permissions grid that the server actually checks. They become part of the access model above.</p>
+          <p className="mb-3 text-sm text-ink-2">
+            When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data &gt; Export. Until then it keeps working exactly as before. The Owner column is the stored Owner level; the workspace&apos;s first Admin is an Owner too and follows the Admin column.
+          </p>
           {loadError ? (
             <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
           ) : loading ? (

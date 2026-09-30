@@ -11,13 +11,16 @@
  *  DELETE /api/item-types/[id]     → remove custom type
  */
 
-import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorState } from "@/components/ui/error-state";
-import { Plus, Search, Trash2, Star, Check, X } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 
 import { useOsToast } from "@/components/layout/os/toast";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { Chip } from "@/components/ui/chip";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { btn } from "@/components/settings/settings-form";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { itemTypeIcon, ITEM_TYPE_ICON_NAMES } from "@/lib/item-type-icons";
 
@@ -119,93 +122,109 @@ export function TaskTypesTab({
     return <ErrorState what="task types" hint={loadError} onRetry={() => { void load(); }} />;
   }
 
+  const columns: TableColumn<ApiType>[] = [
+    {
+      key: "type", label: "Type", title: true, width: "minmax(240px,2fr)",
+      render: (t) => {
+        const Icon = itemTypeIcon(t.icon);
+        return (
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2"><Icon className="h-4 w-4" strokeWidth={1.5} /></span>
+            <span className="min-w-0">
+              <span className="block truncate">{t.singular}</span>
+              <span className="block truncate text-sm font-normal text-ink-2">{t.description || t.plural}</span>
+            </span>
+          </span>
+        );
+      },
+    },
+    { key: "kind", label: "Built-in", width: "110px", render: (t) => (t.builtIn ? "Built-in" : "Custom") },
+    { key: "default", label: "Default", width: "110px", render: (t) => (t.isDefault ? <Chip>Default</Chip> : "·") },
+  ];
+
   return (
     <>
-      <div className="space-y-8">
+      <div className="flex flex-col gap-6">
         {/* Active types */}
-        <section>
-          <h2 className="text-base font-semibold text-zinc-900 mb-3">Active types</h2>
-          {types === null ? (
-            <SkeletonRows rows={4} />
-          ) : (
-            <div className="grid sm:grid-cols-2 gap-2.5">
-              {types.map((t) => {
-                const Icon = itemTypeIcon(t.icon);
-                return (
-                  <div key={t.id} className="group flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3">
-                    <span className="mt-0.5 inline-flex w-8 h-8 rounded-lg bg-zinc-50 items-center justify-center text-zinc-600 shrink-0"><Icon className="w-4 h-4" /></span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-base font-medium text-zinc-900 truncate">{t.singular}</span>
-                        {t.isDefault ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium">Default</span> : null}
-                        {t.builtIn ? <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500">Built-in</span> : null}
-                      </div>
-                      <div className="text-sm text-zinc-500 truncate">{t.description || t.plural}</div>
-                    </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {!t.isDefault ? <button type="button" onClick={() => setDefault(t.id)} title="Set as default" className="w-7 h-7 rounded-md inline-flex items-center justify-center text-zinc-400 hover:bg-zinc-100 hover:text-amber-500"><Star className="w-3.5 h-3.5" /></button> : null}
-                      {!t.builtIn ? <button type="button" onClick={() => remove(t)} title="Delete" className="w-7 h-7 rounded-md inline-flex items-center justify-center text-zinc-400 hover:bg-zinc-100 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button> : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <section className="flex flex-col gap-2">
+          <h2 className="text-base font-semibold text-ink">Active types</h2>
+          <TableCard
+            ariaLabel="Task types"
+            columns={columns}
+            rows={types}
+            rowKey={(t) => t.id}
+            rowMenuAlwaysVisible
+            rowMenuWidth={200}
+            rowMenu={(t) => (
+              <span className="flex items-center justify-end gap-1">
+                {!t.isDefault ? <button type="button" className={btn.ghost} onClick={() => { void setDefault(t.id); }}>Make default</button> : null}
+                {!t.builtIn ? <button type="button" className={btn.dangerGhost} onClick={() => { void remove(t); }}>Delete</button> : null}
+              </span>
+            )}
+            empty={<span>No task types yet</span>}
+          />
         </section>
 
         {/* Recommended library */}
-        <section>
-          <div className="flex items-center justify-between mb-3 gap-3">
-            <h2 className="text-base font-semibold text-zinc-900">Recommended</h2>
-            <div className="inline-flex items-center gap-2 h-8 px-2.5 rounded-lg border border-zinc-200 w-[220px]">
-              <Search className="w-3.5 h-3.5 text-zinc-400" />
-              <input value={recSearch} onChange={(e) => setRecSearch(e.target.value)} placeholder="Search types…" className="flex-1 text-base bg-transparent outline-none" />
-            </div>
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-ink">Recommended</h2>
+            <label className="flex h-9 w-[240px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+              <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+              <input value={recSearch} onChange={(e) => setRecSearch(e.target.value)} placeholder="Search types" aria-label="Search recommended types" className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none" />
+            </label>
           </div>
           {recCats.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              <button type="button" onClick={() => setRecCat(null)} className={`h-7 px-2.5 rounded-full text-sm ${recCat === null ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>All</button>
+            <div className="flex flex-wrap gap-1.5">
+              {/* Filter chips: the selected one is the neutral pill, never a
+                  second blue fill beside the page's one primary. */}
+              <button type="button" aria-pressed={recCat === null} onClick={() => setRecCat(null)} className={chipClass(recCat === null)}>All</button>
               {recCats.map((c) => (
-                <button key={c} type="button" onClick={() => setRecCat(recCat === c ? null : c)} className={`h-7 px-2.5 rounded-full text-sm ${recCat === c ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>{c}</button>
+                <button key={c} type="button" aria-pressed={recCat === c} onClick={() => setRecCat(recCat === c ? null : c)} className={chipClass(recCat === c)}>{c}</button>
               ))}
             </div>
           ) : null}
           {recFiltered.length === 0 ? (
-            <div className="text-base text-zinc-400 py-6">Nothing to add{recSearch || recCat ? " for this filter" : ""}.</div>
+            <p className="py-4 text-base text-ink-2">Nothing to add{recSearch || recCat ? " for this filter" : ""}.</p>
           ) : (
-            <div className="grid sm:grid-cols-2 gap-2.5">
+            <ul className="flex flex-col rounded-lg border border-line bg-raised">
               {recFiltered.map((r) => {
                 const Icon = itemTypeIcon(r.icon);
                 return (
-                  <div key={r.singular} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3">
-                    <span className="inline-flex w-8 h-8 rounded-lg bg-zinc-50 items-center justify-center text-zinc-600 shrink-0"><Icon className="w-4 h-4" /></span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-base font-medium text-zinc-900 truncate">{r.singular}</div>
-                      <div className="text-sm text-zinc-500 truncate">{r.description}</div>
-                    </div>
-                    <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
-                      {adding === r.singular ? <Dots variant="pending" /> : <Plus className="w-3 h-3" />} Add
+                  <li key={r.singular} className="flex min-h-11 items-center gap-3 border-b border-line-soft px-4 py-2 last:border-b-0">
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2"><Icon className="h-4 w-4" strokeWidth={1.5} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-base font-medium text-ink">{r.singular}</span>
+                      <span className="block truncate text-sm text-ink-2">{r.description}</span>
+                    </span>
+                    <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className={btn.secondary}>
+                      {adding === r.singular ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />} Add
                     </button>
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           )}
         </section>
       </div>
 
-      {createOpen ? (
-        <CreateTypeModal
-          onClose={() => setCreateOpen(false)}
-          onCreated={() => { setCreateOpen(false); void load(); }}
-          existingNames={existingNames}
-        />
-      ) : null}
+      <CreateTypeModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => { setCreateOpen(false); void load(); }}
+        existingNames={existingNames}
+      />
     </>
   );
 }
 
-function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () => void; onCreated: () => void; existingNames: Set<string> }) {
+function chipClass(on: boolean): string {
+  return on
+    ? "h-7 rounded-full border border-ink bg-active px-2.5 text-sm font-medium text-ink"
+    : "h-7 rounded-full border border-line-strong px-2.5 text-sm text-ink-2 hover:bg-hover hover:text-ink";
+}
+
+function CreateTypeModal({ open, onClose, onCreated, existingNames }: { open: boolean; onClose: () => void; onCreated: () => void; existingNames: Set<string> }) {
   const { toast } = useOsToast();
   const [icon, setIcon] = useState("CircleDot");
   const [singular, setSingular] = useState("");
@@ -215,6 +234,7 @@ function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () =>
 
   const dupe = singular.trim() && existingNames.has(singular.trim().toLowerCase());
   const canSave = singular.trim().length > 0 && !dupe && !busy;
+  const close = () => { setSingular(""); setPlural(""); setDescription(""); setIcon("CircleDot"); onClose(); };
 
   const submit = async () => {
     if (!canSave) return;
@@ -226,62 +246,63 @@ function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () =>
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d?.error); }
       toast("Task type created");
+      setSingular(""); setPlural(""); setDescription(""); setIcon("CircleDot");
       onCreated();
     } catch (e) { toast(e instanceof Error && e.message ? e.message : "Couldn't create type"); }
     finally { setBusy(false); }
   };
 
   const PreviewIcon = itemTypeIcon(icon);
+  const input = "mt-1 h-9 w-full rounded-md border border-line-strong bg-raised px-2.5 text-base text-ink outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_3px_var(--os-focus-halo)]";
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div role="dialog" aria-modal="true" aria-label="Create Task Type" className="relative w-full max-w-[440px] bg-white rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100">
-          <h3 className="text-base font-semibold text-zinc-900">Create Task Type</h3>
-          <button type="button" onClick={onClose} className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 inline-flex items-center justify-center text-zinc-500"><X className="w-4 h-4" /></button>
-        </div>
-        <div className="p-5 space-y-4">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) close(); }}>
+      <DialogContent className="max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>New task type</DialogTitle>
+          <DialogDescription>Pick an icon and name your type.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <span className="inline-flex w-11 h-11 rounded-xl bg-zinc-50 items-center justify-center text-zinc-600"><PreviewIcon className="w-5 h-5" /></span>
-            <div className="text-base text-zinc-500">Pick an icon and name your type.</div>
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-hover text-ink-2"><PreviewIcon className="h-5 w-5" strokeWidth={1.5} /></span>
+            <span className="text-base text-ink-2">{singular.trim() || "Your type"}</span>
           </div>
           <div>
-            <label className="text-sm font-medium text-zinc-600">Icon</label>
-            <div className="mt-1.5 grid grid-cols-9 gap-1 max-h-[120px] overflow-y-auto rounded-lg border border-zinc-200 p-2">
+            <span className="text-sm font-medium text-ink">Icon</span>
+            <div className="mt-1.5 grid max-h-[120px] grid-cols-9 gap-1 overflow-y-auto rounded-md border border-line p-2">
               {ITEM_TYPE_ICON_NAMES.map((name) => {
                 const Ic = itemTypeIcon(name);
                 return (
-                  <button key={name} type="button" onClick={() => setIcon(name)} className={`inline-flex items-center justify-center w-7 h-7 rounded-md ${icon === name ? "bg-[var(--os-brand)] text-white" : "text-zinc-500 hover:bg-zinc-100"}`}>
-                    <Ic className="w-4 h-4" />
+                  <button key={name} type="button" aria-label={name} aria-pressed={icon === name} onClick={() => setIcon(name)} className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${icon === name ? "bg-active text-ink ring-1 ring-ink" : "text-ink-2 hover:bg-hover hover:text-ink"}`}>
+                    <Ic className="h-4 w-4" strokeWidth={1.5} />
                   </button>
                 );
               })}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium text-zinc-600">Singular name <span className="text-red-400">*</span></label>
-              <input value={singular} onChange={(e) => setSingular(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bug" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-base outline-none focus:border-zinc-400" autoFocus />
-              {dupe ? <div className="text-xs text-red-500 mt-1">A type with this name exists.</div> : null}
-            </div>
-            <div>
-              <label className="text-sm font-medium text-zinc-600">Plural name</label>
-              <input value={plural} onChange={(e) => setPlural(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bugs" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-base outline-none focus:border-zinc-400" />
-            </div>
+            <label className="block">
+              <span className="text-sm font-medium text-ink">Singular name</span>
+              <input value={singular} onChange={(e) => setSingular(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bug" className={input} autoFocus />
+              {dupe ? <span role="alert" className="mt-1 block text-sm text-danger-text">A type with this name exists.</span> : null}
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-ink">Plural name</span>
+              <input value={plural} onChange={(e) => setPlural(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bugs" className={input} />
+            </label>
           </div>
-          <div>
-            <label className="text-sm font-medium text-zinc-600">Description</label>
-            <input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 100))} maxLength={100} placeholder="A defect to fix" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-base outline-none focus:border-zinc-400" />
-            <div className="text-xs text-zinc-400 mt-1 text-right">{description.length}/100</div>
-          </div>
+          <label className="block">
+            <span className="text-sm font-medium text-ink">Description</span>
+            <input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 100))} maxLength={100} placeholder="A defect to fix" className={input} />
+            <span className="mt-1 block text-end text-sm text-ink-3">{description.length}/100</span>
+          </label>
         </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-zinc-100">
-          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-base text-zinc-600 hover:bg-zinc-100">Cancel</button>
-          <button type="button" onClick={submit} disabled={!canSave} className="h-9 px-4 rounded-lg text-base text-white bg-[var(--os-brand)] inline-flex items-center gap-1.5 disabled:opacity-50">
-            {busy ? <Dots variant="pending" /> : <Check className="w-3.5 h-3.5" />} Create
+        <DialogFooter>
+          <button type="button" onClick={close} className={btn.ghost}>Cancel</button>
+          <button type="button" onClick={() => { void submit(); }} disabled={!canSave} className={btn.primary}>
+            {busy ? <Dots variant="pending" /> : null} Create
           </button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

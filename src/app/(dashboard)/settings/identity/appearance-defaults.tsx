@@ -84,8 +84,8 @@ const LOCK_GROUPS: Array<{
 }> = [
   {
     key: "theme",
-    label: "Theme (appearance + accent)",
-    desc: "Members can't change light/dark or the accent color. Everyone gets the org defaults above.",
+    label: "Theme",
+    desc: "Members can't change light or dark. Everyone gets the org default above.",
     Icon: Palette,
     paths: lockPaths("theme"),
   },
@@ -359,14 +359,13 @@ export function AppearanceDefaults() {
               Locked controls
             </h2>
 
-            <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-[#0073EA]/20 bg-[#0073EA]/[0.04] p-3.5">
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#0073EA]" />
-              <p className="text-base leading-relaxed text-zinc-600">
-                <span className="font-semibold text-zinc-800">A lock freezes a setting for every member.</span>{" "}
+            <div className="mb-3 flex items-start gap-2.5 rounded-lg bg-brand-soft p-3.5">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} />
+              <p className="text-base leading-relaxed text-ink-2">
+                <span className="font-semibold text-ink">A lock freezes a setting for every member.</span>{" "}
                 While locked, that setting always resolves to the org default above: a member&apos;s own value is
-                overridden on every load, so their change never sticks. The Theme and Home locks also visibly
-                disable the matching control in the Customize panel; Density and Sidebar are enforced the same
-                way but their controls are not greyed out yet. Unlock to hand the choice back.
+                overridden on every load, so their change never sticks, and where My settings &gt;
+                Preferences has a control for it, it shows the locked value instead. Unlock to hand the choice back.
               </p>
             </div>
 

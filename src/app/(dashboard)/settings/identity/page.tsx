@@ -37,6 +37,7 @@ import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { SPLASH_POLICIES } from "@/lib/settings/org-settings-sections";
 import { AppearanceDefaults } from "./appearance-defaults";
+import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 
 const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
@@ -97,14 +98,29 @@ function selectProfile(b: SettingsGetBody): { form: ProfileForm; logo: string | 
   };
 }
 
+// What the retired /setup wizard stored, in the words this page uses, so an
+// existing workspace never reads a raw code ("smb", "1-10") in a select.
+const LEGACY_WORDS: Record<string, string> = {
+  startup: "Startup",
+  smb: "Small business",
+  mid_market: "Mid-market",
+  enterprise: "Enterprise",
+  "1-10": "1 to 10",
+  "11-50": "11 to 50",
+  "51-200": "51 to 200",
+  "201-500": "201 to 500",
+  "500+": "500+",
+};
+
 function withCurrent(list: string[], current: string): { value: string; label: string }[] {
   const opts = [{ value: "", label: "Not set" }, ...list.map((v) => ({ value: v, label: v }))];
-  if (current && !list.includes(current)) opts.push({ value: current, label: current });
+  if (current && !list.includes(current)) opts.push({ value: current, label: LEGACY_WORDS[current] ?? current });
   return opts;
 }
 
 function ProfileTab() {
   const s = useSettingsSection("profile", selectProfile);
+  const showUpcoming = useShowUpcoming();
   const { toast } = useOsToast();
   const [draft, setDraft] = useState<ProfileForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -211,19 +227,26 @@ function ProfileTab() {
           </Field>
         </SettingsCard>
 
-        <SettingsCard title="About the business" description="Grounds every AI draft (KRAs, SOPs) in what your company actually does." id="identity.business">
+        <SettingsCard title="About the business" description="The industry grounds AI drafts (KRAs, SOPs) in what your company actually does." id="identity.business">
           <Field label="Industry" htmlFor="id-industry" id="identity.industry">
             <TextInput id="id-industry" list="id-industries" value={form.industry} maxLength={200} className="max-w-[360px]" onChange={(e) => set("industry", e.target.value)} />
             <datalist id="id-industries">
               {INDUSTRIES.map((i) => <option key={i} value={i} />)}
             </datalist>
           </Field>
-          <Field label="Business type" htmlFor="id-btype" id="identity.businessType">
-            <NativeSelect id="id-btype" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
-          </Field>
-          <Field label="Team size" htmlFor="id-tsize" id="identity.teamSize">
-            <NativeSelect id="id-tsize" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
-          </Field>
+          {/* Stored, but nothing reads them yet (settings-architecture 9.1):
+              behind Show upcoming features, with that said, until a reader
+              exists. The stored values are kept and saved untouched. */}
+          {showUpcoming ? (
+            <>
+              <Field label="Business type" htmlFor="id-btype" id="identity.businessType" helper="Not used anywhere yet.">
+                <NativeSelect id="id-btype" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
+              </Field>
+              <Field label="Team size" htmlFor="id-tsize" id="identity.teamSize" helper="Not used anywhere yet.">
+                <NativeSelect id="id-tsize" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
+              </Field>
+            </>
+          ) : null}
         </SettingsCard>
 
         <SettingsCard title="Branding" id="identity.branding">
@@ -262,7 +285,9 @@ function selectCulture(b: SettingsGetBody): CultureForm {
     vision: typeof cp.vision === "string" ? cp.vision : "",
     about: typeof cp.about === "string" ? cp.about : "",
     values: Array.isArray(cp.values) ? (cp.values as unknown[]).filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [],
-    splash: splash === "first-open-daily" || splash === "off" ? splash : "every-open",
+    // Unset reads as what the product does for it: /api/boot (the one thing
+    // that drives the splash) falls back to "first-open-daily".
+    splash: splash === "every-open" || splash === "off" ? splash : "first-open-daily",
   };
 }
 
@@ -288,7 +313,9 @@ function CultureTab() {
       vision: draft.vision.trim(),
       about: draft.about.trim(),
       values: draft.values.map((v) => v.trim()).filter(Boolean),
-      splash: draft.splash,
+      // Only when it was changed here: a mission edit never rewrites the
+      // splash policy.
+      ...(base && draft.splash !== base.splash ? { splash: draft.splash } : {}),
     });
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
@@ -296,7 +323,7 @@ function CultureTab() {
     toast("Culture saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     return true;
-  }, [draft, s, toast]);
+  }, [draft, base, s, toast]);
 
   if (s.status === "error") return <ErrorState what="the culture settings" hint={s.error ?? undefined} onRetry={s.retry} />;
   if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;

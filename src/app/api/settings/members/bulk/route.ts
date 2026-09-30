@@ -4,8 +4,8 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
-import { applyRoleChange } from "@/lib/access/membership";
-import { sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner } from "@/lib/access/workspace-admin";
+import { applyRoleChange, roleChangeSentence } from "@/lib/access/membership";
+import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 
 // POST /api/settings/members/bulk: change several people's role in ONE
 // confirmed step (carried from Phase 9). Owner and Admin. Each person goes
@@ -26,7 +26,12 @@ export async function POST(req: Request) {
   if (!sessionIsWorkspaceAdmin(session)) return NextResponse.json({ error: "Only Owners and Admins change roles" }, { status: 403 });
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Send { ids, role, tier }" }, { status: 400 });
-  const actorIsOwner = await sessionIsWorkspaceOwner(session);
+  // The actor as the database has them now (a demoted Admin is refused at
+  // once), and again per person under the role lock inside applyRoleChange.
+  const fresh = await freshWorkspaceActor(session);
+  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.admin) return NextResponse.json({ error: "Only Owners and Admins change roles" }, { status: 403 });
+  const actorIsOwner = fresh.owner;
   const results: { id: string; ok: boolean; error?: string; changed?: boolean }[] = [];
   for (const id of [...new Set(parsed.data.ids)]) {
     if (id === su.id) { results.push({ id, ok: false, error: "Change your own role from your row, one at a time" }); continue; }
@@ -45,7 +50,7 @@ export async function POST(req: Request) {
         type: "org_role.changed",
         actorId: su.id,
         organizationId: su.organizationId,
-        description: `Changed a role from ${r.before.role.toLowerCase()} to ${r.after.role.toLowerCase()} (bulk)`,
+        description: `${roleChangeSentence(r.targetName, r)} (bulk change)`,
         targetId: id,
         targetType: "user",
         severity: "warning",

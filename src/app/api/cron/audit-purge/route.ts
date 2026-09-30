@@ -13,6 +13,9 @@
 //      row per org naming how many rows went and the cut-off, so the purge
 //      is itself on the record.
 //   4. `?dry=1` reports what it would delete and deletes nothing.
+//   5. It never deletes a row a feature reads back (weekly review decisions,
+//      goal creators, invites, shares, the retired grid, consent, staff
+//      rows): src/lib/audit-retention.ts, AUDIT_PURGE_KEEP_TYPES.
 //
 // NOT INSTALLED. scripts/CRON-SETUP.md carries the row; the crontab is the
 // founder's step.
@@ -20,6 +23,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { retentionOf } from "@/lib/settings/org-policy";
+import { auditPurgeWhere } from "@/lib/audit-retention";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +52,8 @@ export async function POST(req: NextRequest) {
       const days = retentionOf(org.settings).auditDays;
       if (!days) continue;
       const cutoff = new Date(Date.now() - days * 86_400_000);
-      const where = { organizationId: org.id, createdAt: { lt: cutoff } };
+      // Never the rows a feature reads back (src/lib/audit-retention.ts).
+      const where = auditPurgeWhere(org.id, cutoff);
       let deleted = 0;
       if (dryRun) {
         deleted = await prisma.activityLog.count({ where });

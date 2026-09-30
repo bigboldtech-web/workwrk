@@ -19,7 +19,7 @@ import { signOut, useSession } from "next-auth/react";
 
 export function PrivacyControls() {
   const { data: session } = useSession();
-  const user = session?.user as any;
+  const user = session?.user as { id?: string; email?: string | null; name?: string | null; firstName?: string; lastName?: string } | undefined;
   const { reopen, consent, withdraw } = useConsent();
   const [exporting, setExporting] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -60,8 +60,8 @@ export function PrivacyControls() {
       if (!res.ok) throw new Error(data?.error || "Delete failed");
       success("Account deleted. Signing you out…");
       setTimeout(() => signOut({ callbackUrl: "/" }), 1500);
-    } catch (e: any) {
-      error(e.message || "Could not delete account");
+    } catch (e: unknown) {
+      error((e instanceof Error && e.message) || "Could not delete account");
     } finally {
       setDeleting(false);
     }

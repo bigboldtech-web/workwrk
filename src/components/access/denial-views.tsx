@@ -345,6 +345,8 @@ export interface AskAnAdminStripProps {
   pageLabel: string;
   /** Real Owners and Admins, earliest first (listOrgAdmins). */
   admins: OrgAdmin[];
+  /** Workspace pages this viewer CAN open (a reader below Admin), linked after the sentence. */
+  openable?: { label: string; href: string }[];
 }
 
 /** "Ana, Ben and Cy" from the first three names (pure; tested). */
@@ -363,7 +365,7 @@ export function adminNamesSentence(names: string[]): string {
  * not a wall: nothing of the Workspace page is revealed beyond its label,
  * and the page under it is a destination, so it carries no BackButton.
  */
-export function AskAnAdminStrip({ pageLabel, admins }: AskAnAdminStripProps) {
+export function AskAnAdminStrip({ pageLabel, admins, openable }: AskAnAdminStripProps) {
   const who = adminNamesSentence(admins.map((a) => a.name));
   return (
     <div
@@ -372,9 +374,19 @@ export function AskAnAdminStrip({ pageLabel, admins }: AskAnAdminStripProps) {
     >
       <Info className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden />
       <span className="min-w-0 flex-1">
-        {pageLabel === "Workspace settings"
-          ? <>Workspace settings are looked after by {who}. Ask them if you need something changed.</>
-          : <>{pageLabel} is part of Workspace settings, which {who} look{admins.length === 1 ? "s" : ""} after. Ask them if you need something changed.</>}
+        {pageLabel === "Workspace settings" ? "Workspace settings are" : `${pageLabel} is`} looked after by {who}. Ask them to change it.
+        {openable && openable.length > 0 ? (
+          <>
+            {" "}You can open{" "}
+            {openable.map((p, i) => (
+              <span key={p.href}>
+                {i > 0 ? (i === openable.length - 1 ? " and " : ", ") : null}
+                <Link href={p.href} className="font-medium text-brand-deep underline-offset-2 hover:underline">{p.label}</Link>
+              </span>
+            ))}
+            .
+          </>
+        ) : null}
       </span>
       <AdminFaces admins={admins} />
     </div>
@@ -385,7 +397,7 @@ function AdminFaces({ admins }: { admins: OrgAdmin[] }) {
   if (admins.length === 0) return null;
   const face = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink";
   return (
-    <span className="inline-flex shrink-0 -space-x-1.5">
+    <span className="inline-flex shrink-0 -space-x-1">
       {admins.slice(0, 5).map((a) => {
         const inner = a.avatar ? (
           // eslint-disable-next-line @next/next/no-img-element

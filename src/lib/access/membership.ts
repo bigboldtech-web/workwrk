@@ -44,7 +44,7 @@ export const MEMBER_TIERS: readonly { value: string; label: string }[] = [
   { value: "DIRECTOR", label: "Director" },
   { value: "VP", label: "VP" },
   { value: "C_LEVEL", label: "Executive" },
-  { value: "HR", label: "People team (HR)" },
+  { value: "HR", label: "People team" },
   { value: "AGENT", label: "Agent" },
 ];
 const MEMBER_TIER_SET = new Set(MEMBER_TIERS.map((t) => t.value));
@@ -129,49 +129,107 @@ export function planRoleChange(input: RoleChangeInput): RoleChangePlan {
   return { ok: true, level, changed: true, bump, beforeRole, afterRole };
 }
 
-/** Owners and Admins of one org, live, oldest first (the guard's input). */
+/**
+ * Owners and Admins of one org, live, oldest first (the guard's input).
+ *
+ * ONE answer to "who is an Owner here", the same set as ownerIdsFor
+ * (src/lib/admin/company-detail.ts): people anchored in this workspace
+ * (User.organizationId) AND people who hold an admin membership here while
+ * switched into another workspace (OrganizationMembership.role). `anchored`
+ * says which row holds the role, so a write lands on the right one.
+ */
 export async function liveAdminsOf(db: Db, organizationId: string) {
-  return db.user.findMany({
-    where: { organizationId, deletedAt: null, status: { not: "INACTIVE" }, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
-    select: { id: true, accessLevel: true, createdAt: true, firstName: true, lastName: true },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  });
+  const [anchored, members] = await Promise.all([
+    db.user.findMany({
+      where: { organizationId, deletedAt: null, status: { not: "INACTIVE" }, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
+      select: { id: true, accessLevel: true, createdAt: true, firstName: true, lastName: true },
+    }),
+    db.organizationMembership.findMany({
+      where: {
+        organizationId,
+        role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] },
+        user: { deletedAt: null, status: { not: "INACTIVE" }, organizationId: { not: organizationId } },
+      },
+      select: { role: true, user: { select: { id: true, createdAt: true, firstName: true, lastName: true } } },
+    }),
+  ]);
+  const rows = [
+    ...anchored.map((u) => ({ ...u, anchored: true })),
+    ...members.map((m) => ({ id: m.user.id, accessLevel: m.role, createdAt: m.user.createdAt, firstName: m.user.firstName, lastName: m.user.lastName, anchored: false })),
+  ];
+  return rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
+}
+
+/**
+ * Serialise every change to who holds Owner or Admin in one workspace (role
+ * changes, bulk changes, ownership transfer, deactivation, removal, SCIM).
+ * Two Owners demoting each other at the same moment each read the admins,
+ * plan, then write; without this lock both pass the last-Owner guard and
+ * the workspace ends with nobody. Transaction-scoped: released on commit.
+ */
+export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`org-roles:${organizationId}`}))`;
+}
+
+function isClient(db: Db): db is PrismaClient {
+  return typeof (db as PrismaClient).$transaction === "function";
 }
 
 export interface AppliedRoleChange {
   ok: true;
   changed: boolean;
+  /** The person whose role this is, for the audit sentence. */
+  targetName: string;
   before: { level: string; role: MemberRole };
   after: { level: string; role: MemberRole };
   bumped: boolean;
 }
 
 /**
- * Apply one role change in `db` (inside the caller's transaction when there
- * is one). Returns what moved so the caller writes the audit row.
+ * Apply one role change. With the plain client it opens its own transaction;
+ * inside a caller's transaction it joins it. Either way it takes the
+ * workspace's role lock first and then re-reads, under the lock, whether the
+ * ACTOR is still an Owner or Admin: the session's word is only an upper
+ * bound, so an Admin demoted a moment ago (or an Owner who lost a race to
+ * the other Owner) is refused rather than trusted until the next session
+ * check. Returns what moved so the caller writes the audit row.
  */
 export async function applyRoleChange(
   db: Db,
   input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
 ): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string }> {
+  if (isClient(db)) return db.$transaction((tx) => applyRoleChangeIn(tx, input));
+  return applyRoleChangeIn(db, input);
+}
+
+async function applyRoleChangeIn(
+  db: Prisma.TransactionClient,
+  input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
+): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string }> {
+  await lockOrgRoles(db, input.organizationId);
   const target = await db.user.findFirst({
     where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null },
-    select: { id: true, accessLevel: true, createdAt: true },
+    select: { id: true, accessLevel: true, createdAt: true, firstName: true, lastName: true, email: true },
   });
   if (!target) return { ok: false, status: 404, error: "Not found" };
   const admins = await liveAdminsOf(db, input.organizationId);
   const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
+  // The actor as the database has them NOW, under the lock.
+  const actorStillAdmin = admins.some((a) => a.id === input.actorId);
+  const actorIsAdmin = input.actorIsAdmin && actorStillAdmin;
+  const actorIsOwner = input.actorIsOwner && actorStillAdmin && owners.includes(input.actorId);
   const plan = planRoleChange({
     actorId: input.actorId,
-    actorIsOwner: input.actorIsOwner,
-    actorIsAdmin: input.actorIsAdmin,
+    actorIsOwner,
+    actorIsAdmin,
     target: { id: target.id, level: target.accessLevel, isOwner: owners.includes(target.id), createdAt: target.createdAt },
     admins: admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })),
     next: input.next,
   });
+  const targetName = `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || target.email;
   if (!plan.ok) return plan;
   if (!plan.changed) {
-    return { ok: true, changed: false, before: { level: target.accessLevel, role: plan.beforeRole }, after: { level: target.accessLevel, role: plan.afterRole }, bumped: false };
+    return { ok: true, changed: false, targetName, before: { level: target.accessLevel, role: plan.beforeRole }, after: { level: target.accessLevel, role: plan.afterRole }, bumped: false };
   }
   await db.user.update({
     where: { id: target.id },
@@ -186,15 +244,40 @@ export async function applyRoleChange(
   return {
     ok: true,
     changed: true,
+    targetName,
     before: { level: target.accessLevel, role: plan.beforeRole },
     after: { level: plan.level, role: plan.afterRole },
     bumped: plan.bump,
   };
 }
 
+/** The words an audit row uses for a role: "Owner", "Admin", or the tier ("Manager"). */
+export function roleWords(side: { level: string; role: MemberRole }): string {
+  if (side.role === "OWNER") return "Owner";
+  if (side.role === "ADMIN") return "Admin";
+  return tierLabel(side.level);
+}
+
+/** "Changed Mona Manager's role from Manager to Admin", the one sentence every role-change row uses. */
+export function roleChangeSentence(name: string, change: { before: { level: string; role: MemberRole }; after: { level: string; role: MemberRole } }): string {
+  const from = roleWords(change.before);
+  const to = roleWords(change.after);
+  if (from === to) return `Updated ${name}'s role (${to})`;
+  return `Changed ${name}'s role from ${from} to ${to}`;
+}
+
 export type OwnershipResult =
-  | { ok: true; targetId: string; targetName: string; targetBefore: MemberRole; selfDemoted: boolean; selfVersion: { from: number; to: number } | null }
-  | { ok: false; status: 400 | 404 | 409; error: string };
+  | {
+      ok: true;
+      targetId: string;
+      targetName: string;
+      targetBefore: MemberRole;
+      selfDemoted: boolean;
+      selfVersion: { from: number; to: number } | null;
+      /** Implicit Owners (the earliest Admin) written as explicit Owners, each owed its own audit row. */
+      frozen: { id: string; name: string }[];
+    }
+  | { ok: false; status: 400 | 403 | 404 | 409; error: string };
 
 /**
  * Identity > Danger zone > Transfer ownership. The target becomes an Owner
@@ -207,6 +290,7 @@ export async function transferOwnership(
 ): Promise<OwnershipResult> {
   if (input.targetId === input.actorId) return { ok: false, status: 400, error: "Pick someone other than yourself" };
   return db.$transaction(async (tx) => {
+    await lockOrgRoles(tx, input.organizationId);
     const target = await tx.user.findFirst({
       where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null, status: { not: "INACTIVE" } },
       select: { id: true, accessLevel: true, firstName: true, lastName: true, email: true, createdAt: true },
@@ -217,6 +301,11 @@ export async function transferOwnership(
     const admins = await liveAdminsOf(tx, input.organizationId);
     const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
     const targetBefore = memberRoleOf(target.accessLevel, owners.includes(target.id));
+    // The caller as the database has them now, under the lock: an Owner
+    // demoted a moment ago never hands Owner on.
+    if (!owners.includes(input.actorId)) {
+      return { ok: false as const, status: 403 as const, error: "Only a workspace Owner can transfer ownership" };
+    }
 
     // Stepping down only works when it would actually take: under the step-0
     // mapping the org's earliest-created admin is an Owner by that fact
@@ -243,10 +332,16 @@ export async function transferOwnership(
     // Freeze every current implicit Owner (the earliest COMPANY_ADMIN) as an
     // explicit one first, so promoting an older account never quietly takes
     // Owner away from them (the Staff console's Set Owner rule).
+    const frozen: { id: string; name: string }[] = [];
+    const writeOwner = async (a: { id: string; anchored: boolean }) => {
+      if (a.anchored) await tx.user.update({ where: { id: a.id }, data: { accessLevel: "SUPER_ADMIN" } });
+      await tx.organizationMembership.updateMany({ where: { userId: a.id, organizationId: input.organizationId }, data: { role: "SUPER_ADMIN" } });
+    };
     for (const id of owners) {
       const a = admins.find((x) => x.id === id);
       if (a && a.accessLevel === "COMPANY_ADMIN" && id !== input.actorId) {
-        await tx.user.update({ where: { id }, data: { accessLevel: "SUPER_ADMIN" } });
+        await writeOwner(a);
+        frozen.push({ id, name: `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim() || "An Admin" });
       }
     }
     if (target.accessLevel !== "SUPER_ADMIN") {
@@ -256,16 +351,21 @@ export async function transferOwnership(
 
     let selfVersion: { from: number; to: number } | null = null;
     if (input.removeMe) {
+      const anchoredHere = admins.find((a) => a.id === input.actorId)?.anchored !== false;
       const me = await tx.user.update({
         where: { id: input.actorId },
-        data: { accessLevel: "COMPANY_ADMIN", tokenVersion: { increment: 1 } },
+        data: { ...(anchoredHere ? { accessLevel: "COMPANY_ADMIN" as const } : {}), tokenVersion: { increment: 1 } },
         select: { tokenVersion: true },
       });
       await tx.organizationMembership.updateMany({ where: { userId: input.actorId, organizationId: input.organizationId }, data: { role: "COMPANY_ADMIN" } });
       selfVersion = { from: me.tokenVersion - 1, to: me.tokenVersion };
     } else {
       // Keep the caller an explicit Owner too (they may be an implicit one).
-      await tx.user.update({ where: { id: input.actorId }, data: { accessLevel: "SUPER_ADMIN" } });
+      const me = admins.find((a) => a.id === input.actorId);
+      if (me && me.accessLevel !== "SUPER_ADMIN") {
+        await writeOwner(me);
+        frozen.push({ id: me.id, name: `${me.firstName ?? ""} ${me.lastName ?? ""}`.trim() || "You" });
+      }
     }
 
     // The guard, once more over the final state: never zero Owners.
@@ -274,7 +374,7 @@ export async function transferOwnership(
     if (!finalOwners.includes(target.id)) throw new Error("ownership transfer left the target without Owner");
 
     const targetName = `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || target.email;
-    return { ok: true as const, targetId: target.id, targetName, targetBefore, selfDemoted: input.removeMe, selfVersion };
+    return { ok: true as const, targetId: target.id, targetName, targetBefore, selfDemoted: input.removeMe, selfVersion, frozen };
   });
 }
 
@@ -283,35 +383,31 @@ export async function transferOwnership(
  * else the org's first Owner, else null (nothing can receive the work, and
  * the caller must say so rather than orphan it).
  */
-export async function unattendedRecipient(organizationId: string, personId: string): Promise<string | null> {
-  const person = await prisma.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
+export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
+  const person = await db.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
   if (person?.managerId) {
-    const m = await prisma.user.findFirst({ where: { id: person.managerId, organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } });
+    const m = await db.user.findFirst({ where: { id: person.managerId, organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } });
     if (m && m.id !== personId) return m.id;
   }
-  const admins = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null, status: { not: "INACTIVE" }, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] }, id: { not: personId } },
-    select: { id: true, accessLevel: true, createdAt: true },
-  });
+  const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);
   const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
   return owners[0] ?? null;
 }
 
+/** The live Owners' ids right now (the same set as ownerIdsFor). */
+export async function liveOwnerIds(organizationId: string, db: Db = prisma): Promise<string[]> {
+  const admins = await liveAdminsOf(db, organizationId);
+  return ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
+}
+
 /** Whether this person is one of the workspace's live Owners right now. */
-export async function isLiveOwner(organizationId: string, personId: string): Promise<boolean> {
-  const admins = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null, status: { not: "INACTIVE" }, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
-    select: { id: true, accessLevel: true, createdAt: true },
-  });
-  return ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt }))).includes(personId);
+export async function isLiveOwner(organizationId: string, personId: string, db: Db = prisma): Promise<boolean> {
+  return (await liveOwnerIds(organizationId, db)).includes(personId);
 }
 
 /** Whether removing this person would leave the workspace with no live Owner. */
-export async function wouldRemoveLastOwner(organizationId: string, personId: string): Promise<boolean> {
-  const admins = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null, status: { not: "INACTIVE" }, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
-    select: { id: true, accessLevel: true, createdAt: true },
-  });
+export async function wouldRemoveLastOwner(organizationId: string, personId: string, db: Db = prisma): Promise<boolean> {
+  const admins = await liveAdminsOf(db, organizationId);
   const before = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
   if (!before.includes(personId)) return false;
   const after = ownerIdsOf(admins.filter((a) => a.id !== personId).map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));

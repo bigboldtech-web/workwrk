@@ -1,4 +1,4 @@
-import { usersSettingsOf } from "@/lib/settings/org-policy";
+import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -14,15 +14,35 @@ import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const viewer = session.user as { organizationId?: string; accessLevel?: string };
+    const viewer = session.user as { organizationId?: string; accessLevel?: string; email?: string | null };
     const orgId = viewer.organizationId;
+
+    // ?rules=1: the invite rules every invite dialog starts from (Members >
+    // Invite rules), for anyone who may invite (the same people.create cell
+    // POST checks), so the topbar dialog and the Members dialog start on the
+    // same default role and accept the same domains the server accepts.
+    if (new URL(req.url).searchParams.get("rules") === "1") {
+      if (!(await hasPermission(session, "people", "create"))) {
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+      const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
+      const rules = usersSettingsOf(org?.settings, org?.domain);
+      return NextResponse.json(
+        {
+          allowedDomains: inviteDomainsOf(org?.settings, org?.domain, viewer.email),
+          inviteDefaultRole: rules.inviteDefaultRole === "ADMIN" ? "ADMIN" : "MEMBER",
+          inviteExpiryDays: rules.inviteExpiryDays,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     // The list names every invitee, their level and placement, so it is for
     // the people who manage invitations: the manager tier, the same people
     // Settings > Members (its one reader) admits. A Member gets a 403, not a
@@ -94,17 +114,17 @@ export async function POST(req: Request) {
     // workspace joins on the company's own email domain. The domain is
     // the org's stored one, falling back to the inviting admin's — so
     // an @cashkr.com admin can only invite @cashkr.com addresses.
-    // Members > Invite rules (settings.users.allowedDomains) widens it to a
-    // list; an empty list keeps the rule above, so clearing the chips never
-    // opens the workspace to any address.
+    // Members > Invite rules (settings.users.allowedDomains) widens it with
+    // more domains; the own domain always stays in (inviteDomainsOf), so
+    // clearing the chips never opens the workspace to any address and adding
+    // one never locks out the workspace's own.
     const orgDomainRow = await prisma.organization.findUnique({
       where: { id: orgId },
       select: { domain: true, settings: true },
     });
     const inviterEmail = (session.user as { email?: string }).email;
     const rules = usersSettingsOf(orgDomainRow?.settings, orgDomainRow?.domain);
-    const fallbackDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
-    const allowedDomains = rules.allowedDomains.length > 0 ? rules.allowedDomains : fallbackDomain ? [fallbackDomain] : [];
+    const allowedDomains = inviteDomainsOf(orgDomainRow?.settings, orgDomainRow?.domain, inviterEmail);
     const inviteDomain = String(email).split("@")[1]?.toLowerCase() ?? "";
     if (allowedDomains.length > 0 && !allowedDomains.includes(inviteDomain)) {
       return NextResponse.json(
@@ -315,7 +335,7 @@ export async function DELETE(req: Request) {
 // rotation is a conditional update on accepted=false, so an invitation
 // accepted a moment earlier is never revived.
 
-const RESEND_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
@@ -341,7 +361,10 @@ export async function PATCH(req: Request) {
   }
 
   const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + RESEND_WEEK_MS);
+  // A resent link lives as long as a new one: Members > Invite rules >
+  // Invitation expiry (default 7 days), the same rule POST honours.
+  const orgRules = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
+  const expiresAt = new Date(Date.now() + usersSettingsOf(orgRules?.settings, orgRules?.domain).inviteExpiryDays * DAY_MS);
   const claimed = await prisma.invitation.updateMany({
     where: { id: inv.id, organizationId: orgId, accepted: false },
     data: { token, expiresAt },

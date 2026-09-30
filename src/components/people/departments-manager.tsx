@@ -286,7 +286,8 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   return (
     <>
       {door === "teams" ? <Breadcrumb items={[{ label: "Departments" }]} /> : null}
-      {door === "teams" ? <OsPageHeader title="Departments" toolbar={toolbar} /> : <OsToolbar {...toolbar} />}
+      {/* In Settings the page's own 24px gutter holds everything, so the toolbar and body add none. */}
+      {door === "teams" ? <OsPageHeader title="Departments" toolbar={toolbar} /> : <OsToolbar {...toolbar} className="!px-0" />}
       <div className="relative">
         {sortOpen ? (
           <div className="absolute start-[110px] top-0 z-40">
@@ -296,7 +297,7 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
           </div>
         ) : null}
       </div>
-      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4 pt-2"}>
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="departments" activeCount={filters}
           onClearAll={clearFilters} search={{ value: q, onChange: setQ, placeholder: "Search departments" }}>
           <FilterGroup label="Head">

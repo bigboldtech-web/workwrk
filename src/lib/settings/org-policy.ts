@@ -179,6 +179,22 @@ export function usersSettingsOf(settings: unknown, orgDomain: string | null | un
   };
 }
 
+/**
+ * The domains an invitation (or a SCIM create) may go to: the workspace's
+ * own domain (else the inviter's), ALWAYS, plus the extra domains on
+ * Members > Invite rules. One answer for the invite route, SCIM, and the
+ * invite dialogs (GET /api/invitations/rules), so the client never refuses
+ * an address the server would take, or the reverse. Adding gmail.com to the
+ * rules widens the list; it never locks the workspace out of its own domain.
+ * Empty (no domain anywhere) means no lock, which is today's behaviour.
+ */
+export function inviteDomainsOf(settings: unknown, orgDomain: string | null | undefined, inviterEmail?: string | null): string[] {
+  const u = rec(rec(settings).users);
+  const stored = Array.isArray(u.allowedDomains) ? u.allowedDomains.map(normalizeDomain).filter((d): d is string => !!d) : [];
+  const own = normalizeDomain(orgDomain) ?? normalizeDomain(inviterEmail?.split("@")[1] ?? null);
+  return [...new Set([...(own ? [own] : []), ...stored])];
+}
+
 /* ───────────────────────── Task system / Apps › Automations ───────────────────────── */
 
 export interface WorkSettings {
@@ -266,13 +282,11 @@ export function scoreWeightsOf(settings: unknown): Record<ScoreWeightKey, number
     const v = stored[k];
     if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100) out[k] = Math.round(v);
   }
-  // A five-key legacy blob with no behavioural weight: fill it so the four
-  // add up to 100 when the other three leave room, rather than showing a
-  // total the engine never meant.
-  if (typeof stored.behavioral !== "number") {
-    const rest = out.kpi + out.sopCompliance + out.peer;
-    out.behavioral = rest <= 100 ? 100 - rest : 0;
-  }
+  // A five-key legacy blob with no behavioural weight shows the value the
+  // review engine actually uses for it (review-cycle.server.ts orgScoring:
+  // the default, 30), so the number on the page is the number that scores.
+  // If that makes the total differ from 100, the page says so rather than
+  // showing a figure no engine applies.
   return out;
 }
 

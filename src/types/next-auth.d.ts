@@ -11,6 +11,8 @@ declare module "next-auth" {
       firstName: string;
       lastName: string;
       avatar: string | null;
+      /** The tokenVersion this session was issued at (read-only; see freshWorkspaceActor). */
+      tokenVersion?: number;
     } & DefaultSession["user"];
     /**
      * Present once the person was moved out of a suspended or closed company

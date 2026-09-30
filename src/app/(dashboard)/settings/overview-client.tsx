@@ -54,7 +54,7 @@ const PAGE_LINES: Partial<Record<SettingsPageKey, string>> = {
   access: "Who can create, share and invite.",
   tasks: "Task types, tags and the templates people start from.",
   scoring: "Review cadence, score weights and bands.",
-  security: "How people sign in: passwords, sessions, two-factor.",
+  security: "How people sign in: passwords, sessions, two step verification.",
   data: "Export, import, retention and Trash.",
   audit: "What happened, who did it and what changed.",
   api: "Keys for anything that connects from outside.",

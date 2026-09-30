@@ -37,12 +37,13 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useShortcut } from "@/lib/shortcuts";
 import {
   DOOR_LABELS,
+  SETTINGS_PAGES,
   filterSettingsEntries,
   filterSettingsPages,
   resolveSettingsPage,
   type SettingEntry,
 } from "@/lib/settings-registry";
-import { settingsShellGroups, type SettingsDoorProp, type SettingsShellIconName } from "@/lib/settings-shell-groups";
+import { SETTINGS_READER_PAGES, settingsShellGroups, type SettingsDoorProp, type SettingsShellIconName } from "@/lib/settings-shell-groups";
 import { hasDirty, leaveThen, setLeaveConfirmer, type LeaveDecision } from "@/lib/dirty-guard";
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,7 +88,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const pathname = usePathname() || "";
   const router = useRouter();
   const { data: session } = useSession();
-  const { isAdmin, isGuest } = useViewerRole();
+  const { isAdmin, isGuest, isSettingsReader } = useViewerRole();
   const { boot } = useBoot();
   const { mutedNotifications } = useOsShell();
   // Row badges (spec-account-auth door sidebar): "Muted" on Notifications
@@ -129,12 +130,19 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
     return () => window.removeEventListener(SETTINGS_FILTER_FOCUS_EVENT, onFocus);
   }, []);
 
-  const shownDoor: SettingsDoorProp = door === "workspace" && isAdmin ? "workspace" : "me";
-  const groups = useMemo(() => settingsShellGroups(door, isAdmin), [door, isAdmin]);
   // The pathname alone decides the row: the only query-conditioned aliases
   // (/settings?tab=themes, ?tab=shortcuts) redirect before they render, and
   // reading the query here would need a Suspense boundary around the frame.
   const current = resolveSettingsPage(pathname);
+  // A reader below Admin (the manager tier, People team included) on one of
+  // the Workspace pages they open gets the reader list (sidebar-map 8a):
+  // My settings, then those pages, so they can move between them. On any
+  // other Workspace URL they are shown the denial over Profile, inside the
+  // My settings list, as before.
+  const readerOnPage =
+    door === "workspace" && !isAdmin && isSettingsReader && !!current && current.door === "workspace" && SETTINGS_READER_PAGES.includes(current.key);
+  const shownDoor: SettingsDoorProp = (door === "workspace" && isAdmin) || readerOnPage ? "workspace" : "me";
+  const groups = useMemo(() => settingsShellGroups(door, isAdmin, readerOnPage), [door, isAdmin, readerOnPage]);
   const override = useActiveSettingsRowOverride();
   const activeKey = override ?? (current && current.door === shownDoor ? current.key : null);
   const firstName = (session?.user as { firstName?: string } | undefined)?.firstName;
@@ -145,16 +153,27 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
     // "nobody else ever sees this sidebar"), so a Manager reading Members or
     // an Employee on any /settings/* URL gets the My settings crumbs, whose
     // links they can open, not two crumbs into the AdminOnly card.
-    const pageDoor = isAdmin ? (current?.door ?? shownDoor) : "me";
+    // A reader on their own Workspace page reads "Settings > Workspace
+    // settings > Members" too, and those crumbs land on Members, their
+    // Workspace landing (spec-settings-workspace, the settled cross-unit
+    // answer), never on the Overview they cannot open.
+    const pageDoor = isAdmin || readerOnPage ? (current?.door ?? shownDoor) : "me";
     if (pageDoor === "me") {
       // A Guest cannot open the Teams hub, so their name crumb stays in the door.
       if (firstName) items.push({ label: firstName, href: isGuest ? "/account/profile" : "/people/me" });
       items.push({ label: DOOR_LABELS.me, href: "/account/profile" });
     } else {
-      items.push({ label: HUB_LABELS.settings, href: "/settings" });
-      items.push({ label: DOOR_LABELS.workspace, href: "/settings" });
+      const home = readerOnPage ? "/settings/members" : "/settings";
+      items.push({ label: HUB_LABELS.settings, href: home });
+      items.push({ label: DOOR_LABELS.workspace, href: home });
     }
-    if (current && current.key !== "overview") {
+    const overridePage = override ? (SETTINGS_PAGES as Record<string, { label: string } | undefined>)[override] : undefined;
+    if (overridePage && override !== current?.key) {
+      // A denial renders another page (My settings > Profile) at the URL the
+      // person typed: the crumb names the page on screen, never the
+      // Workspace page this door does not have.
+      items.push({ label: overridePage.label });
+    } else if (current && current.key !== "overview") {
       // A route that renders inside another page's row (Data owns /imports
       // until S5) names itself under that page: Data > Import.
       const extra = ALSO_ACTIVE_CRUMBS[pathname.replace(/\/+$/, "")];
@@ -166,7 +185,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       }
     }
     return items;
-  }, [current, shownDoor, firstName, isAdmin, isGuest, pathname]);
+  }, [current, shownDoor, firstName, isAdmin, isGuest, pathname, readerOnPage, override]);
 
   // Filter: rows by label, keyword, group and alias; plus the individual
   // settings (registry entries) the viewer's door lists beneath them.

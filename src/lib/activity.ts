@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
+
+type Json = Prisma.InputJsonValue;
 
 interface LogActivityParams {
   type: string;
@@ -7,11 +10,11 @@ interface LogActivityParams {
   description: string;
   targetId?: string;
   targetType?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   ipAddress?: string | null;
   userAgent?: string | null;
-  oldValue?: Record<string, any> | null;
-  newValue?: Record<string, any> | null;
+  oldValue?: Record<string, unknown> | null;
+  newValue?: Record<string, unknown> | null;
   severity?: "info" | "warning" | "critical";
   /** Who wrote it when not a person: "api_key" | "agent" | "system" | "scim" | "platform_staff". */
   actorType?: string;
@@ -59,7 +62,7 @@ export async function logActivity({
       if (prev && sameKeys(prev.metadata, metadata)) {
         await prisma.activityLog.update({
           where: { id: prev.id },
-          data: { description, newValue: newValue || undefined, metadata: metadata || undefined, createdAt: new Date() },
+          data: { description, newValue: (newValue || undefined) as Json | undefined, metadata: (metadata || undefined) as Json | undefined, createdAt: new Date() },
         });
         return;
       }
@@ -72,11 +75,11 @@ export async function logActivity({
         description,
         targetId,
         targetType,
-        metadata: metadata || undefined,
+        metadata: (metadata || undefined) as Json | undefined,
         ipAddress,
         userAgent,
-        oldValue: oldValue || undefined,
-        newValue: newValue || undefined,
+        oldValue: (oldValue || undefined) as Json | undefined,
+        newValue: (newValue || undefined) as Json | undefined,
         severity,
         ...(actorType ? { actorType } : {}),
         ...(actorLabel ? { actorLabel } : {}),

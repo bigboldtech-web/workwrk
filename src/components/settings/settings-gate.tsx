@@ -27,7 +27,7 @@ import { authOptions } from "@/lib/auth";
 import { isOrgAdminViewer, requireManagerTierViewer } from "@/lib/route-guard";
 import { AdminOnly, AskAnAdminStrip } from "@/components/access";
 import { listOrgAdmins } from "@/lib/access/admins";
-import { sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import type { SettingsPageKey } from "@/lib/access/types";
 import AccountProfilePage from "@/app/(dashboard)/account/profile/page";
@@ -91,10 +91,17 @@ export async function SettingsDenied({ page }: { page: SettingsPageKey }) {
   }
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId ?? null;
   const admins = orgId ? await listOrgAdmins(orgId, 5) : [];
+  // A reader below Admin (the manager tier) is told which Workspace pages
+  // they DO open, so the strip is never a dead end (sidebar-map 8a).
+  const openable = sessionIsSettingsReader(session)
+    ? (Object.entries(LEGACY_SETTINGS_RULES) as [SettingsPageKey, LegacySettingsRule][])
+        .filter(([, r]) => r === "manager-tier")
+        .map(([k]) => ({ label: SETTINGS_PAGES[k].label, href: SETTINGS_PAGES[k].href }))
+    : undefined;
   return (
     <>
       <ActiveSettingsRow pageKey="account/profile" />
-      <AskAnAdminStrip pageLabel={label === SETTINGS_PAGES.overview.label ? "Workspace settings" : label} admins={admins} />
+      <AskAnAdminStrip pageLabel={label === SETTINGS_PAGES.overview.label ? "Workspace settings" : label} admins={admins} openable={openable} />
       <AccountProfilePage />
     </>
   );

@@ -42,3 +42,23 @@ describe("humanizeAuditSentence", () => {
     expect(humanizeAuditSentence("hr@acme.com signed in")).toBe("hr@acme.com signed in");
   });
 });
+
+import { auditKeyWords, auditValueWords, targetTypeWord } from "./audit-families";
+
+describe("audit words", () => {
+  it("names target types in words", () => {
+    expect(targetTypeWord("user")).toBe("Person");
+    expect(targetTypeWord("scim_token")).toBe("SCIM token");
+    expect(targetTypeWord("Organization")).toBe("Workspace");
+    expect(targetTypeWord("SomethingNew")).toBe("Something new");
+  });
+  it("turns enums into words", () => {
+    expect(auditValueWords("ACTIVE")).toBe("Active");
+    expect(auditValueWords("COMPANY_ADMIN")).toBe("Admin");
+    expect(auditValueWords("OWNER")).toBe("Owner");
+    expect(auditValueWords(true)).toBe("On");
+    expect(auditValueWords(undefined)).toBe("·");
+    expect(auditKeyWords("inviteExpiryDays")).toBe("Invite expiry days");
+    expect(auditKeyWords("level")).toBe("Tier");
+  });
+});

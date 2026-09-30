@@ -11,14 +11,14 @@ import {
 import { generateApiKey } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
 import type { ApiKeyScope } from "@/generated/prisma";
-import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 
 /**
  * API key management.
  *
  * GET  /api/keys        — list (plaintext never returned)
  * POST /api/keys        — create; plaintext returned ONCE in the response
- * PATCH /api/keys       — { id, rateLimitPerMinute?, rateLimitPerDay? }: the
+ * PATCH /api/keys       { id, rateLimitPerMinute?, rateLimitPerDay? }: the
  *                         two limits are the only thing that changes after
  *                         a key is made (its scopes never do)
  * DELETE /api/keys?id=  — revoke (soft delete via revokedAt)
@@ -59,7 +59,7 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
 
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const url = new URL(req.url);
@@ -164,7 +164,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !(await sessionMayManageOwnerPage(session))) {
+  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"]) || !freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
     return jsonError("Only workspace Owners can manage API keys", 403);
   }
   const body = (await req.json().catch(() => null)) as { id?: unknown; rateLimitPerMinute?: unknown; rateLimitPerDay?: unknown } | null;

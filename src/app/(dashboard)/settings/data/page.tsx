@@ -25,6 +25,7 @@
 // The two retention rows are Owner rows (every Admin until the Owner and
 // Admin split); every download keeps the 401, 403, 503 and empty guards.
 
+import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -33,7 +34,7 @@ import { Dots } from "@/components/ui/dots";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { NativeSelect, NumberInput, Pending, btn } from "@/components/settings/settings-form";
+import { ConfirmDialog, NativeSelect, NumberInput, Pending, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
 import { settingsTabs } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -51,7 +52,6 @@ import { objectHrefNow } from "@/components/layout/os/use-object-href";
 import { PeopleImport, usePeopleImport } from "@/components/people/people-import";
 import { useSettingsSection } from "@/hooks/use-settings-section";
 import { RETENTION_BOUNDS } from "@/lib/settings/org-policy";
-import { formatRelative } from "@/lib/format/date";
 import type { LegacyMarketingCounts, LegacyMarketingReport, LegacyPending } from "@/lib/marketing/legacy-import";
 import { LIST_NAME, MARKETING_KINDS, type MarketingKind } from "@/lib/marketing/legacy-map";
 
@@ -65,7 +65,7 @@ type ExportRow = {
 };
 
 const EXPORTS: ExportRow[] = [
-  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "Everything in this workspace: people, Spaces, Lists, every task, Docs, Tables, Goals, reviews and SOPs." },
+  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "One CSV each for people, Spaces, Folders, Lists, tasks, Docs, Tables, Goals, reviews and SOPs: ids, titles, owners, statuses and dates. Doc text, task descriptions, comments, custom field values, table rows and files are not in it yet." },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
   { key: "audit", href: "/api/export/audit", fallbackName: "audit.csv", title: "Audit log (CSV)", desc: "The activity log: who, what, when, the target and the IP." },
@@ -178,7 +178,7 @@ function ExportTab({ summary, busy, onRun, onRetry }: { summary: Summary | null 
   const lastFor = (key: string) => s?.recentExports.find((e) => e.kind === key || (key === "all" && e.kind === "workspace"));
   const legacy = s ? LEGACY_EXPORTS.filter((r) => (r.key === "invoices" ? s.legacy.invoices : s.legacy.purchaseOrders) > 0) : [];
   const columns: TableColumn<Summary["recentExports"][number]>[] = [
-    { key: "when", label: "When", width: "150px", render: (e) => <span title={new Date(e.when).toLocaleString()}>{formatRelative(e.when)}</span> },
+    { key: "when", label: "When", width: "150px", render: (e) => <DateText value={e.when} style="relative" /> },
     { key: "who", label: "Who", width: "180px", render: (e) => e.who },
     { key: "what", label: "What", title: true, render: (e) => e.what },
   ];
@@ -192,26 +192,31 @@ function ExportTab({ summary, busy, onRun, onRetry }: { summary: Summary | null 
               key={row.key}
               id={`data.export.${row.key}`}
               label={row.title}
-              helper={<>{row.desc}{last ? <span className="block">Last exported by {last.who}, {formatRelative(last.when)}</span> : null}</>}
+              helper={<>{row.desc}{last ? <span className="block">Last exported by {last.who}, <DateText value={last.when} style="relative" /></span> : null}</>}
               control={<ExportButton row={row} busy={busy} onRun={onRun} />}
             />
           );
         })}
-        {legacy.length > 0 || s?.matrixRetired ? (
-          <>
+        <>
             <div className="mt-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
+            {/* The Marketing (legacy) CSVs live with their importer on the
+                Import tab; this row keeps them findable from Export. */}
+            <SettingsRow
+              label="Marketing (legacy) CSVs"
+              helper="Campaigns, Content and Events from the retired Marketing pages, next to their importer."
+              control={<Link href="/settings/data?tab=import&legacy=marketing" className={btn.secondary}>Open</Link>}
+            />
             {legacy.map((row) => (
               <SettingsRow key={row.key} label={row.title} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onRun} />} />
             ))}
             {s?.matrixRetired ? (
               <SettingsRow
                 label="Previous permissions grid (JSON)"
-                helper={`The old permission grid as it stood when it was retired, ${new Date(s.matrixRetired.at).toLocaleDateString()}.`}
+                helper={<>The old permission grid as it stood when it was retired, <DateText value={s.matrixRetired.at} />.</>}
                 control={<ExportButton row={{ key: "matrix", href: `/api/settings/matrix-export?id=${s.matrixRetired.id}`, fallbackName: "permissions-grid.json", title: "", desc: "" }} busy={busy} onRun={onRun} />}
               />
             ) : null}
-          </>
-        ) : null}
+        </>
       </SettingsCard>
 
       <section>
@@ -296,6 +301,7 @@ type RetentionData = { retention: { trashDays: number; auditDays: number | null 
 
 function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const { toast } = useOsToast();
+  const showUpcoming = useShowUpcoming();
   const ret = useSettingsSection("retention", (b) => {
     const st = (b.settings ?? {}) as Partial<RetentionData>;
     return { retention: st.retention ?? { trashDays: 60, auditDays: null }, data: st.data ?? { aiEnabled: true } } as RetentionData;
@@ -306,7 +312,10 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const [auditDays, setAuditDays] = useState<number | "" | null>(null);
   const [ai, setAi] = useState<boolean | null>(null);
   const [saved, setSaved] = useState<Record<string, number>>({});
-  const [errs, setErrs] = useState<Record<string, string>>({});
+  // A failed save keeps the write that failed, so Retry sends the person's
+  // value again (the shown value has already fallen back to the stored one).
+  const [errs, setErrs] = useState<Record<string, { message: string; run: () => Promise<{ ok: boolean; error?: string }>; revert: () => void }>>({});
+  const [confirmAudit, setConfirmAudit] = useState(false);
   const timers = useRef<Record<string, number>>({});
 
   if (ret.status === "error") return <ErrorState what="the retention settings" hint={ret.error ?? undefined} onRetry={ret.retry} />;
@@ -321,65 +330,98 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
     window.clearTimeout(timers.current[key]);
     timers.current[key] = window.setTimeout(async () => {
       const r = await run();
-      if (!r.ok) { revert(); setErrs((e) => ({ ...e, [key]: r.error ?? "Couldn't save" })); toast(r.error ?? "Couldn't save"); return; }
+      if (!r.ok) {
+        revert();
+        setErrs((e) => ({ ...e, [key]: { message: r.error ?? "Couldn't save", run, revert } }));
+        toast(r.error ?? "Couldn't save");
+        return;
+      }
       setErrs((e) => { const n = { ...e }; delete n[key]; return n; });
       setSaved((x) => ({ ...x, [key]: Date.now() }));
     }, 400);
+  };
+  const retryOf = (key: string) => {
+    const e = errs[key];
+    return e ? { message: e.message, onRetry: () => write(key, e.run, e.revert) } : null;
   };
 
   const b = RETENTION_BOUNDS;
   return (
     <SettingsCardStack>
-      <SettingsCard wide="data.retention" title="Retention" id="data.retention">
-        <SettingsRow
-          id="data.retention.trashDays"
-          label="Keep deleted items in Trash for"
-          helper="After this, a nightly job removes them for good."
-          savedAt={saved.trash}
-          error={errs.trash ? { message: errs.trash, onRetry: () => write("trash", () => ret.save({ trashDays: trashShown }), () => setTrash(null)) } : null}
-          readOnlyValue={canPurge ? undefined : `${cur.retention.trashDays} days`}
-          control={
-            <NumberInput value={trashShown} min={b.trashDays.min} max={b.trashDays.max} suffix="days" ariaLabel="Days in Trash"
-              onChange={(n) => {
-                setTrash(n);
-                if (n === "" || n < b.trashDays.min || n > b.trashDays.max) return;
-                write("trash", () => ret.save({ trashDays: n }), () => setTrash(null));
-              }} />
-          }
-        />
-        <SettingsRow
-          id="data.retention.auditDays"
-          label="Keep the audit log for"
-          helper={mode === "forever" ? "Every entry is kept." : `Entries older than this are removed by a nightly job, at least ${b.auditDays.min} days.`}
-          savedAt={saved.audit}
-          error={errs.audit ? { message: errs.audit, onRetry: () => write("audit", () => ret.save({ auditDays: mode === "forever" ? null : auditShown }), () => { setAuditMode(null); setAuditDays(null); }) } : null}
-          readOnlyValue={canPurge ? undefined : cur.retention.auditDays ? `${cur.retention.auditDays} days` : "Forever"}
-          control={
-            <span className="flex items-center gap-2">
-              <NativeSelect value={mode} ariaLabel="Audit log retention" options={[{ value: "forever", label: "Forever" }, { value: "days", label: "A number of days" }]}
-                onChange={(m) => {
-                  setAuditMode(m);
-                  write("audit", () => ret.save({ auditDays: m === "forever" ? null : (typeof auditShown === "number" ? auditShown : 365) }), () => { setAuditMode(null); setAuditDays(null); });
+      {/* Neither purge job is installed yet (scripts/CRON-SETUP.md: trash-purge
+          and audit-purge, NOT INSTALLED), so nothing is deleted on either
+          window. Both rows wait behind Show upcoming features and say so,
+          until the founder installs the rows (settings spec, Data >
+          Retention: "Not enforced yet"). Deleted items still wait in Trash
+          for the window the Trash tab names. */}
+      {showUpcoming ? (
+        <SettingsCard wide="data.retention" title="Retention" id="data.retention">
+          <SettingsRow
+            id="data.retention.trashDays"
+            label="Keep deleted items in Trash for"
+            helper="Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."
+            savedAt={saved.trash}
+            error={retryOf("trash")}
+            readOnlyValue={canPurge ? undefined : `${cur.retention.trashDays} days`}
+            control={
+              <NumberInput value={trashShown} min={b.trashDays.min} max={b.trashDays.max} suffix="days" ariaLabel="Days in Trash"
+                onChange={(n) => {
+                  setTrash(n);
+                  if (n === "" || n < b.trashDays.min || n > b.trashDays.max) return;
+                  write("trash", () => ret.save({ trashDays: n }), () => setTrash(null));
                 }} />
-              {mode === "days" ? (
-                <NumberInput value={auditShown} min={b.auditDays.min} max={b.auditDays.max} suffix="days" ariaLabel="Days of audit log"
-                  onChange={(n) => {
-                    setAuditDays(n);
-                    if (n === "" || n < b.auditDays.min || n > b.auditDays.max) return;
-                    write("audit", () => ret.save({ auditDays: n }), () => setAuditDays(null));
+            }
+          />
+          <SettingsRow
+            id="data.retention.auditDays"
+            label="Keep the audit log for"
+            helper={mode === "forever" ? "Every entry is kept." : `Not enforced yet. Once the nightly job is installed, entries older than this are removed (at least ${b.auditDays.min} days; decisions, invitations, consent and staff actions are always kept).`}
+            savedAt={saved.audit}
+            error={retryOf("audit")}
+            readOnlyValue={canPurge ? undefined : cur.retention.auditDays ? `${cur.retention.auditDays} days` : "Forever"}
+            control={
+              <span className="flex items-center gap-2">
+                <NativeSelect value={mode} ariaLabel="Audit log retention" options={[{ value: "forever", label: "Forever" }, { value: "days", label: "A number of days" }]}
+                  onChange={(m) => {
+                    // Choosing a window deletes history later: confirmed first.
+                    if (m === "days") { setConfirmAudit(true); return; }
+                    setAuditMode(m);
+                    write("audit", () => ret.save({ auditDays: null }), () => { setAuditMode(null); setAuditDays(null); });
                   }} />
-              ) : null}
-            </span>
-          }
-        />
-      </SettingsCard>
+                {mode === "days" ? (
+                  <NumberInput value={auditShown} min={b.auditDays.min} max={b.auditDays.max} suffix="days" ariaLabel="Days of audit log"
+                    onChange={(n) => {
+                      setAuditDays(n);
+                      if (n === "" || n < b.auditDays.min || n > b.auditDays.max) return;
+                      write("audit", () => ret.save({ auditDays: n }), () => setAuditDays(null));
+                    }} />
+                ) : null}
+              </span>
+            }
+          />
+        </SettingsCard>
+      ) : null}
+      <ConfirmDialog
+        open={confirmAudit}
+        onOpenChange={(v) => { if (!v) setConfirmAudit(false); }}
+        title="Keep the audit log for 365 days?"
+        confirmLabel="Keep 365 days"
+        onConfirm={() => {
+          setConfirmAudit(false);
+          setAuditMode("days");
+          const n = typeof auditShown === "number" ? auditShown : 365;
+          write("audit", () => ret.save({ auditDays: n }), () => { setAuditMode(null); setAuditDays(null); });
+        }}
+      >
+        <p className="text-base text-ink-2">Once the nightly job is installed, entries older than the window are removed for good. You can change the number of days next.</p>
+      </ConfirmDialog>
       <SettingsCard title="Privacy" id="data.privacy">
         <SettingsRow
           id="data.aiEnabled"
           label="AI features for everyone"
           helper="Ask AI, drafting and summaries. Off hides every AI entry point in the workspace."
           savedAt={saved.ai}
-          error={errs.ai ? { message: errs.ai, onRetry: () => write("ai", () => dataSec.save({ aiEnabled: aiShown }), () => setAi(null)) } : null}
+          error={retryOf("ai")}
           control={<Switch checked={aiShown} aria-label="AI features for everyone" onChange={(v) => { setAi(v); write("ai", () => dataSec.save({ aiEnabled: v }), () => setAi(null)); }} />}
         />
       </SettingsCard>
