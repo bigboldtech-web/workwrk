@@ -130,6 +130,9 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width =
         ))}
       </div>
     ) : undefined;
+  // Pixel paddings, not px-6: the header draws on the px grid (.os-chrome),
+  // so px-6 there is 24px while px-6 here would be 21px at the 14px root, and
+  // the title would sit 3px right of the cards under it.
   // Title, subtitle, cross-tab content, then the tabs: the header draws no
   // description line, so a page with a subtitle or lead draws its own views
   // row under them (the same OsViewsRow the header would have used).
@@ -143,12 +146,12 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, actions, width =
         views={splitViews ? undefined : tabStrip}
         primary={tabPrimary}
         menu={tabMenu}
-        className="max-[900px]:[&>div]:px-4"
+        className="max-[900px]:[&>div]:px-[16px]"
       />
-      {subtitle ? <p className="mt-1 px-6 text-sm text-ink-2 max-[900px]:px-4">{subtitle}</p> : null}
-      {lead ? <div className="mt-4 px-6 max-[900px]:px-4">{lead}</div> : null}
-      {splitViews ? <OsViewsRow className="mt-3 max-[900px]:px-4" aria-label="Tabs">{tabStrip}</OsViewsRow> : null}
-      <div className="mt-4 px-6 max-[900px]:px-4">{typeof children === "function" ? children(active) : children}</div>
+      {subtitle ? <p className="mt-1 px-[24px] text-sm text-ink-2 max-[900px]:px-[16px]">{subtitle}</p> : null}
+      {lead ? <div className="mt-4 px-[24px] max-[900px]:px-[16px]">{lead}</div> : null}
+      {splitViews ? <OsViewsRow className="mt-3 px-[24px] max-[900px]:px-[16px]" aria-label="Tabs">{tabStrip}</OsViewsRow> : null}
+      <div className="mt-4 px-[24px] max-[900px]:px-[16px]">{typeof children === "function" ? children(active) : children}</div>
     </div>
   );
 }

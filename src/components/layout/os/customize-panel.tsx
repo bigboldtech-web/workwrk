@@ -22,7 +22,7 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { SETTINGS_PAGES, settingsHrefToday } from "@/lib/settings-registry";
 import { CHROME_CONTROL_EXPOSED } from "@/lib/nav/labels";
 import { readSidebarCards, type SidebarOptionalKey } from "@/lib/home-prefs";
-import { ACCENT_KEYS, ACCENT_LABELS, isAccentKey } from "@/lib/accents";
+import { ACCENT_CHOICE_OFFERED, ACCENT_LABELS, OFFERED_ACCENTS, effectiveAccent } from "@/lib/accents";
 import { cn } from "@/lib/utils";
 import type { DensityPref } from "@/lib/preferences";
 import { useLayer, useOsShell } from "./shell-context";
@@ -52,7 +52,7 @@ export const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
  * colour a key would give regardless of which accent is active, and no hex
  * lives in this file.
  */
-const ACCENTS = ACCENT_KEYS.map((key) => ({ key, label: ACCENT_LABELS[key] }));
+const ACCENTS = OFFERED_ACCENTS.map((key) => ({ key, label: ACCENT_LABELS[key] }));
 
 function SavedTick({ at }: { at: number }) {
   // Shown from the moment of the save until 2s later.
@@ -99,7 +99,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
   const appearance: Appearance = prefs.theme.appearance ?? "LIGHT";
   const chrome: Chrome = prefs.theme.chrome ?? "navy";
   const density: DensityPref = prefs.density ?? "comfortable";
-  const accent = isAccentKey(prefs.theme.accent) ? prefs.theme.accent : "workwrk";
+  const accent = effectiveAccent(prefs.theme.accent);
   const cards = readSidebarCards(prefs.home?.cards);
   const order = prefs.sidebar.sectionsOrder?.length ? prefs.sidebar.sectionsOrder : SECTIONS.map((s) => s.key);
   const hidden = new Set(prefs.sidebar.hiddenSections ?? []);
@@ -176,6 +176,10 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   onChange={(v) => { void write("theme", { theme: { appearance: v } }); }}
                 />
               </Row>
+              {/* One blue (src/lib/accents.ts OFFERED_ACCENTS): the row hides
+                  itself while there is nothing to choose, the same rule My
+                  settings > Preferences follows, so the two never disagree. */}
+              {ACCENT_CHOICE_OFFERED ? (
               <Row label="Accent" hint="Buttons, links and selection" savedAt={saved.accent ?? 0}>
                 <div role="radiogroup" aria-label="Accent" className="flex flex-wrap items-center justify-end gap-1.5">
                   {ACCENTS.map((a) => {
@@ -204,6 +208,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   })}
                 </div>
               </Row>
+              ) : null}
               {CHROME_CONTROL_EXPOSED ? (
                 <Row label="Chrome" hint="The rail and the bar" savedAt={saved.chrome ?? 0}>
                   <SegmentedControl<Chrome>

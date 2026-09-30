@@ -20,6 +20,7 @@
  * → locked re-stamp.)
  */
 
+import { ACCENT_CHOICE_OFFERED } from "@/lib/accents";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -282,7 +283,11 @@ export function AppearanceDefaults() {
                 </div>
               </div>
 
-              {/* Accent */}
+              {/* Accent: hidden while the product offers one blue
+                  (src/lib/accents.ts OFFERED_ACCENTS), the same rule as
+                  Customize and My settings, so no swatch saves a colour
+                  nobody sees. */}
+              {ACCENT_CHOICE_OFFERED ? (
               <div className="mb-5">
                 <h3 className="mb-2 text-base font-semibold text-zinc-800">Accent color</h3>
                 <div className="flex flex-wrap gap-2.5">
@@ -314,6 +319,7 @@ export function AppearanceDefaults() {
                   Brand-safe swatches only. WorkwrK is the default brand blue.
                 </p>
               </div>
+              ) : null}
 
               {/* Density */}
               <div>

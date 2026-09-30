@@ -39,6 +39,7 @@ import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-
 import { SettingsRow } from "@/components/settings/settings-row";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { btn } from "@/components/account/account-ui";
@@ -64,7 +65,6 @@ import {
 } from "@/lib/account/notification-presets";
 
 const TABS: readonly SettingsTab[] = settingsTabs("account/notifications");
-const selectCls = "h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink";
 
 // Decided addition (c): assigned, mentioned, status change and comment on
 // my task and on a task I follow, due soon and overdue. "Follow" is the task's
@@ -176,13 +176,18 @@ function QuietCard() {
           helper="Nothing new pings you: the Inbox still collects it. The avatar menu changes the same setting."
           {...row("mute")}
           control={
-            <select aria-label="Mute everything until" className={selectCls} value={showCustom ? "custom" : value} onChange={(e) => choose(e.target.value as MuteChoice)}>
-              <option value="off">Not muted</option>
-              <option value="1h">1 hour</option>
-              <option value="tomorrow">Until tomorrow, 9:00 am</option>
-              <option value="forever">Until I turn it back on</option>
-              <option value="custom">{value === "custom" && until ? `Until ${formatDate(until, dprefs, "datetime")}` : "Pick a time..."}</option>
-            </select>
+            <PickerSelect
+              label="Mute everything until"
+              value={showCustom ? "custom" : value}
+              options={[
+                { value: "off", label: "Not muted" },
+                { value: "1h", label: "1 hour" },
+                { value: "tomorrow", label: "Until tomorrow, 9:00 am" },
+                { value: "forever", label: "Until I turn it back on" },
+                { value: "custom", label: value === "custom" && until ? `Until ${formatDate(until, dprefs, "datetime")}` : "Pick a time..." },
+              ]}
+              onChange={(v) => choose(v as MuteChoice)}
+            />
           }
         />
         {showCustom ? (
@@ -283,24 +288,30 @@ function InboxTab() {
             label="Clear read items after"
             {...row("view.clear")}
             control={
-              <select aria-label="Clear read items after" className={selectCls} value={String(view.autoClearDays ?? "never")} onChange={(e) => setView("clear", { autoClearDays: e.target.value === "never" ? null : Number(e.target.value) })}>
-                <option value="never">Never</option>
-                <option value="7">7 days</option>
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-                {view.autoClearDays && ![7, 14, 30].includes(view.autoClearDays) ? <option value={String(view.autoClearDays)}>{view.autoClearDays} days</option> : null}
-              </select>
+              <PickerSelect
+                label="Clear read items after"
+                value={String(view.autoClearDays ?? "never")}
+                options={[
+                  { value: "never", label: "Never" },
+                  { value: "7", label: "7 days" },
+                  { value: "14", label: "14 days" },
+                  { value: "30", label: "30 days" },
+                  ...(view.autoClearDays && ![7, 14, 30].includes(view.autoClearDays) ? [{ value: String(view.autoClearDays), label: `${view.autoClearDays} days` }] : []),
+                ]}
+                onChange={(v) => setView("clear", { autoClearDays: v === "never" ? null : Number(v) })}
+              />
             }
           />
           <SettingsRow
             label="Open on"
             {...row("view.tab")}
             control={
-              <select aria-label="Open on" className={selectCls} value={view.defaultTab ?? "primary"} onChange={(e) => setView("tab", { defaultTab: e.target.value as "primary" | "other" | "mentions" })}>
-                <option value="primary">Primary</option>
-                <option value="other">Other</option>
-                <option value="mentions">Mentions</option>
-              </select>
+              <PickerSelect
+                label="Open on"
+                value={view.defaultTab ?? "primary"}
+                options={[{ value: "primary", label: "Primary" }, { value: "other", label: "Other" }, { value: "mentions", label: "Mentions" }]}
+                onChange={(v) => setView("tab", { defaultTab: v as "primary" | "other" | "mentions" })}
+              />
             }
           />
         </div>

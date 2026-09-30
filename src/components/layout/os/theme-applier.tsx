@@ -8,8 +8,8 @@
 //     hydration from its own localStorage key.
 //   - data-chrome "navy" | "light": the frame variant (design-system 1.2.1),
 //     from theme.chrome.
-//   - data-accent "<key>": the accent colour from theme.accent (Customize >
-//     Accent); absent for the brand default. The rail, the bar and the splash read only the
+//   - data-accent "<key>": the accent colour from theme.accent, only while
+//     accents.ts offers more than the brand blue; absent for the brand default. The rail, the bar and the splash read only the
 //     chrome tokens, so the flip is one attribute.
 //   - data-density "comfortable" | "cozy" | "compact": the data-row height.
 //   - data-reduced-motion "reduce": home.ui.reducedMotion (My settings >
@@ -25,6 +25,7 @@ import { useEffect } from "react";
 import { useTheme } from "next-themes";
 import { useOsShell } from "./shell-context";
 import { localeCookieFor } from "@/lib/account/locale-options";
+import { effectiveAccent } from "@/lib/accents";
 
 export function ThemeApplier() {
   const { prefs } = useOsShell();
@@ -40,7 +41,10 @@ export function ThemeApplier() {
     root.setAttribute("data-chrome", prefs.theme.chrome === "light" ? "light" : "navy");
     // The accent: "workwrk" is the base brand blue and carries no override;
     // any other key rebinds the --os-brand tokens (os.css, the accent block).
-    const accent = prefs.theme.accent && prefs.theme.accent !== "workwrk" ? prefs.theme.accent : null;
+    // Only an accent the product still offers paints (one blue today, so a
+    // stored swatch from before the decision draws the brand blue).
+    const key = effectiveAccent(prefs.theme.accent);
+    const accent = key !== "workwrk" ? key : null;
     if (accent) root.setAttribute("data-accent", accent);
     else root.removeAttribute("data-accent");
     root.setAttribute("data-density", prefs.density || "comfortable");

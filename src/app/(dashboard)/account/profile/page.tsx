@@ -35,7 +35,6 @@ import { ORG_ROLE_LABEL } from "@/lib/access/labels";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { profileDraftOf, profileDirty, profilePatch, type ProfileDraft } from "@/lib/account/profile-form";
 import { useVerifyCooldown } from "@/components/account/use-verify-cooldown";
-import { useShortcut } from "@/lib/shortcuts";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp";
@@ -115,21 +114,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
     return true;
   }, [saved, draft, me.id, refresh, toast, updateSession]);
 
-  // Cmd+S saves while the Save bar is showing (registered, so the ? overlay
-  // and the Keyboard shortcuts page list it exactly while it works).
-  useShortcut(
-    {
-      id: "settings.save",
-      keys: "mod+s",
-      label: "Save changes",
-      scope: "page",
-      group: "Settings",
-      inInputs: true,
-      when: () => dirty,
-      run: (e) => { e.preventDefault(); void save(); },
-    },
-    dirty,
-  );
+  // Cmd+S is the Save bar's own (save-bar.tsx), on every Save bar page.
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

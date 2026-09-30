@@ -30,6 +30,7 @@ import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { btn, Pending } from "@/components/account/account-ui";
 import { useMe, type MeRecord } from "@/components/account/use-me";
@@ -348,7 +349,6 @@ function PresenceCard() {
     if (ok) { setSavedAt(Date.now()); setFailed(null); } else setFailed({ c, after });
   };
   const error = failed ? { message: "Couldn't save", onRetry: () => { void apply(failed.c, failed.after); } } : null;
-  const selectCls = "h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink";
 
   return (
     <SettingsCard title="Presence" id="security.presence" description="What teammates see on your avatar dot. The avatar menu changes the same status.">
@@ -359,14 +359,12 @@ function PresenceCard() {
           savedAt={savedAt}
           error={error}
           control={
-            <select
-              aria-label="Show me as"
+            <PickerSelect
+              label="Show me as"
               value={choice}
-              onChange={(e) => { void apply(e.target.value as PresenceChoice, clearAfter ?? "never"); }}
-              className={selectCls}
-            >
-              {PRESENCE_CHOICES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </select>
+              options={PRESENCE_CHOICES.map((p) => ({ value: p.value, label: p.label }))}
+              onChange={(v) => { void apply(v as PresenceChoice, clearAfter ?? "never"); }}
+            />
           }
         />
         {/* Clear after only means something for Away and Do not disturb here;
@@ -377,20 +375,20 @@ function PresenceCard() {
             label="Clear after"
             helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
             control={
-              <select
-                aria-label="Clear after"
+              <PickerSelect
+                label="Clear after"
                 value={clearAfter ?? (presenceStatus.expiresAt ? "current" : "never")}
-                onChange={(e) => {
-                  if (e.target.value === "current") return;
-                  const next = e.target.value as PresenceClearAfter;
+                options={[
+                  ...(clearAfter === null && presenceStatus.expiresAt ? [{ value: "current", label: `Until ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` }] : []),
+                  ...clearOptions.map((o) => ({ value: o.value, label: o.label })),
+                ]}
+                onChange={(v) => {
+                  if (v === "current") return;
+                  const next = v as PresenceClearAfter;
                   setClearAfter(next);
                   void apply(choice, next);
                 }}
-                className={selectCls}
-              >
-                {clearAfter === null && presenceStatus.expiresAt ? <option value="current">Until {formatDate(presenceStatus.expiresAt, prefs, "datetime")}</option> : null}
-                {clearOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              />
             }
           />
         ) : choice === "custom" ? (

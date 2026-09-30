@@ -1,17 +1,36 @@
 "use client";
 
-// My settings > Keyboard shortcuts (settings-architecture 4.6): read-only,
-// and the SAME live registry the ? overlay reads (src/lib/shortcuts.ts
-// useShortcutList), grouped the same way, so the page can never list a key
-// the app does not answer or miss one it does. The avatar menu's old
+// My settings > Keyboard shortcuts (spec-account-auth `/account/shortcuts`):
+// the printable reference, one table per scope in the spec's order.
+// Anywhere is the SAME live registry the ? overlay reads (src/lib/shortcuts.ts
+// useShortcutList, global scope), so it can never list a key the shell does
+// not answer. The page scopes (Lists and boards, Inbox, Docs, Tables, Talk,
+// Settings) come from src/lib/shortcut-reference.ts, whose test fails when a
+// listed chord's listener is gone. The avatar menu's old
 // /settings?tab=shortcuts 308s here.
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { detectPlatform, formatKeys, useShortcutList, type Platform } from "@/lib/shortcuts";
 import { groupShortcuts } from "@/lib/shortcut-groups";
+import { SHORTCUT_REFERENCE } from "@/lib/shortcut-reference";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+
+const kbdCls = "rounded-md border border-line-strong bg-active px-1.5 py-0.5 font-sans text-xs text-ink";
+
+function Chords({ keys, platform }: { keys: readonly string[]; platform: Platform }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {keys.map((k, i) => (
+        <Fragment key={k}>
+          {i > 0 ? <span className="text-sm text-ink-3" aria-hidden>/</span> : null}
+          <kbd className={kbdCls}>{formatKeys(k, platform)}</kbd>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
 
 export default function KeyboardShortcutsPage() {
   const list = useShortcutList();
@@ -20,34 +39,31 @@ export default function KeyboardShortcutsPage() {
     const t = setTimeout(() => setPlatform(detectPlatform()), 0);
     return () => clearTimeout(t);
   }, []);
-  // Page-scoped rows are the Settings scope here (Esc, Find a setting).
-  const groups = useMemo(() => groupShortcuts(list, { includePage: true }), [list]);
+  // Anywhere: every global chord the shell has registered right now.
+  const anywhere = useMemo(() => groupShortcuts(list).flatMap((g) => g.items), [list]);
 
   return (
-    <SettingsPage pageKey="account/shortcuts">
-      <p className="mb-4 max-w-2xl text-base text-ink-2">
-        Every shortcut WorkwrK answers right now. Press <kbd className="rounded border border-line-strong bg-active px-1.5 py-0.5 font-sans text-xs text-ink">?</kbd> anywhere to see this list over the page you are on.
-      </p>
+    <SettingsPage pageKey="account/shortcuts" subtitle={<>&#8984; is Ctrl on Windows and Linux.</>}>
       <SettingsCardStack>
-        {groups.map((g) => (
-          <SettingsCard key={g.name} title={g.name} wide="shortcuts.list">
+        <SettingsCard title="Anywhere" id="shortcuts.anywhere" wide="shortcuts.list">
+          <div>
+            {anywhere.map((d) => (
+              <SettingsRow key={d.id} label={d.label} readOnlyValue={<Chords keys={[d.keys]} platform={platform} />} />
+            ))}
+          </div>
+        </SettingsCard>
+        {SHORTCUT_REFERENCE.map((scope) => (
+          <SettingsCard key={scope.key} title={scope.name} id={`shortcuts.${scope.key}`} wide="shortcuts.list">
             <div>
-              {g.items.map((d) => (
-                <SettingsRow
-                  key={d.id}
-                  label={d.label}
-                  readOnlyValue={
-                    <kbd className="rounded-md border border-line-strong bg-active px-1.5 py-0.5 font-sans text-xs text-ink">
-                      {formatKeys(d.keys, platform)}
-                    </kbd>
-                  }
-                />
+              {scope.rows.map((r) => (
+                <SettingsRow key={r.id} label={r.label} helper={r.note} readOnlyValue={<Chords keys={r.keys} platform={platform} />} />
               ))}
             </div>
           </SettingsCard>
         ))}
-        {groups.length === 0 ? <p className="text-base text-ink-2">No shortcuts are registered right now.</p> : null}
-        <p className="text-sm text-ink-2">Your browser&apos;s own print command prints this page. &#8984; is Ctrl on Windows and Linux.</p>
+        <p className="text-sm text-ink-2">
+          Your browser&apos;s own print command prints this page. Press <kbd className={kbdCls}>?</kbd> anywhere to see the shortcuts for the page you are on.
+        </p>
       </SettingsCardStack>
     </SettingsPage>
   );

@@ -37,7 +37,7 @@ export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
       }`}
     >
       <span
-        className={`pointer-events-none inline-block h-[16px] w-[16px] rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-[160ms] ease-in-out ${
+        className={`pointer-events-none inline-block h-[16px] w-[16px] rounded-full bg-white ring-1 ring-black/10 transition-transform duration-[160ms] ease-in-out ${
           checked ? "translate-x-[18px]" : "translate-x-[2px]"
         }`}
       />

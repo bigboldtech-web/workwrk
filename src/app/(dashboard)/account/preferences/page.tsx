@@ -6,8 +6,9 @@
 //   Appearance        Theme, Chrome (only once CHROME_CONTROL_EXPOSED), Density
 //                     (default Comfortable), Reduced motion, Show upcoming
 //                     features. There is no Accent row: after the one-blue
-//                     decision it would change nothing a person can see. The
-//                     Customize panel keeps its accent swatches for now.
+//                     decision it would change nothing a person can see, and
+//                     the Customize panel hides its Accent row by the same
+//                     rule (src/lib/accents.ts OFFERED_ACCENTS).
 //   Language & region Language, Time zone (with a device mismatch check),
 //                     Week starts on, Date format, Time format
 //   Sidebar           Width, Start collapsed, Quick actions in the avatar
@@ -43,15 +44,16 @@ import {
   TIME_FORMAT_OPTIONS,
   WEEK_START_OPTIONS,
   deviceTimeZone,
+  localeCookieFor,
   timeZoneOptions,
 } from "@/lib/account/locale-options";
+import { PickerSelect } from "@/components/settings/picker-select";
 
 type Appearance = "LIGHT" | "DARK" | "AUTO";
 type Chrome = "navy" | "light";
 
 const TABS: readonly SettingsTab[] = settingsTabs("account/preferences");
 
-const selectCls = "h-9 max-w-[260px] rounded-md border border-line-strong bg-raised px-2 text-base text-ink";
 
 /** Per-row save state: the tick after a write, the Retry after a failure. */
 function useRowWrites() {
@@ -173,6 +175,20 @@ function AppearanceTab() {
   );
 }
 
+const BROWSER_DEFAULT = "__browser__";
+const DEVICE_ZONE = "__device__";
+const FROM_LANGUAGE = "__language__";
+
+/** The wired catalog this browser asks for, else English. */
+function browserLanguage(): string {
+  const asked = typeof navigator !== "undefined" ? navigator.language : null;
+  return localeCookieFor(asked) ?? "en";
+}
+function browserLanguageLabel(): string | undefined {
+  const code = browserLanguage();
+  return LANGUAGE_OPTIONS.find((o) => o.value === code)?.label;
+}
+
 function RegionTab() {
   const { prefs } = useOsShell();
   const { write, row } = useRowWrites();
@@ -189,6 +205,25 @@ function RegionTab() {
     void write(key, { home: { locale: patch } });
   };
   const knownOrder = ["DMY", "MDY", "YMD"].includes(locale.dateFormat ?? "");
+  // The first row of each list is always there, so a stored choice always has
+  // a way back: "Browser default" stores the language this browser asks for,
+  // "Use my device time zone" stores the zone this device is in (the store has
+  // no unset, and an empty string would reach every Intl reader).
+  const languageOptions = useMemo(() => {
+    const opts: { value: string; label: string; description?: string }[] = [
+      { value: BROWSER_DEFAULT, label: "Browser default", description: browserLanguageLabel() },
+      ...LANGUAGE_OPTIONS.map((o) => ({ value: o.value as string, label: o.label })),
+    ];
+    if (locale.language && !LANGUAGE_OPTIONS.some((o) => o.value === locale.language)) opts.push({ value: locale.language, label: locale.language });
+    return opts;
+  }, [locale.language]);
+  const zoneOptions = useMemo(
+    () => [
+      { value: DEVICE_ZONE, label: "Use my device time zone", description: device ?? undefined, disabled: !device },
+      ...zones.map((z) => ({ value: z, label: z.replace(/_/g, " ") })),
+    ],
+    [zones, device],
+  );
 
   return (
     <SettingsCardStack>
@@ -201,11 +236,12 @@ function RegionTab() {
               helper="Some areas are still English only"
               {...row("language")}
               control={
-                <select aria-label="Language" className={selectCls} value={locale.language ?? ""} onChange={(e) => set("language", { language: e.target.value })}>
-                  {!locale.language ? <option value="">Browser default</option> : null}
-                  {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  {locale.language && !LANGUAGE_OPTIONS.some((o) => o.value === locale.language) ? <option value={locale.language}>{locale.language}</option> : null}
-                </select>
+                <PickerSelect
+                  label="Language"
+                  value={locale.language ?? BROWSER_DEFAULT}
+                  options={languageOptions}
+                  onChange={(v) => set("language", { language: v === BROWSER_DEFAULT ? browserLanguage() : v })}
+                />
               }
             />
             <SettingsRow
@@ -214,10 +250,12 @@ function RegionTab() {
               helper="Used for due dates, reminders and your timesheet"
               {...row("timezone")}
               control={
-                <select aria-label="Time zone" className={selectCls} value={zone} onChange={(e) => set("timezone", { timezone: e.target.value })}>
-                  {!zone ? <option value="">Use my device time zone{device ? ` (${device})` : ""}</option> : null}
-                  {zones.map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
-                </select>
+                <PickerSelect
+                  label="Time zone"
+                  value={zone || DEVICE_ZONE}
+                  options={zoneOptions}
+                  onChange={(v) => { const next = v === DEVICE_ZONE ? device : v; if (next) set("timezone", { timezone: next }); }}
+                />
               }
             />
             <SettingsRow
@@ -240,10 +278,12 @@ function RegionTab() {
               helper="How every date in WorkwrK is written for you"
               {...row("dateFormat")}
               control={
-                <select aria-label="Date format" className={selectCls} value={knownOrder ? locale.dateFormat : ""} onChange={(e) => set("dateFormat", { dateFormat: e.target.value })}>
-                  {!knownOrder ? <option value="">From your language</option> : null}
-                  {DATE_FORMAT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                <PickerSelect
+                  label="Date format"
+                  value={knownOrder ? (locale.dateFormat as string) : FROM_LANGUAGE}
+                  options={[...(!knownOrder ? [{ value: FROM_LANGUAGE, label: "From your language" }] : []), ...DATE_FORMAT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
+                  onChange={(v) => { if (v !== FROM_LANGUAGE) set("dateFormat", { dateFormat: v }); }}
+                />
               }
             />
             <SettingsRow
@@ -277,6 +317,21 @@ function RegionTab() {
   );
 }
 
+// The ten personal tools by what they do (every PERSONAL_TOOLS key appears
+// in exactly one group; a tool added later lands in "Open" until placed).
+const TOOL_GROUP_DEFS: { key: string; title: string; keys: readonly string[] }[] = [
+  { key: "create", title: "Quick actions to create", keys: ["create-task", "create-doc", "create-whiteboard", "create-reminder"] },
+  { key: "capture", title: "Quick actions to capture", keys: ["notepad", "voice"] },
+];
+const TOOL_GROUPS = [
+  ...TOOL_GROUP_DEFS,
+  {
+    key: "open",
+    title: "Quick actions to open",
+    keys: PERSONAL_TOOLS.map((t) => t.key).filter((k) => !TOOL_GROUP_DEFS.some((g) => g.keys.includes(k))),
+  },
+];
+
 function SidebarTab() {
   const { prefs, sidebarWidth, setSidebarWidth, sidebarCollapsed, setSidebarCollapsed } = useOsShell();
   const { isAdmin } = useViewerRole();
@@ -297,9 +352,9 @@ function SidebarTab() {
   const visibleOrder = [...order.filter((k) => SECTIONS.some((s) => s.key === k)), ...SECTIONS.map((s) => s.key).filter((k) => !order.includes(k))];
   const cards = readSidebarCards(prefs.home?.cards);
 
-  const togglePin = (key: string, on: boolean) => {
+  const togglePin = (group: string, key: string, on: boolean) => {
     const next = on ? [...pins.filter((k) => k !== key), key] : pins.filter((k) => k !== key);
-    void write("tools", { sidebar: { quickTools: next } });
+    void write(`tools.${group}`, { sidebar: { quickTools: next } });
   };
   const move = (key: string, dir: -1 | 1) => {
     const idx = visibleOrder.indexOf(key);
@@ -358,22 +413,31 @@ function SidebarTab() {
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Quick actions in the avatar menu" id="preferences.sidebar.quickTools" description="Pinned tools also show in the top bar's tool strip.">
-        <div>
-          {PERSONAL_TOOLS.map((t, i) => (
-            <SettingsRow
-              key={t.key}
-              label={t.label}
-              {...(i === 0 ? row("tools") : {})}
-              control={<Switch checked={pins.includes(t.key)} onChange={(v) => togglePin(t.key, v)} aria-label={`Pin ${t.label}`} />}
-            />
-          ))}
-        </div>
-      </SettingsCard>
+      {/* Five rows a card at most (design-system 5.4): the ten tools in three
+          cards by what they do, the section order and the Work sidebar rows
+          in one card each. */}
+      {TOOL_GROUPS.map((g, gi) => (
+        <SettingsCard
+          key={g.key}
+          title={g.title}
+          id={gi === 0 ? "preferences.sidebar.quickTools" : `preferences.sidebar.quickTools.${g.key}`}
+          description={gi === 0 ? "Pinned tools show in the avatar menu and the top bar's tool strip." : undefined}
+        >
+          <div>
+            {PERSONAL_TOOLS.filter((t) => g.keys.includes(t.key)).map((t, i) => (
+              <SettingsRow
+                key={t.key}
+                label={t.label}
+                {...(i === 0 ? row(`tools.${g.key}`) : {})}
+                control={<Switch checked={pins.includes(t.key)} onChange={(v) => togglePin(g.key, t.key, v)} aria-label={`Pin ${t.label}`} />}
+              />
+            ))}
+          </div>
+        </SettingsCard>
+      ))}
 
-      <SettingsCard title="What you see first" id="preferences.sidebar.order">
+      <SettingsCard title="Section order" id="preferences.sidebar.order">
         <div>
-          <div className="mb-1 text-sm font-medium text-ink-2">Section order</div>
           {visibleOrder.map((key, i) => {
             const section = SECTIONS.find((s) => s.key === key);
             if (!section) return null;
@@ -395,7 +459,11 @@ function SidebarTab() {
               />
             );
           })}
-          <div className="mb-1 mt-4 text-sm font-medium text-ink-2">Work sidebar rows</div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Work sidebar rows" id="preferences.sidebar.rows">
+        <div>
           {ROWS.map((r, i) => (
             <SettingsRow
               key={r.key}

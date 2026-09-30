@@ -59,7 +59,7 @@ export function useDesktopNotifications() {
     const result = await Notification.requestPermission();
     setPermission(result as BrowserPermission);
     return result as BrowserPermission;
-  }, [setPref]);
+  }, []);
 
   const disable = useCallback(() => setPref("off"), [setPref]);
   const enable = useCallback(() => setPref("on"), [setPref]);

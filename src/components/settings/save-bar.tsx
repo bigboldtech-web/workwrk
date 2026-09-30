@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { useShortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 
 export interface SaveBarProps {
@@ -32,6 +33,25 @@ export interface SaveBarProps {
 export function SaveBar({ dirty, saving, onDiscard, onSave, guardId, saveLabel = "Save changes", className }: SaveBarProps) {
   const save = useCallback(() => Promise.resolve(onSave()).catch(() => false), [onSave]);
   useDirtyGuard(dirty, { onSave: save, id: guardId });
+  // Cmd+S saves while the bar is showing, on every Save bar page (the
+  // Settings scope of My settings > Keyboard shortcuts lists it with "on
+  // pages with unsaved changes"). Registered only while dirty, so the ?
+  // overlay names it exactly while it works. A second bar on the same page
+  // (guardId) answers it too but is not listed twice.
+  useShortcut(
+    {
+      id: guardId ? `settings.save.${guardId}` : "settings.save",
+      keys: "mod+s",
+      label: "Save changes",
+      scope: "page",
+      group: "Settings",
+      inInputs: true,
+      hidden: Boolean(guardId),
+      when: () => dirty && !saving,
+      run: (e) => { e.preventDefault(); void save(); },
+    },
+    dirty,
+  );
   // A Save-bar page never autosaves, so the offline strip must not promise
   // that changes save on reconnect (offline-strip.tsx reads this marker).
   useEffect(() => {
