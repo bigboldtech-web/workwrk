@@ -46,7 +46,7 @@ import {
   usersSettingsOf,
   workSettingsOf,
 } from "@/lib/settings/org-policy";
-import { freshMayManageOwnerPage, freshWorkspaceActor, sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
 type SessionUser = { id: string; organizationId: string };
@@ -265,7 +265,10 @@ export async function PATCH(req: Request) {
       // An Admin holding the Security scope edits the sign-in policy too
       // (spec 6.6); retention stays the Owner's.
       if (!freshMayManageOwnerPage(fresh, section === "security" ? "security" : undefined)) {
-        return NextResponse.json({ error: "Only workspace Owners can change this" }, { status: 403 });
+        return NextResponse.json(
+          { error: ownerSplitOn() ? "Only the workspace Owner, or an Admin given this page, can change this" : "Only a workspace Owner or Admin can change this", code: "owner_only" },
+          { status: 403 },
+        );
       }
     } else if (!fresh.admin) {
       // general, culture, security, access: Admin only (settings-architecture

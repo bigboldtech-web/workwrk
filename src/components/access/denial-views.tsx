@@ -282,23 +282,30 @@ export interface AppOffProps {
    * The `ai` key's second off switch (spec-ai-automation 1.4): "AI features
    * for members" on Settings > Data turns the app off without hiding it, so
    * the sentence and the Admin's door name that page instead of Apps.
+   * "floored": the app is on, but a minimum role on Apps & modules leaves
+   * this person out, so the card never says "hidden" for an app others use.
    */
-  reason?: "hidden" | "ai-disabled";
+  reason?: "hidden" | "floored" | "ai-disabled";
 }
 
 export function AppOff({ label, isAdmin, admins = [], back, reason = "hidden" }: AppOffProps) {
   const aiOff = reason === "ai-disabled";
+  const floored = reason === "floored";
   return (
     <DenialBlock
-      title={aiOff ? "AI is turned off for this workspace" : `${label} is hidden in this workspace`}
+      title={aiOff ? "AI is turned off for this workspace" : floored ? `${label} is limited to some roles` : `${label} is hidden in this workspace`}
       sentence={
         aiOff
           ? isAdmin
             ? "AI features for members are off in Settings. Turn them back on from Data."
             : "Ask a workspace admin to turn AI features on."
-          : isAdmin
-            ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.`
-            : `Ask a workspace admin to turn ${label} on.`
+          : floored
+            ? isAdmin
+              ? `${label} has a minimum role in Settings. Change it from Apps & modules.`
+              : `Your workspace opens ${label} to some roles only. Ask a workspace admin if you need it.`
+            : isAdmin
+              ? `${label} was hidden in Settings. Turn it back on from Apps & modules.`
+              : `Ask a workspace admin to turn ${label} on.`
       }
       back={back}
       primary={

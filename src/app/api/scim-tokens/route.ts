@@ -18,7 +18,7 @@ import { settingsWriteGate } from "@/lib/access/settings-write";
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  const writeGate = await settingsWriteGate(session, "security");
+  const writeGate = await settingsWriteGate(session, "security", { read: true });
   if (!writeGate.ok) return writeGate.response;
   const tokens = await prisma.scimToken.findMany({
     where: { organizationId: getOrgId(session) },

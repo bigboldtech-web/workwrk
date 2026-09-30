@@ -256,7 +256,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/folders/route.ts",
   "src/app/api/gl-accounts/route.ts",
   "src/app/api/ideas/\\[id\\]/route.ts",
-  "src/app/api/identity-providers/route.ts",
   "src/app/api/integrations/\\[id\\]/route.ts",
   "src/app/api/integrations/\\[id\\]/test/route.ts",
   "src/app/api/integrations/quickbooks/connect/route.ts",
@@ -305,7 +304,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/meetings/\\[id\\]/route.ts",
   "src/app/api/meetings/route.ts",
   "src/app/api/my-team/route.ts",
-  "src/app/api/offices/route.ts",
   "src/app/api/okrs/route.ts",
   "src/app/api/ownership-areas/\\[id\\]/route.ts",
   "src/app/api/ownership-areas/route.ts",
@@ -498,4 +496,38 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/suites/auth.ts",
   "src/lib/workflow/engine.ts",
   "src/lib/workflows/runtime.ts",
+  // Phase 8 stage F review (2026-09-30): SIX files that read the legacy
+  // signals and were on no list, so `npx eslint` over src was not green and
+  // the count above understated the real number of legacy readers. Listed
+  // so the progress bar is true, each with what it still reads:
+  //   announcement-server.ts, announcement-audience.ts  the audience and the
+  //     publish rule of Announcements (accessLevel, hasPermission, the
+  //     SpaceMember audience), the logic the announcements routes left the
+  //     list through; it leaves when the audience resolves through can()
+  //   move/destinations  the Space nesting picker hands the level to
+  //     spaceNestDestinations (node-access's own input shape)
+  //   my-work/personal  the Personal List projection's viewer shape
+  //     (listBoardItems reads the level for the reserved-key rule)
+  //   two tests that build sessions carrying a level on purpose
+  "src/lib/announcement-server.ts",
+  "src/lib/announcement-audience.ts",
+  "src/app/api/move/destinations/route.ts",
+  "src/app/(dashboard)/my-work/personal/page.tsx",
+  "src/lib/auth-workspace-move.test.ts",
+  "src/lib/reports/schedule-patch-private-view.test.ts",
+];
+
+// Legacy code that lives INSIDE src/lib/access/, which the rule never lints
+// (the engine has to read these things). Not an ignore list: counted here so
+// the step 6 exit test ("the allow-list is empty") also means these are gone.
+// Stage F moved them in: src/lib/access.ts became legacy-resolve.ts, and
+// src/hooks/use-role.ts plus use-permission.ts became
+// use-legacy-permissions.tsx, whose useRole still derives isAdmin from the
+// session level (C_LEVEL and HR included) for its client importers. The
+// flip of that wrapper to orgRole (spec 10.1) waits for the same surfaces'
+// server rules to delegate, or C-level would lose controls the server still
+// grants them (scripts/MIGRATIONS.md, "what remains").
+export const ACCESS_LEGACY_INSIDE_ENGINE = [
+  "src/lib/access/legacy-resolve.ts",
+  "src/lib/access/use-legacy-permissions.tsx",
 ];

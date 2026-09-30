@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   // level, tasks, reviews, activity) is an Admin export, as the Data page
   // says it is. This route used to answer any signed-in person, Agents and
   // Guests included.
-  const writeGate = await settingsWriteGate(session, "data");
+  const writeGate = await settingsWriteGate(session, "data", { read: true });
   if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);

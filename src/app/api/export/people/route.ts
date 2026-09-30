@@ -13,7 +13,7 @@ function cell(v: string): string {
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  const writeGate = await settingsWriteGate(session, "data");
+  const writeGate = await settingsWriteGate(session, "data", { read: true });
   if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
 

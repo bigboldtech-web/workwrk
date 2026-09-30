@@ -160,7 +160,7 @@ describe("break 9: every move out of every Space asks the landing rule", () => {
 
 describe("rule 5 beyond the Move dialog: every picker that places a node asks the rule", () => {
   it("the Tables, Canvases and Docs bulk moves offer the common destinations, never the Space list", () => {
-    for (const [file, kind] of [["src/app/(dashboard)/tables/page.tsx", "table"], ["src/app/(dashboard)/canvas/page.tsx", "canvas"], ["src/app/(dashboard)/docs/page.tsx", "doc"]] as const) {
+    for (const [file, kind] of [["src/app/(dashboard)/tables/page.tsx", "table"], ["src/app/(dashboard)/canvas/page.tsx", "canvas"], ["src/app/(dashboard)/docs/(hub)/page.tsx", "doc"]] as const) {
       const page = read(file);
       expect(page).toMatch(new RegExp(`commonMoveDestinations\\("${kind}", `));
       expect(page).toMatch(/\.\.\.\(bulkDests\?\.root \? \[\{ options: \[\{ value: "none"/);

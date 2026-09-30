@@ -1,6 +1,10 @@
+// Offices: GET is the lookup every picker reads (any signed-in person of
+// the org); POST, PATCH and DELETE are Structure > Offices, on that page's
+// rule (an Owner or an Admin, the account re-read), never the manager tier.
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
 import { z } from "zod";
 
@@ -34,7 +38,10 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // Structure > Offices is the one screen that writes offices, and it is an
+  // Owner and Admin page: the page rule, the actor re-read (settings-write.ts).
+  const writeGate = await settingsWriteGate(session, "structure");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const body = (await req.json().catch(() => null)) ?? {};
@@ -73,7 +80,10 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // Structure > Offices is the one screen that writes offices, and it is an
+  // Owner and Admin page: the page rule, the actor re-read (settings-write.ts).
+  const writeGate = await settingsWriteGate(session, "structure");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const body = await req.json().catch(() => null);
@@ -113,7 +123,10 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  // Structure > Offices is the one screen that writes offices, and it is an
+  // Owner and Admin page: the page rule, the actor re-read (settings-write.ts).
+  const writeGate = await settingsWriteGate(session, "structure");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const { id } = await req.json();

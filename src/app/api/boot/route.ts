@@ -16,7 +16,7 @@
 // boot screen renders as ErrorState, never a trip to /onboard.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
-import { accessV2Tables, delegateOn } from "@/lib/access/flags";
+import { accessV2Tables, appGatesEnforce, delegateOn } from "@/lib/access/flags";
 import { settingsReaderPagesFor } from "@/lib/access/settings-door";
 import { mayCreateSpace } from "@/lib/access/space-create";
 import type { SettingsPageKey } from "@/lib/access/types";
@@ -32,7 +32,8 @@ import { countPoliciesToAck } from "@/lib/policies-to-ack";
 import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { getEffectivePreferences, type EffectivePreferences } from "@/lib/preferences";
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
-import { tiersOfLevel, type ViewerTiers } from "@/lib/access/viewer-tiers";
+import { engineTiers, tiersOfLevel, type ViewerTiers } from "@/lib/access/viewer-tiers";
+import { personScope } from "@/lib/process-scope";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
 import { orgRoleOf, isAgentOf, peopleTeamOf } from "@/lib/access/org-role";
@@ -95,6 +96,12 @@ export interface BootPayload {
      * reads the level. Optional for an older payload (none cleared).
      */
     tiers?: ViewerTiers;
+    /**
+     * Opens the SOP and Policy compliance ledgers (src/lib/process-scope.ts
+     * personScope canView: org-wide levels, or a manager with reports), the
+     * rule their layouts 404 on. Optional for an older payload (no rows).
+     */
+    complianceReader?: boolean;
     peopleTeam: boolean;
     /** May create a Space: the answer POST /api/spaces gives (src/lib/access/space-create.ts). Optional for an older payload. */
     canCreateSpace?: boolean;
@@ -387,7 +394,13 @@ export async function GET(req: NextRequest) {
     // (src/lib/app-access.ts): the client catalog is a "use client" module.
     // The display tiers, answered once here and shipped to the client
     // (viewer.tiers), so no client surface reads the level (access step 6).
-    const tiers = tiersOfLevel(accessLevel);
+    // By the rule the app routes enforce: today's ladder, or, once the
+    // engine decides them (appGatesEnforce), the engine's reading
+    // (viewer-tiers.ts engineTiers), so a floored app's rail row and its
+    // route never disagree.
+    const tiers = appGatesEnforce()
+      ? engineTiers({ orgRole: orgRoleOf({ accessLevel }), peopleTeam, hasReports: cf.teams.hasReports })
+      : tiersOfLevel(accessLevel);
     const apps = visibleRailApps({ config: railConfig, tiers, activeModules, apps: APP_ACCESS }).map((a) => a.key);
     const launcherApps = visibleRailApps({ config: railConfig, tiers, activeModules, includeFolded: true, apps: APP_ACCESS }).map((a) => a.key);
     const manageableOffModules = legacyIsAdminLevel(accessLevel)
@@ -405,6 +418,12 @@ export async function GET(req: NextRequest) {
         adminScopes: [],
         hasReports: cf.teams.hasReports,
         tiers,
+        // The SOP and Policy compliance ledgers' own rule (personScope, the
+        // one their layouts 404 on), so the Docs sidebar rows never lead to
+        // a page the person cannot open.
+        complianceReader: await personScope(session)
+          .then((s) => s.canView)
+          .catch(() => false),
         peopleTeam,
         // Who creates a Space: the answer POST /api/spaces gives (every New
         // Space control reads this, never a tier of its own).

@@ -1,6 +1,6 @@
 // Policy compliance is a manager's dashboard, and the denial is a 404.
 //
-// Same rule and same reason as (dashboard)/sops/compliance/layout.tsx:
+// Same rule and same reason as (dashboard)/sops/(app)/compliance/layout.tsx:
 // spec-process section 1 puts both ledgers behind hasReports, the People team
 // and admins, and sidebar-map section 6 row 14 hides the row from everybody
 // else. Without a gate the page rendered its own 403 as "Couldn't load

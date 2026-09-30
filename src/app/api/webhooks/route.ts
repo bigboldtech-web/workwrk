@@ -37,7 +37,7 @@ const VALID_EVENTS = [
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  const writeGate = await settingsWriteGate(session, "api");
+  const writeGate = await settingsWriteGate(session, "api", { read: true });
   if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const subs = await prisma.webhookSubscription.findMany({

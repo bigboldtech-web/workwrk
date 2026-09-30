@@ -168,8 +168,11 @@ const CONTENT_ROWS: Array<{ href: string; label: string; Icon: LucideIcon; app: 
  * PROCESS, contributed by the process unit (spec-process section 1), in its
  * order, with its gates.
  *
- * `managerOnly` / `hrAdminOnly` are the legacy tier helper, which is what the
- * shell still gates on; the access engine stays inert until its own step.
+ * `hrAdminOnly` is the display tier from boot (viewer-tiers.ts).
+ * `complianceOnly` is boot's `complianceReader`: the compliance ledgers' own
+ * rule (process-scope.ts personScope canView, org-wide levels or a manager
+ * with reports), the one their layouts 404 on, so a manager with no reports
+ * never meets a row that leads to "We couldn't find that page".
  * What DID change is who passes:
  *
  *   Policies and Policy compliance were both `hrAdminOnly`, so the people who
@@ -194,15 +197,15 @@ const CONTENT_ROWS: Array<{ href: string; label: string; Icon: LucideIcon; app: 
 // query is the tie-break on an equal path.
 const PROCESS_ROWS: Array<{
   href: string; label: string; Icon: LucideIcon;
-  match?: "exact" | "prefix"; hrAdminOnly?: boolean; managerOnly?: boolean;
+  match?: "exact" | "prefix"; hrAdminOnly?: boolean; complianceOnly?: boolean;
   badge?: "mySops" | "policiesToAck";
 }> = [
   { href: "/sops", label: "SOPs", Icon: ScrollText },
   { href: "/sops/my-sops", label: "My SOPs", Icon: ListChecks, badge: "mySops" },
   { href: "/process-runs", label: "Run history", Icon: Workflow },
-  { href: "/sops/compliance", label: "SOP compliance", Icon: ShieldCheck, managerOnly: true },
+  { href: "/sops/compliance", label: "SOP compliance", Icon: ShieldCheck, complianceOnly: true },
   { href: "/policies", label: "Policies", Icon: BookOpenCheck, badge: "policiesToAck" },
-  { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, managerOnly: true },
+  { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, complianceOnly: true },
   { href: "/agreements", label: "Contracts", Icon: FileSignature, hrAdminOnly: true },
   { href: "/agreements?view=templates", label: "Contract templates", Icon: LayoutTemplate, hrAdminOnly: true },
 ];
@@ -244,7 +247,6 @@ export function DocsSidebar() {
   // The display tiers from boot (never the level off the session).
   const { clears } = useViewerTiers();
   const isHrAdmin = clears("hr-admin");
-  const isManager = clears("manager");
   const activeHref = useActiveRowHref(ALL_ROWS);
   const noteMenu = useDocRowMenu();
   const { prefs, patchPrefs, launcherApps } = useOsShell();
@@ -260,6 +262,7 @@ export function DocsSidebar() {
   // renders for a Guest only while they hold an assignment. A row that
   // lands on the in-shell 404 is the fabricated chrome this refresh removes.
   const isGuest = boot.viewer.orgRole === "GUEST";
+  const complianceReader = boot.viewer.complianceReader === true;
 
   const [docs, setDocs] = useState<DocRow[] | null>(null);
   const [docCounts, setDocCounts] = useState<DocCounts | null>(null);
@@ -342,7 +345,7 @@ export function DocsSidebar() {
     [favorites, matches],
   );
   const processRows = PROCESS_ROWS.filter(
-    (r) => (isHrAdmin || !r.hrAdminOnly) && (isManager || !r.managerOnly)
+    (r) => (isHrAdmin || !r.hrAdminOnly) && (complianceReader || !r.complianceOnly)
       && (!isGuest || (r.badge === "mySops" && counts.mySops > 0)),
   );
 

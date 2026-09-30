@@ -95,8 +95,14 @@ export default function AppsSettingsPage() {
   // or a raised minimum role is counted first and saved only after the Admin
   // has read who it takes the app away from. A change nobody loses to saves
   // straight away, as before.
+  //
+  // THE CHANGE IS KEPT AS AN EDIT, NOT A SNAPSHOT (`apply`), and applied to
+  // the state as it is when the Admin confirms, so a reorder or another app
+  // saved while the count ran or the dialog was open is never overwritten by
+  // a copy taken at click time. While one count is in flight, another hide
+  // or floor change is refused with a toast, never dropped without a word.
   const [impact, setImpact] = useState<
-    | { app: AppEntry; next: State; okMsg: string; sentence: string | null; names: string[]; count: number; error: string | null; checking: boolean; enforced?: boolean }
+    | { app: AppEntry; apply: (s: State) => State; okMsg: string; sentence: string | null; names: string[]; count: number; error: string | null; checking: boolean; enforced?: boolean }
     | null
   >(null);
 
@@ -157,8 +163,8 @@ export default function AppsSettingsPage() {
   // Count who a narrowing change takes the app away from, then either save
   // (nobody loses it) or ask first. A failed count still lets the Admin save,
   // saying the count is unknown, so a broken preview never blocks the page.
-  const saveNarrowing = async (app: AppEntry, next: State, okMsg: string) => {
-    setImpact({ app, next, okMsg, sentence: null, names: [], count: 0, error: null, checking: true });
+  const saveNarrowing = async (app: AppEntry, apply: (s: State) => State, next: State, okMsg: string) => {
+    setImpact({ app, apply, okMsg, sentence: null, names: [], count: 0, error: null, checking: true });
     setSavingKey(app.key);
     const r = await apiFetch<{ count: number; names: string[]; sentence: string; rule?: string }>("/api/settings/apps/impact", {
       method: "POST",
@@ -167,40 +173,67 @@ export default function AppsSettingsPage() {
     setSavingKey(null);
     if (r.ok && r.data.count === 0) {
       setImpact(null);
-      void persist(next, app.key, okMsg);
+      // The latest state, not the click-time copy (see `impact` above).
+      setPendingApply({ apply, key: app.key, okMsg });
       return;
     }
     setImpact({
-      app, next, okMsg, checking: false,
+      app, apply, okMsg, checking: false,
       sentence: r.ok ? r.data.sentence : null,
       names: r.ok ? r.data.names : [],
       count: r.ok ? r.data.count : 0,
       enforced: r.ok && r.data.rule === "engine",
-      error: r.ok ? null : r.error || "Couldn't count who loses access.",
+      error: r.ok ? null : r.error || "The count did not answer.",
     });
   };
 
+  // A narrowing change that is cleared to save (nobody loses it, or the
+  // Admin confirmed), applied to the state of the render that saves it.
+  const [pendingApply, setPendingApply] = useState<{ apply: (s: State) => State; key: string; okMsg: string } | null>(null);
+  useEffect(() => {
+    if (!pendingApply || !state) return;
+    const job = pendingApply;
+    const t = setTimeout(() => {
+      setPendingApply(null);
+      void persist(job.apply(state), job.key, job.okMsg);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [pendingApply, state, persist]);
+
+  // One narrowing change at a time: the second is refused out loud.
+  const busyCounting = (): boolean => {
+    if (!impact && !pendingApply) return false;
+    toast(impact ? `Still checking who loses ${impact.app.label}. Try again in a moment.` : "Saving the last change. Try again in a moment.");
+    return true;
+  };
+
   const setVisible = (app: AppEntry, visible: boolean) => {
-    if (!state || app.alwaysPinned) return;
-    const set = new Set(state.hidden);
-    if (visible) set.delete(app.key);
-    else set.add(app.key);
-    const next = { ...state, hidden: [...set] };
+    if (!state || app.alwaysPinned || busyCounting()) return;
+    const apply = (s: State): State => {
+      const set = new Set(s.hidden);
+      if (visible) set.delete(app.key);
+      else set.add(app.key);
+      return { ...s, hidden: [...set] };
+    };
+    const next = apply(state);
     const okMsg = visible ? `${app.label} shows in the rail` : `${app.label} hidden from the rail`;
     if (visible) void persist(next, app.key, okMsg);
-    else void saveNarrowing(app, next, okMsg);
+    else void saveNarrowing(app, apply, next, okMsg);
   };
 
   const setFloor = (app: AppEntry, value: string) => {
-    if (!state || app.alwaysPinned) return;
-    const minAccess = { ...state.minAccess };
-    if (isTier(value)) minAccess[app.key] = value;
-    else delete minAccess[app.key];
-    const next = { ...state, minAccess };
+    if (!state || app.alwaysPinned || busyCounting()) return;
+    const apply = (s: State): State => {
+      const minAccess = { ...s.minAccess };
+      if (isTier(value)) minAccess[app.key] = value;
+      else delete minAccess[app.key];
+      return { ...s, minAccess };
+    };
+    const next = apply(state);
     const okMsg = isTier(value) ? `${app.label}: ${TIER_OPTIONS.find((t) => t.value === value)?.label.toLowerCase()}` : `${app.label}: everyone`;
     // Back to Everyone never takes the app from anyone.
     if (!isTier(value)) void persist(next, app.key, okMsg);
-    else void saveNarrowing(app, next, okMsg);
+    else void saveNarrowing(app, apply, next, okMsg);
   };
 
   // Reorder inside one group (hubs among hubs, apps among apps); the saved
@@ -356,11 +389,17 @@ export default function AppsSettingsPage() {
         onConfirm={() => {
           const cur = impact;
           setImpact(null);
-          if (cur) void persist(cur.next, cur.app.key, cur.okMsg);
+          if (cur) setPendingApply({ apply: cur.apply, key: cur.app.key, okMsg: cur.okMsg });
         }}
       >
         {impact?.error ? (
-          <p>{impact.error} Saving still works; the people it affects will not see {impact.app.label} in their rail.</p>
+          <>
+            <p className="font-medium text-ink">We couldn&apos;t count who loses access to {impact.app.label}.</p>
+            <p className="mt-1 text-ink-2">{/[.!?]$/.test(impact.error.trim()) ? impact.error.trim() : `${impact.error.trim()}.`}</p>
+            <p className="mt-2 text-ink-2">
+              If you save, everyone it affects stops seeing {impact.app.label} in their rail. Nothing is deleted, and you can turn it back on here at any time.
+            </p>
+          </>
         ) : impact ? (
           <>
             <p className="font-medium text-ink">{impact.sentence}</p>

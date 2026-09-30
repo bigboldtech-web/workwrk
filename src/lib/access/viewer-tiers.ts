@@ -6,10 +6,18 @@
 // the ladder itself (access-tiers.ts canAccessTier, deleted). Now the ladder
 // runs here, beside the engine, and the client asks `clearsTier(tiers, t)`:
 // the same answer by construction (tiersOfLevel is legacyTierAllows per tier),
-// with no level on the client. The engine's own reading of these tiers
-// (manager becomes "has reports", hr-admin becomes the People team) lands with
-// the flip, recorded in parity.ts EXPECTED_MISMATCHES, and changes only
-// tiersOfLevel's inputs, never a call site.
+// with no level on the client.
+//
+// THE ENGINE'S READING (engineTiers). When the engine decides the app routes
+// (ACCESS_V2_RESOLVER on and the log-only week over: settingsGateMode is
+// "engine"), boot ships engineTiers instead: "manager" is has reports (solid
+// or dotted) or the People team, "hr-admin" is the People team, "org-admin"
+// is an Owner or Admin, each cleared by Owners and Admins. That is
+// resolve.ts clearsAppFloor word for word, so a floored app's rail row, its
+// hub sidebar rows and its route (FlaggedAppKeyGate) give one answer, and the
+// Apps page's "N people lose access" count (app-floor-impact.ts, rule
+// "engine") counts the same people. Recorded in parity.ts
+// EXPECTED_MISMATCHES; no call site changes, only the tiers boot ships.
 //
 // Pure: no session, no database.
 
@@ -30,6 +38,31 @@ export function tiersOfLevel(level: string | null | undefined): ViewerTiers {
     manager: legacyTierAllows("manager", level),
     "hr-admin": legacyTierAllows("hr-admin", level),
     "org-admin": legacyTierAllows("org-admin", level),
+  };
+}
+
+/** The facts the engine reads for the three tiers (boot has all three). */
+export interface EngineTierFacts {
+  /** OWNER | ADMIN | MEMBER | GUEST */
+  orgRole: string;
+  peopleTeam: boolean;
+  /** Reports, solid or dotted. */
+  hasReports: boolean;
+}
+
+/**
+ * The engine's reading of the tiers (resolve.ts clearsAppFloor): Owners and
+ * Admins clear all three, the People team clears "manager" and "hr-admin",
+ * anyone with a report clears "manager". A Guest clears none, whatever the
+ * facts say: a Guest's apps are the shared ones (spec 5.2.1), never a tier.
+ */
+export function engineTiers(f: EngineTierFacts): ViewerTiers {
+  if (f.orgRole === "GUEST") return NO_TIERS;
+  const admin = f.orgRole === "OWNER" || f.orgRole === "ADMIN";
+  return {
+    manager: admin || f.peopleTeam || f.hasReports,
+    "hr-admin": admin || f.peopleTeam,
+    "org-admin": admin,
   };
 }
 

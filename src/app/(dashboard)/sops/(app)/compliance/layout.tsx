@@ -11,8 +11,9 @@
 // compliance / Manager access required. / Try again": a retry link on a
 // permission the person will never have. A denial is not a failed fetch.
 //
-// The tier check is the same helper the Docs sidebar's `managerOnly` rows
-// resolve through, so the row and the route cannot disagree.
+// The rule is personScope (src/lib/process-scope.ts), and /api/boot ships
+// the same answer as viewer.complianceReader, which the Docs sidebar's
+// `complianceOnly` rows read, so the row and the route cannot disagree.
 
 import { getServerSession } from "next-auth";
 import { notFound, redirect } from "next/navigation";

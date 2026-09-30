@@ -2,14 +2,18 @@
 // minimum-role change would take this app away from, before it is saved
 // (settings-architecture 5.3, S7). Reads only; the Apps page rule (Owner or
 // Admin, the actor re-read). The count is by the rule in force: the engine's
-// rule 2 with ACCESS_V2_RESOLVER on, the rail's display tiers otherwise.
+// rule 2 once the app gates enforce (flags.ts appGatesEnforce), the rail's
+// display tiers otherwise, and only people who have the app today are named
+// (the catalog baseline and, under the engine, its APP_RULES audience).
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getOrgId, getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { settingsWriteGate } from "@/lib/access/settings-write";
-import { accessV2Resolver } from "@/lib/access/flags";
+import { appGatesEnforce } from "@/lib/access/flags";
+import { APP_RULES } from "@/lib/access/settings";
+import type { AppKey } from "@/lib/access/types";
 import { parseOrgAppsConfig } from "@/lib/rail-apps";
 import { appAccessImpact, impactSentence, type AppVisibility } from "@/lib/access/app-floor-impact";
 
@@ -45,13 +49,16 @@ export async function POST(req: NextRequest) {
   const cfg = parseOrgAppsConfig(sidebar.apps);
   const stored = cfg.minAccess?.[app];
   const before: AppVisibility = { hidden: (cfg.hidden ?? []).includes(app), floor: isTier(stored) ? stored : null };
-  const people = await loadImpactPeople(orgId);
-  const losing = appAccessImpact(people, before, { hidden, floor }, accessV2Resolver() ? "engine" : "legacy");
+  const rule = appGatesEnforce() ? "engine" : "legacy";
+  const appKey = app in APP_RULES ? (app as AppKey) : null;
+  const baseline = { requiredAccess: isTier(entry.requiredAccess) ? entry.requiredAccess : null, appKey };
+  const people = await loadImpactPeople(orgId, appKey);
+  const losing = appAccessImpact(people, before, { hidden, floor }, rule, baseline);
   return jsonSuccess({
     app,
     count: losing.length,
     names: losing.slice(0, 5).map((p) => p.name),
     sentence: impactSentence(losing.length, entry.label),
-    rule: accessV2Resolver() ? "engine" : "legacy",
+    rule,
   });
 }

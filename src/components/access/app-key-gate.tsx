@@ -3,7 +3,7 @@
 //   not signed in          -> /login?callbackUrl= (gatePage, the one redirect)
 //   outside the audience   -> the in-shell 404 (gatePage: not discoverable)
 //   a Guest, app off       -> the in-shell 404
-//   hidden or floored      -> <AppOff>, with /settings/apps for Owners and Admins
+//   hidden or floored      -> <AppOff> (each named as such), with /settings/apps for Owners and Admins
 //   ai with AI features off-> <AppOff reason="ai-disabled">, with /settings/data
 //
 // Server only. One component so /sidekick, /agents, /automation, /store,
@@ -35,12 +35,13 @@ export async function AppKeyGate({
   if (decision.via === "app-off") {
     const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
     const admins = isAdmin ? [] : await listOrgAdmins(viewer.organizationId);
-    let reason: "hidden" | "ai-disabled" = "hidden";
-    if (appKey === "ai") {
-      const org = await loadOrgFacts(viewer.organizationId).catch(() => null);
-      const hidden = (org?.apps.hidden ?? []).includes("ai") || Boolean(org?.apps.minAccess?.ai);
-      if (org?.aiEnabled === false && !hidden) reason = "ai-disabled";
-    }
+    // Which switch: hidden (off for everyone), floored (a minimum role this
+    // person does not clear), or, for ai, the Data page's AI switch.
+    const org = await loadOrgFacts(viewer.organizationId).catch(() => null);
+    const hidden = (org?.apps.hidden ?? []).includes(appKey);
+    const floored = !hidden && Boolean(org?.apps.minAccess?.[appKey]);
+    let reason: "hidden" | "floored" | "ai-disabled" = floored ? "floored" : "hidden";
+    if (appKey === "ai" && org?.aiEnabled === false && !hidden && !floored) reason = "ai-disabled";
     return <AppOff label={label} isAdmin={isAdmin} admins={admins} back={back} reason={reason} />;
   }
   // Discoverable but not allowed for any other reason: nothing in these

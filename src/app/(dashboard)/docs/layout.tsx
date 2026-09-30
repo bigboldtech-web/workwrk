@@ -6,20 +6,18 @@
 // restyles it on the tokens and leaves its Alt (Option) 1 to 9 binding alone,
 // which never collided with the hubs' Cmd 1 to 8.
 //
-// The app-key gate (Phase 8 stage F, settings-architecture S7) runs in the
-// settings door's three states (FlaggedAppKeyGate): off, open as before;
-// SETTINGS_GATE_LOG_ONLY, open and every would-be denial logged;
-// ACCESS_V2_RESOLVER, a hidden or floored Docs hub locks its routes too. A
-// Guest keeps what is shared with them (APP_RULES docs: guest "shared").
+// The app-key gate (Phase 8 stage F) is NOT here: it is on the hub page's
+// route group, (hub)/layout.tsx, so a canonical /docs/[id] link still reaches
+// decision B3 (CanonicalHubGate in [id]/layout.tsx). The strip draws nothing
+// for a person without the hub.
 
 import { DocTabsBar } from "@/components/docs/doc-tabs";
-import { FlaggedAppKeyGate } from "@/components/access/app-key-gate";
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <FlaggedAppKeyGate appKey="docs" label="Docs" callbackUrl="/docs" back={{ fallbackHref: "/home", label: "Home" }}>
+    <>
       <DocTabsBar />
       {children}
-    </FlaggedAppKeyGate>
+    </>
   );
 }

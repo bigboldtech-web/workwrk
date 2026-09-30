@@ -1073,7 +1073,7 @@ export async function loadFacts(viewer: Viewer, ref: ObjectRef): Promise<AccessF
  * Spec 5.2.1's `guest: "shared"` rows: the app renders for a Guest only when
  * something of that kind is shared with them. The question is answerable from
  * today's tables only for the kinds that carry their own membership row (Talk
- * channels, SOP folders). Docs, Tables, Forms and Library files have no
+ * channels, SOP folders and SOP assignments). Docs, Tables, Forms and Library files have no
  * per-object share table before step 4, so those return undefined and
  * decideApp keeps the permissive answer rather than hiding a hub a Guest may
  * legitimately need (recorded in parity.ts UNMODELLED_DIFFERENCES).
@@ -1090,10 +1090,18 @@ async function guestHoldsSomethingFor(viewer: Viewer, app: AppKey): Promise<bool
       return n > 0;
     }
     case "sops": {
-      const n = await prisma.sOPFolderAccess.count({
-        where: { userId: viewer.userId, folder: { organizationId: viewer.organizationId } },
-      });
-      return n > 0;
+      // A folder shared with them, or an SOP assigned to them: spec 5.2.1
+      // gives a Guest "assigned SOPs only", and the assignment notification
+      // links to /sops/my-sops, so an assignment alone must keep the app.
+      const [folders, assigned] = await Promise.all([
+        prisma.sOPFolderAccess.count({
+          where: { userId: viewer.userId, folder: { organizationId: viewer.organizationId } },
+        }),
+        prisma.sOPAssignment.count({
+          where: { userId: viewer.userId, sop: { organizationId: viewer.organizationId } },
+        }),
+      ]);
+      return folders > 0 || assigned > 0;
     }
     default:
       return undefined;

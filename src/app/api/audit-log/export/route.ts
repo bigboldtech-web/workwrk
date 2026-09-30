@@ -28,7 +28,7 @@ import { settingsWriteGate } from "@/lib/access/settings-write";
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  const writeGate = await settingsWriteGate(session, "audit");
+  const writeGate = await settingsWriteGate(session, "audit", { read: true });
   if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
 

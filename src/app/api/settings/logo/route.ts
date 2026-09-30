@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logAuditEvent } from "@/lib/activity";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -14,11 +14,11 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   // Identity & culture's logo: the Identity page rule (Owner and Admin), the
-  // actor re-read so a demoted Admin is refused now. C-level had this write
+  // actor re-read so a demoted Admin is refused now, and the engine's manage
+  // answer on Identity once it decides the door (settings-write.ts). C-level had this write
   // through the raw API only (the Identity page never opened to them).
-  const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return jsonError(fresh.error, fresh.status);
-  if (!fresh.admin) return jsonError("Only a workspace Admin can change the logo", 403);
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 
@@ -63,11 +63,11 @@ export async function DELETE(req: NextRequest) {
   if (error) return error;
 
   // Identity & culture's logo: the Identity page rule (Owner and Admin), the
-  // actor re-read so a demoted Admin is refused now. C-level had this write
+  // actor re-read so a demoted Admin is refused now, and the engine's manage
+  // answer on Identity once it decides the door (settings-write.ts). C-level had this write
   // through the raw API only (the Identity page never opened to them).
-  const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return jsonError(fresh.error, fresh.status);
-  if (!fresh.admin) return jsonError("Only a workspace Admin can change the logo", 403);
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 

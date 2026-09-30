@@ -20,7 +20,14 @@ export async function GET() {
   });
 
   const settings = (org?.settings as any) || {};
-  const matrix: PermissionMatrix | null = settings.permissions || null;
+  // Only the ladder's own levels go out, so the grid never round-trips a
+  // stray level key a hand edit or an old deploy stored (PATCH refuses one
+  // by name). A stray level matches no person, so dropping it changes no answer.
+  const stored = settings.permissions && typeof settings.permissions === "object" ? (settings.permissions as Record<string, unknown>) : null;
+  const known = new Set<string>(ACCESS_LEVELS.map((l) => l.value));
+  const matrix: PermissionMatrix | null = stored
+    ? (Object.fromEntries(Object.entries(stored).filter(([level]) => known.has(level))) as PermissionMatrix)
+    : null;
 
   // ACCESS_V2_RESOLVER (default OFF): the cells the engine owns, answered for
   // this person exactly as the server gates answer them, so the client never
@@ -52,9 +59,13 @@ export async function PATCH(req: NextRequest) {
   // Sanitize: only allow known modules and actions
   const sanitized: any = {};
   const knownLevels = new Set<string>(ACCESS_LEVELS.map((l) => l.value));
+  // Only the ladder's own levels: a stray key used to be stored as is. It is
+  // refused by name (the strict-write rule), never dropped without a word.
+  const unknownLevels = Object.keys(matrix).filter((level) => !knownLevels.has(level));
+  if (unknownLevels.length > 0) {
+    return jsonError(`Unknown access level in the matrix: ${unknownLevels.slice(0, 5).join(", ")}`, 400);
+  }
   for (const [level, modules] of Object.entries(matrix)) {
-    // Only the ladder's own levels: a stray key used to be stored as is.
-    if (!knownLevels.has(level)) continue;
     if (!modules || typeof modules !== "object") continue;
     sanitized[level] = {};
     for (const [mod, actions] of Object.entries(modules as any)) {

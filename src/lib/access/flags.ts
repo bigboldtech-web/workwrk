@@ -47,6 +47,16 @@ export function settingsGateLogOnly(env?: Record<string, string | undefined>): b
 }
 
 /**
+ * The app route gates enforce (FlaggedAppKeyGate's "engine" mode:
+ * ACCESS_V2_RESOLVER on and the log-only week over). Boot reads it too, so
+ * the rail, the hub sidebars and the Apps page's impact count follow the same
+ * rule the routes enforce (viewer-tiers.ts engineTiers).
+ */
+export function appGatesEnforce(env?: Record<string, string | undefined>): boolean {
+  return accessV2Resolver(env) && !settingsGateLogOnly(env);
+}
+
+/**
  * The questions the parity job has proven, per flag state. A helper named
  * here delegates to can() when ACCESS_V2_RESOLVER is on; a helper absent
  * keeps today's resolver whatever the flag says.

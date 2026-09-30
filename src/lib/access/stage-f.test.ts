@@ -1,11 +1,17 @@
 // Phase 8 stage F: the pure helpers the enforcement and cleanup stage added.
 import { describe, expect, it } from "vitest";
-import { NO_TIERS, clearsTier, parseViewerTiers, tiersOfLevel } from "./viewer-tiers";
+import { NO_TIERS, clearsTier, engineTiers, parseViewerTiers, tiersOfLevel } from "./viewer-tiers";
 import { legacyTierAllows } from "./legacy-levels";
 import { appAccessImpact, impactSentence, keepsApp, type ImpactPerson } from "./app-floor-impact";
 import { appRouteAuditRow, settingsGateAuditRow, settingsGateDecision, settingsGateMode } from "./settings-gate-engine";
 import { scoringWriteAllowed, sessionScoringWriteAllowed } from "./settings-legacy";
 import { settingsReaderLanding, hubDefaultHref } from "../nav/route-hub";
+import { appGatesEnforce } from "./flags";
+import { APP_GATE_FILES, ENFORCED_AT } from "./enforcement";
+import { APP_KEYS } from "./settings";
+import { denialAuditRow } from "./guards";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR", "MEMBER", "", null, undefined] as const;
 
@@ -38,6 +44,7 @@ const person = (over: Partial<ImpactPerson>): ImpactPerson => ({
   peopleTeam: over.peopleTeam ?? false,
   hasReports: over.hasReports ?? false,
   tiers: over.tiers ?? tiersOfLevel("EMPLOYEE"),
+  ...(over.shared !== undefined ? { shared: over.shared } : {}),
 });
 
 describe("N people lose access (Apps & modules preview)", () => {
@@ -125,5 +132,97 @@ describe("where the Settings hub lands (spec-settings-workspace 1.1)", () => {
     expect(settingsReaderLanding({ settingsReader: true })).toBe("/settings/members");
     expect(settingsReaderLanding({ settingsReader: false })).toBeNull();
     expect(hubDefaultHref("settings", { canManageWorkspace: false })).toBe("/account/profile");
+  });
+});
+
+// ── Stage F review fixes ─────────────────────────────────────────
+
+
+describe("the engine's reading of the tiers (rail and route agree once the gates enforce)", () => {
+  it("is resolve.ts clearsAppFloor: reports or the People team for manager, the People team for hr-admin", () => {
+    expect(engineTiers({ orgRole: "MEMBER", peopleTeam: false, hasReports: false })).toEqual({ manager: false, "hr-admin": false, "org-admin": false });
+    expect(engineTiers({ orgRole: "MEMBER", peopleTeam: false, hasReports: true })).toEqual({ manager: true, "hr-admin": false, "org-admin": false });
+    expect(engineTiers({ orgRole: "MEMBER", peopleTeam: true, hasReports: false })).toEqual({ manager: true, "hr-admin": true, "org-admin": false });
+    expect(engineTiers({ orgRole: "ADMIN", peopleTeam: false, hasReports: false })).toEqual({ manager: true, "hr-admin": true, "org-admin": true });
+    expect(engineTiers({ orgRole: "OWNER", peopleTeam: false, hasReports: false })["org-admin"]).toBe(true);
+  });
+  it("a Guest clears no tier, whatever the facts say", () => {
+    expect(engineTiers({ orgRole: "GUEST", peopleTeam: true, hasReports: true })).toEqual(NO_TIERS);
+  });
+  it("boot switches to it exactly when FlaggedAppKeyGate enforces", () => {
+    expect(appGatesEnforce({})).toBe(false);
+    expect(appGatesEnforce({ ACCESS_V2_RESOLVER: "true" })).toBe(true);
+    expect(appGatesEnforce({ ACCESS_V2_RESOLVER: "true", SETTINGS_GATE_LOG_ONLY: "true" })).toBe(false);
+    expect(appGatesEnforce({ SETTINGS_GATE_LOG_ONLY: "true" })).toBe(false);
+    for (const resolver of [false, true]) for (const logOnly of [false, true]) {
+      const env = { ACCESS_V2_RESOLVER: resolver ? "true" : undefined, SETTINGS_GATE_LOG_ONLY: logOnly ? "true" : undefined };
+      expect(appGatesEnforce(env)).toBe(settingsGateMode({ resolver, logOnly }) === "engine");
+    }
+  });
+});
+
+describe("N people lose access counts only people who have the app", () => {
+  const admin = person({ id: "a", orgRole: "ADMIN", tiers: tiersOfLevel("COMPANY_ADMIN") });
+  const member = person({ id: "m" });
+  const lead = person({ id: "l", tiers: tiersOfLevel("TEAM_LEAD") });
+  const hr = person({ id: "h", peopleTeam: true, tiers: tiersOfLevel("HR") });
+  const guestShared = person({ id: "gs", orgRole: "GUEST", tiers: NO_TIERS, shared: true });
+  const guestNone = person({ id: "gn", orgRole: "GUEST", tiers: NO_TIERS, shared: false });
+  const all = [admin, member, lead, hr, guestShared, guestNone];
+
+  it("a floor on an Admin-only app (Build apps) names nobody, under either rule", () => {
+    const baseline = { requiredAccess: "org-admin" as const, appKey: "build" as const };
+    for (const rule of ["legacy", "engine"] as const) {
+      expect(appAccessImpact(all, { hidden: false }, { hidden: false, floor: "org-admin" }, rule, baseline)).toEqual([]);
+    }
+    // Hiding it takes it from the Admin alone.
+    expect(appAccessImpact(all, { hidden: false }, { hidden: true }, "engine", baseline).map((p) => p.id)).toEqual(["a"]);
+  });
+  it("hiding Policies: today the hr-admin launcher entry (Admins, People team); under the engine the page every Member opens", () => {
+    const baseline = { requiredAccess: "hr-admin" as const, appKey: "policies" as const };
+    expect(appAccessImpact(all, { hidden: false }, { hidden: true }, "legacy", baseline).map((p) => p.id)).toEqual(["a", "h"]);
+    expect(appAccessImpact(all, { hidden: false }, { hidden: true }, "engine", baseline).map((p) => p.id)).toEqual(["a", "m", "l", "h"]);
+  });
+  it("under the engine a Guest counts only for a Guest-visible app they hold something in", () => {
+    const docs = { appKey: "docs" as const };
+    expect(appAccessImpact(all, { hidden: false }, { hidden: true }, "engine", docs).map((p) => p.id)).toEqual(["a", "m", "l", "h", "gs"]);
+    const planner = { appKey: "planner" as const };
+    expect(appAccessImpact(all, { hidden: false }, { hidden: true }, "engine", planner).map((p) => p.id)).toEqual(["a", "m", "l", "h"]);
+  });
+});
+
+describe("every app key names the file that gates it (nothing can go cosmetic)", () => {
+  const root = process.cwd();
+  it("has one row per APP_KEYS entry, and the file exists", () => {
+    for (const key of APP_KEYS) {
+      const row = APP_GATE_FILES[key];
+      expect(row, key).toBeTruthy();
+      expect(existsSync(join(root, row.file)), `${key}: ${row.file}`).toBe(true);
+      expect(ENFORCED_AT[`app.${key}`]).toContain(row.file);
+    }
+  });
+  it("the FlaggedAppKeyGate rows name a file that renders it for that key", () => {
+    for (const key of APP_KEYS) {
+      const row = APP_GATE_FILES[key];
+      if (!/FlaggedAppKeyGate|^AppKeyGate/.test(row.how)) continue;
+      expect(readFileSync(join(root, row.file), "utf8"), key).toMatch(new RegExp(`appKey="${key}"`));
+    }
+  });
+  it("the canonical object routes sit outside the Docs and SOPs app gates (decision B3)", () => {
+    for (const f of ["src/app/(dashboard)/docs/layout.tsx", "src/app/(dashboard)/docs/[id]/layout.tsx", "src/app/(dashboard)/sops/[id]/layout.tsx"]) {
+      expect(readFileSync(join(root, f), "utf8"), f).not.toMatch(/AppKeyGate/);
+    }
+    expect(existsSync(join(root, "src/app/(dashboard)/sops/layout.tsx"))).toBe(false);
+  });
+});
+
+describe("access.denied (spec 5.1)", () => {
+  it("names the action, the target and the reason", () => {
+    const row = denialAuditRow("view", { type: "app", key: "docs" }, { via: "app-off", reason: "This app is hidden." });
+    expect(row.type).toBe("access.denied");
+    expect(row.targetType).toBe("app");
+    expect(row.targetId).toBe("docs");
+    expect(row.metadata).toEqual({ action: "view", via: "app-off", reason: "This app is hidden." });
+    expect(row.description).not.toMatch(/—|--/);
   });
 });

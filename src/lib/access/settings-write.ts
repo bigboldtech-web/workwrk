@@ -26,15 +26,21 @@ import { NextResponse } from "next/server";
 import type { SettingsPageKey } from "./types";
 import { OWNER_SETTINGS_PAGES } from "./settings-legacy";
 import { delegateOn } from "./flags";
-import { freshMayManageOwnerPage, freshWorkspaceActor, scopeForOwnerPage, sessionIsWorkspaceAdmin, type FreshActor } from "./workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, scopeForOwnerPage, sessionIsWorkspaceAdmin, type FreshActor } from "./workspace-admin";
 
 export type SettingsWriteResult = { ok: true; actor: Extract<FreshActor, { ok: true }> } | { ok: false; response: NextResponse };
 
-/** The denial body every settings write answers with (names the page, never a bare 403). */
-export function settingsWriteDenied(page: SettingsPageKey, ownerPage: boolean): NextResponse {
+/**
+ * The denial body every settings gate answers with (names the page, never a
+ * bare 403). The sentence says what the rule in force is today: an Owner
+ * page is every Admin's while SETTINGS_OWNER_SPLIT is off, and "see" on a
+ * read (a key list, an export), "change" on a write.
+ */
+export function settingsWriteDenied(page: SettingsPageKey, ownerPage: boolean, verb: "change" | "see" = "change"): NextResponse {
+  const who = ownerPage && ownerSplitOn() ? "the workspace Owner, or an Admin given this page," : "a workspace Owner or Admin";
   return NextResponse.json(
     {
-      error: ownerPage ? "Only workspace Owners can change this" : "Only a workspace Owner or Admin can change this",
+      error: `Only ${who} can ${verb} this`,
       code: ownerPage ? "owner_only" : "admin_only",
       page,
     },
@@ -43,22 +49,25 @@ export function settingsWriteDenied(page: SettingsPageKey, ownerPage: boolean): 
 }
 
 /**
- * May the signed-in person write the org setting that lives on `page`?
- * Returns the fresh actor on success, the response to send otherwise.
+ * May the signed-in person write (or, with `{ read: true }`, read) the org
+ * setting that lives on `page`? Returns the fresh actor on success, the
+ * response to send otherwise. A read route passes `read` so its refusal says
+ * "see", never "change".
  */
-export async function settingsWriteGate(session: unknown, page: SettingsPageKey): Promise<SettingsWriteResult> {
+export async function settingsWriteGate(session: unknown, page: SettingsPageKey, opts: { read?: boolean } = {}): Promise<SettingsWriteResult> {
+  const verb = opts.read ? "see" : "change";
   const fresh = await freshWorkspaceActor(session);
   if (!fresh.ok) {
     return { ok: false, response: NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status }) };
   }
   const ownerPage = OWNER_SETTINGS_PAGES.has(page);
   const allowed = ownerPage ? freshMayManageOwnerPage(fresh, scopeForOwnerPage(page)) : fresh.admin;
-  if (!allowed) return { ok: false, response: settingsWriteDenied(page, ownerPage) };
+  if (!allowed) return { ok: false, response: settingsWriteDenied(page, ownerPage, verb) };
   if (!ownerPage && delegateOn("settings")) {
     const { can, viewerFromSession } = await import("./index");
     const viewer = await viewerFromSession();
     if (!viewer || !(await can(viewer, "manage", { type: "settings", page })).allowed) {
-      return { ok: false, response: settingsWriteDenied(page, false) };
+      return { ok: false, response: settingsWriteDenied(page, false, verb) };
     }
   }
   return { ok: true, actor: fresh };

@@ -16,9 +16,14 @@
 // escape hatch that guarantees the rail is never empty for any access level.
 //
 // hidden/minAccess remove rail entries here; the routes are gated by access
-// rule 2 (gatePage over the app key, and the app route gate for the pages
-// that had none: src/lib/access/app-route-gate.ts, enforcing once
-// ACCESS_V2_RESOLVER is on and the log-only week is over).
+// rule 2 (gatePage over the app key, and, for the pages that had no gate,
+// FlaggedAppKeyGate in src/components/access/app-key-gate.tsx with its
+// log-only half in src/lib/access/app-route-observe.ts, enforcing once
+// ACCESS_V2_RESOLVER is on and the log-only week is over; every key's gate
+// file is named in src/lib/access/enforcement.ts APP_GATE_FILES). In that
+// same state /api/boot ships the engine's reading of the tiers
+// (viewer-tiers.ts engineTiers), so this resolver's floors and the routes'
+// floors are one rule.
 //
 // Imports are RELATIVE (not "@/") on purpose: vitest's node environment has
 // no path-alias resolution, and this module's colocated test mocks the
