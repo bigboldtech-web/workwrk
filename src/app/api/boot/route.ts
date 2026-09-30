@@ -18,6 +18,7 @@
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
+import { passwordMaxAgeDaysOf, securityHoldFor, type SecurityHold } from "@/lib/auth/security-policy";
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
@@ -134,7 +135,14 @@ export interface BootPayload {
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
-  session: { idleUntil: string | null };
+  /**
+   * `hold` is the org sign-in rule this person must meet before they carry
+   * on (the Security hold dialog): "mfa" when the org requires two step
+   * verification for their role and they are not enrolled, "password" when
+   * their password is older than the org's maximum age. Null when neither
+   * (every org until Workspace settings > Security writes a rule).
+   */
+  session: { idleUntil: string | null; hold: SecurityHold; passwordMaxAgeDays: number | null };
 }
 
 const SPLASH_VALUES: ReadonlySet<string> = new Set(["every-open", "first-open-daily", "off"]);
@@ -309,6 +317,11 @@ export async function GET(req: NextRequest) {
         .findUnique({ where: { id: userId }, select: { presenceStatus: true, presenceUntil: true } })
         .catch(() => null),
     ]);
+    // Its own query for the same reason: a database without the Phase 8
+    // passwordChangedAt column answers "no hold" instead of failing boot.
+    const security = await prisma.user
+      .findUnique({ where: { id: userId }, select: { mfaEnabled: true, passwordChangedAt: true } })
+      .catch(() => null);
 
     if (!org || !user || user.deletedAt) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -387,7 +400,16 @@ export async function GET(req: NextRequest) {
       },
       counts: cf.counts,
       timer,
-      session: { idleUntil: idle },
+      session: {
+        idleUntil: idle,
+        hold: securityHoldFor({
+          settings,
+          orgRole: orgRoleOf({ accessLevel }),
+          mfaEnabled: !!security?.mfaEnabled,
+          passwordChangedAt: security?.passwordChangedAt ?? null,
+        }),
+        passwordMaxAgeDays: passwordMaxAgeDaysOf(settings),
+      },
     };
     return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

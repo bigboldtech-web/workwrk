@@ -8,7 +8,10 @@ import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
+import { mfaRequiredFor } from "@/lib/auth/security-policy";
+import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
 import { reanchorUser } from "./access/workspace-anchor";
+import { orgRoleOf } from "./access/org-role";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -159,7 +162,13 @@ const providers = [
       // ON it only affects people who opted into MFA. The password was already
       // correct here, so requesting the code is NOT a failed attempt; only a
       // wrong code counts toward the lockout.
-      if (process.env.ENFORCE_MFA_AT_LOGIN === "true" && user.mfaEnabled && user.mfaSecret) {
+      // The org's own rule (Workspace settings > Security, read through
+      // src/lib/auth/security-policy.ts) can only ADD to the env floor: an
+      // org that requires two step verification for this role asks an
+      // enrolled person for their code even where ENFORCE_MFA_AT_LOGIN is
+      // off, and sends an unenrolled one to enrol in the login card below.
+      const orgRequiresMfa = mfaRequiredFor(user.organization?.settings, orgRoleOf({ accessLevel: user.accessLevel }));
+      if ((process.env.ENFORCE_MFA_AT_LOGIN === "true" || orgRequiresMfa) && user.mfaEnabled && user.mfaSecret) {
         // Guard against a client that serialised a missing code as the literal
         // "undefined"/"null" string (e.g. signIn passed mfaCode: undefined) —
         // treat those as "no code yet", not as a wrong code.
@@ -234,6 +243,17 @@ const providers = [
           );
         }
         throw new Error("This workspace is closed. Please contact WorkwrK support.");
+      }
+
+      // Step 2b (spec-account-auth `/login`): the org requires two step
+      // verification for this person's role and they have not set it up.
+      // No session is issued; the login card enrols them with a short-lived
+      // ticket bound to this user and their tokenVersion, then logs in
+      // through this same authorize with a live code. Checked after every
+      // account and workspace check so it never becomes a status oracle.
+      if (!user.mfaEnabled && mfaRequiredFor(org.settings, orgRoleOf({ accessLevel: user.accessLevel }))) {
+        const ticket = issueEnrolTicket(user.id, user.tokenVersion ?? 0);
+        if (ticket) throw new Error(enrolRequiredError(ticket));
       }
 
       // Security activity: record the successful sign-in now that every check

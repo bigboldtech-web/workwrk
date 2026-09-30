@@ -29,7 +29,7 @@
 //   POST /api/organizations/create  a new workspace
 //   POST /api/organizations/delete  schedule the current org for deletion
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { ArrowUpCircle, Plus, Settings, Trash2, UserPlus, Users } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -46,6 +46,9 @@ import { useBoot, useViewerRole } from "./boot-context";
 import { useLayer } from "./shell-context";
 import { useOsToast } from "./toast";
 import { InviteModal } from "./invite-modal";
+import { SwitchCover } from "./switch-cover";
+import { ORG_ROLE_LABEL } from "@/lib/access/labels";
+import { orgRoleOfMembership } from "@/lib/access/org-role";
 
 interface OrgLite { id: string; name: string; slug: string | null; logo: string | null }
 interface Membership { id: string; role: string; isPrimary: boolean; isCurrent: boolean; organization: OrgLite }
@@ -101,18 +104,30 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     return () => window.clearTimeout(t);
   }, [open, load]);
 
-  const switchTo = useCallback(async (orgId: string) => {
+  // The switch (spec-account-auth "Switch workspace"): one at a time (the
+  // row's pending glyph, every other row inert), the boot cover from the
+  // request until the FULL document navigation, never a client push, so no
+  // cached query or open stream of the old workspace survives into the new
+  // one. A 403 means the membership went away while the menu was open: say
+  // why and refresh the list.
+  const [coverName, setCoverName] = useState<string | null>(null);
+  const retryRef = useRef<(orgId: string, orgName: string) => Promise<void>>(async () => {});
+  const switchTo = useCallback(async (orgId: string, orgName: string) => {
     if (switchingId) return;
     setSwitchingId(orgId);
     const r = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: orgId } });
     if (!r.ok) {
-      toast("Couldn't switch workspace. Try again");
+      toast(`Couldn't switch workspace. ${r.error || "Try again"}`, { action: { label: "Retry", onClick: () => { void retryRef.current(orgId, orgName); } } });
       setSwitchingId(null);
+      if (r.status === 403) void load();
       return;
     }
+    setOpen(false);
+    setCoverName(orgName);
     await update?.();
     window.location.href = WORK_HOME_HREF;
-  }, [switchingId, toast, update]);
+  }, [switchingId, toast, update, load]);
+  useEffect(() => { retryRef.current = switchTo; }, [switchTo]);
 
   const createWorkspace = useCallback(async () => {
     setOpen(false);
@@ -150,6 +165,7 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
 
   return (
     <>
+      {coverName !== null ? <SwitchCover orgName={coverName} /> : null}
       <ChromePopover
         open={open}
         onOpenChange={setOpen}
@@ -210,8 +226,10 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
                     key={m.id}
                     leading={<OrgTile org={m.organization} />}
                     label={m.organization.name}
+                    trailing={<span className="text-xs font-medium text-ink-2">{ORG_ROLE_LABEL[orgRoleOfMembership(m.role)]}</span>}
                     busy={switchingId === m.organization.id}
-                    onClick={() => { void switchTo(m.organization.id); }}
+                    disabled={!!switchingId && switchingId !== m.organization.id}
+                    onClick={() => { void switchTo(m.organization.id, m.organization.name); }}
                   />
                 ))}
               </>
@@ -231,7 +249,7 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
         <DeleteWorkspaceDialog
           org={boot.org}
           switchToOrg={otherOrg}
-          onSwitchAway={(id) => { void switchTo(id); }}
+          onSwitchAway={(id) => { void switchTo(id, otherOrg?.name ?? ""); }}
           onClose={() => setDeleteOpen(false)}
         />
       ) : null}

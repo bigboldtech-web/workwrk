@@ -29,6 +29,8 @@ export const WIDE_SETTINGS_CARDS = [
   "data.exports",
   "data.import",
   "security.provisioning",
+  "security.activity",
+  "notifications.muted",
   "identity.appearance",
   "tasks.types",
   "tasks.tags",

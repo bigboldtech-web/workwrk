@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { playNotificationChime } from "@/lib/notification-chime";
 import { sectionHrefNow } from "@/components/layout/os/use-object-href";
+import { useOsShell } from "@/components/layout/os/shell-context";
+import { desktopPrefOf } from "@/lib/account/desktop-pref";
 
 type BrowserPermission = "granted" | "denied" | "default" | "unsupported";
-type UserPref = "on" | "off" | "unset";
 
-const PREF_KEY = "desktop-notifications-pref";
 
 interface NotifyPayload {
   title: string;
@@ -23,25 +23,25 @@ interface NotifyPayload {
 /**
  * Thin wrapper around the browser Notification API with:
  *  - permission state that the UI can render as "Enable / Enabled / Blocked"
- *  - a user-level on/off preference cached in localStorage
+ *  - the person's on/off preference, home.notifications.desktop on the
+ *    server (the old localStorage "desktop-notifications-pref" is carried
+ *    up once by src/lib/local-prefs-migration.ts), so every device agrees
  *  - a built-in chime so the page audibly pings on fire
  *  - click-to-focus-and-navigate behavior
  */
 export function useDesktopNotifications() {
   const [permission, setPermission] = useState<BrowserPermission>("default");
-  const [pref, setPref] = useState<UserPref>("unset");
+  const { prefs, patchPrefs } = useOsShell();
+  const pref = desktopPrefOf(prefs.home.notifications?.desktop);
+  const setPref = useCallback((v: "on" | "off") => { void patchPrefs({ home: { notifications: { desktop: v === "on" } } }); }, [patchPrefs]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!("Notification" in window)) {
-      setPermission("unsupported");
-      return;
-    }
-    setPermission(Notification.permission as BrowserPermission);
-    try {
-      const stored = window.localStorage.getItem(PREF_KEY) as UserPref | null;
-      if (stored === "on" || stored === "off") setPref(stored);
-    } catch { /* ignore */ }
+    const t = window.setTimeout(() => {
+      if (!("Notification" in window)) setPermission("unsupported");
+      else setPermission(Notification.permission as BrowserPermission);
+    }, 0);
+    return () => window.clearTimeout(t);
   }, []);
 
   const requestPermission = useCallback(async (): Promise<BrowserPermission> => {
@@ -49,7 +49,6 @@ export function useDesktopNotifications() {
     if (Notification.permission === "granted") {
       setPermission("granted");
       setPref("on");
-      try { window.localStorage.setItem(PREF_KEY, "on"); } catch { /* ignore */ }
       return "granted";
     }
     if (Notification.permission === "denied") {
@@ -58,22 +57,12 @@ export function useDesktopNotifications() {
     }
     const result = await Notification.requestPermission();
     setPermission(result as BrowserPermission);
-    if (result === "granted") {
-      setPref("on");
-      try { window.localStorage.setItem(PREF_KEY, "on"); } catch { /* ignore */ }
-    }
+    if (result === "granted") setPref("on");
     return result as BrowserPermission;
-  }, []);
+  }, [setPref]);
 
-  const disable = useCallback(() => {
-    setPref("off");
-    try { window.localStorage.setItem(PREF_KEY, "off"); } catch { /* ignore */ }
-  }, []);
-
-  const enable = useCallback(() => {
-    setPref("on");
-    try { window.localStorage.setItem(PREF_KEY, "on"); } catch { /* ignore */ }
-  }, []);
+  const disable = useCallback(() => setPref("off"), [setPref]);
+  const enable = useCallback(() => setPref("on"), [setPref]);
 
   /**
    * Fire a notification. Respects both the browser-level permission and

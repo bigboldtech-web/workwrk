@@ -12,6 +12,11 @@
 //     Accent); absent for the brand default. The rail, the bar and the splash read only the
 //     chrome tokens, so the flip is one attribute.
 //   - data-density "comfortable" | "cozy" | "compact": the data-row height.
+//   - data-reduced-motion "reduce": home.ui.reducedMotion (My settings >
+//     Preferences); absent follows the device (tokens.css honours both).
+//   - the NEXT_LOCALE cookie from home.locale.language, when it names one of
+//     the wired catalogs, so next-intl (src/i18n/request.ts) reads the
+//     person's language on the next server render.
 //
 // No fetch of its own: the preferences arrive with boot, so the first paint
 // already carries the right density and chrome (no flash).
@@ -19,6 +24,7 @@
 import { useEffect } from "react";
 import { useTheme } from "next-themes";
 import { useOsShell } from "./shell-context";
+import { localeCookieFor } from "@/lib/account/locale-options";
 
 export function ThemeApplier() {
   const { prefs } = useOsShell();
@@ -39,6 +45,21 @@ export function ThemeApplier() {
     else root.removeAttribute("data-accent");
     root.setAttribute("data-density", prefs.density || "comfortable");
   }, [prefs.theme.chrome, prefs.theme.accent, prefs.density]);
+
+  const reduced = prefs.home.ui?.reducedMotion === true;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (reduced) root.setAttribute("data-reduced-motion", "reduce");
+    else root.removeAttribute("data-reduced-motion");
+  }, [reduced]);
+
+  const language = prefs.home.locale?.language ?? null;
+  useEffect(() => {
+    const cookie = localeCookieFor(language);
+    if (!cookie) return;
+    const current = document.cookie.split("; ").find((c) => c.startsWith("NEXT_LOCALE="))?.slice("NEXT_LOCALE=".length);
+    if (current !== cookie) document.cookie = `NEXT_LOCALE=${cookie}; path=/; max-age=31536000; samesite=lax`;
+  }, [language]);
 
   return null;
 }

@@ -7,6 +7,7 @@ import {
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
+import { selfAccountFacts } from "@/lib/access/self-facts";
 
 /**
  * GDPR Article 17 / CCPA Right to Delete.
@@ -26,7 +27,15 @@ import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/ser
  *    the anonymized user reference — deletion would break historical integrity
  *  - Consent records — required to prove lawful processing
  *
- * Request body requires `confirm: "<email>"` to prevent accidental deletion.
+ * Request body requires `confirm: "DELETE"` (the My settings dialog) or the
+ * person's own email (the older privacy-controls shape) to prevent an
+ * accidental deletion.
+ *
+ * Refused (409 `last_admin`) when the person is the workspace's only active
+ * Owner or Admin: a workspace with nobody who can reach Members is one
+ * nobody can repair (spec-account-auth "Delete my account", the last Owner
+ * case). The anonymised row also takes a tokenVersion bump, so every other
+ * device's session ends on its next check instead of lingering.
  */
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -41,8 +50,13 @@ export async function POST(req: NextRequest) {
   });
   if (!me) return jsonError("Not found", 404);
   if (me.deletedAt) return jsonError("Account already deleted", 400);
-  if (!body.confirm || body.confirm.trim().toLowerCase() !== me.email.toLowerCase()) {
-    return jsonError("Confirmation email does not match", 400);
+  const confirm = typeof body.confirm === "string" ? body.confirm.trim() : "";
+  if (confirm !== "DELETE" && confirm.toLowerCase() !== me.email.toLowerCase()) {
+    return jsonError("Type DELETE to confirm", 400);
+  }
+  const facts = await selfAccountFacts(userId, me.organizationId);
+  if (facts?.isLastAdmin) {
+    return jsonSuccess({ error: "You are the only admin of this workspace. Make someone else an admin first.", code: "last_admin" }, 409);
   }
 
   const geo = await getVisitorGeo();
@@ -66,6 +80,7 @@ export async function POST(req: NextRequest) {
           passwordHash: randomPassword,
           status: "INACTIVE",
           deletedAt: new Date(),
+          tokenVersion: { increment: 1 },
         },
       });
 

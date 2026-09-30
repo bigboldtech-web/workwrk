@@ -90,3 +90,13 @@ export function adminScopesOf(orgRole: OrgRole, stored: string[] | null | undefi
   if (!stored) return [];
   return stored.filter((s): s is AdminScope => s === "billing" || s === "security");
 }
+
+/**
+ * The four-role word for a membership's stored level (the workspace
+ * switcher's per-workspace label). Same mapping as orgRoleOf; a caller
+ * outside src/lib/access passes the membership's `role` column here rather
+ * than reading a level itself.
+ */
+export function orgRoleOfMembership(role: string | null | undefined): OrgRole {
+  return orgRoleOf({ accessLevel: role });
+}

@@ -57,6 +57,9 @@ export function loginNotice(params: URLSearchParams): LoginNotice | null {
   if (params.get("verified") === "1") return { tone: "success", text: "Email verified." };
   if (params.get("deleted") === "1") return { tone: "info", text: "Your account has been deleted." };
   if (params.get("loggedout") === "1") return { tone: "info", text: "You are logged out." };
+  if (params.get("reason") === "revoked") {
+    return { tone: "info", text: "You were logged out. Log in to pick up where you left off. You were logged out on every device." };
+  }
   if (params.get("expired") === "1" || (params.get("callbackUrl") && params.get("reason") === "expired")) {
     return { tone: "info", text: "You were logged out. Log in to pick up where you left off." };
   }

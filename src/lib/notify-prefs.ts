@@ -85,3 +85,47 @@ export async function filterNotifyUsers(userIds: string[], type: NotifyType): Pr
   }
   return allowed;
 }
+
+// ── Per-object mute (home.notifications.muted[]) ─────────────────────
+//
+// The "..." menu on a Space, Folder or List writes "space:<id>",
+// "folder:<id>" or "list:<id>" into home.notifications.muted[]
+// (container-menu.tsx), and My settings > Notifications lists them. Muting
+// silences the UPDATES about work in that place: status changes, comments
+// and due-date reminders. What is aimed at the person themself (a task
+// assigned to them, a mention) still arrives, because the worst case of
+// muting a noisy Space must never be missing work handed to you.
+
+/** The notification kinds a per-object mute silences. */
+export const MUTABLE_NOTIFY_TYPES: ReadonlySet<NotifyType> = new Set<NotifyType>(["status_changes", "comments", "due_reminders"]);
+
+/** The muted object keys stored on a preference row (pure; tested). */
+export function mutedObjectKeys(home: unknown): string[] {
+  const n = prefsOf(home) as { muted?: unknown };
+  return Array.isArray(n.muted) ? n.muted.filter((k): k is string => typeof k === "string") : [];
+}
+
+/** The keys an item's place answers to: its List, its Folder, its Space (pure; tested). */
+export function placeMuteKeys(place: { boardId?: string | null; folderId?: string | null; spaceId?: string | null }): string[] {
+  const keys: string[] = [];
+  if (place.boardId) keys.push(`list:${place.boardId}`, `board:${place.boardId}`);
+  if (place.folderId) keys.push(`folder:${place.folderId}`);
+  if (place.spaceId) keys.push(`space:${place.spaceId}`);
+  return keys;
+}
+
+/** The subset of userIds who have NOT muted any of these places. Fails open. */
+export async function filterUnmutedUsers(userIds: string[], placeKeys: string[], type: NotifyType): Promise<Set<string>> {
+  const allowed = new Set(userIds);
+  if (!MUTABLE_NOTIFY_TYPES.has(type) || placeKeys.length === 0 || userIds.length === 0) return allowed;
+  try {
+    const rows = await prisma.userPreference.findMany({ where: { userId: { in: userIds } }, select: { userId: true, home: true } });
+    for (const r of rows) {
+      const muted = mutedObjectKeys(r.home);
+      if (muted.some((k) => placeKeys.includes(k))) allowed.delete(r.userId);
+    }
+  } catch {
+    // fail open: a notification arriving is better than one silently lost
+  }
+  return allowed;
+}

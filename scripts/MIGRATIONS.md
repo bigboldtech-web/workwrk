@@ -1230,3 +1230,69 @@ Behaviour changes with no data step, written down so nobody looks for a migratio
 - **Tokens.** Email verification tokens are stored as their SHA-256 from this release; links mailed before it hold the raw value and are still honoured for their remaining 24 hours (the fallback never accepts a 64 hex value, so the stored hash itself cannot verify an address). A reset link is now claimed atomically, so two submits of one link cannot both change the password.
 - **Email log.** EmailLog used to keep the full rendered HTML of every email, so every raw reset, verification and invitation link sat in plain text next to the hashed tokens. From this release a row for a secret-bearing template (password-reset, verify-email, invitation, invitation-space, invitation-space-resend, document-sign; `SECRET_LINK_TEMPLATES` in src/lib/email.ts) never stores the link variables, and its HTML is cleared the moment it is SENT or finally FAILED. Rows sent before the release still hold their links. Founder step, once, after deploy (idempotent, touches only closed secret rows, keeps the delivery log): `UPDATE "EmailLog" SET html = NULL, variables = '{}'::jsonb WHERE status IN ('SENT','FAILED') AND template IN ('password-reset','verify-email','invitation','invitation-space','invitation-space-resend','document-sign') AND html IS NOT NULL;` Rollback: none needed (a sent email is not re-sent from the log).
 - **Signup email check** is case-insensitive (a second workspace for "Priya@Co.com" when "priya@co.com" exists is refused). Stored addresses are not rewritten.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage C: My settings; no schema, one browser-side data move
+
+**No SQL file.** Every column this stage reads already exists: `User.presenceStatus`
+and `presenceUntil` (Phase 6, `2026-09-26-phase6-people.sql`), `User.passwordChangedAt`
+(Phase 8 stage B, `2026-09-30-phase8-settings-access.sql`). Every new preference key
+lives inside the existing `UserPreference.home` and `sidebar` JSON columns, strict at
+every level in `src/lib/preferences-schema.ts`.
+
+**The one data move: browser storage to the server keys (settings-architecture 7.3).**
+It runs in each browser, once, on the first load of the new release
+(`src/lib/local-prefs-migration.ts`, run by `src/components/layout/os/shell-context.tsx`
+through `src/lib/local-prefs-migration-runner.ts`):
+
+| Browser key | Server key | Rule |
+|---|---|---|
+| `workwrk:os:sidebar-width` | `sidebar.width` | carried when the row has none |
+| `workwrk:os:sidebar-collapsed` | `sidebar.collapsed` | same |
+| `workwrk:os:profile-tool-pins:v2` | `sidebar.quickTools` | same |
+| `workwrk:os:muted-notifs` ("1") | `home.notifications.mutedUntil` (a hundred years out, "Until I turn it back on") | same |
+| `desktop-notifications-pref` | `home.notifications.desktop` | same |
+| `workwrk:density` | `UserPreference.density` | same |
+| `workwrk:task-saved-filters` | `home.work.savedFilters` | same; nameless entries dropped |
+| `workwrk:os:presence` | `User.presenceStatus` / `presenceUntil` (PUT `/api/me/presence`) | only when the server has no status and the local one has not expired |
+| `workwrk:os:active-app`, `:lens`, `:icons-only` | none | removed, nothing reads them |
+
+The server always wins (another device, or a later choice, is never overwritten by an
+older browser). A key is removed from the browser only after the write that carried it
+answered ok, so a failed write retries on the next load. Before this stage the shell
+deleted the first five keys on boot WITHOUT reading them; a browser that already lost
+them lost nothing a person could see (the server defaults applied), and this stage
+stops the deletion-before-read for everyone else.
+
+The workload capacity key (`workwrk:team-workload:v1`) keeps its own one-time move
+on the Workload page (Phase 6); it is not duplicated here.
+
+Dry-run report (read only; refuses a non-local database without `--allow-remote`):
+
+```
+node scripts/report-local-prefs-migration.mjs --out /tmp/local-prefs-migration.json
+```
+
+It counts, per organization, the people who have NO server value for each key (the
+people whose browser value, if they still hold one, will be carried up). Local run
+2026-09-30: 35 orgs, 83 people, 6 with a preference row; saved under
+`phase8-reports/local-prefs-migration-dryrun.json` in the session scratchpad.
+
+**Behaviour changes with no data step**, for the release note:
+- `POST /api/me/delete` now takes `{ confirm: "DELETE" }` (the old `{ confirm: <email> }`
+  still works), refuses the workspace's last active Owner or Admin with 409 `last_admin`,
+  and bumps `tokenVersion` so every other device's session ends.
+- `DELETE /api/auth/mfa/enroll` takes the code in the JSON body (`?code=` still accepted
+  for one release), refuses with 403 when the org requires two step verification for
+  the role, and is rate limited (10 per 15 minutes per person). `POST /api/auth/mfa/enroll`
+  refuses (409) to replace a live secret. Backup codes come from the CSPRNG.
+- New `POST /api/auth/mfa/backup-codes` (a fresh app code, never a backup code; replaces
+  the set in one write; audited `mfa_backup_codes_regenerated`).
+- New `POST /api/auth/mfa/enrol-at-login` and the `MFA_ENROL_REQUIRED:<ticket>` login
+  outcome (step 2b). Inert until Workspace settings > Security writes
+  `settings.security.mfaRequired`; the ticket is bound to the user and their tokenVersion
+  and lives ten minutes; it never issues a session.
+- `POST /api/me/change-password` is rate limited (10 per 15 minutes per person).
+- Per-object mute (`home.notifications.muted[]`, written by the Space, Folder and List
+  menus) is now READ: status, comment and due-date notifications about work in a muted
+  place stop; a task assigned to the person and a mention still arrive.
+- `home.notifications.desktopRingCalls` is now read by the incoming call card.

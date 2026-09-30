@@ -32,13 +32,14 @@ type Appearance = "LIGHT" | "DARK" | "AUTO";
 type Chrome = "navy" | "light";
 
 /** The Work hub's optional sections (the personal block is required and never listed). */
-const SECTIONS: Array<{ key: string; label: string }> = [
+/** Shared with My settings > Preferences > Sidebar, so the two surfaces list the same sections. */
+export const SECTIONS: Array<{ key: string; label: string }> = [
   { key: "favorites", label: "Favorites" },
   { key: "spaces", label: "Spaces" },
 ];
 
 /** The optional Work rows `home.cards` switches (Home, My work and Inbox are fixed). */
-const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
+export const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
   { key: "activity", label: "Activity" },
   { key: "goals", label: "Goals" },
   { key: "templates", label: "Templates" },

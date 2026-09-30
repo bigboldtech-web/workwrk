@@ -55,7 +55,8 @@ import {
 import { Breadcrumb, type BreadcrumbItem } from "./top-bar/breadcrumb";
 import { SETTINGS_FILTER_FOCUS_EVENT } from "./top-bar/top-bar";
 import { MAIN_ID, SIDEBAR_ID } from "./skip-links";
-import { useViewerRole } from "./boot-context";
+import { useBoot, useViewerRole } from "./boot-context";
+import { useOsShell } from "./shell-context";
 
 const ICONS: Record<SettingsShellIconName, LucideIcon> = {
   LayoutGrid, Building2, Globe, Boxes, Users, Network, ShieldCheck, Shapes, BarChart3, Shield, Database, FileCheck,
@@ -90,6 +91,12 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const router = useRouter();
   const { data: session } = useSession();
   const { isAdmin } = useViewerRole();
+  const { boot } = useBoot();
+  const { mutedNotifications } = useOsShell();
+  // Row badges (spec-account-auth door sidebar): "Muted" on Notifications
+  // while a mute is running; a dot on Security while the org requires two
+  // step verification for this person and they have not set it up.
+  const mfaHold = boot.session?.hold === "mfa";
   const { closeSettings } = useSettingsNav();
   const leave = useLeaveDialog();
   const [query, setQuery] = useState("");
@@ -110,6 +117,13 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
     scope: "page",
     run: () => { void closeSettings(); },
   });
+
+  // Listed for the Keyboard shortcuts page and the ? overlay while a door is
+  // open (spec-account-auth `/account/shortcuts`, the Settings scope). Both
+  // are ownedByPage: the chord itself is delivered elsewhere (Cmd / by the
+  // shell's alias, the digits by the focused tab strip), so this entry only
+  // advertises what already works.
+  useShortcut({ id: "settings.find", keys: "mod+/", label: "Find a setting", scope: "page", group: "Settings", ownedByPage: true, run: () => {} });
 
   // Cmd K and Cmd / inside a door focus the filter (the bar dispatches this).
   useEffect(() => {
@@ -281,6 +295,12 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
                         >
                           <Icon className={cn("h-5 w-5 shrink-0", on ? "text-ink" : "text-ink-2")} strokeWidth={1.5} aria-hidden />
                           <span className="min-w-0 flex-1 truncate">{row.label}</span>
+                          {row.pageKey === "account/notifications" && mutedNotifications ? (
+                            <span className="shrink-0 text-xs font-medium text-ink-2">Muted</span>
+                          ) : null}
+                          {row.pageKey === "account/security" && mfaHold ? (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--os-attention)]" aria-label="Needs attention" />
+                          ) : null}
                         </Link>
                       </li>
                     );

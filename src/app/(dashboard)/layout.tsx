@@ -16,6 +16,8 @@
 
 import { OsShell } from "@/components/layout/os/os-shell";
 import { BootProvider, type BootPayload } from "@/components/layout/os/boot-context";
+import { SecurityHoldDialog } from "@/components/account/security-hold-dialog";
+import type { OrgRole } from "@/lib/access/types";
 import { ToastProvider } from "@/components/ui/toast";
 import { DialogProvider } from "@/components/ui/dialog-provider";
 import { TourProvider } from "@/components/tour-provider";
@@ -119,6 +121,13 @@ export default function DashboardLayout({
             {ready ? (
               <BootProvider boot={boot}>
                 <OsShell drawer={drawer}>{children}</OsShell>
+                <SecurityHoldDialog
+                  hold={boot.session?.hold ?? null}
+                  role={boot.viewer.orgRole as OrgRole}
+                  orgName={boot.org.name}
+                  who={boot.viewer.email ?? boot.viewer.name}
+                  maxAgeDays={boot.session?.passwordMaxAgeDays ?? null}
+                />
               </BootProvider>
             ) : (
               <BootScreen error={bootError} showMark={showMark} onRetry={retry} />

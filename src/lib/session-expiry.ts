@@ -84,6 +84,12 @@ export function loginUrlFor(pathname: string, search: string = "", hash: string 
   return `/login?callbackUrl=${encodeURIComponent(`${path}${query}${fragment}`)}`;
 }
 
+/** The login URL plus the reason /login reads: a revocation adds "You were logged out on every device." */
+export function loginHrefFor(base: string, reason: SessionExpiryReason): string {
+  if (reason !== "revoked") return base;
+  return `${base}${base.includes("?") ? "&" : "?"}reason=revoked`;
+}
+
 /** The current location's login URL, or bare /login outside a browser. */
 export function currentLoginUrl(): string {
   if (typeof window === "undefined") return "/login";

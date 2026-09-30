@@ -86,11 +86,12 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     keywords: ["name", "avatar", "phone", "photo", "personal"],
   }),
   page("me", "account/preferences", "Preferences", "/account/preferences", "SlidersHorizontal", {
-    tabs: ["appearance"],
+    tabs: ["appearance", "region", "sidebar"],
     aliases: ["/account/appearance", "/settings?tab=themes"],
     keywords: ["theme", "appearance", "dark", "density", "accent", "language", "timezone", "sidebar"],
   }),
   page("me", "account/notifications", "Notifications", "/account/notifications", "Bell", {
+    tabs: ["inbox", "email", "desktop"],
     aliases: ["/settings/notifications"],
     keywords: ["inbox", "email", "mute", "quiet hours", "desktop", "alerts"],
   }),
@@ -237,7 +238,8 @@ export const DOOR_LABELS: Record<SettingsDoor, string> = {
  * registry tab has a label here.
  */
 export const SETTINGS_TAB_LABELS: Readonly<Partial<Record<SettingsPageKey, Readonly<Record<string, string>>>>> = {
-  "account/preferences": { appearance: "Appearance" },
+  "account/preferences": { appearance: "Appearance", region: "Language & region", sidebar: "Sidebar" },
+  "account/notifications": { inbox: "Inbox", email: "Email", desktop: "Desktop" },
   identity: { profile: "Profile", appearance: "Appearance defaults" },
   structure: { overview: "Overview", departments: "Departments", titles: "Job titles", fields: "Profile fields" },
   tasks: { types: "Task types", tags: "Tags" },
@@ -429,6 +431,46 @@ function entry(e: SettingEntry): SettingEntry {
 
 /** Every individually-addressable setting the door can find. */
 export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
+  // My settings: every field on the six personal pages (settings spec G1:
+  // /account/all and the door filter list these; a test holds each href to
+  // a registered page and tab).
+  entry({ id: "profile.photo", door: "me", page: "account/profile", label: "Photo", description: "Your picture on your avatar everywhere.", href: "/account/profile#profile.photo", keywords: ["avatar", "picture", "image"] }),
+  entry({ id: "profile.details", door: "me", page: "account/profile", label: "Name, phone and date of birth", description: "How teammates see and reach you.", href: "/account/profile#profile.details", keywords: ["first name", "last name", "phone", "birthday", "dob"] }),
+  entry({ id: "profile.email", door: "me", page: "account/profile", label: "Email verification", description: "Send a new verification email.", href: "/account/profile#profile.email", keywords: ["verify", "email", "address"] }),
+  entry({ id: "profile.place", door: "me", page: "account/profile", label: "Job title, department, office and manager", description: "Your place in the workspace, read only.", href: "/account/profile#profile.place", keywords: ["title", "department", "office", "manager", "role"] }),
+  entry({ id: "profile.data", door: "me", page: "account/profile", label: "Download my data", description: "A JSON copy of your personal records.", href: "/account/profile#profile.data", keywords: ["export", "gdpr", "download"] }),
+  entry({ id: "profile.delete", door: "me", page: "account/profile", label: "Delete my account", description: "Leave the workspace and erase your personal details.", href: "/account/profile#profile.delete", keywords: ["delete", "close account", "erase"] }),
+  entry({ id: "preferences.appearance.theme.appearance", door: "me", page: "account/preferences", label: "Theme", description: "Light, dark, or follow your device.", href: "/account/preferences?tab=appearance#preferences.appearance.theme.appearance", keywords: ["dark mode", "light mode", "theme"] }),
+  entry({ id: "preferences.appearance.density", door: "me", page: "account/preferences", label: "Density", description: "How tall table and list rows are.", href: "/account/preferences?tab=appearance#preferences.appearance.density", keywords: ["compact", "cozy", "comfortable", "rows"] }),
+  entry({ id: "preferences.appearance.reducedMotion", door: "me", page: "account/preferences", label: "Reduced motion", description: "Turn off animations.", href: "/account/preferences?tab=appearance#preferences.appearance.reducedMotion", keywords: ["animation", "motion", "accessibility"] }),
+  entry({ id: "preferences.appearance.showUpcoming", door: "me", page: "account/preferences", label: "Show upcoming features", description: "Reveal rows still being built.", href: "/account/preferences?tab=appearance#preferences.appearance.showUpcoming", keywords: ["coming soon", "beta", "preview"] }),
+  entry({ id: "preferences.region.language", door: "me", page: "account/preferences", label: "Language", description: "The language WorkwrK uses for you.", href: "/account/preferences?tab=region#preferences.region.language", keywords: ["locale", "translation"] }),
+  entry({ id: "preferences.region.timezone", door: "me", page: "account/preferences", label: "Time zone", description: "Used for due dates, reminders and timesheets.", href: "/account/preferences?tab=region#preferences.region.timezone", keywords: ["timezone", "zone", "tz"] }),
+  entry({ id: "preferences.region.weekStart", door: "me", page: "account/preferences", label: "Week starts on", description: "Monday or Sunday.", href: "/account/preferences?tab=region#preferences.region.weekStart", keywords: ["week", "calendar", "monday", "sunday"] }),
+  entry({ id: "preferences.region.dateFormat", door: "me", page: "account/preferences", label: "Date format", description: "How dates are written for you.", href: "/account/preferences?tab=region#preferences.region.dateFormat", keywords: ["date", "dd/mm", "mm/dd"] }),
+  entry({ id: "preferences.region.timeFormat", door: "me", page: "account/preferences", label: "Time format", description: "24 hour or 12 hour.", href: "/account/preferences?tab=region#preferences.region.timeFormat", keywords: ["clock", "am", "pm"] }),
+  entry({ id: "preferences.sidebar.width", door: "me", page: "account/preferences", label: "Sidebar width", description: "How wide the sidebar is.", href: "/account/preferences?tab=sidebar#preferences.sidebar.width", keywords: ["sidebar", "width"] }),
+  entry({ id: "preferences.sidebar.collapsed", door: "me", page: "account/preferences", label: "Start collapsed", description: "Open with only the rail showing.", href: "/account/preferences?tab=sidebar#preferences.sidebar.collapsed", keywords: ["collapse", "sidebar"] }),
+  entry({ id: "preferences.sidebar.quickTools", door: "me", page: "account/preferences", label: "Quick actions", description: "The tools pinned to the avatar menu and the top bar.", href: "/account/preferences?tab=sidebar#preferences.sidebar.quickTools", keywords: ["tools", "pins", "quick"] }),
+  entry({ id: "preferences.sidebar.order", door: "me", page: "account/preferences", label: "Section order and Work sidebar rows", description: "What the sidebar shows first.", href: "/account/preferences?tab=sidebar#preferences.sidebar.order", keywords: ["sections", "favorites", "spaces", "rows"] }),
+  entry({ id: "notifications.mutedUntil", door: "me", page: "account/notifications", label: "Mute everything", description: "Pause every ping for a while.", href: "/account/notifications#notifications.mutedUntil", keywords: ["mute", "snooze", "do not disturb", "pause"] }),
+  entry({ id: "notifications.preset", door: "me", page: "account/notifications", label: "Notification preset", description: "Default, Focused or Custom.", href: "/account/notifications?tab=inbox#notifications.preset", keywords: ["focused", "preset"] }),
+  entry({ id: "notifications.inbox.work", door: "me", page: "account/notifications", label: "Task notifications", description: "Assigned, status changes and due dates.", href: "/account/notifications?tab=inbox#notifications.inbox.work", keywords: ["tasks", "assigned", "status", "due"] }),
+  entry({ id: "notifications.inbox.people", door: "me", page: "account/notifications", label: "Mentions, comments and kudos", description: "What people send your way.", href: "/account/notifications?tab=inbox#notifications.inbox.people", keywords: ["mentions", "comments", "kudos"] }),
+  entry({ id: "notifications.inbox.talk", door: "me", page: "account/notifications", label: "Talk and announcements", description: "Messages, channels, calls and announcements.", href: "/account/notifications?tab=inbox#notifications.inbox.talk", keywords: ["dm", "channel", "calls", "announcements"] }),
+  entry({ id: "notifications.inboxView", door: "me", page: "account/notifications", label: "How the Inbox behaves", description: "Grouping, clearing and where it opens.", href: "/account/notifications?tab=inbox#notifications.inboxView", keywords: ["inbox", "group", "clear"] }),
+  entry({ id: "notifications.muted", door: "me", page: "account/notifications", label: "Muted items", description: "Spaces, Lists and channels you muted.", href: "/account/notifications?tab=inbox#notifications.muted", keywords: ["muted", "unmute"] }),
+  entry({ id: "notifications.email", door: "me", page: "account/notifications", label: "Email notifications", description: "What WorkwrK emails you.", href: "/account/notifications?tab=email#notifications.email", keywords: ["email", "send me email"] }),
+  entry({ id: "reports", door: "me", page: "account/notifications", label: "Reports you receive", description: "Scheduled reports sent to you.", href: "/account/notifications?tab=email#reports", keywords: ["reports", "schedule", "digest"] }),
+  entry({ id: "notifications.desktop", door: "me", page: "account/notifications", label: "Desktop notifications", description: "Browser alerts and ringing for calls.", href: "/account/notifications?tab=desktop#notifications.desktop", keywords: ["desktop", "browser", "push", "ring", "calls"] }),
+  entry({ id: "security.password", door: "me", page: "account/security", label: "Password", description: "Change your password.", href: "/account/security#security.password", keywords: ["password", "change password"] }),
+  entry({ id: "security.mfa", door: "me", page: "account/security", label: "Two step verification", description: "An authenticator app code at log in.", href: "/account/security#security.mfa", keywords: ["2fa", "mfa", "authenticator", "two factor"] }),
+  entry({ id: "security.sessions", door: "me", page: "account/security", label: "Log out everywhere", description: "End every session on every device.", href: "/account/security#security.sessions", keywords: ["sessions", "devices", "log out"] }),
+  entry({ id: "security.activity", door: "me", page: "account/security", label: "Recent security activity", description: "Log ins, password changes and more.", href: "/account/security#security.activity", keywords: ["activity", "history", "log"] }),
+  entry({ id: "security.presence", door: "me", page: "account/security", label: "Presence", description: "Active, Away or Do not disturb.", href: "/account/security#security.presence", keywords: ["status", "away", "dnd", "presence"] }),
+  entry({ id: "connections.google", door: "me", page: "account/connections", label: "Google Calendar", description: "See your meetings next to your work.", href: "/account/connections", keywords: ["google", "calendar", "sync", "meetings"] }),
+  entry({ id: "connections.feed", door: "me", page: "account/connections", label: "Your calendar feed", description: "An ICS link for Apple Calendar or Outlook.", href: "/account/connections", keywords: ["ics", "feed", "outlook", "apple"] }),
+
   // spec-process section 2 (/sops/manage) and section 4: the acknowledgement
   // defaults a new SOP or policy assignment inherits.
   entry({

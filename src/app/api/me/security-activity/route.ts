@@ -12,6 +12,8 @@ const SECURITY_TYPES = [
   "mfa_enabled",
   "mfa_disabled",
   "signed_out_all_devices",
+  "mfa_backup_codes_regenerated",
+  "org.switch.in",
 ];
 
 /** GET /api/me/security-activity → the signed-in user's recent security events. */

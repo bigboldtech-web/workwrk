@@ -20,7 +20,8 @@ export default function KeyboardShortcutsPage() {
     const t = setTimeout(() => setPlatform(detectPlatform()), 0);
     return () => clearTimeout(t);
   }, []);
-  const groups = useMemo(() => groupShortcuts(list), [list]);
+  // Page-scoped rows are the Settings scope here (Esc, Find a setting).
+  const groups = useMemo(() => groupShortcuts(list, { includePage: true }), [list]);
 
   return (
     <SettingsPage pageKey="account/shortcuts">
@@ -46,6 +47,7 @@ export default function KeyboardShortcutsPage() {
           </SettingsCard>
         ))}
         {groups.length === 0 ? <p className="text-base text-ink-2">No shortcuts are registered right now.</p> : null}
+        <p className="text-sm text-ink-2">Your browser&apos;s own print command prints this page. &#8984; is Ctrl on Windows and Linux.</p>
       </SettingsCardStack>
     </SettingsPage>
   );

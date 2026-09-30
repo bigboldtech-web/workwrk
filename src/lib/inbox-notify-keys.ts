@@ -75,8 +75,10 @@ export const TALK_INBOX_DEFAULTS: Record<TalkInboxKey, boolean> = {
 /**
  * "Ring for incoming calls" on the Desktop tab. A sibling of `desktop`, default on.
  *
- * This one is a step behind the four above: it has neither a writer nor a
- * reader yet. The schema accepts it (src/lib/preferences-schema.ts, a sibling
+ * Wired in Phase 8: the Desktop tab of My settings > Notifications writes it
+ * and src/components/calls/incoming-call-watcher.tsx reads it (off shows no
+ * ringing card). The history below is kept for the record: before that it
+ * had neither a writer nor a reader. The schema accepts it (src/lib/preferences-schema.ts, a sibling
  * of `desktop` on purpose) and the default is declared here, but the switch is
  * not on the Desktop section of
  * src/app/(dashboard)/account/notifications/page.tsx and

@@ -6,6 +6,8 @@ import { useSession } from "next-auth/react";
 import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
+import { decodePresence, encodePresence } from "@/lib/people/presence-codec";
+import { runLocalPrefsMigration } from "@/lib/local-prefs-migration-runner";
 import { apiFetch } from "@/lib/api-fetch";
 import { leaveThen } from "@/lib/dirty-guard";
 import { recordWriteQueue } from "@/lib/people/record-write-queue";
@@ -312,22 +314,7 @@ const Ctx = createContext<ShellState | null>(null);
 /** The raw context, for the few hooks that must work outside the frame too (use-hub-back). */
 export const OsShellContext = Ctx;
 
-// Retired keys removed from a returning browser on boot so a stale value
-// cannot outlive the code that read it. The last four went with the
-// icons-only option, the quick-tool pins, the localStorage sidebar state
-// and the localStorage mute (all server preferences now, 1.2 rule 11).
-const RETIRED_KEYS = [
-  "workwrk:os:active-app",
-  "workwrk:os:lens",
-  "workwrk:os:icons-only",
-  "workwrk:os:profile-tool-pins:v2",
-  "workwrk:os:sidebar-collapsed",
-  "workwrk:os:sidebar-width",
-  "workwrk:os:muted-notifs",
-  "workwrk:density",
-];
 const RECENT_APPS_KEY = "workwrk:os:recent-apps";
-const PRESENCE_KEY = "workwrk:os:presence";
 const MAX_RECENTS = 6;
 const WIDTH_PERSIST_MS = 500;
 
@@ -355,7 +342,12 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [openItem, setOpenItem] = useState<OpenItem | null>(null);
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({});
   const [recentAppKeys, setRecentAppKeysState] = useState<string[]>([]);
-  const [presenceStatus, setPresenceStatusState] = useState<PresenceStatus>(DEFAULT_PRESENCE);
+  // The person's own status comes from the server (User.presenceStatus, via
+  // boot), so it is the same on every device; localStorage is only read once
+  // below, to carry an old browser's status up.
+  const [presenceStatus, setPresenceStatusState] = useState<PresenceStatus>(
+    () => decodePresence(boot.viewer.presenceStatus, boot.viewer.presenceUntil) ?? DEFAULT_PRESENCE,
+  );
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [routePending, setRoutePending] = useState(false);
 
@@ -408,11 +400,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     recordLastAppPath(pathname, window.location.search);
   }, [pathname]);
 
-  // Storage: retire dead keys, restore the two pieces of client ephemera.
+  // Storage: restore the one piece of client ephemera (recent apps), and
+  // carry the old browser-only settings up to their server keys ONCE
+  // (settings-architecture 7.3, src/lib/local-prefs-migration.ts): the
+  // server wins where it already has a value, and a key is removed only
+  // after the write that carries it has succeeded.
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
-        for (const key of RETIRED_KEYS) window.localStorage.removeItem(key);
         const recents = window.localStorage.getItem(RECENT_APPS_KEY);
         if (recents) {
           const parsed = JSON.parse(recents);
@@ -420,19 +415,16 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
             setRecentAppKeysState(parsed.slice(0, MAX_RECENTS));
           }
         }
-        const pres = window.localStorage.getItem(PRESENCE_KEY);
-        if (pres) {
-          const parsed = JSON.parse(pres);
-          if (parsed && typeof parsed.label === "string") {
-            const expiresAt = typeof parsed.expiresAt === "string" ? parsed.expiresAt : null;
-            if (!expiresAt || new Date(expiresAt).getTime() > Date.now()) {
-              setPresenceStatusState({ emoji: typeof parsed.emoji === "string" ? parsed.emoji : null, label: parsed.label, expiresAt });
-            }
-          }
-        }
       } catch {}
+      void runLocalPrefsMigration({
+        serverPresence: boot.viewer.presenceStatus,
+        onPrefs: (effective) => setPrefs(effective),
+        onPresence: (p) => setPresenceStatusState(p),
+      });
     }, 0);
     return () => window.clearTimeout(t);
+    // Once per mount: the boot values are the starting point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Preferences: refetch on change events, PATCH optimistically ──
@@ -687,11 +679,10 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
 
   const setPresenceStatus = useCallback((s: PresenceStatus) => {
     setPresenceStatusState(s);
-    try { window.localStorage.setItem(PRESENCE_KEY, JSON.stringify(s)); } catch {}
-    // Shared with everyone else too (User.presenceStatus), so the dots on
-    // the Directory, the Org chart and the record show it. The write queue
-    // retries a dropped connection; "Online" clears the dot.
-    const shared = s.label === DEFAULT_PRESENCE.label ? null : s.label;
+    // ONE store (User.presenceStatus): this device, every other device and
+    // the dots on the Directory, the Org chart and the record all read it.
+    // The write queue retries a dropped connection; "Online" clears the dot.
+    const shared = encodePresence(s);
     void recordWriteQueue().write("PUT", "/api/me/presence", { status: shared, until: shared ? s.expiresAt : null });
   }, []);
   const openStatusModal = useCallback(() => setStatusModalOpen(true), []);

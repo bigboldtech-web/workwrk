@@ -29,7 +29,7 @@
 //   task_comment  (Phase 2)
 
 import { prisma } from "@/lib/prisma";
-import { filterNotifyUsers, type NotifyType } from "@/lib/notify-prefs";
+import { filterNotifyUsers, filterUnmutedUsers, placeMuteKeys, type NotifyType } from "@/lib/notify-prefs";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { notifyTargets, readWatchers } from "@/lib/item-watchers";
 import { usersWhoCanRead } from "@/lib/access/node-access";
@@ -152,8 +152,21 @@ async function emit(args: EmitArgs): Promise<number> {
     if (readers.size === 0) return 0;
 
     // THE preference gate: /account/notifications inbox toggles.
-    const wanted = await filterNotifyUsers([...readers], args.prefKey);
-    if (wanted.size === 0) return 0;
+    const byType = await filterNotifyUsers([...readers], args.prefKey);
+    if (byType.size === 0) return 0;
+
+    // Per-object mute (the Space, Folder or List "..." menu): silences
+    // updates about work there, never what is aimed at the person.
+    let wanted = byType;
+    if (args.itemId) {
+      const place = await prisma.item
+        .findUnique({ where: { id: args.itemId }, select: { boardId: true, board: { select: { folderId: true, spaceId: true } } } })
+        .catch(() => null);
+      if (place) {
+        wanted = await filterUnmutedUsers([...byType], placeMuteKeys({ boardId: place.boardId, folderId: place.board?.folderId, spaceId: place.board?.spaceId }), args.prefKey);
+        if (wanted.size === 0) return 0;
+      }
+    }
 
     const created = await prisma.notification.createMany({
       data: [...wanted].map((userId) => ({

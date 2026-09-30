@@ -205,7 +205,7 @@ describe("SETTINGS_ENTRY_LIST", () => {
     expect(ids).toContain("process.ack.statement");
     expect(ids).toContain("process.ack.dueDays");
     expect(ids).toContain("process.ack.remindDays");
-    for (const e of SETTINGS_ENTRY_LIST) expect(e.door).toBe("workspace");
+    for (const e of SETTINGS_ENTRY_LIST) if (e.id.startsWith("process.")) expect(e.door).toBe("workspace");
   });
 
   it("points each one at the Organize page's defaults tab, anchored on its own id", () => {
@@ -235,7 +235,7 @@ describe("filterSettingsEntries", () => {
   });
 
   it("matches on label, description, id and keyword", () => {
-    const opts = { allowedExternalGates: ["manage_process"] as const };
+    const opts = { allowedExternalGates: ["manage_process"] as const, door: "workspace" as const };
     expect(filterSettingsEntries("statement", opts).map((e) => e.id)).toEqual(["process.ack.statement"]);
     expect(filterSettingsEntries("due date", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
     expect(filterSettingsEntries("process.ack.dueDays", opts).map((e) => e.id)).toEqual(["process.ack.dueDays"]);
@@ -243,13 +243,47 @@ describe("filterSettingsEntries", () => {
   });
 
   it("is case-insensitive and ignores surrounding space", () => {
-    const opts = { allowedExternalGates: ["manage_process"] as const };
+    const opts = { allowedExternalGates: ["manage_process"] as const, door: "workspace" as const };
     expect(filterSettingsEntries("  REMINDER ", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
   });
 
   it("filters by door", () => {
     const opts = { allowedExternalGates: ["manage_process"] as const };
-    expect(filterSettingsEntries("", { ...opts, door: "me" })).toEqual([]);
+    expect(filterSettingsEntries("", { ...opts, door: "me" }).every((e) => e.door === "me")).toBe(true);
     expect(filterSettingsEntries("", { ...opts, door: "workspace" }).length).toBe(3);
+  });
+});
+
+describe("My settings field entries (settings spec G1)", () => {
+  const meEntries = SETTINGS_ENTRY_LIST.filter((e) => e.door === "me");
+
+  it("lists fields for every personal page but the index", () => {
+    const pages = new Set(meEntries.map((e) => e.page));
+    for (const key of ["account/profile", "account/preferences", "account/notifications", "account/security", "account/connections"]) {
+      expect(pages.has(key as never)).toBe(true);
+    }
+  });
+
+  it("points every entry at its own page, a registered tab and its own anchor", () => {
+    for (const e of meEntries) {
+      const page = SETTINGS_PAGES[e.page!];
+      expect(page, e.id).toBeTruthy();
+      expect(page.door).toBe("me");
+      const url = new URL(e.href, "https://x.test");
+      expect(url.pathname).toBe(page.href);
+      const tab = url.searchParams.get("tab");
+      if (tab) expect(page.tabs ?? []).toContain(tab);
+      if (url.hash) expect(url.hash).toBe(`#${e.id}`);
+    }
+  });
+
+  it("has unique ids", () => {
+    const ids = SETTINGS_ENTRY_LIST.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("finds a personal setting by keyword", () => {
+    expect(filterSettingsEntries("dark mode", { door: "me" }).map((e) => e.id)).toContain("preferences.appearance.theme.appearance");
+    expect(filterSettingsEntries("2fa", { door: "me" }).map((e) => e.id)).toContain("security.mfa");
   });
 });

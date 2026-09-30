@@ -48,6 +48,7 @@ import { Picker } from "@/components/ui/picker";
 import { FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { DotsArt } from "@/components/ui/dots-art";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
@@ -144,6 +145,7 @@ export function InboxClient({
   mutedUntil: string | null;
 }) {
   const router = useRouter();
+  const { openSettings } = useSettingsNav();
   const pathname = usePathname();
   const params = useSearchParams();
   const { patchPrefs, layerCount } = useOsShell();
@@ -637,10 +639,10 @@ export function InboxClient({
               footer={
                 <button
                   type="button"
-                  onClick={() => { setOptionsOpen(false); router.push("/account/notifications"); }}
+                  onClick={() => { setOptionsOpen(false); void openSettings("/account/notifications"); }}
                   className="w-full px-2 py-1.5 text-start text-base text-ink-2 hover:text-ink"
                 >
-                  Notification settings
+                  All notification settings
                 </button>
               }
               onSelect={(value) => {

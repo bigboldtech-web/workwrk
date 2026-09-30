@@ -8,7 +8,11 @@
 //   - not dismissable: Esc, outside click and the overlay all refuse
 //   - #app-root gets `inert` + aria-hidden so the frame leaves the tab order
 //     and the accessibility tree while staying visible behind the scrim
-//   - one primary, "Sign in again", to /login?callbackUrl=<current>
+//   - one primary, "Log in", to /login?callbackUrl=<current>, plus
+//     &reason=revoked when the 401 named a revocation, so /login can add
+//     "You were logged out on every device." (spec-account-auth, Session
+//     expired re-login, step 4). /login validates the callback itself
+//     (safeCallbackUrl) and prefills the email from workwrk:last-email.
 //
 // The sentence about kept drafts renders only when a draft was actually
 // flushed (useDraftOnExpiry writes under the workwrk:draft: prefix), and the
@@ -24,6 +28,7 @@ import {
   SESSION_RENEW_URL,
   currentLoginUrl,
   isSessionExpired,
+  loginHrefFor,
   markSessionExpired,
   scheduleIdleWarning,
   type IdleWarningDetail,
@@ -54,7 +59,7 @@ export function SessionExpiredDialog() {
   useEffect(() => {
     const show = (detail?: SessionExpiredDetail) => {
       setReason(detail?.reason ?? "unknown");
-      setLoginHref(currentLoginUrl());
+      setLoginHref(loginHrefFor(currentLoginUrl(), detail?.reason ?? "unknown"));
       setOffline(typeof navigator !== "undefined" && navigator.onLine === false);
       setOpen(true);
       // Editors flush their drafts in their own listeners for the same event;
@@ -108,19 +113,19 @@ export function SessionExpiredDialog() {
           onEscapeKeyDown={refuse}
           onPointerDownOutside={refuse}
           onInteractOutside={refuse}
-          className="fixed inset-x-0 mx-auto top-1/2 z-[10001] w-[400px] max-w-[calc(100vw-32px)] -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
+          className="fixed inset-x-0 mx-auto top-1/2 z-[10001] w-[400px] max-w-[calc(100vw-32px)] -translate-y-1/2 rounded-xl border border-line bg-raised p-5 text-ink shadow-[var(--os-shadow-modal)] focus:outline-none"
         >
           <DialogPrimitive.Title className="text-lg font-semibold leading-tight">
-            You&apos;ve been signed out
+            You were logged out
           </DialogPrimitive.Title>
           {/* Radix wires aria-describedby to this Description itself; an
               overridden id left its generated one dangling and logged a
               "Missing Description" warning on every open. */}
-          <DialogPrimitive.Description className="mt-2 text-base leading-relaxed text-zinc-600 dark:text-zinc-300">
-            {reason === "revoked" ? "You were signed out on every device. " : ""}
-            Sign in again to keep working.
+          <DialogPrimitive.Description className="mt-2 text-base leading-relaxed text-ink-2">
+            {reason === "revoked" ? "You were logged out on every device. " : ""}
+            Log in again to keep working.
             {draftKept ? " Anything you were typing has been kept on this device." : ""}
-            {offline ? " You're offline. Sign in when you're back." : ""}
+            {offline ? " You are offline. Log in when you are back." : ""}
           </DialogPrimitive.Description>
           <div className="mt-5 flex justify-end">
             <a
@@ -130,7 +135,7 @@ export function SessionExpiredDialog() {
               // .workwrk-os, so the ring is spelled out here on the tokens.
               className="inline-flex h-9 items-center justify-center rounded-lg bg-brand px-4 text-base font-medium text-white hover:bg-brand-hover outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]"
             >
-              Sign in again
+              Log in
             </a>
           </div>
         </DialogPrimitive.Content>
@@ -197,16 +202,16 @@ export function SessionIdleWarning() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 start-4 z-[9000] flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-lg dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
+      className="fixed bottom-4 start-4 z-[9000] flex items-center gap-3 rounded-lg border border-line bg-raised px-3 py-2 text-sm text-ink shadow-[var(--os-shadow-pop)]"
     >
-      <span>You&apos;ll be signed out in 2 minutes</span>
+      <span>You&apos;ll be logged out in 2 minutes</span>
       <button
         type="button"
         onClick={() => void stay()}
         disabled={busy}
         className="rounded-md bg-brand px-2.5 py-1 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
-        Stay signed in
+        Stay logged in
       </button>
     </div>
   );

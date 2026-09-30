@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { logAuditEvent } from "@/lib/activity";
-import { ipFromRequest } from "@/lib/rate-limit-memory";
+import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { issueTokenVersionProof } from "@/lib/session-proof";
 
 /**
@@ -26,6 +26,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Current and new password are required." }, { status: 400 });
   }
 
+  // A stolen session must not be able to walk the current password: ten
+  // tries per person per 15 minutes, then a named wait (the login lockout's
+  // shape, on this door too).
+  const guard = rateLimit(`change-password:${userId}`, { max: 10, windowMs: 15 * 60 * 1000 });
+  if (!guard.ok) {
+    return NextResponse.json({ error: `Too many attempts. Try again in ${Math.ceil(guard.retryAfter / 60)} minutes.` }, { status: 429 });
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { organization: { select: { settings: true } } },
@@ -34,7 +42,7 @@ export async function POST(req: Request) {
 
   const currentOk = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!currentOk) {
-    return NextResponse.json({ error: "Your current password is incorrect." }, { status: 400 });
+    return NextResponse.json({ error: "That is not your current password.", field: "currentPassword" }, { status: 400 });
   }
 
   const pwError = validatePassword(newPassword, policyFromOrgSettings(user.organization?.settings));

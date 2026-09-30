@@ -25,6 +25,8 @@ import Link from "next/link";
 import { resetSessionExpired } from "@/lib/session-expiry";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { safeCallbackUrl } from "@/lib/nav/safe-callback";
+import { ticketFromLoginError } from "@/lib/auth/mfa-enrol-error";
+import { MfaEnrolPanel } from "@/components/account/mfa-enrol-panel";
 import { friendlyError, loginNotice, normaliseMfaCode, ONE_TIME_LOGIN_FLAGS, type LoginNotice } from "@/lib/auth/login-messages";
 import { Dots } from "@/components/ui/dots";
 import { AuthBanner, AuthCard } from "@/components/auth/auth-card";
@@ -69,6 +71,7 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mfaRequired, setMfaRequired] = useState(false);
+  const [enrolTicket, setEnrolTicket] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState("");
   const [backupMode, setBackupMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,14 +117,15 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
     };
   }, [staffConsole]);
 
-  async function submit() {
+  async function submit(codeOverride?: string) {
     if (loading) return;
-    const code = normaliseMfaCode(mfaCode);
-    if (!mfaRequired && (!email.trim() || !password)) {
+    const code = normaliseMfaCode(codeOverride ?? mfaCode);
+    const sendCode = mfaRequired || !!codeOverride;
+    if (!sendCode && (!email.trim() || !password)) {
       setError("Enter your email and password.");
       return;
     }
-    if (mfaRequired && !code) {
+    if (sendCode && !code) {
       setError("Enter the code from your authenticator app.");
       return;
     }
@@ -136,7 +140,7 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
       result = await signIn("credentials", {
         email: email.trim(),
         password,
-        ...(mfaRequired ? { mfaCode: code } : {}),
+        ...(sendCode ? { mfaCode: code } : {}),
         redirect: false,
       });
     } catch {
@@ -150,6 +154,16 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
     if (result.error) {
       if (result.error === "MFA_REQUIRED") {
         setMfaRequired(true);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+      // Step 2b: the workspace requires two step verification for this
+      // role and it is not set up yet. Enrol here, in the card, with the
+      // short-lived ticket the server handed back; no session exists yet.
+      const ticket = ticketFromLoginError(result.error);
+      if (ticket) {
+        setEnrolTicket(ticket);
         setError(null);
         setLoading(false);
         return;
@@ -211,6 +225,39 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
       ) : null}
     </>
   );
+
+  if (enrolTicket) {
+    return (
+      <AuthCard
+        title="Set up two step verification"
+        subtitle={
+          <>
+            Your workspace requires it for your role. Logging in as <strong style={{ color: "var(--os-ink)", fontWeight: 500 }}>{email}</strong>.{" "}
+            <button type="button" className="wa-link" onClick={() => { setEnrolTicket(null); resetToStart(); }}>
+              Use a different account
+            </button>
+          </>
+        }
+      >
+        <div>
+          <MfaEnrolPanel
+            source={{ kind: "ticket", ticket: enrolTicket }}
+            who={email}
+            finishLabel="Finish and log in"
+            onFinished={({ lastCode }) => {
+              // The same code that just proved the app: authorize checks it
+              // like any other. If its 30 seconds have passed, the normal
+              // code step asks for a fresh one.
+              setEnrolTicket(null);
+              setMfaRequired(true);
+              setMfaCode(lastCode);
+              void submit(lastCode);
+            }}
+          />
+        </div>
+      </AuthCard>
+    );
+  }
 
   if (mfaRequired) {
     return (

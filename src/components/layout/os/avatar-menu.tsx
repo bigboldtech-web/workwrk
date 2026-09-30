@@ -161,6 +161,8 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
             <MenuItem label="1 hour" onClick={() => { void mute(inHours(1)); }} />
             <MenuItem label="Until tomorrow" onClick={() => { void mute(untilTomorrow()); }} />
             <MenuItem label="Until I turn it back on" onClick={() => { void mute(forever()); }} />
+            <MenuSeparator />
+            <MenuItem label="Notification settings" onClick={() => { close(); openSettings("/account/notifications"); }} />
           </MenuSubmenu>
         )}
         <MenuSeparator />

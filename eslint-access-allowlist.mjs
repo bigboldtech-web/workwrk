@@ -134,8 +134,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // rail switch-over to can() at step 6, together with the client rail.
   "src/app/api/boot/route.ts",
   "src/app/(admin)/layout.tsx",
-  "src/app/(dashboard)/account/profile/page.tsx",
-  "src/app/(dashboard)/account/security/page.tsx",
   "src/app/(dashboard)/announcements/page.tsx",
   "src/app/(dashboard)/assets/asset-row-menu.tsx",
   "src/app/(dashboard)/boards/\\[slug\\]/page.tsx",
@@ -306,7 +304,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/me/favorites/whiteboards/route.ts",
   "src/app/api/me/items/route.ts",
   "src/app/api/me/mentions/route.ts",
-  "src/app/api/me/route.ts",
   "src/app/api/meeting-templates/route.ts",
   "src/app/api/meetings/\\[id\\]/action-items/route.ts",
   "src/app/api/meetings/\\[id\\]/ics/route.ts",
