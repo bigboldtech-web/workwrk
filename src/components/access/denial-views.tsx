@@ -358,12 +358,21 @@ export interface AskAnAdminStripProps {
   instead?: { label: string; href: string };
 }
 
-/** "Ana, Ben and Cy" from the first three names (pure; tested). */
+/**
+ * "Ana, Ben and Cy" from the first three names, and "Ana, Ben, Cy and 2 more"
+ * past three (pure; tested in denial-views.test.ts). The remainder is counted
+ * on purpose: a workspace with four or more Owners and Admins must not read as
+ * if the three named people were all of them, with a fourth face beside the
+ * sentence that nobody can place. Same "and N more" wording as AdminAvatars.
+ */
 export function adminNamesSentence(names: string[]): string {
-  const n = names.filter(Boolean).slice(0, 3);
+  const all = names.filter(Boolean);
+  const n = all.slice(0, 3);
+  const rest = all.length - n.length;
   if (n.length === 0) return "your workspace Owners and Admins";
   if (n.length === 1) return n[0];
   if (n.length === 2) return `${n[0]} and ${n[1]}`;
+  if (rest > 0) return `${n[0]}, ${n[1]}, ${n[2]} and ${rest} more`;
   return `${n[0]}, ${n[1]} and ${n[2]}`;
 }
 
@@ -416,6 +425,10 @@ export function AskAnAdminStrip({ pageLabel, admins, openable, instead }: AskAnA
 function AdminFaces({ admins }: { admins: OrgAdmin[] }) {
   if (admins.length === 0) return null;
   const face = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink";
+  // Up to five faces (spec-settings-workspace 1.4), then one "+N" face whose
+  // tooltip names the rest, so the faces account for every Owner and Admin
+  // the sentence counts in its "and N more".
+  const hidden = admins.slice(5);
   return (
     <span className="inline-flex shrink-0 -space-x-1">
       {admins.slice(0, 5).map((a) => {
@@ -433,6 +446,15 @@ function AdminFaces({ admins }: { admins: OrgAdmin[] }) {
           <span key={a.id} title={a.name} className={face}>{inner}</span>
         );
       })}
+      {hidden.length > 0 ? (
+        <span
+          title={hidden.map((a) => a.name).filter(Boolean).join(", ")}
+          aria-label={`${hidden.length} more`}
+          className={face}
+        >
+          +{hidden.length}
+        </span>
+      ) : null}
     </span>
   );
 }
