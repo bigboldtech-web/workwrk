@@ -416,27 +416,36 @@ function EmailTab() {
     return () => window.clearTimeout(t);
   }, [loadCats]);
 
+  // The closure passed to run() is also the row's Retry, so it sets the switch
+  // itself on every attempt: the chosen value while it is sent, the chosen
+  // value again once the server keeps it, the old value if it does not. Before,
+  // only the failure path touched `cats`, so a Retry that saved left the switch
+  // showing the reverted value and a second click saved the opposite. Each
+  // write is functional and touches only its own key, so putting one row back
+  // never undoes a row changed in the meantime.
   const setCat = (key: EmailCatKey, value: boolean) => {
     if (!cats) return;
-    const before = cats;
-    setCats({ ...cats, [key]: value });
+    const before = cats[key];
     void run(`cat.${key}`, async () => {
+      setCats((c) => (c ? { ...c, [key]: value } : c));
       const r = await apiFetch("/api/email-preferences", { method: "PATCH", json: { [key]: value } });
-      if (!r.ok) setCats(before);
+      setCats((c) => (c ? { ...c, [key]: r.ok ? value : before } : c));
       return r.ok;
     });
   };
-  // The kudos email is gated by BOTH stores: one switch writes both.
+  // The kudos email is gated by BOTH stores: one switch writes both. The
+  // preferences half sets and reverts itself inside patchPrefs; this keeps the
+  // email-preferences half in step the same way setCat does, Retry included.
   const setKudos = (value: boolean) => {
     if (!cats) return;
-    const before = cats;
-    setCats({ ...cats, kudosNotifications: value });
+    const before = cats.kudosNotifications;
     void run("email.kudos", async () => {
+      setCats((c) => (c ? { ...c, kudosNotifications: value } : c));
       const [a, b] = await Promise.all([
         patchPrefs({ home: { notifications: { email: { kudos: value } } } }),
         apiFetch("/api/email-preferences", { method: "PATCH", json: { kudosNotifications: value } }).then((r) => r.ok),
       ]);
-      if (!b) setCats(before);
+      setCats((c) => (c ? { ...c, kudosNotifications: b ? value : before } : c));
       return a && b;
     });
   };
