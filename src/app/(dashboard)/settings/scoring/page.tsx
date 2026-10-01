@@ -22,14 +22,14 @@
 // Anyone below Admin who may open this page today (the manager tier, the
 // People team) sees every value as text: no control they cannot save.
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SaveBar } from "@/components/settings/save-bar";
-import { ConfirmDialog, NativeSelect, NumberInput, TextInput, btn } from "@/components/settings/settings-form";
+import { ConfirmDialog, NativeSelect, NumberInput, TextInput, btn, useTypedNumbers, type TypedNumberField } from "@/components/settings/settings-form";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
@@ -77,6 +77,7 @@ const RESET_WORDS: Record<Section, string> = {
   bands: "Exceptional 90 to 100, Strong 75 to 89, On track 60 to 74, Needs focus 40 to 59, At risk 0 to 39.",
   anchors: "The five built-in scale words.",
 };
+const TYPED_PREFIX: Record<Section, string> = { cadences: "cad.", weights: "w.", bands: "band.", anchors: "anchor." };
 const STORE_KEY: Record<Section, string> = { cadences: "reviewCadences", weights: "scoreWeights", bands: "scoringBands", anchors: "behavioralAnchors" };
 
 export default function ScoringSettingsPage() {
@@ -86,6 +87,11 @@ export default function ScoringSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [resetting, setResetting] = useState<Section | null>(null);
+  // Every number field keeps what is typed (a cleared field stays clear, "15"
+  // is never "1" then "15" clamped); the draft takes only in-range numbers,
+  // and Save waits until each field holds one. Keys start with the section's
+  // prefix (TYPED_PREFIX) so a reset or a removed band drops its typing.
+  const nums = useTypedNumbers();
 
   const base = s.data?.values ?? null;
   const v: ScoringValues | null = base ? { ...base, ...draft } : null;
@@ -97,7 +103,9 @@ export default function ScoringSettingsPage() {
   const bErr = v ? bandError(v.bands) : null;
   const set = <K extends Section>(k: K, val: ScoringValues[K]) => { setErr(null); setDraft((d) => ({ ...d, [k]: val })); };
 
-  const save = useCallback(async () => {
+  // Not memoized: the typed-number state it consults is rebuilt each render.
+  const save = async () => {
+    if (!nums.check()) { setErr("Fix the fields marked in red before saving."); return false; }
     if (!v) return true;
     if (dirtyKeys.includes("weights") && total !== 100) { setErr("Score weights must add up to 100"); return false; }
     if (dirtyKeys.includes("bands") && bErr) { setErr(bErr.message); return false; }
@@ -109,9 +117,10 @@ export default function ScoringSettingsPage() {
       setDraft((d) => { const n = { ...d }; delete n[k]; return n; });
     }
     setSaving(false);
+    nums.reset();
     toast("Scoring saved");
     return true;
-  }, [v, dirtyKeys, total, bErr, s, toast]);
+  };
 
   if (s.status === "error") return <SettingsPage pageKey="scoring"><ErrorState what="the scoring settings" hint={s.error ?? undefined} onRetry={s.retry} /></SettingsPage>;
   if (!v) return <SettingsPage pageKey="scoring"><SkeletonRows rows={8} className="max-w-[760px]" /></SettingsPage>;
@@ -128,6 +137,7 @@ export default function ScoringSettingsPage() {
           {CADENCE_KEYS.map((key) => {
             const c = v.cadences[key] ?? DEFAULT_CADENCES[key];
             const patch = (p: Partial<CadenceSetting>) => set("cadences", { ...v.cadences, [key]: { ...c, ...p } });
+            const lead = nums.field(`cad.${key}.lead`, c.reminderLeadDays, { min: 0, max: 60 }, (n) => patch({ reminderLeadDays: n }));
             return (
               <div key={key} className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft pb-3 last:border-b-0 last:pb-0">
                 <span className="w-40 text-base font-medium text-ink">{CADENCE_LABELS[key]}</span>
@@ -138,12 +148,14 @@ export default function ScoringSettingsPage() {
                     <Switch checked={c.enabled} onChange={(on) => patch({ enabled: on })} aria-label={`${CADENCE_LABELS[key]} on`} />
                     {c.enabled ? (
                       <>
-                        <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })} />
+                        <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })}
+                          day={nums.field(`cad.${key}.anchor`, c.anchor, { min: 1, max: key === "monthly" ? 28 : 90 }, (a) => patch({ anchor: a }))} />
                         <span className="inline-flex items-center gap-2 text-sm text-ink-2">
                           Remind
-                          <NumberInput value={c.reminderLeadDays} min={0} max={60} width={64} ariaLabel={`${CADENCE_LABELS[key]} reminder days`} onChange={(n) => patch({ reminderLeadDays: n === "" ? 0 : Math.max(0, n) })} />
+                          <NumberInput {...lead.input} width={64} ariaLabel={`${CADENCE_LABELS[key]} reminder days`} />
                           days before
                         </span>
+                        {lead.error ? <span role="alert" className="text-sm text-danger-text">{lead.error}</span> : null}
                         <label className="inline-flex items-center gap-2 text-sm text-ink">
                           <input type="checkbox" className="h-4 w-4" checked={c.autoOpen} onChange={(e) => patch({ autoOpen: e.target.checked })} />
                           Open the cycle automatically
@@ -161,29 +173,35 @@ export default function ScoringSettingsPage() {
         </SettingsCard>
 
         <SettingsCard title="Score weights" description="How each part weighs into a person's review score. The monthly performance score on profiles also weighs the manager and self parts, which stay as they are." id="scoring.weights" wide="scoring.weights" actions={resetBtn("weights")}>
-          {SCORE_WEIGHT_KEYS.map((k) => (
-            <div key={k} className="flex items-center gap-3">
+          {SCORE_WEIGHT_KEYS.map((k) => {
+            const pct = nums.field(`w.${k}`, v.weights[k], { min: 0, max: 100 }, (n) => set("weights", { ...v.weights, [k]: n }));
+            return (
+            <div key={k} className="flex flex-wrap items-center gap-3">
               <span className="w-44 shrink-0 text-base text-ink">{METRIC_LABELS[k]}</span>
               {ro ? (
                 <span className="text-base text-ink">{v.weights[k]}%</span>
               ) : (
                 <>
                   <input type="range" min={0} max={100} value={v.weights[k]} aria-label={METRIC_LABELS[k]}
-                    onChange={(e) => set("weights", { ...v.weights, [k]: Number(e.target.value) })}
+                    onChange={(e) => { nums.clear(`w.${k}`); set("weights", { ...v.weights, [k]: Number(e.target.value) }); }}
                     className="flex-1 accent-[var(--os-brand)]" />
-                  <NumberInput value={v.weights[k]} min={0} max={100} width={72} suffix="%" ariaLabel={`${METRIC_LABELS[k]} percent`}
-                    onChange={(n) => set("weights", { ...v.weights, [k]: n === "" ? 0 : Math.min(100, Math.max(0, n)) })} />
+                  <NumberInput {...pct.input} width={72} suffix="%" ariaLabel={`${METRIC_LABELS[k]} percent`} />
+                  {pct.error ? <span role="alert" className="w-full text-end text-sm text-danger-text">{pct.error}</span> : null}
                 </>
               )}
             </div>
-          ))}
+            );
+          })}
           <p className={`text-base font-medium ${total === 100 ? "text-ink" : "text-danger-text"}`} role={total === 100 ? undefined : "alert"}>
             Total {total}%{total === 100 ? "" : ". Must add up to 100"}
           </p>
         </SettingsCard>
 
         <SettingsCard title="Performance bands" description="Score ranges that name a composite score." id="scoring.bands" wide="scoring.bands" actions={resetBtn("bands")}>
-          {v.bands.map((b, i) => (
+          {v.bands.map((b, i) => {
+            const from = nums.field(`band.${i}.min`, b.min, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, min: n } : x))));
+            const to = nums.field(`band.${i}.max`, b.max, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, max: n } : x))));
+            return (
             <div key={i}>
               <div className="flex items-center gap-2">
                 {ro ? (
@@ -192,22 +210,24 @@ export default function ScoringSettingsPage() {
                   <>
                     <TextInput value={b.label} aria-label="Band name" maxLength={40} invalid={bErr?.row === i}
                       onChange={(e) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="max-w-[240px]" />
-                    <NumberInput value={b.min} min={0} max={100} width={72} ariaLabel="From" invalid={bErr?.row === i}
-                      onChange={(n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, min: n === "" ? 0 : n } : x)))} />
+                    <NumberInput {...from.input} width={72} ariaLabel="From" invalid={from.input.invalid || bErr?.row === i} />
                     <span className="text-ink-2">to</span>
-                    <NumberInput value={b.max} min={0} max={100} width={72} ariaLabel="To" invalid={bErr?.row === i}
-                      onChange={(n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, max: n === "" ? 0 : n } : x)))} />
+                    <NumberInput {...to.input} width={72} ariaLabel="To" invalid={to.input.invalid || bErr?.row === i} />
                     <button type="button" aria-label={`Remove ${b.label || "band"}`} disabled={v.bands.length <= 1}
-                      onClick={() => set("bands", v.bands.filter((_, j) => j !== i))}
+                      // Rows below move up a place, so typing held by row
+                      // index would land on the wrong band: dropped.
+                      onClick={() => { nums.clear(TYPED_PREFIX.bands); set("bands", v.bands.filter((_, j) => j !== i)); }}
                       className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40">
                       <X className="h-4 w-4" strokeWidth={1.5} />
                     </button>
                   </>
                 )}
               </div>
-              {bErr?.row === i && !ro ? <p role="alert" className="mt-1 text-sm text-danger-text">{bErr.message}</p> : null}
+              {(from.error ?? to.error) && !ro ? <p role="alert" className="mt-1 text-sm text-danger-text">{from.error ?? to.error}</p>
+                : bErr?.row === i && !ro ? <p role="alert" className="mt-1 text-sm text-danger-text">{bErr.message}</p> : null}
             </div>
-          ))}
+            );
+          })}
           {ro ? null : (
             <button type="button" className={`${btn.ghost} self-start`} disabled={v.bands.length >= 10}
               onClick={() => set("bands", [...v.bands, { label: "", min: 0, max: 0, color: "neutral" }])}>
@@ -233,7 +253,7 @@ export default function ScoringSettingsPage() {
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
 
-      {ro ? null : <SaveBar dirty={dirtyKeys.length > 0} saving={saving} onDiscard={() => { setDraft({}); setErr(null); }} onSave={save} />}
+      {ro ? null : <SaveBar dirty={dirtyKeys.length > 0 || nums.blocked} saving={saving} onDiscard={() => { setDraft({}); setErr(null); nums.reset(); }} onSave={save} />}
 
       <ConfirmDialog
         open={!!resetting}
@@ -243,6 +263,7 @@ export default function ScoringSettingsPage() {
         onConfirm={() => {
           if (!resetting) return;
           const k = resetting;
+          nums.clear(TYPED_PREFIX[k]);
           setDraft((d) => ({ ...d, [k]: DEFAULTS[k] }));
           setResetting(null);
         }}
@@ -261,7 +282,7 @@ function anchorWord(cadence: CadenceKey, anchor: number): string {
   return `day ${anchor} of the quarter`;
 }
 
-function AnchorControl({ cadence, value, onChange }: { cadence: CadenceKey; value: number; onChange: (n: number) => void }) {
+function AnchorControl({ cadence, value, onChange, day }: { cadence: CadenceKey; value: number; onChange: (n: number) => void; day: TypedNumberField }) {
   if (cadence === "weekly") {
     return <NativeSelect ariaLabel="Due on" value={String(value)} options={WEEKDAYS.map((d, i) => ({ value: String(i + 1), label: d }))} onChange={(x) => onChange(Number(x))} />;
   }
@@ -271,7 +292,8 @@ function AnchorControl({ cadence, value, onChange }: { cadence: CadenceKey; valu
   return (
     <span className="inline-flex items-center gap-2 text-sm text-ink-2">
       Opens on day
-      <NumberInput value={value} min={1} max={cadence === "monthly" ? 28 : 90} width={64} ariaLabel="Opens on day" onChange={(n) => onChange(n === "" ? 1 : Math.max(1, n))} />
+      <NumberInput {...day.input} width={64} ariaLabel="Opens on day" />
+      {day.error ? <span role="alert" className="text-danger-text">{day.error}</span> : null}
     </span>
   );
 }

@@ -27,7 +27,7 @@
 //                    to end; under "Show upcoming features" one line says so.
 
 import { DateText } from "@/components/ui/date-text";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Copy } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
@@ -36,7 +36,7 @@ import { SettingsPage, type SettingsTab } from "@/components/settings/settings-p
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { SaveBar } from "@/components/settings/save-bar";
-import { ConfirmDialog, Field, NumberInput, TextInput, btn } from "@/components/settings/settings-form";
+import { ConfirmDialog, Field, NumberInput, TextInput, btn, useTypedNumbers } from "@/components/settings/settings-form";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
@@ -50,6 +50,17 @@ import { formatRelative } from "@/lib/format/date";
 type Summary = {
   mfa: { admins: number; enrolled: number; everyone: number; everyoneEnrolled: number; viewerEnrolled: boolean };
   scimBaseUrl: string;
+};
+
+type NumKey = keyof typeof SIGN_IN_BOUNDS;
+// The row label each number field goes by, for the "fix these first" line.
+const NUM_LABEL: Record<NumKey, string> = {
+  minPasswordLength: "Minimum length",
+  passwordMaxAgeDays: "Password expires after",
+  sessionIdleMinutes: "Signed out after being idle for",
+  sessionMaxDays: "Signed out after",
+  lockoutThreshold: "Lock the account after",
+  lockoutMinutes: "Keep it locked for",
 };
 
 const TABS: SettingsTab[] = [
@@ -83,6 +94,9 @@ function SignInTab() {
   const [confirmMfa, setConfirmMfa] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // What is typed into a number field stays as typed; the draft takes only
+  // in-range numbers, and Save waits until every field holds one.
+  const nums = useTypedNumbers();
 
   useEffect(() => {
     void apiFetch<Summary>("/api/settings/security-summary", { cache: "no-store" }).then((r) => { if (r.ok) setSummary(r.data); });
@@ -90,10 +104,20 @@ function SignInTab() {
 
   const base = s.data?.policy ?? null;
   const form = draft ?? base;
-  const dirty = !!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base);
+  // A field left empty or out of range is unsaved work too: the bar stays
+  // up (and the guard armed) so it is fixed or discarded, never forgotten.
+  const dirty = (!!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base)) || nums.blocked;
+  const numbersReady = () => {
+    if (nums.check()) return true;
+    setErr(`Fix the fields marked in red before saving: ${nums.heldKeys.map((k) => NUM_LABEL[k as NumKey] ?? k).join(", ")}.`);
+    return false;
+  };
   const set = <K extends keyof SignInPolicy>(k: K, v: SignInPolicy[K]) => { setErr(null); setDraft((d) => ({ ...(d ?? (base as SignInPolicy)), [k]: v })); };
 
-  const doSave = useCallback(async () => {
+  // Plain functions, not memoized: the typed-number state they consult is
+  // rebuilt each render, and the Save bar wraps whatever it is given.
+  const doSave = async () => {
+    if (!numbersReady()) return false;
     if (!draft || !base) return true;
     const changed = Object.fromEntries((Object.keys(draft) as (keyof SignInPolicy)[]).filter((k) => draft[k] !== base[k]).map((k) => [k, draft[k]]));
     setSaving(true);
@@ -101,27 +125,34 @@ function SignInTab() {
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
     setDraft(null);
+    nums.reset();
     toast("Sign-in policy saved");
     return true;
-  }, [draft, base, s, toast]);
+  };
 
   // Raising the two step audience over someone who has not set it up (the
   // saver included) holds them at their next check until they enrol: ask.
-  const save = useCallback(async () => {
+  const save = async () => {
+    if (!numbersReady()) return false;
     if (draft && base && draft.mfaRequired !== base.mfaRequired && draft.mfaRequired !== "off" && summary && !summary.mfa.viewerEnrolled) {
       setConfirmMfa(true);
       return false;
     }
     return doSave();
-  }, [draft, base, summary, doSave]);
+  };
 
   if (s.status === "error") return <ErrorState what="the sign-in policy" hint={s.error ?? undefined} onRetry={s.retry} />;
   if (!form) return <SkeletonRows rows={8} className="max-w-[560px]" />;
   const b = SIGN_IN_BOUNDS;
-  const num = (k: keyof SignInPolicy, bounds: { min: number; max: number }, suffix: string, label: string) => (
-    <NumberInput value={form[k] as number} min={bounds.min} max={bounds.max} suffix={suffix} ariaLabel={label}
-      onChange={(n) => set(k, (n === "" ? bounds.min : Math.min(bounds.max, Math.max(bounds.min, n))) as never)} />
-  );
+  // A row's control and helper: the helper gives way to the range sentence
+  // while the field holds something that cannot be saved.
+  const num = (k: NumKey, suffix: string, label: string, helper?: ReactNode) => {
+    const f = nums.field(k, form[k], b[k], (n) => set(k, n));
+    return {
+      control: <NumberInput {...f.input} suffix={suffix} ariaLabel={label} />,
+      helper: f.error ? <span role="alert" className="text-danger-text">{f.error}</span> : helper,
+    };
+  };
   const audience = form.mfaRequired === "everyone" ? summary?.mfa.everyone : summary?.mfa.admins;
   const audienceEnrolled = form.mfaRequired === "everyone" ? summary?.mfa.everyoneEnrolled : summary?.mfa.enrolled;
 
@@ -129,19 +160,19 @@ function SignInTab() {
     <>
       <SettingsCardStack>
         <SettingsCard title="Passwords" id="signin.passwords">
-          <SettingsRow label="Minimum length" id="security.minPasswordLength" control={num("minPasswordLength", b.minPasswordLength, "characters", "Minimum length")} />
+          <SettingsRow label="Minimum length" id="security.minPasswordLength" {...num("minPasswordLength", "characters", "Minimum length")} />
           <SettingsRow label="Require an uppercase letter" control={<Switch checked={form.requireUppercase} onChange={(v) => set("requireUppercase", v)} aria-label="Require an uppercase letter" />} />
           <SettingsRow label="Require a number" control={<Switch checked={form.requireNumbers} onChange={(v) => set("requireNumbers", v)} aria-label="Require a number" />} />
           <SettingsRow label="Require a symbol" control={<Switch checked={form.requireSymbol} onChange={(v) => set("requireSymbol", v)} aria-label="Require a symbol" />} />
-          <SettingsRow label="Password expires after" helper="0 means never. A password with no recorded change date is never expired." id="security.passwordMaxAgeDays"
-            control={num("passwordMaxAgeDays", b.passwordMaxAgeDays, "days", "Password expires after days")} />
+          <SettingsRow label="Password expires after" id="security.passwordMaxAgeDays"
+            {...num("passwordMaxAgeDays", "days", "Password expires after days", "0 means never. A password with no recorded change date is never expired.")} />
         </SettingsCard>
 
         <SettingsCard title="Sessions" id="signin.sessions">
-          <SettingsRow label="Signed out after being idle for" helper={`${b.sessionIdleMinutes.min} to ${b.sessionIdleMinutes.max} minutes. Anyone clicking or typing stays signed in.`} id="security.sessionIdleMinutes"
-            control={num("sessionIdleMinutes", b.sessionIdleMinutes, "minutes", "Idle minutes")} />
-          <SettingsRow label="Signed out after" helper="However active they are, people sign in again after this." id="security.sessionMaxDays"
-            control={num("sessionMaxDays", b.sessionMaxDays, "days", "Session lifetime days")} />
+          <SettingsRow label="Signed out after being idle for" id="security.sessionIdleMinutes"
+            {...num("sessionIdleMinutes", "minutes", "Idle minutes", `${b.sessionIdleMinutes.min} to ${b.sessionIdleMinutes.max} minutes. Anyone clicking or typing stays signed in.`)} />
+          <SettingsRow label="Signed out after" id="security.sessionMaxDays"
+            {...num("sessionMaxDays", "days", "Session lifetime days", "However active they are, people sign in again after this.")} />
         </SettingsCard>
 
         <SettingsCard title="Two step verification" id="signin.mfa">
@@ -174,8 +205,8 @@ function SignInTab() {
         </SettingsCard>
 
         <SettingsCard title="Failed sign-ins" description="The built-in rule is 8 failures, then 15 minutes. You can lock sooner or for longer, never later." id="signin.lockout">
-          <SettingsRow label="Lock the account after" control={num("lockoutThreshold", b.lockoutThreshold, "attempts", "Attempts before lockout")} />
-          <SettingsRow label="Keep it locked for" control={num("lockoutMinutes", b.lockoutMinutes, "minutes", "Lockout minutes")} />
+          <SettingsRow label="Lock the account after" {...num("lockoutThreshold", "attempts", "Attempts before lockout")} />
+          <SettingsRow label="Keep it locked for" {...num("lockoutMinutes", "minutes", "Lockout minutes")} />
         </SettingsCard>
 
         <SettingsCard title="Invitation domains" id="security.domains">
@@ -197,7 +228,7 @@ function SignInTab() {
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
-      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); }} onSave={save} />
+      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); nums.reset(); }} onSave={save} />
 
       <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title="You have not set up two step verification" confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
         <p>This rule covers you. Within five minutes you will be asked to set it up before you can do anything else, so have your phone ready.</p>

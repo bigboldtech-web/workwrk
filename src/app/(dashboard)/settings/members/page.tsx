@@ -36,7 +36,7 @@ import { SettingsPage, type SettingsTab } from "@/components/settings/settings-p
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { SaveBar } from "@/components/settings/save-bar";
-import { ChipsInput, ConfirmDialog, Field, NativeSelect, NumberInput, btn } from "@/components/settings/settings-form";
+import { ChipsInput, ConfirmDialog, Field, NativeSelect, NumberInput, btn, useTypedNumbers } from "@/components/settings/settings-form";
 import { OsToolbar } from "@/components/layout/os/page-header";
 import { TableCard, BulkAction, type TableColumn } from "@/components/ui/table-card";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
@@ -499,6 +499,9 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
   const [draft, setDraft] = useState<Rules | null>(null);
   const [saving, setSaving] = useState(false);
   const [ruleErr, setRuleErr] = useState<string | null>(null);
+  // Invitation expiry keeps what is typed (a cleared field stays clear); the
+  // draft takes only 1 to 90, and Save waits for one.
+  const nums = useTypedNumbers();
 
   const load = useCallback(async () => {
     setError(null);
@@ -513,8 +516,10 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
 
   const base = rules.data;
   const form = draft ?? base;
-  const dirty = !!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base);
-  const saveRules = useCallback(async () => {
+  const dirty = (!!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base)) || nums.blocked;
+  // Not memoized: the typed-number state it consults is rebuilt each render.
+  const saveRules = async () => {
+    if (!nums.check()) { setRuleErr("Fix the invitation expiry before saving."); return false; }
     if (!draft) return true;
     setSaving(true);
     // Only what changed: sending the domain list on an expiry-only save
@@ -525,9 +530,10 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
     setSaving(false);
     if (!r.ok) { setRuleErr(r.error ?? "Couldn't save"); return false; }
     setDraft(null);
+    nums.reset();
     toast("Invite rules saved");
     return true;
-  }, [draft, base, rules, toast]);
+  };
 
   const revoke = async (inv: PendingInvite) => {
     setBusyId(inv.id);
@@ -547,6 +553,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
   };
 
   const [now] = useState(() => Date.now());
+  const expiry = form ? nums.field("inviteExpiryDays", form.inviteExpiryDays, { min: 1, max: 90 }, (n) => { setRuleErr(null); setDraft({ ...form, inviteExpiryDays: n }); }) : null;
   const columns: TableColumn<PendingInvite>[] = [
     { key: "email", label: "Email", title: true, width: "minmax(220px,1.6fr)", render: (i) => i.email },
     { key: "role", label: "Role", width: "120px", render: (i) => LEVEL_WORD[i.accessLevel] ?? "Member" },
@@ -582,10 +589,9 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
                 onChange={(v) => setDraft({ ...form, inviteDefaultRole: v })} />
             ) : <p className="text-base text-ink">{form.inviteDefaultRole === "ADMIN" ? "Admin" : "Member"}</p>}
           </Field>
-          <Field label="Invitation expiry" id="members.inviteExpiryDays">
-            {canEdit ? (
-              <NumberInput value={form.inviteExpiryDays} min={1} max={90} suffix="days" ariaLabel="Invitation expiry days"
-                onChange={(n) => setDraft({ ...form, inviteExpiryDays: n === "" ? 7 : Math.min(90, Math.max(1, n)) })} />
+          <Field label="Invitation expiry" id="members.inviteExpiryDays" error={canEdit ? expiry?.error : null}>
+            {canEdit && expiry ? (
+              <NumberInput {...expiry.input} suffix="days" ariaLabel="Invitation expiry days" />
             ) : <p className="text-base text-ink">{form.inviteExpiryDays} days</p>}
           </Field>
           <p className="text-sm text-ink-2">
@@ -595,7 +601,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
           {ruleErr ? <p role="alert" className="text-sm text-danger-text">{ruleErr}</p> : null}
         </SettingsCard>
       ) : null}
-      {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); }} onSave={saveRules} /> : null}
+      {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); nums.reset(); }} onSave={saveRules} /> : null}
 
       {canManageInvites && invites && invites.length > 0 ? (
         <div className="flex justify-end">

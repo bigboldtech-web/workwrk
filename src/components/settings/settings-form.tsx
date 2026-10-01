@@ -80,10 +80,105 @@ export function TextArea({
   );
 }
 
+/**
+ * Why a number field cannot be saved, or null when it can (pure; tested).
+ * An empty field is missing unless `allowEmpty`.
+ */
+export function numberFieldError(v: number | "", min?: number, max?: number, allowEmpty = false): string | null {
+  const words =
+    min !== undefined && max !== undefined ? `Enter a number from ${min} to ${max}`
+    : min !== undefined ? `Enter ${min} or more`
+    : max !== undefined ? `Enter ${max} or less`
+    : "Enter a number";
+  if (v === "") return allowEmpty ? null : words;
+  if ((min !== undefined && v < min) || (max !== undefined && v > max)) return words;
+  return null;
+}
+
+/**
+ * What one keystroke in a bounded number field hands the form (pure;
+ * tested): the number when it is in range, else null and the field keeps
+ * the text as typed. Never a clamp: clamping each keystroke turned "12"
+ * into 8 and then 82, saved as 64, and a cleared field snapped back to the
+ * minimum before the next digit landed.
+ */
+export function acceptTypedNumber(n: number | "", bounds: { min: number; max: number }): number | null {
+  return n !== "" && numberFieldError(n, bounds.min, bounds.max) === null ? n : null;
+}
+
+export interface TypedNumberField {
+  /** The sentence to show under the field, once the person has left it or tried to save. */
+  error: string | null;
+  input: {
+    value: number | "";
+    min: number;
+    max: number;
+    invalid: boolean;
+    onChange: (v: number | "") => void;
+    onBlur: () => void;
+  };
+}
+
+/**
+ * Bounded number fields on a Save bar page. The form holds only valid
+ * numbers; while a field reads empty or out of range, what the person typed
+ * is kept here and shown in the field, the form keeps its last valid value,
+ * and `check()` refuses the save (and turns every such field red) until it
+ * is fixed. So typing is never rewritten under the cursor and a blank field
+ * never saves a number nobody chose.
+ */
+export function useTypedNumbers() {
+  const [typed, setTyped] = useState<Record<string, number | "">>({});
+  const [left, setLeft] = useState<Record<string, true>>({});
+  const [tried, setTried] = useState(false);
+  const without = <T,>(o: Record<string, T>, key: string) => { const n = { ...o }; delete n[key]; return n; };
+  const heldKeys = Object.keys(typed);
+  return {
+    heldKeys,
+    blocked: heldKeys.length > 0,
+    field(key: string, value: number, bounds: { min: number; max: number }, commit: (n: number) => void): TypedNumberField {
+      const held = Object.prototype.hasOwnProperty.call(typed, key);
+      const error = held && (left[key] || tried) ? numberFieldError(typed[key], bounds.min, bounds.max) : null;
+      return {
+        error,
+        input: {
+          value: held ? typed[key] : value,
+          min: bounds.min,
+          max: bounds.max,
+          invalid: !!error,
+          onChange: (n) => {
+            const ok = acceptTypedNumber(n, bounds);
+            setTyped((t) => (ok === null ? { ...t, [key]: n } : without(t, key)));
+            // Typing again hides the sentence until the person leaves the field.
+            setLeft((l) => without(l, key));
+            if (ok !== null) commit(ok);
+          },
+          onBlur: () => setLeft((l) => (held ? { ...l, [key]: true } : l)),
+        },
+      };
+    },
+    /** False (and every held field shown red) while any field is not a valid number. */
+    check(): boolean {
+      if (heldKeys.length === 0) return true;
+      setTried(true);
+      return false;
+    },
+    /** After a save or a Discard. */
+    reset() { setTyped({}); setLeft({}); setTried(false); },
+    /** Drop the typed text of fields whose key starts with `prefix` (a section reset, a removed row). */
+    clear(prefix: string) {
+      const drop = <T,>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith(prefix)));
+      setTyped(drop);
+      setLeft(drop);
+    },
+  };
+}
+
 /** A whole-number input with an optional suffix ("days", "minutes"). */
 export function NumberInput({
   value,
   onChange,
+  onBlur,
   min,
   max,
   suffix,
@@ -95,6 +190,7 @@ export function NumberInput({
 }: {
   value: number | "";
   onChange: (v: number | "") => void;
+  onBlur?: () => void;
   min?: number;
   max?: number;
   suffix?: string;
@@ -123,6 +219,7 @@ export function NumberInput({
           const n = Number(raw);
           onChange(Number.isFinite(n) ? Math.trunc(n) : "");
         }}
+        onBlur={onBlur}
         style={{ width }}
         className={cn(FIELD, "h-9 tabular-nums", invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand", disabled && "opacity-60")}
       />
