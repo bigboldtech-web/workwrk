@@ -32,16 +32,27 @@ function roleWords(level: string): string {
   return level;
 }
 
+/**
+ * "a Member" but "an Admin" / "an Owner". Worked out from the plain role word,
+ * before escaping, so an entity such as "&amp;" never decides it. A role word
+ * passed through as is gets the same rule, by its first letter.
+ */
+function articleFor(word: string): "a" | "an" {
+  return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
+}
+
 export function invitationTemplate(vars: InvitationVars): { subject: string; html: string } {
   const company = escapeHtml(vars.companyName);
-  const role = escapeHtml(roleWords(vars.role ?? vars.accessLevel ?? "EMPLOYEE"));
+  const roleWord = roleWords(vars.role ?? vars.accessLevel ?? "EMPLOYEE");
+  const role = escapeHtml(roleWord);
+  const article = articleFor(roleWord);
   const inviter = vars.inviterName?.trim() ? escapeHtml(vars.inviterName.trim()) : null;
   const days = vars.expiresInDays ?? 7;
   const messageBlock = vars.personalMessage?.trim() ? `<p class="quote">${escapeHtml(vars.personalMessage.trim())}</p>` : "";
   const href = safeHref(vars.inviteLink);
   const html = baseLayout(`
     <h1>Join ${company} on WorkwrK</h1>
-    <p>${inviter ? `<span class="highlight">${inviter}</span> invited you` : "You are invited"} to join <span class="highlight">${company}</span> as a <strong>${role}</strong>.</p>
+    <p>${inviter ? `<span class="highlight">${inviter}</span> invited you` : "You are invited"} to join <span class="highlight">${company}</span> as ${article} <strong>${role}</strong>.</p>
     ${messageBlock}
     <p style="margin:24px 0 8px;">${emailButton(href, `Join ${company}`)}</p>
     <p class="meta">This invitation works for ${days} days. If the button does not work, paste this link into your browser:<br/><span class="url" style="word-break:break-all;">${href}</span></p>
