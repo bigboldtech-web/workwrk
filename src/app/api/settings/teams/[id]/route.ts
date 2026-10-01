@@ -28,6 +28,15 @@ const patchSchema = z
 
 type Params = { params: Promise<{ id: string }> };
 
+// The name an archived team takes when a rename claims its old one: the old
+// name plus a short id tail (unique per row), cut so the whole stays inside
+// the 80-character name limit. Not exported: a route file may only export
+// its handlers.
+function freedArchivedName(oldName: string, teamId: string): string {
+  const tail = ` (archived ${teamId.slice(-6)})`;
+  return `${oldName.slice(0, 80 - tail.length).trimEnd()}${tail}`;
+}
+
 async function actor() {
   const session = await getServerSession(authOptions);
   const u = session?.user as { id?: string; organizationId?: string } | undefined;
@@ -52,9 +61,17 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "invalid_body", key }, { status: 400, headers: NO_STORE });
   }
   const { name, description, add = [], remove = [], lead } = parsed.data;
+  // Only a LIVE team holds a name. An archived team cannot be seen or
+  // restored anywhere, so refusing a rename over it gave a 409 nobody could
+  // explain (and POST already lets the same name through by reviving the
+  // archived row). An archived clash gives its name up inside the
+  // transaction below instead, so the @@unique([organizationId, name])
+  // index does not throw.
+  let archivedClashes: { id: string; name: string }[] = [];
   if (name && name.toLowerCase() !== team.name.toLowerCase()) {
-    const clash = await prisma.team.findFirst({ where: { organizationId: a.organizationId, name: { equals: name, mode: "insensitive" }, id: { not: id } }, select: { id: true } });
-    if (clash) return NextResponse.json({ error: "name_taken", key: "name" }, { status: 409, headers: NO_STORE });
+    const clashes = await prisma.team.findMany({ where: { organizationId: a.organizationId, name: { equals: name, mode: "insensitive" }, id: { not: id } }, select: { id: true, name: true, archivedAt: true } });
+    if (clashes.some((c) => !c.archivedAt)) return NextResponse.json({ error: "name_taken", key: "name" }, { status: 409, headers: NO_STORE });
+    archivedClashes = clashes.map((c) => ({ id: c.id, name: c.name }));
   }
   const wanted = [...new Set([...add, ...(lead ? [lead.userId] : [])])];
   if (wanted.length) {
@@ -63,6 +80,13 @@ export async function PATCH(req: Request, { params }: Params) {
   }
   try {
     await prisma.$transaction(async (tx) => {
+      for (const c of archivedClashes) {
+        // Guarded on archivedAt: if another Admin revived this team a moment
+        // ago it is live again and keeps its name, and this rename loses with
+        // the same 409 a live clash gives.
+        const freed = await tx.team.updateMany({ where: { id: c.id, organizationId: a.organizationId, archivedAt: { not: null } }, data: { name: freedArchivedName(c.name, c.id) } });
+        if (freed.count === 0) throw Object.assign(new Error("archived team revived during rename"), { code: "P2002" });
+      }
       if (name !== undefined || description !== undefined) {
         await tx.team.update({ where: { id }, data: { ...(name !== undefined ? { name } : {}), ...(description !== undefined ? { description } : {}) } });
       }
@@ -88,7 +112,7 @@ export async function PATCH(req: Request, { params }: Params) {
     targetType: "Team",
     targetId: id,
     description: add.length || remove.length ? `Changed the people on ${name ?? team.name}` : `Updated the team ${name ?? team.name}`,
-    metadata: { add, remove, lead: lead ?? null, name: name ?? null },
+    metadata: { add, remove, lead: lead ?? null, name: name ?? null, ...(archivedClashes.length ? { freedArchivedTeamIds: archivedClashes.map((c) => c.id) } : {}) },
   }).catch(() => {});
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
