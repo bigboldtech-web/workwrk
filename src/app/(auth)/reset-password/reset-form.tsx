@@ -140,7 +140,9 @@ function ResetInner() {
             Password changed
           </span>
         }
-        subtitle="You are logged out on your other devices."
+        // The reset bumps tokenVersion; other devices notice at their next
+        // re-check (REVALIDATE_MS in src/lib/auth.ts), so promise the window.
+        subtitle="Your other devices are logged out within 5 minutes."
       >
         <Link href="/login?reset=1" className="wa-btn wa-btn--primary wa-btn--block">
           Log in

@@ -9,6 +9,11 @@
 // every OTHER device is logged out, and returns a signed proof; this dialog
 // hands it to session.update() so THIS session adopts the new version. It
 // never copies a version in any other way.
+//
+// Honest timing: another device's token only notices the bumped version at
+// its next re-check (REVALIDATE_MS in src/lib/auth.ts, 5 minutes), so the
+// copy says "within 5 minutes", never "already". Someone locking out an
+// attacker must not believe the attacker is gone a moment before they are.
 
 import { useState } from "react";
 import { Check, Circle, Eye, EyeOff } from "lucide-react";
@@ -123,7 +128,7 @@ export function ChangePasswordDialog({
     if (proof) await updateSession({ tokenVersionProof: proof });
     reset();
     onOpenChange(false);
-    toast("Password changed. Every other device is logged out.");
+    toast("Password changed. Your other devices are logged out within 5 minutes.");
     onChanged?.();
   };
 
@@ -171,7 +176,7 @@ export function ChangePasswordDialog({
           <Secret id="cp-confirm" value={confirm} onChange={setConfirm} autoComplete="new-password" invalid={!!confirmErr} />
           <FieldError>{confirmErr}</FieldError>
         </div>
-        <p className="text-sm text-ink-2">You stay logged in here. Every other device is logged out.</p>
+        <p className="text-sm text-ink-2">You stay logged in here. Your other devices are logged out within 5 minutes.</p>
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </AccountDialog>

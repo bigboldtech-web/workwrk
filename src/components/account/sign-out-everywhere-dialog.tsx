@@ -3,7 +3,9 @@
 // Log out everywhere confirm (spec-account-auth): 400px, the copy says this
 // device is included, one destructive primary. POST /api/me/sign-out-everywhere
 // bumps tokenVersion (every session, this one too), then signOut clears this
-// browser and lands on /login?loggedout=1.
+// browser and lands on /login?loggedout=1. This browser ends at once; every
+// other device ends at its next re-check (REVALIDATE_MS in src/lib/auth.ts,
+// 5 minutes), so the copy promises "within 5 minutes", not "now".
 
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -45,7 +47,7 @@ export function SignOutEverywhereDialog({ open, onOpenChange }: { open: boolean;
         </>
       }
     >
-      <p className="text-base text-ink">This logs you out on every device, including this one. You will need to log in again.</p>
+      <p className="text-base text-ink">This logs you out on every device, including this one. Other devices are logged out within 5 minutes. You will need to log in again.</p>
       <DialogBanner>{err}</DialogBanner>
     </AccountDialog>
   );
