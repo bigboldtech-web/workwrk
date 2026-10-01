@@ -5,8 +5,11 @@
 // as the target, and the anchor a lookup is made by is itself an end of
 // every row it returns. Node ends (a doc, a canvas, a Folder, a List, a
 // Space, a table, a form) are decided by the one resolver; a task follows
-// its List or its assignment; a file follows the file read rule. Ends that
-// are not nodes (a SOP, a KRA, an OKR, a person) pass, as before.
+// its List or its assignment; a file follows the file read rule; a SOP
+// follows the SOP read rule (sopVisibilityWhere: a SOP filed in a folder the
+// viewer holds no grant on is not theirs to see) when the caller hands in
+// the readable ones. Other ends that are not nodes (a KRA, an OKR, a person)
+// pass, as before.
 //
 // Pure: the route loads the decisions and hands them in.
 
@@ -30,11 +33,18 @@ export interface LinkEndFacts {
   /** Can the viewer open this node (Can view or better)? */
   nodeOpens: (kind: NodeKind, id: string) => boolean;
   readableFiles: ReadonlySet<string>;
+  /**
+   * The SOP ends the viewer may read (the SOP read rule). When given, a link
+   * to any other SOP is dropped whole: no title, no count, no context line.
+   * Left out (the write checks), a SOP end passes as before.
+   */
+  readableSops?: ReadonlySet<string>;
   tasks: ReadonlyMap<string, { boardId: string; ownerId: string | null; assigneeIds: readonly string[] }>;
 }
 
 export function linkEndVisible(type: string, id: string, f: LinkEndFacts): boolean {
   if (type === "FILE") return f.readableFiles.has(id);
+  if (type === "SOP" && f.readableSops) return f.readableSops.has(id);
   if (LINK_TASK_TYPES.has(type)) {
     const t = f.tasks.get(id);
     // A TASK id that is no task (a legacy row) is not a node: no node gate.

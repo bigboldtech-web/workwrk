@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   availableFrom,
   contentSpawnBoardId,
+  isOutOfOfficeStatus,
   pickJobTitleHolder,
   planRunPicks,
   readSopStepOrigin,
   runnableSteps,
   stepCreatesTask,
   stepJobTitle,
+  withoutStoredSopTitle,
   type HolderCandidate,
 } from "./sop-step-owner";
+import { encodePresence } from "./people/presence-codec";
 import { flowFromSteps, stepsFromFlow } from "@/components/sops/sop-steps-editor";
 
 const NOW = new Date("2026-10-01T09:00:00Z");
@@ -77,6 +80,58 @@ describe("pickJobTitleHolder (the soonest available rule)", () => {
   });
 });
 
+describe("out of office, as the product really stores it (PUT /api/me/presence)", () => {
+  // Exactly what the Set status presets write: encodePresence puts the emoji
+  // in front of the label, and the preset's return time goes to presenceUntil.
+  const back = "2026-10-05T09:00:00Z";
+  const vacation = encodePresence({ emoji: "🏖️", label: "Vacation", expiresAt: back });
+  const sickToday = encodePresence({ emoji: "🤒", label: "Sick", expiresAt: "2026-10-01T23:59:00Z" });
+
+  it("reads the Vacation and Sick presets, OOO and out of office as away, and nothing else", () => {
+    expect(vacation).toBe("🏖️ Vacation");
+    expect(isOutOfOfficeStatus(vacation)).toBe(true);
+    expect(isOutOfOfficeStatus(sickToday)).toBe(true);
+    expect(isOutOfOfficeStatus("ooo")).toBe(true);
+    expect(isOutOfOfficeStatus("OOO till Monday")).toBe(true);
+    expect(isOutOfOfficeStatus("✈️ Out of office")).toBe(true);
+    expect(isOutOfOfficeStatus("📅 In a meeting")).toBe(false);
+    expect(isOutOfOfficeStatus("📚 Focusing")).toBe(false);
+    expect(isOutOfOfficeStatus("Cooool")).toBe(false);
+    expect(isOutOfOfficeStatus(null)).toBe(false);
+  });
+
+  it("gives the task to the holder at work, not the one on vacation, even when the vacationer's id sorts first", () => {
+    const p = pickJobTitleHolder([
+      person({ id: "a-lea", presenceStatus: vacation, presenceUntil: back }),
+      person({ id: "b-leo" }),
+    ], "Onboarding lead", NOW);
+    expect(p).toMatchObject({ kind: "assigned", userId: "b-leo" });
+  });
+
+  it("gives the task to the holder at work, not the one off sick, even with fewer open tasks", () => {
+    const p = pickJobTitleHolder([
+      person({ id: "a-lea", presenceStatus: sickToday, presenceUntil: "2026-10-01T23:59:00Z", openTasks: 0 }),
+      person({ id: "b-leo", openTasks: 9 }),
+    ], "Onboarding lead", NOW);
+    expect(p).toMatchObject({ kind: "assigned", userId: "b-leo" });
+  });
+
+  it("counts the vacationer from their return time when they are the only holder", () => {
+    const c = person({ id: "a", presenceStatus: vacation, presenceUntil: back });
+    expect(availableFrom(c, NOW)?.toISOString()).toBe(new Date(back).toISOString());
+  });
+
+  it("treats a vacation with no return time as no known moment, and one that ended as available now", () => {
+    expect(availableFrom(person({ id: "a", presenceStatus: vacation }), NOW)).toBeNull();
+    expect(availableFrom(person({ id: "a", presenceStatus: vacation, presenceUntil: "2026-09-30T09:00:00Z" }), NOW)?.getTime()).toBe(NOW.getTime());
+  });
+
+  it("does not count a meeting or focus status as away", () => {
+    const meeting = encodePresence({ emoji: "📅", label: "In a meeting", expiresAt: back });
+    expect(availableFrom(person({ id: "a", presenceStatus: meeting, presenceUntil: back }), NOW)?.getTime()).toBe(NOW.getTime());
+  });
+});
+
 describe("the stored step fields", () => {
   it("reads a job title and the create flag tolerantly", () => {
     expect(stepJobTitle({ jobTitle: { roleId: "r1", title: " Onboarding lead " } })).toEqual({ roleId: "r1", title: "Onboarding lead" });
@@ -108,6 +163,24 @@ describe("the stored step fields", () => {
     const o = readSopStepOrigin({ sopStep: { sopId: "s", stepId: "st", n: 3, sopTitle: "SOP", stepTitle: "Step", runId: "run_1", jobTitle: { roleId: "r", title: "Lead" }, assignedBy: "none", notice: "Nobody" } });
     expect(o).toMatchObject({ sopId: "s", n: 3, jobTitle: { roleId: "r", title: "Lead" }, assignedBy: "none", notice: "Nobody" });
     expect(readSopStepOrigin({})).toBeNull();
+  });
+
+  it("reads an origin with no stored SOP title (runs no longer store it)", () => {
+    const o = readSopStepOrigin({ sopStep: { sopId: "s", stepId: "st", n: 1, stepTitle: "Step", runId: "run_1" } });
+    expect(o).toMatchObject({ sopId: "s", stepId: "st", sopTitle: "SOP" });
+  });
+
+  it("never sends a stored SOP title to a reader, and keeps the pointer a retry and the trail need", () => {
+    const meta = { kraId: "k", sopStep: { sopId: "s", sopTitle: "MW flow", stepId: "f1", n: 1, runId: "run_1", stepTitle: "Flow step one" } };
+    const out = withoutStoredSopTitle(meta);
+    expect(JSON.stringify(out)).not.toContain("MW flow");
+    expect(out).toEqual({ kraId: "k", sopStep: { sopId: "s", stepId: "f1", n: 1, runId: "run_1", stepTitle: "Flow step one" } });
+    // The stored value is not changed in place.
+    expect(meta.sopStep.sopTitle).toBe("MW flow");
+    // Nothing to drop: the same object back.
+    const plain = { a: 1 };
+    expect(withoutStoredSopTitle(plain)).toBe(plain);
+    expect(withoutStoredSopTitle(null)).toBeNull();
   });
 });
 

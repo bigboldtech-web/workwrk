@@ -22,15 +22,19 @@
 //      agent, and not INACTIVE. People on probation, on a PIP or serving
 //      notice are working and count.
 //   2. Each person is available from a moment: now, unless they are out of
-//      office (presence "ooo") until a known time, which is then that time.
-//      Someone ON_LEAVE, or out of office with no return time, has no known
-//      moment and is not picked.
+//      office until a known time, which is then that time. Out of office is
+//      read from the status the product really stores (isOutOfOfficeStatus):
+//      the Set status presets "Vacation" and "Sick", or a status that says
+//      "OOO" or "out of office". Someone ON_LEAVE, or out of office with no
+//      return time, has no known moment and is not picked.
 //   3. The earliest moment wins; then the fewest open tasks assigned to
 //      them; then a fixed order by person id, so the same inputs always give
 //      the same person.
 //   4. When nobody holds the title, or every holder has no known moment, the
 //      task is created UNASSIGNED and carries a notice saying why. The rule
 //      never guesses (it never falls back to the person running the SOP).
+
+import { decodePresence } from "./people/presence-codec";
 
 export interface StepJobTitle {
   roleId: string;
@@ -87,10 +91,31 @@ function toDate(v: Date | string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// The Set status presets that mean "not at work" (set-status-modal.tsx:
+// "Sick" is OOO for today, "Vacation" OOO until Thursday). Compared as words,
+// ignoring case and the emoji the codec puts in front.
+const AWAY_LABELS: ReadonlySet<string> = new Set(["vacation", "sick"]);
+// "OOO" as a word, so a status like "Cooool" is not read as away.
+const OOO_WORD = /(^|[^a-z0-9])ooo([^a-z0-9]|$)/;
+
+/**
+ * Does a stored User.presenceStatus say the person is out of office? It reads
+ * what PUT /api/me/presence really writes (presence-codec encodePresence: an
+ * emoji, a space, the label), so "🏖️ Vacation" and "🤒 Sick" count, as does
+ * any status saying "OOO" or "out of office", and the bare "ooo" this rule
+ * first matched. Pure.
+ */
+export function isOutOfOfficeStatus(status: string | null | undefined): boolean {
+  const decoded = decodePresence(status, null);
+  if (!decoded) return false;
+  const label = decoded.label.trim().toLowerCase();
+  return AWAY_LABELS.has(label) || OOO_WORD.test(label) || label.includes("out of office");
+}
+
 /** When this person is next available, or null for "no known moment". */
 export function availableFrom(c: HolderCandidate, now: Date): Date | null {
   if (c.status === "ON_LEAVE") return null;
-  if (c.presenceStatus === "ooo") {
+  if (isOutOfOfficeStatus(c.presenceStatus)) {
     const until = toDate(c.presenceUntil);
     if (!until) return null;
     return until.getTime() > now.getTime() ? until : now;
@@ -135,7 +160,14 @@ export const SOONEST_AVAILABLE_RULE =
  */
 export interface SopStepOrigin {
   sopId: string;
-  sopTitle: string;
+  /**
+   * The SOP's title as it was when the task was made. No longer written: the
+   * metadata travels to every reader of the task, and a reader who may not
+   * open the SOP must not learn its name from it (the trail reads the live
+   * title under the SOP read rule). Older tasks may still carry it; the item
+   * projection drops it (board-items-view.ts).
+   */
+  sopTitle?: string;
   stepId: string;
   n: number;
   stepTitle: string;
@@ -150,7 +182,7 @@ export interface SopStepOrigin {
   notice: string | null;
 }
 
-export function readSopStepOrigin(metadata: unknown): SopStepOrigin | null {
+export function readSopStepOrigin(metadata: unknown): (SopStepOrigin & { sopTitle: string }) | null {
   const o = (metadata as { sopStep?: unknown } | null)?.sopStep as Partial<SopStepOrigin> | null | undefined;
   if (!o || typeof o !== "object" || typeof o.sopId !== "string" || typeof o.stepId !== "string") return null;
   return {
@@ -166,6 +198,23 @@ export function readSopStepOrigin(metadata: unknown): SopStepOrigin | null {
     reason: o.reason === "nobody" || o.reason === "unavailable" ? o.reason : null,
     notice: typeof o.notice === "string" ? o.notice : null,
   };
+}
+
+/**
+ * A task's metadata with any stored SOP title taken out of sopStep, for
+ * sending to a reader. The title names a SOP the reader may not be allowed
+ * to open (a SOP filed in a folder they hold no grant on), and nothing reads
+ * it: the trail reads the live title under the SOP read rule. The pointer
+ * itself (sopId, stepId, runId) stays, so a whole-blob save made from this
+ * copy keeps everything a retried run and the trail need. Returns the same
+ * object when there is nothing to drop. Pure.
+ */
+export function withoutStoredSopTitle<T>(metadata: T): T {
+  const o = (metadata as { sopStep?: unknown } | null)?.sopStep;
+  if (!o || typeof o !== "object" || Array.isArray(o) || !("sopTitle" in o)) return metadata;
+  const rest: Record<string, unknown> = { ...(o as Record<string, unknown>) };
+  delete rest.sopTitle;
+  return { ...(metadata as Record<string, unknown>), sopStep: rest } as T;
 }
 
 export interface RunnableStep {

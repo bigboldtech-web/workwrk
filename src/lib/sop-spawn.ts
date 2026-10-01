@@ -5,8 +5,9 @@
 // What one run writes, per spawned step:
 //   - the task, through createBoardItem (positions, the CREATED activity row
 //     with meta.source naming the SOP step, every normal invariant)
-//   - Item.metadata.sopStep (SopStepOrigin): the SOP, the step, the run id,
-//     the job title, and the notice when nobody could be picked
+//   - Item.metadata.sopStep (SopStepOrigin): the SOP's id (never its title),
+//     the step, the run id, the job title, and the notice when nobody could
+//     be picked
 //   - Item.metadata.kraId when the SOP is owned by a KRA, so the task lands
 //     on the Effort card of every goal linked to that KRA
 //   - an EntityLink BOARD_ITEM -> SOP (Required reading, position = the
@@ -178,7 +179,8 @@ async function runSopStepsLocked(input: RunSopInput): Promise<SpawnedTask[]> {
     const jobTitle = step.jobTitle ? { roleId: step.jobTitle.roleId, title: step.currentTitle ?? step.jobTitle.title } : null;
     const origin: SopStepOrigin = {
       sopId: input.sop.id,
-      sopTitle: input.sop.title,
+      // No sopTitle: every reader of the task gets its metadata, including
+      // one who may not open the SOP (SopStepOrigin.sopTitle).
       stepId: step.stepId,
       n: step.n,
       stepTitle: step.title,

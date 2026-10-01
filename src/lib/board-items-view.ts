@@ -43,6 +43,7 @@ import {
 } from "@/lib/list-links-server";
 import { linkedRowAccess } from "@/lib/list-link-rows";
 import type { ItemRole } from "@/lib/item-role";
+import { withoutStoredSopTitle } from "@/lib/sop-step-owner";
 
 export interface LinkedRowInfo {
   rootId: string;
@@ -121,7 +122,7 @@ export async function viewRows(
 ): Promise<BoardItemRow[]> {
   if (rows.length === 0) return rows;
   if (!opts.viewer) {
-    return rows.map((r) => ({ ...r, metadata: stripForUnknownViewer(r.metadata) }));
+    return rows.map((r) => ({ ...r, metadata: withoutStoredSopTitle(stripForUnknownViewer(r.metadata)) }));
   }
   const viewer = opts.viewer;
   const reader = opts.reader ?? listReader(viewer);
@@ -249,7 +250,10 @@ export async function viewRows(
       ? { kind: "linked", listId: opts.context.id, homeReadable: p.homeReadable, contextStoredKeys: p.keys.stored, contextConnectKeys: p.keys.connect, readable }
       : { kind: "home", contextStoredKeys: p.keys.stored, contextConnectKeys: p.keys.connect, readable };
     const { metadata, connected } = projectRowMetadata(p.row.metadata, ctx);
-    const next: BoardItemRow = { ...p.row, metadata };
+    // A task an SOP run made may still carry the SOP's title (older runs
+    // stored it); it is never sent, so a reader who may not open that SOP
+    // does not learn its name from the task (sop-step-owner withoutStoredSopTitle).
+    const next: BoardItemRow = { ...p.row, metadata: withoutStoredSopTitle(metadata) };
     if (p.keys.connect.size > 0) {
       const connections: NonNullable<BoardItemRow["connections"]> = {};
       for (const key of p.keys.connect) connections[key] = buildConnections(connected[key] ?? [], info);
