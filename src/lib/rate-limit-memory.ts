@@ -7,6 +7,8 @@
 // to stop scripted abuse on one node; swap the store for Redis when scaling
 // horizontally. Never used for anything a legitimate burst would trip.
 
+import { clientIpFromHeaders } from "./client-ip";
+
 type Hit = { count: number; windowStart: number };
 
 const store = new Map<string, Hit>();
@@ -34,10 +36,13 @@ export function rateLimit(
   return { ok: true, retryAfter: 0 };
 }
 
-/** First client IP from proxy headers (behind nginx: x-forwarded-for). */
+/**
+ * The client's address for a per-address limit, read in the order a client
+ * cannot forge (src/lib/client-ip.ts). "unknown" when nothing is known, so
+ * every unknown caller shares one bucket rather than getting a fresh one.
+ */
 export function ipFromRequest(req: Request): string {
-  const raw = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "";
-  return raw.split(",")[0].trim() || "unknown";
+  return clientIpFromHeaders(req.headers) ?? "unknown";
 }
 
 function sweep(now: number): void {

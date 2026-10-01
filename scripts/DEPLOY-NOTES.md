@@ -59,9 +59,27 @@ Staff console writes are refused (403) unless they come from the console's
 own origin (`src/lib/admin/staff-write-origin.ts`, run in `src/proxy.ts`):
 the session cookie is shared across `.workwrk.com`, so a page on any sibling
 subdomain would otherwise count as same-site. nginx must forward the
-browser's `Host` header unchanged (`proxy_set_header Host $host;`) and should
-set `X-Real-IP $remote_addr`, which the StaffAction IP reads first.
+browser's `Host` header unchanged (`proxy_set_header Host $host;`).
 Every write a staff member makes is recorded there in the same transaction,
 so a change that cannot record itself does not happen; do not drop or
 truncate the table, it is the record a customer is shown when they ask who
 changed what.
+
+### The client address (Phase 8)
+
+Every per-address limit (the sign-in throttle, signup, password reset, invite
+links, MFA codes, public forms and tables), the security activity log, API
+key "last used from", acknowledgement evidence and the StaffAction IP read
+the client's address in one place, `src/lib/client-ip.ts`: `X-Real-IP`
+first, then the LAST `X-Forwarded-For` hop. Both are only trustworthy
+because nginx writes them, so the app's `location` block must keep both
+lines (aaPanel's Node project and reverse proxy templates already have them):
+
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+Without the first line a client's own `X-Real-IP` would reach the app and
+choose its own rate-limit bucket. If a CDN or a second proxy is ever put in
+front of nginx, `$remote_addr` becomes that proxy's address and every visitor
+shares one bucket; set nginx's `real_ip_header` and `set_real_ip_from` for that
+proxy's ranges at the same time.

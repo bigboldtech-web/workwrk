@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { settingsWriteGate } from "@/lib/access/settings-write";
+import { logAuditEvent } from "@/lib/activity";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
@@ -11,14 +13,19 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const accessLevel = (session as any).user.accessLevel;
-  if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
-    return jsonError("Insufficient permissions", 403);
-  }
+  // Identity & culture's logo: the Identity page rule (Owner and Admin), the
+  // actor re-read so a demoted Admin is refused now, and the engine's manage
+  // answer on Identity once it decides the door (settings-write.ts). C-level had this write
+  // through the raw API only (the Identity page never opened to them).
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 
-  const formData = await req.formData();
+  // A body that is not multipart (or none at all) is a 400 naming what is
+  // missing, never a 500.
+  const formData = await req.formData().catch(() => null);
+  if (!formData) return jsonError("No file provided");
   const file = formData.get("logo") as File | null;
 
   if (!file) return jsonError("No file provided");
@@ -46,6 +53,7 @@ export async function POST(req: NextRequest) {
     where: { id: orgId },
     data: { logo: logoUrl },
   });
+  void logAuditEvent({ type: "settings.updated.logo", actorId: getUserId(session), organizationId: orgId, description: "Changed the workspace logo", targetType: "Organization", targetId: orgId });
 
   return jsonSuccess({ logo: logoUrl });
 }
@@ -54,10 +62,12 @@ export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const accessLevel = (session as any).user.accessLevel;
-  if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
-    return jsonError("Insufficient permissions", 403);
-  }
+  // Identity & culture's logo: the Identity page rule (Owner and Admin), the
+  // actor re-read so a demoted Admin is refused now, and the engine's manage
+  // answer on Identity once it decides the door (settings-write.ts). C-level had this write
+  // through the raw API only (the Identity page never opened to them).
+  const writeGate = await settingsWriteGate(session, "identity");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 
@@ -65,6 +75,7 @@ export async function DELETE(req: NextRequest) {
     where: { id: orgId },
     data: { logo: null },
   });
+  void logAuditEvent({ type: "settings.updated.logo", actorId: getUserId(session), organizationId: orgId, description: "Removed the workspace logo", targetType: "Organization", targetId: orgId });
 
   return jsonSuccess({ logo: null });
 }

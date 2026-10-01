@@ -89,7 +89,7 @@ export interface HomePref {
   // Space Overview tab — same shape, separate key.
   overviewCardLayout?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
   overviewCardsHidden?: string[];
-  // Notification settings (/settings/notifications). Lives inside the home
+  // Notification settings (/account/notifications). Lives inside the home
   // JSON column on purpose — UserPreference has fixed columns and this
   // avoids a schema migration. Missing key = all defaults (true).
   // Enforced server-side by src/lib/notify-prefs.ts.
@@ -276,12 +276,35 @@ interface RawPrefs {
   userHome: HomePref | null;
   userTheme: ThemePref | null;
   userDensity: DensityPref | null;
+  /** The org's Locale & work week defaults, from Organization.settings. */
+  orgLocale: NonNullable<HomePref["locale"]>;
+}
+
+/**
+ * The org half of the locale chain (settings-architecture 9.3: defaults, then
+ * org, then the person). Only keys the org actually stored, so a key the
+ * Locale page never wrote falls through to the product default. The time
+ * zone is deliberately NOT layered in: a person who never picked one keeps
+ * their device's zone rather than headquarters' (the crons and digests read
+ * the org zone on the server). Pure; tested.
+ */
+export function orgLocaleDefaults(settings: unknown): NonNullable<HomePref["locale"]> {
+  const s = settings && typeof settings === "object" && !Array.isArray(settings) ? (settings as Record<string, unknown>) : {};
+  const l = s.locale && typeof s.locale === "object" && !Array.isArray(s.locale) ? (s.locale as Record<string, unknown>) : {};
+  const out: NonNullable<HomePref["locale"]> = {};
+  if (typeof s.language === "string" && s.language) out.language = s.language;
+  if (l.weekStart === "MON") out.weekStart = 1;
+  else if (l.weekStart === "SUN") out.weekStart = 0;
+  if (l.dateFormat === "DMY" || l.dateFormat === "MDY" || l.dateFormat === "YMD") out.dateFormat = l.dateFormat;
+  if (l.timeFormat === "12h" || l.timeFormat === "24h") out.timeFormat = l.timeFormat;
+  return out;
 }
 
 async function loadRaw(userId: string, organizationId: string): Promise<RawPrefs> {
-  const [orgRow, userRow] = await Promise.all([
+  const [orgRow, userRow, org] = await Promise.all([
     prisma.orgPreference.findUnique({ where: { organizationId } }),
     prisma.userPreference.findUnique({ where: { userId } }),
+    prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } }),
   ]);
 
   return {
@@ -294,6 +317,7 @@ async function loadRaw(userId: string, organizationId: string): Promise<RawPrefs
     userHome: (userRow?.home as HomePref | null) ?? null,
     userTheme: (userRow?.theme as ThemePref | null) ?? null,
     userDensity: (userRow?.density as DensityPref | null) ?? null,
+    orgLocale: orgLocaleDefaults(org?.settings),
   };
 }
 
@@ -320,6 +344,11 @@ export async function getEffectivePreferences(userId: string, organizationId: st
     // disabled module.
     modules: { activeAppKeys },
   };
+
+  // home.locale merges key by key: the org's Locale & work week defaults,
+  // then any org home default, then the person's own choices.
+  const localeLayers = { ...raw.orgLocale, ...(raw.orgHome?.locale ?? {}), ...(raw.userHome?.locale ?? {}) };
+  if (Object.keys(localeLayers).length > 0) merged.home.locale = localeLayers;
 
   // sidebar.apps (the ACCESS-system rail config) is ORG-LEVEL ONLY: the
   // Super Admin decides which apps every rail shows. Re-stamp it from the

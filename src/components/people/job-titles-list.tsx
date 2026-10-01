@@ -241,6 +241,11 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
       { label: "No grouping", checked: group === "none", onClick: () => setGroup("none") },
       ...(isAdmin && !boot.viewer.isAgent ? [{ separator: true as const }, { label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
       ...(isAdmin && door === "teams" ? [{ label: "Manage in Settings", icon: ExternalLink, onClick: () => openSettings("/settings/structure?tab=titles") }] : []),
+      // In Settings the page tabs are the only tab strip, so the All and
+      // Unfilled views ride in this menu instead of a second row.
+      ...(door === "settings"
+        ? [{ separator: true as const }, { label: "Only open positions", checked: view === "unfilled", keepOpen: true, onClick: () => setParams({ view: view === "unfilled" ? null : "unfilled" }) }]
+        : []),
     ],
   };
   const views = (
@@ -256,8 +261,8 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
       {door === "teams" ? <Breadcrumb items={[{ label: "Job titles" }]} /> : null}
       {door === "teams" ? <OsPageHeader title="Job titles" views={views} toolbar={toolbar} /> : (
         <>
-          <div className="flex items-center gap-1 px-6 pt-2">{views}</div>
-          <OsToolbar {...toolbar} />
+          <p className="text-base text-ink-2">Job titles describe the work. They never change what someone can open.</p>
+          <OsToolbar {...toolbar} className="!px-0" />
         </>
       )}
       <div className="relative">
@@ -269,7 +274,7 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
           </div>
         ) : null}
       </div>
-      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2">
+      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4 pt-2"}>
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="job titles" activeCount={filters} onClearAll={clear}
           search={{ value: q, onChange: setQ, placeholder: "Search job titles" }}>
           {depts.length ? (

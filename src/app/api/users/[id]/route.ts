@@ -19,6 +19,7 @@
 // ever fed are no longer read here.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
@@ -43,6 +44,7 @@ import {
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
+import { pendingHandover } from "@/lib/people/handover.server";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -50,6 +52,10 @@ import { subjectRowView } from "@/lib/people/review-visibility";
 import { profileFieldRows, readProfileFieldDefs, validateProfileValues } from "@/lib/people/profile-fields";
 import { effectivePersonSchedule, nominalWeekHours, readPersonScheduleOverride, validatePersonScheduleOverride } from "@/lib/work-schedule";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+import { applyRoleChange, isLiveOwner, lockOrgRoles, roleChangeSentence, wouldRemoveLastOwner, type AppliedRoleChange, type MemberRole } from "@/lib/access/membership";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -63,7 +69,7 @@ function accessFor(
   subject: { id: string; deletedAt: Date | null; accessLevel: string },
   subjectHasDob = false,
 ) {
-  const opts = { managerTierSelf: relation === "self" && ctx.managerTier };
+  const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const editable = Object.keys(PERSON_FIELD_GROUP).filter(
     (f) =>
       f !== "accessLevel" &&
@@ -325,13 +331,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const target = await prisma.user.findFirst({
     where: { id, organizationId: ctx.organizationId },
-    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true },
+    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true, status: true },
   });
   if (!target) return err(404, "User not found");
 
   const relation = relationTo(ctx, id);
   if (relation === "none") return err(403, "You can only edit your own record or your reports'.");
-  const opts = { managerTierSelf: relation === "self" && ctx.managerTier };
+  const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const { unknown, forbidden } = checkPersonPatch(body, relation, opts);
   if (unknown.length) return err(400, `Unknown field: ${unknown.join(", ")}`, { code: "unknown_field", fields: unknown });
   if (forbidden.length) {
@@ -436,31 +442,130 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.managerId = next;
   }
 
-  if (body.accessLevel !== undefined) {
+  // The org role (settings-architecture 9.2a): { orgRole, memberTier } from
+  // the Members drawer, or the older { accessLevel } shape, both through ONE
+  // planner (src/lib/access/membership.ts): Owner only for anything touching
+  // Owner, never SUPER_ADMIN as a tier, the workspace keeps an Owner, and a
+  // lowering bumps tokenVersion so it lands on the person's next request.
+  let roleNext: { role: MemberRole; tier?: string | null } | null = null;
+  if (body.orgRole !== undefined || body.memberTier !== undefined) {
+    const role = body.orgRole ?? "MEMBER";
+    if (role !== "OWNER" && role !== "ADMIN" && role !== "MEMBER") return err(400, "Unknown role", { field: "orgRole" });
+    if (body.memberTier !== undefined && body.memberTier !== null && typeof body.memberTier !== "string") return err(400, "Unknown tier", { field: "memberTier" });
+    roleNext = { role, tier: (body.memberTier as string | null | undefined) ?? null };
+  } else if (body.accessLevel !== undefined) {
     if (typeof body.accessLevel !== "string" || !(ACCESS_LEVELS as readonly string[]).includes(body.accessLevel)) {
       return err(400, "Unknown access level", { field: "accessLevel" });
     }
-    if (target.accessLevel === "COMPANY_ADMIN" && body.accessLevel !== "COMPANY_ADMIN") {
-      const adminCount = await prisma.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
-      if (adminCount <= 1) return err(400, "Cannot demote the last Company Admin. Promote another user first.");
-    }
-    if (body.accessLevel === "SUPER_ADMIN" && ctx.accessLevel !== "SUPER_ADMIN") return err(403, "Only WorkwrK staff grant Super Admin.", { code: "field_forbidden", fields: ["accessLevel"] });
-    data.accessLevel = body.accessLevel;
+    const lvl = body.accessLevel;
+    roleNext = lvl === "SUPER_ADMIN" ? { role: "OWNER" } : lvl === "COMPANY_ADMIN" ? { role: "ADMIN" } : { role: "MEMBER", tier: lvl };
   }
 
-  if (Object.keys(data).length === 0 && !profilePatch) return err(400, "Nothing to change");
+  // Deactivating: only an Owner deactivates an Owner (an Admin locking the
+  // Owner out is the worst case), never the last Owner; the session ends on
+  // the next check.
+  const deactivating = data.status === "INACTIVE";
+  if (deactivating) {
+    if (id === ctx.userId) return err(400, "You cannot deactivate yourself.");
+    // The handover comes first, on every path (invariant 13): a leaver's
+    // open tasks, reports and containers are never orphaned by a direct API
+    // call. The Members transfer dialog and the Remove dialog run POST
+    // /api/users/[id]/handover before this PATCH, which empties all three.
+    if (target.status !== "INACTIVE") {
+      const left = await pendingHandover(ctx.organizationId, id);
+      if (left.openTasks + left.directReports + left.containers > 0) {
+        return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first", fields: ["status"], pending: left });
+      }
+    }
+    data.tokenVersion = { increment: 1 };
+  }
 
-  const user = await prisma.user.update({
-    where: { id },
-    data: data as Prisma.UserUncheckedUpdateInput,
-    select: { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true },
-  });
-  if (profilePatch) {
-    const json = JSON.stringify(profilePatch.set);
-    await prisma.$executeRaw`
+  if (Object.keys(data).length === 0 && !profilePatch && !roleNext) return err(400, "Nothing to change");
+
+  // A role change or a deactivation changes who can do what: the actor is
+  // re-read from the database first (an Admin demoted a moment ago is
+  // refused now, not at the five-minute session check).
+  let fresh: Awaited<ReturnType<typeof freshWorkspaceActor>> | null = null;
+  if (roleNext || deactivating) {
+    fresh = await freshWorkspaceActor(await getServerSession(authOptions));
+    if (!fresh.ok) return err(fresh.status, fresh.error, { code: fresh.code });
+  }
+
+  // ONE transaction under the workspace's role lock: the Owner guards, the
+  // role change and the rest of the edit land together or not at all, and a
+  // second admin racing this one waits for it and then re-reads.
+  type Outcome =
+    | { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] }
+    | { ok: true; roleChange: AppliedRoleChange | null; user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null };
+  const outcome: Outcome = await prisma.$transaction(async (tx) => {
+    if (roleNext || deactivating) await lockOrgRoles(tx, ctx.organizationId);
+    if (deactivating) {
+      if (await isLiveOwner(ctx.organizationId, id, tx)) {
+        const actorOwner = fresh?.ok === true && fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
+        if (!actorOwner) return { ok: false, status: 403, error: "Only an Owner can deactivate an Owner.", code: "owner_only", fields: ["status"] };
+      }
+      if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {
+        return { ok: false, status: 409, error: "This is the workspace's last Owner. Make someone else an Owner first.", code: "last_owner" };
+      }
+    }
+    let rc: AppliedRoleChange | null = null;
+    if (roleNext) {
+      const r = await applyRoleChange(tx, {
+        organizationId: ctx.organizationId,
+        actorId: ctx.userId,
+        actorIsAdmin: fresh?.ok === true && fresh.admin,
+        actorIsOwner: fresh?.ok === true && fresh.owner,
+        targetId: id,
+        next: roleNext,
+      });
+      if (!r.ok) return { ok: false, status: r.status, error: r.error, code: r.status === 409 ? "last_owner" : "field_forbidden", fields: ["orgRole"] };
+      rc = r;
+    }
+    const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;
+    const u =
+      Object.keys(data).length > 0
+        ? await tx.user.update({ where: { id }, data: data as Prisma.UserUncheckedUpdateInput, select })
+        : await tx.user.findUnique({ where: { id }, select });
+    if (profilePatch) {
+      const json = JSON.stringify(profilePatch.set);
+      await tx.$executeRaw`
       UPDATE "User"
       SET "customFields" = ((CASE WHEN jsonb_typeof("customFields") = 'object' THEN "customFields" ELSE '{}'::jsonb END) - ${profilePatch.remove}::text[]) || ${json}::jsonb
       WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
+    }
+    return { ok: true, roleChange: rc, user: u };
+  });
+  if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
+  const roleChange = outcome.roleChange;
+  const user = outcome.user;
+  if (!user) return err(404, "User not found");
+  if (roleChange?.changed) {
+    void logActivity({
+      type: "org_role.changed",
+      actorId: ctx.userId,
+      organizationId: ctx.organizationId,
+      description: roleChangeSentence(roleChange.targetName, roleChange),
+      targetId: id,
+      targetType: "user",
+      severity: "warning",
+      oldValue: { role: roleChange.before.role, level: roleChange.before.level },
+      newValue: { role: roleChange.after.role, level: roleChange.after.level },
+      metadata: { tokenVersionBumped: roleChange.bumped },
+    });
+  }
+  if (roleNext && Object.keys(data).length === 0 && !profilePatch) return NextResponse.json(user);
+
+  if (data.status !== undefined) {
+    void logActivity({
+      type: "membership.changed",
+      actorId: ctx.userId,
+      organizationId: ctx.organizationId,
+      description: `${deactivating ? "Deactivated" : "Changed the status of"} ${user.firstName} ${user.lastName}`,
+      targetId: id,
+      targetType: "user",
+      severity: deactivating ? "warning" : "info",
+      newValue: { status: data.status as string },
+    });
   }
 
   if (data.managerId !== undefined && data.managerId !== target.managerId) {
@@ -528,12 +633,30 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been restored` });
   }
 
-  if (user.accessLevel === "COMPANY_ADMIN") {
-    const admins = await prisma.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
-    if (admins <= 1) return err(400, "This is the last Company Admin. Make someone else an Admin first.");
-  }
-
-  await prisma.user.update({ where: { id }, data: { deletedAt: new Date(), status: "INACTIVE" } });
+  // Removing someone who holds Admin changes who runs the workspace: the
+  // actor is re-read from the database, and the guards and the write run
+  // under the workspace's role lock so two admins removing each other can
+  // never both pass.
+  const fresh = await freshWorkspaceActor(await getServerSession(authOptions));
+  if (!fresh.ok) return err(fresh.status, fresh.error, { code: fresh.code });
+  const removed = await prisma.$transaction(async (tx) => {
+    await lockOrgRoles(tx, ctx.organizationId);
+    if (user.accessLevel === "COMPANY_ADMIN") {
+      const admins = await tx.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
+      if (admins <= 1) return err(400, "This is the last Company Admin. Make someone else an Admin first.");
+    }
+    if (await isLiveOwner(ctx.organizationId, id, tx)) {
+      const actorOwner = fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
+      if (!actorOwner) return err(403, "Only an Owner can remove an Owner.", { code: "owner_only" });
+    }
+    if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {
+      return err(409, "This is the workspace's last Owner. Make someone else an Owner first.", { code: "last_owner" });
+    }
+    // tokenVersion: a removed person's open sessions end on their next check.
+    await tx.user.update({ where: { id }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
+    return null;
+  });
+  if (removed) return removed;
   void logActivity({
     type: "user_removed",
     actorId: ctx.userId,

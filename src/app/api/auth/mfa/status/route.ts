@@ -13,12 +13,14 @@ export async function GET(_req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { mfaEnabled: true, emailVerifiedAt: true },
+    select: { mfaEnabled: true, emailVerifiedAt: true, mfaBackupCodes: true },
   });
   if (!user) return jsonError("User not found", 404);
 
   return jsonSuccess({
     mfaEnabled: !!user.mfaEnabled,
     emailVerified: !!user.emailVerifiedAt,
+    // A count only; the hashes never leave the server.
+    backupCodesLeft: user.mfaEnabled ? user.mfaBackupCodes.length : 0,
   });
 }

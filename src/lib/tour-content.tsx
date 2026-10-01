@@ -1,55 +1,55 @@
 import {
   Sparkles, Building2, Users, Target, BookOpen, Lock,
-  CheckSquare, BarChart3, Package, Award, FileText, Megaphone,
-  Lightbulb, Crosshair, Settings, User, TrendingUp,
+  CheckSquare, BarChart3, Package, Award, FileText,
+  Crosshair, User,
 } from "lucide-react";
 import type { TourStep } from "@/components/product-tour";
 import { WORK_HOME_HREF } from "./nav/route-hub";
 
 // ========================================
-// ADMIN TOUR — for the person who set up the org
+// ADMIN TOUR: for the person who set up the org
 // ========================================
 export const ADMIN_TOUR_STEPS: TourStep[] = [
   {
     title: "Welcome to WorkwrK 👋",
-    description: "WorkwrK is your business operating system — it brings People, KRAs/KPIs, SOPs, Reviews, OKRs, Assets, Policies and AI into one place. Let's get you set up so your team can start using it today. This tour takes about 3 minutes.",
+    description: "WorkwrK is your business operating system. It brings People, KRAs/KPIs, SOPs, Reviews, OKRs, Assets, Policies and AI into one place. Let's get you set up so your team can start using it today. This tour takes about 3 minutes.",
     icon: <Sparkles size={24} />,
-    highlight: "You're set as Company Admin, so you have full access to everything.",
+    highlight: "You run this workspace, so you can open every Space and every Workspace settings page.",
   },
   {
-    title: "Step 1 — Set up your Company Profile",
-    description: "The Organization page is where you describe your company. Add your mission, vision, values, and a description of what you do. The AI uses this context for everything — generating better KRAs, KPIs, and aligning the system to your business.",
+    title: "Step 1: Describe your company",
+    description: "Workspace settings, Identity & culture is where you describe your company: its name and logo, then its mission and values on the Culture tab. The AI uses this context for everything: better KRAs, KPIs and a system aligned to your business.",
     icon: <Building2 size={24} />,
-    navigateTo: "/organization",
-    actionLabel: "Open Organization",
-    highlight: "Hit the 'AI Assist' button on the Organization page to auto-generate a strong profile from just your company name and website.",
+    navigateTo: "/settings/identity?tab=culture",
+    actionLabel: "Open Identity & culture",
+    highlight: "Your mission and values show on the welcome screen everyone sees when they open WorkwrK.",
   },
   {
-    title: "Step 2 — Invite your team",
-    description: "Add the people who'll use WorkwrK. Go to Settings → Team and either invite by email or paste a list. Each person gets an access level — Employee, Team Lead, Manager, HR, or Admin. You can change roles later.",
+    title: "Step 2: Invite your team",
+    description: "Add the people who'll use WorkwrK. Go to Workspace settings, Members, and invite by email or import a list. Everyone is an Owner, an Admin or a Member; an agent account is a Member marked as an agent. You can change roles later.",
     icon: <Users size={24} />,
-    navigateTo: "/settings",
-    actionLabel: "Open Team Settings",
-    highlight: "Promote anyone to 'Company Admin' to give them full system control — useful for HR or co-founders.",
+    navigateTo: "/settings/members?invite=1",
+    actionLabel: "Open Members",
+    highlight: "Make someone an Admin to let them run the workspace day to day. Put the people who look after everyone's information on the People team.",
   },
   {
-    title: "Step 3 — Configure Access Control",
-    description: "WorkwrK has a granular permission matrix. You decide what each role can do across every module — from creating SOPs to deleting people. Defaults are sensible but you can lock anything down. Find it under Settings → Access Control.",
+    title: "Step 3: Decide who can do what",
+    description: "Everything you make is shared at one of four levels: Full access, Can edit, Can comment or Can view. Sharing flows down from a Space to its Folders and Lists. Workspace settings, Access holds the switches for the whole company, and Lock it down tightens them in one step.",
     icon: <Lock size={24} />,
-    navigateTo: "/settings",
-    actionLabel: "Open Access Control",
-    highlight: "Only Company Admin can edit access control — your control center for permissions.",
+    navigateTo: "/settings/access",
+    actionLabel: "Open Access",
+    highlight: "Owners and Admins change the access switches. The People team can read them.",
   },
   {
-    title: "Step 4 — Create KRAs & KPIs (with AI)",
-    description: "KRAs are Key Result Areas — what each role is accountable for. KPIs are how you measure them. Click 'Create with AI' on the KRA & KPIs page, type a job role, and AI generates 5 KRAs with 3 KPIs each — fully editable.",
+    title: "Step 4: Create KRAs & KPIs (with AI)",
+    description: "KRAs are Key Result Areas: what each role is accountable for. KPIs are how you measure them. Click 'Create with AI' on the KRA & KPIs page, type a job role, and AI generates 5 KRAs with 3 KPIs each, fully editable.",
     icon: <Target size={24} />,
     navigateTo: "/kra-kpi",
     actionLabel: "Open KRA & KPIs",
-    highlight: "AI uses your company profile from Step 1 to make KRAs specific to your business — not generic templates.",
+    highlight: "AI uses your company profile from Step 1 to make KRAs specific to your business, not generic templates.",
   },
   {
-    title: "Step 5 — Document your processes (SOPs)",
+    title: "Step 5: Document your processes (SOPs)",
     description: "SOPs are step-by-step playbooks for how things get done. WorkwrK supports written SOPs, step-by-step checklists, recorded SOPs (via the browser extension), and approval flows. Use AI to generate a first draft, then refine.",
     icon: <BookOpen size={24} />,
     navigateTo: "/sops",
@@ -57,22 +57,22 @@ export const ADMIN_TOUR_STEPS: TourStep[] = [
     highlight: "Assign SOPs to specific people. Compliance is tracked automatically and feeds into their performance score.",
   },
   {
-    title: "Step 6 — Set OKRs and goals",
+    title: "Step 6: Set OKRs and goals",
     description: "OKRs are how you align everyone to bigger goals. Create company-wide OKRs, team OKRs, or individual OKRs. Each Objective has Key Results that are measured with check-ins. They roll up into a quarterly view.",
     icon: <Crosshair size={24} />,
     navigateTo: "/okrs",
     actionLabel: "Open OKRs",
   },
   {
-    title: "Step 7 — Manage Assets",
-    description: "Track laptops, phones, monitors, ID cards, vehicles — anything you give to employees. Each asset has a serial/IMEI, condition, purchase date, warranty. Assign them to people during onboarding, collect them back during offboarding.",
+    title: "Step 7: Manage Assets",
+    description: "Track laptops, phones, monitors, ID cards, vehicles: anything you give to employees. Each asset has a serial/IMEI, condition, purchase date, warranty. Assign them to people during onboarding, collect them back during offboarding.",
     icon: <Package size={24} />,
     navigateTo: "/assets",
     actionLabel: "Open Assets",
   },
   {
-    title: "Step 8 — Publish Policies & Announcements",
-    description: "Use Policies for HR documents, code of conduct, leave rules — employees can acknowledge them and you track compliance. Use Announcements for time-sensitive updates that show on everyone's dashboard.",
+    title: "Step 8: Publish Policies & Announcements",
+    description: "Use Policies for HR documents, code of conduct, leave rules. Employees can acknowledge them and you track compliance. Use Announcements for time-sensitive updates that show on everyone's dashboard.",
     icon: <FileText size={24} />,
     navigateTo: "/policies",
     actionLabel: "Open Policies",
@@ -82,17 +82,17 @@ export const ADMIN_TOUR_STEPS: TourStep[] = [
     description: "That's the core setup. There's much more: Reviews, Analytics, Ideas Board, Surveys, Talent Grid, Tools & Credentials, Onboarding workflows. Explore at your own pace, or click the Help icon at any time to re-launch this tour.",
     icon: <CheckSquare size={24} />,
     actionLabel: "Start using WorkwrK",
-    highlight: "Pro tip: The AI Assistant (sidebar) can answer questions about your business — try asking 'Who are my top performers this quarter?'",
+    highlight: "Pro tip: The AI Assistant (sidebar) can answer questions about your business. Try asking 'Who are my top performers this quarter?'",
   },
 ];
 
 // ========================================
-// NEW EMPLOYEE TOUR — for invited team members
+// NEW EMPLOYEE TOUR: for invited team members
 // ========================================
 export const EMPLOYEE_TOUR_STEPS: TourStep[] = [
   {
     title: "Welcome to WorkwrK 👋",
-    description: "WorkwrK is where your team manages people, performance, processes, and goals — all in one place. This 2-minute tour will show you what you can do and where to find things.",
+    description: "WorkwrK is where your team manages people, performance, processes, and goals, all in one place. This 2-minute tour will show you what you can do and where to find things.",
     icon: <Sparkles size={24} />,
   },
   {
@@ -108,7 +108,7 @@ export const EMPLOYEE_TOUR_STEPS: TourStep[] = [
     icon: <Target size={24} />,
     navigateTo: "/kra-kpi",
     actionLabel: "Open KRAs",
-    highlight: "Update your KPIs regularly — they feed into your composite performance score.",
+    highlight: "Update your KPIs regularly: they feed into your composite performance score.",
   },
   {
     title: "My work",
@@ -119,14 +119,14 @@ export const EMPLOYEE_TOUR_STEPS: TourStep[] = [
   },
   {
     title: "SOPs assigned to you",
-    description: "Standard Operating Procedures — step-by-step guides for how to do things in your role. Complete them at your own pace; your progress is tracked.",
+    description: "Standard Operating Procedures: step-by-step guides for how to do things in your role. Complete them at your own pace; your progress is tracked.",
     icon: <BookOpen size={24} />,
     navigateTo: "/sops",
     actionLabel: "Open SOPs",
   },
   {
     title: "Policies to acknowledge",
-    description: "Company policies and HR documents are here. Some require acknowledgment — make sure to read and acknowledge them.",
+    description: "Company policies and HR documents are here. Some require acknowledgment, so make sure to read and acknowledge them.",
     icon: <FileText size={24} />,
     navigateTo: "/policies",
     actionLabel: "Open Policies",

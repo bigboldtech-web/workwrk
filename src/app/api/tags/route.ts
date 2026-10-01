@@ -12,8 +12,8 @@ import {
   getUserId,
   jsonError,
   jsonSuccess,
-  isOrgAdmin,
-} from "@/lib/api-helpers";
+  } from "@/lib/api-helpers";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 const MAX_LIMIT = 500;
 
@@ -77,7 +77,10 @@ export async function POST(req: NextRequest) {
   // any member may mint one from the tag picker. Dimensional types
   // (cost center, region…) drive Finance/HR reporting and stay
   // admin-only.
-  if (type !== "CUSTOM" && !isOrgAdmin(session)) return jsonError("Forbidden", 403);
+  if (type !== "CUSTOM") {
+    const writeGate = await settingsWriteGate(session, "tasks");
+    if (!writeGate.ok) return writeGate.response;
+  }
   const color = typeof body.color === "string" ? body.color.trim() || null : null;
   const description = typeof body.description === "string" ? body.description.trim() || null : null;
 

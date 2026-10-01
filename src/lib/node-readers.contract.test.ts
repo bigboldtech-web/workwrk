@@ -141,6 +141,9 @@ describe("the grant routes", () => {
     expect(files.map((f) => f.split(path.sep).join("/")).sort()).toEqual([
       "src/app/api/access/[kind]/[id]/grants/route.ts",
       "src/app/api/access/[kind]/[id]/route.ts",
+      // Phase 8 stage E: Check access and the LockedPage peek, both node-access reads.
+      "src/app/api/access/check/route.ts",
+      "src/app/api/access/peek/route.ts",
     ]);
   });
 

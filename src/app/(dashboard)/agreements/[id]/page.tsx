@@ -48,7 +48,7 @@ import { SignPreviewDialog } from "@/components/agreements/sign-preview-dialog";
 import { SignatureImage } from "@/components/agreements/signature-image";
 import type { PersonRef } from "@/components/board-view/assignee-picker";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { CONTRACT_STATUS_COLOR, CONTRACT_STATUS_LABEL, PARTY_STATUS_COLOR, PARTY_STATUS_LABEL, parseContractStatus, parsePartyStatus, partyHue, partyRoleLabel, partySendErrors, type PartyRole } from "@/lib/contracts";

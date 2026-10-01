@@ -9,7 +9,8 @@
 //
 // Pure: imports ./types only. Nothing here writes anything.
 
-import type { AccessSettings, ObjectRole, OrgRole } from "./types";
+import type { AccessSettings, Action, Decision, ObjectRef, ObjectRole, OrgRole } from "./types";
+import { APP_ACCESS_BY_KEY } from "@/lib/app-access";
 
 export interface GuardResult {
   ok: boolean;
@@ -170,6 +171,30 @@ export function shouldLogDenial(input: {
   if (!input.discoverable) return false;
   if (input.lastLoggedAt === null) return true;
   return input.now - input.lastLoggedAt >= DENIAL_SAMPLE_WINDOW_MS;
+}
+
+/** The type and id an access.denied row names (audit.ts logDenial). */
+export function denialTarget(ref: ObjectRef): { type: string; id: string } {
+  if (ref.type === "app") return { type: "app", id: ref.key };
+  if (ref.type === "settings") return { type: "settings", id: ref.page };
+  if (ref.type === "org") return { type: "org", id: ref.action };
+  return { type: ref.type, id: ref.id };
+}
+
+/** The audit row for one denial (pure, for the tests). */
+export function denialAuditRow(action: Action, ref: ObjectRef, decision: Pick<Decision, "via" | "reason">) {
+  const t = denialTarget(ref);
+  // An app is named by its one label (principle 16: "Timesheets", never the
+  // key "timesheets"); the key stays in targetId for filters.
+  const named = t.type === "app" ? `the ${APP_ACCESS_BY_KEY[t.id]?.label ?? t.id} app` : `${t.type} ${t.id}`;
+  return {
+    type: "access.denied",
+    description: `Refused ${action} on ${named}: ${decision.reason}`,
+    targetType: t.type,
+    targetId: t.id,
+    metadata: { action, via: decision.via, reason: decision.reason },
+    severity: "info" as const,
+  };
 }
 
 /**

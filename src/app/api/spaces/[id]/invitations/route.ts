@@ -82,7 +82,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       spaceRole: r.spaceRole,
       createdAt: r.createdAt.toISOString(),
       expiresAt: r.expiresAt.toISOString(),
-      inviteUrl: `${baseUrl}/register?token=${r.token}`,
+      inviteUrl: `${baseUrl}/join?token=${r.token}`,
     })),
   });
 }
@@ -158,7 +158,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       });
 
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const inviteUrl = `${baseUrl}/register?token=${invitation.token}`;
+  const inviteUrl = `${baseUrl}/join?token=${invitation.token}`;
 
   // Fire-and-forget email — the inviteUrl is still returned so the
   // caller can copy/paste if email delivery is misconfigured.

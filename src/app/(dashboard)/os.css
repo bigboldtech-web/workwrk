@@ -134,7 +134,6 @@
   --os-accent-swatch-workwrk: #0073EA;
   --os-accent-swatch-black: #1F2024;
   --os-accent-swatch-blue: #3B82F6;
-  --os-accent-swatch-pink: #EC4899;
   --os-accent-swatch-orange: #F59E0B;
   --os-accent-swatch-teal: #14B8A6;
   --os-accent-swatch-bronze: #A78B6C;
@@ -149,7 +148,6 @@
    is still chosen with html[data-chrome]; the accent never paints the rail. */
 :root[data-accent="black"], :root[data-accent="black"] .workwrk-os, :root.dark[data-accent="black"], :root.dark[data-accent="black"] .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-pressed: #000000; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; }
 :root[data-accent="blue"], :root[data-accent="blue"] .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-pressed: #1D4ED8; --os-brand-soft: #E6F0FE; --os-brand-deep: #1D4ED8; }
-:root[data-accent="pink"], :root[data-accent="pink"] .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-pressed: #BE185D; --os-brand-soft: #FCE2EF; --os-brand-deep: #BE185D; }
 :root[data-accent="orange"], :root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-pressed: #B45309; --os-brand-soft: #FCEFCE; --os-brand-deep: #B45309; }
 :root[data-accent="teal"], :root[data-accent="teal"] .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-pressed: #0F766E; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F766E; }
 :root[data-accent="bronze"], :root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8C7256; --os-brand-pressed: #6F5A44; --os-brand-soft: #F1EBE4; --os-brand-deep: #6F5A44; }
@@ -158,7 +156,6 @@
    so it clears the near-black canvas, the same move tokens.css makes for
    the brand blue. */
 :root.dark[data-accent="blue"], :root.dark[data-accent="blue"] .workwrk-os { --os-brand-soft: rgba(59, 130, 246, 0.18); --os-brand-deep: #7AB8FF; }
-:root.dark[data-accent="pink"], :root.dark[data-accent="pink"] .workwrk-os { --os-brand-soft: rgba(236, 72, 153, 0.18); --os-brand-deep: #F9A8D4; }
 :root.dark[data-accent="orange"], :root.dark[data-accent="orange"] .workwrk-os { --os-brand-soft: rgba(245, 158, 11, 0.18); --os-brand-deep: #FCD34D; }
 :root.dark[data-accent="teal"], :root.dark[data-accent="teal"] .workwrk-os { --os-brand-soft: rgba(20, 184, 166, 0.18); --os-brand-deep: #5EEAD4; }
 :root.dark[data-accent="bronze"], :root.dark[data-accent="bronze"] .workwrk-os { --os-brand-soft: rgba(167, 139, 108, 0.18); --os-brand-deep: #D6C3AE; }
@@ -8466,34 +8463,6 @@ table.os-tbl {
 
 /* Account · Security */
 .acs__error { padding: 10px 14px; background: color-mix(in srgb, var(--os-c-red) 8%, transparent); color: var(--os-c-red); border: 1px solid color-mix(in srgb, var(--os-c-red) 25%, var(--os-line)); border-radius: 8px; font-size: 13.5px; }
-.acs__score {
-  position: relative;
-  background: linear-gradient(135deg, var(--os-surface), color-mix(in srgb, var(--score-c) 6%, var(--os-surface)));
-  border: 1px solid color-mix(in srgb, var(--score-c) 28%, var(--os-line));
-  border-radius: 14px;
-  padding: 18px 22px;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  overflow: hidden;
-}
-.acs__score::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-  background: var(--score-c);
-}
-.acs__score-l { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
-.acs__score-tag {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 700; padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--score-c); color: white;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  align-self: flex-start;
-}
-.acs__score-tag svg { width: 11px; height: 11px; }
-.acs__score-l h2 { font-size: 22px; font-weight: 700; color: var(--os-ink); margin: 0; letter-spacing: -0.02em; }
-.acs__score-l p { font-size: 14px; color: var(--os-ink-2); margin: 0; line-height: 1.5; }
-.acs__score-r { text-align: right; flex-shrink: 0; }
-.acs__score-r strong { font-size: 44px; font-weight: 700; color: var(--score-c); font-variant-numeric: tabular-nums; line-height: 1; }
-.acs__score-r span { font-size: 12px; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; display: block; margin-top: 4px; }
 
 .acs__section {
   background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 12px;
@@ -23934,7 +23903,7 @@ html[data-density="compact"] .os-tc__row:focus-within .os-tc__check { opacity: 1
 
 /* ───────────────────────── Calendar and connections (/account/connections)
    Phase 4, Time and Talk. Tokens only: no hex, no zinc, no gradient. */
-.cxn { padding: 16px 28px 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+.cxn { padding: 0 0 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
 .cxn__loading { display: flex; align-items: center; gap: 10px; padding: 32px 0; color: var(--os-ink-2); font-size: 13px; }
 .cxn__error {
   display: flex; align-items: center; gap: 8px; padding: 12px 14px;

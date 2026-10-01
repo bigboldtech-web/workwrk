@@ -92,11 +92,19 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   action_item: k("action_item", "Action item from a meeting", "ListChecks", "primary", "tasks"),
   boundary_request: k("boundary_request", "Needs your approval", "ShieldCheck", "primary", "requests"),
   access_request: k("access_request", "Access request", "KeyRound", "primary", "requests"),
+  // Written by POST /api/invitations/request-resend when someone opens an
+  // expired invitation on /join and asks for a new one: the inviter and the
+  // Owners and Admins, linked to Pending invites.
+  invite_resend_request: k("invite_resend_request", "Invitation needs resending", "Mail", "primary", "requests"),
   // Written by src/lib/access/grants.ts when someone gives you a role on a
   // Space, Folder, List, doc, table, canvas or form, or raises yours (never
   // for a downgrade, a removal or a change you made yourself).
   access_granted: k("access_granted", "Shared with you", "UserPlus", "primary", "requests"),
   access_expiring: k("access_expiring", "Access expiring", "KeyRound", "primary", "requests"),
+  // Written by PATCH /api/access-requests/[id] when the owner or an Admin
+  // declines a Request access (Phase 8 stage E). A grant is told by
+  // grants.ts as access_granted.
+  access_declined: k("access_declined", "Request declined", "KeyRound", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),

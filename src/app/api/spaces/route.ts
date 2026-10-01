@@ -7,20 +7,18 @@
 //      grantee always found the Space that holds their Folder in the pickers.
 //      ?paths=0 leaves the path rows out; ?counts=0 skips the counts (null)
 //      for a caller that never shows them.
-// POST /api/spaces — create a Space. Manager+ only; creator becomes OWNER.
+// POST /api/spaces: create a Space (space-create.ts decides who); creator becomes OWNER.
 
 import { NextResponse } from "next/server";
+import { mayCreateSpace, spaceCreateRefusal } from "@/lib/access/space-create";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { canContributeSpace, createSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { createBoard } from "@/lib/board";
-import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
-
-// One definition, read from src/lib/template-center.ts, because applying a
-// Space TEMPLATE creates a Space too and has to answer with the same floor.
-// Two private copies is how the two doors end up disagreeing.
-const MANAGER_LEVELS = SPACE_CREATE_LEVELS;
+// Who creates a Space: ONE answer (src/lib/access/space-create.ts), read by
+// this route, the Space template apply route, the /spaces page and boot, so
+// the doors and the controls never disagree.
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -67,8 +65,12 @@ const createSchema = z.object({
 export async function POST(req: Request) {
   const c = await ctx();
   if ("error" in c) return c.error;
-  if (!MANAGER_LEVELS.has(c.accessLevel)) {
-    return NextResponse.json({ error: "Manager-level access required to create Spaces." }, { status: 403 });
+  // ACCESS_V2_RESOLVER (default OFF): access toggle 1 ("Who can create
+  // Spaces": everyone, or Owners and Admins) through the engine's
+  // create_space verb; off, today's manager-tier rule.
+  // The one answer (src/lib/access/space-create.ts) the New Space controls read.
+  if (!(await mayCreateSpace(c.accessLevel))) {
+    return NextResponse.json({ error: spaceCreateRefusal() }, { status: 403 });
   }
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

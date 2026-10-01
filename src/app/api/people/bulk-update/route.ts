@@ -12,6 +12,7 @@
 // assign_sop (unchanged behaviour) and add_tag (new).
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
   // Admins, the chain for a manager. Self is skipped for placement moves.
   const allowed = users
     .map((u) => u.id)
-    .filter((id) => canWritePersonGroup("placement", relationTo(ctx, id), { managerTierSelf: false }) && id !== ctx.userId);
+    .filter((id) => canWritePersonGroup("placement", relationTo(ctx, id), { managerTierSelf: false, chainWritesMembership: !accessV2Resolver() }) && id !== ctx.userId);
   const skipped = userIds.length - allowed.length;
   if (allowed.length === 0) return NextResponse.json({ updated: 0, skipped, message: "Nobody in that selection is yours to change." });
 

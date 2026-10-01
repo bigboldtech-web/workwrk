@@ -113,6 +113,18 @@ const eslintConfig = defineConfig([
       "workwrk-ds/no-loading-text": "warn",
     },
   },
+  // Settings chrome exits through closeSettings() (settings-architecture
+  // 8.3): no hard-coded /today or /home in the shell or either door.
+  {
+    files: [
+      "src/components/layout/os/settings-shell*.tsx",
+      "src/app/(dashboard)/settings/**/*.tsx",
+      "src/app/(dashboard)/account/**/*.tsx",
+      "src/components/settings/**/*.tsx",
+    ],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: { "workwrk-ds/no-hardcoded-settings-exit": "error" },
+  },
   // The shell (Phase 1 "the frame"): the loader sweep is complete here, so
   // a spinner or a "Loading..." string is an error, not a warning.
   {

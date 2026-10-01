@@ -360,6 +360,7 @@ function ManageAccessBody({
               </section>
               <InheritedAccess panel={panel} meId={meId} onManageIn={manageIn} />
               <EveryoneAndAdmins panel={panel} />
+              {manage ? <CheckAccess key={`check-${currentKey}`} target={current} meId={meId} /> : null}
             </div>
           </div>
         </>
@@ -568,7 +569,7 @@ function AddPeople({
  * (problem 34), minus those already listed here.
  */
 function PeopleField({
-  selection, excludeIds, open, onOpenChange, onToggle, meId,
+  selection, excludeIds, open, onOpenChange, onToggle, meId, placeholder, ariaLabel = "People to add",
 }: {
   selection: PickPerson[];
   excludeIds: string[];
@@ -576,6 +577,9 @@ function PeopleField({
   onOpenChange: (open: boolean) => void;
   onToggle: (p: PickPerson) => void;
   meId: string | null;
+  /** The empty field's words (Check access asks for one person). */
+  placeholder?: string;
+  ariaLabel?: string;
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PickPerson[] | null>(null);
@@ -642,7 +646,7 @@ function PeopleField({
           aria-expanded={open}
           className="h-6 min-w-[120px] flex-1 rounded px-1 text-start text-base text-ink-3 hover:text-ink-2"
         >
-          {selection.length === 0 ? "Add people by name or email" : "Add more"}
+          {selection.length === 0 ? placeholder ?? "Add people by name or email" : placeholder ? "Pick someone else" : "Add more"}
         </button>
       </div>
       <Picker
@@ -652,7 +656,7 @@ function PeopleField({
         alwaysSearch
         onSearchChange={setQ}
         searchPlaceholder="Find a person"
-        ariaLabel="People to add"
+        ariaLabel={ariaLabel}
         width={320}
         selected={[...chosen]}
         loading={results === null}
@@ -664,6 +668,70 @@ function PeopleField({
         sections={[{ options: pickerOptions }]}
       />
     </div>
+  );
+}
+
+/* ─────────────────────────── Check access ─────────────────────────── */
+
+/**
+ * Check access (access-model-spec 6.1, Phase 8 stage E): for someone who
+ * manages who has access here, pick a person and read what they can do and
+ * why, in one sentence, from the live resolver (POST /api/access/check).
+ */
+function CheckAccess({ target, meId }: { target: { kind: AccessNodeKind; id: string }; meId: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [person, setPerson] = useState<PickPerson | null>(null);
+  const [answer, setAnswer] = useState<{ state: "idle" | "busy" | "done" | "failed"; sentence?: string; message?: string }>({ state: "idle" });
+
+  const run = async (p: PickPerson) => {
+    setPerson(p);
+    setOpen(false);
+    setAnswer({ state: "busy" });
+    try {
+      const res = await fetch("/api/access/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: p.id, target: { kind: target.kind, id: target.id } }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        setAnswer({ state: "failed", message: typeof d?.message === "string" ? d.message : "Couldn't check that person." });
+        return;
+      }
+      setAnswer({ state: "done", sentence: typeof d?.sentence === "string" ? d.sentence : "" });
+    } catch {
+      setAnswer({ state: "failed", message: "Couldn't check that person." });
+    }
+  };
+
+  return (
+    <section>
+      <AccessSectionHeading>Check access</AccessSectionHeading>
+      <div className="flex flex-col gap-2">
+        <PeopleField
+          selection={person ? [person] : []}
+          excludeIds={[]}
+          open={open}
+          onOpenChange={setOpen}
+          placeholder="Pick a person to see what they can do here"
+          ariaLabel="Person to check"
+          onToggle={(p) => {
+            if (person?.id === p.id) {
+              setPerson(null);
+              setAnswer({ state: "idle" });
+            } else void run(p);
+          }}
+          meId={meId}
+        />
+        {answer.state === "busy" ? <Dots variant="pending" label="Checking" /> : null}
+        {answer.state === "done" && person ? (
+          <p className="m-0 text-base text-ink" role="status">
+            <span className="font-medium">{person.name}</span> · {answer.sentence}
+          </p>
+        ) : null}
+        {answer.state === "failed" ? <p className="m-0 text-sm text-danger-text" role="alert">{answer.message}</p> : null}
+      </div>
+    </section>
   );
 }
 

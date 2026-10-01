@@ -61,6 +61,42 @@ async function shouldSendEmail(userId: string, category: EmailCategory): Promise
 }
 
 // ==========================================
+// Secrets at rest
+// ==========================================
+
+/**
+ * Templates whose body carries a working secret link: a password reset, an
+ * email verification, an invitation, a signing request. Reset and verify
+ * tokens are hashed in their own tables so a database leak yields no working
+ * link; the EmailLog row must not undo that. So for these templates the
+ * link-bearing variables are never stored, and the rendered HTML (which is
+ * needed to send) is cleared the moment the row is SENT or finally FAILED.
+ * The subject, recipient, template and timestamps stay as the delivery log.
+ */
+export const SECRET_LINK_TEMPLATES: ReadonlySet<string> = new Set([
+  "password-reset",
+  "verify-email",
+  "invitation",
+  "invitation-space",
+  "invitation-space-resend",
+  "document-sign",
+]);
+
+const SECRET_VARIABLE_KEY = /link|url|token|href/i;
+
+/** Variables as stored: a secret template never keeps a link, url or token value. */
+export function storedEmailVariables(template: string, variables: Record<string, unknown> | undefined): Record<string, unknown> {
+  const vars = variables || {};
+  if (!SECRET_LINK_TEMPLATES.has(template)) return vars;
+  return Object.fromEntries(Object.entries(vars).filter(([k]) => !SECRET_VARIABLE_KEY.test(k)));
+}
+
+/** The update that closes a row: a secret template's HTML is cleared with it. */
+function closedRowData<T extends object>(template: string, data: T): T & { html?: null } {
+  return SECRET_LINK_TEMPLATES.has(template) ? { ...data, html: null } : data;
+}
+
+// ==========================================
 // Queue email (write to EmailLog table)
 // ==========================================
 
@@ -95,7 +131,7 @@ export function emailLogData(p: {
     subject: p.subject,
     template: p.template,
     html: p.html,
-    variables: (p.variables || {}) as object,
+    variables: storedEmailVariables(p.template, p.variables) as object,
     organizationId: p.organizationId,
     status: "QUEUED" as const,
   };
@@ -127,7 +163,7 @@ export async function queueEmail({
         subject,
         template,
         html,
-        variables: variables || {},
+        variables: storedEmailVariables(template, variables) as object,
         organizationId,
         status: "QUEUED",
       },
@@ -180,11 +216,16 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
         console.log(`To: ${email.to}`);
         console.log(`Subject: ${email.subject}`);
         console.log(`Template: ${email.template}`);
+        // Local testing still needs the link once the stored copy is
+        // cleared, so a dev run with no mail transport prints it here.
+        if (IS_DEV && SECRET_LINK_TEMPLATES.has(email.template) && email.html) {
+          for (const m of email.html.matchAll(/href="([^"]+)"/g)) console.log(`Link: ${m[1]}`);
+        }
         console.log(`================================\n`);
 
         await prisma.emailLog.update({
           where: { id: email.id },
-          data: { status: "SENT", sentAt: new Date() },
+          data: closedRowData(email.template, { status: "SENT", sentAt: new Date() }),
         });
         sent++;
         continue;
@@ -199,7 +240,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
 
       await prisma.emailLog.update({
         where: { id: email.id },
-        data: { status: "SENT", sentAt: new Date() },
+        data: closedRowData(email.template, { status: "SENT", sentAt: new Date() }),
       });
       sent++;
     } catch (err: any) {
@@ -207,7 +248,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
       const newStatus = email.attempts >= 3 ? "FAILED" : "QUEUED";
       await prisma.emailLog.update({
         where: { id: email.id },
-        data: { status: newStatus, error: err.message },
+        data: newStatus === "FAILED" ? closedRowData(email.template, { status: newStatus, error: err.message }) : { status: newStatus, error: err.message },
       });
       failed++;
     }
@@ -249,18 +290,28 @@ export async function sendEmail(params: QueueEmailParams): Promise<void> {
 // Get/update email preferences
 // ==========================================
 
+/**
+ * What a person with no EmailPreference row is shown. It must say exactly
+ * what shouldSendEmail does for them (no row = every category sends) and
+ * what the schema creates on their first change (every category true,
+ * digest false). The KRA key was once `taskNotifications`, a field that does
+ * not exist: the page read the missing `kraNotifications` as Off while KPI
+ * reminders kept going out, and the switch then flipped On by itself the
+ * moment any other category was saved and the row was created.
+ */
+export const EMAIL_PREFERENCE_DEFAULTS = {
+  kraNotifications: true,
+  reviewNotifications: true,
+  sopNotifications: true,
+  kudosNotifications: true,
+  dailyDigest: false,
+} as const;
+
 export async function getEmailPreferences(userId: string) {
   const pref = await prisma.emailPreference.findUnique({ where: { userId } });
   if (pref) return pref;
 
-  // Return defaults
-  return {
-    taskNotifications: true,
-    reviewNotifications: true,
-    sopNotifications: true,
-    kudosNotifications: true,
-    dailyDigest: false,
-  };
+  return { ...EMAIL_PREFERENCE_DEFAULTS };
 }
 
 export async function updateEmailPreferences(

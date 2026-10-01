@@ -99,7 +99,7 @@ const TOGGLE_ENFORCEMENT: Record<`toggle.${ToggleKey}`, string> = {
   "toggle.peopleTeam": "can(person), review / policy / survey / asset routes",
   "toggle.whoCanPublish": "PATCH /api/sops/[id], PATCH /api/policies/[id]",
   "toggle.whoCanDelete": "container DELETE routes",
-  "toggle.guestExpiryDays": "grants.ts (default expiresAt on Guest grants)",
+  "toggle.guestExpiryDays": "NOT YET: planned in grants.ts (a default expiresAt on Guest grants); nothing writes expiresAt today, and only the engine's resolve.ts (rule 20) reads it, not access-grant-store.ts",
   "toggle.publicLinks": "SOP.shareToken, DataTable.isPublic, FormDefinition.isPublic",
 };
 
@@ -165,23 +165,80 @@ const OBJECT_ENFORCEMENT: Record<`object.${ObjectType}`, string> = {
   "object.person_card": "GET /api/people/pick, GET /api/users",
 };
 
-function appEnforcement(): Record<`app.${AppKey}`, string> {
-  const out = {} as Record<`app.${AppKey}`, string>;
-  for (const key of APP_KEYS) {
-    out[`app.${key}`] = `the ${key} hub or route layout, via gatePage("view", { type: "app", key: "${key}" })`;
-  }
+/**
+ * The app keys' real gates, one explicit entry per key and each naming the
+ * file that enforces it. There is no template: a key added to APP_RULES
+ * without a row here is a compile error (the Record is exhaustive), and
+ * stage-f.test.ts checks that the file each row names exists, so the
+ * completeness check can catch an app key with no gate again.
+ */
+export const APP_GATE_FILES: Record<AppKey, { file: string; how: string }> = {
+  home: { file: "src/app/(dashboard)/home/page.tsx", how: 'gatePage("view", { type: "app", key: "home" }), also on my-work, inbox, everything, favorites, activity and dashboards' },
+  planner: { file: "src/app/(dashboard)/planner/layout.tsx", how: "FlaggedAppKeyGate" },
+  chat: { file: "src/app/(dashboard)/tlk/layout.tsx", how: "the Talk gate (module state, then legacyTierAllows)" },
+  docs: { file: "src/app/(dashboard)/docs/(hub)/layout.tsx", how: "FlaggedAppKeyGate on the hub page only; /docs/[id] is decision B3's (CanonicalHubGate)" },
+  teams: { file: "src/app/(dashboard)/people/page.tsx", how: 'gatePage("view", { type: "app", key: "teams" }), also on organization and people/*' },
+  tables: { file: "src/app/(dashboard)/tables/layout.tsx", how: "TablesModuleGate (and tables/[id]/layout.tsx)" },
+  ai: { file: "src/app/(dashboard)/sidekick/layout.tsx", how: "AppKeyGate (and agents/layout.tsx)" },
+  settings: { file: "src/components/settings/settings-gate.tsx", how: "SettingsGate, the settings door (settings-door.ts)" },
+  goals: { file: "src/app/(dashboard)/okrs/layout.tsx", how: "FlaggedAppKeyGate (and src/lib/page-gates.ts)" },
+  trash: { file: "src/app/(dashboard)/trash/page.tsx", how: 'gatePage("view", { type: "app", key: "trash" }), and api/trash/*' },
+  templates: { file: "src/app/(dashboard)/templates/page.tsx", how: 'gatePage("view", { type: "app", key: "templates" }), and src/lib/templates/gate.ts' },
+  timesheets: { file: "src/app/(dashboard)/timesheets/layout.tsx", how: "FlaggedAppKeyGate" },
+  meetings: { file: "src/app/(dashboard)/meetings/layout.tsx", how: "FlaggedAppKeyGate" },
+  clock: { file: "src/app/(dashboard)/clock/layout.tsx", how: "FlaggedAppKeyGate" },
+  library: { file: "src/app/(dashboard)/files/layout.tsx", how: "FlaggedAppKeyGate" },
+  clips: { file: "src/app/(dashboard)/notetaker/layout.tsx", how: "FlaggedAppKeyGate" },
+  sops: { file: "src/app/(dashboard)/sops/(app)/layout.tsx", how: "FlaggedAppKeyGate on the SOP centre's own pages; /sops/[id] is decision B3's (CanonicalHubGate)" },
+  policies: { file: "src/app/(dashboard)/policies/layout.tsx", how: "FlaggedAppKeyGate" },
+  agreements: { file: "src/app/(dashboard)/agreements/page.tsx", how: 'gatePage("view", { type: "app", key: "agreements" })' },
+  reviews: { file: "src/app/(dashboard)/reviews/page.tsx", how: 'gatePage("view", { type: "app", key: "reviews" }), and api/reviews' },
+  talent: { file: "src/app/(dashboard)/talent/page.tsx", how: 'gatePage("view", { type: "app", key: "talent" })' },
+  analytics: { file: "src/app/(dashboard)/analytics/layout.tsx", how: 'gatePage("view", { type: "app", key: "analytics" })' },
+  rollup: { file: "src/app/(dashboard)/team/rollup/page.tsx", how: 'gatePage("view", { type: "app", key: "rollup" })' },
+  candor: { file: "src/app/(dashboard)/candor/page.tsx", how: 'cultureGate("candor") (src/lib/people/culture-gate.ts), and candor/[id]' },
+  kudos: { file: "src/app/(dashboard)/kudos/layout.tsx", how: 'FlaggedAppKeyGate, and cultureGate("kudos") on the page' },
+  surveys: { file: "src/app/(dashboard)/surveys/page.tsx", how: 'cultureGate("surveys") (src/lib/people/culture-gate.ts), and surveys/[id]' },
+  tools: { file: "src/app/(dashboard)/tools/layout.tsx", how: "AppKeyGate" },
+  assets: { file: "src/app/(dashboard)/assets/layout.tsx", how: "AppKeyGate" },
   // The one sanctioned exception to the app-key 404 (access 5.5): /team and
   // /team/workload render LockedPage without Request access, so they ask
   // can() through their own gate instead of gatePage.
-  out["app.team"] = `src/app/(dashboard)/team/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "team" }) with LockedPage)`;
-  out["app.workload"] = `src/app/(dashboard)/team/workload/page.tsx via teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "workload" }) with LockedPage)`;
+  team: { file: "src/app/(dashboard)/team/page.tsx", how: 'teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "team" }) with LockedPage)' },
+  workload: { file: "src/app/(dashboard)/team/workload/page.tsx", how: 'teamAppGate (src/lib/people/team-gate.ts, can("view", { type: "app", key: "workload" }) with LockedPage)' },
+  "weekly-reviews": { file: "src/app/(dashboard)/team/reviews/page.tsx", how: 'gatePage("view", { type: "app", key: "weekly-reviews" })' },
+  "kra-kpi": { file: "src/app/(dashboard)/kra-kpi/page.tsx", how: 'gatePage("view", { type: "app", key: "kra-kpi" })' },
+  alignment: { file: "src/app/(dashboard)/team/alignment/page.tsx", how: 'gatePage("view", { type: "app", key: "alignment" }), and okrs/page.tsx' },
+  "kpi-reviews": { file: "src/app/(dashboard)/team/kpi-reviews/page.tsx", how: 'gatePage("view", { type: "app", key: "kpi-reviews" })' },
+  announcements: { file: "src/app/(dashboard)/announcements/layout.tsx", how: "FlaggedAppKeyGate" },
+  forms: { file: "src/app/(dashboard)/forms/layout.tsx", how: "FormsGate" },
+  automation: { file: "src/app/(dashboard)/automation/layout.tsx", how: "AppKeyGate" },
+  build: { file: "src/app/(dashboard)/build/layout.tsx", how: "AppKeyGate" },
+  store: { file: "src/app/(dashboard)/store/layout.tsx", how: "AppKeyGate" },
+  integrations: { file: "src/app/(dashboard)/integrations/layout.tsx", how: "AppKeyGate" },
+};
+
+function appEnforcement(): Record<`app.${AppKey}`, string> {
+  const out = {} as Record<`app.${AppKey}`, string>;
+  // FlaggedAppKeyGate (Phase 8 stages E and F, settings-architecture S7):
+  // open as before with the flags off, logging would-be denials under
+  // SETTINGS_GATE_LOG_ONLY, enforcing under ACCESS_V2_RESOLVER.
+  for (const key of APP_KEYS) {
+    const row = APP_GATE_FILES[key];
+    out[`app.${key}`] = `${row.file} via ${row.how}`;
+  }
   return out;
 }
 
 function settingsEnforcement(): Record<`settings.${SettingsPageKey}`, string> {
   const out = {} as Record<`settings.${SettingsPageKey}`, string>;
   for (const page of SETTINGS_PAGE_KEYS) {
-    out[`settings.${page}`] = `src/app/(dashboard)/settings/layout.tsx via SETTINGS_PAGE_GATES["${page}"]`;
+    // Each Workspace segment's layout renders SettingsGate (a parent layout
+    // cannot see the pathname); today's table decides until
+    // ACCESS_V2_RESOLVER, then SETTINGS_PAGE_GATES (settings-gate-engine.ts).
+    out[`settings.${page}`] = page.startsWith("account/")
+      ? `src/app/(dashboard)/account/layout.tsx (personal, every signed-in person)`
+      : `src/components/settings/settings-gate.tsx SettingsGate (settings-legacy.ts, then SETTINGS_PAGE_GATES["${page}"] under ACCESS_V2_RESOLVER)`;
   }
   return out;
 }

@@ -145,6 +145,34 @@ export const designSystemPlugin = {
         };
       },
     },
+    // settings-architecture 8.3: settings chrome never names its exit. "Back
+    // to app", Esc and a page's own exits call closeSettings() (returnTo,
+    // else lastAppPath, else the Work landing); a hard-coded router.push or
+    // router.replace to "/today" or "/home" would drop the person somewhere
+    // other than where they came from. Scoped in eslint.config.mjs to the
+    // settings shell and the two doors.
+    "no-hardcoded-settings-exit": {
+      meta: { type: "problem", docs: { description: "Settings chrome exits through closeSettings(), never a hard-coded /today or /home (settings-architecture 8.3)." }, schema: [] },
+      create(context) {
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (callee.type !== "MemberExpression" || callee.property.type !== "Identifier") return;
+            if (callee.property.name !== "push" && callee.property.name !== "replace") return;
+            const obj = callee.object;
+            if (!(obj.type === "Identifier" && /router$/i.test(obj.name))) return;
+            const arg = node.arguments[0];
+            if (!arg) return;
+            const lit = arg.type === "Literal" ? arg.value : arg.type === "TemplateLiteral" && arg.expressions.length === 0 ? arg.quasis[0]?.value?.cooked : null;
+            const isHome = typeof lit === "string" && /^\/(today|home)(?:[?#]|$)/.test(lit);
+            const isHomeConst = arg.type === "Identifier" && arg.name === "WORK_HOME_HREF";
+            if (isHome || isHomeConst) {
+              context.report({ node, message: "Settings chrome never names its exit: call closeSettings() from useSettingsNav() (settings-architecture 8.3)." });
+            }
+          },
+        };
+      },
+    },
     "dynamic-page-declares-breadcrumb": {
       meta: { type: "problem", docs: { description: "A page.tsx under a dynamic segment declares <Breadcrumb items/> (spec-shell 2.1 rule 2)." }, schema: [] },
       create(context) {

@@ -354,6 +354,38 @@ const nextConfig: NextConfig = {
       // had, so the redirect changes nobody's access: one org chart, one place
       // (spec-teams-people section 0, settings-architecture 8.4).
       { source: "/settings/hierarchy", destination: "/organization", permanent: true },
+      //
+      // Phase 8 Stage A: the rest of settings-architecture 8.4. Every row is
+      // SETTINGS_REDIRECTS in src/lib/settings-registry.ts (a vitest test,
+      // src/lib/settings-redirects.config.test.ts, holds this table and that
+      // one in step), each path-only row has a route-handler twin at its old
+      // path, and each target page exists and admits the same people the old
+      // page did. Next appends the source query to the destination, so a
+      // bookmark's parameters ride along; a target's own ?tab= or #hash is
+      // part of the destination.
+      { source: "/settings/modules", destination: "/settings/apps#modules", permanent: true },
+      { source: "/settings/tags", destination: "/settings/tasks?tab=tags", permanent: true },
+      { source: "/settings/task-types", destination: "/settings/tasks?tab=types", permanent: true },
+      { source: "/settings/defaults", destination: "/settings/identity?tab=appearance", permanent: true },
+      { source: "/settings/permissions", destination: "/settings/access", permanent: true },
+      { source: "/settings/import-export", destination: "/settings/data?tab=import", permanent: true },
+      // /imports: the Import tab ships (Stage D), so the old hub 308s into it
+      // (spec-settings-workspace section 0, its S5 row).
+      { source: "/imports", destination: "/settings/data?tab=import", permanent: true },
+      { source: "/settings/integrations", destination: "/settings/api", permanent: true },
+      // The reverse of the old in-page redirect: personal preferences belong
+      // in the personal door. The page file moved in the same change, so
+      // there is no loop.
+      { source: "/settings/notifications", destination: "/account/notifications", permanent: true },
+      { source: "/account/appearance", destination: "/account/preferences?tab=appearance", permanent: true },
+      // The avatar menu's two old query rows. The matched `tab` rides along
+      // (Next appends the source query). On the themes row the target's own
+      // `tab=appearance` comes first and wins; on the shortcuts row the
+      // carried `tab=shortcuts` is inert (/account/shortcuts has no tabs).
+      // /settings/page.tsx answers the same two rows on a server that has
+      // not re-read this file.
+      { source: "/settings", has: [{ type: "query", key: "tab", value: "themes" }], destination: "/account/preferences?tab=appearance", permanent: true },
+      { source: "/settings", has: [{ type: "query", key: "tab", value: "shortcuts" }], destination: "/account/shortcuts", permanent: true },
       // Phase 6, spec-goals section 0. /goals was a dead path the nav config
       // referenced; it is the Goals list. The query string passes through.
       { source: "/goals", destination: "/okrs", permanent: true },
@@ -386,8 +418,23 @@ const nextConfig: NextConfig = {
       // become a real page (a plan-aware or template-aware sign-up) later.
       // Same for /join, whose destination is the invite arm of the same form
       // (register reads ?token and switches to "Join <org>").
-      { source: "/signup", destination: "/register", permanent: false },
-      { source: "/join", destination: "/register", permanent: false },
+      //
+      // PHASE 8: /signup and /join are real pages now ((auth)/signup and
+      // (auth)/join), so the two 307 rows that sent them to /register are gone
+      // (a config redirect runs before the filesystem and would shadow the
+      // pages). /register is the old name and 308s to them, the invitation
+      // arm first: a stored invite email's /register?token=X lands on
+      // /join?token=X with the token intact. (auth)/register/route.ts is the
+      // twin that answers under hot reload.
+      { source: "/register", has: [{ type: "query", key: "token" }], destination: "/join", permanent: true },
+      { source: "/register", destination: "/signup", permanent: true },
+      // Phase 8 Stage B: the two old wizards are the one at /onboard, which
+      // renders the wizard for an Owner or Admin of a workspace still being
+      // set up and "Nothing to set up" (with its way on to Work home) for
+      // everyone else. Route-handler twins at (auth)/welcome/route.ts and
+      // setup/route.ts answer under hot reload.
+      { source: "/welcome", destination: "/onboard", permanent: true },
+      { source: "/setup", destination: "/onboard", permanent: true },
       //
       // Phase 7 (spec-ai-automation.md section 0). The two static AI mocks
       // are deleted and their addresses land on the real surfaces. Next

@@ -10,6 +10,8 @@ import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import { orgRoleOf } from "@/lib/access/org-role";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
@@ -146,6 +148,11 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
+  // The level as the database holds it now: a person demoted a moment ago
+  // must not create an account on the level their token still claims.
+  const fresh = await freshWorkspaceActor(session);
+  if (!fresh.ok) return jsonError(fresh.error, fresh.status);
+  if (!legacyIsManagerLevel(fresh.level)) return jsonError("Forbidden", 403);
 
   // Plan limit enforcement
   const planCheck = await checkPlanLimit(getOrgId(session), "users");
@@ -159,7 +166,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Never take the level from the body on trust (grantable-level.ts).
-  const level = grantableAccessLevel((session.user as { accessLevel?: string }).accessLevel, accessLevel);
+  const level = grantableAccessLevel(fresh.level, accessLevel);
   if (!level) return jsonError("You can't give that access level. An admin sets it in Members.", 403);
 
   const existing = await prisma.user.findFirst({
@@ -192,6 +199,8 @@ export async function POST(req: NextRequest) {
       departmentId,
       roleId,
       accessLevel: level,
+      // The org-role mirror, written with the level (spec 10 step 0).
+      orgRole: orgRoleOf({ accessLevel: level }),
       managerId,
       organizationId: getOrgId(session),
     },

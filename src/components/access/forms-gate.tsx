@@ -19,7 +19,7 @@
 
 import { notFound } from "next/navigation";
 import { requireSessionUser } from "@/lib/page-gates";
-import { isGuestViewer } from "@/lib/route-guard";
+import { pageViewerIsGuest } from "@/lib/access/page-viewer";
 import { nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 
@@ -30,7 +30,7 @@ export async function FormsGate({ children }: { children: React.ReactNode }) {
 
 export async function FormsListGate({ children }: { children: React.ReactNode }) {
   await requireSessionUser();
-  if (await isGuestViewer()) notFound();
+  if (await pageViewerIsGuest()) notFound();
   return <>{children}</>;
 }
 

@@ -8,6 +8,7 @@
 // will fold these checks into a single canonical entrypoint.
 
 import { prisma } from "@/lib/prisma";
+import { delegatedNodeRole } from "@/lib/access/delegate";
 import type { Prisma, Space, SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
@@ -173,7 +174,8 @@ async function spaceRoleOf(spaceId: string, userId: string, accessLevel: string 
   const grants = emptyGrants(ctx);
   const own = row.members[0]?.role as MemberRole | undefined;
   if (own) grants.space.set(row.id, own);
-  return { row, role: decide(rows, grants, { kind: "space", id: row.id }).role };
+  const live = decide(rows, grants, { kind: "space", id: row.id }).role;
+  return { row, role: await delegatedNodeRole(userId, row.organizationId, accessLevel, { kind: "space", id: row.id }, live) };
 }
 
 /**

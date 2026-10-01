@@ -47,13 +47,12 @@ export function isHubKey(key: string): key is HubKey {
 /**
  * The takeover prefixes (spec-shell 2.8). `OsShell` renders the settings frame
  * when one of these matches, `resolveHub` rule 1 reads the same list, and
- * `lastAppPath` excludes it. `/imports` is the one member outside the two door
- * prefixes: it renders inside the takeover with the Data row active until it
- * 308s into `/settings/data?tab=import`, when its entry here, its
- * `alsoActiveOn` and its `ROUTE_HUB` row are deleted together. A test pins the
- * array to exactly these three so a fourth can never be added by accident.
+ * `lastAppPath` excludes it. Exactly the two door prefixes: `/imports` was a
+ * third until the Data > Import tab shipped (Phase 8 Stage D); it now 308s to
+ * `/settings/data?tab=import`, and its entry here, its `alsoActiveOn` and its
+ * `ROUTE_HUB` row went in the same change. A test pins the array.
  */
-export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/imports"];
+export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account"];
 
 /**
  * URLs under `(dashboard)` that are resolved by a redirect before a hub is ever
@@ -91,6 +90,9 @@ export const REDIRECT_ROUTES: readonly string[] = [
   // renders (spec-tools-misc section 1, "delete the /marketing prefix from
   // the home row"; naming-canon retires "Marketing (as an app)").
   "/marketing",
+  // Phase 8 Stage D: /imports 308s to Workspace settings > Data > Import
+  // (a route-handler twin of the next.config.ts row).
+  "/imports",
 ];
 
 /**
@@ -198,7 +200,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // ── Settings ──────────────────────────────────────────────────────
   "/settings": "settings",
   "/account": "settings",
-  "/imports": "settings",
 };
 
 /**
@@ -272,7 +273,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/forms": "Forms",
   "/settings": "Workspace settings",
   "/account": "My settings",
-  "/imports": "Import",
 
   // ── Nested static directories (the hierarchy under a hub row) ──────
   //
@@ -466,6 +466,12 @@ export function resolveCrumbTrail(pathname: string): { label: string; href?: str
 /** What a hub's landing URL may depend on. The only two branches in the table. */
 export type HubHrefContext = {
   /**
+   * The Workspace settings page a reader below Admin lands on (the first page
+   * the settings door opens for them; spec-settings-workspace 1.1: the People
+   * team lands on Members). Null or absent: My settings > Profile.
+   */
+  settingsReaderHref?: string | null;
+  /**
    * Whether Ask AI renders for the viewer (the ai app, AI features on for the
    * workspace, not a Guest). With it off the AI hub's front door is its
    * Workflows page, which still works, never an Ask AI page that answers
@@ -515,7 +521,8 @@ export function hubDefaultHref(hub: HubKey, ctx: HubHrefContext = {}): string {
       // Module off: Forms is the hub's only content, so it is the door.
       return ctx.tablesModuleOn === false ? "/forms" : "/tables";
     case "settings":
-      return ctx.canManageWorkspace ? "/settings" : "/account/profile";
+      if (ctx.canManageWorkspace) return "/settings";
+      return ctx.settingsReaderHref ?? "/account/profile";
   }
 }
 
@@ -591,4 +598,22 @@ export function resolveActiveRow<T extends ActiveRowInput>(
   }
 
   return best;
+}
+
+/** The Workspace pages a reader opens, in the sidebar's order (boot's one door decision). */
+const READER_LANDING_ORDER: readonly string[] = ["members", "structure", "access", "scoring"];
+
+/**
+ * Where the Settings hub lands for a viewer below Admin who reads some
+ * Workspace pages (spec-settings-workspace 1.1's table): the first page the
+ * door opens for them, never a page that would refuse them. Pure: it reads
+ * only what /api/boot sent (settingsReaderPages under the engine's door,
+ * settingsReader under today's table, which opens Members for the tier).
+ */
+export function settingsReaderLanding(viewer: { settingsReader?: boolean; settingsReaderPages?: readonly string[] }): string | null {
+  if (viewer.settingsReaderPages) {
+    const first = READER_LANDING_ORDER.find((k) => viewer.settingsReaderPages!.includes(k));
+    return first ? `/settings/${first}` : null;
+  }
+  return viewer.settingsReader === true ? "/settings/members" : null;
 }

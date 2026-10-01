@@ -20,8 +20,9 @@ import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
-import { checkPermission, type AccessLevel as PermAccessLevel } from "@/lib/permissions";
-import { legacyIsManagerLevel, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { hasPermission } from "@/lib/api-helpers";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { goalVisibilityOr } from "@/lib/goal-audience";
 import { goalRightsActor } from "@/lib/alignment-scope";
 import { mayEditGoal } from "@/lib/goals/goal-rights";
@@ -970,7 +971,7 @@ const createWorkspaceTool: ToolDefinition = {
 const invitePersonWithRole: ToolDefinition = {
   name: "invite_person_with_role",
   description:
-    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /register?token=… email flow.",
+    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /join?token=… email flow.",
   input_schema: {
     type: "object",
     properties: {
@@ -989,15 +990,21 @@ const invitePersonWithRole: ToolDefinition = {
     // Same gate as POST /api/invitations (the People create permission), and
     // the level comes from a closed list: the model's input can never mint an
     // admin, and a person who cannot invite from the UI cannot invite here.
+    // hasPermission itself, so the engine's rule answers here too once
+    // ACCESS_V2_RESOLVER is on (Owner and Admin), exactly as the route does.
     const level = await callerLevel(ctx);
-    const matrixOrg = await prisma.organization.findUnique({ where: { id: ctx.orgId }, select: { settings: true } });
-    const matrix = ((matrixOrg?.settings as { permissions?: unknown } | null)?.permissions ?? null) as Parameters<typeof checkPermission>[1];
-    if (!level || !checkPermission(level as PermAccessLevel, matrix, "people", "create")) {
+    const caller = await callerSession(ctx);
+    if (!level || !caller || !(await hasPermission(caller, "people", "create"))) {
       return { error: "You can't invite people. Ask an admin to send the invitation." };
     }
+    // The level follows the ONE invite rule (src/lib/access/invite-level.ts),
+    // the same as POST /api/invitations: at most the inviter's own rung,
+    // never an admin unless the inviter is one. A refused level is an
+    // error the model reports, never a silent downgrade.
     const requested = String(input.accessLevel ?? "EMPLOYEE").toUpperCase();
-    const INVITABLE = new Set(["EMPLOYEE", "TEAM_LEAD", "MANAGER", "DIRECTOR", "VP", "C_LEVEL", "HR", "AGENT"]);
-    const inviteLevel = requested === "COMPANY_ADMIN" && legacyIsAdminLevel(level) ? "COMPANY_ADMIN" : INVITABLE.has(requested) ? requested : "EMPLOYEE";
+    const levelCheck = resolveInviteLevel(level, requested);
+    if (!levelCheck.ok) return { error: levelCheck.error };
+    const inviteLevel = levelCheck.level;
     const email = String(input.email ?? "").trim();
     if (!email.includes("@")) throw new Error("Valid email is required");
     const kraIds = Array.isArray(input.kraIds) ? (input.kraIds as string[]) : [];
@@ -1048,7 +1055,7 @@ const invitePersonWithRole: ToolDefinition = {
         email: invitation.email,
         // Token is sensitive, don't echo it back in chat. The email
         // worker already includes the registration link.
-        registerLink: `/register?token=…`,
+        registerLink: `/join?token=…`,
       },
     };
   },

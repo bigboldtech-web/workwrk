@@ -11,7 +11,8 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { resolveRequestsFor } from "@/lib/access/access-requests";
 import {
   addGoalAssignees,
   canSeeGoal,
@@ -78,7 +79,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.ok) return jsonError(parsed.error, 400);
   if (parsed.entries.length === 0) return jsonError("No assignees to add", 400);
 
+  // The people this POST adds by name (not already on the goal), read before
+  // the write so a re-add of an existing contributor answers nothing.
+  const namedIds = parsed.entries.filter((e) => e.type === "USER").map((e) => e.id);
+  const already = namedIds.length > 0
+    ? new Set((await prisma.goalAssignee.findMany({ where: { okrId: id, userId: { in: namedIds } }, select: { userId: true } })).map((r) => r.userId))
+    : new Set<string>();
   const added = await addGoalAssignees(id, parsed.entries);
+  // Adding someone to the goal by name is how its owner shares it (the
+  // Access requests card's Open to share lands here), so it answers that
+  // person's open Request on this goal. Before this the request stayed open
+  // and the only way to clear it was Decline, which told the person "declined"
+  // after they had been added. Only a person newly added by name: a
+  // contributor who already was one and asks for edit keeps their request.
+  const deciderId = getUserId(session);
+  for (const userId of namedIds) {
+    if (already.has(userId) || userId === deciderId) continue;
+    await resolveRequestsFor({ organizationId: orgId, objectTypes: ["goal"], objectId: id, requesterId: userId, roles: null, deciderId });
+  }
   return jsonSuccess({ added, ...(await audiencePayload(orgId, okr)) });
 }
 

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
@@ -22,8 +23,9 @@ export async function POST(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const accessLevel = (session as { user: { accessLevel?: string } }).user.accessLevel;
-  if (!accessLevel || !["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel)) {
+  // Owner only (settings spec Identity > Danger zone); every Admin until
+  // the Owner and Admin split is approved (SETTINGS_OWNER_SPLIT, default OFF).
+  if (!freshMayManageOwnerPage(await freshWorkspaceActor(session))) {
     return jsonError("Only company admins can restore the organization", 403);
   }
 

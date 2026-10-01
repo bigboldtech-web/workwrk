@@ -866,6 +866,11 @@ function objectFor(i: LegacyInputs, target: ObjectType): ObjectFacts {
         ownerOnlySubjectId: anchor.entityId,
       };
     }
+    // A doc anchored to a task that no longer exists reaches nobody but an
+    // org admin (node-access.ts, node-rules R6 anchorReach BOARD_ITEM gives
+    // NONE, and the creator term needs the anchor to reach). The owner rule
+    // must not fire on it, exactly as loadDocFacts drops it.
+    if (danglingTaskAnchor(i)) return { ...blank(i.doc.id, i.doc.organizationId), ownerId: null };
     return { ...blank(i.doc.id, i.doc.organizationId), ownerId: i.doc.createdById };
   }
   return blank("unknown", null);
@@ -1066,6 +1071,14 @@ const KNOWN_DOC_ANCHORS: ReadonlySet<string> = new Set([
   "NOTEPAD",
 ]);
 
+const TASK_DOC_ANCHORS: ReadonlySet<string> = new Set(["BOARD_ITEM", "TASK", "BOARD_ROW"]);
+
+/** A doc anchored to a task row that is gone (deleted with the doc left behind). */
+function danglingTaskAnchor(i: LegacyInputs): boolean {
+  const anchor = i.doc?.anchor;
+  return !!anchor?.entityType && !!anchor.entityId && TASK_DOC_ANCHORS.has(anchor.entityType) && !i.item;
+}
+
 function isAdmin(ctx: MismatchContext): boolean {
   return legacyIsAdminLevel(ctx.input.accessLevel);
 }
@@ -1149,6 +1162,16 @@ const CLASSIFIERS: ReadonlyArray<{ key: string; matches: (ctx: MismatchContext) 
     },
   },
 
+  // ── Docs on a task that is gone: node-access is the truth ──
+  {
+    key: "dangling-task-doc-creator-follows-node-access",
+    matches: (ctx) => ctx.helper === "resolveDoc" && danglingTaskAnchor(ctx.input) && !isAdmin(ctx) && narrows(ctx),
+  },
+  {
+    key: "dangling-task-doc-admin-follows-node-access",
+    matches: (ctx) => ctx.helper === "docAccessible" && danglingTaskAnchor(ctx.input) && isAdmin(ctx) && widens(ctx),
+  },
+
   // ── Folders ──
   {
     key: "pivot-folder-readable-admin-without-row",
@@ -1161,6 +1184,21 @@ const CLASSIFIERS: ReadonlyArray<{ key: string; matches: (ctx: MismatchContext) 
       ctx.input.folder?.visibility === "PRIVATE" &&
       !!ctx.input.folder.memberRole &&
       widens(ctx),
+  },
+  {
+    // Phase 8 stage E, the broad local run (every person against every
+    // Folder): folderVisibleTo is the Folder HALF of the question (a PRIVATE
+    // Folder hides from non-owners); the Space half is asked first by each of
+    // its three call sites. The engine answers the whole question, so a
+    // person with no role on the Space reads "not visible" there and
+    // "visible" here.
+    key: "folder-visible-to-is-the-folder-half",
+    matches: (ctx) =>
+      ctx.helper === "folderVisibleTo" &&
+      ctx.input.folder?.visibility !== "PRIVATE" &&
+      !ctx.input.space?.memberRole &&
+      ctx.input.space?.visibility !== "ORG" &&
+      narrows(ctx),
   },
   {
     key: "audit-1.6-c-folder-grantee-board",
@@ -1455,6 +1493,27 @@ export const EXPECTED_MISMATCHES: Record<string, ExpectedMismatch> = {
     source: "doc-access.ts:46 and :87; spec 3.3 and 5.1",
     reason:
       "docAccessible returns true for a doc with no anchor and for any anchor type it does not know (LEAD and anything a future suite adds). The engine has no open default: an unrecognised anchor resolves to none. Widening a doc gate by accident is the one direction that must never ship quietly, so the open default is preserved verbatim until each anchor type has a rule.",
+    direction: "narrows",
+  },
+  "dangling-task-doc-creator-follows-node-access": {
+    key: "dangling-task-doc-creator-follows-node-access",
+    source: "access.ts:253 (resolveDoc's creator branch); doc-access.ts docAccessible via node-access.ts docRoleFor; node-rules R6 anchorReach BOARD_ITEM",
+    reason:
+      "When a task is deleted and a doc anchored to it is left behind, the two helpers disagree today: resolveDoc lets the creator in before it looks at the anchor, while docAccessible (the gate on /api/docs/[id], which already delegates to node-access) finds no task and answers not found. node-access is the shipped truth: the anchor reaches nobody, so the creator term never applies. The engine follows node-access, so the creator's resolveDoc answer narrows to what the page already shows them.",
+    direction: "narrows",
+  },
+  "dangling-task-doc-admin-follows-node-access": {
+    key: "dangling-task-doc-admin-follows-node-access",
+    source: "doc-access.ts docAccessible via node-access.ts docRoleFor; node-rules R6 (R1 org admin before the anchor); board.ts:614 in the transcription",
+    reason:
+      "The transcription of the old docAccessible denied an org admin a doc whose task is gone, because the missing board was checked before the admin ladder. node-access, which docAccessible now calls, gives an org admin every doc in the workspace first (R1), so an admin can still open and clean up an orphaned doc. The engine follows node-access.",
+    direction: "widens",
+  },
+  "folder-visible-to-is-the-folder-half": {
+    key: "folder-visible-to-is-the-folder-half",
+    source: "folder.ts:20-25 (its own comment); the Phase 8 stage E broad parity run",
+    reason:
+      "folderVisibleTo answers only the Folder's PRIVATE predicate; each of its three call sites (api/spaces/[id]/children, spaces/[slug]/page.tsx, folders/[id]/page.tsx) has already required the Space, so the helper never decides for a person outside it. The engine answers the whole question and says no. No person's reach changes: the helper is synchronous and is not delegated (flags.ts).",
     direction: "narrows",
   },
   "pivot-folder-visible-to-ignores-folder-grant": {

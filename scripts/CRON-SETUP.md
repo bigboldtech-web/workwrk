@@ -216,6 +216,32 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
 the schedule.
 
+
+### Audit log retention (Phase 8, NOT INSTALLED)
+
+`POST /api/cron/audit-purge` deletes Audit log rows older than the window an
+Owner chose in Settings > Data > Retention & privacy ("Keep the audit log
+for"). It acts ONLY on orgs that set `settings.retention.auditDays`; an org
+that never chose keeps its log forever, so adding this row deletes nothing
+anyone did not ask to delete. The window is floored at 90 days, deletes run in
+batches of 5000, and each org gets one `audit.purged` row naming how many
+entries went. It never deletes the rows features read back (weekly review
+decisions, goal creators, invitations, shares, the retired permissions grid,
+consent and staff rows: `src/lib/audit-retention.ts`). Until this row AND the
+trash-purge row are installed, both retention rows sit behind Show upcoming
+features on Data > Retention, captioned "Not enforced yet"; once both rows are
+in, move them out (data/page.tsx RetentionTab).
+
+| Job | Schedule | Command |
+|---|---|---|
+| Purge audit rows past each org's chosen window | `10 4 * * *` (4:10 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/audit-purge` |
+
+Dry run first (reads only):
+
+```
+curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "https://workwrk.com/api/cron/audit-purge?dry=1"
+```
+
 ## Access parity job (NOT INSTALLED: the founder adds this row)
 
 `scripts/access-parity-job.mjs` is the step-2 job from
@@ -245,7 +271,24 @@ visibility/membership bucket before the rest). `--allow-remote` is only
 needed if `DATABASE_URL` does not point at localhost:
 
 ```
-15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --sections legacy,node --node-per-kind 40 --prove-tables --prove-resolver --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+
+Phase 8 stage E fix: `--prove-tables --prove-resolver` evaluate the flip
+state in the job's own process (the session stays read-only; the server's
+environment is never touched). Without `--prove-tables` the node section
+cannot fail: with ACCESS_V2_TABLES off the engine reads the old tables and
+one named row explains every node case, so a week of flag-off runs would
+prove nothing for Spaces, Folders, Lists, Docs, Tables, Canvases and Forms.
+The job prints a WARNING line when it runs the node section with the flag off.
+
+Phase 8 stage E: the job now has two sections. `legacy` is the Phase 0
+comparison with a live tie-break; `node` compares can() against the live
+resolvers (node-access, item-gate, sop-access, canSeeGoal, the settings door,
+the matrix cells). `--node-per-kind 40` keeps the nightly node section to
+about the size of the legacy one on a large tenant. Run it once more by hand
+with the production flag state you are about to turn on (for example
+`ACCESS_V2_TABLES=true ACCESS_V2_RESOLVER=true node scripts/access-parity-job.mjs ...`):
+the criterion is zero UNEXPECTED in both sections with that state.
 ```
 
 Read the log the next morning: a line `UNEXPECTED: 0` is the pass. The

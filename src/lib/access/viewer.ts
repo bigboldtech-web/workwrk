@@ -16,7 +16,10 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth";
 import { prisma } from "../prisma";
-import { adminScopesOf, isAgentOf, isSeededPeopleTeam, orgRoleOf } from "./org-role";
+import { adminScopesOf, effectiveAdminScopes, effectiveIsAgent, effectiveOrgRole, isAgentOf, isSeededPeopleTeam, orgRoleOf } from "./org-role";
+import { accessV2Tables } from "./flags";
+import { ownerIdsFor } from "../admin/company-detail";
+import { parseAccessSettings } from "./settings";
 import type { ActingAs, ObjectRole, Viewer, ViewerStatus } from "./types";
 
 /** Per-request memo of the expensive Viewer fields. */
@@ -95,6 +98,10 @@ export async function hydrate(
         // directory, no discoverability. Re-reading the level here is what
         // makes the promised fallback actually be the fallback.
         accessLevel: true,
+        // Phase 8 stage E: the Admin scopes, read only with ACCESS_V2_TABLES on.
+        adminScopes: true,
+        // ACCESS_V2_TABLES: read only to narrow a Member to a Guest (org-role.ts).
+        orgRole: true,
       },
     }),
     reportTreeFor(viewer.userId),
@@ -112,6 +119,14 @@ export async function hydrate(
   const storedLevel = row?.accessLevel ?? null;
   const reDerived =
     opts.reDeriveOrgRole && storedLevel ? orgRoleOf({ accessLevel: storedLevel }) : null;
+  // ACCESS_V2_TABLES (default OFF): the row's stored org role, which may only
+  // refine the accessLevel mirror (an Owner among the admins), never widen it.
+  let v2: Pick<Viewer, "orgRole" | "isAgent" | "adminScopes"> | null = null;
+  if (accessV2Tables() && row && storedLevel) {
+    const pick = orgRoleOf({ accessLevel: storedLevel }) === "ADMIN" ? (await ownerIdsFor(viewer.organizationId)).includes(viewer.userId) : false;
+    const role = effectiveOrgRole(storedLevel, pick, row.orgRole);
+    v2 = { orgRole: role, isAgent: effectiveIsAgent(storedLevel), adminScopes: effectiveAdminScopes(role, row.adminScopes) };
+  }
 
   const extra: Partial<Viewer> = {
     status: (row?.status as ViewerStatus | undefined) ?? "ACTIVE",
@@ -120,8 +135,9 @@ export async function hydrate(
     officeId: row?.officeId ?? null,
     roleId: row?.roleId ?? null,
     reportTree: reports,
-    peopleTeam:
-      viewer.peopleTeam || people.includes(viewer.userId) || isSeededPeopleTeam(storedLevel),
+    peopleTeam: accessV2Tables()
+      ? people.includes(viewer.userId)
+      : viewer.peopleTeam || people.includes(viewer.userId) || isSeededPeopleTeam(storedLevel),
     teamIds: [], // no Team table until step 4
     tagIds: tags.map((t) => t.tagId),
     ...(reDerived
@@ -131,6 +147,7 @@ export async function hydrate(
           adminScopes: adminScopesOf(reDerived, null),
         }
       : {}),
+    ...(v2 ?? {}),
   };
   MEMO.set(key as object, extra);
   return { ...viewer, ...extra };
@@ -152,6 +169,14 @@ async function reportTreeFor(userId: string): Promise<Set<string>> {
 }
 
 async function peopleTeamIdsFor(organizationId: string): Promise<string[]> {
+  // ACCESS_V2_TABLES (default OFF): toggle 6 governs. A configured list is the
+  // People team (so an admin CAN take an HR person off it); an empty list
+  // falls back to the HR users, which is what the backfill seeds.
+  if (accessV2Tables()) {
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const configured = parseAccessSettings((org?.settings as { access?: unknown } | null)?.access).peopleTeamUserIds;
+    if (configured.length > 0) return configured;
+  }
   const rows = await prisma.user.findMany({
     where: { organizationId, accessLevel: "HR", deletedAt: null },
     select: { id: true },

@@ -5,6 +5,7 @@
 // Phase 6 resolver may add per-Folder ACLs later.
 
 import { prisma } from "@/lib/prisma";
+import { delegatedNodeRole } from "@/lib/access/delegate";
 import { legacyAllows, type LegacyInputs, type VisibilityValue } from "@/lib/access/parity";
 import { withArchivedBy } from "@/lib/archived-by";
 import { loadPathEvidence } from "@/lib/access/node-world";
@@ -209,7 +210,7 @@ export async function folderReadable(
   const folder = await prisma.folder.findUnique({ where: { id: folderId }, select: { organizationId: true } });
   if (!folder) return false;
   const d = await nodeRole(nodeCtxFromLevel(userId, folder.organizationId, accessLevel), { kind: "folder", id: folderId });
-  return roleAtLeast(d.role, "VIEW");
+  return roleAtLeast(await delegatedNodeRole(userId, folder.organizationId, accessLevel, { kind: "folder", id: folderId }, d.role), "VIEW");
 }
 
 export interface FolderSummary {

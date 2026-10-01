@@ -3,11 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { zipFiles, zipTextFile } from "@/lib/zip";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
-function toCsv(headers: string[], rows: Record<string, any>[]): string {
-  const escape = (val: any) => {
-    const s = val === null || val === undefined ? "" : String(val);
-    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+function toCsv(headers: string[], rows: Record<string, unknown>[]): string {
+  const escape = (val: unknown) => {
+    let s = val === null || val === undefined ? "" : String(val);
+    // A cell a spreadsheet would run as a formula stays text.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return s.includes(",") || s.includes('"') || s.includes("\n") || s.startsWith("'") ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(",")];
   for (const row of rows) {
@@ -19,6 +22,13 @@ function toCsv(headers: string[], rows: Record<string, any>[]): string {
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
+
+  // The whole organization in one ZIP (every person's email and access
+  // level, tasks, reviews, activity) is an Admin export, as the Data page
+  // says it is. This route used to answer any signed-in person, Agents and
+  // Guests included.
+  const writeGate = await settingsWriteGate(session, "data", { read: true });
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
 
@@ -77,8 +87,49 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
+  // The whole workspace's WORK (decided addition f, the enterprise target):
+  // Spaces, Folders, Lists, every task on them, Docs, Tables and Goals, so an
+  // export is a real copy of the workspace, not a people-and-HR slice. Tasks
+  // are read in pages of 5000 by id, so a large workspace is exported whole
+  // up to ITEM_CAP (and the manifest says so if it ever stops early).
+  const ITEM_CAP = 200_000;
+  const [spaces, folders, lists, docs, tables, goals] = await Promise.all([
+    prisma.space.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, slug: true, visibility: true, ownerId: true, archivedAt: true, createdAt: true } }),
+    prisma.folder.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, spaceId: true, visibility: true, archivedAt: true, createdAt: true } }),
+    prisma.board.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, spaceId: true, folderId: true, visibility: true, archivedAt: true, createdAt: true } }),
+    prisma.doc.findMany({ where: { organizationId: orgId }, select: { id: true, title: true, entityType: true, entityId: true, parentId: true, createdById: true, archivedAt: true, createdAt: true, updatedAt: true } }),
+    prisma.dataTable.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, spaceId: true, createdById: true, createdAt: true, updatedAt: true } }),
+    prisma.oKR.findMany({ where: { organizationId: orgId }, select: { id: true, title: true, level: true, status: true, progress: true, ownerId: true, parentId: true, startDate: true, createdAt: true } }),
+  ]);
+  const items: { id: string; boardId: string; title: string; status: string | null; priority: string | null; ownerId: string | null; assigneeIds: string[]; startAt: Date | null; dueAt: Date | null; archivedAt: Date | null; createdAt: Date }[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await prisma.item.findMany({
+      where: { organizationId: orgId },
+      select: { id: true, boardId: true, title: true, status: true, priority: true, ownerId: true, assigneeIds: true, startAt: true, dueAt: true, archivedAt: true, createdAt: true },
+      orderBy: { id: "asc" },
+      take: 5000,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    items.push(...page);
+    if (page.length < 5000 || items.length >= ITEM_CAP) break;
+    cursor = page[page.length - 1].id;
+  }
+  const iso = (d: Date | null | undefined) => (d ? d.toISOString() : "");
+
   // Build CSV files
   const csvFiles: Record<string, string> = {};
+
+  csvFiles["spaces.csv"] = toCsv(["id", "name", "slug", "visibility", "ownerId", "archivedAt", "createdAt"], spaces.map((x) => ({ ...x, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt) })));
+  csvFiles["folders.csv"] = toCsv(["id", "name", "spaceId", "visibility", "archivedAt", "createdAt"], folders.map((x) => ({ ...x, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt) })));
+  csvFiles["lists.csv"] = toCsv(["id", "name", "spaceId", "folderId", "visibility", "archivedAt", "createdAt"], lists.map((x) => ({ ...x, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt) })));
+  csvFiles["list-tasks.csv"] = toCsv(
+    ["id", "listId", "title", "status", "priority", "ownerId", "assigneeIds", "startAt", "dueAt", "archivedAt", "createdAt"],
+    items.map((x) => ({ ...x, listId: x.boardId, assigneeIds: x.assigneeIds.join(" "), startAt: iso(x.startAt), dueAt: iso(x.dueAt), archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt) })),
+  );
+  csvFiles["docs.csv"] = toCsv(["id", "title", "entityType", "entityId", "parentId", "createdById", "archivedAt", "createdAt", "updatedAt"], docs.map((x) => ({ ...x, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt) })));
+  csvFiles["tables.csv"] = toCsv(["id", "name", "spaceId", "createdById", "createdAt", "updatedAt"], tables.map((x) => ({ ...x, createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt) })));
+  csvFiles["goals.csv"] = toCsv(["id", "title", "level", "status", "progress", "ownerId", "parentId", "startDate", "createdAt"], goals.map((x) => ({ ...x, startDate: iso(x.startDate), createdAt: iso(x.createdAt) })));
 
   csvFiles["people.csv"] = toCsv(
     ["id", "firstName", "lastName", "email", "status", "accessLevel", "department", "role", "createdAt", "deletedAt"],
@@ -155,8 +206,15 @@ export async function GET(req: NextRequest) {
       meetings: meetings.length,
       kras: kras.length,
       activity: activity.length,
+      spaces: spaces.length,
+      folders: folders.length,
+      lists: lists.length,
+      listTasks: items.length,
+      docs: docs.length,
+      tables: tables.length,
+      goals: goals.length,
     },
-    notes: "WorkwrK tenant export. Activity is capped at 500 most-recent rows; tasks at 1000.",
+    notes: `WorkwrK workspace export. list-tasks.csv holds every task on every List${items.length >= ITEM_CAP ? ` up to ${ITEM_CAP} (this workspace has more; export again after archiving, or ask support)` : ""}. tasks.csv is the older task table. Activity is the 500 most recent rows; the full audit log is its own export.`,
   };
 
   const archive = zipFiles([
@@ -165,14 +223,14 @@ export async function GET(req: NextRequest) {
   ]);
 
   // Tenant exports are sensitive — record who pulled what + when.
-  const totalRows = users.length + departments.length + tasks.length + sops.length + reviews.length + meetings.length + kras.length + activity.length;
+  const totalRows = Object.values(manifest.counts).reduce((a, b) => a + b, 0);
   logAuditEvent({
-    type: "tenant_export",
+    type: "data.exported",
     actorId: getUserId(session),
     organizationId: orgId,
     description: `Exported tenant data (${totalRows} rows across ${Object.keys(csvFiles).length} files)`,
     targetType: "organization",
-    metadata: manifest.counts,
+    metadata: { kind: "workspace", ...manifest.counts },
     severity: "warning",
   });
 

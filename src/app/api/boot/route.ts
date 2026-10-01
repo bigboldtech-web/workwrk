@@ -16,8 +16,13 @@
 // boot screen renders as ErrorState, never a trip to /onboard.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
+import { accessV2Tables, appGatesEnforce, delegateOn } from "@/lib/access/flags";
+import { settingsReaderPagesFor } from "@/lib/access/settings-door";
+import { mayCreateSpace } from "@/lib/access/space-create";
+import type { SettingsPageKey } from "@/lib/access/types";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { retentionDays } from "@/lib/trash-view";
+import { passwordMaxAgeDaysOf, securityHoldFor, type SecurityHold } from "@/lib/auth/security-policy";
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
@@ -27,11 +32,14 @@ import { countPoliciesToAck } from "@/lib/policies-to-ack";
 import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { getEffectivePreferences, type EffectivePreferences } from "@/lib/preferences";
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
+import { engineTiers, tiersOfLevel, type ViewerTiers } from "@/lib/access/viewer-tiers";
+import { personScope } from "@/lib/process-scope";
 import { APP_ACCESS } from "@/lib/app-access";
 import { MODULE_APP_KEYS } from "@/lib/modules";
-import { orgRoleOf, isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import { orgRoleOf, isAgentOf, peopleTeamOf } from "@/lib/access/org-role";
 import { parseAccessSettings } from "@/lib/access/settings";
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { ownerSplitOn, scopeForOwnerPage, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 
@@ -83,7 +91,44 @@ export interface BootPayload {
     adminScopes: string[];
     /** Reports, solid or dotted (the access engine's rule). */
     hasReports: boolean;
+    /**
+     * The display tiers the rail, hub sidebars and create menus read
+     * (src/lib/access/viewer-tiers.ts), answered here so no client surface
+     * reads the level. Optional for an older payload (none cleared).
+     */
+    tiers?: ViewerTiers;
+    /**
+     * Opens the SOP and Policy compliance ledgers (src/lib/process-scope.ts
+     * personScope canView: org-wide levels, or a manager with reports), the
+     * rule their layouts 404 on. Optional for an older payload (no rows).
+     */
+    complianceReader?: boolean;
     peopleTeam: boolean;
+    /** May create a Space: the answer POST /api/spaces gives (src/lib/access/space-create.ts). Optional for an older payload. */
+    canCreateSpace?: boolean;
+    /**
+     * Opens the Workspace Members, Access and Scoring pages below Admin (the
+     * legacy manager tier, People team included: settings-gate.tsx
+     * LEGACY_SETTINGS_RULES), so the settings frame shows those rows
+     * (sidebar-map 8a) instead of the My settings list.
+     */
+    settingsReader?: boolean;
+    /**
+     * Phase 8 stage E: with the engine deciding the settings door
+     * (ACCESS_V2_RESOLVER on, the log-only week over), the pages this reader
+     * opens: the People team's four (Members, Structure, Access, Scoring),
+     * nothing for the manager tier. Absent under today's table.
+     */
+    settingsReaderPages?: SettingsPageKey[];
+    /**
+     * Phase 8: the Owner pages (Security, API & webhooks, Plan & billing) this
+     * Admin cannot open (only with SETTINGS_OWNER_SPLIT on, and only for an
+     * Admin without the page's scope). The Workspace sidebar draws a lock on
+     * these rows, as the Overview tiles do. Absent when nothing is locked.
+     */
+    settingsLockedPages?: SettingsPageKey[];
+    /** Phase 8: the Owner-only actions (Identity > Danger zone: delete, transfer) are closed to this Admin (the split on, not an Owner). */
+    ownerActionsLocked?: boolean;
     /**
      * Phase 6: in scope of an open candor session, or answered one, or an
      * organiser by the legacy manager tier (the Candor row). The organiser
@@ -134,7 +179,14 @@ export interface BootPayload {
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
-  session: { idleUntil: string | null };
+  /**
+   * `hold` is the org sign-in rule this person must meet before they carry
+   * on (the Security hold dialog): "mfa" when the org requires two step
+   * verification for their role and they are not enrolled, "password" when
+   * their password is older than the org's maximum age. Null when neither
+   * (every org until Workspace settings > Security writes a rule).
+   */
+  session: { idleUntil: string | null; hold: SecurityHold; passwordMaxAgeDays: number | null };
 }
 
 const SPLASH_VALUES: ReadonlySet<string> = new Set(["every-open", "first-open-daily", "off"]);
@@ -309,6 +361,11 @@ export async function GET(req: NextRequest) {
         .findUnique({ where: { id: userId }, select: { presenceStatus: true, presenceUntil: true } })
         .catch(() => null),
     ]);
+    // Its own query for the same reason: a database without the Phase 8
+    // passwordChangedAt column answers "no hold" instead of failing boot.
+    const security = await prisma.user
+      .findUnique({ where: { id: userId }, select: { mfaEnabled: true, passwordChangedAt: true } })
+      .catch(() => null);
 
     if (!org || !user || user.deletedAt) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -333,17 +390,29 @@ export async function GET(req: NextRequest) {
     // counts (spec 10 step 0 "People team = users at HR until toggle 6
     // exists"). Boot used to read a stale key alone, so an HR person's chrome
     // disagreed with every server gate that let them in.
-    const peopleTeam =
-      parseAccessSettings(settings.access).peopleTeamUserIds.includes(userId) ||
-      isSeededPeopleTeam(user.accessLevel ?? null);
+    const peopleTeam = peopleTeamOf({
+      userId,
+      accessLevel: user.accessLevel ?? null,
+      configured: parseAccessSettings(settings.access).peopleTeamUserIds,
+      tablesOn: accessV2Tables(),
+    });
 
     const accessLevel = user.accessLevel ?? null;
     const activeModules = new Set(prefs.modules.activeAppKeys);
     const railConfig = parseOrgAppsConfig(prefs.sidebar.apps);
     // The same resolver the client rail runs, over the pure catalog mirror
     // (src/lib/app-access.ts): the client catalog is a "use client" module.
-    const apps = visibleRailApps({ config: railConfig, accessLevel: accessLevel ?? undefined, activeModules, apps: APP_ACCESS }).map((a) => a.key);
-    const launcherApps = visibleRailApps({ config: railConfig, accessLevel: accessLevel ?? undefined, activeModules, includeFolded: true, apps: APP_ACCESS }).map((a) => a.key);
+    // The display tiers, answered once here and shipped to the client
+    // (viewer.tiers), so no client surface reads the level (access step 6).
+    // By the rule the app routes enforce: today's ladder, or, once the
+    // engine decides them (appGatesEnforce), the engine's reading
+    // (viewer-tiers.ts engineTiers), so a floored app's rail row and its
+    // route never disagree.
+    const tiers = appGatesEnforce()
+      ? engineTiers({ orgRole: orgRoleOf({ accessLevel }), peopleTeam, hasReports: cf.teams.hasReports })
+      : tiersOfLevel(accessLevel);
+    const apps = visibleRailApps({ config: railConfig, tiers, activeModules, apps: APP_ACCESS }).map((a) => a.key);
+    const launcherApps = visibleRailApps({ config: railConfig, tiers, activeModules, includeFolded: true, apps: APP_ACCESS }).map((a) => a.key);
     const manageableOffModules = legacyIsAdminLevel(accessLevel)
       ? [...MODULE_APP_KEYS].filter((k) => !activeModules.has(k))
       : [];
@@ -358,7 +427,19 @@ export async function GET(req: NextRequest) {
         active: user.status === "ACTIVE",
         adminScopes: [],
         hasReports: cf.teams.hasReports,
+        tiers,
+        // The SOP and Policy compliance ledgers' own rule (personScope, the
+        // one their layouts 404 on), so the Docs sidebar rows never lead to
+        // a page the person cannot open.
+        complianceReader: await personScope(session)
+          .then((s) => s.canView)
+          .catch(() => false),
         peopleTeam,
+        // Who creates a Space: the answer POST /api/spaces gives (every New
+        // Space control reads this, never a tier of its own).
+        canCreateSpace: orgRoleOf({ accessLevel }) !== "GUEST" && !isAgentOf(accessLevel) && (await mayCreateSpace(accessLevel)),
+        ...(await settingsReaderFor(accessLevel, session)),
+        ...(await settingsLockedFor(accessLevel, session)),
         candorInvited: cf.teams.candorInvited || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         surveyTargeted: cf.teams.surveyTargeted || (orgRoleOf({ accessLevel }) !== "GUEST" && legacyIsManagerLevel(accessLevel)),
         name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email || "",
@@ -387,7 +468,16 @@ export async function GET(req: NextRequest) {
       },
       counts: cf.counts,
       timer,
-      session: { idleUntil: idle },
+      session: {
+        idleUntil: idle,
+        hold: securityHoldFor({
+          settings,
+          orgRole: orgRoleOf({ accessLevel }),
+          mfaEnabled: !!security?.mfaEnabled,
+          passwordChangedAt: security?.passwordChangedAt ?? null,
+        }),
+        passwordMaxAgeDays: passwordMaxAgeDaysOf(settings),
+      },
     };
     return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
@@ -401,4 +491,32 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/**
+ * Who reads Workspace settings below Admin, by the gate that decides the
+ * door: today's table (the manager tier) until ACCESS_V2_RESOLVER is on and
+ * the log-only week is over, then the engine's People-team pages
+ * (SETTINGS_PAGE_GATES peopleTeamRead), so the frame never lists a page the
+ * gate refuses.
+ */
+/** The Owner pages this Admin cannot open (the lock glyph); the same rule sessionMayManageOwnerPage applies. */
+async function settingsLockedFor(accessLevel: string | null, session: unknown): Promise<{ settingsLockedPages?: SettingsPageKey[]; ownerActionsLocked?: boolean }> {
+  if (!legacyIsAdminLevel(accessLevel) || !ownerSplitOn()) return {};
+  const pages: SettingsPageKey[] = ["security", "api", "billing"];
+  const locked: SettingsPageKey[] = [];
+  for (const p of pages) {
+    if (!(await sessionMayManageOwnerPage(session, scopeForOwnerPage(p)))) locked.push(p);
+  }
+  const ownerActionsLocked = !(await sessionMayManageOwnerPage(session));
+  return { ...(locked.length ? { settingsLockedPages: locked } : {}), ...(ownerActionsLocked ? { ownerActionsLocked } : {}) };
+}
+
+async function settingsReaderFor(accessLevel: string | null, session: unknown): Promise<{ settingsReader: boolean; settingsReaderPages?: SettingsPageKey[] }> {
+  if (legacyIsAdminLevel(accessLevel)) return { settingsReader: false };
+  if (!delegateOn("settings")) return { settingsReader: legacyIsManagerLevel(accessLevel) };
+  // The same door decision the page gate and the reader APIs ask
+  // (src/lib/access/settings-door.ts), page by page.
+  const pages = await settingsReaderPagesFor(session);
+  return { settingsReader: pages.length > 0, settingsReaderPages: pages };
 }

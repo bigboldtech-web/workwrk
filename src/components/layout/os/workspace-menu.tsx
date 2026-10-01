@@ -8,11 +8,11 @@
 // workspace. No "Apps" or "Automations" coming-soon toasts, no Templates
 // (Template Center lives in Create).
 //
-// DELIBERATE DEVIATION from 2.14, tracked for the settings unit: "Delete
-// workspace" stays reachable here for Owners and Admins until Identity ›
-// Danger zone exists (no destination is removed before its next door
-// exists); it is the last row, destructive, and opens the typed-confirmation
-// dialog. Delete this row and the dialog in the same PR as that card.
+// "Delete workspace" (settings-architecture 2.4) opens Workspace settings >
+// Identity & culture > Danger zone, the ONE delete surface (typed
+// confirmation there, then a move to another workspace or sign out). The row
+// is for the people that tab lets delete: every Admin until the Owner and
+// Admin split, then Owners only (absent, never offered and refused).
 //
 // Invite people follows the PERMISSION MATRIX, not the org role: the API
 // (POST /api/invitations) admits whoever holds people.create, so a Member or
@@ -27,25 +27,25 @@
 //   GET  /api/settings              usage.users for the member count
 //   POST /api/me/switch-org         flip the active org (then session.update())
 //   POST /api/organizations/create  a new workspace
-//   POST /api/organizations/delete  schedule the current org for deletion
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { signOut, useSession } from "next-auth/react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useSession } from "next-auth/react";
 import { ArrowUpCircle, Plus, Settings, Trash2, UserPlus, Users } from "lucide-react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { usePrompt } from "@/components/ui/dialog-provider";
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { apiFetch } from "@/lib/api-fetch";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 import { ChromePopover } from "./chrome-popover";
 import { useBoot, useViewerRole } from "./boot-context";
-import { useLayer } from "./shell-context";
 import { useOsToast } from "./toast";
 import { InviteModal } from "./invite-modal";
+import { SwitchCover } from "./switch-cover";
+import { ORG_ROLE_LABEL } from "@/lib/access/labels";
+import { orgRoleOfMembership } from "@/lib/access/org-role";
 
 interface OrgLite { id: string; name: string; slug: string | null; logo: string | null }
 interface Membership { id: string; role: string; isPrimary: boolean; isCurrent: boolean; organization: OrgLite }
@@ -69,7 +69,7 @@ function OrgTile({ org, size = "sm" }: { org: { name: string; logo: string | nul
 export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { boot } = useBoot();
-  const { isAdmin, isGuest } = useViewerRole();
+  const { isAdmin, isGuest, ownerActionsLocked } = useViewerRole();
   const { update } = useSession();
   const { openSettings } = useSettingsNav();
   const { toast } = useOsToast();
@@ -80,7 +80,6 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const canInvite = usePermission("people", "create") === true;
 
@@ -101,18 +100,30 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     return () => window.clearTimeout(t);
   }, [open, load]);
 
-  const switchTo = useCallback(async (orgId: string) => {
+  // The switch (spec-account-auth "Switch workspace"): one at a time (the
+  // row's pending glyph, every other row inert), the boot cover from the
+  // request until the FULL document navigation, never a client push, so no
+  // cached query or open stream of the old workspace survives into the new
+  // one. A 403 means the membership went away while the menu was open: say
+  // why and refresh the list.
+  const [coverName, setCoverName] = useState<string | null>(null);
+  const retryRef = useRef<(orgId: string, orgName: string) => Promise<void>>(async () => {});
+  const switchTo = useCallback(async (orgId: string, orgName: string) => {
     if (switchingId) return;
     setSwitchingId(orgId);
     const r = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: orgId } });
     if (!r.ok) {
-      toast("Couldn't switch workspace. Try again");
+      toast(`Couldn't switch workspace. ${r.error || "Try again"}`, { action: { label: "Retry", onClick: () => { void retryRef.current(orgId, orgName); } } });
       setSwitchingId(null);
+      if (r.status === 403) void load();
       return;
     }
+    setOpen(false);
+    setCoverName(orgName);
     await update?.();
     window.location.href = WORK_HOME_HREF;
-  }, [switchingId, toast, update]);
+  }, [switchingId, toast, update, load]);
+  useEffect(() => { retryRef.current = switchTo; }, [switchTo]);
 
   const createWorkspace = useCallback(async () => {
     setOpen(false);
@@ -125,7 +136,9 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     }))?.trim();
     if (!name || creating) return;
     setCreating(true);
-    const r = await apiFetch<{ data?: { organization?: { id?: string } }; organization?: { id?: string } }>("/api/organizations/create", { method: "POST", json: { name } });
+    // The browser's zone seeds the new workspace's locale (seedOrgDefaults).
+    const timezone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } })();
+    const r = await apiFetch<{ data?: { organization?: { id?: string } }; organization?: { id?: string } }>("/api/organizations/create", { method: "POST", json: { name, timezone } });
     if (!r.ok) {
       toast("Couldn't create workspace. Try again");
       setCreating(false);
@@ -134,7 +147,9 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     const newId = r.data?.data?.organization?.id ?? r.data?.organization?.id;
     if (newId) {
       const sw = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: newId } });
-      if (sw.ok) { await update?.(); window.location.href = WORK_HOME_HREF; return; }
+      // A brand new workspace opens on its setup wizard, the same offer a
+      // signup gets (never a gate: Finish later and Skip are one click).
+      if (sw.ok) { await update?.(); window.location.href = "/onboard"; return; }
     }
     window.location.reload();
   }, [creating, promptDialog, toast, update]);
@@ -142,10 +157,10 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
   const others = (memberships ?? []).filter((m) => !m.isCurrent);
   const plan = PLAN_LABEL[boot.org.plan] ?? boot.org.plan;
   const showUpgrade = isAdmin && boot.org.plan !== "ENTERPRISE";
-  const otherOrg = others[0]?.organization ?? null;
 
   return (
     <>
+      {coverName !== null ? <SwitchCover orgName={coverName} /> : null}
       <ChromePopover
         open={open}
         onOpenChange={setOpen}
@@ -206,127 +221,25 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
                     key={m.id}
                     leading={<OrgTile org={m.organization} />}
                     label={m.organization.name}
+                    trailing={<span className="text-xs font-medium text-ink-2">{ORG_ROLE_LABEL[orgRoleOfMembership(m.role)]}</span>}
                     busy={switchingId === m.organization.id}
-                    onClick={() => { void switchTo(m.organization.id); }}
+                    disabled={!!switchingId && switchingId !== m.organization.id}
+                    onClick={() => { void switchTo(m.organization.id, m.organization.name); }}
                   />
                 ))}
               </>
             ) : null}
             <MenuItem icon={Plus} label="Create workspace" busy={creating} onClick={() => { void createWorkspace(); }} />
-            {isAdmin ? (
+            {isAdmin && !ownerActionsLocked ? (
               <>
                 <MenuSeparator />
-                <MenuItem icon={Trash2} label="Delete workspace" destructive onClick={() => { setOpen(false); setDeleteOpen(true); }} />
+                <MenuItem icon={Trash2} label="Delete workspace" destructive onClick={() => { setOpen(false); openSettings("/settings/identity?tab=danger"); }} />
               </>
             ) : null}
           </div>
         ) : null}
       </ChromePopover>
       {inviteOpen ? <InviteModal open onOpenChange={(v) => { if (!v) setInviteOpen(false); }} /> : null}
-      {deleteOpen ? (
-        <DeleteWorkspaceDialog
-          org={boot.org}
-          switchToOrg={otherOrg}
-          onSwitchAway={(id) => { void switchTo(id); }}
-          onClose={() => setDeleteOpen(false)}
-        />
-      ) : null}
     </>
-  );
-}
-
-/* ───────────────────────── delete confirm dialog ───────────────────────── */
-// A 400 Radix modal on the design-system anatomy (5.5): header 56 with a
-// title, body 24, footer with Cancel left of the one destructive primary.
-// Two-key confirm (exact org name + the word DELETE) mirrors the API.
-
-function DeleteWorkspaceDialog({
-  org, switchToOrg, onSwitchAway, onClose,
-}: {
-  org: { id: string; name: string };
-  switchToOrg: OrgLite | null;
-  onSwitchAway: (orgId: string) => void;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [phrase, setPhrase] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
-  const { toast } = useOsToast();
-  useLayer(true, { id: "delete-workspace", kind: "modal", close: onClose });
-
-  const canSubmit = name === org.name && phrase === "DELETE" && !submitting;
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
-    const r = await apiFetch<{ message?: string }>("/api/organizations/delete", { method: "POST", json: { confirmName: name, confirmPhrase: phrase } });
-    if (!r.ok) {
-      toast("Couldn't delete workspace. Try again");
-      setSubmitting(false);
-      return;
-    }
-    if (switchToOrg) {
-      toast(`Workspace scheduled for deletion. Switching you to ${switchToOrg.name}`);
-      onSwitchAway(switchToOrg.id);
-      return;
-    }
-    setDone(r.data?.message ?? "Workspace scheduled for deletion.");
-  };
-
-  const input = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-
-  return (
-    <DialogPrimitive.Root open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-[var(--os-scrim)]" />
-        <DialogPrimitive.Content className="workwrk-os os-chrome fixed inset-x-0 mx-auto top-1/2 z-[61] w-[400px] max-w-[calc(100vw-24px)] -translate-y-1/2 rounded-xl border border-line bg-raised text-ink shadow-[var(--os-shadow-modal)] outline-none">
-          <div className="flex h-14 items-center px-6">
-            <DialogPrimitive.Title className="text-lg font-semibold text-danger-text">
-              {done ? "Deletion scheduled" : "Delete this workspace?"}
-            </DialogPrimitive.Title>
-          </div>
-          {done ? (
-            <>
-              <div className="px-6 pb-2 text-base text-ink-2">
-                <p className="m-0">{done}</p>
-                <p className="mt-2">You can undo this during the grace period from the staff console or by contacting support.</p>
-              </div>
-              <div className="flex h-16 items-center justify-end gap-2 px-6">
-                <button type="button" onClick={onClose} className="h-9 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover">Close</button>
-                <button type="button" onClick={() => { void signOut({ callbackUrl: "/login" }); }} className="h-9 rounded-md bg-brand px-3 text-base font-medium text-ink-inv hover:bg-brand-hover">{SHELL_LABELS.logOut}</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex flex-col gap-4 px-6 pb-2">
-                <DialogPrimitive.Description className="m-0 text-base text-ink-2">
-                  This schedules the entire <span className="font-medium text-ink">{org.name}</span> workspace and all of its data for deletion. It stays recoverable for 30 days, then is permanently removed. {switchToOrg ? `You'll be moved to ${switchToOrg.name}.` : "You'll be logged out."}
-                </DialogPrimitive.Description>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-                  Type the workspace name to confirm
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder={org.name} className={input} />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
-                  Type DELETE to confirm
-                  <input value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="DELETE" className={input} />
-                </label>
-              </div>
-              <div className="flex h-16 items-center justify-end gap-2 px-6">
-                <button type="button" onClick={onClose} className="h-9 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
-                <button
-                  type="button"
-                  onClick={() => { void submit(); }}
-                  disabled={!canSubmit}
-                  className="h-9 rounded-md bg-danger-solid px-3 text-base font-medium text-ink-inv disabled:bg-active disabled:text-ink-4"
-                >
-                  {submitting ? "Deleting…" : "Delete workspace"}
-                </button>
-              </div>
-            </>
-          )}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
   );
 }

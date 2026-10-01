@@ -17,6 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BootCounts, BootPayload } from "@/app/api/boot/route";
 import { apiFetch } from "@/lib/api-fetch";
 import { FALLBACK_POLL_MS, WINDOW_EVENTS, type ActiveTimer, type RealtimeEvent } from "@/lib/realtime-events";
+import { clearsTier, parseViewerTiers, type ViewerTiers } from "@/lib/access/viewer-tiers";
 
 export type { BootCounts, BootPayload };
 
@@ -101,6 +102,18 @@ export function useBoot(): BootState {
   return ctx;
 }
 
+/**
+ * Does the viewer clear a display tier (the rail's and the create menus'
+ * "manager", "hr-admin", "org-admin")? Answered from boot, never the session.
+ */
+export function useViewerTiers(): { tiers: ViewerTiers; clears: (tier: string | null | undefined) => boolean } {
+  const { boot } = useBoot();
+  const raw = boot.viewer.tiers;
+  const tiers = useMemo(() => parseViewerTiers(raw), [raw]);
+  const clears = useCallback((tier: string | null | undefined) => clearsTier(tiers, tier), [tiers]);
+  return { tiers, clears };
+}
+
 /** The viewer's org role from boot, for chrome that branches on Guest / Admin. */
 export function useViewerRole() {
   const { boot } = useBoot();
@@ -111,5 +124,13 @@ export function useViewerRole() {
     isAdmin: role === "OWNER" || role === "ADMIN",
     isGuest: role === "GUEST",
     isAgent: boot.viewer.isAgent,
+    /** Opens Members, Access and Scoring below Admin (boot settingsReader). */
+    isSettingsReader: boot.viewer.settingsReader === true,
+    /** The Workspace pages that reader opens (the engine gate names them; absent: Members, Access, Scoring). */
+    settingsReaderPages: boot.viewer.settingsReaderPages,
+    /** Owner pages this Admin cannot open (SETTINGS_OWNER_SPLIT on, no scope): the sidebar's lock rows. */
+    settingsLockedPages: boot.viewer.settingsLockedPages,
+    /** Identity > Danger zone is closed to this Admin (the Owner split on, not an Owner). */
+    ownerActionsLocked: boot.viewer.ownerActionsLocked === true,
   };
 }

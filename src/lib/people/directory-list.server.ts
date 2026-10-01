@@ -18,6 +18,7 @@ import "server-only";
 // directory). Every read tolerates the Phase 6 presence columns being absent.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
@@ -175,7 +176,7 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       ...(peopleData ? { phone: u.phone } : {}),
       // A row is selectable (and editable) only where the viewer holds the
       // placement write: a dotted-line manager reads, never edits.
-      canEdit: u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id)),
+      canEdit: u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id), { chainWritesMembership: !accessV2Resolver() }),
     };
   });
 

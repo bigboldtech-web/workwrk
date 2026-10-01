@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
       type: "csv_exported",
       actorId: viewer.userId,
       organizationId: viewer.organizationId,
-      description: `Exported legacy marketing ${kind} CSV (${rows} rows)`,
+      description: `Exported legacy marketing ${kind} CSV (${rows} ${rows === 1 ? "row" : "rows"})`,
       targetType: "export",
       severity: rows > 1000 ? "warning" : "info",
     });

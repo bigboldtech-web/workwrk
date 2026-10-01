@@ -1204,3 +1204,405 @@ Stage E adds no SQL and needs no backfill: it reads the columns stage A's file a
 - **Inbox kinds written from this release**: `review_open`, `manager_reviews_due`, `candor_open`, `survey_open`, `weekly_review_reminder` (all registered in `src/lib/inbox-kinds.ts`).
 - **Stage E review fixes (no schema, no data script)**: the cycle CSV's `?subjectIds=` now only narrows the caller's reach (it used to replace it); nobody's calibration, cycle CSV or cycle page lens includes their own review (a subject who is Admin or People team reads their row as its subject); the cycle list and its CSV follow app:reviews (a subject reaches their review by its link and their profile); weekly, talent, cycle and survey CSVs escape formulas; an anonymous survey's CSV is one row per answer with each question under four answers hidden (no per-person rows); the attributed survey CSV works again (it selected a relation SurveyResponse does not have); Reopen works on a survey whose close date passed; a repeated weekly decision answers 200 and reuses its one Inbox row; asking for peer feedback suggests who works with the subject and finds anyone active in the org by name, as before Phase 6; unsent candor and survey answers are kept per person and cleared on sign out.
 - **Crons** (`scripts/CRON-SETUP.md`): the review cycles auto-open now tells the People team and Admins only, with a link to the cycle; the survey rotation links the survey; a NEW row, "Review closes in 3 days" (`/api/cron/review-closing`, 8:30 daily), is **not installed**: the founder adds it. All three refuse to run in production when `CRON_SECRET` is unset.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage A: no schema, no data step; three deferrals written down
+
+Stage A ships the settings chassis, the fourteen settings redirects and the /register split. It has no SQL file and no backfill. Three things the specs list for A0 are deliberately NOT in it, recorded here so the count of redirects is not misread:
+
+- **/welcome and /setup to /onboard (spec-account-auth A0(a), two of its ten 308s): deferred to A3.** They ship in the same change that repoints the two callers, never before them. Today `src/components/auth/register-form.tsx` pushes a fresh sign-up to `/welcome` (invited) or `/setup` (new workspace), and `src/app/api/onboarding-progress/route.ts` links `/setup`. A bare 308 now would send a freshly invited Member into the admin wizard (the worst case the A3 wizard, an offer not a gate, exists to remove). Until A3 both old pages keep answering 200 as they did at 9e2d21d1.
+- **/me/mentions to /inbox?tab=mentions (settings-architecture 8.4): deferred until `scripts/backfill-mentions.ts` has run in production.** /me/mentions stays a page because it is the only door to doc and SOP mentions until then (the comment in `src/lib/settings-registry.ts` above SETTINGS_REDIRECTS).
+- **/imports to /settings/data?tab=import: deferred to S5.** Until then /imports renders inside the takeover with the Data row active (`alsoActiveOn`) and the crumb Settings > Workspace settings > Data > Import.
+
+One cosmetic difference is also recorded rather than fixed by editing `next.config.ts` (an edit there restarts the dev server): the query-matched `/settings?tab=shortcuts` row carries its matched `tab=shortcuts` along to `/account/shortcuts` (Next appends the source query; that page has no tabs, so it is inert). The registry's route twin now answers the identical Location, so config, twin and test agree. The config comment that says the target's own tab wins is true only for the themes row; correct it in A3 when the /welcome and /setup rows are added to the same table.
+
+Invitation and create levels (review A fix): one rule, `src/lib/access/invite-level.ts` resolveGrantLevel, used by POST /api/invitations, POST /api/setup, the AI agent's invite tool and POST /api/users. HR may again invite at any non-admin level. No data changes: invitations already stored keep their level and accept as stored.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage B: sign-in and the wizard; one SQL file, no backfill
+
+Schema: `prisma/sql/2026-09-30-phase8-settings-access.sql`, the ONE file for Phase 8 (later stages append guarded statements to it). Stage B adds two nullable columns, `User.termsAcceptedAt` and `User.passwordChangedAt`. It is in the deploy manifest and must land before the code (signup, join and reset write both). No row is read or written by the file and there is no backfill: a null reads as "not recorded". Applied locally 2026-09-30 with `prisma db execute`.
+
+Behaviour changes with no data step, written down so nobody looks for a migration:
+
+- **New workspaces are complete when they exist.** `seedOrgDefaults` (`src/lib/org/seed-org-defaults.ts`) runs inside both org-create transactions (POST /api/auth/register and POST /api/organizations/create): the six departments (as before), and, only where the key is absent, timezone (the signup browser's, else Asia/Kolkata), currency and fiscal month by that zone, language, the enforced password rules, the ten access toggles at their section 8 defaults, trash retention 60 days and `settings.console` at step 1. The General Space (visibility ORG, the creator its Owner, one "Tasks" List) is made right after, through `createSpace` and `createBoard`; a failure there is logged and does not undo the workspace. Existing workspaces are NOT back-filled: every reader already falls back to the same defaults, and a backfill would write values nobody chose.
+- **No setup gate.** `(dashboard)/layout.tsx` no longer sends an Owner or Admin of an unfinished workspace to /onboard. The wizard is reached from /signup and from the "Set up {Org}" card on Workspace settings > Overview. Workspaces that hold the old `settings.setupCompleted: true` read as completed (`src/lib/setup/console-state.ts`), so no finished workspace is offered setup again; Finish writes `console.setupCompletedAt` and mirrors `setupCompleted: true`.
+- **Retired routes.** GET/POST /api/setup and GET /api/onboarding-progress answer 410 and change nothing. /welcome and /setup 308 to /onboard (next.config.ts rows plus route twins). The businessType, industry and teamSize values /setup stored stay on the org untouched. Workspace settings Overview reads them (Industry, Team size), and Identity & culture edits them: Business type and Team size through the general section, Industry through the company profile (a stored settings.industry shows there until the first save moves it).
+- **Invitations.** The raw token no longer comes back in the 201 of POST /api/invitations (it goes to the invitee by email only, as the GET already did). The inviter's personal message is kept in the `user.invited` audit row's metadata so /join can show it; invitations sent before this release show no message. A signed-out accept for an address that already has a live account anywhere is now a 409 `account_exists` and creates nothing (it used to create a second User row for the same mailbox); the person logs in and joins, which writes an OrganizationMembership and moves them into the joined workspace through `reanchorUser` (the one they leave stays a membership at their level there).
+- **Tokens.** Email verification tokens are stored as their SHA-256 from this release; links mailed before it hold the raw value and are still honoured for their remaining 24 hours (the fallback never accepts a 64 hex value, so the stored hash itself cannot verify an address). A reset link is now claimed atomically, so two submits of one link cannot both change the password.
+- **Email log.** EmailLog used to keep the full rendered HTML of every email, so every raw reset, verification and invitation link sat in plain text next to the hashed tokens. From this release a row for a secret-bearing template (password-reset, verify-email, invitation, invitation-space, invitation-space-resend, document-sign; `SECRET_LINK_TEMPLATES` in src/lib/email.ts) never stores the link variables, and its HTML is cleared the moment it is SENT or finally FAILED. Rows sent before the release still hold their links. Founder step, once, after deploy (idempotent, touches only closed secret rows, keeps the delivery log): `UPDATE "EmailLog" SET html = NULL, variables = '{}'::jsonb WHERE status IN ('SENT','FAILED') AND template IN ('password-reset','verify-email','invitation','invitation-space','invitation-space-resend','document-sign') AND html IS NOT NULL;` Rollback: none needed (a sent email is not re-sent from the log).
+- **Signup email check** is case-insensitive (a second workspace for "Priya@Co.com" when "priya@co.com" exists is refused). Stored addresses are not rewritten.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage C: My settings; no schema, one browser-side data move
+
+**No SQL file.** Every column this stage reads already exists: `User.presenceStatus`
+and `presenceUntil` (Phase 6, `2026-09-26-phase6-people.sql`), `User.passwordChangedAt`
+(Phase 8 stage B, `2026-09-30-phase8-settings-access.sql`). Every new preference key
+lives inside the existing `UserPreference.home` and `sidebar` JSON columns, strict at
+every level in `src/lib/preferences-schema.ts`.
+
+**The one data move: browser storage to the server keys (settings-architecture 7.3).**
+It runs in each browser, once, on the first load of the new release
+(`src/lib/local-prefs-migration.ts`, run by `src/components/layout/os/shell-context.tsx`
+through `src/lib/local-prefs-migration-runner.ts`):
+
+| Browser key | Server key | Rule |
+|---|---|---|
+| `workwrk:os:sidebar-width` | `sidebar.width` | carried when the row has none |
+| `workwrk:os:sidebar-collapsed` | `sidebar.collapsed` | same |
+| `workwrk:os:profile-tool-pins:v2` | `sidebar.quickTools` | same |
+| `workwrk:os:muted-notifs` ("1") | `home.notifications.mutedUntil` (24 hours from the carry, bounded so one stale browser cannot mute every device indefinitely) | same |
+| `desktop-notifications-pref` | `home.notifications.desktop` | same |
+| `workwrk:density` | `UserPreference.density` | same |
+| `workwrk:task-saved-filters` | `home.work.savedFilters` | same; nameless entries dropped |
+| `workwrk:os:presence` | `User.presenceStatus` / `presenceUntil` (PUT `/api/me/presence`) | only when the server has no status and the local one has not expired |
+| `workwrk:os:active-app`, `:lens`, `:icons-only` | none | removed, nothing reads them |
+
+The server always wins (another device, or a later choice, is never overwritten by an
+older browser). A key is removed from the browser only after the write that carried it
+answered ok, so a failed write retries on the next load. Before this stage the shell
+deleted the first five keys on boot WITHOUT reading them; a browser that already lost
+them lost nothing a person could see (the server defaults applied), and this stage
+stops the deletion-before-read for everyone else.
+
+The workload capacity key (`workwrk:team-workload:v1`) keeps its own one-time move
+on the Workload page (Phase 6); it is not duplicated here.
+
+Dry-run report (read only; refuses a non-local database without `--allow-remote`):
+
+```
+node scripts/report-local-prefs-migration.mjs --out /tmp/local-prefs-migration.json
+```
+
+It counts, per organization, the people who have NO server value for each key (the
+people whose browser value, if they still hold one, will be carried up). Local run
+2026-09-30: 35 orgs, 83 people, 6 with a preference row; saved under
+`phase8-reports/local-prefs-migration-dryrun.json` in the session scratchpad.
+
+**Behaviour changes with no data step**, for the release note:
+- `POST /api/me/delete` now takes `{ confirm: "DELETE" }` (the old `{ confirm: <email> }`
+  still works), refuses the workspace's last active Owner or Admin with 409 `last_admin`,
+  and bumps `tokenVersion` so every other device's session ends.
+- `DELETE /api/auth/mfa/enroll` takes the code in the JSON body (`?code=` still accepted
+  for one release), refuses with 403 when the org requires two step verification for
+  the role, and is rate limited (10 per 15 minutes per person). `POST /api/auth/mfa/enroll`
+  refuses (409) to replace a live secret. Backup codes come from the CSPRNG.
+- New `POST /api/auth/mfa/backup-codes` (a fresh app code, never a backup code; replaces
+  the set in one write; audited `mfa_backup_codes_regenerated`).
+- New `POST /api/auth/mfa/enrol-at-login` and the `MFA_ENROL_REQUIRED:<ticket>` login
+  outcome (step 2b). Inert until Workspace settings > Security writes
+  `settings.security.mfaRequired`; the ticket is bound to the user and their tokenVersion
+  and lives ten minutes; it never issues a session.
+- `POST /api/me/change-password` is rate limited (10 per 15 minutes per person).
+- Per-object mute (`home.notifications.muted[]`, written by the Space, Folder and List
+  menus) is now READ: status, comment and due-date notifications about work in a muted
+  place stop; a task assigned to the person and a mention still arrive.
+- `home.notifications.desktopRingCalls` is now read by the incoming call card.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage D: Workspace settings; four guarded statements, no backfill
+
+**Schema.** Stage D appends to `prisma/sql/2026-09-30-phase8-settings-access.sql` (the one
+Phase 8 file, already in the deploy manifest):
+
+```
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorType" TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actorLabel" TEXT;
+ALTER TABLE "ActivityLog" ADD COLUMN IF NOT EXISTS "actingForId" TEXT;
+ALTER TABLE "ActivityLog" ALTER COLUMN "actorId" DROP NOT NULL;
+```
+
+Every existing row reads as `actorType = 'user'` with its actor unchanged, so there is
+no backfill and nothing to dry-run. Apply it before the code: the new release writes
+the three columns (SCIM deprovisioning writes `scim` / "Identity provider", the audit
+purge writes `system`, the Staff console's tenant audit row now lands through
+`writeTenantRow`) and may write a null actor. Applied locally 2026-09-30 with
+`prisma db execute`. **Rollback:** drop the three columns (only the label of non-person
+rows is lost); `SET NOT NULL` on `actorId` succeeds only while no null row exists, so
+roll back the code first, then delete or reassign the null-actor rows, then restore
+the constraint. **Order matters for a rollback of the CODE too:** once the first
+null-actor row exists (a SCIM change, an audit purge, a Staff console action), the
+previous release's Prisma client, which declares `actor` as required, throws on ANY
+query that includes `actor` over that row (the Audit log, the activity feeds), not
+only on the `SET NOT NULL` step. So a code rollback to a release before stage D must
+first reassign those rows to a real person (for example the Owner) or delete them.
+
+**Flags.** One new flag, read at request time, default OFF, in no `.env`:
+`SETTINGS_OWNER_SPLIT`. Off, every Admin counts as an Owner for the Owner pages
+(Security, API, Billing, Retention, Delete workspace), exactly as today. On, only the
+real Owners (SUPER_ADMIN, else the earliest live COMPANY_ADMIN) open them. Role changes,
+ownership transfer, and deactivating or removing an Owner use the real Owner in both
+states.
+
+**Settings keys written for the first time** (all inside `Organization.settings`, strict
+zod sections in `src/lib/settings/org-settings-sections.ts`, absent reads as the old
+behaviour): `security.{minPasswordLength, requireUppercase, requireNumbers,
+requireSymbol, passwordMaxAgeDays, sessionIdleMinutes, sessionMaxDays, mfaRequired,
+lockoutThreshold, lockoutMinutes}`, `profile`, `locale`, `work.automationsPaused`,
+`users.{allowedDomains, inviteDefaultRole, inviteExpiryDays}` (plus `autoJoin` and `defaultSpaceIds`, stored but read by nothing yet),
+`retention.{trashDays, auditDays}`, `data.{aiEnabled, selfExport}`, `scoreWeights`
+(read through `scoreWeightsOf`, which migrates the old five-key shape on read, never
+on write).
+
+**Behaviour changes with no data step**, for the release note:
+- Sign-in policy is enforced: the password rules (with an optional symbol rule) apply
+  at signup, join, reset and change; a password older than the max age puts the
+  person on the change-password hold (proxy 403 `password_expired` on APIs, redirect
+  on pages); the idle limit and the absolute session lifetime are checked on every
+  token refresh (the lifetime counts from the first check after deploy for sessions
+  already open); the lockout threshold and minutes apply per org and can only be made
+  STRICTER than the built-in floor (8 failures, 15 minutes). `ENFORCE_MFA_AT_LOGIN`
+  stays the floor for enrolled people; `mfaRequired` adds the audience (off, admins,
+  everyone). Existing orgs stay "off".
+- Role changes go through `src/lib/access/membership.ts`: only an Owner makes or
+  changes an Owner, a workspace always keeps one Owner (409 `last_owner`), SUPER_ADMIN
+  is never a pickable tier, and every change that is not a strict promotion bumps
+  `tokenVersion` (the person's sessions end on their next check; a promotion lands
+  within the five-minute revalidation). Audited `org_role.changed`.
+- Only an Owner deactivates or removes an Owner (403 `owner_only`).
+- `POST /api/org/sign-out-everyone` (typed "SIGN OUT", Owner page) bumps `tokenVersion`
+  for everyone anchored to the org. Audited `security.sign_out_all`.
+- SCIM deprovisioning (DELETE, or `active: false`) now hands open tasks, reports and
+  owned Spaces, Folders and Lists to the person's manager, else the first Owner,
+  refuses the last Owner, sets INACTIVE and bumps `tokenVersion`.
+- `GET /api/audit?format=csv` exports up to 50,000 rows (audited `data.exported`);
+  `GET /api/export/all` is the whole-workspace export (Spaces, Folders, Lists, tasks
+  paged to 200,000, Docs, Tables, Goals) with the CSV formula guard.
+- `POST /api/cron/audit-purge` (new, `?dry=1` supported) deletes audit rows older than
+  `retention.auditDays` for orgs that set it, in batches, and writes one `audit.purged`
+  row. The default is keep for ever, so it deletes nothing until an Owner chooses a
+  period. The crontab row is NOT installed; see `scripts/CRON-SETUP.md`.
+- `PATCH /api/offices` accepts only the office fields (mass-assignment fix) and keeps
+  one headquarters.
+- `/imports` is a 308 to `/settings/data?tab=import`. New `GET /api/org/admins` (the
+  ask-an-admin strip: names of the workspace's Owners and Admins, any signed-in member).
+
+**Stage D review fixes (behaviour, no schema):**
+- Every change to who holds Owner or Admin (role change, bulk change, ownership
+  transfer, deactivate or remove, SCIM deprovisioning) runs under one transaction-scoped
+  advisory lock per workspace (`lockOrgRoles`, key `org-roles:<orgId>`) and re-reads, under
+  the lock, whether the ACTOR is still an Owner or Admin. Two Owners demoting each other
+  at once can no longer leave a workspace with nobody.
+- The routes that change who can do what (role changes, ownership, sign-out-everyone,
+  every workspace settings PATCH, API keys, workspace delete and restore) re-read the
+  actor from the database (`freshWorkspaceActor`): a demoted Admin, or a session whose
+  `tokenVersion` the account has moved past, is refused at once (403 `stale_session`)
+  instead of at the five-minute session check. The session now carries its own
+  `tokenVersion` (read-only; adopting a new one still needs the signed proof).
+- One Owner set everywhere: `liveAdminsOf` counts admins anchored here AND admins by
+  membership who are switched into another workspace (the same set as `ownerIdsFor`).
+- "Log out everywhere" (sign-out-everyone) also ends the sessions of members switched
+  into another workspace.
+- SCIM deprovisioning of an Owner who is not the last one deactivates them (every
+  session ends) but does NOT hand their work over unattended, and the audit row names
+  who holds Owner now; a person hands an Owner's work over from Members. SCIM
+  reactivation writes its own audit row ("work handed over stays where it went").
+- The audit purge never deletes rows features read back: `weekly_review_decided`,
+  `okr_created`, `user.invited`, `access.invited`, `access.matrix_retired`,
+  `access.migrated`, `audit.purged`, `terms.*`, `staff.*` (`src/lib/audit-retention.ts`).
+  Both retention rows now sit behind Show upcoming features, captioned "Not enforced
+  yet", until the two cron rows are installed.
+- The score-weights save merges into the stored weights, so the monthly performance
+  score's `manager` and `self` keys survive; `scoreWeightsOf` shows the behavioural
+  weight the review engine really uses (the default 30) for an older five-key blob.
+- Invite rules: the workspace's own domain is always allowed and Invite rules ADD
+  domains (`inviteDomainsOf`, one answer for invitations, SCIM create and the invite
+  dialogs); a resent invitation lives as long as Invitation expiry says (was always 7
+  days); every invite dialog starts on the Default role for invites
+  (`GET /api/invitations?rules=1`).
+- **Decision to ratify: the legacy `security.twoFactorEnabled: true` is NOT migrated to
+  `mfaRequired: "everyone"`**, contrary to settings-architecture 5.10 and access-model-spec
+  (migrate-on-read). Nothing ever enforced the old key, and honouring it now would hold
+  every un-enrolled person at their next click in a workspace whose Owner never saw the
+  rule. Worst case of this choice: an Owner who believes the old switch is on. So the
+  Security page shows a note on any org that stored it ("an older setting says ... it
+  was never enforced ... choose Everyone to require it"). To count the affected orgs
+  before deciding: `SELECT count(*) FROM "Organization" WHERE settings->'security'->>'twoFactorEnabled' = 'true' AND settings->'security'->'mfaRequired' IS NULL;`
+- Whole-workspace export copy now says what the ZIP holds (one CSV per object with ids,
+  titles, owners, statuses and dates; no doc text, descriptions, comments, field
+  values, table rows or files yet). The route still builds the ZIP in memory (up to
+  200,000 tasks); a streamed or background export is the next step before large
+  enterprise workspaces use it.
+
+**Next step for custom roles** (not in this stage): the Members drawer still offers the
+legacy seniority tier under Member so no capability is lost. When the access engine's
+roles switch on (access step 4 and 5), the tier select is replaced by the role
+picker, the matrix export on Data > Export ships the retired grid, and the transitional
+Access page's legacy grid is removed.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage E: the access flip, flag-gated
+
+Everything in this stage ships OFF. With the three flags off the product answers every access question exactly as the previous release did (proven by the parity run with the flags off, below). The production order is the founder's, one step at a time, each gated on the step before it.
+
+### Schema (append to `prisma/sql/2026-09-30-phase8-settings-access.sql`, already in the deploy manifest)
+
+Additive only; the running release names none of it, so it lands before the code:
+
+- `User.orgRole` (TEXT, NULL, CHECK OWNER/ADMIN/MEMBER/GUEST), `User.isAgent` (BOOLEAN NOT NULL DEFAULT false), `User.adminScopes` (TEXT[] NOT NULL DEFAULT '{}', CHECK subset of billing/security).
+- `Invitation.orgRole` (TEXT, NULL, CHECK ADMIN/MEMBER/GUEST), `Invitation.isAgent` (BOOLEAN NOT NULL DEFAULT false). POST /api/invitations writes both from the level it already stores; accept still applies `accessLevel`.
+- `Space`, `Folder`, `Board`: `restricted`, `findable` (BOOLEAN NOT NULL DEFAULT false). Read by nothing yet; `visibility` stays the authority until step 8.
+- `AccessGrant.expiresAt` (TIMESTAMP NULL, rule 20) and `AccessGrant.objectRole` (TEXT NULL, CHECK FULL/EDIT/COMMENT/VIEW). The two CHECKs are WIDENED, never narrowed: objectType gains SPACE, FOLDER, LIST, SOP_FOLDER, GOAL, TOOL, TEAM (new constraint `AccessGrant_objectType_v2_check` added before the old one is dropped), role gains OWNER (`AccessGrant_role_v2_check`). subjectType stays USER only and the subjectId foreign key to "User" stays.
+- New tables `Team`, `TeamMember` (Members > Teams) and `AccessRequest` (the Request access flow; a partial unique index keeps one PENDING row per person per object).
+
+Applied locally 2026-09-30 (twice, idempotent). Rollback: in the block's own comment (drop the three tables; delete the AccessGrant rows of the new types BEFORE restoring the narrow CHECKs).
+
+`src/lib/access/access-grant-store.ts` `viewerObjectGrants` now filters to TABLE, WHITEBOARD and FORM, so a container copy (step 7) can never reach the path-discovery code that maps those three kinds. Ship this code before running step 7 anywhere.
+
+### Flags (all read at request time, default OFF, never in `.env`)
+
+| Flag | What it switches | Rollback |
+|---|---|---|
+| `SETTINGS_GATE_LOG_ONLY=true` | The Workspace settings door asks the engine too and logs every disagreement (`access.settings_gate.disagree`, one line per person per page per 10 minutes, on stderr); today's table still decides. The decided first week. | unset |
+| `ACCESS_V2_RESOLVER=true` | Step 1: the settings door decides by the engine (SETTINGS_PAGE_GATES, with the Owner split's floor: while `SETTINGS_OWNER_SPLIT` is off every Admin still opens Billing, Security and API); `hasPermission` answers the 16 cells in `src/lib/access/matrix-rules.ts` by the section 9 rules (every other cell keeps the stored grid); POST /api/spaces follows access toggle 1; the Access page retires the grid and shows the enforced switches. Node helpers delegate ONLY when `ACCESS_V2_TABLES` is also on. | unset; takes effect on the next request |
+| `ACCESS_V2_TABLES=true` | Step 4: `loadFacts` takes a node object's role from node-access (`src/lib/access/node-bridge.ts`, tasks from item-gate), with the engine's rules around it; `hydrate` refines an Admin to Owner by the live Owner pick (every SUPER_ADMIN, else the earliest live COMPANY_ADMIN; the same rule as the Staff console and `SETTINGS_OWNER_SPLIT`), reads `adminScopes`, and takes the People team from the configured list (an empty list still means everyone at HR). With `ACCESS_V2_RESOLVER` also on, the node helpers (space.ts, board.ts, folder.ts, doc-access.ts, access.ts resolveX) answer through can(). | unset |
+| `SETTINGS_OWNER_SPLIT` | Stage D's flag, unchanged. Turn on only after the pre-flight report's Owner list is approved. | unset |
+
+Order for production: deploy (flags off) -> parity job nightly for a week with the flags off, run with `--prove-tables --prove-resolver` (criterion below) -> `SETTINGS_GATE_LOG_ONLY=true` for a week, read the disagreement lines -> backfill pre-flight approved -> backfill `--write` -> `ACCESS_V2_TABLES=true` (the parity job run again with it on must be clean) -> `ACCESS_V2_RESOLVER=true`, `SETTINGS_GATE_LOG_ONLY` unset -> the org-wide tokenVersion bump (below) -> `SETTINGS_OWNER_SPLIT=true` once the Owner list is approved.
+
+### The parity job (`scripts/access-parity-job.mjs`)
+
+Two sections now. The **legacy** section is the Phase 0 comparison (the transcription against the pure engine); every unexpected mismatch on a helper node-access answers is tie-broken against the LIVE helper (called with the resolver forced off, `scripts/lib/parity-live-tiebreak.mjs`): the live helper agreeing with the engine is "superseded" (the transcription is stale), the rest is the pure engine over the old tables, which no node helper ever delegates to. The **node** section (`scripts/lib/parity-node-section.mjs`, rows in `src/lib/access/node-parity.ts`) compares can() against the live resolvers: node-access for Space, Folder, List, Doc, Table, Canvas and Form, item-gate for tasks, sop-access for SOP folders, canSeeGoal for goals, the settings door's table, and the 16 matrix cells. `--all` runs every live person against every object (up to 400 per kind per org); `--sections legacy,node` picks. The job stays read-only three ways (read-only session, a Prisma extension that throws on writes, loaders only) and stubs `src/lib/auth.ts` (it never reads a session).
+
+Criterion for each flag: zero UNEXPECTED in both sections, run with that flag state. Local runs 2026-09-30 (reports under `phase8-reports/` in the session scratchpad):
+
+- `parity-before.txt` (flags off): legacy 183,648 cases, 0 unexpected; node 61,790 cases, 0 unexpected.
+- `parity-resolver-on.txt` (ACCESS_V2_RESOLVER on): identical counts, 0 unexpected (the resolver alone changes no node answer; the matrix and settings differences are the named rows).
+- `parity-tables-on.txt` (both on): legacy 183,648 cases, 0 unexpected; node 61,790 cases, 59,363 agreed, 2,427 expected (1,473 the archived cap, 717 deactivated people item-gate never meets, 194 matrix cells, 28 settings door rows, 15 goals), 0 unexpected.
+- `parity-tables-on-after-backfill.txt` (both on, after the local `--write` of the backfill and the container copies): identical, 0 unexpected.
+
+Behaviour the flags change on purpose, for the release note (each is a named row in `src/lib/access/node-parity.ts`): with both flags on, anything inside an archived Space, Folder or List reads as Can view unless the person holds Full access (spec rule 13; today node-access keeps their role and some routes allow the write); Members, Access and Scoring close to the manager tier and open to the People team; Structure opens to the People team; the 16 matrix cells follow section 9 (managers lose invite, KRA and asset writes unless on the People team; Members gain SOP create and edit, which the folder check still narrows); Space creation follows toggle 1 (default everyone).
+
+The nightly crontab row in `scripts/CRON-SETUP.md` gains `--sections legacy,node`; `--all` is for a local or staging run (on production keep `--limit 500 --rotate`).
+
+### Step 4: `scripts/access-backfill.ts` (dry run by default)
+
+```
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --out /tmp/backfill.json            # pre-flight + plan
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --write --out /tmp/backfill.json    # after approval
+```
+
+The pre-flight report is printed first, per workspace: the Owner(s) chosen (SUPER_ADMIN, else the earliest live COMPANY_ADMIN), every SUPER_ADMIN, every C-level/VP/Director whose report tree is not the whole workspace (default for them: the People team, D6), every Manager and Team lead with no reports, every ADMIN-scope API key whose creator is not an Owner or Admin, the C-level people who lose the settings write, and a workspace whose stored toggles read the two widening values. **The founder approves this report before `--write` in production.** A `--write` runs each workspace in one transaction with row-count assertions and one `access.migrated` activity row (the audit purge never deletes it); a failed assertion rolls that workspace back. A workspace with no admin at all is reported and skipped. It writes: `User.orgRole`/`isAgent` (the step-8 mirror; a later role change through membership.ts clears `orgRole` and `adminScopes`, and nothing reads `orgRole` at runtime: the Owner comes from the live pick), `settings.access` ONLY where absent and at TODAY'S enforced values (never the section 8 defaults, which would widen an existing workspace), the People team seeded with HR where empty, `restricted` (PRIVATE Folders and Lists) and `findable` (ORG Spaces), `ownerId` from the OWNER member row where null, and the USER-subject AccessGrant rows (SOPFolderAccess mapped; G5's explicit Full for the Space owner on every Private List). The EVERYONE rows (ORG Spaces and Lists, org-visible standalone Docs, org-wide Whiteboards, unscoped Tables) are counted and NOT written: the subject foreign key allows only a User until step 8's file replaces it, and until then the visibility columns grant exactly those rows. Local dry run 2026-09-30: 49 workspaces, 135 org roles to write, 0 grants, 12 workspaces with no admin (test fixtures). Local `--write` the same day: 37 workspaces written (each one transaction, assertions passed, `access.migrated` recorded), 12 skipped with no Owner; a second dry run plans 3 roles, all in the skipped workspaces (idempotent). Rollback: `UPDATE "User" SET "orgRole" = NULL`, `UPDATE "Space"/"Folder"/"Board" SET restricted = false, findable = false`; the settings.access written at today's values is behaviour-neutral and can stay.
+
+**The org-wide tokenVersion bump (founder's step, after ACCESS_V2_TABLES is on):** `UPDATE "User" SET "tokenVersion" = "tokenVersion" + 1 WHERE "deletedAt" IS NULL;` so every session re-reads the row once (spec 10.1). It signs everyone out once; announce it. Rollback: none needed.
+
+### Step 7: `scripts/access-migrate-container-rows.ts` (dry run by default)
+
+Copies SpaceMember, FolderMember, BoardMember and USER GoalAssignee rows into AccessGrant (SPACE, FOLDER, LIST, GOAL; a goal audience row as Can view), diffing exactly both ways (insert missing, re-role changed, delete orphaned copies), one transaction per workspace with the per-type row-count assertion. `--verify` reports drift and exits 1 on any. The old tables are never written. Department, Role and Tag goal audiences stay in GoalAssignee (the subject key is a User). Local dry run 2026-09-30: 186 copies to write across 49 workspaces; `--write` wrote them (0 failed); `--verify` right after: 0 drift.
+
+**Deviation to ratify:** the loader does NOT read the copies in this release, with either flag. A copy that outlived its member row would hand a removed person their access back the day a reader switched to the copies, and a dozen code paths write the member tables (the dialog, the member routes, invites, Space creation, offboarding, SCIM); keeping the copies equal at write time needs a database-level mirror on the four member tables, which was not installed on the shared local database. The founder's decision before any reader moves to the copies: install that mirror (or move every writer onto grants.ts), then `--verify` must report zero drift. Until then the copies are a verified snapshot and node-access (which already unions the Table, Canvas and Form AccessGrant rows) stays the loader.
+
+### The permission matrix: `scripts/access-retire-matrix.ts`
+
+Dry run lists every cell each workspace changed from the shipped grid and the section 9 rule it becomes. `--write` writes one `access.matrix_retired` activity row holding the grid exactly as stored (the Data > Export "previous permissions grid" download, `GET /api/settings/matrix-export`, reads it) and keeps `settings.permissions`. `--write --strip` also removes `settings.permissions` in the same transaction, and refuses unless `ACCESS_V2_RESOLVER=true` in its own environment. Local 2026-09-30: 0 workspaces store a grid, nothing to export. Production: run the dry run to count, `--write` any time, `--strip` only after the resolver has run clean.
+
+### Request access, Check access, Teams (no data step)
+
+- POST /api/access-requests now also records an `AccessRequest` row (one PENDING per person per object; an id probe with no object leaves none). GET lists the open requests the person may answer (Owners and Admins: all; others: the objects they own); PATCH /api/access-requests/[id] `{ decision: "grant" | "decline", role? }` grants through grants.ts setNodeGrant (mode raise) so the Manage access dialog's rules hold, resolves the request, tells the requester, and writes `access.request.granted` / `access.request.declined`. Requests expire after 14 days at read time (no cron row needed). The Access page has an Access requests card.
+- POST /api/access/check (the viewer's own role on up to 50 nodes, or Check access for one person, answered by node-access with a one-sentence reason) and GET /api/access/peek (kind, name and owner's name only, for a node the viewer can see or is on the way to; 404 otherwise). The Manage access dialog gains a Check access section for people who manage access there.
+- Members > Teams: GET/POST /api/settings/teams, PATCH/DELETE /api/settings/teams/[id] (Owner and Admin; audited `team.*`). A Team is a saved group today; sharing with a Team arrives with the engine.
+- The invite dialog's Agent is a checkbox ("This is an agent account"), no longer a rung in the level list.
+
+### Stage E review fixes (one more additive column; flags still OFF)
+
+- **Schema**: `AccessGrant.source` (TEXT NULL), appended to the same phase file with `ADD COLUMN IF NOT EXISTS`. `'copy.step7'` marks a step-7 container copy, `'backfill.g5'` a step-4 reach-preservation row (the Space owner's Full on a Private List), `'backfill.sop_folder'` a mapped SOPFolderAccess row; NULL is every row written before the column. Applied locally 2026-09-30, exit 0. Rollback: `ALTER TABLE "AccessGrant" DROP COLUMN IF EXISTS "source"` (the copy script then treats every untagged non-G5-shaped container row as a copy again).
+- **Step 7 never deletes the G5 rows.** The copy diff now re-roles and deletes ONLY its own rows (tagged `copy.step7`, or untagged and not G5-shaped, which a `--write` adopts and tags). A G5 row, tagged or untagged with objectRole FULL, and any row from another writer are protected: never re-roled, never deleted, and a member row whose key a protected row already holds is not inserted over it. The write asserts the protected count is the same after as before, and `--verify` no longer reports the G5 rows as drift. So step 4 then step 7 (the documented order) keeps every G5 row.
+- **The parity job proves the flip state.** `--prove-tables` and `--prove-resolver` evaluate as if the flags were on, in the job's own process only (read-only as before). The nightly row in `scripts/CRON-SETUP.md` passes both: with ACCESS_V2_TABLES off the node section cannot fail (one named row explains every node case), so a week of flag-off runs proved nothing for node objects. The job also prints a WARNING when it runs the node section with the tables flag off. The app modules the job loads now run on the job's read-only, write-refusing client (it seeds `globalThis.prismaByClass`, the cache src/lib/prisma.ts reads), so the "did not reuse the read-only client" line is gone: three read-only layers again.
+- **Matrix parity**: the one blanket row is split. A cell that NARROWS is expected (`matrix-cell-narrows-to-section-9-gate-rule`); a cell that WIDENS is expected only for the cells spec 9 names, to the people it names (`matrix-cell-widens-by-named-decision`: the People team on KRA definitions, Policies, org announcements and Assets; the People team or a person with reports on the two assign cells). Any other widening is UNEXPECTED and blocks the flip.
+- **SOP content cells never widen.** `sops.create`, `sops.edit`, `sops.publish` are `narrowOnly` in matrix-rules.ts: under the resolver the answer is the rule AND today's stored cell, so no Member reads, edits or publishes another person's unfiled draft on flip day. They widen only when step 6 moves the SOP routes onto `requireCan` with the SOP in hand.
+- **One answer per door.** The client's `usePermission` reads the engine's cells from GET /api/permissions (`cells`, resolver on only), so a control shows exactly when the server lets its handler through. Who creates a Space is one server function (`src/lib/access/space-create.ts`) read by POST /api/spaces, the Space template apply route, the /spaces page and boot's `viewer.canCreateSpace` (every New Space control). The Workspace settings door is one server function (`src/lib/access/settings-door.ts`) read by the page gate, boot's reader sidebar and the reader APIs (Members, Teams, role counts, Access model, the invitations list), and boot's People team follows the engine in both tables-flag states.
+- **Admin scopes**: read by the Owner-page APIs (Billing: billing-summary, checkout, portal; Security and API: security-summary, keys, sign-out-everyone, the sign-in policy PATCH) whenever `SETTINGS_OWNER_SPLIT` and `ACCESS_V2_TABLES` are both on, the same state in which the engine's page gate reads them. The Members drawer shows the scope control as live only then; otherwise it sits behind Show upcoming features with that caption.
+- **org role mirror**: every role change now writes `User.orgRole` from the plan computed under the role lock (it used to write NULL), sign-up writes OWNER for the workspace's first admin, and invite acceptance, POST /api/users and SCIM write the mirror of the level. The column is still not an authority: the Owner comes from the live pick, and the loader (ACCESS_V2_TABLES) reads the column in one direction only, to narrow a Member to a Guest. Step 8 must re-derive every row from the live rule (`orgRole` = OWNER for the live Owner pick, ADMIN for other admins, MEMBER for the rest, GUEST for Guests) in the same transaction that makes the column authoritative.
+- **Backfill report**: names every workspace where an earlier SUPER_ADMIN keeps the earliest COMPANY_ADMIN out of today's Owner pick (DECISION NEEDED before `SETTINGS_OWNER_SPLIT`; Acme locally: admin@workwrk.com is the pick, verify.admin is written Admin). The pick itself is NOT changed: the same rule guards role changes with the flags off, and making the earliest COMPANY_ADMIN an Owner everywhere would let a later hire demote a founder who is SUPER_ADMIN. Remedy per workspace, after the customer confirms: make the right person an Owner on Settings > Members or with the Staff console's Set Owner. A workspace with no Owner and live people (invariant 10) is reported with its people count and the remedy (the Staff console's Set Owner on /admin/companies/[id]); an empty one is reported as nothing to do. A stored "Who can create Spaces: Everyone" is reported with how many people below the manager tier gain New Space under the resolver. The backfill's writes are raw statements, so no row's `updatedAt` moves.
+- **Request access**: the answer is the same whether the object exists or not (`201 { ok, throttled }`), the 24h throttle is per person per object, requests on Docs, Tables, Canvases and Forms go to their creator with a link to the object, a decider never sees a request on an object they cannot read (another person's Private note), two people answering one request at once cannot both win (the answer is claimed first; the loser gets 409, and a refused grant releases the claim), and the requester sees "Request pending since" or "declined" on the Request access button.
+- **Deactivation needs the handover** in every flag state: PATCH /api/users/[id] `{ status: "INACTIVE" }` answers 409 `handover_first` while the person still owns open tasks, direct reports or Spaces, Folders and Lists. Every UI path already runs the handover first. With ACCESS_V2_RESOLVER on the manager chain no longer writes placement, reports-to or status (spec 3.5); the People team and Admins keep them.
+
+- **Performance gate before ACCESS_V2_TABLES (not fixed in code here)**: with both flags on every delegated node helper runs hydrate, loadFacts and a second node-access resolve; the stage E review measured 10 to 20 times the time per viewer over 772 objects (3.7 to 15 s against 0.3 to 0.6 s). Before the production flip, time /api/boot, the sidebar tree and Bird's eye for the largest tenant on staging with both flags on; if a page is over its budget (boot under 300 ms at p95), batch the delegated calls per request (one loadFacts per viewer, nodeRoles over the whole list) before turning the flag on.
+
+### Documented only: step 8 (drops), NOT done
+
+A future file `prisma/sql/<date>-access-step8-drops.sql`, after the resolver and tables flags have run clean in production for a release: replace `AccessGrant.subjectId`'s User foreign key with a subject check (so EVERYONE, TEAM, DEPARTMENT, ROLE, TAG rows can land), write the deferred EVERYONE rows, move the loader onto the copies (with the mirror in place), then drop `User.accessLevel`, `Invitation.accessLevel`, `Role.level`, `Space/Folder/Board.visibility`, the tables `SpaceMember`, `FolderMember`, `BoardMember`, `SOPFolderAccess`, `HRSegment`, `GoalAssignee`, the enums `AccessLevel`, `SpaceRole`, `SOPFolderRole`, `Visibility`, `settings.permissions` (after `--strip`), and the code listed in access-model-spec 10 step 8. Custom roles over the four-role ladder are the next step after the engine is proven on in production; not built here.
+
+## Phase 8 (Settings, My settings, sign-in, access), stage F: enforcement and cleanup; no schema, one dry-run report
+
+**No SQL applied, no backfill.** One file is written and deliberately NOT applied: `prisma/sql/future/access-step8-drops.sql` (access step 8; its first statement raises an exception, its header lists the five preconditions; it is not in the deploy manifest; see `prisma/sql/README.md`).
+
+**No new flag.** Stage F reuses the three request-time flags (all default OFF, none in `.env`):
+
+| State | Workspace settings door | App pages that had no gate (Planner, Docs, Files, Notetaker, Goals, Timesheets, Meetings, Clock in/out, SOPs, plus Policies, Kudos, Announcements from stage E) |
+|---|---|---|
+| all off (shipped) | today's table decides | open exactly as before |
+| `SETTINGS_GATE_LOG_ONLY=true` | today's table decides; every disagreement on a real page visit writes one audit row a day per person per page, `access.settings_gate.would_deny` or `.would_allow` ("... (log only, nothing changed)"), and a sampled stderr line | open; every would-be denial writes `access.app_gate.would_deny` (one a day per person per app) and a sampled stderr line |
+| `ACCESS_V2_RESOLVER=true` (log-only off) | the engine decides (Owner split floor kept) | `AppKeyGate`: a hidden or floored app locks its routes (AppOff for Owners and Admins with the Apps & modules link, the in-shell 404 for Guests) |
+
+Read the week: Workspace settings > Audit log, filter on `access.settings_gate` and `access.app_gate`. Both row families carry `metadata.logOnly: true`, and the audit purge may delete them (they are not read back). Rollback: unset the flag; takes effect on the next request (verified locally: the dev server re-reads `.env.local` without a restart).
+
+**Before the Apps hides and floors become real gates, run the one-time report** (dry run only, refuses a non-local database without `--allow-remote`):
+
+```
+DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/report-app-floors.ts --out /tmp/app-floors.json
+```
+
+Per workspace that hides or floors an app: today's count without it, the engine's count, and by name who LOSES it at the flip (the rung is replaced by reports or the People team) and who GAINS it. Local 2026-09-30: 0 workspaces hide or floor an app (report `phase8-reports/app-floors-dryrun.txt` in the session scratchpad). The Apps & modules page now counts before saving: a hide or a raised minimum role asks "N people lose access to {app}" with the first five names (`POST /api/settings/apps/impact`, Owner and Admin, reads only), by the rule in force (the engine's rule 2 with the resolver on, the rail's display tiers otherwise); a change nobody loses to saves straight away; a failed count still lets the Admin save and says the count is unknown.
+
+**Behaviour changes with no data step**, for the release note:
+- Every org write API is on its settings page's rule through `src/lib/access/settings-write.ts` (the actor re-read, so a demoted Admin is refused at once, 403 `admin_only` / `owner_only` naming the page): branding, BYOK, the AI profile draft, the work schedule, SCIM tokens (Security), webhooks and API keys (API & webhooks), billing checkout and portal, the audit export, the people export (Data: it admitted the whole manager tier through the raw API; the only product caller was the Admin-only Data page), module installs and the org rail defaults (Apps & modules), the old permission grid PATCH (Access; now level keys are whitelisted and the save is audited `settings.updated.permissions`), dimensional tags (Task system), and the logo (Identity; C-level loses the raw-API write the Identity page never offered them, audited `settings.updated.logo`, and a non-multipart body is a 400, not a 500). SCIM tokens and webhooks now follow the Owner page rule: with `SETTINGS_OWNER_SPLIT` off that is every Admin, exactly as before.
+- C-level keeps the Scoring save while today's door decides; once the engine's door decides (resolver on, log-only off) the Scoring write follows the page to Owners and Admins (access-model-spec 10.1). The backfill pre-flight already names every C-level person this touches.
+- The rail Settings hub lands per viewer (spec-settings-workspace 1.1): Owners and Admins on Overview, a reader below Admin on the first Workspace page the door opens for them (Members for the manager tier today, the People team's first page under the engine), everyone else on My settings > Profile.
+- The Planner sidebar drops Meetings, Timesheets and Clock in/out when the org hides them (they already left the rail, the launcher and the palette).
+- `/sops/compliance`, `/policies/compliance` and `/policies/[id]/compliance` gate on the ledger API's own rule (personScope): a manager-tier person with no reports gets the in-shell 404 where they used to get "Couldn't load" from a 403.
+- `GET /api/me/access` is gone (a debug endpoint no client called; `POST /api/access/check` answers "my role here, and why").
+
+**Access step 6 progress: the allow-list shrank 331 to 255** (`eslint-access-allowlist.mjs`, header note). Batches done: Settings and Admin-adjacent (the write routes above, `/api/settings`), Nav (the rail, hub sidebars, Planner and Docs sidebars and the create menus read `viewer.tiers` from `/api/boot`, `src/lib/access/viewer-tiers.ts`; no client surface reads the level any more), plus 47 files that had stopped reading the legacy signals in earlier stages. Deleted with zero importers: `src/lib/route-guard.ts` (callers moved to `src/lib/access/page-viewer.ts` or personScope), `src/components/layout/os/access-tiers.ts` (the ladder is `tiersOfLevel` in viewer-tiers.ts), `src/app/api/me/access/route.ts`. Moved beside the engine, answers unchanged: `src/lib/access.ts` to `src/lib/access/legacy-resolve.ts` (this ends the shadow: `@/lib/access` now resolves to the engine's index; the parity tie-break imports the new path), `src/hooks/use-role.ts` and `src/hooks/use-permission.ts` to `src/lib/access/use-legacy-permissions.tsx`.
+
+**What remains on the allow-list (255), and why it is not done in this stage:** the Work OS routes (boards 13, docs 14, spaces 10, folders 7, whiteboards 6, tables 6, items, lists, entity links, the favourites and "me" aggregates 11) call the node helpers (`space.ts`, `board.ts`, `folder.ts`, `doc-access.ts`), whose delegation to `can()` is proven only with `ACCESS_V2_TABLES` on (flags.ts `PROVEN_DELEGATES`): replacing their call sites with `requireCan` before that flag is on in production would regress the node-access rules; People and alignment (alignment-scope.ts and its 20 importers, goal-audience, KRAs, KPIs, OKRs) keep the manager-chain rules that change meaning at the flip (the rung becomes "has reports"); Knowledge (SOPs, policies, agreements) still read the stored permission grid through `requirePermission`, which retires with `access-retire-matrix.ts --strip` after the resolver runs clean; the finance and planning routes (accounting periods, budget plans, invoices, journal entries, GL accounts, fiscal years, purchase orders, vendors) gate on `isManager` with no settings page or object to point a ref at; `src/lib/auth.ts`, `/api/auth/*` and `/api/boot` read `accessLevel` to mint and refresh the session, which step 8 changes with the JWT claim. Each leaves in the batch named above, after its flag state is proven.
+
+**Decisions to ratify:**
+- `AppEntry.requiredAccess` is kept (three apps and four create actions): it is a display tier the client now reads through `viewer.tiers`, mirrored server-side in `src/lib/app-access.ts` with a drift test; deleting it before APP_RULES' audiences replace it at the flip would drop the rail tier for Policies, Contracts and Build.
+- The permission grid's unenforced cells: under `ACCESS_V2_RESOLVER` the whole grid retires on the Access page (read-only, kept for the matrix export). With the flags off the "rest of the old grid" stays editable behind its disclosure, because seven client surfaces (`usePermission`) still hide or show menu rows from those cells; removing them now would change those menus for any workspace that edited them.
+
+**Custom roles over the four-role ladder** remain the next step after the engine is proven on in production; not built here.
+
+### Stage F review fixes (2026-09-30): no schema, no flag, no data step
+
+- **Canonical links keep decision B3.** The Docs and SOPs app gates moved off the `/docs` and `/sops` segments onto route groups that add nothing to the URL: `src/app/(dashboard)/docs/(hub)/` (the hub page) and `src/app/(dashboard)/sops/(app)/` (the SOP centre, My SOPs, new, manage, compliance; files moved, content unchanged, `sops/layout.tsx` removed because its only job, the gate, is now `sops/(app)/layout.tsx`). `/docs/[id]` and `/sops/[id]` sit outside them, so with the resolver on a person without the hub is moved to the item's Work door by `CanonicalHubGate` instead of meeting AppOff, and the log-only week no longer counts those visits as would-be denials. The open-doc strip stays on `docs/layout.tsx`.
+- **The rail and the routes answer by one rule in every state.** `/api/boot` ships `viewer.tiers` from `engineTiers` (src/lib/access/viewer-tiers.ts: manager is reports or the People team, hr-admin the People team, each cleared by Owners and Admins, a Guest clears none) whenever the app gates enforce (`appGatesEnforce()` in flags.ts: `ACCESS_V2_RESOLVER` on and `SETTINGS_GATE_LOG_ONLY` off), and `tiersOfLevel` otherwise. So a MANAGER or TEAM_LEAD with no reports loses a manager-floored app's rail row, launcher entry and hub-sidebar rows at the same moment its route closes, and a C-level, VP or Director on the People team gains the hr-admin rows the route already let them into. Flags off: byte-for-byte today's tiers. The AppOff card now says "{app} is limited to some roles" for a floor and keeps "is hidden" for a hide.
+- **"N people lose access" counts only people who have the app.** `keepsApp` starts from the app's baseline (today the catalog `requiredAccess`, the rail and launcher a hide changes; under the engine the APP_RULES audience, the route a hide closes, with a Guest counted only on a Guest-visible app they hold something in). The count follows `appGatesEnforce()`, the rule the routes and the rail enforce, not the resolver flag alone. Locally a floor on Build apps now names nobody (it named 42). Two races on the page are closed: a second hide or floor change while a count is in flight is refused with a toast; the confirmed change is applied to the page's state at save time, so a reorder saved meanwhile is kept. The failed-count dialog no longer promises "Saving still works".
+- **SOP and Policy compliance rows follow their layouts.** `/api/boot` ships `viewer.complianceReader` (process-scope.ts personScope canView, the rule both layouts 404 on); the Docs sidebar's two rows read it (`complianceOnly`), so a manager with no reports no longer sees a row that leads to "We couldn't find that page".
+- **Two more settings write routes on their page rule** (settings-write.ts, the account re-read): offices POST, PATCH and DELETE on Structure (they admitted the whole manager tier; the only screen is Structure > Offices, Owner and Admin; the People team and managers lose an API-only write, GET stays open to every picker), and the SAML and OIDC identity provider GET and upsert on Security (an Owner page, so every Admin while `SETTINGS_OWNER_SPLIT` is off, then the Owner or an Admin with the Security scope; before, a stale Admin token was enough). The logo route now calls `settingsWriteGate` itself, so under the engine it also needs the engine's manage answer on Identity. The read routes (key list, webhooks, SCIM tokens, identity providers, the audit and data exports) refuse with "can see this"; the owner-page sentence names today's rule ("a workspace Owner or Admin" until the split is on).
+- **The old permission grid PATCH refuses an unknown level key by name** (400 "Unknown access level in the matrix: X"); GET returns only the ladder's levels, so a stray key stored by a hand edit never round-trips into a save the server then refuses.
+- **access.denied is written** (access-model-spec 5.1, invariant 16): `requireCan` on every refusal and `gatePage` on a refused "view", only when the decision was discoverable (never an id probe), sampled to one row per viewer per target per action per 10 minutes (src/lib/access/audit.ts `logDenial`, row shape `guards.ts denialAuditRow`). Visible on Workspace settings > Audit log under the `access.` family.
+- **A Guest assigned an SOP keeps /sops/my-sops** under the resolver: `guestHoldsSomethingFor("sops")` counts SOPAssignment as well as SOPFolderAccess (spec 5.2.1 "assigned SOPs only").
+- **Server page helpers keep route-guard's two edges** (page-viewer.ts): a token with no level claim re-reads the account instead of reading as a Guest, and signed in with no organization renders as a Member instead of bouncing to /login.
+- **ENFORCED_AT names a real file for every app key** (`APP_GATE_FILES` in enforcement.ts, one explicit row per key, a test checks each file exists and, for AppKeyGate rows, renders that key). The generic template is gone.
+- **The allow-list count is true: 259**, not 255. Offices and identity providers left it; six files that read legacy signals and were on no list joined it (announcement-server.ts, announcement-audience.ts, move/destinations, my-work/personal, two tests), and `ACCESS_LEGACY_INSIDE_ENGINE` counts the two legacy modules stage F moved into the lint-exempt `src/lib/access/` (legacy-resolve.ts, use-legacy-permissions.tsx). So the real shrink of legacy logic in stage F was 331 to 261, not 331 to 255.
+- **Deletion recorded:** `GET /api/me/access` (debug, zero client importers) also answered `module:`, `user:`, `weekly-review:` and `kra:` refs. `POST /api/access/check` answers node kinds only; for the other kinds a support question is answered by the parity job (`scripts/access-parity-job.mjs`, which evaluates can() for every person and object kind) until a support view exists.
+
+**What remains, added by this review:** the settings-area files still on the allow-list: `api/audit` (sessionIsWorkspaceAdmin, no fresh actor), `api/invitations`, `api/users`, `api/users/[id]` (Members role changes), `api/workspaces/*`, `settings/access/page.tsx`, `settings/members/page.tsx`. `useRole().isAdmin` (use-legacy-permissions.tsx) still counts C_LEVEL and HR as admin for its 14 client importers; spec 10.1 moves it to orgRole, which waits until those surfaces' server rules (canManageProcess, the SOP, policy and agreement routes) delegate too, or C-level would lose controls the server still grants. Custom roles over the ladder follow the engine being proven on in production.
+
+## Phase 8 (Settings, My settings, sign-in, access), close: deviations to ratify, and what was decided but is not built
+
+No new schema, flag or data step in this section. It is the written record the final review asked for: what Phase 8 did NOT ship of its decided additions and of the "one share dialog", why, and what the founder should ratify before deploy.
+
+### To ratify before deploy
+
+- **`ActivityLog.actorId` becomes nullable** (`prisma/sql/2026-09-30-phase8-settings-access.sql`). It is the one statement in this phase that relaxes an existing column, and it is a one-way door for a CODE rollback: once the first row with no person as its actor exists (a SCIM change, the audit purge, a Staff console action), a release older than stage D throws on every query that includes the actor over that row. The rollback no longer deletes audit rows: the SQL file's header copies the null-actor rows into `ActivityLogNullActorHold`, takes them out of the log, restores the constraint, and puts them back on the way forward. Ratify, or hold stage D's code and this statement together.
+- **Per-List mute** (decided addition c) is stored as `UserPreference.home.notifications.muted[]` (the strict preferences schema), not as a column on `BoardMember`. The capability is the same (mute one List, from the List's menu and My settings > Notifications); the storage differs from the decision because a column on `BoardMember` cannot mute a List the person reaches through a Space, a Folder or an AccessGrant (they have no BoardMember row). Ratify, or ask for the column (additive; the preference key would then be migrated into it).
+
+### Decided, NOT built in Phase 8 (the next steps, in this order)
+
+1. **SSO sign-in, SAML and OIDC (decided addition d).** Built: the API that stores a SAML or OIDC provider (`api/identity-providers`, an Owner page rule; no screen reads it yet) and SCIM provisioning and deprovisioning. NOT built: the sign-in itself. `src/lib/auth.ts` has the credentials and Google providers only; the Security page shows SSO sign-in only under Show upcoming features ("Coming soon"). Why not now: an SSO login is a new way past the live login hardening, and each of lockout, MFA at login (`ENFORCE_MFA_AT_LOGIN`), tokenVersion logout, the edge gate and the idle session has to be proven on it before it is exposed; a half-built SAML path is the worst case for an enterprise. Next: a NextAuth provider per stored IdP (OIDC first, SAML through a vetted library), `signIn` refusing an enrolled person unless the IdP asserts MFA (the same rule the Google callback now applies), and the tokenVersion and idle rules unchanged.
+2. **Board permission ladder, two extra rungs, and the read-only matrix page (decided addition a).** NOT built: "edit only rows assigned to me", "comment only" as additive List roles, and a read-only page of what each role can do. `SpaceRole` is still OWNER, ADMIN, MEMBER, GUEST, and node access (`src/lib/access/node-access.ts`) decides Full, Can edit, Can comment and Can view (Can comment already exists on every node, so the second rung is a List-level alias of it, not a new rung). Why not now: "edit only assigned rows" is a per-ROW rule every task write route would have to ask (inline edit, bulk actions, drag to reorder and reschedule, the API), and a rung that one route forgets is a silent over-grant. Next: `ASSIGNED_EDIT` as a node role below Can edit, enforced in the one item-write gate, with the golden suite extended; then the matrix page renders from the same rule table, so it cannot drift from what is enforced. Until then the old grid is kept read-only on Access ("Show the grid as it stood") and exported on Data > Export.
+3. **Public task link (decided addition b).** NOT built: no share token on Item, no `(public)/share/task` route, no hide-assignees-and-comments toggle. The share-token pattern exists for Docs and SOPs (`src/app/(public)/share/doc`, `.../sop`) and the Public links switch on Access governs them. Next: an additive `Item.shareToken` and `shareExpiresAt`, a view-only public page reusing the doc share page's frame, the two hide toggles stored on the token, and the Public links switch as the org-wide off.
+4. **Whole-workspace export, the content (decided addition f).** Built: Data > Export > Full workspace (ZIP), one CSV per object kind with ids, titles, owners, statuses and dates, Owner and Admin, logged. NOT in it yet, and the card says so: doc text, task descriptions, comments, custom field values, table rows and files. Next: stream those per kind into the same ZIP (the table rows through the Tables streaming transport), with a size estimate before the download starts.
+5. **One share dialog for the non-node kinds.** The Manage access dialog (`src/components/access/manage-access-dialog.tsx`) covers the seven node kinds (Space, Folder, List, doc, table, canvas, form) with every node-access rule. Goals still share through `OkrAudience` (`okrs/[id]/page.tsx`), SOPs through `SopShareDialog`, SOP folders through `sop-folder-share-dialog.tsx` (Settings > SOP folders and tags). The AccessGrant CHECK already admits `SOP_FOLDER`, `GOAL`, `TOOL` and `TEAM`, but no route writes those kinds. Why not now: each of those three surfaces enforces its own reach today (goal audience, SOP folder access, SOP assignment), and folding them into the dialog means the dialog's writes must become what those routes read; doing the UI first would show a role the routes ignore. Next: node-access gains the four kinds behind `ACCESS_V2_TABLES`, the parity job proves them, then the dialog opens on them and the three surfaces retire.
+6. **Custom roles over the ladder** (carried from Phase 9): after the new engine is proven on in production.
+
+### Final review fixes (2026-09-30): no schema, no flag, no data step
+
+- **One audit export.** Data > Export > Audit log (CSV) now downloads the Audit log page's own export (`/api/audit?format=csv`): Owner and Admin only on the fresh actor, every non-person actor labelled (identity provider, WorkwrK staff, system), up to 50,000 rows with a line in the file when capped. `/api/export/audit` (it admitted the whole manager tier) now checks the same gate and redirects old links there.
+- **Stale sessions cannot mint access.** `POST /api/invitations` and `POST /api/users` decide the permission and the invitable level from the account as the database holds it now (`freshWorkspaceActor`); the audit log read and CSV, Teams create, rename and delete, and the access-request decline re-read the actor too. A person demoted a moment ago is refused at once, not at the five-minute session check.
+- **SCIM handover is never lost.** The deactivation and a `membership.handover_pending` audit row commit together; if the handover then fails, the identity provider's retry finds that row still the latest word and finishes the handover (to the manager, else the first Owner). The PATCH and PUT routes now call deprovisioning when the person is already inactive, so the retry reaches it.
+- **Google sign-in asks for the second factor whenever the password path would.** With `ENFORCE_MFA_AT_LOGIN=true`, a person enrolled in two step verification is sent to the password and code path instead of being signed in by Google.
+- **Sign everyone out stays inside the workspace.** It bumps `tokenVersion` only for people anchored in this workspace. For members anchored in another company it stamps `settings.security.signedOutEveryoneAt`, and any session signed in before the stamp ends at its next check when it acts in this workspace (it stays ended), never in their own company.
+- **Security saves cannot race.** The Security section is read, merged and written under the Organization row lock.
+- **Pre-release sessions idle out.** A token with no `seenAt` is idle-timed from its own `iat`, never from "now". Production cookies already expire 12 hours after their last write, so nobody still in use is signed out by this.
+- **Decline needs no more than grant.** Anyone who clears a node's grant bar (Full access) can decline a request for it, as they can grant it.
+- **Workspace settings chrome.** The Overview setup card reads the legacy `setupCompleted`, so a finished workspace is never offered setup again. The Access tile names only the two switches enforced in every state (People team, Public links). The breadcrumb reads `{Org} > Workspace settings > {Page}`. The sidebar draws a lock on Owner pages an Admin cannot open (boot `settingsLockedPages`, only while `SETTINGS_OWNER_SPLIT` is on), and the narrow Pages select adds ". Owners only". The bar's wide search pill is not drawn inside a door (the door's own "Find a setting" is the search; Cmd K still focuses it). Cmd K lists Workspace settings entries to Owners and Admins only and opens them through the settings door. The workspace menu's Delete workspace opens Identity > Danger zone (the one delete surface, which now moves the person to another workspace or signs them out) and is absent while the split is on for a non-Owner Admin. Members > Teams is in the registry. The Ask-an-admin strip reads "{Page} is part of Workspace settings, which {names} look after" and, on Data, points a Member at "Import a CSV into a table" (the old /imports card's way out). Manage task types is Owner and Admin only and opens through the door. The admin tour's first step opens Identity & culture > Culture, and the second opens the invite dialog.
+- **Audit wording.** An app denial names the app by its label ("the Docs app") and says which switch: hidden, limited to some roles, or AI features off.

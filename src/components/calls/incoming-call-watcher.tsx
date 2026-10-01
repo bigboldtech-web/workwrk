@@ -265,7 +265,11 @@ export function IncomingCallWatcher() {
   // The list is read through this guard rather than cleared in an effect, so
   // turning Talk off never costs a cascading render.
   const live = talkOn ? calls : [];
-  if (live.length === 0) return null;
+  // My settings > Notifications > Desktop > "Ring for incoming calls"
+  // (home.notifications.desktopRingCalls, default on). Off means no ringing
+  // card; the call still reaches the bell and the conversation.
+  const ringOn = prefs.home.notifications?.desktopRingCalls !== false;
+  if (!ringOn || live.length === 0) return null;
 
   // Stack above the dock when there is one. 20px page margin, the dock's own
   // height, then 12px between surfaces, then 96 per card below this one.

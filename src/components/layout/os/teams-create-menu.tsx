@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { Briefcase, Building2, ClipboardList, Gauge, Heart, Target, UserPlus, type LucideIcon } from "lucide-react";
 import { MorePortal } from "./more-portal";
 import { MenuList, MenuItem, MenuSectionLabel } from "@/components/ui/menu";
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useBoot } from "./boot-context";
 import { leaveThen } from "@/lib/dirty-guard";

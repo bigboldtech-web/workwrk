@@ -48,6 +48,10 @@ export const PERSON_FIELD_GROUP: Record<string, PersonFieldGroup> = {
   managerId: "reports-to",
   status: "status",
   "accessLevel": "access",
+  // The four-role write (Members drawer): Owner, Admin or Member, and the
+  // member tier; src/lib/access/membership.ts applies every guard.
+  orgRole: "access",
+  memberTier: "access",
 };
 
 /** Every key PATCH /api/users/[id] accepts. Anything else is a 400. */
@@ -57,10 +61,23 @@ export const PATCHABLE_PERSON_FIELDS: ReadonlySet<string> = new Set(Object.keys(
  * May this relationship write this group? `managerTierSelf` is the legacy
  * rule that a manager-tier viewer edits their own placement (kept).
  */
+export interface PersonWriteOpts {
+  managerTierSelf?: boolean;
+  /**
+   * The manager chain writes the membership fields (placement, reports-to,
+   * status). True today; the server passes false once ACCESS_V2_RESOLVER is
+   * on (access-model-spec 3.5 and 10 step 2: "Membership (P) fields no
+   * longer writable by the manager chain"), when the Owner, Admin and the
+   * People team keep them. Server callers pass it from the flag; the client
+   * reads the server's editable list, never this table with a flag.
+   */
+  chainWritesMembership?: boolean;
+}
+
 export function canWritePersonGroup(
   group: PersonFieldGroup,
   relation: PersonRelation,
-  opts: { managerTierSelf?: boolean } = {},
+  opts: PersonWriteOpts = {},
 ): boolean {
   switch (group) {
     case "personal":
@@ -75,6 +92,7 @@ export function canWritePersonGroup(
     case "reports-to":
     case "status":
       if (relation === "self") return opts.managerTierSelf === true;
+      if (relation === "chain" && opts.chainWritesMembership === false) return false;
       return relation !== "none" && relation !== "chain-view";
     case "access":
       // Membership fields are the Members drawer's (Owner and Admin only).
@@ -85,7 +103,7 @@ export function canWritePersonGroup(
 export function canWritePersonField(
   field: string,
   relation: PersonRelation,
-  opts: { managerTierSelf?: boolean } = {},
+  opts: PersonWriteOpts = {},
 ): boolean {
   const group = PERSON_FIELD_GROUP[field];
   if (!group) return false;
@@ -96,7 +114,7 @@ export function canWritePersonField(
 export function checkPersonPatch(
   body: Record<string, unknown>,
   relation: PersonRelation,
-  opts: { managerTierSelf?: boolean } = {},
+  opts: PersonWriteOpts = {},
 ): { unknown: string[]; forbidden: string[] } {
   const unknown: string[] = [];
   const forbidden: string[] = [];

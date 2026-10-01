@@ -11,6 +11,12 @@ declare module "next-auth" {
       firstName: string;
       lastName: string;
       avatar: string | null;
+      /** The tokenVersion this session was issued at (read-only; see freshWorkspaceActor). */
+      tokenVersion?: number;
+      /** Access step 0 claims, derived from accessLevel (the mirror); the server re-reads the row. */
+      orgRole?: "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+      isAgent?: boolean;
+      adminScopes?: ("billing" | "security")[];
     } & DefaultSession["user"];
     /**
      * Present once the person was moved out of a suspended or closed company
@@ -39,7 +45,22 @@ declare module "next-auth/jwt" {
     firstName: string;
     lastName: string;
     avatar: string | null;
+    /** Access step 0 claims (Phase 8 stage E), derived from accessLevel on every read. */
+    orgRole?: "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+    isAgent?: boolean;
+    adminScopes?: ("billing" | "security")[];
     /** The one-shot workspace-move marker (lib/auth.ts, WorkspaceMove). */
     workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED"; to: string; at: number };
+    /** The workspace requires two step verification of this person and they have none (lib/auth/mfa-hold.ts). */
+    mfaHold?: boolean;
+    /** The password is past the workspace's maximum age (Security > Passwords). */
+    passwordHold?: boolean;
+    /** The session clock (lib/auth/session-policy.ts). */
+    authAt?: number;
+    seenAt?: number;
+    idleMin?: number;
+    maxDays?: number;
+    policyEnded?: boolean;
+    policyEndedReason?: "idle" | "lifetime" | "signed_out";
   }
 }

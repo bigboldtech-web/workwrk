@@ -4,6 +4,8 @@
 // directly (src/lib/staff-audit-helpers.test.ts). The writes live in
 // staff-audit.ts.
 
+import { clientIpFromHeaders } from "./client-ip";
+
 export const STAFF_ACTIONS = [
   "admin.org.plan_changed",
   "admin.org.status_changed",
@@ -61,13 +63,10 @@ export function statusLabel(status: string | null | undefined): string {
 }
 
 /**
- * The client IP from proxy headers, in the order that a client cannot forge:
- * x-real-ip first (nginx sets it to the address it accepted the connection
- * from, overwriting anything the client sent), then the LAST x-forwarded-for
- * hop (proxy_add_x_forwarded_for appends that same address after whatever
- * the client claimed; the first hop is the client's own claim). Accepts a
- * Request, a Headers, or anything with a `headers` that has `get`. Null when
- * nothing is known; never a guess.
+ * The client IP from proxy headers, in the order that a client cannot forge
+ * (x-real-ip, then the LAST x-forwarded-for hop; src/lib/client-ip.ts is the
+ * one place that order lives). Accepts a Request, a Headers, or anything with
+ * a `headers` that has `get`. Null when nothing is known; never a guess.
  */
 export function requestIp(
   source: Request | Headers | { headers: Headers } | null | undefined,
@@ -79,13 +78,7 @@ export function requestIp(
       : (source as { headers?: Headers }).headers instanceof Headers
         ? (source as { headers: Headers }).headers
         : undefined;
-  if (!headers) return null;
-  const real = headers.get("x-real-ip")?.trim();
-  if (real) return real;
-  const raw = headers.get("x-forwarded-for");
-  if (!raw) return null;
-  const hops = raw.split(",").map((h) => h.trim());
-  return hops[hops.length - 1] || null;
+  return clientIpFromHeaders(headers);
 }
 
 /** The staff actor from a NextAuth session: id when present, email lower-cased. */

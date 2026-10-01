@@ -1,53 +1,14 @@
-"use client";
+// /onboard's layout: the tab title and the light-only sign-in stylesheet.
+// The session gate and the boot screen are the client frame
+// (onboard-frame.tsx). The wizard names the workspace in the tab once it
+// has loaded it ("Set up {Org}", naming-canon); this is the title before.
 
-// Onboarding shell — self-contained light theme (explicit Tailwind, no
-// dependency on the .workwrk-os / os.css tokens, which inherit the app's dark
-// default and were rendering the wizard dark + unreadable).
+import type { Metadata } from "next";
+import { OnboardFrame } from "./onboard-frame";
+import "../(auth)/auth-shell.css";
 
-import Link from "next/link";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { LogoLockup } from "@/components/brand/logo";
-import { DotsLoaderScreen } from "@/components/brand/dots-loader";
-import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+export const metadata: Metadata = { title: "Set up your workspace | WorkwrK", robots: { index: false, follow: false } };
 
 export default function OnboardLayout({ children }: { children: React.ReactNode }) {
-  const { status } = useSession();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
-  }, [status, router]);
-
-  if (status === "loading") {
-    return <DotsLoaderScreen label="Loading" background="#FBFBFC" />;
-  }
-  if (status === "unauthenticated") return null;
-
-  return (
-    <div
-      className="min-h-screen text-zinc-900 antialiased"
-      style={{
-        colorScheme: "light",
-        background: "#FBFBFC",
-        fontFamily: "var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
-      }}
-    >
-      <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-3.5">
-          <Link href={WORK_HOME_HREF} aria-label="WorkwrK home" className="flex items-center">
-            <LogoLockup size={19} textColor="#181B34" />
-          </Link>
-          <Link href={WORK_HOME_HREF} className="ml-auto rounded-md px-3 py-1.5 text-base text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
-            Skip for now
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto flex min-h-[calc(100vh-57px)] w-full max-w-5xl flex-col px-6 py-10">
-        {children}
-      </main>
-    </div>
-  );
+  return <OnboardFrame>{children}</OnboardFrame>;
 }

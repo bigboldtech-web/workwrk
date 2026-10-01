@@ -9,7 +9,9 @@
 // toggle is off and point admins here, so there has to be a control behind
 // that sentence. Reads GET /api/settings (settings.access.publicLinks) and
 // writes PATCH /api/settings { section: "access", data: { publicLinks } }.
-// The row autosaves with the inline "Saved" tick and reverts on failure.
+// The row autosaves with the inline "Saved" tick and reverts on failure. A
+// failed save says why and offers a Retry that resends the value the admin
+// picked (the chassis rule in settings-row.tsx), not a bare "Not saved".
 //
 // The stored key can also be ABSENT (an org that never saved this page). The
 // public docs, tables and forms routes treat absent as "keep what is live"
@@ -26,10 +28,21 @@ import { apiFetch } from "@/lib/api-fetch";
 
 type PublicLinks = "off" | "view";
 
+// What a failed save leaves behind: the reason to show and the value the
+// admin picked. The switch itself reverts to the stored value, so `intended`
+// is the only place the choice survives, and it is what Retry resends.
+export type PublicLinksFailure = { message: string; intended: PublicLinks };
+
+export function publicLinksFailure(r: { ok: boolean; error?: string }, intended: PublicLinks): PublicLinksFailure | null {
+  if (r.ok) return null;
+  return { message: r.error?.trim() || "Couldn't save", intended };
+}
+
 export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
   const [value, setValue] = useState<PublicLinks | null>(null);
   const [unset, setUnset] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [failure, setFailure] = useState<PublicLinksFailure | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -52,9 +65,11 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
     const prev = value;
     const next: PublicLinks = on ? "view" : "off";
     setValue(next);
+    setFailure(null);
     setState("saving");
     const r = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: { publicLinks: next } } });
-    if (!r.ok) { setValue(prev); setState("failed"); return; }
+    const failed = publicLinksFailure(r, next);
+    if (failed) { setValue(prev); setFailure(failed); setState("failed"); return; }
     setUnset(false);
     setState("saved");
   }
@@ -78,11 +93,26 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
         <span className="inline-flex shrink-0 items-center gap-2 text-sm text-ink-2">
           {state === "saving" ? <Dots variant="pending" label="Saving" /> : null}
           {state === "saved" ? <span className="text-success-text">Saved</span> : null}
-          {state === "failed" ? <span className="text-danger-text">Not saved</span> : null}
+          {state === "failed" && failure ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
+              {failure.message}
+              <button
+                type="button"
+                onClick={() => { void change(failure.intended === "view"); }}
+                className="underline underline-offset-2 hover:text-ink"
+              >
+                Retry
+              </button>
+            </span>
+          ) : null}
           {value === null ? (
             <span className="inline-block h-5 w-9 rounded-full bg-skeleton os-skeleton-pulse" aria-hidden />
+          ) : canEdit ? (
+            <Switch checked={value === "view"} disabled={state === "saving"} onChange={(on) => void change(on)} aria-label="Public links" />
           ) : (
-            <Switch checked={value === "view"} disabled={!canEdit || state === "saving"} onChange={(on) => void change(on)} aria-label="Public links" />
+            // Read-only is the value as text, never a faded control
+            // (access-model-spec 5.4).
+            <span className="text-base font-medium text-ink">{value === "view" ? "On" : "Off"}</span>
           )}
         </span>
       </div>

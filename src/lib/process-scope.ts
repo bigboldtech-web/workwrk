@@ -6,7 +6,8 @@
 // transcription every sibling route already uses: the org-wide legacy levels
 // see everyone, any other manager sees their report tree, and a viewer with
 // nobody in scope is answered 403 by the route (the page never reaches it:
-// the sidebar row and the layout 404 both gate on the same tier).
+// the layouts 404 on personScope, and /api/boot ships the same answer as
+// viewer.complianceReader for the Docs sidebar rows).
 
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";

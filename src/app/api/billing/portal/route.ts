@@ -2,18 +2,19 @@ import { NextRequest } from "next/server";
 import {
   getSessionOrFail,
   getOrgId,
-  hasRole,
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { createPortalSession, isBillingLive } from "@/services/billing";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!hasRole(session, ["SUPER_ADMIN", "COMPANY_ADMIN"])) {
-    return jsonError("Only admins can manage billing", 403);
-  }
+  // The Billing page rule (an Owner, or an Admin holding the Billing scope
+  // once the Owner split is on), the actor re-read.
+  const writeGate = await settingsWriteGate(session, "billing");
+  if (!writeGate.ok) return writeGate.response;
   if (!isBillingLive) {
     return jsonError("Stripe not configured", 503);
   }

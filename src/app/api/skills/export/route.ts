@@ -30,7 +30,7 @@ export async function GET() {
     type: "data.exported",
     actorId: ctx.userId,
     organizationId: ctx.organizationId,
-    description: `Exported ${rows.length} skill rows`,
+    description: `Exported ${rows.length} skill ${rows.length === 1 ? "row" : "rows"}`,
     targetType: "Skills",
     metadata: { rows: rows.length },
   });

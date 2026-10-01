@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
         email: invite.email,
         token,
         expiresAt,
-        acceptUrl: `${base}/register?token=${token}`,
+        acceptUrl: `${base}/join?token=${token}`,
       },
     },
     { status: 201 },

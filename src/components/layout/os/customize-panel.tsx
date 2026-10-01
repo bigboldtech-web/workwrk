@@ -22,7 +22,7 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { SETTINGS_PAGES, settingsHrefToday } from "@/lib/settings-registry";
 import { CHROME_CONTROL_EXPOSED } from "@/lib/nav/labels";
 import { readSidebarCards, type SidebarOptionalKey } from "@/lib/home-prefs";
-import { ACCENT_KEYS, ACCENT_LABELS, isAccentKey } from "@/lib/accents";
+import { ACCENT_CHOICE_OFFERED, ACCENT_LABELS, OFFERED_ACCENTS, effectiveAccent } from "@/lib/accents";
 import { cn } from "@/lib/utils";
 import type { DensityPref } from "@/lib/preferences";
 import { useLayer, useOsShell } from "./shell-context";
@@ -32,13 +32,14 @@ type Appearance = "LIGHT" | "DARK" | "AUTO";
 type Chrome = "navy" | "light";
 
 /** The Work hub's optional sections (the personal block is required and never listed). */
-const SECTIONS: Array<{ key: string; label: string }> = [
+/** Shared with My settings > Preferences > Sidebar, so the two surfaces list the same sections. */
+export const SECTIONS: Array<{ key: string; label: string }> = [
   { key: "favorites", label: "Favorites" },
   { key: "spaces", label: "Spaces" },
 ];
 
 /** The optional Work rows `home.cards` switches (Home, My work and Inbox are fixed). */
-const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
+export const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
   { key: "activity", label: "Activity" },
   { key: "goals", label: "Goals" },
   { key: "templates", label: "Templates" },
@@ -51,7 +52,7 @@ const ROWS: Array<{ key: SidebarOptionalKey; label: string }> = [
  * colour a key would give regardless of which accent is active, and no hex
  * lives in this file.
  */
-const ACCENTS = ACCENT_KEYS.map((key) => ({ key, label: ACCENT_LABELS[key] }));
+const ACCENTS = OFFERED_ACCENTS.map((key) => ({ key, label: ACCENT_LABELS[key] }));
 
 function SavedTick({ at }: { at: number }) {
   // Shown from the moment of the save until 2s later.
@@ -98,7 +99,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
   const appearance: Appearance = prefs.theme.appearance ?? "LIGHT";
   const chrome: Chrome = prefs.theme.chrome ?? "navy";
   const density: DensityPref = prefs.density ?? "comfortable";
-  const accent = isAccentKey(prefs.theme.accent) ? prefs.theme.accent : "workwrk";
+  const accent = effectiveAccent(prefs.theme.accent);
   const cards = readSidebarCards(prefs.home?.cards);
   const order = prefs.sidebar.sectionsOrder?.length ? prefs.sidebar.sectionsOrder : SECTIONS.map((s) => s.key);
   const hidden = new Set(prefs.sidebar.hiddenSections ?? []);
@@ -108,6 +109,13 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
     const ok = await patchPrefs(patch);
     if (ok) setSaved((s) => ({ ...s, [key]: Date.now() }));
     else toast("Couldn't save. Try again", { action: { label: "Try again", onClick: () => { void write(key, patch); } } });
+  };
+
+  // Saved only once the server kept it; the shell reverts the rail otherwise.
+  const saveCollapsed = async (v: boolean) => {
+    const ok = await setSidebarCollapsed(v);
+    if (ok) setSaved((s) => ({ ...s, sidebar: Date.now() }));
+    else toast("Couldn't save. Try again", { action: { label: "Try again", onClick: () => { void saveCollapsed(v); } } });
   };
 
   const move = (key: string, dir: -1 | 1) => {
@@ -128,7 +136,9 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
     void write("rows", { home: { cards: next } });
   };
 
-  const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/appearance";
+  // settings-architecture 2.4: this link opens the Sidebar tab, the one that
+  // holds the same rows as this panel plus width and quick actions.
+  const preferencesHref = `${settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/preferences"}?tab=sidebar`;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -166,6 +176,10 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   onChange={(v) => { void write("theme", { theme: { appearance: v } }); }}
                 />
               </Row>
+              {/* One blue (src/lib/accents.ts OFFERED_ACCENTS): the row hides
+                  itself while there is nothing to choose, the same rule My
+                  settings > Preferences follows, so the two never disagree. */}
+              {ACCENT_CHOICE_OFFERED ? (
               <Row label="Accent" hint="Buttons, links and selection" savedAt={saved.accent ?? 0}>
                 <div role="radiogroup" aria-label="Accent" className="flex flex-wrap items-center justify-end gap-1.5">
                   {ACCENTS.map((a) => {
@@ -194,6 +208,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   })}
                 </div>
               </Row>
+              ) : null}
               {CHROME_CONTROL_EXPOSED ? (
                 <Row label="Chrome" hint="The rail and the bar" savedAt={saved.chrome ?? 0}>
                   <SegmentedControl<Chrome>
@@ -219,7 +234,7 @@ export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenCh
                   label="Sidebar"
                   value={sidebarCollapsed ? "collapsed" : "expanded"}
                   options={[{ value: "expanded", label: "Expanded" }, { value: "collapsed", label: "Icons only" }]}
-                  onChange={(v) => { setSidebarCollapsed(v === "collapsed"); setSaved((s) => ({ ...s, sidebar: Date.now() })); }}
+                  onChange={(v) => { void saveCollapsed(v === "collapsed"); }}
                 />
               </Row>
             </div>

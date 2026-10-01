@@ -1,224 +1,110 @@
 "use client";
 
+// Bring your own AI key (settings-architecture 5.10 Retention & privacy,
+// 5.13 AI keys): an Anthropic key the workspace's AI features use instead of
+// WorkwrK's shared one (read by src/lib/ai-client.ts). Enterprise add-on
+// only: the caller mounts this for orgs with the `byok` flag; the API refuses
+// everyone else. The key is write-only: after saving, only its hint shows.
+//
+//   GET    /api/organization/byok   { enabled, key: { keyHint, lastUsedAt, preferredModel } }
+//   PUT    /api/organization/byok   { apiKey, preferredModel } (tested against Anthropic first)
+//   DELETE /api/organization/byok
+
+import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useToast } from "@/components/ui/toast";
-import { useConfirm } from "@/components/ui/dialog-provider";
-import { KeyRound, Loader2, Check, Trash2, Crown } from "lucide-react";
-import { BloomMark } from "@/components/layout/os/bloom-mark";
+import { apiFetch } from "@/lib/api-client";
+import { useOsToast } from "@/components/layout/os/toast";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { ConfirmDialog, Field, NativeSelect, Pending, TextInput, btn } from "@/components/settings/settings-form";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface KeyState {
   enabled: boolean;
   reason?: string;
-  key: {
-    keyHint: string | null;
-    lastUsedAt: string | null;
-    preferredModel: string | null;
-    createdAt: string;
-    updatedAt: string;
-  } | null;
+  key: { keyHint: string | null; lastUsedAt: string | null; preferredModel: string | null } | null;
 }
 
 const MODELS = [
-  { value: "", label: "Default (per-feature)" },
+  { value: "", label: "Default (each feature picks)" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6 (balanced)" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (fast, cheap)" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (fast)" },
 ];
 
-/**
- * Customer-side UI for plugging in an Anthropic key. Gated behind
- * the BYOK Enterprise add-on by the API; this component shows the
- * upsell card if the feature is off.
- */
 export function ByokManager() {
-  const { success: toastSuccess, error: toastError } = useToast();
-  const confirm = useConfirm();
+  const { toast } = useOsToast();
   const [state, setState] = useState<KeyState | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
-  const [preferredModel, setPreferredModel] = useState("");
+  const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [revokeOpen, setRevokeOpen] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    const r = await fetch("/api/organization/byok");
-    if (r.ok) {
-      const d = await r.json();
-      const data = (d.data ?? d) as KeyState;
-      setState(data);
-      setPreferredModel(data.key?.preferredModel ?? "");
-    }
-    setLoading(false);
+    setError(null);
+    const r = await apiFetch<KeyState>("/api/organization/byok", { cache: "no-store" });
+    if (!r.ok) { setError(r.error); return; }
+    setState(r.data);
+    setModel(r.data.key?.preferredModel ?? "");
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  async function save() {
+  const save = async () => {
     if (!apiKey.trim()) return;
     setSaving(true);
-    try {
-      const res = await fetch("/api/organization/byok", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: apiKey.trim(),
-          preferredModel: preferredModel || null,
-        }),
-      });
-      if (res.ok) {
-        toastSuccess("Key saved & verified");
-        setApiKey("");
-        await load();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toastError(err.error || "Failed to save key");
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
+    setSaveError(null);
+    const r = await apiFetch("/api/organization/byok", { method: "PUT", json: { apiKey: apiKey.trim(), preferredModel: model || null } });
+    setSaving(false);
+    if (!r.ok) { setSaveError(r.error); return; }
+    setApiKey("");
+    toast("Key saved and tested");
+    void load();
+  };
+  const revoke = async () => {
+    setSaving(true);
+    const r = await apiFetch("/api/organization/byok", { method: "DELETE" });
+    setSaving(false);
+    if (!r.ok) { setSaveError(r.error); return; }
+    setRevokeOpen(false);
+    toast("Key removed");
+    void load();
+  };
 
-  async function revoke() {
-    if (!(await confirm({
-      title: "Revoke this Anthropic key?",
-      description: "AI features will fall back to the WorkwrK shared key. Your key isn't deleted from Anthropic — only from this org's settings.",
-      confirmLabel: "Revoke key",
-      destructive: true,
-    }))) return;
-    const res = await fetch("/api/organization/byok", { method: "DELETE" });
-    if (res.ok) {
-      toastSuccess("Key revoked");
-      await load();
-    } else {
-      toastError("Failed to revoke key");
-    }
-  }
-
-  if (loading) {
-    return (
-      <Card><CardContent className="p-8 text-center text-xs text-muted">
-        <Loader2 size={16} className="animate-spin mx-auto mb-2" /> Loading…
-      </CardContent></Card>
-    );
-  }
-
-  // Upsell card if BYOK isn't enabled.
-  if (!state?.enabled) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <BloomMark size={14} /> AI &amp; Integrations
-          </CardTitle>
-          <CardDescription>
-            Plug in your own Anthropic API key for AI features. AI calls stop using
-            WorkwrK&rsquo;s shared key and start using yours, billed directly to your
-            Anthropic account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-lg border border-dashed border-border bg-surface-2 p-6 text-center">
-            <Crown size={20} className="mx-auto text-muted mb-2" />
-            <p className="text-xs font-medium">Enterprise add-on</p>
-            <p className="text-sm text-muted mt-1 max-w-md mx-auto">
-              BYOK is a custom add-on we enable per Enterprise customer. Reach out to
-              your WorkwrK contact and we&rsquo;ll switch it on.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
+  if (error) return <ErrorState what="the AI key" hint={error} onRetry={() => { void load(); }} />;
+  if (!state) return <SkeletonRows rows={3} className="max-w-[560px]" />;
+  if (!state.enabled) return null;
   const hasKey = !!state.key?.keyHint;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <BloomMark size={14} /> AI &amp; Integrations
-        </CardTitle>
-        <CardDescription>
-          AI features (organisation chat, SOP/KRA generation, profile generation)
-          will use your key when one is set. Falls back to the WorkwrK shared key
-          if not.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {hasKey && (
-          <div className="rounded-lg border border-border bg-surface-2 p-3 flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-[rgba(34,197,94,0.10)] border border-[rgba(34,197,94,0.30)] flex items-center justify-center shrink-0">
-              <Check size={14} className="text-green-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">Anthropic key active</div>
-              <div className="text-xs text-muted font-mono">
-                {state.key?.keyHint}
-                {state.key?.lastUsedAt && ` · last used ${new Date(state.key.lastUsedAt).toLocaleString()}`}
-              </div>
-            </div>
-            <Button variant="outline" size="sm" className="gap-1.5 text-red-400 hover:text-red-300" onClick={revoke}>
-              <Trash2 size={12} /> Revoke
-            </Button>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <Label>{hasKey ? "Replace key" : "Anthropic API key"}</Label>
-          <div className="flex items-center gap-2">
-            <KeyRound size={14} className="text-muted shrink-0" />
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-ant-…"
-              className="font-mono"
-            />
-          </div>
-          <p className="text-xs text-muted">
-            We&rsquo;ll test the key against Anthropic before saving. Stored encrypted at rest with AES-256-GCM.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Preferred model</Label>
-          <Select value={preferredModel} onValueChange={setPreferredModel}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MODELS.map((m) => (
-                <SelectItem key={m.value || "default"} value={m.value || "default"}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted">
-            Override which Claude model is used for your org. Default lets each
-            feature pick the right model (cheap for SOP/KRA generation, balanced
-            for chat).
-          </p>
-        </div>
-
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-          <span className="text-xs text-muted">
-            {hasKey ? "Save updates the stored key with the new value." : "Saving runs a free test call against Anthropic."}
-          </span>
-          <Button onClick={save} disabled={saving || !apiKey.trim()} className="gap-1.5">
-            {saving ? <Loader2 size={12} className="animate-spin" /> : null}
-            {hasKey ? "Replace key" : "Save key"}
-          </Button>
-        </div>
-
-        {!!state.key?.preferredModel && state.key.preferredModel !== preferredModel && (
-          <Badge variant="outline" className="text-xs">
-            Currently using {state.key.preferredModel}
-          </Badge>
-        )}
-      </CardContent>
-    </Card>
+    <SettingsCard title="Bring your own AI key" description="AI features use your Anthropic key when one is set, and WorkwrK's shared key when not." id="data.byok">
+      {hasKey ? (
+        <SettingsRow
+          label="Anthropic key"
+          helper={<>{state.key?.keyHint ?? ""}{state.key?.lastUsedAt ? <> · last used <DateText value={state.key.lastUsedAt} /></> : null}</>}
+          control={<button type="button" className={btn.dangerGhost} onClick={() => setRevokeOpen(true)}>Remove</button>}
+        />
+      ) : null}
+      <Field label={hasKey ? "Replace the key" : "Anthropic API key"} htmlFor="byok-key" helper="Tested against Anthropic before it is saved. Stored encrypted.">
+        <TextInput id="byok-key" type="password" autoComplete="off" value={apiKey} placeholder="sk-ant-" onChange={(e) => setApiKey(e.target.value)} className="font-mono" />
+      </Field>
+      <Field label="Preferred model" htmlFor="byok-model">
+        <NativeSelect id="byok-model" value={model} options={MODELS} onChange={setModel} />
+      </Field>
+      {saveError ? <p role="alert" className="text-sm text-danger-text">{saveError}</p> : null}
+      <div>
+        <button type="button" className={btn.secondary} disabled={saving || !apiKey.trim()} onClick={() => { void save(); }}>
+          {saving ? <Pending label="Testing" /> : null}
+          {hasKey ? "Replace and test" : "Save and test"}
+        </button>
+      </div>
+      <ConfirmDialog open={revokeOpen} onOpenChange={setRevokeOpen} title="Remove the AI key?" danger confirmLabel="Remove key" onConfirm={revoke} busy={saving}>
+        <p>AI features go back to WorkwrK&apos;s shared key. The key itself stays valid at Anthropic; only this workspace forgets it.</p>
+      </ConfirmDialog>
+    </SettingsCard>
   );
 }

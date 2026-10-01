@@ -140,7 +140,7 @@ export async function goalCreatorIds(orgId: string, goalIds: string[]): Promise<
     select: { targetId: true, actorId: true },
     orderBy: { createdAt: "asc" },
   });
-  for (const r of rows) if (r.targetId && !out.has(r.targetId)) out.set(r.targetId, r.actorId);
+  for (const r of rows) if (r.targetId && r.actorId && !out.has(r.targetId)) out.set(r.targetId, r.actorId);
   return out;
 }
 

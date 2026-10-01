@@ -1,37 +1,30 @@
 "use client";
 
-/* Settings · Apps: the Super Admin surface for the ACCESS-based left rail.
- *
- * Personal pinning is gone. Every member's rail shows every app they can
- * access, in the order set here. This page edits the org rail config at
- * OrgPreference.sidebarDefault.apps:
- *
- *   { order?: string[];                    full desired order of app keys
- *     hidden?: string[];                   apps the org switched off
- *     minAccess?: Record<string, tier> }   per-app access floor ON TOP of
- *                                          the catalog's requiredAccess
- *
- * Reads GET  /api/org/preferences  → { preference: OrgPreference | null }
- * Writes PATCH /api/org/preferences (admin-gated) on every change, always
- * sending the COMPLETE apps object. setOrgPreference shallow-merges
- * sidebarDefault's top-level keys, so `apps` replaces wholesale while the
- * legacy keys (pinned / iconsOnly / sectionsOrder / ...) survive untouched.
- *
- * v1 scope, on purpose: hidden and minAccess are DISPLAY-level. They remove
- * rail icons; the routes stay reachable by URL, and the catalog's
- * requiredAccess plus the server page-gates (src/lib/page-gates.ts) keep
- * doing the real enforcement. The floor here can only ADD restriction on
- * top of the catalog baseline, never weaken it.
- *
- * alwaysPinned apps (Home) can never be hidden or floored: they are the
- * escape hatch that guarantees the rail is never empty for any member.
- */
+// Workspace settings > Apps & modules (spec-settings-workspace
+// `/settings/apps`, settings-architecture 5.3). Anchored sections, not tabs,
+// because /settings/modules 308s to #modules:
+//
+//   1. Modules     one ModuleCard per premium module (ProductInstallation via
+//                  POST / DELETE /api/products/installations; confirm before
+//                  turning off)
+//   2. Rail apps   the org rail config at OrgPreference.sidebarDefault.apps
+//                  { order, hidden, minAccess }, grouped as the 8 rail hubs
+//                  and the apps inside hubs (captioned "in {Hub} sidebar"),
+//                  autosaved PER ROW (only that row waits on its write)
+//   3. Automations "Pause all automations" (settings.work.automationsPaused,
+//                  read by the automation engine) with this month's runs
+//
+// Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
+// complete apps object, and checks the response really holds it. Hidden and
+// the floor change the RAIL; each page keeps its own access rules until the
+// engine's enforcement flip (settings spec S7) makes the same rows gates.
+// alwaysPinned apps (Work, Settings) can never be hidden or floored.
+//
+// No blue button: every control autosaves.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  AppWindow, ChevronRight, ChevronUp, ChevronDown, GripVertical, Loader2, Lock,
-} from "lucide-react";
+import { ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import {
   APPS,
   orderedCatalogForAdmin,
@@ -43,20 +36,24 @@ import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatRelative } from "@/lib/format/date";
+import { HUB_LABELS } from "@/lib/nav/labels";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { ConfirmDialog, NativeSelect } from "@/components/settings/settings-form";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { useSettingsSection } from "@/hooks/use-settings-section";
+import { ModulesSection } from "./modules-section";
 
-// The select reuses the catalog's own tier vocabulary (AccessTier), not a
-// second copy: a vocabulary drift here is a compile error, not a silent bug.
+// The rail's own tier vocabulary (AccessTier), in plain words: a vocabulary
+// drift here is a compile error, not a silent bug.
 const TIER_OPTIONS: ReadonlyArray<{ value: AccessTier; label: string }> = [
-  { value: "manager",   label: "Managers and up" },
-  { value: "hr-admin",  label: "HR and org admins" },
-  { value: "org-admin", label: "Org admins only" },
+  { value: "manager", label: "Managers and up" },
+  { value: "hr-admin", label: "People team and Admins" },
+  { value: "org-admin", label: "Admins only" },
 ];
-
-const TIER_SHORT: Record<AccessTier, string> = {
-  "manager": "Managers+",
-  "hr-admin": "HR admins",
-  "org-admin": "Org admins",
-};
+const FLOOR_OPTIONS: ReadonlyArray<{ value: "" | AccessTier; label: string }> = [{ value: "", label: "Everyone" }, ...TIER_OPTIONS];
 
 function isTier(v: string): v is AccessTier {
   return TIER_OPTIONS.some((t) => t.value === v);
@@ -81,320 +78,422 @@ type OrgPrefResponse = {
   } | null;
 };
 
+const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
+
 export default function AppsSettingsPage() {
   const { toast } = useOsToast();
   const [state, setState] = useState<State | null>(null);
-  const [saving, setSaving] = useState(false);
+  // A failed read renders ErrorState: an editable default catalog here would
+  // let the next autosave overwrite the workspace's real rail config.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savedKey, setSavedKey] = useState<{ key: string; at: number } | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  // "N people lose access to {app}" (settings-architecture 5.3, S7): a hide
+  // or a raised minimum role is counted first and saved only after the Admin
+  // has read who it takes the app away from. A change nobody loses to saves
+  // straight away, as before.
+  //
+  // THE CHANGE IS KEPT AS AN EDIT, NOT A SNAPSHOT (`apply`), and applied to
+  // the state as it is when the Admin confirms, so a reorder or another app
+  // saved while the count ran or the dialog was open is never overwritten by
+  // a copy taken at click time. While one count is in flight, another hide
+  // or floor change is refused with a toast, never dropped without a word.
+  const [impact, setImpact] = useState<
+    | { app: AppEntry; apply: (s: State) => State; okMsg: string; sentence: string | null; names: string[]; count: number; error: string | null; checking: boolean; enforced?: boolean }
+    | null
+  >(null);
 
-  // Key → catalog entry, for rendering rows from the order array and for
-  // pruning stale keys (apps removed from the catalog) out of saved config.
   const byKey = useMemo(() => new Map<string, AppEntry>(APPS.map((a) => [a.key, a])), []);
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/org/preferences", { cache: "no-store" });
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data = (await res.json()) as OrgPrefResponse;
-      // parseOrgAppsConfig is the tolerant reader (drops malformed keys and
-      // unknown tiers); orderedCatalogForAdmin resolves the effective order
-      // (org order first, then new catalog apps appended in catalog order)
-      // and reports alwaysPinned apps as never hidden / never floored, so
-      // stale config can't make this page show an untrue state.
-      const cfg = parseOrgAppsConfig(data.preference?.sidebarDefault?.apps);
-      const rows = orderedCatalogForAdmin(cfg);
-      const minAccess: Partial<Record<string, AccessTier>> = {};
-      for (const r of rows) {
-        if (r.minAccess && isTier(r.minAccess)) minAccess[r.app.key] = r.minAccess;
-      }
-      setState({
-        order: rows.map((r) => r.app.key),
-        hidden: rows.filter((r) => r.hidden).map((r) => r.app.key),
-        minAccess,
-      });
-    } catch {
-      // Still render something editable: the pure catalog in default order.
-      setState({
-        order: orderedCatalogForAdmin({}).map((r) => r.app.key),
-        hidden: [],
-        minAccess: {},
-      });
-      toast("Couldn't load app settings");
+    setLoadError(null);
+    const r = await apiFetch<OrgPrefResponse>("/api/org/preferences", { cache: "no-store" });
+    if (!r.ok) { setLoadError(r.error); return; }
+    // parseOrgAppsConfig is the tolerant reader; orderedCatalogForAdmin
+    // resolves the effective order and reports alwaysPinned apps as never
+    // hidden or floored, so stale config can't show an untrue state.
+    const cfg = parseOrgAppsConfig(r.data.preference?.sidebarDefault?.apps);
+    const rows = orderedCatalogForAdmin(cfg);
+    const minAccess: Partial<Record<string, AccessTier>> = {};
+    for (const row of rows) {
+      if (row.minAccess && isTier(row.minAccess)) minAccess[row.app.key] = row.minAccess;
     }
-  }, [toast]);
+    setState({
+      order: rows.map((row) => row.app.key),
+      hidden: rows.filter((row) => row.hidden).map((row) => row.app.key),
+      minAccess,
+    });
+  }, []);
 
   useEffect(() => {
-    void load();
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
   }, [load]);
 
-  // PATCH the complete apps config. Local state is set optimistically by the
-  // caller; on failure we resync truth from the server (same contract as
-  // settings/defaults). One extra integrity check: /api/org/preferences
-  // validates with zod, and zod strips keys it doesn't know, so if the
-  // response row came back WITHOUT sidebarDefault.apps the save silently
-  // didn't stick. Surface that instead of lying (data integrity rule).
-  const patch = useCallback(
-    async (next: State, okMsg: string) => {
-      setSaving(true);
-      try {
-        const res = await fetch("/api/org/preferences", {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sidebarDefault: {
-              apps: { order: next.order, hidden: next.hidden, minAccess: next.minAccess },
-            },
-          }),
-        });
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        const data = (await res.json().catch(() => null)) as OrgPrefResponse | null;
-        if (!data?.preference?.sidebarDefault?.apps) {
-          throw new Error("apps key not persisted");
-        }
-        toast(okMsg);
-        // Nudge the admin's own shell to re-resolve the rail immediately.
-        window.dispatchEvent(new CustomEvent("workwrk:prefs-changed"));
-      } catch {
-        toast("Couldn't save, try again");
-        void load();
-      } finally {
-        setSaving(false);
+  // PATCH the complete apps config; the response must really contain it
+  // (zod strips unknown keys, so a missing `apps` means it did not stick).
+  const persist = useCallback(
+    async (next: State, rowKey: string, okMsg: string) => {
+      const prev = state;
+      setState(next);
+      setSavingKey(rowKey);
+      const r = await apiFetch<OrgPrefResponse>("/api/org/preferences", {
+        method: "PATCH",
+        json: { sidebarDefault: { apps: { order: next.order, hidden: next.hidden, minAccess: next.minAccess } } },
+      });
+      setSavingKey(null);
+      if (!r.ok || !r.data?.preference?.sidebarDefault?.apps) {
+        setState(prev);
+        toast(r.ok ? "Couldn't save the rail. Try again." : r.error || "Couldn't save the rail. Try again.");
+        return;
       }
+      const at = Date.now();
+      setSavedKey({ key: rowKey, at });
+      // The "Saved" word shows for two seconds, then clears (no clock read in render).
+      window.setTimeout(() => setSavedKey((cur) => (cur && cur.at === at ? null : cur)), 2000);
+      toast(okMsg);
+      window.dispatchEvent(new CustomEvent("workwrk:prefs-changed"));
     },
-    [toast, load],
+    [state, toast],
   );
 
-  const persist = useCallback(
-    (next: State, okMsg: string) => {
-      setState(next);
-      void patch(next, okMsg);
-    },
-    [patch],
-  );
+  // Count who a narrowing change takes the app away from, then either save
+  // (nobody loses it) or ask first. A failed count still lets the Admin save,
+  // saying the count is unknown, so a broken preview never blocks the page.
+  const saveNarrowing = async (app: AppEntry, apply: (s: State) => State, next: State, okMsg: string) => {
+    setImpact({ app, apply, okMsg, sentence: null, names: [], count: 0, error: null, checking: true });
+    setSavingKey(app.key);
+    const r = await apiFetch<{ count: number; names: string[]; sentence: string; rule?: string }>("/api/settings/apps/impact", {
+      method: "POST",
+      json: { app: app.key, hidden: next.hidden.includes(app.key), floor: next.minAccess[app.key] ?? null },
+    });
+    setSavingKey(null);
+    if (r.ok && r.data.count === 0) {
+      setImpact(null);
+      // The latest state, not the click-time copy (see `impact` above).
+      setPendingApply({ apply, key: app.key, okMsg });
+      return;
+    }
+    setImpact({
+      app, apply, okMsg, checking: false,
+      sentence: r.ok ? r.data.sentence : null,
+      names: r.ok ? r.data.names : [],
+      count: r.ok ? r.data.count : 0,
+      enforced: r.ok && r.data.rule === "engine",
+      error: r.ok ? null : r.error || "The count did not answer.",
+    });
+  };
+
+  // A narrowing change that is cleared to save (nobody loses it, or the
+  // Admin confirmed), applied to the state of the render that saves it.
+  const [pendingApply, setPendingApply] = useState<{ apply: (s: State) => State; key: string; okMsg: string } | null>(null);
+  useEffect(() => {
+    if (!pendingApply || !state) return;
+    const job = pendingApply;
+    const t = setTimeout(() => {
+      setPendingApply(null);
+      void persist(job.apply(state), job.key, job.okMsg);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [pendingApply, state, persist]);
+
+  // One narrowing change at a time: the second is refused out loud.
+  const busyCounting = (): boolean => {
+    if (!impact && !pendingApply) return false;
+    toast(impact ? `Still checking who loses ${impact.app.label}. Try again in a moment.` : "Saving the last change. Try again in a moment.");
+    return true;
+  };
 
   const setVisible = (app: AppEntry, visible: boolean) => {
-    if (!state || app.alwaysPinned) return;
-    const set = new Set(state.hidden);
-    if (visible) set.delete(app.key);
-    else set.add(app.key);
-    persist(
-      { ...state, hidden: [...set] },
-      visible ? `${app.label} shown in the rail` : `${app.label} hidden from the rail`,
-    );
+    if (!state || app.alwaysPinned || busyCounting()) return;
+    const apply = (s: State): State => {
+      const set = new Set(s.hidden);
+      if (visible) set.delete(app.key);
+      else set.add(app.key);
+      return { ...s, hidden: [...set] };
+    };
+    const next = apply(state);
+    const okMsg = visible ? `${app.label} shows in the rail` : `${app.label} hidden from the rail`;
+    if (visible) void persist(next, app.key, okMsg);
+    else void saveNarrowing(app, apply, next, okMsg);
   };
 
   const setFloor = (app: AppEntry, value: string) => {
-    if (!state || app.alwaysPinned) return;
-    const minAccess = { ...state.minAccess };
-    if (isTier(value)) minAccess[app.key] = value;
-    else delete minAccess[app.key];
-    persist(
-      { ...state, minAccess },
-      isTier(value)
-        ? `${app.label} limited to ${TIER_OPTIONS.find((t) => t.value === value)?.label.toLowerCase()}`
-        : `${app.label} open to everyone with access`,
-    );
+    if (!state || app.alwaysPinned || busyCounting()) return;
+    const apply = (s: State): State => {
+      const minAccess = { ...s.minAccess };
+      if (isTier(value)) minAccess[app.key] = value;
+      else delete minAccess[app.key];
+      return { ...s, minAccess };
+    };
+    const next = apply(state);
+    const okMsg = isTier(value) ? `${app.label}: ${TIER_OPTIONS.find((t) => t.value === value)?.label.toLowerCase()}` : `${app.label}: everyone`;
+    // Back to Everyone never takes the app from anyone.
+    if (!isTier(value)) void persist(next, app.key, okMsg);
+    else void saveNarrowing(app, apply, next, okMsg);
   };
 
-  const moveKey = (key: string, toIdx: number) => {
+  // Reorder inside one group (hubs among hubs, apps among apps); the saved
+  // order is still one list, so the rail and the launcher read it unchanged.
+  const moveWithin = (key: string, group: string[], toIdx: number) => {
     if (!state) return;
-    const from = state.order.indexOf(key);
-    if (from < 0 || toIdx < 0 || toIdx >= state.order.length || from === toIdx) return;
+    const from = group.indexOf(key);
+    if (from < 0 || toIdx < 0 || toIdx >= group.length || from === toIdx) return;
+    const target = group[toIdx];
     const order = [...state.order];
-    order.splice(from, 1);
-    order.splice(toIdx, 0, key);
-    persist({ ...state, order }, "App order saved");
+    order.splice(order.indexOf(key), 1);
+    const at = order.indexOf(target);
+    order.splice(from < toIdx ? at + 1 : at, 0, key);
+    void persist({ ...state, order }, key, "Rail order saved");
   };
 
-  // ─── Drag-and-drop reorder: same HTML5 pattern the old rail used ───
-  const onDragStart = (e: React.DragEvent, key: string) => {
-    setDragKey(key);
-    e.dataTransfer.effectAllowed = "move";
-    try { e.dataTransfer.setData("text/plain", key); } catch {}
-  };
-  const onDragOverRow = (e: React.DragEvent, key: string) => {
-    if (!dragKey || dragKey === key) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverKey(key);
-  };
-  const onDropRow = (e: React.DragEvent, key: string) => {
-    e.preventDefault();
-    if (dragKey && dragKey !== key && state) {
-      moveKey(dragKey, state.order.indexOf(key));
-    }
-    setDragKey(null);
-    setDragOverKey(null);
-  };
-  const onDragEndRow = () => {
-    setDragKey(null);
-    setDragOverKey(null);
+  const resetOrder = () => {
+    if (!state) return;
+    const order = orderedCatalogForAdmin(parseOrgAppsConfig({})).map((r) => r.app.key);
+    setResetOpen(false);
+    void persist({ ...state, order }, "__reset__", "Rail order reset to the default");
   };
 
-  const loading = state === null;
-  const rows: AppEntry[] = state
-    ? state.order.map((k) => byKey.get(k)).filter((a): a is AppEntry => Boolean(a))
-    : [];
+  const rows: AppEntry[] = state ? state.order.map((k) => byKey.get(k)).filter((a): a is AppEntry => Boolean(a)) : [];
+  const hubs = rows.filter((a) => !a.hubKey);
+  const folded = rows.filter((a) => !!a.hubKey);
+
+  function renderRow(app: AppEntry, group: AppEntry[], i: number) {
+    if (!state) return null;
+    const keys = group.map((a) => a.key);
+    const always = Boolean(app.alwaysPinned);
+    const visible = always || !state.hidden.includes(app.key);
+    const floor = state.minAccess[app.key] ?? "";
+    const busy = savingKey === app.key;
+    const isDragOver = dragOverKey === app.key && dragKey && dragKey !== app.key;
+    const caption = app.hubKey ? `in ${HUB_LABELS[app.hubKey]} sidebar` : "Rail hub";
+    return (
+      <li
+        key={app.key}
+        draggable={!busy && !always}
+        onDragStart={(e) => { setDragKey(app.key); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", app.key); } catch {} }}
+        onDragOver={(e) => { if (!dragKey || dragKey === app.key || !keys.includes(dragKey)) return; e.preventDefault(); setDragOverKey(app.key); }}
+        onDrop={(e) => { e.preventDefault(); if (dragKey && dragKey !== app.key && keys.includes(dragKey)) moveWithin(dragKey, keys, i); setDragKey(null); setDragOverKey(null); }}
+        onDragEnd={() => { setDragKey(null); setDragOverKey(null); }}
+        className={`flex min-h-11 items-center gap-3 border-t border-line-soft px-3 py-1.5 first:border-t-0 ${dragKey === app.key ? "opacity-40" : ""} ${isDragOver ? "bg-hover" : ""}`}
+      >
+        <span className={`text-ink-3 ${always ? "invisible" : "cursor-grab active:cursor-grabbing"}`} title="Drag to reorder" aria-hidden>
+          <GripVertical className="h-4 w-4" strokeWidth={1.5} />
+        </span>
+        <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2 ${visible ? "" : "opacity-40"}`} aria-hidden>
+          <app.Icon className="h-5 w-5" />
+        </span>
+        <div className={`min-w-0 flex-1 ${visible ? "" : "opacity-60"}`}>
+          <div className="flex items-center gap-2">
+            <span className="truncate text-base font-medium text-ink">{app.label}</span>
+            {always ? <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-xs font-medium text-ink-2">Always available</span> : null}
+          </div>
+          <div className="text-sm text-ink-2">{caption}</div>
+        </div>
+        {savedKey?.key === app.key ? <span className="text-xs font-medium text-success-text">Saved</span> : null}
+        {always ? (
+          <span className="w-[190px] text-base text-ink-2">Everyone</span>
+        ) : (
+          <NativeSelect
+            value={floor as "" | AccessTier}
+            options={FLOOR_OPTIONS}
+            disabled={busy}
+            onChange={(v) => setFloor(app, v)}
+            ariaLabel={`Who can see ${app.label}`}
+            className="w-[190px]"
+          />
+        )}
+        <div className="flex shrink-0 items-center">
+          <button type="button" disabled={busy || always || i === 0} onClick={() => moveWithin(app.key, keys, i - 1)} aria-label={`Move ${app.label} up`}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink ${always || i === 0 ? "invisible" : ""}`}>
+            <ChevronUp className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+          <button type="button" disabled={busy || always || i === group.length - 1} onClick={() => moveWithin(app.key, keys, i + 1)} aria-label={`Move ${app.label} down`}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink ${always || i === group.length - 1 ? "invisible" : ""}`}>
+            <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </div>
+        <span className="w-10 shrink-0 text-right" title={always ? "Always available" : undefined}>
+          {always ? null : <Switch checked={visible} disabled={busy} onChange={(next) => setVisible(app, next)} aria-label={`Show ${app.label} in the rail`} />}
+        </span>
+      </li>
+    );
+  }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-6">
-      {/* Header */}
-      <header className="mb-6">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
-          <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
-          <ChevronRight className="h-3 w-3" />
-          <span>Apps</span>
-        </div>
-        <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900">
-          <AppWindow className="h-5 w-5 text-[#0073EA]" />
-          Apps
-        </h1>
-        <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
-          The left rail shows every app a person has access to, in the order below.
-          There is no personal pinning: what you arrange here is what everyone sees.
-        </p>
-        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-400">
-          Hiding an app or raising its access floor changes the rail only. The pages
-          themselves stay gated by their own access rules.
-        </p>
-      </header>
-
-      {loading ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading app settings…
-        </div>
-      ) : (
-        <section>
-          <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            Rail apps &amp; order
-          </h2>
-          <ul className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            {rows.map((app, i) => {
-              const always = Boolean(app.alwaysPinned);
-              const visible = always || !state.hidden.includes(app.key);
-              const floor = state.minAccess[app.key] ?? "";
-              const isDragOver = dragOverKey === app.key && dragKey && dragKey !== app.key;
-              return (
-                <li
-                  key={app.key}
-                  draggable={!saving}
-                  onDragStart={(e) => onDragStart(e, app.key)}
-                  onDragOver={(e) => onDragOverRow(e, app.key)}
-                  onDrop={(e) => onDropRow(e, app.key)}
-                  onDragEnd={onDragEndRow}
-                  className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-zinc-100" : ""} ${
-                    dragKey === app.key ? "opacity-40" : ""
-                  } ${isDragOver ? "bg-[#0073EA]/[0.05]" : ""}`}
-                >
-                  <span
-                    className="cursor-grab text-zinc-300 hover:text-zinc-500 active:cursor-grabbing"
-                    title="Drag to reorder"
-                    aria-hidden
-                  >
-                    <GripVertical className="h-4 w-4" />
-                  </span>
-
-                  <div
-                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 ${
-                      visible ? "" : "opacity-40"
-                    }`}
-                  >
-                    <app.Icon className="h-4 w-4" />
-                  </div>
-
-                  <div className={`min-w-0 flex-1 ${visible ? "" : "opacity-50"}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-base font-semibold text-zinc-900">
-                        {app.label}
-                      </span>
-                      {always && (
-                        <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-xs font-semibold text-[#0073EA]">
-                          <Lock className="h-2.5 w-2.5" /> Always available
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-zinc-400">
-                      {app.category ?? "Other"}
-                      {app.requiredAccess ? (
-                        <span> · Baseline: {TIER_SHORT[app.requiredAccess]}</span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* Access floor. "Everyone" = catalog baseline only; a tier
-                      here can only tighten, never loosen, requiredAccess. */}
-                  <select
-                    value={floor}
-                    disabled={saving || always}
-                    onChange={(e) => setFloor(app, e.target.value)}
-                    aria-label={`Minimum access for ${app.label}`}
-                    title={always ? "Always available to everyone" : undefined}
-                    style={{ border: "1px solid #e4e4e7", background: "#fff" }}
-                    className={`h-7 shrink-0 rounded-md px-1.5 text-xs text-zinc-700 ${
-                      saving || always ? "opacity-50" : ""
-                    }`}
-                  >
-                    <option value="">Everyone</option>
-                    {TIER_OPTIONS.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </select>
-
-                  {/* Keyboard fallback for reordering: up/down beside the drag
-                      handle, so the order is editable without a pointer. */}
-                  <div className="flex shrink-0 flex-col">
-                    <button
-                      type="button"
-                      disabled={saving || i === 0}
-                      onClick={() => moveKey(app.key, i - 1)}
-                      aria-label={`Move ${app.label} up`}
-                      className={`grid h-4 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 ${
-                        saving || i === 0 ? "invisible" : ""
-                      }`}
-                    >
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={saving || i === rows.length - 1}
-                      onClick={() => moveKey(app.key, i + 1)}
-                      aria-label={`Move ${app.label} down`}
-                      className={`grid h-4 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 ${
-                        saving || i === rows.length - 1 ? "invisible" : ""
-                      }`}
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  {/* alwaysPinned apps can't be hidden: they guarantee the
-                      rail is never empty for any member. */}
-                  <span
-                    className="shrink-0"
-                    title={always ? "Always available" : visible ? `Hide ${app.label}` : `Show ${app.label}`}
-                  >
-                    <Switch
-                      checked={visible}
-                      disabled={saving || always}
-                      onChange={(next) => setVisible(app, next)}
-                      aria-label={`Show ${app.label} in the rail`}
-                    />
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="mt-2 text-xs text-zinc-400">
-            An app also stays off a person&apos;s rail when their access level is below
-            its baseline, no matter what is set here. New apps added to the catalog
-            appear at the end of this list automatically.
-          </p>
+    <SettingsPage
+      pageKey="apps"
+      subtitle="Turn capabilities on, and decide what shows in everyone's rail."
+    >
+      <div className="flex flex-col gap-8">
+        <section id="modules" className="scroll-mt-4">
+          <h2 className={SECTION_LABEL}>Modules<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+          <ModulesSection />
         </section>
-      )}
-      <RequestsSection />
-      <div className="h-10" />
-    </div>
+
+        <section>
+          <h2 className={SECTION_LABEL}>Rail apps<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+          <SettingsCard
+            id="rail"
+            wide="apps.rail"
+            actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
+            description="Everyone's rail shows the apps they can open, in this order. Hiding an app or raising who can see it removes it from people's rails; each page keeps its own access rules."
+          >
+            {loadError ? (
+              <ErrorState compact what="the rail apps" hint={loadError} onRetry={() => { void load(); }} />
+            ) : !state ? (
+              <SkeletonRows rows={6} />
+            ) : (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <div className="mb-1 flex items-center justify-between px-3 text-sm font-medium text-ink-2">
+                    <span>Rail hubs</span>
+                    <span className="flex items-center gap-[108px] pe-2"><span>Who can see it</span><span>Show in rail</span></span>
+                  </div>
+                  <ul className="rounded-lg border border-line">{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
+                </div>
+                <div>
+                  <div className="mb-1 px-3 text-sm font-medium text-ink-2">Apps inside hubs</div>
+                  <ul className="rounded-lg border border-line">{folded.map((a, i) => renderRow(a, folded, i))}</ul>
+                </div>
+                <p className="text-sm text-ink-2">
+                  An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.
+                </p>
+              </div>
+            )}
+          </SettingsCard>
+        </section>
+
+        <section>
+          <h2 className={SECTION_LABEL}>Automations<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+          <AutomationsCard />
+        </section>
+
+        <RequestsSection />
+
+        <p className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <Link href="/build" className="font-medium text-brand-deep hover:underline">Build apps</Link>
+          <Link href="/store" className="font-medium text-brand-deep hover:underline">Marketplace</Link>
+          <Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link>
+        </p>
+      </div>
+
+      <ConfirmDialog
+        open={impact !== null && !impact.checking}
+        onOpenChange={(v) => { if (!v) setImpact(null); }}
+        title={impact ? `Change who sees ${impact.app.label}?` : "Change who sees this app?"}
+        confirmLabel="Save"
+        onConfirm={() => {
+          const cur = impact;
+          setImpact(null);
+          if (cur) setPendingApply({ apply: cur.apply, key: cur.app.key, okMsg: cur.okMsg });
+        }}
+      >
+        {impact?.error ? (
+          <>
+            <p className="font-medium text-ink">We couldn&apos;t count who loses access to {impact.app.label}.</p>
+            <p className="mt-1 text-ink-2">{/[.!?]$/.test(impact.error.trim()) ? impact.error.trim() : `${impact.error.trim()}.`}</p>
+            <p className="mt-2 text-ink-2">
+              If you save, everyone it affects stops seeing {impact.app.label} in their rail. Nothing is deleted, and you can turn it back on here at any time.
+            </p>
+          </>
+        ) : impact ? (
+          <>
+            <p className="font-medium text-ink">{impact.sentence}</p>
+            {impact.names.length > 0 ? (
+              <p className="mt-1 text-ink-2">
+                {impact.names.join(", ")}
+                {impact.count > impact.names.length ? ` and ${impact.count - impact.names.length} more` : ""}.
+              </p>
+            ) : null}
+            <p className="mt-2 text-ink-2">
+              {impact.enforced ? "It leaves their rail and its pages close to them." : "It leaves their rail now."} Nothing is deleted, and you can turn it back on here at any time.
+            </p>
+          </>
+        ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        title="Reset the rail order?"
+        confirmLabel="Reset order"
+        onConfirm={resetOrder}
+      >
+        <p>Every app goes back to the default order. What is hidden and who can see each app stay as they are.</p>
+      </ConfirmDialog>
+    </SettingsPage>
+  );
+}
+
+// ─── Automations ─────────────────────────────────────────────────────────
+//
+// "Pause all automations" writes settings.work.automationsPaused, which the
+// engine reads before every run (src/lib/automation/engine.ts); the runs
+// line comes from GET /api/automation/usage, the same meter that blocks new
+// runs past the monthly allowance.
+
+type Usage = { used: number; limit: number; paused: boolean };
+
+function AutomationsCard() {
+  const { toast } = useOsToast();
+  const work = useSettingsSection("work", (b) => {
+    const w = ((b.settings ?? {}) as { work?: { automationsPaused?: boolean } }).work;
+    return { paused: w?.automationsPaused === true };
+  });
+  const [usage, setUsage] = useState<Usage | null | "error">(null);
+  const [paused, setPaused] = useState<boolean | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  const loadUsage = useCallback(async () => {
+    const r = await apiFetch<Usage>("/api/automation/usage", { cache: "no-store" });
+    setUsage(r.ok ? r.data : "error");
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { void loadUsage(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadUsage]);
+
+  const shown = paused ?? work.data?.paused ?? false;
+  const toggle = async (next: boolean) => {
+    setPaused(next);
+    setRowError(null);
+    const r = await work.save({ automationsPaused: next });
+    if (!r.ok) {
+      setPaused(!next);
+      setRowError(r.error ?? "Couldn't save");
+      return;
+    }
+    setSavedAt(Date.now());
+    toast(next ? "Automations paused" : "Automations running again");
+  };
+
+  if (work.status === "error") return <ErrorState what="the automation settings" hint={work.error ?? undefined} onRetry={work.retry} />;
+  return (
+    <SettingsCard id="apps.automations">
+      <SettingsRow
+        label="Pause all automations"
+        helper={
+          usage && usage !== "error"
+            ? `${usage.used} of ${usage.limit} runs this month`
+            : usage === "error"
+              ? "This month's runs are not available right now."
+              : " "
+        }
+        savedAt={savedAt}
+        error={rowError ? { message: rowError, onRetry: () => { void toggle(!shown); } } : null}
+        control={work.status === "ready" ? <Switch checked={shown} onChange={(v) => { void toggle(v); }} aria-label="Pause all automations" /> : null}
+      />
+      <p className="flex gap-4 text-sm">
+        <Link href="/automation/health" className="font-medium text-brand-deep hover:underline">Health</Link>
+        <Link href="/automation/usage" className="font-medium text-brand-deep hover:underline">Usage</Link>
+        <Link href="/automation/logs" className="font-medium text-brand-deep hover:underline">Logs</Link>
+      </p>
+    </SettingsCard>
   );
 }
 
@@ -439,7 +538,8 @@ function RequestsSection() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
   }, [load]);
 
   if (requests?.state === "hidden" && suggestions?.state === "hidden") return null;
@@ -447,54 +547,52 @@ function RequestsSection() {
   const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
 
   return (
-    <section id="requests" className="mt-8 scroll-mt-6">
-      <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-        Requests from people here
+    <section id="requests" className="scroll-mt-6">
+      <h2 className="mb-1 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">
+        Requests from people here<span className="h-px flex-1 bg-line" aria-hidden />
       </h2>
-      <p className="mb-2.5 max-w-2xl text-xs leading-relaxed text-zinc-400">
+      <p className="mb-2.5 max-w-2xl text-sm text-ink-2">
         What people asked for with Request this and Request a connector on Integrations,
         and Suggest an app on Marketplace. Connectors are built in the order people ask for them.
       </p>
 
       {requests === null || suggestions === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading requests…
-        </div>
+        <SkeletonRows rows={3} />
       ) : (
         <div className="flex flex-col gap-4">
           {requests.state === "hidden" ? null : (
-            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-line bg-raised">
               <div className="flex items-center gap-2 px-3 py-2.5">
-                <span className="text-base font-semibold text-zinc-900">Connector requests</span>
+                <span className="text-base font-semibold text-ink">Connector requests</span>
                 {requests.state === "ok" ? (
-                  <span className="text-xs text-zinc-400">{requests.data.total} {requests.data.total === 1 ? "request" : "requests"}</span>
+                  <span className="text-sm text-ink-2">{requests.data.total} {requests.data.total === 1 ? "request" : "requests"}</span>
                 ) : null}
-                <Link href="/integrations" className="ms-auto text-xs font-medium text-[#0073EA] hover:underline">Integrations</Link>
+                <Link href="/integrations" className="ms-auto text-sm font-medium text-brand-deep hover:underline">Integrations</Link>
               </div>
               {requests.state === "error" ? (
-                <p className="border-t border-zinc-100 px-3 py-3 text-sm text-zinc-500">
+                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">
                   Couldn&apos;t load connector requests. {requests.message}{" "}
-                  <button type="button" onClick={() => void load()} className="font-medium text-[#0073EA] hover:underline">Retry</button>
+                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
                 </p>
               ) : requests.data.totals.length === 0 ? (
-                <p className="border-t border-zinc-100 px-3 py-3 text-sm text-zinc-400">Nobody has asked for a connector yet.</p>
+                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">Nobody has asked for a connector yet.</p>
               ) : (
                 requests.data.totals.map((t) => (
-                  <div key={t.key} className="border-t border-zinc-100 px-3 py-2.5">
+                  <div key={t.key} className="border-t border-line-soft px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="text-base font-medium text-zinc-900">{t.name}</span>
+                      <span className="text-base font-medium text-ink">{t.name}</span>
                       {t.custom ? (
-                        <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-500">Not in the catalogue</span>
+                        <span className="rounded bg-hover px-1.5 py-0.5 text-xs font-medium text-ink-2">Not in the catalogue</span>
                       ) : null}
-                      <span className="ms-auto text-xs text-zinc-400">
+                      <span className="ms-auto text-sm text-ink-2">
                         {people(t.count)}
                         {t.lastAt ? ` · last asked ${formatRelative(t.lastAt)}` : ""}
                       </span>
                     </div>
-                    <div className="mt-0.5 text-xs text-zinc-500">{t.askedBy.map((a) => a.name).join(", ")}</div>
+                    <div className="mt-0.5 text-sm text-ink-2">{t.askedBy.map((a) => a.name).join(", ")}</div>
                     {t.askedBy.filter((a) => a.note).map((a, i) => (
-                      <p key={i} className="mt-1 text-sm leading-5 text-zinc-600">
-                        &ldquo;{a.note}&rdquo; <span className="text-zinc-400">({a.name})</span>
+                      <p key={i} className="mt-1 text-sm leading-5 text-ink-2">
+                        &ldquo;{a.note}&rdquo; <span className="text-ink-3">({a.name})</span>
                       </p>
                     ))}
                   </div>
@@ -504,31 +602,31 @@ function RequestsSection() {
           )}
 
           {suggestions.state === "hidden" ? null : (
-            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <div className="overflow-hidden rounded-lg border border-line bg-raised">
               <div className="flex items-center gap-2 px-3 py-2.5">
-                <span className="text-base font-semibold text-zinc-900">App suggestions</span>
+                <span className="text-base font-semibold text-ink">App suggestions</span>
                 {suggestions.state === "ok" ? (
-                  <span className="text-xs text-zinc-400">{suggestions.data.total} {suggestions.data.total === 1 ? "suggestion" : "suggestions"}</span>
+                  <span className="text-sm text-ink-2">{suggestions.data.total} {suggestions.data.total === 1 ? "suggestion" : "suggestions"}</span>
                 ) : null}
-                <Link href="/store" className="ms-auto text-xs font-medium text-[#0073EA] hover:underline">Marketplace</Link>
+                <Link href="/store" className="ms-auto text-sm font-medium text-brand-deep hover:underline">Marketplace</Link>
               </div>
               {suggestions.state === "error" ? (
-                <p className="border-t border-zinc-100 px-3 py-3 text-sm text-zinc-500">
+                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">
                   Couldn&apos;t load app suggestions. {suggestions.message}{" "}
-                  <button type="button" onClick={() => void load()} className="font-medium text-[#0073EA] hover:underline">Retry</button>
+                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
                 </p>
               ) : suggestions.data.suggestions.length === 0 ? (
-                <p className="border-t border-zinc-100 px-3 py-3 text-sm text-zinc-400">Nobody has suggested an app yet.</p>
+                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">Nobody has suggested an app yet.</p>
               ) : (
                 <>
                   {suggestions.data.suggestions.map((s) => (
-                    <div key={s.id} className="border-t border-zinc-100 px-3 py-2.5">
-                      <p className="text-sm leading-5 text-zinc-800">{s.text}</p>
-                      <div className="mt-0.5 text-xs text-zinc-400">{s.by} · {formatRelative(s.createdAt)}</div>
+                    <div key={s.id} className="border-t border-line-soft px-3 py-2.5">
+                      <p className="text-sm leading-5 text-ink">{s.text}</p>
+                      <div className="mt-0.5 text-sm text-ink-2">{s.by} · {formatRelative(s.createdAt)}</div>
                     </div>
                   ))}
                   {suggestions.data.total > suggestions.data.suggestions.length ? (
-                    <p className="border-t border-zinc-100 px-3 py-2 text-xs text-zinc-400">
+                    <p className="border-t border-line-soft px-3 py-2 text-sm text-ink-2">
                       Showing the latest {suggestions.data.suggestions.length} of {suggestions.data.total}.
                     </p>
                   ) : null}

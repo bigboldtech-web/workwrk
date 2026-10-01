@@ -10,6 +10,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { scimDeprovision, scimReactivated } from "@/lib/scim-deprovision";
 import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
@@ -87,6 +88,17 @@ export async function PUT(
     data.emailVerifiedAt = null;
   }
 
+  // Deprovisioning goes through the one handover path; the other fields
+  // (a name change riding along) are written after it.
+  // Called when already INACTIVE too: a retry after a failed handover
+  // finishes it there (scimDeprovision's resume path), else it is a no-op.
+  if (data.status === "INACTIVE") {
+    const out = await scimDeprovision(auth.organizationId, id);
+    if (!out.ok) return scimError(out.status, out.error);
+    delete data.status;
+  }
+  const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
+
   const updated = await prisma.user.update({
     where: { id },
     data,
@@ -100,6 +112,7 @@ export async function PUT(
       updatedAt: true,
     },
   });
+  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
 
@@ -178,6 +191,17 @@ export async function PATCH(
     data.emailVerifiedAt = null;
   }
 
+  // Deprovisioning goes through the one handover path; the other fields
+  // (a name change riding along) are written after it.
+  // Called when already INACTIVE too: a retry after a failed handover
+  // finishes it there (scimDeprovision's resume path), else it is a no-op.
+  if (data.status === "INACTIVE") {
+    const out = await scimDeprovision(auth.organizationId, id);
+    if (!out.ok) return scimError(out.status, out.error);
+    delete data.status;
+  }
+  const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
+
   const updated = await prisma.user.update({
     where: { id },
     data,
@@ -191,6 +215,7 @@ export async function PATCH(
       updatedAt: true,
     },
   });
+  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
 
@@ -211,10 +236,10 @@ export async function DELETE(
   // Soft delete: SCIM clients call this when a user is removed from
   // the WorkWrk app on their side. Hard delete is a separate admin
   // action so we never lose audit / time-off / payroll history.
-  await prisma.user.update({
-    where: { id },
-    data: { status: "INACTIVE" },
-  });
+  // Deactivate AND hand the person's work over (src/lib/scim-deprovision.ts),
+  // never a bare status flip that leaves their Spaces and tasks ownerless.
+  const out = await scimDeprovision(auth.organizationId, id);
+  if (!out.ok) return scimError(out.status, out.error);
 
   // 204 No Content per RFC 7644.
   return new Response(null, { status: 204 });

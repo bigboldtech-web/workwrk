@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ACCESS, APP_ACCESS_BY_KEY } from "./app-access";
 import { visibleRailApps } from "./rail-apps";
+import { tiersOfLevel } from "./access/viewer-tiers";
 import { WORK_HOME_HREF } from "./nav/route-hub";
 
 // rail-apps.ts imports the client catalog for its APPS default; that module's
@@ -75,7 +76,7 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
   });
 
   it("resolves the same rail through visibleRailApps for the server", () => {
-    const asEmployee = { config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS };
+    const asEmployee = { config: {}, tiers: tiersOfLevel("EMPLOYEE"), apps: APP_ACCESS };
     const employee = visibleRailApps({ ...asEmployee, activeModules: new Set(["chat"]) });
     // Teams for every Member (Phase 6): its default href /people is the
     // Directory, which every Member holds.
@@ -85,7 +86,7 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
     // Talk off: the hub stays on the rail for a Member because Announcements does.
     const employeeTalkOff = visibleRailApps({ ...asEmployee, activeModules: new Set() });
     expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "teams", "docs", "tables", "settings"]);
-    const admin = visibleRailApps({ config: { order: ["settings", "home"] }, accessLevel: "COMPANY_ADMIN", apps: APP_ACCESS, activeModules: new Set(["chat", "tables"]) });
+    const admin = visibleRailApps({ config: { order: ["settings", "home"] }, tiers: tiersOfLevel("COMPANY_ADMIN"), apps: APP_ACCESS, activeModules: new Set(["chat", "tables"]) });
     expect(admin.map((a) => a.key)).toEqual(["settings", "home", "planner", "ai", "chat", "teams", "docs", "tables"]);
     const launcher = visibleRailApps({ ...asEmployee, activeModules: new Set(), includeFolded: true });
     expect(launcher.map((a) => a.key)).toContain("goals");

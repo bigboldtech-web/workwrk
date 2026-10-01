@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
-import { PROTECTED_ADMIN_ROLES, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
+import { accessV2Resolver } from "@/lib/access/flags";
+import { engineMatrixCells } from "@/lib/access/matrix-engine";
+import { ACCESS_LEVELS, PERMISSION_MODULES, type PermissionMatrix } from "@/lib/permissions";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 // GET — return the full matrix (custom + defaults merged on the client)
 export async function GET() {
@@ -16,10 +20,22 @@ export async function GET() {
   });
 
   const settings = (org?.settings as any) || {};
-  const matrix: PermissionMatrix | null = settings.permissions || null;
+  // Only the ladder's own levels go out, so the grid never round-trips a
+  // stray level key a hand edit or an old deploy stored (PATCH refuses one
+  // by name). A stray level matches no person, so dropping it changes no answer.
+  const stored = settings.permissions && typeof settings.permissions === "object" ? (settings.permissions as Record<string, unknown>) : null;
+  const known = new Set<string>(ACCESS_LEVELS.map((l) => l.value));
+  const matrix: PermissionMatrix | null = stored
+    ? (Object.fromEntries(Object.entries(stored).filter(([level]) => known.has(level))) as PermissionMatrix)
+    : null;
 
-  return NextResponse.json({ matrix }, {
-    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" },
+  // ACCESS_V2_RESOLVER (default OFF): the cells the engine owns, answered for
+  // this person exactly as the server gates answer them, so the client never
+  // shows a control whose handler is refused (or hides one it allows).
+  const cells = accessV2Resolver() ? await engineMatrixCells(session) : null;
+
+  return NextResponse.json({ matrix, cells }, {
+    headers: { "Cache-Control": cells ? "private, no-store" : "private, max-age=60, stale-while-revalidate=300" },
   });
 }
 
@@ -28,11 +44,9 @@ export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  // Only COMPANY_ADMIN and SUPER_ADMIN can edit access control
-  const accessLevel = (session.user as any).accessLevel;
-  if (!PROTECTED_ADMIN_ROLES.includes(accessLevel)) {
-    return jsonError("Only Company Admin can manage access control", 403);
-  }
+  // The Access page rule (an Owner or an Admin), the actor re-read.
+  const writeGate = await settingsWriteGate(session, "access");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
   const body = await req.json();
@@ -44,6 +58,13 @@ export async function PATCH(req: NextRequest) {
 
   // Sanitize: only allow known modules and actions
   const sanitized: any = {};
+  const knownLevels = new Set<string>(ACCESS_LEVELS.map((l) => l.value));
+  // Only the ladder's own levels: a stray key used to be stored as is. It is
+  // refused by name (the strict-write rule), never dropped without a word.
+  const unknownLevels = Object.keys(matrix).filter((level) => !knownLevels.has(level));
+  if (unknownLevels.length > 0) {
+    return jsonError(`Unknown access level in the matrix: ${unknownLevels.slice(0, 5).join(", ")}`, 400);
+  }
   for (const [level, modules] of Object.entries(matrix)) {
     if (!modules || typeof modules !== "object") continue;
     sanitized[level] = {};
@@ -64,6 +85,16 @@ export async function PATCH(req: NextRequest) {
   // Only the `permissions` key of the shared settings column, in one
   // statement, so no other writer's key is lost to a concurrent save.
   await writeOrgSettingsKeys(orgId, { permissions: sanitized });
+  // A change to who can do what is an audit event (it had none).
+  void logAuditEvent({
+    type: "settings.updated.permissions",
+    actorId: getUserId(session),
+    organizationId: orgId,
+    description: "Changed the old permissions grid",
+    targetType: "Organization",
+    targetId: orgId,
+    metadata: { levels: Object.keys(sanitized) },
+  });
 
   return jsonSuccess({ matrix: sanitized });
 }

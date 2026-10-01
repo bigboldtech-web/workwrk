@@ -20,12 +20,15 @@
 // as plain text for anybody who cannot change it (access spec 5.4).
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, CircleAlert, Plus, X } from "lucide-react";
+import { CircleAlert, Plus, X } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import { formatHm } from "@/lib/time-format";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { SettingsCard } from "@/components/settings/settings-card";
 import {
   WORK_SCHEDULE_DEFAULTS,
   expectedWeekHours,
@@ -51,6 +54,7 @@ function sameSchedule(a: WorkSchedule, b: WorkSchedule): boolean {
 }
 
 export function WorkWeekCard() {
+  const fmt = useFormat();
   const { toast } = useOsToast();
   const [schedule, setSchedule] = useState<WorkSchedule | null>(null);
   const [saved, setSaved] = useState<WorkSchedule | null>(null);
@@ -83,8 +87,8 @@ export function WorkWeekCard() {
     void run();
   }, [load]);
 
-  async function save() {
-    if (!schedule) return;
+  async function save(): Promise<boolean> {
+    if (!schedule) return true;
     setSaving(true);
     setError(null);
     const r = await apiFetchWithRetry<Record<string, unknown>>(
@@ -97,17 +101,22 @@ export function WorkWeekCard() {
       // The typed schedule stays on screen. The server's own sentence when
       // there is one: only it can say the SQL file has not been applied.
       setError(r.error);
-      return;
+      return false;
     }
     setSaved(schedule);
     toast("Working calendar saved");
     // The Timesheets week card and the Workload grid both read this.
     window.dispatchEvent(new CustomEvent("workwrk:work-schedule-changed"));
+    return true;
   }
+
+  // The card's own unsaved edits ask "Save your changes?" on the way out,
+  // like every Save-bar section (settings spec 1.5).
+  useDirtyGuard(schedule !== null && saved !== null && !sameSchedule(schedule, saved), { onSave: save, id: "work-week" });
 
   if (schedule === null) {
     return (
-      <section className="mt-6 max-w-xl rounded-lg border border-line bg-raised p-5">
+      <section className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6">
         <span className="inline-block h-5 w-40 rounded bg-skeleton os-skeleton-pulse" />
         <span className="sr-only">Loading the working calendar</span>
       </section>
@@ -140,16 +149,10 @@ export function WorkWeekCard() {
   };
 
   return (
-    <section className="mt-6 max-w-xl rounded-lg border border-line bg-raised p-5">
-      <header className="mb-1 flex items-center gap-2">
-        <CalendarDays className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
-        <h2 className="text-base font-semibold text-ink">Work week</h2>
-      </header>
-      <p className="mb-4 text-base text-ink-2">
-        Which days the organization works, how long a work day is, and the days it is closed.
-        Timesheets measures a week against this, and the Workload grid draws its capacity from it.
-        {canEdit ? "" : " You need Owner or Admin access to change it."}
-      </p>
+    <SettingsCard
+      title="Work week"
+      description={<>Which days the organization works, how long a work day is, and the days it is closed. Timesheets measures a week against this, and the Workload grid draws its capacity from it.{canEdit ? "" : " You need Owner or Admin access to change it."}</>}
+    >
 
       {error ? (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-danger-solid bg-danger-soft px-3 py-2 text-base text-ink">
@@ -164,7 +167,7 @@ export function WorkWeekCard() {
       {canEdit ? (
         <>
           <div className="mb-4">
-            <span className="mb-1.5 block text-sm font-medium text-ink-2">Working days</span>
+            <span className="mb-1.5 block text-base font-medium text-ink">Working days</span>
             <div className="flex flex-wrap gap-1.5">
               {DAYS.map((d) => {
                 const on = schedule.workdays.includes(d.value);
@@ -174,8 +177,11 @@ export function WorkWeekCard() {
                     type="button"
                     aria-pressed={on}
                     onClick={() => setDay(d.value, !on)}
+                    // A day toggle, not a button to press on: pressed days
+                    // are the selected pill (no blue fill; the page's one
+                    // blue button is Save changes).
                     className={on
-                      ? "h-9 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover"
+                      ? "h-9 rounded-md border border-ink bg-active px-3 text-base font-medium text-ink hover:bg-hover"
                       : "h-9 rounded-md border border-line-strong bg-raised px-3 text-base text-ink-2 hover:bg-hover hover:text-ink"}
                   >
                     {d.label}
@@ -186,7 +192,7 @@ export function WorkWeekCard() {
           </div>
 
           <label className="mb-4 block">
-            <span className="mb-1.5 block text-sm font-medium text-ink-2">Hours in a work day</span>
+            <span className="mb-1.5 block text-base font-medium text-ink">Hours in a work day</span>
             <input
               type="number"
               min={0.5}
@@ -220,14 +226,14 @@ export function WorkWeekCard() {
       )}
 
       <div>
-        <span className="mb-1.5 block text-sm font-medium text-ink-2">Holidays</span>
+        <span className="mb-1.5 block text-base font-medium text-ink">Holidays</span>
         {schedule.holidays.length === 0 ? (
           <p className="text-base text-ink-3">No holidays yet.</p>
         ) : (
           <ul className="mb-2 flex flex-col gap-1">
             {schedule.holidays.map((h) => (
               <li key={h.date} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-base text-ink hover:bg-hover">
-                <span className="w-[110px] shrink-0 tabular-nums text-ink-2">{h.date}</span>
+                <span className="w-[110px] shrink-0 tabular-nums text-ink-2">{fmt.wallDate(h.date)}</span>
                 <span className="min-w-0 flex-1 truncate" title={h.name}>{h.name}</span>
                 {canEdit ? (
                   <button
@@ -275,20 +281,23 @@ export function WorkWeekCard() {
         ) : null}
       </div>
 
-      {canEdit ? (
+      {/* Its own record and its own save, shown only while there is
+          something to save, as a secondary button: the page's one blue
+          button is the Save bar above. */}
+      {canEdit && dirty ? (
         <div className="mt-5 flex items-center gap-3">
           <button
             type="button"
             onClick={() => { void save(); }}
-            disabled={!dirty || saving}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-40"
+            disabled={saving}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover disabled:opacity-50"
           >
             {saving ? <Dots variant="pending" /> : null}
             Save work week
           </button>
-          {dirty && !saving ? <span className="text-base text-ink-3">Unsaved changes</span> : null}
+          <span className="text-base text-ink-2">Unsaved changes</span>
         </div>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

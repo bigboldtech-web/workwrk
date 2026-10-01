@@ -1,21 +1,20 @@
-import { baseLayout } from "./base";
+import { baseLayout, emailButton } from "./base";
+import { escapeHtml, safeHref } from "./escape";
 
 interface PasswordResetVars {
+  /** /reset-password?token=... ; the token is hashed at rest and lives 60 minutes. */
   resetLink: string;
   firstName: string;
 }
 
 export function passwordResetTemplate(vars: PasswordResetVars): { subject: string; html: string } {
+  const href = safeHref(vars.resetLink);
   const html = baseLayout(`
     <h1>Reset your password</h1>
-    <p>Hi <span class="highlight">${vars.firstName}</span>, we received a request to reset your password.</p>
-    <p>Click the button below to choose a new password:</p>
-    <hr class="divider" />
-    <p style="text-align: center;">
-      <a href="${vars.resetLink}" class="btn">Reset Password</a>
-    </p>
-    <p class="meta">This link expires in 1 hour. If you didn't request this, you can safely ignore this email — your password won't be changed.</p>
-    <p class="meta">If the button doesn't work, copy and paste this link into your browser:<br/>${vars.resetLink}</p>
+    <p>Hi ${escapeHtml(vars.firstName)}, someone asked to reset the password on your WorkwrK account.</p>
+    <p style="margin:24px 0 8px;">${emailButton(href, "Set a new password")}</p>
+    <p class="meta">The link works for 60 minutes and only once. Setting a new password logs you out everywhere else. If you did not ask for this, ignore this email: your password stays as it is.</p>
+    <p class="meta">If the button does not work, paste this link into your browser:<br/><span class="url" style="word-break:break-all;">${href}</span></p>
   `);
 
   return {

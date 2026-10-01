@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
   void (async () => {
     for (const inv of created) {
       try {
-        const { subject, html } = invitationTemplate({ companyName: org?.name || "Your team", inviteLink: `${baseUrl}/register?token=${inv.token}`, accessLevel: "EMPLOYEE" });
+        const { subject, html } = invitationTemplate({ companyName: org?.name || "Your team", inviteLink: `${baseUrl}/join?token=${inv.token}`, accessLevel: "EMPLOYEE" });
         await sendEmail({ to: inv.email, subject, html, template: "invitation", variables: { companyName: org?.name }, organizationId: orgId, category: "invitation" });
       } catch (e) {
         console.error("[bulk-import] invitation email failed", e);

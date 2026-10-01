@@ -7,6 +7,12 @@ import {
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
+import { soleAdminWorkspaces } from "@/lib/access/self-facts";
+
+/** Thrown inside the transaction when the re-check under the lock refuses. */
+class LastAdminError extends Error {
+  constructor(public readonly orgIds: string[]) { super("last_admin"); }
+}
 
 /**
  * GDPR Article 17 / CCPA Right to Delete.
@@ -18,15 +24,31 @@ import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/ser
  *
  * Things we DO erase:
  *  - email, names, avatar, phone, date of birth, passwordHash
- *  - notifications, AI queries, idea votes/comments, activity log rows
- *    attributable to the user (these are freely deletable)
+ *  - notifications, AI queries, idea votes/comments (freely deletable)
+ *  - the IP address and user agent on the activity rows they authored
  *
  * Things we RETAIN:
  *  - Aggregated org records (reviews, KPI records, kudos, action items) with
  *    the anonymized user reference — deletion would break historical integrity
- *  - Consent records — required to prove lawful processing
+ *  - Consent records, required to prove lawful processing
+ *  - The activity and audit rows they authored, under the anonymised actor
+ *    ("Deleted User"): the workspace's audit log and its retention setting
+ *    decide how long those live, never the person the log is about, so an
+ *    admin cannot erase their own trail by deleting their account
  *
- * Request body requires `confirm: "<email>"` to prevent accidental deletion.
+ * Request body requires `confirm: "DELETE"` (the My settings dialog) or the
+ * person's own email (the older privacy-controls shape) to prevent an
+ * accidental deletion.
+ *
+ * Refused (409 `last_admin`) when the person is the only active Owner or
+ * Admin of ANY workspace they belong to (the anchored one and every
+ * membership): a workspace with nobody who can reach Members is one nobody
+ * can repair (spec-account-auth "Delete my account", the last Owner case).
+ * The check runs twice: once up front for a fast answer, and again inside
+ * the transaction under a per-workspace advisory lock, so two sole admins
+ * deleting at the same moment cannot both pass (the second waits for the
+ * first, then sees it gone and is refused). The anonymised row also takes a tokenVersion bump, so every other
+ * device's session ends on its next check instead of lingering.
  */
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -41,9 +63,17 @@ export async function POST(req: NextRequest) {
   });
   if (!me) return jsonError("Not found", 404);
   if (me.deletedAt) return jsonError("Account already deleted", 400);
-  if (!body.confirm || body.confirm.trim().toLowerCase() !== me.email.toLowerCase()) {
-    return jsonError("Confirmation email does not match", 400);
+  const confirm = typeof body.confirm === "string" ? body.confirm.trim() : "";
+  if (confirm !== "DELETE" && confirm.toLowerCase() !== me.email.toLowerCase()) {
+    return jsonError("Type DELETE to confirm", 400);
   }
+  const lastAdmin = () =>
+    jsonSuccess({ error: "You are the only admin of a workspace you belong to. Make someone else an admin there first.", code: "last_admin" }, 409);
+  const sole = await soleAdminWorkspaces(userId);
+  if (sole.length > 0) return lastAdmin();
+  // Every workspace this person belongs to: the lock set for the re-check.
+  const memberOf = await prisma.organizationMembership.findMany({ where: { userId }, select: { organizationId: true } });
+  const lockOrgs = [...new Set([me.organizationId, ...memberOf.map((m) => m.organizationId)])].sort();
 
   const geo = await getVisitorGeo();
   const ipAddress = await getClientIp();
@@ -53,6 +83,16 @@ export async function POST(req: NextRequest) {
 
   try {
     await prisma.$transaction(async (tx) => {
+      // 0) Lock every workspace this person belongs to, in one sorted order
+      //    (no deadlock between two deletes), then re-check under the lock.
+      //    Another delete of an admin of the same workspace waits here until
+      //    this one commits, so it counts this person as gone.
+      for (const orgId of lockOrgs) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`me.delete:${orgId}`}))`;
+      }
+      const stillSole = await soleAdminWorkspaces(userId, tx);
+      if (stillSole.length > 0) throw new LastAdminError(stillSole);
+
       // 1) Anonymize the user row
       await tx.user.update({
         where: { id: userId },
@@ -66,6 +106,7 @@ export async function POST(req: NextRequest) {
           passwordHash: randomPassword,
           status: "INACTIVE",
           deletedAt: new Date(),
+          tokenVersion: { increment: 1 },
         },
       });
 
@@ -75,7 +116,8 @@ export async function POST(req: NextRequest) {
         tx.aIQuery.deleteMany({ where: { userId } }),
         tx.ideaVote.deleteMany({ where: { userId } }),
         tx.ideaComment.deleteMany({ where: { userId } }),
-        tx.activityLog.deleteMany({ where: { actorId: userId } }),
+        // Kept, with the network details cleared (see the header).
+        tx.activityLog.updateMany({ where: { actorId: userId }, data: { ipAddress: null, userAgent: null } }),
       ]);
 
       // 3) Log the erasure request itself (required evidence)
@@ -96,7 +138,7 @@ export async function POST(req: NextRequest) {
           withdrawnAt: new Date(),
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 10_000 });
 
     return jsonSuccess({
       ok: true,
@@ -104,6 +146,7 @@ export async function POST(req: NextRequest) {
         "Account anonymized. Some organizational records are retained in anonymized form as permitted by GDPR Art. 17(3) and our retention policy.",
     });
   } catch (err) {
+    if (err instanceof LastAdminError) return lastAdmin();
     console.error("[delete] failed:", err);
     return jsonError("Failed to delete account", 500);
   }

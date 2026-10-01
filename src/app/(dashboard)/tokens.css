@@ -555,3 +555,17 @@ html[data-contrast="high"] .workwrk-os {
    src/app/globals.css, which the root layout loads on every route.
    See the block at the end of that file for the six values and why they
    never rebind in dark. */
+
+/* Reduced motion (My settings > Preferences > Appearance). ThemeApplier
+   writes html[data-reduced-motion="reduce"] from home.ui.reducedMotion; the
+   device setting applies on its own through the media query elsewhere.
+   Animations and transitions collapse to an instant change, never removed,
+   so nothing that waits on an animationend event is stranded. */
+html[data-reduced-motion="reduce"] *,
+html[data-reduced-motion="reduce"] *::before,
+html[data-reduced-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

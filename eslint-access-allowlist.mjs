@@ -125,6 +125,32 @@
 // and /api/kpi-records/[id]/manager-review. The unit files still listed below
 // keep a real legacy read (an isManager or accessLevel check) that changes
 // behaviour if removed; they leave with access step 6.
+// Phase 8 Stage D (2026-09-30) NET SHRINK of nine. The rebuilt Settings pages
+// (API, Billing, Identity, Locale, Structure), the settings shell,
+// the org delete and restore routes and the SCIM Users collection now gate
+// through src/lib/access/workspace-admin.ts and no longer read the legacy
+// signals themselves.
+// Phase 8 Stage F (2026-09-30) NET SHRINK of seventy-six, 331 to 255 (access
+// step 6: Settings and Admin-adjacent, then Nav). Every file that left was
+// linted with the G7 rule and no allow-list first (zero findings):
+//   * the org write APIs now go through src/lib/access/settings-write.ts
+//     settingsWriteGate (the page rule, the actor re-read): branding, BYOK,
+//     AI profile, work schedule, SCIM tokens, tags, webhooks, API keys,
+//     billing checkout and portal, audit export, people export, module
+//     installs, org preferences, the permission grid PATCH, the logo and
+//     PATCH /api/settings;
+//   * the rail, the hub sidebars and the create menus read the display tiers
+//     boot ships (src/lib/access/viewer-tiers.ts, viewer.tiers), never the
+//     level: shell-context, apps-catalog, hub-sidebar, docs-sidebar;
+//   * deleted with zero importers left: route-guard.ts (its callers use
+//     src/lib/access/page-viewer.ts or the ledger's own personScope),
+//     access-tiers.ts, /api/me/access; moved beside the engine:
+//     src/lib/access.ts (now access/legacy-resolve.ts, which ends the shadow
+//     of "@/lib/access"), hooks/use-role.ts and hooks/use-permission.ts (now
+//     access/use-legacy-permissions.tsx, same answers);
+//   * forty-seven files that had stopped reading the legacy signals in
+//     earlier stages and were never taken off.
+// What remains, and why, is in scripts/MIGRATIONS.md (Phase 8 stage F).
 export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/calls/status/route.ts",
   "src/app/api/people/pick/route.ts",
@@ -133,37 +159,19 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // (visibleRailApps over accessLevel tiers). It leaves this list with the
   // rail switch-over to can() at step 6, together with the client rail.
   "src/app/api/boot/route.ts",
-  "src/app/(admin)/layout.tsx",
-  "src/app/(auth)/register/page.tsx",
-  "src/app/(dashboard)/account/profile/page.tsx",
-  "src/app/(dashboard)/account/security/page.tsx",
-  "src/app/(dashboard)/announcements/page.tsx",
-  "src/app/(dashboard)/assets/asset-row-menu.tsx",
   "src/app/(dashboard)/boards/\\[slug\\]/page.tsx",
-  "src/app/(dashboard)/dashboard/dashboard-content.tsx",
-  "src/app/(dashboard)/everything/page.tsx",
   "src/app/(dashboard)/folders/\\[id\\]/page.tsx",
   "src/app/(dashboard)/okrs/\\[id\\]/page.tsx",
   "src/app/(dashboard)/people/roles/\\[id\\]/page.tsx",
-  "src/app/(dashboard)/settings/api/page.tsx",
-  "src/app/(dashboard)/settings/billing/page.tsx",
-  "src/app/(dashboard)/settings/identity/page.tsx",
-  "src/app/(dashboard)/settings/locale/page.tsx",
   "src/app/(dashboard)/settings/members/page.tsx",
-  "src/app/(dashboard)/settings/modules/page.tsx",
-  "src/app/(dashboard)/settings/permissions/page.tsx",
-  "src/app/(dashboard)/settings/structure/page.tsx",
+  // Phase 8 Stage A: /settings/permissions moved here; the transitional
+  // page still draws the legacy grid through checkPermission.
+  "src/app/(dashboard)/settings/access/page.tsx",
   "src/app/(dashboard)/spaces/\\[slug\\]/page.tsx",
   "src/app/(dashboard)/spaces/page.tsx",
-  "src/app/(dashboard)/tables/layout.tsx",
   "src/app/(dashboard)/tlk/layout.tsx",
-  "src/app/(dashboard)/today/page.tsx",
   "src/app/api/accounting-periods/\\[id\\]/route.ts",
   "src/app/api/accounting-periods/route.ts",
-  "src/app/api/activity/route.ts",
-  "src/app/api/agents/\\[slug\\]/install/route.ts",
-  "src/app/api/agents/\\[slug\\]/schedule/route.ts",
-  "src/app/api/agents/route.ts",
   // Phase 3 Stage D (2026-09-21): the contracts and policies routes the process
   // spec adds (resend, rename-folder, rename-category, the two CSV exports,
   // the assignment PATCH/DELETE and reminders) gate the way their siblings
@@ -171,10 +179,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // AGENT check on export), because this stage keeps the engine inert. They
   // leave with the rest of the family when the process routes flip to can().
   "src/app/api/agreements/\\[id\\]/parties/\\[partyId\\]/resend/route.ts",
-  "src/app/api/agreements/rename-folder/route.ts",
   "src/app/api/policies/\\[id\\]/acknowledge/route.ts",
   "src/app/api/policies/compliance/export/route.ts",
-  "src/app/api/policies/rename-category/route.ts",
   "src/app/api/sop-assignments/compliance/export/route.ts",
   "src/app/api/agreements/\\[id\\]/parties/route.ts",
   "src/app/api/agreements/\\[id\\]/route.ts",
@@ -183,22 +189,13 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/agreements/route.ts",
   "src/app/api/ai/route.ts",
   "src/app/api/ai/signals/route.ts",
-  "src/app/api/analytics/route.ts",
-  "src/app/api/announcements/\\[id\\]/acknowledge/route.ts",
-  "src/app/api/announcements/\\[id\\]/route.ts",
-  "src/app/api/announcements/route.ts",
   "src/app/api/appsumo/redeem/route.ts",
   "src/app/api/assets/\\[id\\]/route.ts",
   "src/app/api/assets/route.ts",
-  "src/app/api/audit-log/export/route.ts",
   "src/app/api/audit/route.ts",
   "src/app/api/auth/accept-invite/route.ts",
   "src/app/api/auth/register/route.ts",
-  "src/app/api/autopilot/workflows/\\[id\\]/route.ts",
-  "src/app/api/autopilot/workflows/route.ts",
   "src/app/api/backlinks/route.ts",
-  "src/app/api/billing/checkout/route.ts",
-  "src/app/api/billing/portal/route.ts",
   "src/app/api/boards/\\[id\\]/duplicate/route.ts",
   "src/app/api/boards/\\[id\\]/fields/\\[key\\]/route.ts",
   "src/app/api/boards/\\[id\\]/fields/available/route.ts",
@@ -214,9 +211,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/boards/route.ts",
   "src/app/api/budget-plans/\\[id\\]/route.ts",
   "src/app/api/budget-plans/route.ts",
-  "src/app/api/build/apps/\\[slug\\]/route.ts",
   "src/app/api/bulk-decide/route.ts",
-  "src/app/api/calendar/meetings/route.ts",
   "src/app/api/calendar/route.ts",
   "src/app/api/cron/review-cycles/route.ts",
   "src/app/api/cron/run-due-agents/route.ts",
@@ -238,7 +233,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/notetaker/save/route.ts",
   "src/app/api/whiteboards/\\[id\\]/duplicate/route.ts",
   "src/app/api/whiteboards/\\[id\\]/thumbnail/route.ts",
-  "src/app/api/docs/\\[id\\]/sharing/route.ts",
   "src/app/api/docs/\\[id\\]/summarize/route.ts",
   "src/app/api/docs/\\[id\\]/versions/\\[versionId\\]/route.ts",
   "src/app/api/docs/\\[id\\]/versions/route.ts",
@@ -249,7 +243,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/entity-links/route.ts",
   "src/app/api/export/\\[type\\]/route.ts",
   "src/app/api/export/all/route.ts",
-  "src/app/api/export/people/route.ts",
   "src/app/api/files/\\[id\\]/route.ts",
   "src/app/api/files/route.ts",
   "src/app/api/financial-reports/route.ts",
@@ -263,10 +256,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/folders/route.ts",
   "src/app/api/gl-accounts/route.ts",
   "src/app/api/ideas/\\[id\\]/route.ts",
-  "src/app/api/identity-providers/route.ts",
   "src/app/api/integrations/\\[id\\]/route.ts",
   "src/app/api/integrations/\\[id\\]/test/route.ts",
-  "src/app/api/integrations/\\[id\\]/webhooks/route.ts",
   "src/app/api/integrations/quickbooks/connect/route.ts",
   "src/app/api/integrations/quickbooks/disconnect/route.ts",
   "src/app/api/integrations/route.ts",
@@ -280,7 +271,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/items/\\[id\\]/duplicate/route.ts",
   "src/app/api/journal-entries/\\[id\\]/route.ts",
   "src/app/api/journal-entries/route.ts",
-  "src/app/api/keys/route.ts",
   "src/app/api/kpi-records/batch/route.ts",
   "src/app/api/kpis/route.ts",
   "src/app/api/kra-assignments/\\[id\\]/route.ts",
@@ -290,8 +280,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/kras/route.ts",
   "src/app/api/labels/route.ts",
   "src/app/api/notifications/route.ts",
-  "src/app/api/me/access/route.ts",
-  "src/app/api/me/everything/route.ts",
   "src/app/api/me/export/route.ts",
   "src/app/api/me/favorites/route.ts",
   // Phase 2 Stage C, two entries, both for the SAME one reason: they hand an
@@ -309,38 +297,25 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/me/favorites/spaces/route.ts",
   "src/app/api/me/favorites/tables/route.ts",
   "src/app/api/me/favorites/whiteboards/route.ts",
-  "src/app/api/me/items/route.ts",
   "src/app/api/me/mentions/route.ts",
-  "src/app/api/me/route.ts",
   "src/app/api/meeting-templates/route.ts",
   "src/app/api/meetings/\\[id\\]/action-items/route.ts",
   "src/app/api/meetings/\\[id\\]/ics/route.ts",
   "src/app/api/meetings/\\[id\\]/route.ts",
   "src/app/api/meetings/route.ts",
   "src/app/api/my-team/route.ts",
-  "src/app/api/offices/route.ts",
   "src/app/api/okrs/route.ts",
-  "src/app/api/org/preferences/route.ts",
-  "src/app/api/organization/ai-profile/route.ts",
-  "src/app/api/organization/branding/route.ts",
-  "src/app/api/organization/byok/route.ts",
-  "src/app/api/organization/work-schedule/route.ts",
-  "src/app/api/organizations/delete/route.ts",
-  "src/app/api/organizations/restore/route.ts",
   "src/app/api/ownership-areas/\\[id\\]/route.ts",
   "src/app/api/ownership-areas/route.ts",
   "src/app/api/people/backfill-role-defs/route.ts",
   "src/app/api/people/bulk-import/route.ts",
   "src/app/api/performance-scores/recalculate/route.ts",
-  "src/app/api/permissions/route.ts",
   "src/app/api/plan-lines/route.ts",
   "src/app/api/plan-variance/route.ts",
   "src/app/api/policies/\\[id\\]/assignments/route.ts",
   "src/app/api/policies/\\[id\\]/ledger/export/route.ts",
-  "src/app/api/policies/\\[id\\]/ledger/route.ts",
   "src/app/api/policies/\\[id\\]/route.ts",
   "src/app/api/policies/\\[id\\]/versions/route.ts",
-  "src/app/api/policies/compliance/route.ts",
   "src/app/api/policies/route.ts",
   "src/app/api/process-runs/route.ts",
   // Phase 3 Stage C (2026-09-21) adds three NEW routes the process spec asks
@@ -365,7 +340,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/process-scope.ts",
   "src/app/api/sops/\\[id\\]/people/route.ts",
   "src/app/api/sop-assignments/\\[id\\]/remind/route.ts",
-  "src/app/api/products/installations/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/export/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/route.ts",
   "src/app/api/purchase-orders/\\[id\\]/route.ts",
@@ -374,17 +348,10 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/role-boundaries/route.ts",
   "src/app/api/role-instances/\\[id\\]/route.ts",
   "src/app/api/role-instances/route.ts",
-  "src/app/api/scim-tokens/\\[id\\]/route.ts",
-  "src/app/api/scim-tokens/route.ts",
-  "src/app/api/scim/v2/Users/route.ts",
   "src/app/api/scopes/\\[id\\]/route.ts",
   "src/app/api/scopes/route.ts",
   "src/app/api/search/route.ts",
-  "src/app/api/settings/logo/route.ts",
-  "src/app/api/settings/route.ts",
-  "src/app/api/setup/route.ts",
   "src/app/api/sop-assignments/\\[id\\]/route.ts",
-  "src/app/api/sop-assignments/compliance/route.ts",
   "src/app/api/sop-assignments/route.ts",
   "src/app/api/sop-categories/\\[id\\]/route.ts",
   "src/app/api/sop-categories/route.ts",
@@ -407,7 +374,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/sops/record/route.ts",
   "src/app/api/sops/route.ts",
   "src/app/api/spaces/\\[id\\]/bookmarks/route.ts",
-  "src/app/api/spaces/\\[id\\]/children/route.ts",
   "src/app/api/spaces/\\[id\\]/duplicate/route.ts",
   "src/app/api/spaces/\\[id\\]/invitations/\\[inviteId\\]/resend/route.ts",
   "src/app/api/spaces/\\[id\\]/invitations/\\[inviteId\\]/route.ts",
@@ -419,16 +385,11 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/spaces/route.ts",
   "src/app/api/tables/\\[id\\]/ask/route.ts",
   "src/app/api/tables/\\[id\\]/import/route.ts",
-  "src/app/api/tables/\\[id\\]/route.ts",
   "src/app/api/tables/\\[id\\]/rows/batch/route.ts",
   "src/app/api/tables/\\[id\\]/rows/route.ts",
   "src/app/api/tables/\\[id\\]/trash/route.ts",
   "src/app/api/tables/route.ts",
   "src/app/api/tag-assignments/route.ts",
-  "src/app/api/tags/\\[id\\]/route.ts",
-  "src/app/api/tags/route.ts",
-  "src/app/api/tasks/route.ts",
-  "src/app/api/tasks/workload/route.ts",
   "src/app/api/team/workload/route.ts",
   "src/app/api/template-center/\\[id\\]/apply/route.ts",
   "src/app/api/template-center/save-as/route.ts",
@@ -438,12 +399,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/timesheets/\\[id\\]/route.ts",
   "src/app/api/timesheets/route.ts",
   "src/app/api/timesheets/summary/route.ts",
-  "src/app/api/tools/\\[id\\]/route.ts",
-  "src/app/api/tools/\\[id\\]/share/route.ts",
-  "src/app/api/tools/route.ts",
-  "src/app/api/trash/\\[id\\]/restore/route.ts",
-  "src/app/api/trash/\\[id\\]/route.ts",
-  "src/app/api/trash/route.ts",
   "src/app/api/users/\\[id\\]/route.ts",
   "src/app/api/users/\\[id\\]/seed-alignment/route.ts",
   "src/app/api/users/route.ts",
@@ -451,7 +406,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/v1/people/route.ts",
   "src/app/api/vendors/\\[id\\]/route.ts",
   "src/app/api/vendors/route.ts",
-  "src/app/api/webhooks/route.ts",
   "src/app/api/weekly-reviews/\\[id\\]/manager-review/route.ts",
   "src/app/api/whiteboards/\\[id\\]/route.ts",
   "src/app/api/whiteboards/\\[id\\]/versions/\\[versionId\\]/restore/route.ts",
@@ -462,32 +416,12 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // branch a deep link lands in. It gates with `folderReadable` / `canRead`,
   // the same helpers its sibling container routes on this list use, and leaves
   // in the same batch they do at access step 6.
-  "src/app/api/work/locate/route.ts",
   "src/app/api/workflow-runs/route.ts",
   "src/app/api/workflows/route.ts",
   "src/app/api/workspaces/\\[id\\]/members/route.ts",
   "src/app/api/workspaces/route.ts",
-  "src/app/onboard/page.tsx",
-  "src/components/dashboard/dept-workspace-banner.tsx",
-  "src/components/layout/os/access-tiers.ts",
-  "src/components/layout/os/apps-catalog.tsx",
-  "src/components/layout/os/chat-sidebar.tsx",
-  "src/components/layout/os/hub-sidebar.tsx",
-  "src/components/layout/os/docs-sidebar.tsx",
   "src/components/layout/os/invite-modal.tsx",
-  "src/components/layout/os/settings-shell.tsx",
-  "src/components/layout/os/share-board-dialog.tsx",
-  "src/components/layout/os/shell-context.tsx",
-  "src/components/layout/os/space-members-strip.tsx",
-  "src/components/layout/os/workspace-menu.tsx",
   "src/components/okrs/create-goal-modal.tsx",
-  "src/components/tasks/task-dialog.tsx",
-  "src/components/tour-provider.tsx",
-  "src/generated/prisma/index.d.ts",
-  "src/hooks/use-permission.ts",
-  "src/hooks/use-role.ts",
-  "src/lib/access-levels.ts",
-  "src/lib/access.ts",
   "src/lib/agents/autonomous.ts",
   "src/lib/agents/tools.ts",
   "src/lib/alignment-scope.ts",
@@ -501,11 +435,9 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/automation/usage.ts",
   "src/lib/board.ts",
   "src/lib/crm/auth.ts",
-  "src/lib/doc-access.ts",
   "src/lib/doc-sharing.ts",
   "src/lib/email-templates/invitation.ts",
   "src/lib/entity-link-authz.ts",
-  "src/lib/everything.ts",
   // The "who may read this file" rule, lifted verbatim out of
   // src/app/api/files/route.ts (still on this list, two entries above) so the
   // comment-attachment path can run the SAME check instead of skipping it. It
@@ -526,7 +458,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/people/directory-list.server.ts",
   "src/lib/people/department-access.server.ts",
   "src/lib/permissions.ts",
-  "src/lib/platform-admin.ts",
   "src/lib/item-gate.ts",
   // Phase 5 (Data): the ONE reader gate the three new /api/tables/[id]/*
   // routes (duplicate, export, presence) share, on the item-gate precedent,
@@ -552,9 +483,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // memberViewer and the rest) and none of them reads the signal itself.
   "src/lib/list-links-server.ts",
   "src/lib/rail-apps.test.ts",
-  "src/lib/rail-apps.ts",
   "src/lib/role-defaults.ts",
-  "src/lib/route-guard.ts",
   "src/lib/sop-access.ts",
   "src/lib/space.ts",
   // Bird's eye (2026-09-24) had added src/lib/work/space-lists.ts and its
@@ -565,9 +494,40 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // a Folder grant's own role, so the module had no caller left and a second
   // opinion on readability is exactly what this list exists to shrink.
   "src/lib/suites/auth.ts",
-  "src/lib/trash.ts",
-  "src/lib/types.ts",
   "src/lib/workflow/engine.ts",
   "src/lib/workflows/runtime.ts",
-  "src/types/next-auth.d.ts",
+  // Phase 8 stage F review (2026-09-30): SIX files that read the legacy
+  // signals and were on no list, so `npx eslint` over src was not green and
+  // the count above understated the real number of legacy readers. Listed
+  // so the progress bar is true, each with what it still reads:
+  //   announcement-server.ts, announcement-audience.ts  the audience and the
+  //     publish rule of Announcements (accessLevel, hasPermission, the
+  //     SpaceMember audience), the logic the announcements routes left the
+  //     list through; it leaves when the audience resolves through can()
+  //   move/destinations  the Space nesting picker hands the level to
+  //     spaceNestDestinations (node-access's own input shape)
+  //   my-work/personal  the Personal List projection's viewer shape
+  //     (listBoardItems reads the level for the reserved-key rule)
+  //   two tests that build sessions carrying a level on purpose
+  "src/lib/announcement-server.ts",
+  "src/lib/announcement-audience.ts",
+  "src/app/api/move/destinations/route.ts",
+  "src/app/(dashboard)/my-work/personal/page.tsx",
+  "src/lib/auth-workspace-move.test.ts",
+  "src/lib/reports/schedule-patch-private-view.test.ts",
+];
+
+// Legacy code that lives INSIDE src/lib/access/, which the rule never lints
+// (the engine has to read these things). Not an ignore list: counted here so
+// the step 6 exit test ("the allow-list is empty") also means these are gone.
+// Stage F moved them in: src/lib/access.ts became legacy-resolve.ts, and
+// src/hooks/use-role.ts plus use-permission.ts became
+// use-legacy-permissions.tsx, whose useRole still derives isAdmin from the
+// session level (C_LEVEL and HR included) for its client importers. The
+// flip of that wrapper to orgRole (spec 10.1) waits for the same surfaces'
+// server rules to delegate, or C-level would lose controls the server still
+// grants them (scripts/MIGRATIONS.md, "what remains").
+export const ACCESS_LEGACY_INSIDE_ENGINE = [
+  "src/lib/access/legacy-resolve.ts",
+  "src/lib/access/use-legacy-permissions.tsx",
 ];

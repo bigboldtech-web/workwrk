@@ -107,7 +107,7 @@ export function BellPopover() {
   const { mutedNotifications } = useOsShell();
   const { openSettings } = useSettingsNav();
   const dot = counts.inboxUnread > 0 || counts.remindersDue > 0;
-  const notificationsHref = settingsHrefToday(SETTINGS_PAGES["account/notifications"]) ?? "/settings/notifications";
+  const notificationsHref = settingsHrefToday(SETTINGS_PAGES["account/notifications"]) ?? "/account/notifications";
   // One hook instance for the door and the alert path, so enabling here is
   // what the alert reads (two instances would each keep their own state).
   const desktop = useDesktopNotifications();
@@ -247,8 +247,9 @@ function DesktopAlertsDoor({ desktop }: { desktop: ReturnType<typeof useDesktopN
       <button
         type="button"
         onClick={() => {
-          void desktop.requestPermission().then((r) => {
-            if (r === "granted") toast("Desktop alerts on");
+          void desktop.requestPermission().then(async (r) => {
+            // Permission is the browser's; on is the person's saved choice.
+            if (r === "granted") toast((await desktop.enable()) ? "Desktop alerts on" : "Couldn't save. Try again");
             else if (r === "denied") toast("Your browser blocked desktop alerts");
           });
         }}
@@ -264,7 +265,12 @@ function DesktopAlertsDoor({ desktop }: { desktop: ReturnType<typeof useDesktopN
   return (
     <button
       type="button"
-      onClick={() => { if (on) desktop.disable(); else desktop.enable(); toast(on ? "Desktop alerts off" : "Desktop alerts on"); }}
+      onClick={() => {
+        void (async () => {
+          const ok = await (on ? desktop.disable() : desktop.enable());
+          toast(ok ? (on ? "Desktop alerts off" : "Desktop alerts on") : "Couldn't save. Try again");
+        })();
+      }}
       aria-pressed={on}
       aria-label={on ? "Desktop alerts on. Turn off" : "Desktop alerts off. Turn on"}
       title={on ? "Desktop alerts on" : "Desktop alerts off"}

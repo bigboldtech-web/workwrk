@@ -1,3 +1,5 @@
+import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -8,22 +10,67 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
+import { settingsDoorAllows } from "@/lib/access/settings-door";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { inviteSender } from "@/lib/auth/invite-facts.server";
+import { canEditSpace } from "@/lib/space";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const viewer = session.user as { organizationId?: string; accessLevel?: string; email?: string | null };
+    const orgId = viewer.organizationId;
+
+    // ?rules=1: the invite rules every invite dialog starts from (Members >
+    // Invite rules), for anyone who may invite (the same people.create cell
+    // POST checks), so the topbar dialog and the Members dialog start on the
+    // same default role and accept the same domains the server accepts.
+    if (new URL(req.url).searchParams.get("rules") === "1") {
+      if (!(await hasPermission(session, "people", "create"))) {
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+      // hasPermission reads the session's level, re-checked only every five
+      // minutes: a session the database no longer backs (a demotion's
+      // tokenVersion bump, signed out elsewhere) is refused now, as POST is.
+      const fresh = await freshWorkspaceActor(session);
+      if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+      const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
+      const rules = usersSettingsOf(org?.settings, org?.domain);
+      return NextResponse.json(
+        {
+          allowedDomains: inviteDomainsOf(org?.settings, org?.domain, viewer.email),
+          inviteDefaultRole: rules.inviteDefaultRole === "ADMIN" ? "ADMIN" : "MEMBER",
+          inviteExpiryDays: rules.inviteExpiryDays,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    // The list names every invitee, their level and placement, so it is for
+    // the people who manage invitations: the same people Settings > Members
+    // (its one reader) admits, through the one door decision (the manager
+    // tier today, the engine's page table once ACCESS_V2_RESOLVER is on). A
+    // Member gets a 403, not a way to enumerate pending Admin invites. The
+    // door re-reads the person from the database (settings-door.ts), so an
+    // Admin demoted a moment ago is refused now too.
+    if (!(await settingsDoorAllows("members", session))) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
 
     const invitations = await prisma.invitation.findMany({
       where: { organizationId: orgId },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(invitations);
+    // The raw token is the invitation: whoever holds it can accept it with a
+    // password of their choosing. It goes to the invitee by email and never
+    // back out of this list (any signed-in member can read it), so a pending
+    // Admin invite cannot be lifted and accepted by someone else.
+    return NextResponse.json(invitations.map(({ token: _token, ...rest }) => { void _token; return rest; }));
   } catch (error) {
     console.error("Invitations GET error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -37,14 +84,43 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const orgId = (session.user as { organizationId: string }).organizationId;
 
-    const allowed = await hasPermission(session, "people", "create");
+    // The actor as the database has them NOW (freshWorkspaceActor): an
+    // invitation outlives the session that sends it (seven days, and it can
+    // carry Admin), so a person demoted a moment ago must not mint one on the
+    // level their five-minute-old token still claims. The permission and the
+    // level rule below both read the fresh level.
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) {
+      return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    }
+    const freshSession = { ...session, user: { ...session.user, accessLevel: fresh.level } };
+    const allowed = await hasPermission(freshSession, "people", "create");
     if (!allowed) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+    const { email, accessLevel: levelField, role: roleField, isAgent, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+
+    // The setup wizard asks in the four-role words ({ role, isAgent }); the
+    // Members page and API callers still send a level. Either way the level
+    // rule below decides.
+    let requestedLevel: unknown = levelField;
+    if (levelField === undefined && roleField !== undefined) {
+      const mapped = levelForInviteRole(roleField, isAgent);
+      if (!mapped.ok) return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      requestedLevel = mapped.level;
+    }
+
+    // The level an invitation may carry (src/lib/access/invite-level.ts):
+    // never WorkwrK staff, an Admin only from an Admin, and otherwise at or
+    // below the inviter's own rung. It used to be stored as sent.
+    const levelCheck = resolveInviteLevel(fresh.level, requestedLevel);
+    if (!levelCheck.ok) {
+      return NextResponse.json({ error: levelCheck.error }, { status: levelCheck.status });
+    }
+    const inviteLevel = levelCheck.level;
 
     // Optional personal note from the inviter — capped so the email stays sane.
     const personalMessage =
@@ -58,16 +134,21 @@ export async function POST(req: Request) {
     // workspace joins on the company's own email domain. The domain is
     // the org's stored one, falling back to the inviting admin's — so
     // an @cashkr.com admin can only invite @cashkr.com addresses.
+    // Members > Invite rules (settings.users.allowedDomains) widens it with
+    // more domains; the own domain always stays in (inviteDomainsOf), so
+    // clearing the chips never opens the workspace to any address and adding
+    // one never locks out the workspace's own.
     const orgDomainRow = await prisma.organization.findUnique({
       where: { id: orgId },
-      select: { domain: true },
+      select: { domain: true, settings: true },
     });
-    const inviterEmail = (session.user as any).email as string | undefined;
-    const allowedDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
+    const inviterEmail = (session.user as { email?: string }).email;
+    const rules = usersSettingsOf(orgDomainRow?.settings, orgDomainRow?.domain);
+    const allowedDomains = inviteDomainsOf(orgDomainRow?.settings, orgDomainRow?.domain, inviterEmail);
     const inviteDomain = String(email).split("@")[1]?.toLowerCase() ?? "";
-    if (allowedDomain && inviteDomain !== allowedDomain) {
+    if (allowedDomains.length > 0 && !allowedDomains.includes(inviteDomain)) {
       return NextResponse.json(
-        { error: `Only @${allowedDomain} addresses can join this workspace` },
+        { error: `Only ${allowedDomains.map((d) => `@${d}`).join(", ")} addresses can join this workspace` },
         { status: 400 },
       );
     }
@@ -104,34 +185,61 @@ export async function POST(req: Request) {
     const existingInvite = await prisma.invitation.findFirst({
       where: { email, organizationId: orgId, accepted: false },
     });
-    if (existingInvite) {
-      return NextResponse.json({ error: "Invitation already sent to this email" }, { status: 400 });
+    // A live pending invitation blocks a second one (Resend it instead). An
+    // EXPIRED one no longer does: it is the same person being invited again,
+    // so the row is renewed in place with a new token, a new week and what
+    // this invite asks for, instead of making the admin Revoke first. The
+    // renewal is conditional on the row still being unaccepted and expired.
+    const now = new Date();
+    if (existingInvite && existingInvite.expiresAt >= now) {
+      return NextResponse.json({ error: "Invitation already sent to this email. Resend it from Pending invites." }, { status: 400 });
     }
 
-    const invitation = await prisma.invitation.create({
-      data: {
-        email,
-        accessLevel: inviteLevel || "EMPLOYEE",
-        token: crypto.randomBytes(32).toString("hex"),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        organizationId: orgId,
-        departmentId: departmentId || null,
-        roleId: roleId || null,
-        managerId: managerId || null,
-        officeId: officeId || null,
-        kraIds: cleanKraIds,
-        sopIds: cleanSopIds,
-      },
-    });
+    const level = inviteLevel || "EMPLOYEE";
+    const mirrorRole = orgRoleOf({ accessLevel: level });
+    const fields = {
+      accessLevel: level,
+      // Phase 8 stage E: what the invite makes the person, in the four-role
+      // vocabulary (the step-8 mirror; accept still applies accessLevel).
+      orgRole: mirrorRole === "OWNER" ? "ADMIN" : mirrorRole,
+      isAgent: isAgentOf(level),
+      token: crypto.randomBytes(32).toString("hex"),
+      // Members > Invite rules > Invitation expiry (default 7 days).
+      expiresAt: new Date(now.getTime() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000),
+      departmentId: departmentId || null,
+      roleId: roleId || null,
+      managerId: managerId || null,
+      officeId: officeId || null,
+      kraIds: cleanKraIds,
+      sopIds: cleanSopIds,
+    };
+    let invitation;
+    if (existingInvite) {
+      const renewed = await prisma.invitation.updateMany({
+        where: { id: existingInvite.id, accepted: false, expiresAt: { lt: now } },
+        data: fields,
+      });
+      if (renewed.count !== 1) {
+        return NextResponse.json({ error: "Invitation already sent to this email. Resend it from Pending invites." }, { status: 400 });
+      }
+      invitation = await prisma.invitation.findUniqueOrThrow({ where: { id: existingInvite.id } });
+    } else {
+      invitation = await prisma.invitation.create({
+        data: { email, organizationId: orgId, ...fields },
+      });
+    }
 
     // Send invitation email
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const inviteLink = `${baseUrl}/register?token=${invitation.token}`;
+    const inviteLink = `${baseUrl}/join?token=${invitation.token}`;
+    const inviter = session.user as { firstName?: string; lastName?: string; name?: string | null };
+    const inviterName = `${inviter.firstName ?? ""} ${inviter.lastName ?? ""}`.trim() || inviter.name || undefined;
     const { subject, html } = invitationTemplate({
       companyName: org?.name || "Your team",
       inviteLink,
       accessLevel: inviteLevel || "EMPLOYEE",
+      inviterName,
       personalMessage,
     });
 
@@ -160,15 +268,21 @@ export async function POST(req: Request) {
     // to see in their access review reports.
     logAuditEvent({
       type: "user.invited",
-      actorId: (session.user as any).id,
+      actorId: (session.user as { id: string }).id,
       organizationId: orgId,
       description: `Invited ${email} as ${inviteLevel || "EMPLOYEE"}`,
       targetId: invitation.id,
       targetType: "Invitation",
-      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId, kraCount: cleanKraIds.length, sopCount: cleanSopIds.length },
+      // The personal message is kept here (Invitation has no column for it)
+      // so /join can show the invitee what the inviter wrote.
+      metadata: { email, accessLevel: inviteLevel || "EMPLOYEE", departmentId, roleId, officeId, kraCount: cleanKraIds.length, sopCount: cleanSopIds.length, ...(personalMessage ? { message: personalMessage } : {}) },
     });
 
-    return NextResponse.json(invitation, { status: 201 });
+    // The raw token is the invitation (see GET): it goes to the invitee by
+    // email and never back to the caller.
+    const { token: _t, ...created } = invitation;
+    void _t;
+    return NextResponse.json(created, { status: 201 });
   } catch (error) {
     console.error("Invitations POST error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -182,7 +296,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const orgId = (session.user as { organizationId: string }).organizationId;
 
     const allowed = await hasPermission(session, "people", "create");
     if (!allowed) {
@@ -212,7 +326,7 @@ export async function DELETE(req: Request) {
 
     logAuditEvent({
       type: "user.invitation.revoked",
-      actorId: (session.user as any).id,
+      actorId: (session.user as { id: string }).id,
       organizationId: orgId,
       description: `Revoked invitation for ${invitation.email}`,
       targetId: id,
@@ -225,4 +339,102 @@ export async function DELETE(req: Request) {
     console.error("Invitations DELETE error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
+}
+
+// PATCH /api/invitations { id, resend: true }: Resend
+//
+// Resend lives on Workspace settings > Members > Pending invites, which is
+// where the "Invitation needs resending" Inbox row (request-resend) sends the
+// inviter and the admins. An expired invitation is the usual case: the old
+// row blocked a fresh invite ("Invitation already sent"), so before this the
+// only way through was Revoke and invite again.
+//
+// Who may resend: whoever may invite (people.create, the same gate as POST
+// and DELETE /api/invitations), plus, for an invitation to a Space, whoever
+// can edit that Space (the Space share dialog's own rule). The level rule is
+// applied again, so a person below Admin can never resend an Admin
+// invitation they could not have sent.
+//
+// A resend ROTATES the token and gives the invitation seven more days: the
+// link in the old email stops working, so a copy that leaked (a forwarded
+// email) cannot be accepted after the real person asked for a new one. The
+// rotation is a conditional update on accepted=false, so an invitation
+// accepted a moment earlier is never revived.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export async function PATCH(req: Request) {
+  const session = await getServerSession(authOptions);
+  const viewer = session?.user as { id?: string; organizationId?: string; accessLevel?: string; firstName?: string; lastName?: string; name?: string | null } | undefined;
+  if (!viewer?.id || !viewer.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const orgId = viewer.organizationId;
+  const reqBody = (await req.json().catch(() => null)) as { id?: unknown; resend?: unknown } | null;
+  const id = typeof reqBody?.id === "string" ? reqBody.id : "";
+  if (!id || reqBody?.resend !== true) return NextResponse.json({ error: "Send { id, resend: true }." }, { status: 400 });
+
+  const inv = await prisma.invitation.findFirst({
+    where: { id, organizationId: orgId, accepted: false },
+    select: { id: true, email: true, accessLevel: true, spaceId: true, organizationId: true },
+  });
+  if (!inv) return NextResponse.json({ error: "This invitation was accepted or revoked." }, { status: 404 });
+
+  const mayInvite = await hasPermission(session, "people", "create");
+  const maySpace = !mayInvite && inv.spaceId ? await canEditSpace(inv.spaceId, viewer.id, viewer.accessLevel ?? "EMPLOYEE") : false;
+  if (!mayInvite && !maySpace) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  if (!inv.spaceId) {
+    const level = resolveInviteLevel(viewer.accessLevel, inv.accessLevel);
+    if (!level.ok) return NextResponse.json({ error: level.error }, { status: level.status });
+  }
+
+  const token = crypto.randomBytes(32).toString("hex");
+  // A resent link lives as long as a new one: Members > Invite rules >
+  // Invitation expiry (default 7 days), the same rule POST honours.
+  const orgRules = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
+  const expiresAt = new Date(Date.now() + usersSettingsOf(orgRules?.settings, orgRules?.domain).inviteExpiryDays * DAY_MS);
+  const claimed = await prisma.invitation.updateMany({
+    where: { id: inv.id, organizationId: orgId, accepted: false },
+    data: { token, expiresAt },
+  });
+  if (claimed.count !== 1) return NextResponse.json({ error: "This invitation was accepted or revoked." }, { status: 404 });
+
+  const [org, sender] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),
+    inviteSender(inv),
+  ]);
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const inviteLink = `${baseUrl}/join?token=${token}`;
+  const resender = `${viewer.firstName ?? ""} ${viewer.lastName ?? ""}`.trim() || viewer.name || undefined;
+  const { subject, html } = invitationTemplate({
+    companyName: org?.name || "Your team",
+    inviteLink,
+    accessLevel: inv.accessLevel,
+    inviterName: sender.inviterName ?? resender,
+    personalMessage: sender.message ?? undefined,
+  });
+  try {
+    await sendEmail({
+      to: inv.email,
+      subject,
+      html,
+      template: "invitation",
+      variables: { companyName: org?.name },
+      organizationId: orgId,
+      category: "invitation",
+    });
+  } catch (err) {
+    console.error("[Invitation] resend email failed:", err);
+    return NextResponse.json({ error: "The new link was made but the email did not go out. Try Resend again." }, { status: 502 });
+  }
+
+  logAuditEvent({
+    type: "user.invitation_resent",
+    actorId: viewer.id,
+    organizationId: orgId,
+    description: `Resent the invitation to ${inv.email}`,
+    targetId: inv.id,
+    targetType: "Invitation",
+    metadata: { email: inv.email, accessLevel: inv.accessLevel, expiresAt: expiresAt.toISOString() },
+  });
+
+  return NextResponse.json({ ok: true, id: inv.id, expiresAt: expiresAt.toISOString() });
 }

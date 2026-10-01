@@ -66,6 +66,8 @@ const MAX_CHAIN = 8;
 // accessibleIds cannot drift apart on what a SpaceRole means. Re-exported here
 // because this is the module the mapping historically belonged to.
 export { roleFromSpaceRole, roleFromSopRole } from "./id-sets";
+import { accessV2Tables } from "./flags";
+import { nodeBridgeGrants } from "./node-bridge";
 
 function userGrant(
   objectType: ObjectType,
@@ -841,8 +843,12 @@ async function loadDocFacts(viewer: Viewer, docId: string): Promise<ContainerRes
   }
 
   // Anchored: the doc inherits its anchor, which becomes the chain.
+  // A doc on a task that is gone reaches nobody but an org admin
+  // (node-access.ts, node-rules R6 anchorReach BOARD_ITEM gives NONE and the
+  // creator term needs the anchor to reach), so the owner rule is dropped.
   const anchor = await anchorChain(viewer, doc.entityType, doc.entityId);
-  return { object: base, chain: anchor.chain, grants: anchor.grants };
+  const object = anchor.dangling ? { ...base, ownerId: null } : base;
+  return { object, chain: anchor.chain, grants: anchor.grants };
 }
 
 /** The chain and grants of whatever a Doc, Table or Whiteboard hangs off. */
@@ -850,7 +856,7 @@ async function anchorChain(
   viewer: Viewer,
   entityType: string,
   entityId: string,
-): Promise<{ chain: ChainLink[]; grants: GrantFact[] }> {
+): Promise<{ chain: ChainLink[]; grants: GrantFact[]; dangling?: boolean }> {
   if (entityType === "SPACE") {
     const res = await loadSpaceFacts(viewer, entityId);
     return { chain: [objectAsLink(res.object), ...res.chain], grants: res.grants };
@@ -868,7 +874,7 @@ async function anchorChain(
       where: { id: entityId },
       select: { boardId: true },
     });
-    if (!item) return { chain: [], grants: [] };
+    if (!item) return { chain: [], grants: [], dangling: true };
     const res = await loadListFacts(viewer, item.boardId);
     return { chain: [objectAsLink(res.object), ...res.chain], grants: res.grants };
   }
@@ -1029,12 +1035,35 @@ export async function loadFacts(viewer: Viewer, ref: ObjectRef): Promise<AccessF
   if (appKey) loaded.object.appKey = appKey;
   const relationships = await loadRelationships(viewer, ref, loaded.object, org, null);
 
+  // Step 4 behind ACCESS_V2_TABLES (default OFF): a node object's grant is the
+  // viewer's node-access role, the one resolver that already unions
+  // AccessGrant, the member tables, docSharing and the Private rule
+  // (node-bridge.ts). Off, the old-table grants below stand, exactly as before.
+  // node-access already folds ownership (the owner rung, the creator of a
+  // doc or canvas, the Private rule's owner) into that role, so the engine's
+  // own rule 5 must not add a second owner source over it: a creator whom
+  // node-access no longer lets in (a doc left behind in a Space they left)
+  // would otherwise read as Full access.
+  let grants = loaded.grants;
+  let object = loaded.object;
+  let chain = loaded.chain;
+  let rel = relationships;
+  if (accessV2Tables()) {
+    const bridged = await nodeBridgeGrants(viewer, ref, loaded);
+    if (bridged) {
+      grants = bridged;
+      object = { ...loaded.object, ownerId: null };
+      chain = loaded.chain.map((l) => ({ ...l, ownerId: null }));
+      rel = { ...relationships, isCreator: false };
+    }
+  }
+
   return {
     viewer,
-    object: loaded.object,
-    chain: loaded.chain,
-    grants: loaded.grants,
-    relationships,
+    object,
+    chain,
+    grants,
+    relationships: rel,
     org,
     now,
   };
@@ -1044,7 +1073,7 @@ export async function loadFacts(viewer: Viewer, ref: ObjectRef): Promise<AccessF
  * Spec 5.2.1's `guest: "shared"` rows: the app renders for a Guest only when
  * something of that kind is shared with them. The question is answerable from
  * today's tables only for the kinds that carry their own membership row (Talk
- * channels, SOP folders). Docs, Tables, Forms and Library files have no
+ * channels, SOP folders and SOP assignments). Docs, Tables, Forms and Library files have no
  * per-object share table before step 4, so those return undefined and
  * decideApp keeps the permissive answer rather than hiding a hub a Guest may
  * legitimately need (recorded in parity.ts UNMODELLED_DIFFERENCES).
@@ -1061,10 +1090,18 @@ async function guestHoldsSomethingFor(viewer: Viewer, app: AppKey): Promise<bool
       return n > 0;
     }
     case "sops": {
-      const n = await prisma.sOPFolderAccess.count({
-        where: { userId: viewer.userId, folder: { organizationId: viewer.organizationId } },
-      });
-      return n > 0;
+      // A folder shared with them, or an SOP assigned to them: spec 5.2.1
+      // gives a Guest "assigned SOPs only", and the assignment notification
+      // links to /sops/my-sops, so an assignment alone must keep the app.
+      const [folders, assigned] = await Promise.all([
+        prisma.sOPFolderAccess.count({
+          where: { userId: viewer.userId, folder: { organizationId: viewer.organizationId } },
+        }),
+        prisma.sOPAssignment.count({
+          where: { userId: viewer.userId, sop: { organizationId: viewer.organizationId } },
+        }),
+      ]);
+      return folders > 0 || assigned > 0;
     }
     default:
       return undefined;

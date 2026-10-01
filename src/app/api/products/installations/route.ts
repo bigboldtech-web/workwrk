@@ -2,7 +2,7 @@
 // POST /api/products/installations         — install a product { productSlug, settings? }
 // DELETE /api/products/installations       — remove an install { productSlug }
 //
-// Admin or owner only for POST/DELETE. GET is any authed user (the
+// Owner or Admin only for POST/DELETE (the Apps & modules page rule). GET is any authed user (the
 // sidebar needs to know what's installed).
 
 import { NextResponse } from "next/server";
@@ -11,6 +11,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { AGENTS_BY_PRODUCT } from "@/lib/agents/catalog";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 async function resolveOrgAndRole() {
   const session = await getServerSession(authOptions);
@@ -21,7 +22,7 @@ async function resolveOrgAndRole() {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, organizationId: true, accessLevel: true },
+    select: { id: true, organizationId: true },
   });
   if (!user?.organizationId) {
     return { error: NextResponse.json({ error: "no organization" }, { status: 400 }) };
@@ -30,7 +31,7 @@ async function resolveOrgAndRole() {
   return {
     userId: user.id,
     orgId: user.organizationId,
-    accessLevel: user.accessLevel,
+    session,
   };
 }
 
@@ -71,9 +72,9 @@ const installSchema = z.object({
 export async function POST(req: Request) {
   const ctx = await resolveOrgAndRole();
   if ("error" in ctx) return ctx.error;
-  if (ctx.accessLevel !== "SUPER_ADMIN" && ctx.accessLevel !== "COMPANY_ADMIN") {
-    return NextResponse.json({ error: "admin only" }, { status: 403 });
-  }
+  // Apps & modules page rule: an Owner or an Admin, the actor re-read.
+  const writeGate = await settingsWriteGate(ctx.session, "apps");
+  if (!writeGate.ok) return writeGate.response;
 
   const body = await req.json().catch(() => null);
   const parsed = installSchema.safeParse(body);
@@ -160,9 +161,9 @@ const removeSchema = z.object({ productSlug: z.string().min(1) });
 export async function DELETE(req: Request) {
   const ctx = await resolveOrgAndRole();
   if ("error" in ctx) return ctx.error;
-  if (ctx.accessLevel !== "SUPER_ADMIN" && ctx.accessLevel !== "COMPANY_ADMIN") {
-    return NextResponse.json({ error: "admin only" }, { status: 403 });
-  }
+  // Apps & modules page rule: an Owner or an Admin, the actor re-read.
+  const writeGate = await settingsWriteGate(ctx.session, "apps");
+  if (!writeGate.ok) return writeGate.response;
 
   const body = await req.json().catch(() => null);
   const parsed = removeSchema.safeParse(body);

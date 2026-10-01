@@ -251,16 +251,13 @@ export function exemptFor(list, filePath) {
  * and the debt is not. It never grows: a new file is held to the rule from
  * its first line.
  *
- * THIS LIST NO LONGER SAYS "a later stage". Every marketing file that was
- * on it has been rewritten, and the marketing phase is the last stage, so
- * the one entry left is not waiting on a stage: it is waiting on the unit
- * that owns src/components/layout. The reason for the entry, and the exact
- * seven findings, are written against it below so whoever picks it up does
- * not have to rediscover them.
+ * THE LIST IS EMPTY. Every marketing file that was on it has been
+ * rewritten, and the last entry, the consent banner, came off when Phase 8
+ * of the UI refresh cleaned it (see below). It stays as an export, empty,
+ * because check.mjs and the report still read it, and because emptying it is
+ * the point: a file that goes back on it needs a reason written beside it.
  */
 export const LEGACY_PREFIXES = [
-  // The list is down to one entry, and that entry is not ours.
-  //
   // The forty one pages of the pre-rebuild site were all on this list.
   // They have been rewritten against the product: the twelve capability
   // pages under /features, the seven trade pages and their index, and
@@ -271,35 +268,16 @@ export const LEGACY_PREFIXES = [
   // motion.tsx and shared.tsx, had zero importers and zero routes and
   // were deleted rather than cleaned.
   //
-  // Every one of those files is now held to every rule, which is what
-  // this list existing was for.
-  //
-  // The consent banner is what is left, and it is the one surface on the
-  // marketing site that never came onto the rebuilt system. The marketing
-  // layout mounts it on every page, so it is the FIRST thing a first time
-  // visitor sees, over the hero, on every route.
-  //
-  // Seven findings, all in that one file, all still open:
-  //
-  //   3 x no-em-dash, at lines 23, 61 and 120. Line 61 is user visible and
-  //     is the heading: "We use cookies, your choice" is written there with
-  //     an em dash in place of the comma. A sed-strip and grep over all
-  //     fifty nine crawled routes finds no other em dash anywhere on the
-  //     site, so this is the only one on screen, and a static scan of the
-  //     rendered HTML misses it because the banner is client rendered.
-  //
-  //   4 x no-raw-hex, at lines 29, 30, 55 and 190, each hard coding #0073EA
-  //     or #0060B9 instead of the accent token. So the banner is also the
-  //     one element on the site whose blue cannot follow the token layer.
-  //
-  // There is a third thing this checker cannot see: "Accept all" is a
-  // second FILLED blue button in the same viewport as the hero's Start
-  // free, against the site's one-primary-per-viewport rule.
-  //
-  // It is a SHARED component in src/components/layout, outside the
-  // marketing phase's territory, so it is reported here rather than edited.
-  // It is not deferred to a later marketing stage, because there is not one.
-  "src/components/layout/consent-banner.tsx",
+  // src/components/layout/consent-banner.tsx was the last entry: the one
+  // surface on the marketing site that never came onto the rebuilt system,
+  // mounted by the marketing layout on every page and by the (auth) layout
+  // on every sign-in page. It carried seven findings (three em dashes, one
+  // of them the visible heading, and four raw hexes) plus a second filled
+  // blue "Accept all" beside each page's own primary. Phase 8 cleaned all of
+  // it: the heading reads "Your cookie choices", the blue reads the brand
+  // token, and Accept all is a secondary button at equal prominence with
+  // Reject all. It is now held to every rule, which is what this list
+  // existing was for. consent-banner-copy.test.ts keeps it that way.
 ];
 
 export function isLegacy(relativePath) {

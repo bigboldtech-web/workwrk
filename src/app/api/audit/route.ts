@@ -1,98 +1,202 @@
-// Org-scoped audit trail. Manager+ to read; admin can export.
-// Indexed on (organizationId, type, actorId, severity, createdAt)
-// so the common filter combinations stay sub-second even at
-// Fortune-500 row counts.
+// Org-scoped audit trail (Settings > Audit log). Owner and Admin only, the
+// page's own rule (it used to be the whole manager tier, while the only page
+// that reads it was admin-only). Indexed on (organizationId, type, actorId,
+// severity, createdAt).
 //
-// Cursor pagination by id (DESC) — newest first; fetch `limit + 1`
-// to detect "more" without a separate count query.
+// Every filter is SERVER-SIDE, so no list is ever searched in memory:
+//   ?family=all|access|security|data|settings   the page's tabs
+//   ?q=           words in the sentence or the event key
+//   ?type=a,b     exact types (the Type filter, from /api/audit/types)
+//   ?actor=id     one person;  ?severity=info|warning|critical
+//   ?range=today|7d|30d|90d, or ?from= and ?to= (ISO)
+//   ?cursor=      id of the last row (newest first); ?limit up to 200
+//   ?format=csv   the same filtered set as a CSV download, up to 50,000 rows,
+//                 logged as data.exported (decided addition e)
 //
-// An access row (a grant, a role change, a removal, a general access change)
-// keeps who and what in metadata as ids, never in its description. Here, and
-// only here, they become the `summary` line Settings > Audit prints: the
-// person's name, and the node's name when the auditor can open that node
-// (otherwise its noun alone, so the audit never names what the reader of the
-// audit cannot open).
+// An access row keeps who and what in metadata as ids; here they become the
+// `summary` sentence, naming the node only when the auditor can open it.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { isAccessActivityType, accessAuditSentence } from "@/lib/access/access-activity";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import type { AccessNodeKind } from "@/lib/access/access-panel";
-import {
-  getSessionOrFail,
-  getOrgId,
-  jsonError,
-  jsonSuccess,
-  isManager,
-} from "@/lib/api-helpers";
+import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
+import { logActivity } from "@/lib/activity";
+import { actorLabelOf, auditKeyWords, familyWhere, humanizeAuditSentence, isAuditFamily, rangeStart, targetTypeWord } from "@/lib/audit-families";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 const VALID_SEVERITY = new Set(["info", "warning", "critical"]);
+const CSV_CAP = 50_000;
+
+function csvCell(v: unknown): string {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+  if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only workspace Owners and Admins can read the audit log", 403);
+  // The actor as the database has them now: the log carries every person's
+  // email, security events and IPs, so an Admin demoted a moment ago is
+  // refused at once, not at the five-minute session check.
+  const gate = await settingsWriteGate(session, "audit", { read: true });
+  if (!gate.ok) return gate.response;
 
   const orgId = getOrgId(session);
   const sp = new URL(req.url).searchParams;
-  const type = sp.get("type");
-  const actorId = sp.get("actorId");
+  const family = sp.get("family") ?? "all";
+  if (!isAuditFamily(family)) return jsonError("Unknown tab");
+  const q = (sp.get("q") ?? "").trim().slice(0, 120);
+  const types = (sp.get("type") ?? "").split(",").map((t) => t.trim()).filter(Boolean).slice(0, 50);
+  const actor = sp.get("actor") ?? sp.get("actorId");
   const targetType = sp.get("targetType");
   const targetId = sp.get("targetId");
   const severity = sp.get("severity");
-  const startDate = sp.get("startDate");
-  const endDate = sp.get("endDate");
+  const from = sp.get("from") ?? sp.get("startDate");
+  const to = sp.get("to") ?? sp.get("endDate");
+  const range = sp.get("range");
   const cursor = sp.get("cursor");
-  const limit = Math.min(Math.max(1, Number(sp.get("limit") ?? 100)), 500);
+  const csv = sp.get("format") === "csv";
+  const dir: "asc" | "desc" = sp.get("order") === "asc" ? "asc" : "desc";
+  const limit = Math.min(Math.max(1, Number(sp.get("limit") ?? 50) || 50), 200);
 
-  const where: Record<string, unknown> = { organizationId: orgId };
-  if (type) where.type = type;
-  if (actorId) where.actorId = actorId;
-  if (targetType) where.targetType = targetType;
-  if (targetId) where.targetId = targetId;
+  const and: Prisma.ActivityLogWhereInput[] = [{ organizationId: orgId }];
+  const fam = familyWhere(family);
+  if (fam) and.push(fam);
+  if (types.length) and.push({ type: { in: types } });
+  if (actor) and.push({ actorId: actor });
+  if (targetType) and.push({ targetType });
+  if (targetId) and.push({ targetId });
   if (severity) {
     if (!VALID_SEVERITY.has(severity)) return jsonError("Invalid severity");
-    where.severity = severity;
+    and.push({ severity });
   }
-  if (startDate || endDate) {
-    const created: Record<string, Date> = {};
-    if (startDate) created.gte = new Date(startDate);
-    if (endDate) created.lte = new Date(endDate);
-    where.createdAt = created;
+  const created: { gte?: Date; lte?: Date } = {};
+  const start = range ? rangeStart(range) : null;
+  if (start) created.gte = start;
+  if (from) { const d = new Date(from); if (!Number.isNaN(d.getTime())) created.gte = d; }
+  if (to) { const d = new Date(to); if (!Number.isNaN(d.getTime())) created.lte = d; }
+  if (created.gte || created.lte) and.push({ createdAt: created });
+  if (q) {
+    for (const word of q.split(/\s+/).slice(0, 6)) {
+      and.push({ OR: [{ description: { contains: word, mode: "insensitive" } }, { type: { contains: word, mode: "insensitive" } }, { actorLabel: { contains: word, mode: "insensitive" } }] });
+    }
+  }
+  const where: Prisma.ActivityLogWhereInput = { AND: and };
+
+  const select = {
+    id: true,
+    type: true,
+    description: true,
+    targetType: true,
+    targetId: true,
+    severity: true,
+    oldValue: true,
+    newValue: true,
+    metadata: true,
+    ipAddress: true,
+    userAgent: true,
+    createdAt: true,
+    actorType: true,
+    actorLabel: true,
+    actingForId: true,
+    actor: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+  } as const;
+
+  if (csv) {
+    const rows = await prisma.activityLog.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: CSV_CAP, select });
+    const header = ["When", "Actor", "Actor type", "Event", "Type", "Severity", "Target type", "Target ID", "IP"];
+    const lines = [header.map(csvCell).join(",")];
+    for (const r of rows) {
+      lines.push([r.createdAt.toISOString(), actorLabelOf(r), r.actorType, humanizeAuditSentence(r.description), r.type, r.severity, r.targetType ?? "", r.targetId ?? "", r.ipAddress ?? ""].map(csvCell).join(","));
+    }
+    // Say so IN the file when the cap cut it, so a reader never takes the
+    // newest 50,000 events for the whole log.
+    if (rows.length >= CSV_CAP) {
+      lines.push([`Only the newest ${CSV_CAP.toLocaleString("en-US")} events are in this file. Narrow the date range to export older ones.`].map(csvCell).join(","));
+    }
+    logActivity({
+      type: "data.exported",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Exported the audit log (${rows.length} events${rows.length >= CSV_CAP ? `, the newest ${CSV_CAP}` : ""})`,
+      targetType: "export",
+      severity: "warning",
+      metadata: { kind: "audit", rows: rows.length, family, q: q || undefined, actor: actor || undefined, severity: severity || undefined },
+    });
+    return new Response(lines.join("\r\n") + "\r\n", {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="audit-log-${new Date().toISOString().slice(0, 10)}.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
   }
 
-  const items = await prisma.activityLog.findMany({
-    where,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: {
-      id: true,
-      type: true,
-      description: true,
-      targetType: true,
-      targetId: true,
-      severity: true,
-      oldValue: true,
-      newValue: true,
-      metadata: true,
-      ipAddress: true,
-      userAgent: true,
-      createdAt: true,
-      actor: { select: { id: true, firstName: true, lastName: true, email: true } },
-    },
-  });
+  const [items, total] = await Promise.all([
+    prisma.activityLog.findMany({
+      where,
+      orderBy: [{ createdAt: dir }, { id: dir }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select,
+    }),
+    cursor ? Promise.resolve(null) : prisma.activityLog.count({ where }),
+  ]);
 
   const hasMore = items.length > limit;
   const rows = hasMore ? items.slice(0, limit) : items;
   const user = session.user as { id?: string; accessLevel?: string };
   const summaries = await accessSummaries(orgId, user.id ?? "", user.accessLevel ?? null, rows).catch(() => new Map<string, string>());
   // metadata stays on the server: the summary is what the audit shows of it.
-  const page = rows.map(({ metadata: _metadata, ...r }) => ({ ...r, summary: summaries.get(r.id) ?? null }));
+  // The target and the acting-for person by NAME, with a link where the
+  // auditor can open the thing (a person opens in Members): an admin never
+  // decodes an id to learn who was affected.
+  const personIds = [
+    ...new Set(
+      rows
+        .flatMap((r) => [r.targetType && r.targetType.toLowerCase() === "user" ? r.targetId : null, r.actingForId])
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const people = personIds.length
+    ? await prisma.user.findMany({ where: { id: { in: personIds }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true, email: true } })
+    : [];
+  const personName = new Map(people.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email]));
+  const page = rows.map(({ metadata: _metadata, ...r }) => {
+    const isPerson = !!r.targetType && r.targetType.toLowerCase() === "user" && !!r.targetId;
+    const name = isPerson ? personName.get(r.targetId as string) ?? null : null;
+    // Rows written before the role sentence named the person ("Changed a
+    // role from admin to member") read with the name now known.
+    let description = humanizeAuditSentence(r.description);
+    const oldRole = /^Changed a role from (\w+) to (\w+)( \(bulk\))?$/.exec(description);
+    if (oldRole && name) {
+      const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+      description = `Changed ${name}'s role from ${cap(oldRole[1])} to ${cap(oldRole[2])}${oldRole[3] ? " (bulk change)" : ""}`;
+    }
+    const policy = /^Changed the sign-in policy: (.+)$/.exec(description);
+    if (policy) description = `Changed the sign-in policy: ${policy[1].split(/,\s*/).map((k) => (/^[a-z]+[A-Z]/.test(k) ? auditKeyWords(k).toLowerCase() : k)).join(", ")}`;
+    return {
+      ...r,
+      description,
+      actorName: actorLabelOf(r),
+      summary: summaries.get(r.id) ?? null,
+      targetWord: targetTypeWord(r.targetType),
+      targetName: name,
+      targetHref: isPerson && name ? `/settings/members?open=${encodeURIComponent(r.targetId as string)}` : null,
+      actingForName: r.actingForId ? personName.get(r.actingForId) ?? null : null,
+    };
+  });
 
   return jsonSuccess({
     items: page,
+    total,
     nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
   });
 }

@@ -23,7 +23,7 @@
 // retired labels Today, My tasks, My Priorities, AI Notetaker.
 
 import { useRouter } from "next/navigation";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import {
   useCallback,
   useEffect,
@@ -297,7 +297,7 @@ function PaletteBody() {
   const { isAdmin, isGuest } = useViewerRole();
   // The `manage_process` rule (Owner, Admin, People team) the acknowledgement
   // default entries carry as their externalGate: today's admin tier in
-  // hooks/use-role (SUPER_ADMIN, COMPANY_ADMIN, C_LEVEL, HR), the same set
+  // useRole in lib/access/use-legacy-permissions (SUPER_ADMIN, COMPANY_ADMIN, C_LEVEL, HR), the same set
   // lib/process-scope canManageProcess checks on the server.
   const { isAdmin: canManageProcess } = useRole();
   const { openSettings } = useSettingsNav();
@@ -598,17 +598,24 @@ function PaletteBody() {
       // who passes the entry's org gate, and only against a typed query, so
       // the empty-query Settings group stays the pages list.
       const entryRows: Row[] = text.trim()
-        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [] }).map((e) => ({
-            id: `setting-${e.id}`,
-            label: e.label,
-            secondary: e.description,
-            glyph: <Glyph icon={Settings2} />,
-            action: () => void leaveThen(() => router.push(e.href)),
-          }))
+        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [], guest: isGuest })
+            // Workspace settings entries are for an Owner or Admin only
+            // (settings-architecture 8.2), like the pages list above; an
+            // entry that lives outside the doors keeps its own org gate.
+            .filter((e) => isAdmin || e.door === "me" || !!e.externalGate)
+            .map((e) => ({
+              id: `setting-${e.id}`,
+              label: e.label,
+              secondary: e.description,
+              glyph: <Glyph icon={Settings2} />,
+              action: /^\/(settings|account)(\/|\?|$)/.test(e.href)
+                ? () => openSettings(e.href)
+                : () => void leaveThen(() => router.push(e.href)),
+            }))
         : [];
       return [...pageRows, ...entryRows];
     },
-    [isAdmin, canManageProcess, openSettings, router],
+    [isAdmin, isGuest, canManageProcess, openSettings, router],
   );
 
   const sections = useMemo<Section[]>(() => {

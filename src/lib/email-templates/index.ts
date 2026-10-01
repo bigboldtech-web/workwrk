@@ -1,10 +1,12 @@
 export { invitationTemplate } from "./invitation";
+export { verifyEmailTemplate } from "./verify-email";
+export { escapeHtml, safeHref } from "./escape";
 export { reviewPendingTemplate } from "./review-pending";
 export { reviewCompletedTemplate } from "./review-completed";
 export { sopAssignedTemplate } from "./sop-assigned";
 export { policyAssignedTemplate } from "./policy-assigned";
 export { documentSignTemplate } from "./document-sign";
-export { reminderTemplate } from "./reminder";
+export { personalReminderTemplate, reminderTemplate } from "./reminder";
 export { kudosTemplate } from "./kudos";
 export { passwordResetTemplate } from "./password-reset";
 export { welcomeTemplate } from "./welcome";

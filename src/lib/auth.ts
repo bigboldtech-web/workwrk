@@ -4,11 +4,18 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { verifySync } from "otplib";
 import { prisma } from "./prisma";
+import { settingsKey } from "@/lib/org-settings-write";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
+import { clientIpFromRecord } from "./client-ip";
+import { mfaRequiredFor, passwordAgeOf, passwordMaxAgeDaysOf } from "@/lib/auth/security-policy";
+import { signInPolicyOf } from "@/lib/settings/org-policy";
+import { sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
+import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
 import { reanchorUser } from "./access/workspace-anchor";
+import { adminScopesOf, isAgentOf, orgRoleOf } from "./access/org-role";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -20,13 +27,83 @@ function userAgentOf(req: unknown): string | null {
 
 // TOTP verification at login — mirrors the enrolment route (otplib, ±1 step of
 // clock-drift leeway) so a code that enrolled will validate here.
+// Returns the RFC 6238 time step the code matched, or null when it did not
+// match, so the caller can refuse a code that was already spent (below).
 const MFA_TOLERANCE: [number, number] = [1, 1];
-function verifyTotpCode(code: string, secret: string): boolean {
+const TOTP_PERIOD_S = 30;
+function verifyTotpCode(code: string, secret: string): number | null {
   try {
-    return !!verifySync({ token: code, secret, epochTolerance: MFA_TOLERANCE })?.valid;
+    const r = verifySync({ token: code, secret, epochTolerance: MFA_TOLERANCE });
+    if (!r?.valid) return null;
+    // otplib's TOTP result carries timeStep; the epoch it matched at is the
+    // same number by another route, kept as a fallback.
+    if ("timeStep" in r && typeof r.timeStep === "number") return r.timeStep;
+    if ("epoch" in r && typeof r.epoch === "number") return Math.floor(r.epoch / TOTP_PERIOD_S);
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// Authenticator codes are one-time too. A code stays valid for its whole
+// 30 second step (plus the drift leeway), so without this anyone who saw or
+// phished the password and the code just typed could sign in again with the
+// same six digits and get a session of their own. The last step accepted
+// for each person is remembered and a code at or before it is refused, the
+// way a spent backup code is. The check and the record are one synchronous
+// step, with no await between them, so two submits of one code racing each
+// other cannot both pass.
+//
+// In-memory and per-process, like login-throttle: right while production
+// runs one pm2 instance, and an entry only has to outlive the code's own
+// window. Swap for a User column (or Redis) when scaling horizontally.
+const lastTotpStep = new Map<string, number>();
+const TOTP_STEP_ENTRIES_MAX = 20_000;
+
+/**
+ * Claim a matched time step for a person: true the first time, false for
+ * that step or any earlier one again (a replay). Exported for the tests.
+ */
+export function claimTotpStep(userId: string, step: number, nowStep = Math.floor(Date.now() / 1000 / TOTP_PERIOD_S)): boolean {
+  const last = lastTotpStep.get(userId);
+  if (typeof last === "number" && step <= last) return false;
+  if (lastTotpStep.size >= TOTP_STEP_ENTRIES_MAX) {
+    // An entry older than the drift window can no longer stop anything:
+    // every code at or before it has expired on its own.
+    for (const [id, s] of lastTotpStep) if (s < nowStep - 2) lastTotpStep.delete(id);
+  }
+  lastTotpStep.set(userId, step);
+  return true;
+}
+
+/**
+ * The one account a typed email names, whatever its case. Signup keeps the
+ * address as typed ("Priya@Co.com") and refuses a second one that differs
+ * only by case, so a person typing "priya@co.com" later (a phone keyboard
+ * capitalises the first letter, an invite lowercases it) means the same
+ * account; an exact-case lookup told them their password was wrong and
+ * counted it toward the lockout. `rows` are the case-insensitive matches.
+ *
+ * Older data can hold two accounts that differ only by case (from before
+ * signup refused that). An exact-case match still wins, so those people sign
+ * in exactly as before; a typed spelling that matches neither exactly and
+ * more than one live account is ambiguous and matches nothing, which is
+ * what it did before too. Among same-case rows a live account wins over a
+ * removed one; a removed account alone is still returned, so its owner
+ * hears "no longer active" after the password check rather than a vague
+ * refusal. Pure; tested.
+ */
+export function pickAccountForEmail<T extends { email: string; deletedAt?: Date | null }>(rows: readonly T[], typed: string): T | null {
+  const want = typed.trim();
+  const live = (list: readonly T[]) => list.filter((r) => !r.deletedAt);
+  const exact = rows.filter((r) => r.email === want);
+  if (exact.length) return live(exact)[0] ?? exact[0];
+  const lower = want.toLowerCase();
+  const same = rows.filter((r) => r.email.toLowerCase() === lower);
+  const sameLive = live(same);
+  if (sameLive.length === 1) return sameLive[0];
+  if (sameLive.length === 0 && same.length === 1) return same[0];
+  return null;
 }
 // Backup codes are one-time: a match is CONSUMED (removed from the stored set)
 // so the same code can never be replayed.
@@ -45,12 +122,11 @@ async function verifyAndConsumeBackupCode(
   return false;
 }
 
-// Best-effort client IP from proxy headers (behind nginx: x-forwarded-for).
+// The client's address from the proxy headers, in the order a client cannot
+// forge (src/lib/client-ip.ts): the sign-in throttle and the security log key
+// on it, so a made-up x-forwarded-for hop must never pick a fresh bucket.
 function clientIp(req: unknown): string | null {
-  const h = (req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers;
-  const raw = h?.["x-forwarded-for"] ?? h?.["x-real-ip"];
-  const val = Array.isArray(raw) ? raw[0] : raw;
-  return val ? val.split(",")[0].trim() : null;
+  return clientIpFromRecord((req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers);
 }
 
 // Google OAuth is only registered when the env vars are present. This
@@ -135,10 +211,23 @@ const providers = [
         throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
-      const user = await prisma.user.findFirst({
-        where: { email: credentials.email },
-        include: { organization: true },
-      });
+      // The exact spelling first, the same query as before, so nobody who
+      // signs in today is affected; only a miss falls back to a
+      // case-insensitive match with one account picked (pickAccountForEmail),
+      // since the address as typed and as stored can differ by case.
+      const user =
+        (await prisma.user.findFirst({
+          where: { email: credentials.email },
+          include: { organization: true },
+        })) ??
+        pickAccountForEmail(
+          await prisma.user.findMany({
+            where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
+            include: { organization: true },
+            take: 10,
+          }),
+          credentials.email,
+        );
 
       if (!user) {
         // Spend the same bcrypt time as the wrong-password branch so an
@@ -148,9 +237,12 @@ const providers = [
         throw new Error("Invalid credentials");
       }
 
+      // The workspace's own lockout rule, known now the account is (Workspace
+      // settings > Security; the built-in 8 and 15 stay the floor).
+      const lockout = signInPolicyOf(user.organization?.settings);
       const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
       if (!isValid) {
-        recordLoginFailure(key);
+        recordLoginFailure(key, lockout);
         throw new Error("Invalid credentials");
       }
 
@@ -159,7 +251,13 @@ const providers = [
       // ON it only affects people who opted into MFA. The password was already
       // correct here, so requesting the code is NOT a failed attempt; only a
       // wrong code counts toward the lockout.
-      if (process.env.ENFORCE_MFA_AT_LOGIN === "true" && user.mfaEnabled && user.mfaSecret) {
+      // The org's own rule (Workspace settings > Security, read through
+      // src/lib/auth/security-policy.ts) can only ADD to the env floor: an
+      // org that requires two step verification for this role asks an
+      // enrolled person for their code even where ENFORCE_MFA_AT_LOGIN is
+      // off, and sends an unenrolled one to enrol in the login card below.
+      const orgRequiresMfa = mfaRequiredFor(user.organization?.settings, orgRoleOf({ accessLevel: user.accessLevel }));
+      if ((process.env.ENFORCE_MFA_AT_LOGIN === "true" || orgRequiresMfa) && user.mfaEnabled && user.mfaSecret) {
         // Guard against a client that serialised a missing code as the literal
         // "undefined"/"null" string (e.g. signIn passed mfaCode: undefined) —
         // treat those as "no code yet", not as a wrong code.
@@ -169,12 +267,15 @@ const providers = [
           // Signal the client to collect a code and resubmit email+password+code.
           throw new Error("MFA_REQUIRED");
         }
-        const totpOk = verifyTotpCode(code, user.mfaSecret);
+        // A code that matched but whose step was already accepted is a
+        // replay: refused like a wrong code, and counted like one.
+        const step = verifyTotpCode(code, user.mfaSecret);
+        const totpOk = step !== null && claimTotpStep(user.id, step);
         const backupOk = totpOk
           ? false
           : await verifyAndConsumeBackupCode(user.id, code, user.mfaBackupCodes);
         if (!totpOk && !backupOk) {
-          recordLoginFailure(key);
+          recordLoginFailure(key, lockout);
           throw new Error("Invalid authentication code");
         }
       }
@@ -236,6 +337,20 @@ const providers = [
         throw new Error("This workspace is closed. Please contact WorkwrK support.");
       }
 
+      // Step 2b (spec-account-auth `/login`): the org requires two step
+      // verification for this person's role and they have not set it up.
+      // No session is issued; the login card enrols them with a short-lived
+      // ticket bound to this user and their tokenVersion, then logs in
+      // through this same authorize with a live code. Checked after every
+      // account and workspace check so it never becomes a status oracle.
+      if (!user.mfaEnabled && mfaRequiredFor(org.settings, orgRoleOf({ accessLevel: user.accessLevel }))) {
+        const ticket = issueEnrolTicket(user.id, user.tokenVersion ?? 0);
+        if (ticket) throw new Error(enrolRequiredError(ticket));
+        // No key to sign a ticket with: refuse rather than issue a session
+        // with no second factor against the org's rule (fail closed).
+        throw new Error("Sign in is unavailable right now. Please try again later.");
+      }
+
       // Security activity: record the successful sign-in now that every check
       // (password, second factor, account + workspace status) has passed.
       void logActivity({
@@ -260,6 +375,10 @@ const providers = [
         avatar: user.avatar,
         tokenVersion: user.tokenVersion,
         workspaceMove,
+        // The workspace's session rules (Workspace settings > Security),
+        // carried into the token at sign-in; the revalidation refreshes them.
+        sessionIdleMinutes: signInPolicyOf(org.settings).sessionIdleMinutes,
+        sessionMaxDays: signInPolicyOf(org.settings).sessionMaxDays,
       };
     },
   }),
@@ -319,9 +438,11 @@ export const authOptions: NextAuthOptions = {
     updateAge: 30 * 60,
   },
   cookies: crossSubdomainCookies,
+  // `newUser: "/welcome"` is gone (spec-account-auth section 0): with JWT
+  // sessions and no adapter NextAuth never fires it, and /welcome is retiring
+  // into the one wizard. With the key absent NextAuth falls back to signIn.
   pages: {
     signIn: "/login",
-    newUser: "/welcome",
   },
   providers,
   callbacks: {
@@ -369,6 +490,20 @@ export const authOptions: NextAuthOptions = {
       if (!existing) return false;
       // Mirror the credentials path: refuse sign-in for a soft-deleted org.
       if (existing.organization.status === "CANCELLED" || existing.organization.status === "SUSPENDED") return false;
+      // Google proves the email, not the second factor. When the workspace
+      // requires two step verification for this person's role, they sign in
+      // with their password and code (or enrol there), never around it.
+      const mfa = await prisma.user.findUnique({
+        where: { id: existing.id },
+        select: { accessLevel: true, mfaEnabled: true, mfaSecret: true, organization: { select: { settings: true } } },
+      });
+      // Also the live floor: with ENFORCE_MFA_AT_LOGIN on, a person enrolled
+      // in two step verification is asked for their code on the password
+      // path, so Google must not be a way around it either.
+      const enrolledUnderFloor = !!mfa && process.env.ENFORCE_MFA_AT_LOGIN === "true" && mfa.mfaEnabled && !!mfa.mfaSecret;
+      if (mfa && (enrolledUnderFloor || mfaRequiredFor(mfa.organization.settings, orgRoleOf({ accessLevel: mfa.accessLevel })))) {
+        return "/login?error=MfaRequired";
+      }
       return true;
     },
 
@@ -383,6 +518,14 @@ export const authOptions: NextAuthOptions = {
         token.lastName = u.lastName;
         token.avatar = u.avatar;
         token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
+        // The session clock (src/lib/auth/session-policy.ts): signed in now.
+        const signedInAt = Date.now();
+        token.authAt = signedInAt;
+        token.seenAt = signedInAt;
+        token.policyEnded = false;
+        const sp = user as unknown as { sessionIdleMinutes?: number; sessionMaxDays?: number };
+        if (typeof sp.sessionIdleMinutes === "number") token.idleMin = sp.sessionIdleMinutes;
+        if (typeof sp.sessionMaxDays === "number") token.maxDays = sp.sessionMaxDays;
         const move = (user as unknown as { workspaceMove?: WorkspaceMove }).workspaceMove;
         if (move) token.workspaceMove = move;
       }
@@ -475,6 +618,8 @@ export const authOptions: NextAuthOptions = {
             accessLevel: true,
             tokenVersion: true,
             organizationId: true,
+            mfaEnabled: true,
+            passwordChangedAt: true,
             organization: { select: { status: true, name: true } },
           },
         });
@@ -489,9 +634,35 @@ export const authOptions: NextAuthOptions = {
           token.revoked = true;
         } else {
           token.revoked = false;
-          // Access-level changes (promotion / demotion) take effect in the
-          // same window instead of waiting for a fresh sign-in.
-          token.accessLevel = account_.accessLevel;
+
+          // The level this token acts with is the level held in the
+          // workspace it acts in. User.accessLevel is the level in the
+          // ANCHORED workspace; after a switch, a join or a create on another
+          // device the anchored workspace differs from this token's, and
+          // copying the anchored level in would make an Employee of company A
+          // an Admin of A because another company invited them as Admin (or
+          // quietly demote an Owner at home). So a token acting elsewhere
+          // reads its level from that workspace's membership row, and a token
+          // with no membership left there comes home to the anchored one
+          // (after the health check below, so a suspended or closed company
+          // still gets its notice). Promotions and demotions still take
+          // effect in the same window.
+          const tokenOrgId =
+            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          let noSeatThere = false;
+          if (tokenOrgId === account_.organizationId) {
+            token.accessLevel = account_.accessLevel;
+          } else {
+            const held = await prisma.organizationMembership.findUnique({
+              where: { userId_organizationId: { userId: token.id as string, organizationId: tokenOrgId } },
+              select: { role: true },
+            });
+            if (held) token.accessLevel = held.role;
+            else {
+              noSeatThere = true;
+              token.accessLevel = account_.accessLevel;
+            }
+          }
 
           // The workspace itself. A support suspension or a scheduled
           // deletion blocked new sign-ins but never touched a live session,
@@ -505,8 +676,7 @@ export const authOptions: NextAuthOptions = {
           // on another device the two differ, and a token still acting in a
           // suspended company must not keep working there.
           const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
-          const actingOrgId =
-            typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+          const actingOrgId = tokenOrgId;
           const acting =
             actingOrgId === account_.organizationId
               ? account_.organization
@@ -523,6 +693,7 @@ export const authOptions: NextAuthOptions = {
               // write its cookie lands on the next check, so it stamps too.
               token.organizationId = account_.organizationId;
               token.organizationName = account_.organization?.name;
+              token.accessLevel = account_.accessLevel;
               const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
               if (move) token.workspaceMove = move;
             } else {
@@ -552,7 +723,89 @@ export const authOptions: NextAuthOptions = {
                 token.revoked = true;
               }
             }
+          } else if (noSeatThere) {
+            // A healthy workspace this person no longer belongs to (removed
+            // there, or the membership row is gone): never act in it, and
+            // never at the anchored workspace's level. Home, as the
+            // database says.
+            token.organizationId = account_.organizationId;
+            token.organizationName = account_.organization?.name;
+            token.accessLevel = account_.accessLevel;
+          } else if (acting?.name) {
+            // Healthy and still a member here: carry the workspace's current
+            // name. Without this a rename in Workspace settings > Identity
+            // reached a token only on the next sign in, so the settings
+            // crumb (and every other reader of organizationName) showed the
+            // old name for the rest of the session, for every member.
+            token.organizationName = acting.name;
           }
+
+          // The server side of the workspace two step rule. authorize()
+          // refuses a password sign-in without the second factor, but a
+          // session issued before the rule was set, or through Google, only
+          // met the client-side hold dialog. The token carries the hold; the
+          // proxy refuses every API call but the few that let the person
+          // enrol or sign out (src/lib/auth/mfa-hold.ts), whatever the
+          // client does. Lifts on the next check after enrolment, which the
+          // enrol panel forces at once with session.update().
+          if (!token.revoked) {
+            const holdOrgId = typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+            let holdOrg: { settings: unknown } | null = null;
+            try {
+              holdOrg = await prisma.organization.findUnique({ where: { id: holdOrgId }, select: { settings: true } });
+            } catch {
+              holdOrg = null;
+            }
+            token.mfaHold =
+              !account_.mfaEnabled &&
+              mfaRequiredFor(holdOrg?.settings, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }));
+            // The rest of the sign-in policy, refreshed with the same read:
+            // the session windows, and the password age hold (an expired
+            // password reaches only My settings > Security until changed;
+            // a password with no recorded change date is never held).
+            // Workspace settings > Security > Sign everyone out, for a
+            // session that acts here but whose account was not bumped
+            // (anchored in another company when the button was pressed):
+            // signed in before the stamp ends now, and stays ended.
+            const signedOutAt = Date.parse(String(settingsKey(holdOrg?.settings, "security").signedOutEveryoneAt ?? ""));
+            if (Number.isFinite(signedOutAt) && typeof token.authAt === "number" && token.authAt < signedOutAt) {
+              token.policyEnded = true;
+              token.policyEndedReason = "signed_out";
+            }
+            if (holdOrg) {
+              const policy = signInPolicyOf(holdOrg.settings);
+              token.idleMin = policy.sessionIdleMinutes;
+              token.maxDays = policy.sessionMaxDays;
+              token.passwordHold = passwordAgeOf(account_.passwordChangedAt, passwordMaxAgeDaysOf(holdOrg.settings)).kind === "expired";
+            }
+          }
+        }
+      }
+
+      // Access step 0 / Phase 8 stage E: the four-role claims, derived from
+      // the final accessLevel on every read of the token (the mirror, spec
+      // 10.1), so every path above that sets the level (sign-in, a workspace
+      // switch, the revalidation) carries them without its own copy. A claim
+      // never widens anything: the server re-reads the row (viewer.ts
+      // hydrate) and only refines an Admin to Owner from User.orgRole there.
+      if (token.accessLevel) {
+        const role = orgRoleOf({ accessLevel: token.accessLevel as AccessLevel });
+        token.orgRole = role;
+        token.isAgent = isAgentOf(token.accessLevel);
+        token.adminScopes = adminScopesOf(role, null);
+      }
+
+      // The session windows (idle and absolute), checked on every read of
+      // the token. An ended session stays ended; the revalidation above never
+      // clears policyEnded.
+      if (token.id && !token.policyEnded) {
+        const verdict = sessionVerdict({ authAt: token.authAt, seenAt: token.seenAt, issuedAt: typeof token.iat === "number" ? token.iat * 1000 : undefined, idleMin: token.idleMin, maxDays: token.maxDays });
+        if (verdict.ended) {
+          token.policyEnded = true;
+          token.policyEndedReason = verdict.reason;
+        } else {
+          token.authAt = verdict.authAt;
+          token.seenAt = verdict.seenAt;
         }
       }
 
@@ -562,9 +815,13 @@ export const authOptions: NextAuthOptions = {
       // Revoked (removed / deactivated) — hand back a session with no
       // identity. requireSessionUser() and every API gate check for an id,
       // so this reads as signed out everywhere without a special case.
-      if (token.revoked) {
+      if (token.revoked || token.policyEnded) {
         return { ...session, user: undefined } as unknown as typeof session;
       }
+      // The idle warning arms on `expires`: the workspace's idle window when
+      // it is shorter than NextAuth's 12h ceiling.
+      const until = sessionIdleUntil({ authAt: token.authAt, seenAt: token.seenAt, issuedAt: typeof token.iat === "number" ? token.iat * 1000 : undefined, idleMin: token.idleMin, maxDays: token.maxDays });
+      if (Number.isFinite(until) && until < new Date(session.expires).getTime()) session.expires = new Date(until).toISOString();
       if (session.user) {
         Object.assign(session.user, {
           id: token.id,
@@ -575,6 +832,12 @@ export const authOptions: NextAuthOptions = {
           lastName: token.lastName,
           avatar: token.avatar,
         } satisfies Partial<AuthIdentity>);
+        Object.assign(session.user, { orgRole: token.orgRole, isAgent: token.isAgent, adminScopes: token.adminScopes });
+        // The version this token was issued at, so a route that changes who
+        // can do what refuses a token the account has moved past without
+        // waiting for the five-minute check (freshWorkspaceActor). Reading
+        // it never adopts anything: adoption still needs the signed proof.
+        if (typeof token.tokenVersion === "number") (session.user as { tokenVersion?: number }).tokenVersion = token.tokenVersion;
       }
       // Only the sentence and the marker's id reach the client; the ack
       // sends the id back (see WorkspaceMove).

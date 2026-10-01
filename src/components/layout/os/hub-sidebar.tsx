@@ -19,21 +19,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronLeft, Plus, Search, SlidersHorizontal, X } from "lucide-react";
-import { useSession } from "next-auth/react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { isHubKey, resolveHub, type HubKey } from "@/lib/nav/route-hub";
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_DEFAULT_WIDTH, useOsShell } from "./shell-context";
-import { useBoot } from "./boot-context";
-import { canAccessTier, type CreateAction } from "./apps-catalog";
+import { useBoot, useViewerTiers } from "./boot-context";
+import { type CreateAction } from "./apps-catalog";
 import { SidebarSearchProvider, useSidebarSearch } from "./sidebar-search-context";
 import { CreateMenu } from "./create-menu";
 import { SidebarCreateMenu, runCreateAction, useCreateActionContext } from "./sidebar-create-menu";
 import { WorkspaceMenu } from "./workspace-menu";
 import { SIDEBAR_ROW_ATTR } from "./sidebar-primitives";
 import { SIDEBAR_DRAWER_ID } from "./skip-links";
-import { usePermissions } from "@/hooks/use-permission";
+import { usePermissions } from "@/lib/access/use-legacy-permissions";
 
 const SEARCH_THRESHOLD = 12;
 
@@ -83,8 +82,8 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
 
   // The per-app "+" contract: "global" opens the Create menu, a list of one
   // fires it, two or more open a MenuList, none hides the button.
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? null;
+  // The display tiers from boot (never the level off the session).
+  const { clears: clearsViewerTier } = useViewerTiers();
   const createCtx = useCreateActionContext();
   // Two gates, and a row must pass both: the tier ladder, and (for a create
   // whose route asks the permission matrix) the exact right that route
@@ -97,7 +96,7 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
   const createActions = useMemo<CreateAction[]>(() => {
     if (!Array.isArray(app.createActions)) return [];
     return app.createActions.filter((a) => {
-      if (!canAccessTier(a.requiredAccess, accessLevel)) return false;
+      if (!clearsViewerTier(a.requiredAccess)) return false;
       // The destination's own app gate, so a row never lands on AppOff.
       if (a.requiredApps && !a.requiredApps.every((k) => appKeys.has(k))) return false;
       // An Ask AI door closes with the one fact every Ask AI entry reads.
@@ -109,7 +108,7 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
       if (permsLoading) return false;
       return canDo(a.requiredPermission.module, a.requiredPermission.action);
     });
-  }, [app, accessLevel, canDo, permsLoading, appKeys, activeModuleKeys, askAiVisible]);
+  }, [app, clearsViewerTier, canDo, permsLoading, appKeys, activeModuleKeys, askAiVisible]);
   const createMode: "custom" | "global" | "menu" | "single" | "none" =
     app.CreateMenu ? "custom"
     : app.createActions === "global" ? "global"

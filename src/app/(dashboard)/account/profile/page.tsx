@@ -1,321 +1,339 @@
 "use client";
 
-// Account · Profile — the signed-in user's own profile. USER-level: no
-// admin gate, everyone edits their own identity. Renders inside the
-// settings takeover (AccountLayout → SettingsShell).
+// My settings > Profile (spec-account-auth `/account/profile`).
 //
-//   GET    /api/me                       → { user: { id, firstName, … } }
-//   PATCH  /api/users/{id}               → updated user (firstName/lastName)
-//   POST   /api/users/{id}/avatar {file} → { avatar }
-//   DELETE /api/users/{id}/avatar        → { avatar: null }
+//   Photo            autosave (POST / DELETE /api/users/[id]/avatar), 2 MB cap
+//   Your details     first and last name, phone, date of birth: ONE Save bar,
+//                    ONE PATCH /api/users/[id] per save, never two writes
+//   Email            the address as text, Verified or "Send verification email"
+//   Your place       job title, department, office, reports to, workspace
+//                    role: read only (placement is the manager's and the
+//                    People team's to change), each linking to /people/me
+//   Your data        GET /api/me/export, a JSON file straight to the browser
+//   Danger zone      Delete my account (typed confirmation)
 //
-// CSS note: .workwrk-os globally strips <input> borders, so text inputs
-// use the bordered-wrapper pattern. <button>/<select> are not reset.
+// A failed GET /api/me renders OsEmptyView with Retry in place of the form:
+// the form never renders blank over a failed read, so Save can never write
+// empty strings over live values.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, User, Camera, Trash2, Mail, ShieldCheck, Building2 } from "lucide-react";
-import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check } from "lucide-react";
+import { useSession } from "next-auth/react";
+import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { SaveBar } from "@/components/settings/save-bar";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { btn, FieldError, FieldLabel, Pending, TextInput } from "@/components/account/account-ui";
+import { useMe, type MeRecord } from "@/components/account/use-me";
+import { DeleteAccountDialog } from "@/components/account/delete-account-dialog";
+import { ORG_ROLE_LABEL } from "@/lib/access/labels";
+import { useViewerRole } from "@/components/layout/os/boot-context";
+import { profileDraftOf, profileDirty, profilePatch, type ProfileDraft } from "@/lib/account/profile-form";
+import { useVerifyCooldown } from "@/components/account/use-verify-cooldown";
 
-type Me = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  email: string | null;
-  avatar: string | null;
-  accessLevel: AccessLevel;
-  department?: { id: string; name: string } | null;
-  role?: { id: string; title: string } | null;
-};
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+const ACCEPT = "image/png,image/jpeg,image/webp";
 
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2MB — matches the avatar API cap
-
-const accessLabel = (lvl: AccessLevel | undefined) =>
-  ACCESS_LEVELS.find((l: { value: AccessLevel; label: string }) => l.value === lvl)?.label ?? (lvl ?? "—");
-
-const initialsOf = (m: Pick<Me, "firstName" | "lastName" | "email">) => {
-  const a = m.firstName?.[0] ?? "";
-  const b = m.lastName?.[0] ?? "";
-  const both = `${a}${b}`.trim();
-  if (both) return both.toUpperCase();
-  return (m.email?.[0] ?? "?").toUpperCase();
-};
+function initialsOf(m: Pick<MeRecord, "firstName" | "lastName" | "email">): string {
+  const both = `${m.firstName?.[0] ?? ""}${m.lastName?.[0] ?? ""}`.trim();
+  return (both || m.email?.[0] || "?").toUpperCase();
+}
 
 export default function AccountProfilePage() {
+  const me = useMe();
+  return (
+    <SettingsPage pageKey="account/profile" subtitle="Your details as your teammates see them.">
+      {me.status === "loading" ? (
+        <SettingsCardStack>
+          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
+          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
+          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
+        </SettingsCardStack>
+      ) : me.status === "error" ? (
+        <OsEmptyView variant="error" title="Couldn't load your profile" hint={me.error} action={{ label: "Try again", onClick: me.retry }} />
+      ) : (
+        <ProfileBody me={me.me} refresh={me.refresh} />
+      )}
+    </SettingsPage>
+  );
+}
+
+function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<void> }) {
   const { toast } = useOsToast();
+  const { update: updateSession } = useSession();
+  const { isAdmin, isGuest } = useViewerRole();
+  // A Guest never sees the Teams hub (avatar-menu.tsx), so the place links to
+  // /people/me would lead them to a page they cannot open: plain text instead.
+  const placeHref = isGuest ? null : "/people/me";
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [me, setMe] = useState<Me | null>(null);
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [avatar, setAvatar] = useState<string | null>(null);
+  const [avatar, setAvatar] = useState<string | null>(me.avatar);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoSavedAt, setPhotoSavedAt] = useState<number | null>(null);
 
+  const saved = useMemo(() => profileDraftOf(me), [me]);
+  const [draft, setDraft] = useState<ProfileDraft>(saved);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/me");
-      if (!res.ok) {
-        setMe({} as Me);
-        return;
-      }
-      const d = await res.json();
-      const u: Me = d?.user ?? ({} as Me);
-      setMe(u);
-      setFirstName(u.firstName ?? "");
-      setLastName(u.lastName ?? "");
-      setAvatar(u.avatar ?? null);
-    } catch {
-      setMe({} as Me);
-    }
-  }, []);
+  const [fieldErr, setFieldErr] = useState<{ field?: string; message: string } | null>(null);
   useEffect(() => {
-    void load();
-  }, [load]);
+    const t = window.setTimeout(() => setDraft(saved), 0);
+    return () => window.clearTimeout(t);
+  }, [saved]);
+  const dirty = profileDirty(saved, draft);
 
-  async function save() {
-    if (!me?.id) return;
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportedAt, setExportedAt] = useState<number | null>(null);
+  const verify = useVerifyCooldown(me.email);
+
+  const set = <K extends keyof ProfileDraft>(k: K, v: ProfileDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
+
+  const save = useCallback(async (): Promise<boolean> => {
+    const patch = profilePatch(saved, draft);
+    if (!patch.ok) { setFieldErr({ field: patch.field, message: patch.error }); return false; }
+    if (Object.keys(patch.data).length === 0) return true;
     setSaving(true);
-    try {
-      const res = await fetch(`/api/users/${me.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast(err?.error ?? "Couldn't save profile");
-        return;
-      }
-      const updated = await res.json().catch(() => null);
-      setMe((prev) =>
-        prev
-          ? {
-              ...prev,
-              firstName: updated?.firstName ?? firstName.trim(),
-              lastName: updated?.lastName ?? lastName.trim(),
-            }
-          : prev,
-      );
-      toast("Profile saved");
-    } catch {
-      toast("Couldn't save profile");
-    } finally {
-      setSaving(false);
+    setFieldErr(null);
+    const r = await apiFetch(`/api/users/${me.id}`, { method: "PATCH", json: patch.data });
+    setSaving(false);
+    if (!r.ok) {
+      const field = (r.issues as { field?: string } | undefined)?.field;
+      setFieldErr({ field, message: r.error || "Couldn't save your profile" });
+      toast("Couldn't save your profile");
+      return false;
     }
-  }
+    await refresh();
+    // The top bar's name comes from the session: re-read it now, not in 30 minutes.
+    void updateSession();
+    toast("Profile saved");
+    return true;
+  }, [saved, draft, me.id, refresh, toast, updateSession]);
 
-  function pickPhoto() {
-    fileRef.current?.click();
-  }
+  // Cmd+S is the Save bar's own (save-bar.tsx), on every Save bar page.
 
-  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    // Reset the input so re-picking the same file fires onChange again.
     e.target.value = "";
-    if (!file || !me?.id) return;
+    if (!file) return;
+    if (!ACCEPT.split(",").includes(file.type)) { toast("Choose a PNG, JPG or WebP image"); return; }
+    if (file.size > MAX_AVATAR_BYTES) { toast("That image is over 2 MB"); return; }
+    const before = avatar;
+    setPhotoBusy(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await apiFetch<{ avatar?: string | null }>(`/api/users/${me.id}/avatar`, { method: "POST", body: fd });
+    setPhotoBusy(false);
+    if (!r.ok) { setAvatar(before); toast("Couldn't update your photo"); return; }
+    setAvatar(r.data?.avatar ?? null);
+    setPhotoSavedAt(Date.now());
+    void updateSession();
+  };
 
-    if (!file.type.startsWith("image/")) {
-      toast("Please choose an image file");
-      return;
-    }
-    if (file.size > MAX_AVATAR_BYTES) {
-      toast("Image is too large — max 2MB");
-      return;
-    }
+  const removePhoto = async () => {
+    const before = avatar;
+    setPhotoBusy(true);
+    setAvatar(null);
+    const r = await apiFetch(`/api/users/${me.id}/avatar`, { method: "DELETE" });
+    setPhotoBusy(false);
+    if (!r.ok) { setAvatar(before); toast("Couldn't remove your photo"); return; }
+    setPhotoSavedAt(Date.now());
+    void updateSession();
+  };
 
-    setUploading(true);
+  const download = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/users/${me.id}/avatar`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast(err?.error ?? "Couldn't upload photo");
-        return;
-      }
-      const d = await res.json().catch(() => ({}));
-      setAvatar(d?.avatar ?? null);
-      setMe((prev) => (prev ? { ...prev, avatar: d?.avatar ?? null } : prev));
-      toast("Photo updated");
+      const res = await fetch("/api/me/export", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workwrk-data-export-${me.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportedAt(Date.now());
     } catch {
-      toast("Couldn't upload photo");
+      toast("Couldn't download your data. Try again.");
     } finally {
-      setUploading(false);
+      setExportBusy(false);
     }
-  }
+  };
 
-  async function removePhoto() {
-    if (!me?.id) return;
-    setUploading(true);
-    try {
-      const res = await fetch(`/api/users/${me.id}/avatar`, { method: "DELETE" });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast(err?.error ?? "Couldn't remove photo");
-        return;
-      }
-      setAvatar(null);
-      setMe((prev) => (prev ? { ...prev, avatar: null } : prev));
-      toast("Photo removed");
-    } catch {
-      toast("Couldn't remove photo");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  const loaded = me !== null;
-  const busy = saving || uploading;
+  const roleLabel = ORG_ROLE_LABEL[me.orgRole] ?? "Member";
+  const reportsTo = me.manager ? `${me.manager.firstName} ${me.manager.lastName}`.trim() : null;
 
   return (
-    <div className="px-6 pt-6">
-      <header className="mb-1 flex items-center gap-2">
-        <User className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Profile</h1>
-      </header>
-      <p className="mb-5 max-w-2xl text-base text-zinc-500">
-        Your personal details. Update your name and photo. Everyone manages their own profile.
-      </p>
-
-      {!loaded ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading profile…
-        </div>
-      ) : (
-        <div className="max-w-2xl space-y-5">
-          {/* Avatar */}
-          <div className="flex items-center gap-4 rounded-xl border border-zinc-200 bg-white p-4">
+    <>
+      <SettingsCardStack>
+        <SettingsCard id="profile.photo">
+          <div className="flex items-center gap-4">
             {avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatar}
-                alt=""
-                className="h-16 w-16 rounded-full object-cover"
-              />
+              <img src={avatar} alt="" className="h-[72px] w-[72px] shrink-0 rounded-full object-cover" />
             ) : (
-              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-200 text-xl font-semibold text-zinc-600">
+              <span className="inline-flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full bg-side-pill text-lg font-medium text-ink-2" aria-hidden>
                 {initialsOf(me)}
               </span>
             )}
             <div className="min-w-0 flex-1">
-              <div className="text-base font-medium text-zinc-900">Profile photo</div>
-              <div className="text-sm text-zinc-500">PNG, JPEG or WebP. Up to 2MB.</div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={onFilePicked}
-                />
-                <button
-                  type="button"
-                  onClick={pickPhoto}
-                  disabled={uploading}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-                >
-                  {uploading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Camera className="h-3.5 w-3.5" />
-                  )}
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" className={btn.secondary} onClick={() => fileRef.current?.click()} disabled={photoBusy}>
+                  {photoBusy ? <Pending label="Uploading" /> : null}
                   Change photo
                 </button>
                 {avatar ? (
-                  <button
-                    type="button"
-                    onClick={removePhoto}
-                    disabled={uploading}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Remove
-                  </button>
+                  <button type="button" className={btn.ghost} onClick={() => { void removePhoto(); }} disabled={photoBusy}>Remove</button>
                 ) : null}
+                {photoSavedAt ? <SavedTick at={photoSavedAt} /> : null}
               </div>
+              <p className="mt-2 text-sm text-ink-2">PNG or JPG, up to 2 MB.</p>
+              <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => { void onFile(e); }} />
             </div>
           </div>
+        </SettingsCard>
 
-          {/* Editable identity */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-zinc-700">First name</span>
-                <div className="flex h-9 items-center rounded-md border border-zinc-200 bg-white px-2.5">
-                  <input
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="First name"
-                    className="w-full bg-transparent text-xs text-zinc-800 outline-none placeholder:text-zinc-400"
-                  />
-                </div>
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-zinc-700">Last name</span>
-                <div className="flex h-9 items-center rounded-md border border-zinc-200 bg-white px-2.5">
-                  <input
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Last name"
-                    className="w-full bg-transparent text-xs text-zinc-800 outline-none placeholder:text-zinc-400"
-                  />
-                </div>
-              </label>
-              <label className="block sm:col-span-2">
-                <span className="mb-1.5 block text-sm font-medium text-zinc-700">Email</span>
-                <div className="flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5">
-                  <Mail className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                  <span className="truncate text-xs text-zinc-500">{me.email ?? "—"}</span>
-                </div>
-                <span className="mt-1 block text-xs text-zinc-400">
-                  Your email is managed by your administrator.
-                </span>
-              </label>
+        <SettingsCard title="Your details" id="profile.details">
+          <div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
+            <div>
+              <FieldLabel htmlFor="pf-first">First name</FieldLabel>
+              <TextInput id="pf-first" value={draft.firstName} onChange={(e) => set("firstName", e.target.value)} autoComplete="given-name" maxLength={80} invalid={fieldErr?.field === "firstName"} />
             </div>
+            <div>
+              <FieldLabel htmlFor="pf-last">Last name</FieldLabel>
+              <TextInput id="pf-last" value={draft.lastName} onChange={(e) => set("lastName", e.target.value)} autoComplete="family-name" maxLength={80} invalid={fieldErr?.field === "lastName"} />
+            </div>
+          </div>
+          <div>
+            <FieldLabel htmlFor="pf-phone">Phone</FieldLabel>
+            <TextInput id="pf-phone" type="tel" value={draft.phone} onChange={(e) => set("phone", e.target.value)} autoComplete="tel" maxLength={40} invalid={fieldErr?.field === "phone"} />
+            <p className="mt-1.5 text-sm text-ink-2">Visible to your manager and the People team</p>
+          </div>
+          <div>
+            <FieldLabel htmlFor="pf-dob">Date of birth</FieldLabel>
+            <TextInput id="pf-dob" type="date" value={draft.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className="max-w-[220px]" invalid={fieldErr?.field === "dateOfBirth"} />
+            <p className="mt-1.5 text-sm text-ink-2">Visible to you, your managers, the People team and admins</p>
+          </div>
+          <FieldError>{fieldErr?.message}</FieldError>
+        </SettingsCard>
 
-            {/* Read-only info chips */}
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-4">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                {accessLabel(me.accessLevel)}
+        <SettingsCard title="Email" id="profile.email">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-base text-ink">{me.email}</span>
+            {me.emailVerifiedAt ? (
+              <span className="inline-flex items-center gap-1 text-sm font-medium text-success-text">
+                <Check className="h-4 w-4" strokeWidth={2} aria-hidden /> Verified
               </span>
-              {me.role?.title ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700">
-                  <User className="h-3.5 w-3.5 text-zinc-400" />
-                  {me.role.title}
-                </span>
-              ) : null}
-              {me.department?.name ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700">
-                  <Building2 className="h-3.5 w-3.5 text-zinc-400" />
-                  {me.department.name}
-                </span>
-              ) : null}
-            </div>
+            ) : (
+              <>
+                <span className="text-sm text-warning-text">Not verified yet</span>
+                <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
+                  {verify.busy ? <Pending label="Sending" /> : null}
+                  {verify.sent ? "Sent" : "Send verification email"}
+                </button>
+              </>
+            )}
           </div>
+          <p className="text-sm text-ink-2">Managed by your workspace admin</p>
+        </SettingsCard>
 
-          {/* Save */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={save}
-              disabled={busy || !me.id}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              {saving ? "Saving…" : "Save changes"}
-            </button>
-          </div>
+        <div className="w-full max-w-[560px]">
+          <SettingsCard title={`Your place at ${me.organization.name}`} id="profile.place">
+            <div>
+              <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} href={placeHref} />} />
+              <SettingsRow label="Department" readOnlyValue={<PlaceChip value={me.department?.name} href={placeHref} />} />
+              <SettingsRow label="Office" readOnlyValue={<PlaceChip value={me.office?.name} href={placeHref} />} />
+              <SettingsRow
+                label="Reports to"
+                readOnlyValue={
+                  reportsTo && !placeHref ? (
+                    <span className="text-base text-ink">{reportsTo}</span>
+                  ) : reportsTo && placeHref ? (
+                    <Link href={placeHref} className="inline-flex items-center gap-2 text-base text-ink hover:underline">
+                      {me.manager?.avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={me.manager.avatar} alt="" className="h-6 w-6 rounded-full object-cover" />
+                      ) : (
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-side-pill text-micro font-medium text-ink-2" aria-hidden>
+                          {`${me.manager?.firstName?.[0] ?? ""}${me.manager?.lastName?.[0] ?? ""}`.toUpperCase()}
+                        </span>
+                      )}
+                      {reportsTo}
+                    </Link>
+                  ) : <PlaceChip value={null} href={placeHref} />
+                }
+              />
+              <SettingsRow label="Workspace role" readOnlyValue={<PlaceChip value={roleLabel} href={placeHref} />} />
+            </div>
+          </SettingsCard>
+          <p className="mt-2 text-sm text-ink-2">Ask your manager or the People team to change these.</p>
         </div>
-      )}
-      <div className="h-10" />
-    </div>
+
+        <SettingsCard title="Your data" id="profile.data">
+          <p className="text-base text-ink-2">A copy of your personal records: your profile, your notifications, your activity and your consents. It downloads as a JSON file.</p>
+          <div className="flex items-center gap-3">
+            <button type="button" className={btn.secondary} onClick={() => { void download(); }} disabled={exportBusy}>
+              {exportBusy ? <Pending label="Preparing" /> : null}
+              Download
+            </button>
+            {exportedAt ? <SavedTick at={exportedAt} label="Downloaded" /> : null}
+          </div>
+        </SettingsCard>
+
+        <SettingsCard title="Danger zone" danger id="profile.delete">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-base font-medium text-ink">Delete my account</div>
+              <div className="mt-0.5 text-sm text-ink-2">Removes you from {me.organization.name} and erases your personal details. Work you created stays with the workspace.</div>
+            </div>
+            <button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>
+          </div>
+        </SettingsCard>
+      </SettingsCardStack>
+
+      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(saved); setFieldErr(null); }} onSave={save} />
+
+      <DeleteAccountDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        isLastOwner={me.isLastAdmin}
+        orgName={me.organization.name}
+        canOpenMembers={isAdmin}
+      />
+    </>
+  );
+}
+
+function PlaceChip({ value, href }: { value: string | null | undefined; href: string | null }) {
+  if (!value) return <span className="text-base text-ink-3">Not set</span>;
+  const cls = "inline-flex h-6 items-center rounded-md bg-hover px-2 text-sm font-medium text-ink";
+  if (!href) return <span className={cls}>{value}</span>;
+  return (
+    <Link href={href} className={`${cls} hover:underline`}>
+      {value}
+    </Link>
+  );
+}
+
+function SavedTick({ at, label = "Saved" }: { at: number; label?: string }) {
+  const [shownFor, setShownFor] = useState<number | null>(at);
+  useEffect(() => {
+    const t0 = window.setTimeout(() => setShownFor(at), 0);
+    const t = window.setTimeout(() => setShownFor(null), 2000);
+    return () => { window.clearTimeout(t0); window.clearTimeout(t); };
+  }, [at]);
+  if (shownFor !== at) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
+      <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden /> {label}
+    </span>
   );
 }

@@ -5,6 +5,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { listItemTypes, RECOMMENDED_ITEM_TYPES, ITEM_TYPE_CATEGORIES, ITEM_TYPE_LIMIT } from "@/lib/item-types";
 
@@ -33,6 +34,9 @@ const createSchema = z.object({
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
+  // Task types are the whole workspace's (Settings > Task system): only an
+  // Owner or Admin may change them. This verb had no gate at all.
+  if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only a workspace Admin can change task types", 403);
   const orgId = getOrgId(session);
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

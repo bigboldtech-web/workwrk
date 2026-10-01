@@ -25,7 +25,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Hash, Lock, ShieldCheck } from "lucide-react";
+import { Hash, Info, Lock, ShieldCheck } from "lucide-react";
 import { DotsArt } from "@/components/ui/dots-art";
 import { BackButton } from "@/components/ui/back-button";
 import { cn } from "@/lib/utils";
@@ -282,23 +282,30 @@ export interface AppOffProps {
    * The `ai` key's second off switch (spec-ai-automation 1.4): "AI features
    * for members" on Settings > Data turns the app off without hiding it, so
    * the sentence and the Admin's door name that page instead of Apps.
+   * "floored": the app is on, but a minimum role on Apps & modules leaves
+   * this person out, so the card never says "hidden" for an app others use.
    */
-  reason?: "hidden" | "ai-disabled";
+  reason?: "hidden" | "floored" | "ai-disabled";
 }
 
 export function AppOff({ label, isAdmin, admins = [], back, reason = "hidden" }: AppOffProps) {
   const aiOff = reason === "ai-disabled";
+  const floored = reason === "floored";
   return (
     <DenialBlock
-      title={aiOff ? "AI is turned off for this workspace" : `${label} is hidden in this workspace`}
+      title={aiOff ? "AI is turned off for this workspace" : floored ? `${label} is limited to some roles` : `${label} is hidden in this workspace`}
       sentence={
         aiOff
           ? isAdmin
             ? "AI features for members are off in Settings. Turn them back on from Data."
             : "Ask a workspace admin to turn AI features on."
-          : isAdmin
-            ? `${label} was hidden or floored in Settings. Turn it back on from Apps & modules.`
-            : `Ask a workspace admin to turn ${label} on.`
+          : floored
+            ? isAdmin
+              ? `${label} has a minimum role in Settings. Change it from Apps & modules.`
+              : `Your workspace opens ${label} to some roles only. Ask a workspace admin if you need it.`
+            : isAdmin
+              ? `${label} was hidden in Settings. Turn it back on from Apps & modules.`
+              : `Ask a workspace admin to turn ${label} on.`
       }
       back={back}
       primary={
@@ -321,7 +328,7 @@ export interface AdminOnlyProps {
   managedBy?: "Owners" | "Owners and Admins";
   back: BackTarget;
   /** Under the sentence: the one thing a Member CAN do instead, so the card
-   *  is not a dead end (the /imports "Import a CSV into a table" link). */
+   *  is not a dead end. */
   children?: ReactNode;
 }
 
@@ -335,6 +342,120 @@ export function AdminOnly({ page, managedBy = "Owners and Admins", back, childre
     >
       {children}
     </DenialBlock>
+  );
+}
+
+/* ───────────────────────────── Ask-an-admin strip ───────────────────────────── */
+
+export interface AskAnAdminStripProps {
+  /** The Workspace page the viewer typed (its registry label). */
+  pageLabel: string;
+  /** Real Owners and Admins, earliest first (listOrgAdmins). */
+  admins: OrgAdmin[];
+  /** Workspace pages this viewer CAN open (a reader below Admin), linked after the sentence. */
+  openable?: { label: string; href: string }[];
+  /** The one thing this viewer CAN do instead, outside settings (Data: "Import a CSV into a table"). */
+  instead?: { label: string; href: string };
+}
+
+/**
+ * "Ana, Ben and Cy" from the first three names, and "Ana, Ben, Cy and 2 more"
+ * past three (pure; tested in denial-views.test.ts). The remainder is counted
+ * on purpose: a workspace with four or more Owners and Admins must not read as
+ * if the three named people were all of them, with a fourth face beside the
+ * sentence that nobody can place. Same "and N more" wording as AdminAvatars.
+ */
+export function adminNamesSentence(names: string[]): string {
+  const all = names.filter(Boolean);
+  const n = all.slice(0, 3);
+  const rest = all.length - n.length;
+  if (n.length === 0) return "your workspace Owners and Admins";
+  if (n.length === 1) return n[0];
+  if (n.length === 2) return `${n[0]} and ${n[1]}`;
+  if (rest > 0) return `${n[0]}, ${n[1]}, ${n[2]} and ${rest} more`;
+  return `${n[0]}, ${n[1]} and ${n[2]}`;
+}
+
+/**
+ * The second denial view under /settings (spec-settings-workspace 1.4 item
+ * 2, access 5.5 item 3): a 44px brand-soft strip ABOVE the viewer's own
+ * My settings > Profile, at the Workspace URL they typed. An explanation,
+ * not a wall: nothing of the Workspace page is revealed beyond its label,
+ * and the page under it is a destination, so it carries no BackButton.
+ */
+export function AskAnAdminStrip({ pageLabel, admins, openable, instead }: AskAnAdminStripProps) {
+  const who = adminNamesSentence(admins.map((a) => a.name));
+  const look = admins.filter((a) => a.name).length === 1 ? "looks" : "look";
+  return (
+    <div
+      role="note"
+      className="os-chrome mx-6 mt-4 flex min-h-11 items-center gap-3 rounded-lg bg-brand-soft px-4 py-2 text-base text-ink max-[900px]:mx-4"
+    >
+      <Info className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 flex-1">
+        {/* spec-settings-workspace 1.4: the page is part of Workspace
+            settings, which named people look after. */}
+        {pageLabel === "Workspace settings"
+          ? `Workspace settings are looked after by ${who}. Ask them if you need something changed.`
+          : `${pageLabel} is part of Workspace settings, which ${who} ${look} after. Ask them if you need something changed.`}
+        {openable && openable.length > 0 ? (
+          <>
+            {" "}You can open{" "}
+            {openable.map((p, i) => (
+              <span key={p.href}>
+                {i > 0 ? (i === openable.length - 1 ? " and " : ", ") : null}
+                <Link href={p.href} className="font-medium text-brand-deep underline-offset-2 hover:underline">{p.label}</Link>
+              </span>
+            ))}
+            .
+          </>
+        ) : null}
+        {instead ? (
+          <>
+            {" "}
+            <Link href={instead.href} className="font-medium text-brand-deep underline-offset-2 hover:underline">{instead.label}</Link>
+          </>
+        ) : null}
+      </span>
+      <AdminFaces admins={admins} />
+    </div>
+  );
+}
+
+function AdminFaces({ admins }: { admins: OrgAdmin[] }) {
+  if (admins.length === 0) return null;
+  const face = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-raised bg-active text-micro font-medium text-ink";
+  // Up to five faces (spec-settings-workspace 1.4), then one "+N" face whose
+  // tooltip names the rest, so the faces account for every Owner and Admin
+  // the sentence counts in its "and N more".
+  const hidden = admins.slice(5);
+  return (
+    <span className="inline-flex shrink-0 -space-x-1">
+      {admins.slice(0, 5).map((a) => {
+        const inner = a.avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={a.avatar} alt="" className="h-full w-full object-cover" />
+        ) : (
+          a.name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase()
+        );
+        return a.email ? (
+          <a key={a.id} href={`mailto:${a.email}`} title={`Email ${a.name}`} aria-label={`Email ${a.name}`} className={face}>
+            {inner}
+          </a>
+        ) : (
+          <span key={a.id} title={a.name} className={face}>{inner}</span>
+        );
+      })}
+      {hidden.length > 0 ? (
+        <span
+          title={hidden.map((a) => a.name).filter(Boolean).join(", ")}
+          aria-label={`${hidden.length} more`}
+          className={face}
+        >
+          +{hidden.length}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

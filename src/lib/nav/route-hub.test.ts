@@ -81,7 +81,7 @@ describe("resolveHub", () => {
     expect(resolveHub("/settings/members")).toBe("settings");
     expect(resolveHub("/account")).toBe("settings");
     expect(resolveHub("/account/profile")).toBe("settings");
-    expect(resolveHub("/imports")).toBe("settings");
+    expect(resolveHub("/settings/data")).toBe("settings");
   });
 
   it("resolves settings before any other row could match", () => {
@@ -159,11 +159,11 @@ describe("ROUTE_HUB completeness", () => {
     expect(missing).toEqual([]);
   });
 
-  it("declares exactly the three takeover prefixes (spec-shell 2.8)", () => {
+  it("declares exactly the two takeover prefixes (spec-shell 2.8; /imports left in Phase 8)", () => {
     // /imports is the one member outside the two door prefixes; it leaves
     // together with its ROUTE_HUB row when it 308s into /settings/data.
-    expect([...SETTINGS_ROUTES]).toEqual(["/settings", "/account", "/imports"]);
-    expect(ROUTE_HUB["/imports"]).toBe("settings");
+    expect([...SETTINGS_ROUTES]).toEqual(["/settings", "/account"]);
+    expect(ROUTE_HUB["/imports"]).toBeUndefined();
   });
 
   it("has a breadcrumb title for every ROUTE_HUB row, and nested rows only under one", () => {
@@ -224,7 +224,7 @@ describe("ROUTE_HUB completeness", () => {
     // /home and /my-work replaced them, and /marketing in Phase 7 when the
     // module's five pages became one resolver that redirects or 404s before
     // it paints.
-    expect([...REDIRECT_ROUTES]).toEqual(["/today", "/dashboard", "/assigned-comments", "/tasks", "/marketing"]);
+    expect([...REDIRECT_ROUTES]).toEqual(["/today", "/dashboard", "/assigned-comments", "/tasks", "/marketing", "/imports"]);
     expect(ROUTE_HUB["/marketing"]).toBeUndefined();
     expect(ROUTE_HUB["/today"]).toBeUndefined();
     expect(ROUTE_HUB["/tasks"]).toBeUndefined();

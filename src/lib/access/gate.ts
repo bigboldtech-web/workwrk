@@ -20,6 +20,7 @@ import { can } from "./index";
 import { loadFacts } from "./facts";
 import { decide } from "./resolve";
 import { viewerFromSession } from "./viewer";
+import { logDenial } from "./audit";
 import type { Action, Decision, ObjectRef, Viewer } from "./types";
 
 export type AccessErrorKind = "not_found" | "no_access" | "module_off" | "app_off" | "unauthorized";
@@ -69,6 +70,9 @@ export async function requireCan(
   const facts = await loadFacts(viewer, ref);
   const decision = decide(facts, action);
   if (decision.allowed) return { viewer, decision };
+  // Spec 5.1: a discoverable refusal is a real person at a wall, sampled
+  // (audit.ts). An id probe (not discoverable) is never written.
+  logDenial(viewer, action, ref, decision);
 
   const guest = viewer.orgRole === "GUEST";
 
@@ -135,6 +139,9 @@ export async function gatePage(
   }
 
   const decision = await can(viewer, action, ref);
+  // A page's "view" refused is a wall (spec 5.1); a page that asks for a
+  // stronger action only to render read-only is not, so only "view" logs.
+  if (!decision.allowed && action === "view") logDenial(viewer, action, ref, decision);
   // Nothing under /settings/* ever 404s for a signed-in person: the personal
   // door shares the prefix, so the layout renders My settings there instead.
   if (!decision.discoverable && ref.type !== "settings") notFound();

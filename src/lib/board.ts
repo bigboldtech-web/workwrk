@@ -14,6 +14,7 @@
 // the parent Space's membership + visibility decides.
 
 import { prisma } from "@/lib/prisma";
+import { delegatedNodeRole } from "@/lib/access/delegate";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
@@ -747,7 +748,7 @@ export async function boardRoleOf(
   });
   if (!board) return { board: null, role: "none" };
   const decision = await nodeRole(nodeCtxFromLevel(userId, board.organizationId, accessLevel), { kind: "list", id: boardId });
-  return { board, role: decision.role };
+  return { board, role: await delegatedNodeRole(userId, board.organizationId, accessLevel, { kind: "list", id: boardId }, decision.role) };
 }
 
 /**

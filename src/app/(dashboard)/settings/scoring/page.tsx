@@ -1,429 +1,299 @@
 "use client";
 
-/* Settings · Scoring & reviews — the editable config backbone.
- *
- *  GET   /api/settings                     → org settings (incl. cadences/weights/bands/anchors)
- *  PATCH /api/settings { section:"scoring", data }
- *
- * Four editable sections:
- *   1. Review cadences   — weekly / monthly / quarterly / annual rhythms
- *   2. Score weights     — composite-score metric weights (must sum to 100)
- *   3. Performance bands  — score → label ranges (drives 9-box + composite labels)
- *   4. Behavioral anchors — the 5-point Likert labels used in manager reviews
- *
- * Everything persists to Organization.settings JSON. Save is per-section
- * so a bad weight sum can't block the whole page.
- */
+// Workspace settings > Scoring & reviews (spec-settings-workspace
+// `/settings/scoring`, settings-architecture 5.16). Four cards, each with its
+// own dirty state and "Reset to defaults"; ONE sticky Save bar saves the
+// dirty cards, one PATCH { section: "scoring" } per card, never two for one.
+//
+//   Review cadence       settings.reviewCadences: read by the review-cycle
+//                        opener (/reviews launch) and the review-cycles cron
+//   Score weights        settings.scoreWeights, the four keys the review
+//                        cycle engine reads (orgScoring); the older five-key
+//                        default migrates on read (org-policy scoreWeightsOf)
+//   Performance bands    settings.scoringBands: add and remove rows; read by
+//                        the band chip on reviews, calibration and the 9-box
+//   Behavioural anchors  settings.behavioralAnchors: the five scale words
+//                        the review form shows (orgScoring scaleWords)
+//
+// Bands carry no colour control: the band chip is the reserved neutral
+// StatusChip variant (only the top band reads success), so a colour the
+// renderer never paints is not offered. A stored colour is kept on save.
+//
+// Anyone below Admin who may open this page today (the manager tier, the
+// People team) sees every value as text: no control they cannot save.
 
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { X } from "lucide-react";
+import { useOsToast } from "@/components/layout/os/toast";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SaveBar } from "@/components/settings/save-bar";
+import { ConfirmDialog, NativeSelect, NumberInput, TextInput, btn, useTypedNumbers, type TypedNumberField } from "@/components/settings/settings-form";
+import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { Switch } from "@/components/ui/switch";
-import {
-  Sparkles,
-  BarChart3,
-  Award,
-  MessageSquareText,
-  Check,
-  AlertCircle,
-  RotateCcw,
-} from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { C } from "@/components/layout/os/catalog";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import {
   CADENCE_LABELS, METRIC_LABELS,
-  DEFAULT_CADENCES, DEFAULT_SCORE_WEIGHTS, DEFAULT_SCORING_BANDS, DEFAULT_BEHAVIORAL_ANCHORS,
-  validateScoreWeights, validateScoringBands,
-  type CadenceKey, type CadenceSetting, type ReviewCadenceConfig,
-  type MetricKey, type ScoringBand,
+  DEFAULT_CADENCES, DEFAULT_SCORING_BANDS, DEFAULT_BEHAVIORAL_ANCHORS,
+  type CadenceKey, type CadenceSetting, type ReviewCadenceConfig, type ScoringBand,
 } from "@/lib/review-cadence";
+import { DEFAULT_FOUR_WEIGHTS, MONTH_NAMES, SCORE_WEIGHT_KEYS, weightsTotal, type ScoreWeightKey } from "@/lib/settings/org-policy";
+import { bandError } from "@/lib/settings/scoring-bands";
 
 const CADENCE_KEYS: CadenceKey[] = ["weekly", "monthly", "quarterly", "annual"];
-const METRIC_KEYS: MetricKey[] = ["kpi", "sopCompliance", "behavioral", "peer"];
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-const ANCHOR_HINT: Record<CadenceKey, string> = {
-  weekly: "Anchor = ISO weekday the check-in is due (1 = Mon … 7 = Sun).",
-  monthly: "Anchor = day-of-month the pulse opens (1–28).",
-  quarterly: "Anchor = day-of-quarter the cycle opens (1 = first day).",
-  annual: "Anchor = month-of-year the appraisal opens (1–12).",
+type Section = "cadences" | "weights" | "bands" | "anchors";
+interface Loaded { values: ScoringValues; canEdit: boolean }
+interface ScoringValues {
+  cadences: ReviewCadenceConfig;
+  weights: Record<ScoreWeightKey, number>;
+  bands: ScoringBand[];
+  anchors: string[];
+}
+
+function select(b: SettingsGetBody): Loaded {
+  return { values: selectValues(b), canEdit: (b as { viewer?: { canEditScoring?: boolean } }).viewer?.canEditScoring === true };
+}
+
+function selectValues(b: SettingsGetBody): ScoringValues {
+  const s = (b.settings ?? {}) as Record<string, unknown>;
+  const w = (s.scoreWeights ?? {}) as Record<string, number>;
+  return {
+    cadences: (s.reviewCadences as ReviewCadenceConfig) ?? DEFAULT_CADENCES,
+    weights: Object.fromEntries(SCORE_WEIGHT_KEYS.map((k) => [k, typeof w[k] === "number" ? w[k] : DEFAULT_FOUR_WEIGHTS[k]])) as Record<ScoreWeightKey, number>,
+    bands: Array.isArray(s.scoringBands) && s.scoringBands.length ? (s.scoringBands as ScoringBand[]) : DEFAULT_SCORING_BANDS,
+    anchors: Array.isArray(s.behavioralAnchors) && s.behavioralAnchors.length === 5 ? (s.behavioralAnchors as string[]) : DEFAULT_BEHAVIORAL_ANCHORS,
+  };
+}
+
+const DEFAULTS: ScoringValues = { cadences: DEFAULT_CADENCES, weights: DEFAULT_FOUR_WEIGHTS, bands: DEFAULT_SCORING_BANDS, anchors: DEFAULT_BEHAVIORAL_ANCHORS };
+const RESET_WORDS: Record<Section, string> = {
+  cadences: "Weekly, monthly and quarterly on; annual off; the built-in anchors and reminders.",
+  weights: "KPI 40, SOP compliance 20, Behavioural 30, Peer 10.",
+  bands: "Exceptional 90 to 100, Strong 75 to 89, On track 60 to 74, Needs focus 40 to 59, At risk 0 to 39.",
+  anchors: "The five built-in scale words.",
 };
-
-type Banner = { kind: "ok" | "err"; text: string } | null;
+const TYPED_PREFIX: Record<Section, string> = { cadences: "cad.", weights: "w.", bands: "band.", anchors: "anchor." };
+const STORE_KEY: Record<Section, string> = { cadences: "reviewCadences", weights: "scoreWeights", bands: "scoringBands", anchors: "behavioralAnchors" };
 
 export default function ScoringSettingsPage() {
-  const [loading, setLoading] = useState(true);
-  const [cadences, setCadences] = useState<ReviewCadenceConfig>(DEFAULT_CADENCES);
-  const [weights, setWeights] = useState<Record<MetricKey, number>>(DEFAULT_SCORE_WEIGHTS);
-  const [bands, setBands] = useState<ScoringBand[]>(DEFAULT_SCORING_BANDS);
-  const [anchors, setAnchors] = useState<string[]>(DEFAULT_BEHAVIORAL_ANCHORS);
+  const s = useSettingsSection("scoring", select);
+  const { toast } = useOsToast();
+  const [draft, setDraft] = useState<Partial<ScoringValues>>({});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [resetting, setResetting] = useState<Section | null>(null);
+  // Every number field keeps what is typed (a cleared field stays clear, "15"
+  // is never "1" then "15" clamped); the draft takes only in-range numbers,
+  // and Save waits until each field holds one. Keys start with the section's
+  // prefix (TYPED_PREFIX) so a reset or a removed band drops its typing.
+  const nums = useTypedNumbers();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/settings", { cache: "no-store" });
-      if (res.ok) {
-        const d = await res.json();
-        const s = d.settings ?? {};
-        if (s.reviewCadences) setCadences(s.reviewCadences);
-        if (s.scoreWeights) {
-          // Keep only known metric keys; fill missing with defaults.
-          setWeights({ ...DEFAULT_SCORE_WEIGHTS, ...s.scoreWeights });
-        }
-        if (Array.isArray(s.scoringBands) && s.scoringBands.length) setBands(s.scoringBands);
-        if (Array.isArray(s.behavioralAnchors) && s.behavioralAnchors.length === 5) setAnchors(s.behavioralAnchors);
-      }
-    } finally {
-      setLoading(false);
+  const base = s.data?.values ?? null;
+  const v: ScoringValues | null = base ? { ...base, ...draft } : null;
+  const dirtyKeys = useMemo(
+    () => (base ? (Object.keys(draft) as Section[]).filter((k) => JSON.stringify(draft[k]) !== JSON.stringify(base[k])) : []),
+    [draft, base],
+  );
+  const total = v ? weightsTotal(v.weights) : 100;
+  const bErr = v ? bandError(v.bands) : null;
+  const set = <K extends Section>(k: K, val: ScoringValues[K]) => { setErr(null); setDraft((d) => ({ ...d, [k]: val })); };
+
+  // Not memoized: the typed-number state it consults is rebuilt each render.
+  const save = async () => {
+    if (!nums.check()) { setErr("Fix the fields marked in red before saving."); return false; }
+    if (!v) return true;
+    if (dirtyKeys.includes("weights") && total !== 100) { setErr("Score weights must add up to 100"); return false; }
+    if (dirtyKeys.includes("bands") && bErr) { setErr(bErr.message); return false; }
+    if (dirtyKeys.includes("anchors") && v.anchors.some((a) => !a.trim())) { setErr("All five scale words need a label"); return false; }
+    setSaving(true);
+    for (const k of dirtyKeys) {
+      const r = await s.save({ [STORE_KEY[k]]: v[k] });
+      if (!r.ok) { setSaving(false); setErr(r.error ?? "Couldn't save"); return false; }
+      setDraft((d) => { const n = { ...d }; delete n[k]; return n; });
     }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
-  if (loading) {
-    return (
-      <div>
-        <OsPageHeader title="Scoring & reviews" />
-        <div className="px-6 py-6"><SkeletonRows rows={6} /></div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="pb-16">
-      <OsPageHeader title="Scoring & reviews" />
-      <div className="px-6">
-        <div className="max-w-3xl space-y-5">
-          <CadencesSection cadences={cadences} setCadences={setCadences} />
-          <WeightsSection weights={weights} setWeights={setWeights} />
-          <BandsSection bands={bands} setBands={setBands} />
-          <AnchorsSection anchors={anchors} setAnchors={setAnchors} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ───────────────────────── shared bits ───────────────────────── */
-
-async function saveScoring(data: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ section: "scoring", data }),
-    });
-    if (res.ok) return { ok: true };
-    const d = await res.json().catch(() => ({}));
-    return { ok: false, error: d.error ?? `HTTP ${res.status}` };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "save failed" };
-  }
-}
-
-function SectionCard({
-  Icon, color, title, subtitle, children, footer,
-}: {
-  Icon: typeof Sparkles;
-  color: string;
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-zinc-200 bg-white">
-      <header className="flex items-start gap-3 p-4 border-b border-zinc-100">
-        <span className="grid place-items-center w-8 h-8 rounded-lg shrink-0" style={{ background: `${color}1a`, color }}>
-          <Icon className="w-4 h-4" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
-          <p className="text-sm text-zinc-500">{subtitle}</p>
-        </div>
-      </header>
-      <div className="p-4">{children}</div>
-      {footer ? <div className="px-4 pb-4">{footer}</div> : null}
-    </section>
-  );
-}
-
-function SaveRow({
-  banner, dirty, onSave, onReset, saving,
-}: { banner: Banner; dirty: boolean; onSave: () => void; onReset: () => void; saving: boolean }) {
-  return (
-    <div className="flex items-center gap-3 mt-4 pt-3 border-t border-zinc-100">
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={!dirty || saving}
-        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-sm font-medium disabled:opacity-40 hover:bg-zinc-800"
-      >
-        {saving ? "Saving…" : "Save changes"}
-      </button>
-      <button
-        type="button"
-        onClick={onReset}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm text-zinc-500 hover:bg-zinc-100"
-      >
-        <RotateCcw className="w-3.5 h-3.5" /> Reset to defaults
-      </button>
-      {banner ? (
-        <span className={`inline-flex items-center gap-1 text-sm ${banner.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>
-          {banner.kind === "ok" ? <Check className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-          {banner.text}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-/* ───────────────────────── 1. Cadences ───────────────────────── */
-
-function CadencesSection({
-  cadences, setCadences,
-}: { cadences: ReviewCadenceConfig; setCadences: (c: ReviewCadenceConfig) => void }) {
-  const [banner, setBanner] = useState<Banner>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  const patch = (key: CadenceKey, p: Partial<CadenceSetting>) => {
-    setCadences({ ...cadences, [key]: { ...cadences[key], ...p } });
-    setDirty(true);
-    setBanner(null);
-  };
-
-  const onSave = async () => {
-    setSaving(true);
-    const r = await saveScoring({ reviewCadences: cadences });
     setSaving(false);
-    setBanner(r.ok ? { kind: "ok", text: "Saved" } : { kind: "err", text: r.error ?? "Save failed" });
-    if (r.ok) setDirty(false);
+    nums.reset();
+    toast("Scoring saved");
+    return true;
   };
 
+  if (s.status === "error") return <SettingsPage pageKey="scoring"><ErrorState what="the scoring settings" hint={s.error ?? undefined} onRetry={s.retry} /></SettingsPage>;
+  if (!v) return <SettingsPage pageKey="scoring"><SkeletonRows rows={8} className="max-w-[760px]" /></SettingsPage>;
+  const ro = !s.data?.canEdit;
+
+  const resetBtn = (sec: Section) => (ro ? null : <button type="button" className={btn.ghost} onClick={() => setResetting(sec)}>Reset to defaults</button>);
+
   return (
-    <SectionCard
-      Icon={Sparkles} color={C.pink}
-      title="Review cadences"
-      subtitle="Turn each review rhythm on or off and set when it anchors."
-      footer={<SaveRow banner={banner} dirty={dirty} saving={saving} onSave={onSave} onReset={() => { setCadences(DEFAULT_CADENCES); setDirty(true); }} />}
-    >
-      <div className="space-y-2.5">
-        {CADENCE_KEYS.map((key) => {
-          const c = cadences[key];
-          return (
-            <div key={key} className={`rounded-lg border p-3 ${c.enabled ? "border-zinc-200" : "border-zinc-100 bg-zinc-50/60"}`}>
-              <div className="flex items-center gap-3">
-                <Switch checked={c.enabled} onChange={() => patch(key, { enabled: !c.enabled })} />
-                <span className="text-base font-medium text-zinc-800 flex-1">{CADENCE_LABELS[key]}</span>
+    <SettingsPage pageKey="scoring" subtitle="How reviews run and how scores are worked out.">
+      <SettingsCardStack>
+        {ro ? <SettingsReadOnlyBanner>You can look at these settings. Ask an Owner or Admin to change them.</SettingsReadOnlyBanner> : null}
+
+        <SettingsCard title="Review cadence" id="scoring.cadence" wide="scoring.weights" actions={resetBtn("cadences")}>
+          {CADENCE_KEYS.map((key) => {
+            const c = v.cadences[key] ?? DEFAULT_CADENCES[key];
+            const patch = (p: Partial<CadenceSetting>) => set("cadences", { ...v.cadences, [key]: { ...c, ...p } });
+            const lead = nums.field(`cad.${key}.lead`, c.reminderLeadDays, { min: 0, max: 60 }, (n) => patch({ reminderLeadDays: n }));
+            return (
+              <div key={key} className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft pb-3 last:border-b-0 last:pb-0">
+                <span className="w-40 text-base font-medium text-ink">{CADENCE_LABELS[key]}</span>
+                {ro ? (
+                  <span className="text-base text-ink-2">{c.enabled ? `On · ${anchorWord(key, c.anchor)} · remind ${c.reminderLeadDays} days before${c.autoOpen ? " · opens itself" : ""}` : "Off"}</span>
+                ) : (
+                  <>
+                    <Switch checked={c.enabled} onChange={(on) => patch({ enabled: on })} aria-label={`${CADENCE_LABELS[key]} on`} />
+                    {c.enabled ? (
+                      <>
+                        <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })}
+                          day={nums.field(`cad.${key}.anchor`, c.anchor, { min: 1, max: key === "monthly" ? 28 : 90 }, (a) => patch({ anchor: a }))} />
+                        <span className="inline-flex items-center gap-2 text-sm text-ink-2">
+                          Remind
+                          <NumberInput {...lead.input} width={64} ariaLabel={`${CADENCE_LABELS[key]} reminder days`} />
+                          days before
+                        </span>
+                        {lead.error ? <span role="alert" className="text-sm text-danger-text">{lead.error}</span> : null}
+                        <label className="inline-flex items-center gap-2 text-sm text-ink">
+                          <input type="checkbox" className="h-4 w-4" checked={c.autoOpen} onChange={(e) => patch({ autoOpen: e.target.checked })} />
+                          Open the cycle automatically
+                        </label>
+                      </>
+                    ) : null}
+                  </>
+                )}
               </div>
-              {c.enabled ? (
-                <div className="mt-2.5 grid grid-cols-3 gap-3 pl-12">
-                  <label className="text-xs text-zinc-500">
-                    Anchor
-                    <input
-                      type="number" min={1} value={c.anchor}
-                      onChange={(e) => patch(key, { anchor: Number(e.target.value) })}
-                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800"
-                    />
-                  </label>
-                  <label className="text-xs text-zinc-500">
-                    Reminder lead (days)
-                    <input
-                      type="number" min={0} value={c.reminderLeadDays}
-                      onChange={(e) => patch(key, { reminderLeadDays: Number(e.target.value) })}
-                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800"
-                    />
-                  </label>
-                  <label className="flex items-end gap-1.5 text-xs text-zinc-600 pb-1">
-                    <input
-                      type="checkbox" checked={c.autoOpen}
-                      onChange={(e) => patch(key, { autoOpen: e.target.checked })}
-                    />
-                    Auto-open
-                  </label>
-                  <p className="col-span-3 text-xs text-zinc-400 -mt-1">{ANCHOR_HINT[key]}</p>
-                </div>
-              ) : null}
+            );
+          })}
+          <p className="text-sm text-ink-2">
+            Run a cycle now from <Link href="/reviews" className="font-medium text-brand-deep hover:underline">Review cycles</Link>.
+          </p>
+        </SettingsCard>
+
+        <SettingsCard title="Score weights" description="How each part weighs into a person's review score. The monthly performance score on profiles also weighs the manager and self parts, which stay as they are." id="scoring.weights" wide="scoring.weights" actions={resetBtn("weights")}>
+          {SCORE_WEIGHT_KEYS.map((k) => {
+            const pct = nums.field(`w.${k}`, v.weights[k], { min: 0, max: 100 }, (n) => set("weights", { ...v.weights, [k]: n }));
+            return (
+            <div key={k} className="flex flex-wrap items-center gap-3">
+              <span className="w-44 shrink-0 text-base text-ink">{METRIC_LABELS[k]}</span>
+              {ro ? (
+                <span className="text-base text-ink">{v.weights[k]}%</span>
+              ) : (
+                <>
+                  <input type="range" min={0} max={100} value={v.weights[k]} aria-label={METRIC_LABELS[k]}
+                    onChange={(e) => { nums.clear(`w.${k}`); set("weights", { ...v.weights, [k]: Number(e.target.value) }); }}
+                    className="flex-1 accent-[var(--os-brand)]" />
+                  <NumberInput {...pct.input} width={72} suffix="%" ariaLabel={`${METRIC_LABELS[k]} percent`} />
+                  {pct.error ? <span role="alert" className="w-full text-end text-sm text-danger-text">{pct.error}</span> : null}
+                </>
+              )}
             </div>
-          );
-        })}
-      </div>
-    </SectionCard>
+            );
+          })}
+          <p className={`text-base font-medium ${total === 100 ? "text-ink" : "text-danger-text"}`} role={total === 100 ? undefined : "alert"}>
+            Total {total}%{total === 100 ? "" : ". Must add up to 100"}
+          </p>
+        </SettingsCard>
+
+        <SettingsCard title="Performance bands" description="Score ranges that name a composite score." id="scoring.bands" wide="scoring.bands" actions={resetBtn("bands")}>
+          {v.bands.map((b, i) => {
+            const from = nums.field(`band.${i}.min`, b.min, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, min: n } : x))));
+            const to = nums.field(`band.${i}.max`, b.max, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, max: n } : x))));
+            return (
+            <div key={i}>
+              <div className="flex items-center gap-2">
+                {ro ? (
+                  <span className="text-base text-ink">{b.label}: {b.min} to {b.max}</span>
+                ) : (
+                  <>
+                    <TextInput value={b.label} aria-label="Band name" maxLength={40} invalid={bErr?.row === i}
+                      onChange={(e) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="max-w-[240px]" />
+                    <NumberInput {...from.input} width={72} ariaLabel="From" invalid={from.input.invalid || bErr?.row === i} />
+                    <span className="text-ink-2">to</span>
+                    <NumberInput {...to.input} width={72} ariaLabel="To" invalid={to.input.invalid || bErr?.row === i} />
+                    <button type="button" aria-label={`Remove ${b.label || "band"}`} disabled={v.bands.length <= 1}
+                      // Rows below move up a place, so typing held by row
+                      // index would land on the wrong band: dropped.
+                      onClick={() => { nums.clear(TYPED_PREFIX.bands); set("bands", v.bands.filter((_, j) => j !== i)); }}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40">
+                      <X className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                  </>
+                )}
+              </div>
+              {(from.error ?? to.error) && !ro ? <p role="alert" className="mt-1 text-sm text-danger-text">{from.error ?? to.error}</p>
+                : bErr?.row === i && !ro ? <p role="alert" className="mt-1 text-sm text-danger-text">{bErr.message}</p> : null}
+            </div>
+            );
+          })}
+          {ro ? null : (
+            <button type="button" className={`${btn.ghost} self-start`} disabled={v.bands.length >= 10}
+              onClick={() => set("bands", [...v.bands, { label: "", min: 0, max: 0, color: "neutral" }])}>
+              + Add band
+            </button>
+          )}
+        </SettingsCard>
+
+        <SettingsCard title="Behavioural anchors" description="The five words a reviewer picks from, lowest first." id="scoring.anchors" actions={resetBtn("anchors")}>
+          {v.anchors.map((a, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-hover text-xs font-semibold text-ink-2">{i + 1}</span>
+              {ro ? <span className="text-base text-ink">{a}</span> : (
+                <TextInput value={a} maxLength={200} aria-label={`Scale word ${i + 1}`} onChange={(e) => set("anchors", v.anchors.map((x, j) => (j === i ? e.target.value : x)))} />
+              )}
+            </div>
+          ))}
+        </SettingsCard>
+
+        <p className="text-sm">
+          <Link href="/talent" className="font-medium text-brand-deep hover:underline">Open the talent grid</Link>
+        </p>
+        {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
+      </SettingsCardStack>
+
+      {ro ? null : <SaveBar dirty={dirtyKeys.length > 0 || nums.blocked} saving={saving} onDiscard={() => { setDraft({}); setErr(null); nums.reset(); }} onSave={save} />}
+
+      <ConfirmDialog
+        open={!!resetting}
+        onOpenChange={(o) => { if (!o) setResetting(null); }}
+        title="Reset to defaults?"
+        confirmLabel="Reset"
+        onConfirm={() => {
+          if (!resetting) return;
+          const k = resetting;
+          nums.clear(TYPED_PREFIX[k]);
+          setDraft((d) => ({ ...d, [k]: DEFAULTS[k] }));
+          setResetting(null);
+        }}
+      >
+        <p>{resetting ? RESET_WORDS[resetting] : ""}</p>
+        <p className="text-ink-2">Nothing is saved until you press Save changes.</p>
+      </ConfirmDialog>
+    </SettingsPage>
   );
 }
 
-/* ───────────────────────── 2. Score weights ───────────────────────── */
-
-function WeightsSection({
-  weights, setWeights,
-}: { weights: Record<MetricKey, number>; setWeights: (w: Record<MetricKey, number>) => void }) {
-  const [banner, setBanner] = useState<Banner>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  const sum = useMemo(() => METRIC_KEYS.reduce((a, k) => a + (weights[k] ?? 0), 0), [weights]);
-  const valid = validateScoreWeights(weights).ok;
-
-  const set = (k: MetricKey, v: number) => {
-    setWeights({ ...weights, [k]: v });
-    setDirty(true);
-    setBanner(null);
-  };
-
-  const onSave = async () => {
-    const v = validateScoreWeights(weights);
-    if (!v.ok) { setBanner({ kind: "err", text: v.error ?? "Invalid" }); return; }
-    setSaving(true);
-    const r = await saveScoring({ scoreWeights: weights });
-    setSaving(false);
-    setBanner(r.ok ? { kind: "ok", text: "Saved" } : { kind: "err", text: r.error ?? "Save failed" });
-    if (r.ok) setDirty(false);
-  };
-
-  return (
-    <SectionCard
-      Icon={BarChart3} color={C.purple}
-      title="Score weights"
-      subtitle="How each metric weighs into the composite performance score."
-      footer={<SaveRow banner={banner} dirty={dirty} saving={saving} onSave={onSave} onReset={() => { setWeights(DEFAULT_SCORE_WEIGHTS); setDirty(true); }} />}
-    >
-      <div className="space-y-2.5">
-        {METRIC_KEYS.map((k) => (
-          <div key={k} className="flex items-center gap-3">
-            <span className="text-base text-zinc-700 w-40 shrink-0">{METRIC_LABELS[k]}</span>
-            <input
-              type="range" min={0} max={100} value={weights[k] ?? 0}
-              onChange={(e) => set(k, Number(e.target.value))}
-              className="flex-1 accent-zinc-800"
-            />
-            <input
-              type="number" min={0} max={100} value={weights[k] ?? 0}
-              onChange={(e) => set(k, Number(e.target.value))}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800 text-right"
-            />
-            <span className="text-sm text-zinc-400 w-3">%</span>
-          </div>
-        ))}
-      </div>
-      <div className={`mt-3 text-sm font-medium ${valid ? "text-emerald-600" : "text-red-600"}`}>
-        Total: {sum}% {valid ? "✓" : "— must equal 100%"}
-      </div>
-    </SectionCard>
-  );
+function anchorWord(cadence: CadenceKey, anchor: number): string {
+  if (cadence === "weekly") return WEEKDAYS[(anchor - 1 + 7) % 7] ?? `day ${anchor}`;
+  if (cadence === "annual") return MONTH_NAMES[(anchor - 1 + 12) % 12] ?? `month ${anchor}`;
+  if (cadence === "monthly") return `day ${anchor} of the month`;
+  return `day ${anchor} of the quarter`;
 }
 
-/* ───────────────────────── 3. Performance bands ───────────────────────── */
-
-function BandsSection({
-  bands, setBands,
-}: { bands: ScoringBand[]; setBands: (b: ScoringBand[]) => void }) {
-  const [banner, setBanner] = useState<Banner>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  const valid = validateScoringBands(bands).ok;
-
-  const set = (i: number, p: Partial<ScoringBand>) => {
-    setBands(bands.map((b, idx) => (idx === i ? { ...b, ...p } : b)));
-    setDirty(true);
-    setBanner(null);
-  };
-
-  const onSave = async () => {
-    const v = validateScoringBands(bands);
-    if (!v.ok) { setBanner({ kind: "err", text: v.error ?? "Invalid" }); return; }
-    setSaving(true);
-    const r = await saveScoring({ scoringBands: bands });
-    setSaving(false);
-    setBanner(r.ok ? { kind: "ok", text: "Saved" } : { kind: "err", text: r.error ?? "Save failed" });
-    if (r.ok) setDirty(false);
-  };
-
+function AnchorControl({ cadence, value, onChange, day }: { cadence: CadenceKey; value: number; onChange: (n: number) => void; day: TypedNumberField }) {
+  if (cadence === "weekly") {
+    return <NativeSelect ariaLabel="Due on" value={String(value)} options={WEEKDAYS.map((d, i) => ({ value: String(i + 1), label: d }))} onChange={(x) => onChange(Number(x))} />;
+  }
+  if (cadence === "annual") {
+    return <NativeSelect ariaLabel="Opens in" value={String(value)} options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))} onChange={(x) => onChange(Number(x))} />;
+  }
   return (
-    <SectionCard
-      Icon={Award} color={C.indigo}
-      title="Performance bands"
-      subtitle="Score ranges that map a composite score to a label."
-      footer={<SaveRow banner={banner} dirty={dirty} saving={saving} onSave={onSave} onReset={() => { setBands(DEFAULT_SCORING_BANDS); setDirty(true); }} />}
-    >
-      <div className="space-y-2">
-        {bands.map((b, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <input
-              type="color"
-              value={b.color?.startsWith("#") ? b.color : "#a1a1aa"}
-              onChange={(e) => set(i, { color: e.target.value })}
-              className="w-7 h-7 rounded border border-zinc-200 p-0.5 shrink-0 cursor-pointer"
-              aria-label="Band color"
-            />
-            <input
-              value={b.label}
-              onChange={(e) => set(i, { label: e.target.value })}
-              className="flex-1 h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800"
-              placeholder="Label"
-            />
-            <input
-              type="number" min={0} max={100} value={b.min}
-              onChange={(e) => set(i, { min: Number(e.target.value) })}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800 text-right"
-            />
-            <span className="text-xs text-zinc-400">–</span>
-            <input
-              type="number" min={0} max={100} value={b.max}
-              onChange={(e) => set(i, { max: Number(e.target.value) })}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-sm text-zinc-800 text-right"
-            />
-          </div>
-        ))}
-      </div>
-      {!valid ? (
-        <p className="mt-2 text-sm text-red-600">Ranges must stay within 0–100 and not overlap.</p>
-      ) : null}
-    </SectionCard>
-  );
-}
-
-/* ───────────────────────── 4. Behavioral anchors ───────────────────────── */
-
-function AnchorsSection({
-  anchors, setAnchors,
-}: { anchors: string[]; setAnchors: (a: string[]) => void }) {
-  const [banner, setBanner] = useState<Banner>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  const set = (i: number, v: string) => {
-    setAnchors(anchors.map((a, idx) => (idx === i ? v : a)));
-    setDirty(true);
-    setBanner(null);
-  };
-
-  const onSave = async () => {
-    if (anchors.some((a) => !a.trim())) { setBanner({ kind: "err", text: "All 5 anchors need a label" }); return; }
-    setSaving(true);
-    const r = await saveScoring({ behavioralAnchors: anchors });
-    setSaving(false);
-    setBanner(r.ok ? { kind: "ok", text: "Saved" } : { kind: "err", text: r.error ?? "Save failed" });
-    if (r.ok) setDirty(false);
-  };
-
-  return (
-    <SectionCard
-      Icon={MessageSquareText} color={C.teal}
-      title="Behavioral anchors"
-      subtitle="The 5-point scale labels managers see when rating behaviors."
-      footer={<SaveRow banner={banner} dirty={dirty} saving={saving} onSave={onSave} onReset={() => { setAnchors(DEFAULT_BEHAVIORAL_ANCHORS); setDirty(true); }} />}
-    >
-      <div className="space-y-2">
-        {anchors.map((a, i) => (
-          <div key={i} className="flex items-center gap-2.5">
-            <span className="grid place-items-center w-6 h-6 rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600 shrink-0">{i + 1}</span>
-            <input
-              value={a}
-              onChange={(e) => set(i, e.target.value)}
-              className="flex-1 h-8 px-2.5 rounded border border-zinc-200 text-base text-zinc-800"
-            />
-          </div>
-        ))}
-      </div>
-    </SectionCard>
+    <span className="inline-flex items-center gap-2 text-sm text-ink-2">
+      Opens on day
+      <NumberInput {...day.input} width={64} ariaLabel="Opens on day" />
+      {day.error ? <span role="alert" className="text-danger-text">{day.error}</span> : null}
+    </span>
   );
 }

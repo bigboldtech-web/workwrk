@@ -1,164 +1,121 @@
 "use client";
 
-// Plan & billing — read-only snapshot of the org's plan + status and how
-// current usage sits against the PLAN_LIMITS for the active plan. Admins
-// (COMPANY_ADMIN / SUPER_ADMIN) get a "Manage billing" button that opens
-// the Stripe customer portal via POST /api/billing/portal.
-// Data: GET /api/settings → { organization { plan, status }, usage }.
+// Workspace settings > Plan & billing (spec-settings-workspace
+// `/settings/billing`, settings-architecture 5.14). Owner page (every Admin
+// until the Owner and Admin split). Honest states, never a button that 503s:
+//
+//   Stripe portal configured   [Manage billing] is the page's one primary
+//   not configured             "Billing is handled by our team" with a
+//                              mailto line, and no blue button at all
+//
+// The plan comparison and Invoices tab render only when checkout and Stripe
+// invoices exist; neither does in this release, so neither is drawn.
+// Data: GET /api/settings/billing-summary; POST /api/billing/portal.
 
-import { useEffect, useState } from "react";
-import { CreditCard, Loader2 } from "lucide-react";
-import { useRole } from "@/hooks/use-role";
-import { useToast } from "@/components/ui/toast";
-import { PLAN_LIMITS } from "@/lib/plan-limits-data";
+import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
+import { useOsToast } from "@/components/layout/os/toast";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
-type Plan = "STARTER" | "GROWTH" | "SCALE" | "ENTERPRISE";
-type Status = "ACTIVE" | "TRIAL" | "SUSPENDED" | "CANCELLED";
-
-type SettingsResponse = {
-  organization: { plan: Plan; status: Status };
-  usage: { users: number; sops: number; aiQueries: number };
+type Summary = {
+  plan: string;
+  status: string;
+  limits: { users: number; sops: number; ai: number };
+  usage: { members: number; sops: number; aiThisMonth: number };
+  billingLive: boolean;
 };
 
-const PLAN_LABEL: Record<Plan, string> = {
-  STARTER: "Starter",
-  GROWTH: "Growth",
-  SCALE: "Scale",
-  ENTERPRISE: "Enterprise",
+const PLAN_LABEL: Record<string, string> = { STARTER: "Starter", GROWTH: "Growth", SCALE: "Scale", ENTERPRISE: "Enterprise" };
+const STATUS: Record<string, { label: string; cls: string }> = {
+  TRIAL: { label: "Trial", cls: "bg-[var(--os-warning-bg)] text-warning-text" },
+  ACTIVE: { label: "Active", cls: "bg-[var(--os-success-bg)] text-success-text" },
+  PAST_DUE: { label: "Past due", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
+  SUSPENDED: { label: "Suspended", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
+  CANCELLED: { label: "Cancelled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
 };
 
-const STATUS_STYLE: Record<Status, string> = {
-  ACTIVE: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  TRIAL: "border-blue-200 bg-blue-50 text-blue-700",
-  SUSPENDED: "border-amber-200 bg-amber-50 text-amber-700",
-  CANCELLED: "border-red-200 bg-red-50 text-red-700",
-};
-
-const STATUS_LABEL: Record<Status, string> = {
-  ACTIVE: "Active",
-  TRIAL: "Trial",
-  SUSPENDED: "Suspended",
-  CANCELLED: "Cancelled",
-};
-
-// ENTERPRISE limits are sentinel 99999 ("unlimited") — render as a dash and
-// a flat (empty) bar instead of an absurd fraction.
-const UNLIMITED = 99999;
-
-function UsageBar({ label, used, limit }: { label: string; used: number; limit: number }) {
-  const unlimited = limit >= UNLIMITED;
-  const pct = unlimited || limit <= 0 ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  const over = !unlimited && used >= limit;
+function Meter({ label, used, limit, helper }: { label: string; used: number; limit: number; helper?: string }) {
+  const unlimited = limit >= 99999;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const over = !unlimited && used > limit;
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-base font-medium text-zinc-700">{label}</span>
-        <span className="text-sm tabular-nums text-zinc-500">
-          {used.toLocaleString()} / {unlimited ? "∞" : limit.toLocaleString()}
-        </span>
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        <span className="text-base font-medium text-ink">{label}</span>
+        <span className={`text-sm tabular-nums ${over ? "text-danger-text" : "text-ink-2"}`}>{unlimited ? `${used} · no limit` : `${used} of ${limit}`}</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
-        <div
-          className={`h-full rounded-full ${over ? "bg-red-500" : "bg-zinc-900"}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      {unlimited ? null : (
+        <div className="h-1 w-full overflow-hidden rounded-full bg-hover" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+          <div className={`h-full rounded-full ${over ? "bg-[var(--os-danger-solid)]" : "bg-brand"}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      {helper ? <p className="mt-1 text-sm text-ink-2">{helper}</p> : null}
     </div>
   );
 }
 
-export default function BillingPage() {
-  const { accessLevel } = useRole();
-  const toast = useToast();
-  const canManage = accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
-
-  const [data, setData] = useState<SettingsResponse | null>(null);
+export default function BillingSettingsPage() {
+  const { toast } = useOsToast();
+  const [data, setData] = useState<Summary | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d as SettingsResponse))
-      .catch(() => setData(null));
+  const load = useCallback(async () => {
+    setError(null);
+    const r = await apiFetch<Summary>("/api/settings/billing-summary", { cache: "no-store" });
+    if (!r.ok) { setError(r.error); return; }
+    setData(r.data);
   }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(t);
+  }, [load]);
 
-  const openPortal = async () => {
+  const portal = useCallback(async () => {
     setOpening(true);
-    try {
-      const res = await fetch("/api/billing/portal", { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.url) {
-        throw new Error(body?.error ?? "Could not open billing portal");
-      }
-      window.location.href = body.url as string;
-    } catch (e) {
-      toast.error("Billing", e instanceof Error ? e.message : "Could not open billing portal");
-      setOpening(false);
-    }
-  };
+    const r = await apiFetch<{ url: string }>("/api/billing/portal", { method: "POST", json: { returnUrl: `${window.location.origin}/settings/billing` } });
+    setOpening(false);
+    if (!r.ok || !r.data?.url) { toast(r.ok ? "Couldn't open billing. Try again." : r.error); return; }
+    window.location.href = r.data.url;
+  }, [toast]);
 
-  const plan = data?.organization.plan ?? "STARTER";
-  const status = data?.organization.status ?? "ACTIVE";
-  const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER;
+  const status = data ? STATUS[data.status] ?? { label: data.status, cls: "bg-hover text-ink-2" } : null;
 
   return (
-    <div className="px-6 pt-6">
-      <header className="mb-1 flex items-center gap-2">
-        <CreditCard className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Plan &amp; billing</h1>
-      </header>
-      <p className="mb-5 max-w-2xl text-base text-zinc-500">
-        Review your current plan, usage against your limits, and manage payment details.
-      </p>
-
-      {data === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading billing…
-        </div>
+    <SettingsPage
+      pageKey="billing"
+      primary={data?.billingLive ? { label: "Manage billing", onClick: () => { void portal(); }, busy: opening, icon: null } : undefined}
+    >
+      {error ? (
+        <ErrorState what="billing" hint={error} onRetry={() => { void load(); }} />
+      ) : !data ? (
+        <SkeletonRows rows={5} className="max-w-[560px]" />
       ) : (
-        <div className="max-w-2xl space-y-4">
-          {/* Current plan + status */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Current plan</div>
-                <div className="mt-0.5 text-lg font-semibold tracking-[-0.01em] text-zinc-900">
-                  {PLAN_LABEL[plan]}
-                </div>
-              </div>
-              <span
-                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[status]}`}
-              >
-                {STATUS_LABEL[status]}
-              </span>
+        <SettingsCardStack>
+          <SettingsCard title="Plan" id="billing.plan">
+            <div className="flex items-center gap-3">
+              <span className="text-xl font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
+              {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
-
-            {/* Usage vs limits */}
-            <div className="mt-4 space-y-3 border-t border-zinc-100 pt-4">
-              <UsageBar label="Users" used={data.usage.users} limit={limits.users} />
-              <UsageBar label="SOPs" used={data.usage.sops} limit={limits.sops} />
-              <UsageBar label="AI queries" used={data.usage.aiQueries} limit={limits.ai} />
-            </div>
-          </div>
-
-          {/* Manage billing — admin only */}
-          {canManage ? (
-            <button
-              onClick={openPortal}
-              disabled={opening}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-sm font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
-            >
-              {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-              Manage billing
-            </button>
-          ) : (
-            <p className="text-base text-zinc-400">
-              You need Company Admin to manage billing.
-            </p>
-          )}
-        </div>
+            {data.billingLive ? (
+              <p className="text-sm text-ink-2">Change plan, payment method and invoices in the billing portal (Manage billing).</p>
+            ) : (
+              <p className="text-base text-ink">
+                Billing is handled by our team. Email{" "}
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+              </p>
+            )}
+          </SettingsCard>
+          <SettingsCard title="Usage" id="billing.usage">
+            <Meter label="Members" used={data.usage.members} limit={data.limits.users} helper="Everyone who can sign in. Deactivated people do not count." />
+            <Meter label="SOPs" used={data.usage.sops} limit={data.limits.sops} />
+            <Meter label="AI queries this month" used={data.usage.aiThisMonth} limit={data.limits.ai} />
+          </SettingsCard>
+        </SettingsCardStack>
       )}
-      <div className="h-10" />
-    </div>
+    </SettingsPage>
   );
 }

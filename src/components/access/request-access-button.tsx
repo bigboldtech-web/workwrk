@@ -4,8 +4,15 @@
 // A View / Edit choice (Comment for Docs), an optional message, one POST to
 // /api/access-requests, then the button becomes "Request sent". The owner
 // (or, with no owner, the workspace admins) gets an inbox row.
+//
+// The requester's own latest request on this object (GET
+// /api/access-requests?scope=outgoing) sets the starting state: a pending
+// one reads "Request pending since <date>" instead of a fresh button, and a
+// declined one says so above the button, so a person always knows where
+// their ask stands.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { DateText } from "@/components/ui/date-text";
 import { Dots } from "@/components/ui/dots";
 import { apiFetch } from "@/lib/api-fetch";
 import { OBJECT_ROLE_LABEL } from "@/lib/access/labels";
@@ -29,6 +36,20 @@ export function RequestAccessButton({
   const [role, setRole] = useState<Role>(roles[0] ?? "VIEW");
   const [message, setMessage] = useState("");
   const [state, setState] = useState<"idle" | "busy" | "sent" | "failed">("idle");
+  const [last, setLast] = useState<{ status: string; createdAt: string; decidedAt: string | null } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void apiFetch<{ outgoing?: { objectType: string; objectId: string; status: string; createdAt: string; decidedAt: string | null }[] }>(
+      "/api/access-requests?scope=outgoing",
+      { cache: "no-store" },
+    ).then((r) => {
+      if (!alive || !r.ok) return;
+      const mine = (r.data.outgoing ?? []).find((o) => o.objectType === objectType && o.objectId === objectId);
+      if (mine) setLast({ status: mine.status, createdAt: mine.createdAt, decidedAt: mine.decidedAt });
+    });
+    return () => { alive = false; };
+  }, [objectType, objectId]);
 
   const send = async () => {
     setState("busy");
@@ -48,10 +69,23 @@ export function RequestAccessButton({
     );
   }
 
+  if (last?.status === "PENDING") {
+    return (
+      <p className="m-0 text-base font-medium text-ink-2">
+        Request pending since <DateText value={last.createdAt} />{owner ? `. ${owner.name} has it.` : "."}
+      </p>
+    );
+  }
+
   const seg = "inline-flex h-8 items-center rounded-md px-3 text-base font-medium";
 
   return (
     <div className="flex flex-col items-center gap-3">
+      {last?.status === "DENIED" ? (
+        <p className="m-0 text-sm text-ink-2">
+          Your request was declined{last.decidedAt ? <> on <DateText value={last.decidedAt} /></> : null}. You can ask again.
+        </p>
+      ) : null}
       {!open ? (
         <button
           type="button"

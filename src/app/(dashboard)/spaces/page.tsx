@@ -27,7 +27,7 @@ import { Globe } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
 import { NewSpaceButton } from "./new-space-button";
-import { canAccessTier } from "@/components/layout/os/access-tiers";
+import { mayCreateSpace } from "@/lib/access/space-create";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +46,10 @@ export default async function SpacesIndexPage() {
     paths: true,
     counts: true,
   });
-  // The same gate `POST /api/spaces` applies (MANAGER_LEVELS), so the button
-  // never renders for someone the route would 403.
-  const canCreateSpace = canAccessTier("manager", u.accessLevel ?? null);
+  // The same answer `POST /api/spaces` gives (src/lib/access/space-create.ts),
+  // so the button never renders for someone the route would 403, and does
+  // render for everyone "Who can create Spaces" lets in.
+  const canCreateSpace = await mayCreateSpace(u.accessLevel ?? null);
 
   return (
     <div className="px-8 py-6 max-w-[1200px]">

@@ -3,6 +3,12 @@
 // nothing else. SAML real cryptographic verification is gated on
 // installing `samlify` — for now this endpoint just stores the
 // config so the IT-side onboarding form is ready.
+//
+// Both halves are on the Security page's rule (settings-write.ts, the same
+// gate as the SCIM tokens beside it): an Owner page, so every Admin while
+// SETTINGS_OWNER_SPLIT is off and then the Owner or an Admin holding the
+// Security scope, with the account re-read on every call, so an Admin
+// demoted a moment ago cannot turn on a SAML provider with a stale token.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -11,14 +17,15 @@ import {
   getOrgId,
   jsonError,
   jsonSuccess,
-  isOrgAdmin,
 } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
+  const readGate = await settingsWriteGate(session, "security", { read: true });
+  if (!readGate.ok) return readGate.response;
 
   const providers = await prisma.identityProvider.findMany({
     where: { organizationId: getOrgId(session) },
@@ -29,10 +36,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
+  const writeGate = await settingsWriteGate(session, "security");
+  if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = (await req.json().catch(() => null)) ?? {};
 
   const type = typeof body.type === "string" ? body.type : "SAML";
   if (!["SAML", "OIDC"].includes(type)) return jsonError("Invalid type");

@@ -5,7 +5,12 @@
 //                      "View only. Ask {owner} for edit access." with Request
 //                      (POST /api/access-requests at Can edit; the Inbox row
 //                      goes to the owner, then the admins). After sending it
-//                      reads "Requested".
+//                      reads "You asked {owner} for edit access.", and on a
+//                      reload it reads the person's own latest request on
+//                      this goal (GET /api/access-requests?scope=outgoing,
+//                      as RequestAccessButton does): pending says when they
+//                      asked and offers no second Request, declined says so
+//                      and offers Request again.
 //   CopyLinkButton     the title-row Copy link when "..." would hold nothing
 //                      else.
 //   GoalBody           the column the islands share, so "Check in" on the
@@ -47,21 +52,80 @@ export function GoalDates({ startDate, endDate, quarter, completed }: { startDat
   );
 }
 
+/** One row of GET /api/access-requests?scope=outgoing (newest first). */
+export type OutgoingRequestRow = { objectType: string; objectId: string; status: string; createdAt: string; decidedAt: string | null };
+
+/** Where the viewer's own ask for edit access on this goal stands. */
+export type GoalRequestStanding =
+  | { kind: "pending"; since: string }
+  | { kind: "declined"; on: string | null }
+  | null;
+
+/**
+ * The viewer's latest request on this goal decides the strip. The list is
+ * newest first, so the first goal row for this id is the one that counts:
+ * an old decline followed by a fresh ask is pending, not declined. Approved,
+ * cancelled and expired rows leave the plain Request (an approval that was
+ * later taken back must still let the person ask again).
+ */
+export function goalRequestStanding(outgoing: readonly OutgoingRequestRow[] | null | undefined, okrId: string): GoalRequestStanding {
+  const mine = (outgoing ?? []).find((o) => o.objectType === "goal" && o.objectId === okrId);
+  if (!mine) return null;
+  if (mine.status === "PENDING") return { kind: "pending", since: mine.createdAt };
+  if (mine.status === "DENIED") return { kind: "declined", on: mine.decidedAt };
+  return null;
+}
+
+async function loadGoalRequestStanding(okrId: string): Promise<GoalRequestStanding | undefined> {
+  const r = await apiFetch<{ outgoing?: OutgoingRequestRow[] }>("/api/access-requests?scope=outgoing", { cache: "no-store" });
+  return r.ok ? goalRequestStanding(r.data.outgoing, okrId) : undefined;
+}
+
 export function GoalReadOnlyStrip({ okrId, ownerFirstName }: { okrId: string; ownerFirstName: string | null }) {
   const [state, setState] = useState<"idle" | "busy" | "sent">("idle");
+  // What the server knows about this person's ask, read on mount. Kept apart
+  // from `state` so a slow read never overwrites a Request pressed meanwhile.
+  const [standing, setStanding] = useState<GoalRequestStanding>(null);
   const { toast } = useOsToast();
+  const fmt = useFormat();
+  useEffect(() => {
+    let alive = true;
+    void loadGoalRequestStanding(okrId).then((s) => { if (alive && s !== undefined) setStanding(s); });
+    return () => { alive = false; };
+  }, [okrId]);
   const request = async () => {
     if (state !== "idle") return;
     setState("busy");
-    const r = await apiFetch("/api/access-requests", { method: "POST", json: { objectType: "goal", objectId: okrId, role: "EDIT" } });
+    const r = await apiFetch<{ ok?: boolean; throttled?: boolean }>("/api/access-requests", { method: "POST", json: { objectType: "goal", objectId: okrId, role: "EDIT" } });
     if (!r.ok) { setState("idle"); toast(r.error || "Couldn't send the request", { tone: "danger" }); return; }
+    if (r.data?.throttled) {
+      // Throttled: this person already asked within 24 hours, so nobody was
+      // told again. Say the ask is pending, with its real date, rather than a
+      // fresh "sent" that suggests the owner just heard about it.
+      const s = await loadGoalRequestStanding(okrId);
+      setStanding(s?.kind === "pending" ? s : { kind: "pending", since: new Date().toISOString() });
+      setState("idle");
+      return;
+    }
     setState("sent");
   };
+  const who = ownerFirstName?.trim() || null;
+  let message: string | undefined;
+  let canRequest = state !== "sent";
+  // A goal with no owner sends the ask to the admins, so these name nobody.
+  if (state === "sent") {
+    message = `View only. You asked ${who ? `${who} ` : ""}for edit access.`;
+  } else if (standing?.kind === "pending") {
+    message = `View only. You asked ${who ? `${who} ` : ""}for edit access on ${fmt.date(standing.since, "date")}.`;
+    canRequest = false;
+  } else if (standing?.kind === "declined") {
+    message = `View only. Your request for edit access was declined${standing.on ? ` on ${fmt.date(standing.on, "date")}` : ""}. You can ask again.`;
+  }
   return (
     <ReadOnlyBanner
       ownerName={ownerFirstName}
-      message={state === "sent" ? `View only. You asked ${ownerFirstName ?? "the owner"} for edit access.` : undefined}
-      onRequest={state === "sent" ? undefined : () => void request()}
+      message={message}
+      onRequest={canRequest ? () => void request() : undefined}
       requestLabel={state === "busy" ? "Sending" : "Request"}
     />
   );

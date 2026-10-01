@@ -104,7 +104,9 @@ describe("the audit surface (finding 16)", () => {
     const route = read("src/app/api/audit/route.ts");
     expect(route).toMatch(/metadata: true/);
     expect(route).toMatch(/accessAuditSentence\(/);
-    expect(read("src/app/(dashboard)/settings/audit/page.tsx")).toMatch(/l\.summary \|\| l\.description/);
+    // The Audit log prints the access sentence before the raw description
+    // (Phase 8 rebuilt the page on TableCard: `r.summary ?? r.description`).
+    expect(read("src/app/(dashboard)/settings/audit/page.tsx")).toMatch(/\b\w+\.summary (\?\?|\|\|) \w+\.description/);
   });
 });
 

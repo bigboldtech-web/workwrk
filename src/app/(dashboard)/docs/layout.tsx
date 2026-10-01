@@ -6,8 +6,10 @@
 // restyles it on the tokens and leaves its Alt (Option) 1 to 9 binding alone,
 // which never collided with the hubs' Cmd 1 to 8.
 //
-// The app-key gate for this hub is the shell's URL-derived one
-// (src/lib/nav/route-hub.ts); nothing else lives here.
+// The app-key gate (Phase 8 stage F) is NOT here: it is on the hub page's
+// route group, (hub)/layout.tsx, so a canonical /docs/[id] link still reaches
+// decision B3 (CanonicalHubGate in [id]/layout.tsx). The strip draws nothing
+// for a person without the hub.
 
 import { DocTabsBar } from "@/components/docs/doc-tabs";
 

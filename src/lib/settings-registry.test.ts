@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SETTINGS_PAGE_GATES, SETTINGS_PAGE_KEYS } from "./access/settings";
 import {
+  SETTINGS_TAB_LABELS,
+  settingsTabs,
   SETTINGS_PAGES,
   SETTINGS_PAGE_LIST,
   SETTINGS_ENTRY_LIST,
@@ -9,6 +11,8 @@ import {
   resolveSettingsPage,
   settingsAliasRedirects,
   settingsHrefToday,
+  settingsRedirectFor,
+  settingsRedirectTarget,
   settingsSidebar,
 } from "./settings-registry";
 import { resolveCloseTarget, isSettingsRoute } from "./settings-nav";
@@ -18,9 +22,24 @@ describe("settings registry", () => {
     expect(SETTINGS_PAGE_LIST.map((p) => p.key).sort()).toEqual([...SETTINGS_PAGE_KEYS].sort());
     for (const p of SETTINGS_PAGE_LIST) expect(p.gate).toBe(SETTINGS_PAGE_GATES[p.key]);
   });
-  it("lists the 14 workspace pages and 6 personal pages in section-1 order (the two 'All settings' indexes are generated, not pages)", () => {
-    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "workspace")).toHaveLength(14);
-    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me")).toHaveLength(6);
+  it("lists the 15 workspace rows and 7 personal rows in the spec's order, All settings last in each", () => {
+    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "workspace").map((p) => p.href)).toEqual([
+      "/settings",
+      "/settings/identity",
+      "/settings/locale",
+      "/settings/apps",
+      "/settings/members",
+      "/settings/structure",
+      "/settings/access",
+      "/settings/tasks",
+      "/settings/scoring",
+      "/settings/security",
+      "/settings/data",
+      "/settings/audit",
+      "/settings/api",
+      "/settings/billing",
+      "/settings/all",
+    ]);
     expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me").map((p) => p.href)).toEqual([
       "/account/profile",
       "/account/preferences",
@@ -28,6 +47,13 @@ describe("settings registry", () => {
       "/account/security",
       "/account/connections",
       "/account/shortcuts",
+      "/account/all",
+    ]);
+  });
+  it("gives every row an icon, and the spec's icons to the My settings rows", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(p.icon).toBeTruthy();
+    expect(SETTINGS_PAGE_LIST.filter((p) => p.door === "me").map((p) => p.icon)).toEqual([
+      "CircleUser", "SlidersHorizontal", "Bell", "ShieldCheck", "CalendarCheck", "Keyboard", "List",
     ]);
   });
   it("never repeats an href or an alias", () => {
@@ -74,19 +100,27 @@ describe("resolveSettingsPage", () => {
   });
 });
 
-describe("today's hrefs and the sidebar", () => {
-  it("points every navigable row at a route that renders today", () => {
-    const today = SETTINGS_PAGE_LIST.map((p) => settingsHrefToday(p));
-    expect(today).toContain("/account/appearance");
-    expect(today).toContain("/settings/notifications");
-    expect(today).toContain("/settings/task-types");
-    expect(settingsHrefToday(SETTINGS_PAGES["account/shortcuts"])).toBeNull();
-    expect(settingsHrefToday(SETTINGS_PAGES.security)).toBeNull();
+describe("tab labels", () => {
+  it("every registry tab has its one label, so the page and the index agree", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      for (const t of p.tabs ?? []) expect(SETTINGS_TAB_LABELS[p.key]?.[t], `${p.key}:${t}`).toBeTruthy();
+    }
+    expect(settingsTabs("identity")).toEqual([
+      { key: "profile", label: "Profile" },
+      { key: "culture", label: "Culture" },
+      { key: "appearance", label: "Appearance defaults" },
+      { key: "danger", label: "Danger zone" },
+    ]);
   });
-  it("hides unbuilt pages from the sidebar unless asked", () => {
-    expect(settingsSidebar("workspace").map((p) => p.key)).not.toContain("security");
-    expect(settingsSidebar("workspace", { includeUnbuilt: true }).map((p) => p.key)).toContain("security");
-    expect(settingsSidebar("me").map((p) => p.key)).not.toContain("account/shortcuts");
+});
+
+describe("today's hrefs and the sidebar", () => {
+  it("every page renders at its canonical URL", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(settingsHrefToday(p)).toBe(p.href);
+  });
+  it("lists every built page in the sidebar, Workspace Security included", () => {
+    expect(settingsSidebar("workspace").map((p) => p.key)).toContain("security");
+    expect(settingsSidebar("me").map((p) => p.key)).toContain("account/shortcuts");
   });
   it("filters by label, keyword, group and alias", () => {
     expect(filterSettingsPages("2fa").map((p) => p.key)).toEqual(["account/security"]);
@@ -100,7 +134,44 @@ describe("today's hrefs and the sidebar", () => {
     expect(rows).toContainEqual({ source: "/settings/permissions", destination: "/settings/access" });
     expect(rows).toContainEqual({ source: "/settings/tags", destination: "/settings/tasks" });
     expect(rows).toContainEqual({ source: "/account/appearance", destination: "/account/preferences" });
-    expect(rows.every((r) => !r.source.includes("?"))).toBe(true);
+  });
+});
+
+describe("SETTINGS_REDIRECTS", () => {
+  it("has one explicit row for every alias, landing on that alias's page", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      for (const a of p.aliases) {
+        const [path, q = ""] = a.split("?");
+        const r = settingsRedirectFor(path, q ? `?${q}` : "");
+        expect(r, a).not.toBeNull();
+        expect(resolveSettingsPage(r!.destination.split(/[?#]/)[0])?.key, a).toBe(p.key);
+      }
+    }
+  });
+  it("lands tabbed and hashed targets on the right tab", () => {
+    expect(settingsRedirectFor("/settings/tags")?.destination).toBe("/settings/tasks?tab=tags");
+    expect(settingsRedirectFor("/settings/task-types")?.destination).toBe("/settings/tasks?tab=types");
+    expect(settingsRedirectFor("/settings/modules")?.destination).toBe("/settings/apps#modules");
+    expect(settingsRedirectFor("/settings", "?tab=themes")?.destination).toBe("/account/preferences?tab=appearance");
+    expect(settingsRedirectFor("/settings", "?tab=shortcuts")?.destination).toBe("/account/shortcuts");
+    expect(settingsRedirectFor("/settings")).toBeNull();
+    expect(settingsRedirectFor("/settings", "?tab=nope")).toBeNull();
+  });
+  it("preserves the query as Next does, the target tab wins, the hash last", () => {
+    const tags = settingsRedirectFor("/settings/tags")!;
+    expect(settingsRedirectTarget(tags, "?q=bug")).toBe("/settings/tasks?tab=tags&q=bug");
+    const themes = settingsRedirectFor("/settings", "?tab=themes")!;
+    expect(settingsRedirectTarget(themes, "?tab=themes&x=1")).toBe("/account/preferences?tab=appearance&x=1");
+    // Same Location as the next.config row (Next appends the matched query).
+    const shortcuts = settingsRedirectFor("/settings", "?tab=shortcuts")!;
+    expect(settingsRedirectTarget(shortcuts, "?tab=shortcuts&x=1")).toBe("/account/shortcuts?tab=shortcuts&x=1");
+    const modules = settingsRedirectFor("/settings/modules")!;
+    expect(settingsRedirectTarget(modules, "?from=rail")).toBe("/settings/apps?from=rail#modules");
+    // A tab already on the target wins over an incoming one of the same name.
+    expect(settingsRedirectTarget(tags, "?tab=types")).toBe("/settings/tasks?tab=tags");
+  });
+  it("never redirects a canonical page URL", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(settingsRedirectFor(p.href), p.href).toBeNull();
   });
 });
 
@@ -118,13 +189,12 @@ describe("closeSettings origin rule", () => {
     expect(resolveCloseTarget({ returnTo: "/account/profile", lastAppPath: "/account/security" })).toBe("/home");
     expect(resolveCloseTarget({ returnTo: "//evil.example", lastAppPath: "https://evil.example" })).toBe("/home");
   });
-  it("knows the three takeover prefixes and nothing else", () => {
+  it("knows the two takeover prefixes and nothing else", () => {
     expect(isSettingsRoute("/settings")).toBe(true);
     expect(isSettingsRoute("/settings/members")).toBe(true);
     expect(isSettingsRoute("/account/profile")).toBe(true);
-    // /imports renders inside the takeover until it 308s into
-    // /settings/data?tab=import (spec-shell 2.8).
-    expect(isSettingsRoute("/imports")).toBe(true);
+    // /imports 308s into /settings/data?tab=import (Phase 8 Stage D).
+    expect(isSettingsRoute("/imports")).toBe(false);
     expect(isSettingsRoute("/settingsx")).toBe(false);
     expect(isSettingsRoute("/accounting")).toBe(false);
     expect(isSettingsRoute("/importsx")).toBe(false);
@@ -139,7 +209,7 @@ describe("SETTINGS_ENTRY_LIST", () => {
     expect(ids).toContain("process.ack.statement");
     expect(ids).toContain("process.ack.dueDays");
     expect(ids).toContain("process.ack.remindDays");
-    for (const e of SETTINGS_ENTRY_LIST) expect(e.door).toBe("workspace");
+    for (const e of SETTINGS_ENTRY_LIST) if (e.id.startsWith("process.")) expect(e.door).toBe("workspace");
   });
 
   it("points each one at the Organize page's defaults tab, anchored on its own id", () => {
@@ -169,21 +239,78 @@ describe("filterSettingsEntries", () => {
   });
 
   it("matches on label, description, id and keyword", () => {
-    const opts = { allowedExternalGates: ["manage_process"] as const };
-    expect(filterSettingsEntries("statement", opts).map((e) => e.id)).toEqual(["process.ack.statement"]);
-    expect(filterSettingsEntries("due date", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+    const opts = { allowedExternalGates: ["manage_process"] as const, door: "workspace" as const };
+    // The process rows among every Workspace row (the door now lists each
+    // page's own fields too).
+    const proc = (q: string) => filterSettingsEntries(q, opts).map((e) => e.id).filter((id) => id.startsWith("process."));
+    expect(proc("statement")).toEqual(["process.ack.statement"]);
+    expect(proc("due date")).toEqual(["process.ack.remindDays"]);
     expect(filterSettingsEntries("process.ack.dueDays", opts).map((e) => e.id)).toEqual(["process.ack.dueDays"]);
-    expect(filterSettingsEntries("nudge", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+    expect(proc("nudge")).toEqual(["process.ack.remindDays"]);
   });
 
   it("is case-insensitive and ignores surrounding space", () => {
-    const opts = { allowedExternalGates: ["manage_process"] as const };
-    expect(filterSettingsEntries("  REMINDER ", opts).map((e) => e.id)).toEqual(["process.ack.remindDays"]);
+    const opts = { allowedExternalGates: ["manage_process"] as const, door: "workspace" as const };
+    expect(filterSettingsEntries("  REMINDER ", opts).map((e) => e.id).filter((id) => id.startsWith("process."))).toEqual(["process.ack.remindDays"]);
   });
 
   it("filters by door", () => {
     const opts = { allowedExternalGates: ["manage_process"] as const };
-    expect(filterSettingsEntries("", { ...opts, door: "me" })).toEqual([]);
-    expect(filterSettingsEntries("", { ...opts, door: "workspace" }).length).toBe(3);
+    expect(filterSettingsEntries("", { ...opts, door: "me" }).every((e) => e.door === "me")).toBe(true);
+    const ws = filterSettingsEntries("", { ...opts, door: "workspace" });
+    expect(ws.every((e) => e.door === "workspace")).toBe(true);
+    expect(ws.filter((e) => e.id.startsWith("process.")).length).toBe(3);
+  });
+});
+
+describe("Workspace settings field entries (settings spec 1.11)", () => {
+  const ws = SETTINGS_ENTRY_LIST.filter((e) => e.door === "workspace" && !e.externalGate);
+  it("points every row at a Workspace page, and at a tab that page has", () => {
+    for (const e of ws) {
+      expect(e.page, e.id).toBeTruthy();
+      const page = SETTINGS_PAGES[e.page!];
+      expect(page.door, e.id).toBe("workspace");
+      expect(e.href.startsWith(page.href), e.id).toBe(true);
+      const tab = /[?&]tab=([^&#]+)/.exec(e.href)?.[1];
+      if (tab) expect(page.tabs ?? [], e.id).toContain(tab);
+    }
+  });
+  it("covers every Workspace page but Overview and All settings", () => {
+    const pages = new Set(ws.map((e) => e.page));
+    for (const p of SETTINGS_PAGE_LIST.filter((x) => x.door === "workspace" && x.key !== "overview" && x.key !== "all")) expect(pages.has(p.key), p.key).toBe(true);
+  });
+});
+
+describe("My settings field entries (settings spec G1)", () => {
+  const meEntries = SETTINGS_ENTRY_LIST.filter((e) => e.door === "me");
+
+  it("lists fields for every personal page but the index", () => {
+    const pages = new Set(meEntries.map((e) => e.page));
+    for (const key of ["account/profile", "account/preferences", "account/notifications", "account/security", "account/connections"]) {
+      expect(pages.has(key as never)).toBe(true);
+    }
+  });
+
+  it("points every entry at its own page, a registered tab and its own anchor", () => {
+    for (const e of meEntries) {
+      const page = SETTINGS_PAGES[e.page!];
+      expect(page, e.id).toBeTruthy();
+      expect(page.door).toBe("me");
+      const url = new URL(e.href, "https://x.test");
+      expect(url.pathname).toBe(page.href);
+      const tab = url.searchParams.get("tab");
+      if (tab) expect(page.tabs ?? []).toContain(tab);
+      if (url.hash) expect(url.hash).toBe(`#${e.id}`);
+    }
+  });
+
+  it("has unique ids", () => {
+    const ids = SETTINGS_ENTRY_LIST.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("finds a personal setting by keyword", () => {
+    expect(filterSettingsEntries("dark mode", { door: "me" }).map((e) => e.id)).toContain("preferences.appearance.theme.appearance");
+    expect(filterSettingsEntries("2fa", { door: "me" }).map((e) => e.id)).toContain("security.mfa");
   });
 });

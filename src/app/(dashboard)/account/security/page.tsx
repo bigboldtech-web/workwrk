@@ -1,296 +1,404 @@
 "use client";
 
-/* Account · Security: personal posture + org policy.
- *
- *  GET /api/me
- *  GET /api/auth/mfa/status
- *  GET /api/settings
- */
+// My settings > Security (spec-account-auth `/account/security`).
+//
+//   How you log in       Password (age from User.passwordChangedAt), Two step
+//                        verification (Turn on, or a menu with Show backup
+//                        codes / Get new backup codes / Turn off, and no Turn
+//                        off at all when the org requires it for this role),
+//                        Backup codes (count only), Email verified
+//   Where you are logged in   Log out everywhere (a confirm, this device too)
+//   Recent security activity  the last 20 events, plain words, no row action
+//   Presence             Show me as + Clear after, writing User.presenceStatus
+//                        and presenceUntil through the shell (the avatar menu
+//                        writes the same two columns)
+//
+// Gone, on purpose: the invented "security score" (a number nothing measured),
+// the "Access level" row shown as a passed check, and the read-only "Org
+// policy" card whose session timeout and org-wide two step values nothing
+// enforced. The live rules print inside the Change password dialog, and
+// Owners and Admins get one link to where the policy is edited.
 
-import { Dots } from "@/components/ui/dots";
-import { SkeletonLines } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSession, signOut } from "next-auth/react";
-import {
-  ShieldCheck,
-  Key,
-  Mail,
-  Hash,
-  CheckCircle2,
-  AlertTriangle,
-  Building,
-  Smartphone,
-  Activity,
-  ChevronRight,
-  KeyRound,
-  LogIn,
-  LogOut,
-  Clock,
-  RotateCcw,
-  MonitorSmartphone,
-  ShieldAlert,
-} from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
+import { useSearchParams } from "next/navigation";
+import { Check, LogIn, LogOut, KeyRound, MoreHorizontal, RotateCcw, ShieldAlert, ShieldCheck, Repeat, Activity } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
+import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { PickerSelect } from "@/components/settings/picker-select";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { btn, Pending } from "@/components/account/account-ui";
+import { useMe, type MeRecord } from "@/components/account/use-me";
+import { useVerifyCooldown } from "@/components/account/use-verify-cooldown";
+import { MfaEnrolDialog } from "@/components/account/mfa-enrol-dialog";
+import { MfaDisableDialog } from "@/components/account/mfa-disable-dialog";
+import { BackupCodesDialog } from "@/components/account/backup-codes-dialog";
+import { ChangePasswordDialog } from "@/components/account/change-password-dialog";
+import { SignOutEverywhereDialog } from "@/components/account/sign-out-everywhere-dialog";
+import { passwordAgeOf } from "@/lib/auth/security-policy";
+import { formatDate, formatDateTitle, formatRelative } from "@/lib/format/date";
+import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { PRESENCE_CHOICES, presenceChoiceOf, presenceClearAfterOptions, presenceExpiryFor, type PresenceChoice, type PresenceClearAfter } from "@/lib/account/presence-choices";
+import { SECURITY_EVENT_LABEL } from "@/lib/account/security-events";
 
-import { useOsToast } from "@/components/layout/os/toast";
-import { MfaEnrollDialog, MfaDisableDialog } from "./mfa-modal";
-import { ChangePasswordDialog } from "./change-password-modal";
+type SecEvent = { id: string; type: string; description: string; ipAddress: string | null; createdAt: string };
 
-type SecEvent = {
-  id: string;
-  type: string;
-  description: string;
-  ipAddress: string | null;
-  severity: string;
-  createdAt: string;
+const EVENT_ICON: Record<string, typeof LogIn> = {
+  login: LogIn,
+  logout: LogOut,
+  password_changed: KeyRound,
+  password_reset: KeyRound,
+  mfa_enabled: ShieldCheck,
+  mfa_disabled: ShieldAlert,
+  mfa_backup_codes_regenerated: ShieldCheck,
+  signed_out_all_devices: RotateCcw,
+  "org.switch.in": Repeat,
 };
-
-// Icon + label per security event type.
-const EVENT_META: Record<string, { Icon: typeof Key; label: string; warn?: boolean }> = {
-  login: { Icon: LogIn, label: "Signed in" },
-  logout: { Icon: LogOut, label: "Signed out" },
-  password_changed: { Icon: KeyRound, label: "Password changed", warn: true },
-  mfa_enabled: { Icon: ShieldCheck, label: "Two-factor enabled", warn: true },
-  mfa_disabled: { Icon: ShieldAlert, label: "Two-factor disabled", warn: true },
-  signed_out_all_devices: { Icon: RotateCcw, label: "Signed out of all devices", warn: true },
-};
-
-function relativeTime(iso: string): string {
-  const d = new Date(iso).getTime();
-  const s = Math.max(0, Math.floor((Date.now() - d) / 1000));
-  if (s < 60) return "just now";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const days = Math.floor(h / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-type ApiMe = { user?: { id: string; firstName?: string; lastName?: string; email?: string; accessLevel?: string } };
-type SecurityPolicy = { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean; sessionTimeout?: number; twoFactorEnabled?: boolean };
 
 export default function AccountSecurityPage() {
-  const [me, setMe] = useState<ApiMe | null>(null);
-  const [mfa, setMfa] = useState<{ mfaEnabled: boolean; emailVerified: boolean } | null>(null);
-  const [orgSec, setOrgSec] = useState<SecurityPolicy | null>(null);
-  const [events, setEvents] = useState<SecEvent[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [enrollOpen, setEnrollOpen] = useState(false);
+  const me = useMe();
+  return (
+    <SettingsPage pageKey="account/security" subtitle={me.status === "ready" ? me.me.email : undefined}>
+      {me.status === "loading" ? (
+        <SettingsCardStack>
+          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
+          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={1} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={5} /></div>
+        </SettingsCardStack>
+      ) : me.status === "error" ? (
+        <OsEmptyView variant="error" title="Couldn't load your security settings" hint={me.error} action={{ label: "Try again", onClick: me.retry }} />
+      ) : (
+        <SecurityBody me={me.me} refresh={me.refresh} />
+      )}
+    </SettingsPage>
+  );
+}
+
+function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<void> }) {
+  const params = useSearchParams();
+  const prefs = useDatePrefs();
+  const { isOwner, isAdmin } = useViewerRole();
+  const { boot } = useBoot();
+  // settings-architecture 4.4: Owners, and Admins holding the security scope.
+  // Until scoped admins exist (adminScopes empty) every Admin holds every
+  // scope, which is the gate /settings/security itself applies today.
+  const scopes = boot.viewer.adminScopes ?? [];
+  const canOpenPolicy = isOwner || (isAdmin && (scopes.length === 0 || scopes.includes("security")));
+  const verify = useVerifyCooldown(me.email);
+
+  const [enrolOpen, setEnrolOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
-  const [changePwOpen, setChangePwOpen] = useState(false);
-  const [signingOutAll, setSigningOutAll] = useState(false);
-  const { toast } = useOsToast();
-  const { update: updateSession } = useSession();
+  const [codesOpen, setCodesOpen] = useState<null | "read" | "new">(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [logoutAllOpen, setLogoutAllOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The row's menu closes on a click anywhere else (and on Esc, below).
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
 
-  const loadActivity = useCallback(async () => {
-    try {
-      const res = await fetch("/api/me/security-activity");
-      if (res.ok) setEvents((await res.json()).events ?? []);
-    } catch { /* activity is best-effort context */ }
-  }, []);
-
-  async function signOutEverywhere() {
-    setSigningOutAll(true);
-    try {
-      const res = await fetch("/api/me/sign-out-everywhere", { method: "POST" });
-      if (!res.ok) throw new Error();
-      toast("Signed out of all devices. Sign back in to continue.");
-      // This session is revoked too; clear it locally and return to login.
-      await signOut({ callbackUrl: "/login" });
-    } catch {
-      toast("Couldn't sign out other devices. Try again.");
-      setSigningOutAll(false);
+  // ?enrol=mfa (the Security hold's and the login card's pointer) opens the
+  // enrolment once.
+  useEffect(() => {
+    if (params?.get("enrol") === "mfa" && !me.mfaEnabled) {
+      const t = window.setTimeout(() => setEnrolOpen(true), 0);
+      return () => window.clearTimeout(t);
     }
-  }
+  }, [params, me.mfaEnabled]);
 
-  async function resendVerification() {
+  const age = passwordAgeOf(me.passwordChangedAt, me.policy.passwordMaxAgeDays);
+  // An expired password opens the dialog once per session.
+  useEffect(() => {
+    if (age.kind !== "expired") return;
     try {
-      await fetch("/api/auth/request-verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      toast("Verification email sent. Check your inbox.");
-    } catch {
-      toast("Couldn't send verification email");
-    }
-  }
+      if (window.sessionStorage.getItem("workwrk:password-expired-shown")) return;
+      window.sessionStorage.setItem("workwrk:password-expired-shown", "1");
+    } catch { /* storage unavailable: still open it */ }
+    const t = window.setTimeout(() => setPasswordOpen(true), 0);
+    return () => window.clearTimeout(t);
+  }, [age.kind]);
 
-  const load = useCallback(async () => {
-    try {
-      const [meRes, mfaRes, setRes] = await Promise.all([
-        fetch("/api/me"),
-        fetch("/api/auth/mfa/status"),
-        fetch("/api/settings"),
-      ]);
-      if (!meRes.ok) throw new Error(`me ${meRes.status}`);
-      setMe(await meRes.json());
-      if (mfaRes.ok) {
-        const m = await mfaRes.json();
-        const p = m.data ?? { mfaEnabled: m.mfaEnabled ?? false, emailVerified: m.emailVerified ?? false };
-        setMfa({ mfaEnabled: !!p.mfaEnabled, emailVerified: !!p.emailVerified });
-      }
-      if (setRes.ok) {
-        const s = await setRes.json();
-        setOrgSec(s.settings?.security ?? null);
-      }
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-    void loadActivity();
-  }, [loadActivity]);
-  useEffect(() => { void load(); }, [load]);
+  let passwordLine: React.ReactNode = "Not recorded yet";
+  if (age.kind === "expired") passwordLine = <span className="text-danger-text">Expired</span>;
+  else if (age.kind === "soon") passwordLine = <span className="text-warning-text">Expires in {age.daysLeft} day{age.daysLeft === 1 ? "" : "s"}</span>;
+  else if (age.kind === "ok") passwordLine = <span title={formatDateTitle(age.changedAt, prefs)}>Last changed {formatRelative(age.changedAt, prefs)}</span>;
 
-  const score = (() => {
-    if (!mfa) return 0;
-    let s = 50;
-    if (mfa.emailVerified) s += 25;
-    if (mfa.mfaEnabled) s += 25;
-    return s;
-  })();
-  const scoreLabel = score >= 90 ? "Strong" : score >= 70 ? "Good" : score >= 50 ? "Fair" : "Weak";
-  const scoreHue = score >= 90 ? "var(--os-c-green)" : score >= 70 ? "var(--os-c-teal)" : score >= 50 ? "var(--os-c-orange)" : "var(--os-c-red)";
+  const mfaLine = me.mfaEnabled
+    ? me.policy.mfaRequired ? `On, using an authenticator app. Required by ${me.organization.name}` : "On, using an authenticator app"
+    : me.policy.mfaRequired ? <span className="text-warning-text">Off. Required by {me.organization.name}</span> : "Off";
+  const who = me.email;
 
   return (
     <>
-      <OsPageHeader
-        title="Security"
-        actions={
-          <div className="acs__head-actions">
-            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
-          </div>
-        }
-      />
-
-      <div className="acs">
-        {loadError && <div className="acs__error">{loadError}</div>}
-
-        <section className="acs__score" style={{ ["--score-c" as unknown as string]: scoreHue }}>
-          <div className="acs__score-l">
-            <span className="acs__score-tag"><ShieldCheck /> Security score</span>
-            <h2>{scoreLabel}</h2>
-            <p>{score >= 90 ? "Excellent posture. Keep MFA enabled and rotate passwords yearly." : score >= 70 ? "Good posture. Add MFA to reach Strong." : "Address the recommendations below to improve your score."}</p>
-          </div>
-          <div className="acs__score-r">
-            <strong>{score}</strong>
-            <span>of 100</span>
-          </div>
-        </section>
-
-        <section className="acs__section">
-          <header><h2><Key /> Your posture</h2></header>
-          <div className="acs__list">
-            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "No email on file"} action={!mfa?.emailVerified && "Resend"} onAction={() => void resendVerification()} Icon={Mail} />
-            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active, backup codes issued" : "Not enabled"} action={mfa ? (mfa.mfaEnabled ? "Turn off" : "Enable") : null} onAction={() => (mfa?.mfaEnabled ? setDisableOpen(true) : setEnrollOpen(true))} Icon={Smartphone} />
-            <CheckRow ok={true} title="Password" desc="Change your account password" action="Change" onAction={() => setChangePwOpen(true)} Icon={KeyRound} />
-            <CheckRow ok={true} title="Access level" desc={me?.user?.accessLevel ?? "EMPLOYEE"} Icon={Building} />
-          </div>
-        </section>
-
-        <section className="acs__section">
-          <header><h2><Activity /> Org policy</h2></header>
-          <div className="acs__policy">
-            <PolicyRow label="Minimum password length" value={`${orgSec?.minPasswordLength ?? 8} characters`} />
-            <PolicyRow label="Requires uppercase" value={orgSec?.requireUppercase ? "Yes" : "No"} />
-            <PolicyRow label="Requires numbers" value={orgSec?.requireNumbers ? "Yes" : "No"} />
-            <PolicyRow label="Session timeout" value={`${orgSec?.sessionTimeout ?? 30} minutes`} />
-            <PolicyRow label="MFA required org-wide" value={orgSec?.twoFactorEnabled ? "Yes" : "Optional"} highlight={orgSec?.twoFactorEnabled} />
-          </div>
-        </section>
-
-        <section className="acs__section">
-          <header><h2><MonitorSmartphone /> Sessions</h2></header>
-          <div className="acs__sessions">
-            <div className="acs__sessions-copy">
-              Signed in on this device. If you&apos;ve used a shared or lost device,
-              sign out everywhere. It ends every session, including this one.
-            </div>
-            <button type="button" className="acs__danger-btn" onClick={() => void signOutEverywhere()} disabled={signingOutAll}>
-              {signingOutAll ? <Dots variant="pending" /> : <LogOut />}
-              Sign out of all devices
-            </button>
-          </div>
-        </section>
-
-        <section className="acs__section">
-          <header><h2><Clock /> Recent security activity</h2></header>
-          {events === null ? (
-            <SkeletonLines lines={3} />
-          ) : events.length === 0 ? (
-            <div className="acs__act-empty">No recent activity yet.</div>
-          ) : (
-            <div className="acs__act">
-              {events.map((e) => {
-                const meta = EVENT_META[e.type] ?? { Icon: Activity, label: e.description };
-                const Icon = meta.Icon;
-                return (
-                  <div key={e.id} className="acs__act-row">
-                    <span className={`acs__act-icon${meta.warn ? " is-warn" : ""}`}><Icon /></span>
-                    <div className="acs__act-main">
-                      <div className="acs__act-desc">{meta.label}</div>
-                      <div className="acs__act-sub">{e.ipAddress ? `IP ${e.ipAddress}` : "IP not recorded"}</div>
+      <SettingsCardStack>
+        <div className="w-full max-w-[560px]">
+          <SettingsCard title="How you log in" id="security.login">
+            <div>
+              <SettingsRow
+                id="security.password"
+                label="Password"
+                helper={passwordLine}
+                control={<button type="button" className={btn.secondary} onClick={() => setPasswordOpen(true)}>Change password</button>}
+              />
+              <SettingsRow
+                id="security.mfa"
+                label="Two step verification"
+                helper={mfaLine}
+                control={
+                  me.mfaEnabled ? (
+                    <div className="relative" ref={menuRef}>
+                      <button
+                        type="button"
+                        className={btn.secondary}
+                        aria-label="Two step verification options"
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        onClick={() => setMenuOpen((o) => !o)}
+                      >
+                        <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                      </button>
+                      {menuOpen ? (
+                        <div role="menu" className="absolute end-0 top-9 z-20 w-56 rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop,0_8px_24px_rgba(0,0,0,0.12))]" onKeyDown={(e) => { if (e.key === "Escape") setMenuOpen(false); }}>
+                          <MenuRow onClick={() => { setMenuOpen(false); setCodesOpen("read"); }}>Show backup codes</MenuRow>
+                          <MenuRow onClick={() => { setMenuOpen(false); setCodesOpen("new"); }}>Get new backup codes</MenuRow>
+                          {!me.policy.mfaRequired ? (
+                            <MenuRow destructive onClick={() => { setMenuOpen(false); setDisableOpen(true); }}>Turn off</MenuRow>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
-                    <span className="acs__act-time">{relativeTime(e.createdAt)}</span>
-                  </div>
-                );
-              })}
+                  ) : (
+                    <button type="button" className={btn.secondary} onClick={() => setEnrolOpen(true)}>Turn on</button>
+                  )
+                }
+              />
+              {me.mfaEnabled ? (
+                <SettingsRow
+                  id="security.backup"
+                  label="Backup codes"
+                  helper={`${me.backupCodesLeft} of 8 unused`}
+                  control={<button type="button" className={btn.secondary} onClick={() => setCodesOpen("new")}>Get new codes</button>}
+                />
+              ) : null}
+              <SettingsRow
+                id="security.email"
+                label="Email verified"
+                helper={
+                  me.emailVerifiedAt ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Check className="h-4 w-4 text-success-text" strokeWidth={2} aria-hidden />
+                      Verified on {formatDate(me.emailVerifiedAt, prefs, "date")}
+                    </span>
+                  ) : (
+                    <span className="text-warning-text">Not verified</span>
+                  )
+                }
+                control={
+                  me.emailVerifiedAt ? undefined : (
+                    <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
+                      {verify.busy ? <Pending label="Sending" /> : null}
+                      {verify.sent ? "Sent" : "Send verification email"}
+                    </button>
+                  )
+                }
+              />
             </div>
-          )}
-        </section>
-      </div>
+          </SettingsCard>
+          {canOpenPolicy ? (
+            <p className="mt-2 text-sm text-ink-2">
+              <Link href="/settings/security?tab=signin" className={btn.link}>Workspace sign-in policy</Link>
+            </p>
+          ) : null}
+        </div>
 
-      <MfaEnrollDialog
-        open={enrollOpen}
-        onOpenChange={setEnrollOpen}
-        onEnrolled={() => { toast("Two-factor auth enabled"); void load(); }}
-      />
-      <MfaDisableDialog
-        open={disableOpen}
-        onOpenChange={setDisableOpen}
-        onDisabled={() => { toast("Two-factor auth disabled"); void load(); }}
-      />
-      <ChangePasswordDialog
-        open={changePwOpen}
-        onOpenChange={setChangePwOpen}
-        onChanged={(tokenVersionProof) => {
-          // Re-sync this session's token (it survives; other devices are out).
-          // The proof is what lets THIS token take the new version.
-          void updateSession({ tokenVersionProof });
-          toast("Password updated. Other devices signed out.");
-          void loadActivity();
-        }}
-      />
+        <SettingsCard title="Where you are logged in" id="security.sessions">
+          <SettingsRow
+            label="Log out everywhere"
+            helper="Ends every session, on every device, including this one"
+            control={<button type="button" className={btn.dangerGhost} onClick={() => setLogoutAllOpen(true)}>Log out everywhere</button>}
+          />
+        </SettingsCard>
+
+        <ActivityCard />
+
+        <PresenceCard />
+      </SettingsCardStack>
+
+      <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} policy={me.policy.password} onChanged={() => { void refresh(); }} />
+      <MfaEnrolDialog open={enrolOpen} onOpenChange={setEnrolOpen} who={who} onDone={() => { void refresh(); }} />
+      <MfaDisableDialog open={disableOpen} onOpenChange={setDisableOpen} onDone={() => { void refresh(); }} />
+      {codesOpen ? (
+        <BackupCodesDialog
+          open
+          onOpenChange={(v) => { if (!v) setCodesOpen(null); }}
+          left={me.backupCodesLeft}
+          who={who}
+          startInRegenerate={codesOpen === "new"}
+          onDone={() => { void refresh(); }}
+        />
+      ) : null}
+      <SignOutEverywhereDialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen} />
     </>
   );
 }
 
-function CheckRow({ ok, title, desc, action, onAction, Icon }: { ok: boolean; title: string; desc: string; action?: string | false | null; onAction?: () => void; Icon: typeof Key }) {
+function MenuRow({ children, onClick, destructive }: { children: React.ReactNode; onClick: () => void; destructive?: boolean }) {
   return (
-    <div className={`acs__row${ok ? " is-ok" : " is-todo"}`}>
-      <span className="acs__row-status">
-        {ok ? <CheckCircle2 /> : <AlertTriangle />}
-      </span>
-      <span className="acs__row-icon"><Icon /></span>
-      <div className="acs__row-main">
-        <div className="acs__row-title">{title}</div>
-        <div className="acs__row-desc">{desc}</div>
-      </div>
-      {action && (
-        <button type="button" className="acs__row-btn" onClick={onAction}>{action} <ChevronRight /></button>
-      )}
-    </div>
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex h-9 w-full items-center rounded-md px-3 text-start text-base hover:bg-hover ${destructive ? "text-danger-text" : "text-ink"}`}
+    >
+      {children}
+    </button>
   );
 }
 
-function PolicyRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function ActivityCard() {
+  const prefs = useDatePrefs();
+  const [state, setState] = useState<{ status: "loading" | "ready" | "error"; events: SecEvent[] }>({ status: "loading", events: [] });
+  const load = useCallback(async () => {
+    setState({ status: "loading", events: [] });
+    const r = await apiFetch<{ events?: SecEvent[] }>("/api/me/security-activity", { cache: "no-store" });
+    setState(r.ok ? { status: "ready", events: r.data?.events ?? [] } : { status: "error", events: [] });
+  }, []);
+  useEffect(() => {
+    const t = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(t);
+  }, [load]);
+
   return (
-    <div className="acs__policy-row">
-      <span className="acs__policy-label">{label}</span>
-      <span className={`acs__policy-value${highlight ? " is-on" : ""}`}>{value}</span>
-    </div>
+    <SettingsCard title="Recent security activity" wide="security.activity" id="security.activity">
+      {state.status === "loading" ? (
+        <SkeletonRows rows={5} />
+      ) : state.status === "error" ? (
+        <p className="text-sm text-ink-2">
+          Couldn&apos;t load your activity.{" "}
+          <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button>
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] border-collapse text-base">
+            <thead>
+              <tr className="h-11 text-sm text-ink-2">
+                <th className="px-2 text-start font-medium">What</th>
+                <th className="px-2 text-start font-medium">Where</th>
+                <th className="px-2 text-start font-medium">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.events.length === 0 ? (
+                <tr className="border-t border-line-soft">
+                  <td colSpan={3} className="h-[var(--os-row-h,44px)] px-2 text-ink-2">Nothing yet · Events show up here when you log in or change your password</td>
+                </tr>
+              ) : (
+                state.events.map((e) => {
+                  const Icon = EVENT_ICON[e.type] ?? Activity;
+                  return (
+                    <tr key={e.id} className="h-[var(--os-row-h,44px)] border-t border-line-soft hover:bg-hover">
+                      <td className="px-2">
+                        <span className="inline-flex items-center gap-2 text-ink">
+                          <Icon className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
+                          {SECURITY_EVENT_LABEL[e.type] ?? e.description}
+                        </span>
+                      </td>
+                      <td className="px-2 text-ink-2">{e.ipAddress || "Unknown"}</td>
+                      <td className="px-2 text-ink-2" title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+          {state.events.length > 0 ? <p className="mt-2 text-sm text-ink-3">Showing the last {state.events.length} events</p> : null}
+        </div>
+      )}
+    </SettingsCard>
+  );
+}
+
+function PresenceCard() {
+  const { presenceStatus, setPresenceStatus, openStatusModal } = useOsShell();
+  const prefs = useDatePrefs();
+  const choice = presenceChoiceOf(presenceStatus);
+  // null until the person picks one here: the select then shows the stored
+  // expiry ("Until ...") rather than a default that contradicts it.
+  const [clearAfter, setClearAfter] = useState<PresenceClearAfter | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [failed, setFailed] = useState<null | { c: PresenceChoice; after: PresenceClearAfter }>(null);
+  const clearOptions = useMemo(() => presenceClearAfterOptions(), []);
+
+  // Saved only once the server kept it; a refusal reverts the dot and offers
+  // Retry on the row (the SAVE PATHS rule).
+  const apply = async (c: PresenceChoice, after: PresenceClearAfter) => {
+    if (c === "custom") { openStatusModal(); return; }
+    const now = new Date();
+    const base: PresenceStatus =
+      c === "active" ? DEFAULT_PRESENCE : c === "dnd" ? DND_PRESENCE : { emoji: "\u{1F319}", label: "Away", expiresAt: null };
+    const ok = await setPresenceStatus({ ...base, expiresAt: c === "active" ? null : presenceExpiryFor(after, now) });
+    if (ok) { setSavedAt(Date.now()); setFailed(null); } else setFailed({ c, after });
+  };
+  const error = failed ? { message: "Couldn't save", onRetry: () => { void apply(failed.c, failed.after); } } : null;
+
+  return (
+    <SettingsCard title="Presence" id="security.presence" description="What teammates see on your avatar dot. The avatar menu changes the same status.">
+      <div>
+        <SettingsRow
+          label="Show me as"
+          helper={choice === "custom" ? `${presenceStatus.emoji ? `${presenceStatus.emoji} ` : ""}${presenceStatus.label}` : undefined}
+          savedAt={savedAt}
+          error={error}
+          control={
+            <PickerSelect
+              label="Show me as"
+              value={choice}
+              options={PRESENCE_CHOICES.map((p) => ({ value: p.value, label: p.label }))}
+              onChange={(v) => { void apply(v as PresenceChoice, clearAfter ?? "never"); }}
+            />
+          }
+        />
+        {/* Clear after only means something for Away and Do not disturb here;
+            a custom status carries its own expiry, set where it is written,
+            and Active never expires. So no row that changes nothing. */}
+        {choice === "away" || choice === "dnd" ? (
+          <SettingsRow
+            label="Clear after"
+            helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
+            control={
+              <PickerSelect
+                label="Clear after"
+                value={clearAfter ?? (presenceStatus.expiresAt ? "current" : "never")}
+                options={[
+                  ...(clearAfter === null && presenceStatus.expiresAt ? [{ value: "current", label: `Until ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` }] : []),
+                  ...clearOptions.map((o) => ({ value: o.value, label: o.label })),
+                ]}
+                onChange={(v) => {
+                  if (v === "current") return;
+                  const next = v as PresenceClearAfter;
+                  setClearAfter(next);
+                  void apply(choice, next);
+                }}
+              />
+            }
+          />
+        ) : choice === "custom" ? (
+          <SettingsRow
+            label="Clear after"
+            helper={presenceStatus.expiresAt ? `Clears ${formatDate(presenceStatus.expiresAt, prefs, "datetime")}` : "Stays until you change it"}
+            control={<button type="button" className={btn.secondary} onClick={openStatusModal}>Edit status</button>}
+          />
+        ) : null}
+      </div>
+    </SettingsCard>
   );
 }

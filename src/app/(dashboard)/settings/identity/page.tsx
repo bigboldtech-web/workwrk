@@ -1,412 +1,513 @@
 "use client";
 
-/* Settings · Identity & company profile — org name, domain, logo, and the
- * mission/vision/about profile that grounds AI KRA generation.
- *
- * Data plane (all endpoints already exist):
- *   GET   /api/settings                     → { organization:{name,domain,logo}, settings:{companyProfile} }
- *   PATCH /api/settings { section:"general", data:{ name, domain } }   ← org name + domain
- *   PATCH /api/settings { companyProfile:{…} }                         ← mission/vision/about/industry/values
- *   POST  /api/settings/logo  (FormData: logo)  DELETE /api/settings/logo   ← org logo
- *
- * Locale (timezone/currency/fiscal/language) lives on /settings/locale and
- * is intentionally NOT duplicated here — one writer per field, no drift.
- *
- * Admin-gated by the layout (requireOrgAdminOrRedirect); we also mirror the
- * guard client-side so the controls read-only if a non-admin ever lands here.
- */
+// Workspace settings > Identity & culture (spec-settings-workspace
+// `/settings/identity`, settings-architecture 5.2). Four tabs:
+//
+//   Profile              Save bar, ONE PATCH { section: "profile" }; the
+//                        logo autosaves on pick (POST / DELETE
+//                        /api/settings/logo), outside the Save bar
+//   Culture              Save bar, ONE PATCH { section: "culture" }
+//                        (companyProfile: mission, vision, about, values,
+//                        splash), read by the splash, the loader captions
+//                        and AI KRA generation
+//   Appearance defaults  autosave per row (the old /settings/defaults)
+//   Danger zone          Owner only: Transfer ownership, Delete workspace
+//
+// A failed GET replaces the form with ErrorState (useSettingsSection), so a
+// Save can never write empty strings over live values.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, Loader2, X, Plus,
-} from "lucide-react";
-import { useRole } from "@/hooks/use-role";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { signOut, useSession } from "next-auth/react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { Image as ImageIcon } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { SaveBar } from "@/components/settings/save-bar";
+import { ChipsInput, ConfirmDialog, Field, NativeSelect, Pending, TextArea, TextInput, btn } from "@/components/settings/settings-form";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { AdminOnly } from "@/components/access";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
+import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
+import { normalizeDomain } from "@/lib/settings/org-policy";
+import { SPLASH_POLICIES } from "@/lib/settings/org-settings-sections";
+import { AppearanceDefaults } from "./appearance-defaults";
+import { useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { WORKSPACE_RENAMED_EVENT } from "@/components/layout/os/settings-shell";
 
-// Mirror the /api/settings/logo endpoint's server-side validation so we can
-// reject bad files before the round-trip (endpoint allows these + 2MB cap).
 const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
-const LOGO_MAX = 2 * 1024 * 1024; // 2MB
+const LOGO_MAX = 2 * 1024 * 1024;
 
-type IdentityState = {
-  name: string;
-  domain: string;
-  logo: string | null;
-  mission: string;
-  vision: string;
-  about: string;
-  industry: string;
-  values: string[]; // add/remove one at a time; stored as string[]
+const IDENTITY_TABS: readonly SettingsTab[] = settingsTabs("identity");
+
+const BUSINESS_TYPES = ["Services", "Product", "Retail", "Manufacturing", "Non-profit", "Other"];
+const TEAM_SIZES = ["1 to 10", "11 to 50", "51 to 200", "201 to 1000", "1000+"];
+const INDUSTRIES = [
+  "Software", "Professional services", "Manufacturing", "Retail and ecommerce", "Healthcare", "Education",
+  "Financial services", "Real estate", "Media and marketing", "Hospitality", "Logistics", "Non-profit", "Other",
+];
+const SPLASH_LABELS: Record<(typeof SPLASH_POLICIES)[number], string> = {
+  "every-open": "Every app open",
+  "first-open-daily": "First open each day",
+  off: "Off",
 };
 
+type Viewer = { isOwner: boolean; mayManageOwnerPages: boolean };
+
 export default function IdentitySettingsPage() {
-  const { accessLevel } = useRole();
-  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel);
+  return (
+    <SettingsPage
+      pageKey="identity"
+      tabs={IDENTITY_TABS}
+      subtitle="Your workspace name, your mission, and the defaults everyone starts with."
+    >
+      {(tab) =>
+        tab === "appearance" ? <AppearanceDefaults /> : tab === "culture" ? <CultureTab /> : tab === "danger" ? <DangerTab /> : <ProfileTab />
+      }
+    </SettingsPage>
+  );
+}
+
+/* ───────────────────────── Profile ───────────────────────── */
+
+interface ProfileForm {
+  name: string;
+  domain: string;
+  industry: string;
+  businessType: string;
+  teamSize: string;
+}
+
+function selectProfile(b: SettingsGetBody): { form: ProfileForm; logo: string | null } {
+  const s = (b.settings ?? {}) as Record<string, unknown>;
+  const cp = (s.companyProfile ?? {}) as { industry?: string };
+  return {
+    form: {
+      name: b.organization?.name ?? "",
+      domain: b.organization?.domain ?? "",
+      industry: (typeof s.industry === "string" && s.industry) || cp.industry || "",
+      businessType: typeof s.businessType === "string" ? s.businessType : "",
+      teamSize: typeof s.teamSize === "string" ? s.teamSize : "",
+    },
+    logo: b.organization?.logo ?? null,
+  };
+}
+
+// What the retired /setup wizard stored, in the words this page uses, so an
+// existing workspace never reads a raw code ("smb", "1-10") in a select.
+const LEGACY_WORDS: Record<string, string> = {
+  startup: "Startup",
+  smb: "Small business",
+  mid_market: "Mid-market",
+  enterprise: "Enterprise",
+  "1-10": "1 to 10",
+  "11-50": "11 to 50",
+  "51-200": "51 to 200",
+  "201-500": "201 to 500",
+  "500+": "500+",
+};
+
+function withCurrent(list: string[], current: string): { value: string; label: string }[] {
+  const opts = [{ value: "", label: "Not set" }, ...list.map((v) => ({ value: v, label: v }))];
+  if (current && !list.includes(current)) opts.push({ value: current, label: LEGACY_WORDS[current] ?? current });
+  return opts;
+}
+
+function ProfileTab() {
+  const s = useSettingsSection("profile", selectProfile);
+  const { data: session } = useSession();
+  const sessionOrgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
+  const showUpcoming = useShowUpcoming();
   const { toast } = useOsToast();
-
-  const [state, setState] = useState<IdentityState | null>(null);
+  const [draft, setDraft] = useState<ProfileForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<{ field?: keyof ProfileForm; message: string } | null>(null);
+  const [logo, setLogo] = useState<string | null | undefined>(undefined);
   const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings");
-      if (!res.ok) { setState(blank()); return; }
-      const d = await res.json();
-      const org = d?.organization ?? {};
-      const profile = d?.settings?.companyProfile ?? {};
-      setState({
-        name: typeof org.name === "string" ? org.name : "",
-        domain: typeof org.domain === "string" ? org.domain : "",
-        logo: typeof org.logo === "string" ? org.logo : null,
-        mission: typeof profile.mission === "string" ? profile.mission : "",
-        vision: typeof profile.vision === "string" ? profile.vision : "",
-        about: typeof profile.about === "string" ? profile.about : "",
-        industry: typeof profile.industry === "string" ? profile.industry : "",
-        values: Array.isArray(profile.values) ? profile.values.filter((v: unknown): v is string => typeof v === "string" && v.trim().length > 0) : [],
-      });
-    } catch { setState(blank()); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  const base = s.data?.form ?? null;
+  const form = draft ?? base;
+  const dirty = !!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base);
+  const shownLogo = logo === undefined ? (s.data?.logo ?? null) : logo;
+  const set = <K extends keyof ProfileForm>(k: K, v: ProfileForm[K]) => {
+    setErr(null);
+    setDraft((d) => ({ ...(d ?? base ?? { name: "", domain: "", industry: "", businessType: "", teamSize: "" }), [k]: v }));
+  };
 
-  const set = <K extends keyof IdentityState>(k: K, v: IdentityState[K]) =>
-    setState((s) => (s ? { ...s, [k]: v } : s));
-
-  async function save() {
-    if (!state || !canEdit) return;
+  const save = useCallback(async () => {
+    if (!draft) return true;
+    if (!draft.name.trim()) { setErr({ field: "name", message: "Workspace name is required" }); return false; }
+    if (draft.domain.trim() && !normalizeDomain(draft.domain)) { setErr({ field: "domain", message: "Enter a domain like acme.com" }); return false; }
     setSaving(true);
-    try {
-      // 1. Org name + domain via the section the API actually accepts.
-      const gen = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          section: "general",
-          data: { name: state.name.trim(), domain: state.domain.trim() },
-        }),
-      });
-      if (!gen.ok) throw new Error(await errText(gen));
-
-      // 2. Company profile via the top-level branch (runs sequentially so it
-      //    reads the settings the step above just wrote — no lost update).
-      const values = state.values.map((v) => v.trim()).filter(Boolean);
-      const prof = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyProfile: {
-            mission: state.mission.trim(),
-            vision: state.vision.trim(),
-            about: state.about.trim(),
-            industry: state.industry.trim(),
-            values,
-          },
-        }),
-      });
-      if (!prof.ok) throw new Error(await errText(prof));
-
-      toast("Identity saved");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn't save");
-    } finally {
-      setSaving(false);
+    const r = await s.save({
+      name: draft.name.trim(),
+      domain: draft.domain.trim() ? normalizeDomain(draft.domain) : null,
+      industry: draft.industry.trim(),
+      businessType: draft.businessType,
+      teamSize: draft.teamSize,
+    });
+    setSaving(false);
+    if (!r.ok) { setErr({ message: r.error ?? "Couldn't save" }); return false; }
+    setDraft(null);
+    toast("Profile saved");
+    window.dispatchEvent(new Event("workwrk:prefs-changed"));
+    // The settings crumb reads the workspace name; tell it the new one. Not
+    // session.update(): that re-anchors the token to the account's home
+    // workspace, which is not always the one this tab acts in.
+    if (sessionOrgId && base && draft.name.trim() !== base.name) {
+      window.dispatchEvent(new CustomEvent(WORKSPACE_RENAMED_EVENT, { detail: { organizationId: sessionOrgId, name: draft.name.trim() } }));
     }
-  }
+    return true;
+  }, [draft, s, toast, base, sessionOrgId]);
 
   async function onPickLogo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file
+    e.target.value = "";
     if (!file) return;
-    if (!LOGO_TYPES.includes(file.type)) { toast("Use a PNG, JPEG, WebP, or SVG"); return; }
-    if (file.size > LOGO_MAX) { toast("Logo must be under 2MB"); return; }
+    if (!LOGO_TYPES.includes(file.type)) { toast("Use a PNG, JPEG, WebP or SVG"); return; }
+    if (file.size > LOGO_MAX) { toast("The logo must be under 2 MB"); return; }
     setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("logo", file);
-      const res = await fetch("/api/settings/logo", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(await errText(res));
-      const d = await res.json();
-      set("logo", typeof d?.logo === "string" ? d.logo : null);
-      toast("Logo updated");
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
+    const fd = new FormData();
+    fd.append("logo", file);
+    const r = await apiFetch<{ logo?: string }>("/api/settings/logo", { method: "POST", body: fd });
+    setUploading(false);
+    if (!r.ok) { toast(r.error || "Upload failed"); return; }
+    setLogo(typeof r.data?.logo === "string" ? r.data.logo : null);
+    toast("Logo updated");
   }
-
   async function removeLogo() {
-    if (!canEdit) return;
     setUploading(true);
-    try {
-      const res = await fetch("/api/settings/logo", { method: "DELETE" });
-      if (!res.ok) throw new Error(await errText(res));
-      set("logo", null);
-      toast("Logo removed");
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Couldn't remove logo");
-    } finally {
-      setUploading(false);
+    const r = await apiFetch("/api/settings/logo", { method: "DELETE" });
+    setUploading(false);
+    if (!r.ok) { toast(r.error || "Couldn't remove the logo"); return; }
+    setLogo(null);
+    toast("Logo removed");
+  }
+
+  if (s.status === "error") return <ErrorState what="the workspace profile" hint={s.error ?? undefined} onRetry={s.retry} />;
+  if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;
+
+  const domainChanged = !!base && form.domain.trim() !== base.domain;
+  return (
+    <>
+      <SettingsCardStack>
+        <SettingsCard title="Workspace" id="identity.workspace">
+          <Field label="Logo" helper="PNG, JPG, SVG or WebP, up to 2 MB. Saved as soon as you pick it." id="identity.logo">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border border-line bg-hover">
+                {shownLogo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={shownLogo} alt="Workspace logo" className="h-full w-full object-contain" />
+                ) : (
+                  <ImageIcon className="h-6 w-6 text-ink-3" strokeWidth={1.5} aria-hidden />
+                )}
+              </span>
+              <button type="button" className={btn.secondary} disabled={uploading} onClick={() => fileRef.current?.click()}>
+                {uploading ? <Pending label="Uploading" /> : null}
+                {shownLogo ? "Replace" : "Upload"}
+              </button>
+              {shownLogo ? (
+                <button type="button" className={btn.secondary} disabled={uploading} onClick={() => { void removeLogo(); }}>Remove</button>
+              ) : null}
+              <input ref={fileRef} type="file" accept={LOGO_ACCEPT} className="hidden" onChange={(e) => { void onPickLogo(e); }} />
+            </div>
+          </Field>
+          <Field label="Workspace name" htmlFor="id-name" required error={err?.field === "name" ? err.message : null} id="identity.name">
+            <TextInput id="id-name" value={form.name} maxLength={120} className="max-w-[360px]" invalid={err?.field === "name"} onChange={(e) => set("name", e.target.value)} />
+          </Field>
+          <Field
+            label="Primary email domain"
+            htmlFor="id-domain"
+            id="identity.domain"
+            error={err?.field === "domain" ? err.message : null}
+            helper={domainChanged ? "Existing invitations keep the old domain." : "Used by invitations and the allowed sign-in domains."}
+          >
+            <span className="flex max-w-[280px] items-center gap-1.5">
+              <span className="text-base text-ink-2">@</span>
+              <TextInput id="id-domain" value={form.domain} placeholder="acme.com" invalid={err?.field === "domain"} onChange={(e) => set("domain", e.target.value)} />
+            </span>
+          </Field>
+        </SettingsCard>
+
+        <SettingsCard title="About the business" description="The industry grounds AI drafts (KRAs, SOPs) in what your company actually does." id="identity.business">
+          <Field label="Industry" htmlFor="id-industry" id="identity.industry">
+            <TextInput id="id-industry" list="id-industries" value={form.industry} maxLength={200} className="max-w-[360px]" onChange={(e) => set("industry", e.target.value)} />
+            <datalist id="id-industries">
+              {INDUSTRIES.map((i) => <option key={i} value={i} />)}
+            </datalist>
+          </Field>
+          {/* Stored, but nothing reads them yet (settings-architecture 9.1):
+              behind Show upcoming features, with that said, until a reader
+              exists. The stored values are kept and saved untouched. */}
+          {showUpcoming ? (
+            <>
+              <Field label="Business type" htmlFor="id-btype" id="identity.businessType" helper="Not used anywhere yet.">
+                <NativeSelect id="id-btype" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
+              </Field>
+              <Field label="Team size" htmlFor="id-tsize" id="identity.teamSize" helper="Not used anywhere yet.">
+                <NativeSelect id="id-tsize" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
+              </Field>
+            </>
+          ) : null}
+        </SettingsCard>
+
+        <SettingsCard title="Branding" id="identity.branding">
+          <SettingsRow
+            label="Custom branding"
+            helper="Your logo and name on the sign-in screen and in emails."
+            control={<Link href="/settings/billing" className="text-sm font-medium text-brand-deep hover:underline">Available on Enterprise</Link>}
+          />
+        </SettingsCard>
+        <p className="text-sm text-ink-2">
+          Time zone, currency and the fiscal year are on{" "}
+          <Link href="/settings/locale" className="font-medium text-brand-deep hover:underline">{SETTINGS_PAGES.locale.label}</Link>.
+        </p>
+        {err && !err.field ? <p role="alert" className="text-sm text-danger-text">{err.message}</p> : null}
+      </SettingsCardStack>
+      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); }} onSave={save} />
+    </>
+  );
+}
+
+/* ───────────────────────── Culture ───────────────────────── */
+
+interface CultureForm {
+  mission: string;
+  vision: string;
+  about: string;
+  values: string[];
+  splash: (typeof SPLASH_POLICIES)[number];
+}
+
+function selectCulture(b: SettingsGetBody): CultureForm {
+  const cp = ((b.settings ?? {}) as { companyProfile?: Record<string, unknown> }).companyProfile ?? {};
+  const splash = cp.splash;
+  return {
+    mission: typeof cp.mission === "string" ? cp.mission : "",
+    vision: typeof cp.vision === "string" ? cp.vision : "",
+    about: typeof cp.about === "string" ? cp.about : "",
+    values: Array.isArray(cp.values) ? (cp.values as unknown[]).filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [],
+    // Unset reads as what the product does for it: /api/boot (the one thing
+    // that drives the splash) falls back to "first-open-daily".
+    splash: splash === "every-open" || splash === "off" ? splash : "first-open-daily",
+  };
+}
+
+function CultureTab() {
+  const s = useSettingsSection("culture", selectCulture);
+  const { toast } = useOsToast();
+  const [draft, setDraft] = useState<CultureForm | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const base = s.data;
+  const form = draft ?? base;
+  const dirty = !!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base);
+  const set = <K extends keyof CultureForm>(k: K, v: CultureForm[K]) => {
+    setErr(null);
+    setDraft((d) => ({ ...(d ?? (base as CultureForm)), [k]: v }));
+  };
+
+  const save = useCallback(async () => {
+    if (!draft) return true;
+    setSaving(true);
+    const r = await s.save({
+      mission: draft.mission.trim(),
+      vision: draft.vision.trim(),
+      about: draft.about.trim(),
+      values: draft.values.map((v) => v.trim()).filter(Boolean),
+      // Only when it was changed here: a mission edit never rewrites the
+      // splash policy.
+      ...(base && draft.splash !== base.splash ? { splash: draft.splash } : {}),
+    });
+    setSaving(false);
+    if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
+    setDraft(null);
+    toast("Culture saved");
+    window.dispatchEvent(new Event("workwrk:prefs-changed"));
+    return true;
+  }, [draft, base, s, toast]);
+
+  if (s.status === "error") return <ErrorState what="the culture settings" hint={s.error ?? undefined} onRetry={s.retry} />;
+  if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;
+
+  return (
+    <>
+      <SettingsCardStack>
+        <SettingsCard title="Mission and vision" id="identity.mission">
+          <Field label="Mission" htmlFor="cu-mission" helper="Why the company exists. Shown on the welcome splash." id="culture.mission">
+            <TextArea id="cu-mission" value={form.mission} maxLength={600} onChange={(e) => set("mission", e.target.value)} />
+          </Field>
+          <Field label="Vision" htmlFor="cu-vision" id="culture.vision">
+            <TextArea id="cu-vision" value={form.vision} maxLength={2000} onChange={(e) => set("vision", e.target.value)} />
+          </Field>
+          <Field label="About" htmlFor="cu-about" helper="What the company does and who it serves. Grounds AI drafts." id="culture.about">
+            <TextArea id="cu-about" value={form.about} maxLength={4000} onChange={(e) => set("about", e.target.value)} />
+          </Field>
+        </SettingsCard>
+        <SettingsCard title="Values and the welcome splash" id="identity.values">
+          <Field label="Core values" helper="Values show on the welcome splash and when someone gives kudos." id="culture.values">
+            <ChipsInput values={form.values} onChange={(v) => set("values", v)} max={12} reorder ariaLabel="Core values" placeholder="Add a value and press Enter" />
+          </Field>
+          <Field label="Welcome splash" id="culture.splash">
+            <SegmentedControl
+              label="Welcome splash"
+              value={form.splash}
+              options={SPLASH_POLICIES.map((v) => ({ value: v, label: SPLASH_LABELS[v] }))}
+              onChange={(v) => set("splash", v)}
+            />
+          </Field>
+        </SettingsCard>
+        {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
+      </SettingsCardStack>
+      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); }} onSave={save} />
+    </>
+  );
+}
+
+/* ───────────────────────── Danger zone ───────────────────────── */
+
+function DangerTab() {
+  const { update: updateSession } = useSession();
+  const { toast } = useOsToast();
+  const s = useSettingsSection("profile", (b) => ({
+    orgName: b.organization?.name ?? "",
+    viewer: ((b as { viewer?: Viewer }).viewer ?? { isOwner: false, mayManageOwnerPages: false }) as Viewer,
+  }));
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [target, setTarget] = useState<PickPerson | null>(null);
+  const [removeMe, setRemoveMe] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [owners, setOwners] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!transferOpen) return;
+    void apiFetch<{ admins: { name: string }[] }>("/api/org/admins").then((r) => {
+      if (r.ok) setOwners(r.data.admins.map((a) => a.name));
+    });
+  }, [transferOpen]);
+
+  const remaining = useMemo(() => {
+    const names = [...owners];
+    if (target) names.push(`${target.firstName ?? ""} ${target.lastName ?? ""}`.trim());
+    return names.filter(Boolean);
+  }, [owners, target]);
+
+  if (s.status === "error") return <ErrorState what="the workspace" hint={s.error ?? undefined} onRetry={s.retry} />;
+  if (!s.data) return <SkeletonRows rows={3} className="max-w-[560px]" />;
+  const { orgName, viewer } = s.data;
+  if (!viewer.mayManageOwnerPages) {
+    return <AdminOnly page="Danger zone" managedBy="Owners" back={{ fallbackHref: "/settings", label: "Back to Overview" }} />;
+  }
+
+  async function transfer() {
+    if (!target) return;
+    setBusy(true);
+    setError(null);
+    const r = await apiFetch<{ tokenVersionProof?: string | null }>("/api/settings/ownership", { method: "POST", json: { userId: target.id, removeMe } });
+    setBusy(false);
+    if (!r.ok) { setError(r.error); return; }
+    if (r.data?.tokenVersionProof) await updateSession({ tokenVersionProof: r.data.tokenVersionProof });
+    setTransferOpen(false);
+    setTarget(null);
+    toast("Ownership updated");
+  }
+
+  async function del() {
+    setBusy(true);
+    setError(null);
+    const r = await apiFetch("/api/organizations/delete", { method: "POST", json: { confirmName: orgName, confirmPhrase: "DELETE" } });
+    setBusy(false);
+    if (!r.ok) { setError(r.error); return; }
+    setDeleteOpen(false);
+    // Out of the workspace at once (it was the workspace menu's behaviour):
+    // into another workspace this person belongs to, else signed out. The
+    // session check would move them within five minutes anyway.
+    const orgs = await apiFetch<{ memberships?: { isCurrent: boolean; organization: { id: string; name: string } }[] }>("/api/me/orgs", { cache: "no-store" });
+    const other = orgs.ok ? (orgs.data?.memberships ?? []).find((m) => !m.isCurrent)?.organization : undefined;
+    if (other) {
+      toast(`The workspace is scheduled for deletion. Switching you to ${other.name}`);
+      const sw = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: other.id } });
+      if (sw.ok) {
+        await updateSession();
+        window.location.href = WORK_HOME_HREF;
+        return;
+      }
     }
+    toast("The workspace is scheduled for deletion");
+    void signOut({ callbackUrl: "/login" });
   }
 
   return (
-    <div className="px-6 pt-6">
-      <header className="mb-1 flex items-center gap-2">
-        <Building2 className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">
-          Identity &amp; company profile
-        </h1>
-      </header>
-      <p className="mb-5 max-w-2xl text-base text-zinc-500">
-        Your organization&apos;s name, logo, and the mission/vision that grounds AI.
-        Timezone, currency and fiscal year live under{" "}
-        <a href="/settings/locale" className="text-[var(--os-brand,#0073EA)] hover:underline">Locale &amp; finance</a>.
-        {canEdit ? "" : " You need admin access to change these."}
-      </p>
-
-      {state === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
-        </div>
-      ) : (
-        <>
-          {/* Brand -------------------------------------------------------- */}
-          <section className="max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
-            <SectionHead icon={<Building2 className="h-4 w-4 text-zinc-500" />} title="Brand" />
-
-            {/* Logo */}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-zinc-700">Organization logo</label>
-              <div className="flex items-center gap-3">
-                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
-                  {state.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={state.logo} alt="Organization logo" className="h-full w-full object-contain" />
-                  ) : (
-                    <ImageIcon className="h-5 w-5 text-zinc-300" />
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!canEdit || uploading}
-                    onClick={() => fileRef.current?.click()}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
-                  >
-                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                    {state.logo ? "Replace" : "Upload"}
-                  </button>
-                  {state.logo && (
-                    <button
-                      type="button"
-                      disabled={!canEdit || uploading}
-                      onClick={removeLogo}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-[#E2445C] hover:bg-zinc-50 disabled:opacity-40"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" /> Remove
-                    </button>
-                  )}
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept={LOGO_ACCEPT}
-                    className="hidden"
-                    onChange={onPickLogo}
-                  />
-                </div>
-              </div>
-              <p className="mt-1.5 text-xs text-zinc-400">PNG, JPEG, WebP or SVG · up to 2MB · saved instantly.</p>
-            </div>
-
-            <TextField
-              label="Organization name" value={state.name} disabled={!canEdit}
-              placeholder="Acme Inc."
-              hint="Shown in the sidebar and notifications."
-              onChange={(v) => set("name", v)}
-            />
-            <TextField
-              label="Primary domain" value={state.domain} disabled={!canEdit}
-              placeholder="acme.com"
-              hint="Used to match teammates signing in with a company email."
-              onChange={(v) => set("domain", v)}
-              icon={<Globe className="h-3.5 w-3.5 text-zinc-400" />}
-            />
-          </section>
-
-          {/* Company profile --------------------------------------------- */}
-          <section className="mt-5 max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
-            <SectionHead
-              icon={<Sparkles className="h-4 w-4 text-zinc-500" />}
-              title="Company profile"
-            />
-            <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-xs text-zinc-600">
-              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
-              <span>Your <strong>mission</strong> and <strong>values</strong> become the loading screen: when the app opens (and periodically as people work), the team sees one of them — mission and values take turns — for a moment. They also ground AI KRA &amp; KPI generation.</span>
-            </div>
-
-            <TextField
-              label="Industry" value={state.industry} disabled={!canEdit}
-              placeholder="e.g. SaaS · Manufacturing · Healthcare"
-              onChange={(v) => set("industry", v)}
-            />
-            <AreaField
-              label="Mission" value={state.mission} disabled={!canEdit}
-              placeholder="Why the company exists — the change you're here to make."
-              onChange={(v) => set("mission", v)}
-            />
-            <AreaField
-              label="Vision" value={state.vision} disabled={!canEdit}
-              placeholder="Where the company is headed over the next few years."
-              onChange={(v) => set("vision", v)}
-            />
-            <AreaField
-              label="About" value={state.about} disabled={!canEdit}
-              placeholder="What the company does, who it serves, and how."
-              onChange={(v) => set("about", v)}
-            />
-            <ValuesField
-              values={state.values} disabled={!canEdit}
-              onChange={(v) => set("values", v)}
-            />
-          </section>
-
-          <div className="mt-5 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={save}
-              disabled={!canEdit || saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-sm font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Save changes
-            </button>
-          </div>
-        </>
-      )}
-      <div className="h-10" />
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-
-function blank(): IdentityState {
-  return { name: "", domain: "", logo: null, mission: "", vision: "", about: "", industry: "", values: [] };
-}
-
-async function errText(res: Response): Promise<string> {
-  if (res.status === 403) return "Admin access required";
-  const d = await res.json().catch(() => null);
-  return (d && typeof d.error === "string" && d.error) || "Couldn't save";
-}
-
-function SectionHead({ icon, title }: { icon: React.ReactNode; title: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {icon}
-      <h2 className="text-base font-semibold text-zinc-800">{title}</h2>
-    </div>
-  );
-}
-
-function TextField({
-  label, value, onChange, placeholder, hint, disabled, icon,
-}: {
-  label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; hint?: string; disabled?: boolean; icon?: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-zinc-700">{label}</label>
-      <div className="relative">
-        {icon && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">{icon}</span>}
-        <input
-          type="text"
-          value={value}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          className={`h-8 w-full rounded-md border border-zinc-200 bg-white ${icon ? "pl-8" : "px-2.5"} pr-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60`}
+    <SettingsCardStack>
+      <SettingsCard title="Danger zone" danger id="identity.danger">
+        <SettingsRow
+          id="identity.transfer"
+          label="Transfer ownership"
+          helper={viewer.isOwner ? "Make someone else an Owner of this workspace." : "Only an Owner can make someone else an Owner."}
+          control={viewer.isOwner ? <button type="button" className={btn.dangerGhost} onClick={() => { setError(null); setTransferOpen(true); }}>Transfer ownership</button> : null}
         />
-      </div>
-      {hint && <p className="mt-1 text-xs text-zinc-400">{hint}</p>}
-    </div>
-  );
-}
+        <SettingsRow
+          id="identity.delete"
+          label="Delete workspace"
+          helper="Everyone is signed out. WorkwrK support can restore it for 30 days; after that it is gone for good."
+          control={<button type="button" className={btn.dangerGhost} onClick={() => { setError(null); setDeleteOpen(true); }}>Delete workspace</button>}
+        />
+      </SettingsCard>
 
-function ValuesField({
-  values, onChange, disabled,
-}: {
-  values: string[]; onChange: (v: string[]) => void; disabled?: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const v = draft.trim();
-    if (!v) return;
-    if (values.some((x) => x.toLowerCase() === v.toLowerCase())) { setDraft(""); return; }
-    onChange([...values, v]);
-    setDraft("");
-  };
-  const remove = (i: number) => onChange(values.filter((_, idx) => idx !== i));
-
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-zinc-700">Core values</label>
-      {values.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {values.map((v, i) => (
-            <span key={`${v}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 py-1 pl-2.5 pr-1.5 text-sm font-medium text-zinc-700">
-              {v}
-              {!disabled && (
-                <button type="button" onClick={() => remove(i)} aria-label={`Remove ${v}`}
-                  className="grid h-4 w-4 place-items-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700">
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-      {!disabled && (
-        <div className="flex items-center gap-2">
-          <input
-            type="text" value={draft}
-            placeholder="Add a value and press Enter"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-            className="h-8 flex-1 rounded-md border border-zinc-200 bg-white px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)]"
+      <ConfirmDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        title="Transfer ownership"
+        width={560}
+        confirmLabel="Make Owner"
+        onConfirm={transfer}
+        busy={busy}
+        error={error}
+      >
+        <Field label="New Owner">
+          <PeoplePickerField
+            ariaLabel="New Owner"
+            value={target ? [target.id] : []}
+            people={target ? [target] : []}
+            placeholder="Pick a person"
+            onChange={(_ids, picked) => setTarget(picked[0] ?? null)}
           />
-          <button type="button" onClick={add} disabled={!draft.trim()}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40">
-            <Plus className="h-3.5 w-3.5" /> Add
-          </button>
-        </div>
-      )}
-      <p className="mt-1 text-xs text-zinc-400">Add as many as you like. Mission + values take turns as the loading screen the team sees when they open the app.</p>
-    </div>
-  );
-}
+        </Field>
+        <label className="flex items-center gap-2 text-base text-ink">
+          <input type="checkbox" checked={removeMe} onChange={(e) => setRemoveMe(e.target.checked)} className="h-4 w-4" />
+          Also remove me as an Owner (I stay an Admin)
+        </label>
+        {target ? (
+          <p className="text-sm text-ink-2">
+            Owners and Admins after this: {remaining.join(", ")}.
+          </p>
+        ) : null}
+      </ConfirmDialog>
 
-function AreaField({
-  label, value, onChange, placeholder, disabled,
-}: {
-  label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; disabled?: boolean;
-}) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-zinc-700">{label}</label>
-      <textarea
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        rows={2}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full resize-y rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-base leading-relaxed text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60"
-      />
-    </div>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete workspace"
+        danger
+        typed={orgName}
+        confirmLabel="Delete workspace"
+        onConfirm={del}
+        busy={busy}
+        error={error}
+      >
+        <p>This schedules <span className="font-semibold">{orgName}</span> for deletion: every Space, List, task, doc, table and person in it.</p>
+        <p className="text-ink-2">Everyone is signed out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>
+      </ConfirmDialog>
+    </SettingsCardStack>
   );
 }

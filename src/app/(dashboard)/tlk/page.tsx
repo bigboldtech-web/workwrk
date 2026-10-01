@@ -47,7 +47,7 @@ import { ConversationView } from "@/components/talk/conversation-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useViewerRole } from "@/components/layout/os/boot-context";
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { apiFetch } from "@/lib/api-fetch";
 import { conversationTitle, type ChatUserLite } from "@/components/talk/conversation-utils";

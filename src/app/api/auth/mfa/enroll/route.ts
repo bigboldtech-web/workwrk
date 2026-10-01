@@ -10,7 +10,10 @@ import {
   jsonSuccess,
 } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
-import { ipFromRequest } from "@/lib/rate-limit-memory";
+import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
+import { generateBackupCodes, mfaCodeKind, normaliseMfaInput } from "@/lib/auth/mfa-codes";
+import { selfAccountFacts } from "@/lib/access/self-facts";
+import { mfaRequiredFor } from "@/lib/auth/security-policy";
 
 // One 30-second step of leeway on either side to absorb clock drift.
 const VERIFY_TOLERANCE: [number, number] = [1, 1];
@@ -40,7 +43,7 @@ export async function GET(_req: NextRequest) {
   });
   if (!user) return jsonError("User not found", 404);
   if (user.mfaEnabled) {
-    return jsonError("MFA is already enabled. Disable it first to re-enrol.", 409);
+    return jsonError("Two step verification is already on. Turn it off first to set it up again.", 409);
   }
 
   const secret = generateSecret();
@@ -73,18 +76,18 @@ export async function POST(req: NextRequest) {
     code?: string;
   };
   if (!body.secret || !body.code) return jsonError("secret and code are required");
-  if (!checkCode(body.code, body.secret)) {
-    return jsonError("Incorrect code. Try the next 30-second cycle.", 400);
+  const guard = rateLimit(`mfa-enrol:${userId}`, { max: 10, windowMs: 15 * 60 * 1000 });
+  if (!guard.ok) return jsonError(`Too many attempts. Try again in ${Math.ceil(guard.retryAfter / 60)} minutes.`, 429);
+  if (!checkCode(normaliseMfaInput(body.code), body.secret)) {
+    return jsonError("That code is not right. Codes change every 30 seconds.", 400);
   }
 
-  const bcrypt = await import("bcryptjs");
-  const backupCodes: string[] = [];
-  const hashedCodes: string[] = [];
-  for (let i = 0; i < 8; i++) {
-    const raw = randomCode();
-    backupCodes.push(raw);
-    hashedCodes.push(await bcrypt.hash(raw, 10));
-  }
+  // A session alone never replaces a live secret: re-enrolling means turning
+  // it off first, which needs a valid code.
+  const current = await prisma.user.findUnique({ where: { id: userId }, select: { mfaEnabled: true } });
+  if (current?.mfaEnabled) return jsonError("Two step verification is already on.", 409);
+
+  const { backupCodes, hashedCodes } = await generateBackupCodes();
 
   await prisma.user.update({
     where: { id: userId },
@@ -115,28 +118,42 @@ export async function POST(req: NextRequest) {
 
 /**
  * DELETE /api/auth/mfa/enroll
- * Disable MFA. Requires current session + a valid TOTP code or backup code
- * (passed as ?code=).
+ * Disable MFA. Requires current session + a valid TOTP code or backup code.
+ * The code travels in the JSON body ({ code }) so it never lands in a proxy
+ * log; `?code=` is still accepted for one release so an open tab on the old
+ * dialog keeps working. Refused (403) when the org requires two step
+ * verification for this person's role, and rate limited per person so the
+ * six digits cannot be walked.
  */
 export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const userId = getUserId(session);
-  const code = new URL(req.url).searchParams.get("code");
-  if (!code) return jsonError("code required");
+  const body = (await req.json().catch(() => null)) as { code?: unknown } | null;
+  const rawCode = typeof body?.code === "string" ? body.code : new URL(req.url).searchParams.get("code");
+  if (!rawCode) return jsonError("code required");
+  const code = normaliseMfaInput(rawCode);
+
+  const facts = await selfAccountFacts(userId, getOrgId(session));
+  const org = await prisma.organization.findUnique({ where: { id: getOrgId(session) }, select: { name: true, settings: true } });
+  if (facts && org && mfaRequiredFor(org.settings, facts.orgRole)) {
+    return jsonError(`Required by ${org.name}`, 403);
+  }
+  const guard = rateLimit(`mfa-disable:${userId}`, { max: 10, windowMs: 15 * 60 * 1000 });
+  if (!guard.ok) return jsonError(`Too many attempts. Try again in ${Math.ceil(guard.retryAfter / 60)} minutes.`, 429);
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { mfaEnabled: true, mfaSecret: true, mfaBackupCodes: true },
   });
   if (!user || !user.mfaEnabled || !user.mfaSecret) {
-    return jsonError("MFA not enabled on this account", 400);
+    return jsonError("Two step verification is off.", 400);
   }
 
   const ok =
-    checkCode(code, user.mfaSecret) ||
-    (await verifyBackupCode(code, user.mfaBackupCodes));
-  if (!ok) return jsonError("Invalid code", 401);
+    (mfaCodeKind(code) === "totp" && checkCode(code, user.mfaSecret)) ||
+    (mfaCodeKind(code) === "backup" && (await verifyBackupCode(code, user.mfaBackupCodes)));
+  if (!ok) return jsonError("That code is not right.", 400);
 
   await prisma.user.update({
     where: { id: userId },
@@ -164,9 +181,3 @@ async function verifyBackupCode(code: string, hashed: string[]): Promise<boolean
   return false;
 }
 
-function randomCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return `${out.slice(0, 4)}-${out.slice(4)}`;
-}

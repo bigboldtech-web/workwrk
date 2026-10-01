@@ -50,7 +50,7 @@ import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
-import { useRole } from "@/hooks/use-role";
+import { useRole } from "@/lib/access/use-legacy-permissions";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { POLICY_STATUS_COLOR, POLICY_STATUS_LABEL, type PolicyStatus } from "@/lib/policies-list";
