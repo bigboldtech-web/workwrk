@@ -1,7 +1,7 @@
 // The home route.
 //
 // The page is built in the project-management category's own register, the
-// one ClickUp, Asana and monday.com share, because that is the register the
+// the category's three biggest work platforms share, because that is the register the
 // founder asked for after rejecting a quieter one twice. The bands, and the
 // survey rule each one answers, are documented in
 // src/components/marketing/home/stack.tsx; the visual half is stack.css.

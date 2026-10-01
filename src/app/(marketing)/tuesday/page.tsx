@@ -67,7 +67,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: TITLE,
     description: DESCRIPTION,
-    images: [{ url: "/api/og/receipt" }],
+    images: [{ url: "/api/og/receipt", alt: "The Tuesday work receipt" }],
   },
 };
 

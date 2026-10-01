@@ -901,7 +901,8 @@ a.ic-stackname:hover {
 .ic-doctable tbody th {
   font-weight: 400;
   color: var(--os-ink);
-  font-family: var(--os-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--os-font);
+  font-variant-numeric: tabular-nums;
   font-size: 14px;
 }
 

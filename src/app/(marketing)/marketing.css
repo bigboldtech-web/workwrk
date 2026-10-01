@@ -6,7 +6,27 @@
  * tokens, not from a second design system.
  */
 
+/* LIGHT ONLY, LOCKED. The root ThemeProvider can put html in dark mode for
+   a visitor whose OS is dark, and then the browser draws form controls,
+   scrollbars and the body behind the page (the strip the consent banner
+   reserves) dark. The site states its scheme, and the page and its body
+   paint the light canvas whatever the html class says. */
+html:has(.mk-site),
+html:has(.mk-site) body {
+  /* !important because next-themes writes color-scheme inline on html. */
+  color-scheme: light !important;
+  background-color: Canvas;
+}
+
+/* INTER ONLY. Code, keys and samples on the site (the /developers endpoint
+   table) set in Inter with tabular figures, never the product's mono. */
+.mk-site :is(code, kbd, pre, samp) {
+  font-family: var(--os-font);
+  font-variant-numeric: tabular-nums;
+}
+
 .mk-site {
+  color-scheme: light;
   min-height: 100vh;
   background: var(--os-canvas);
   color: var(--os-ink);
@@ -449,7 +469,7 @@ button.mk-a-solid:hover,
   white-space: nowrap;
 }
 .mk-devtable tbody th code {
-  font-family: var(--os-f-mono);
+  font-family: var(--os-font);
   font-size: 13px;
   color: var(--os-ink);
 }

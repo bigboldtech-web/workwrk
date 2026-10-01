@@ -35,6 +35,10 @@ function SignupFormInner({ planLine, termsHref, privacyHref }: SignupLinks) {
   const sp = useSearchParams();
   const token = sp.get("token");
   const template = sp.get("template");
+  // The one template signup applies (src/lib/templates/tuesday-template.ts
+  // SIGNUP_TEMPLATE_KEYS; the server ignores any other value). Read here as a
+  // literal so the sign-up page does not ship the site's fixture.
+  const withTuesday = template?.trim().toLowerCase() === "tuesday";
 
   // /signup never accepts an invitation (that is /join's one job): a token
   // that lands here is sent on to /join with the rest of the query.
@@ -246,6 +250,11 @@ function SignupFormInner({ planLine, termsHref, privacyHref }: SignupLinks) {
           </a>
           .
         </p>
+        {withTuesday ? (
+          <p className="wa-help" data-testid="signup-template-line">
+            Your workspace starts with the Tuesday: client onboarding template: an Operations Space with its Onboarding List, the Client onboarding SOP, the Onboarding lead and Finance job titles, a KRA and KPI, a company goal and a playbook doc.
+          </p>
+        ) : null}
         <button type="submit" className="wa-btn wa-btn--primary wa-btn--block" data-pending={loading || undefined}>
           {loading ? <Dots variant="pending" label="Creating your workspace" /> : null}
           Create workspace

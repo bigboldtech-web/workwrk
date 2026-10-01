@@ -1,9 +1,15 @@
 import { ImageResponse } from "next/og";
+import { DOT_HEX, DOT_ORDER } from "@/components/marketing/dots";
 
 export const runtime = "edge";
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 
+// The brand mark: the four dots (yellow, blue, red, green) on white, in a
+// two by two grid so they read at tab size. The colours are IMPORTED from the
+// brand module (next/og renders through Satori, which cannot read custom
+// properties), never retyped here. This replaces the retired lime on black
+// block mark.
 export default function AppleIcon() {
   return new ImageResponse(
     (
@@ -12,21 +18,17 @@ export default function AppleIcon() {
           width: "100%",
           height: "100%",
           display: "flex",
-          alignItems: "center",
+          flexWrap: "wrap",
+          alignContent: "center",
           justifyContent: "center",
-          background: "#0a0a0a",
+          gap: 16,
+          background: "white",
+          padding: 16,
         }}
       >
-        <svg
-          width="120"
-          height="120"
-          viewBox="0 0 48 48"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <rect x="0" y="0" width="28" height="22" rx="6" fill="#d4ff2e" />
-          <rect x="31" y="0" width="17" height="22" rx="6" fill="#d4ff2e" />
-          <rect x="0" y="25" width="48" height="23" rx="6" fill="#d4ff2e" />
-        </svg>
+        {DOT_ORDER.map((c) => (
+          <div key={c} style={{ width: 56, height: 56, borderRadius: 56, background: DOT_HEX[c] }} />
+        ))}
       </div>
     ),
     size,

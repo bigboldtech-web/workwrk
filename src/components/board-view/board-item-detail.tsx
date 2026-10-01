@@ -69,6 +69,7 @@ import { CommentThread } from "@/components/comments/comment-thread";
 import { useItemFields } from "@/hooks/use-item-fields";
 import { FieldValue } from "./field-value";
 import { TagPicker } from "./tag-picker";
+import { TaskTrail } from "@/components/board-view/task-trail";
 import { LinkedAttachments } from "./linked-attachments";
 import { TimeTracker } from "./time-tracker";
 import { ItemTypePicker } from "./item-type-picker";
@@ -475,6 +476,9 @@ export function BoardItemDetail({
           onCountChange={setAttachCount}
         />
       </div>
+
+      {/* The connection trail: read only, rendered only when it has entries. */}
+      <TaskTrail itemId={item.id} refreshKey={`${String(item.metadata?.kraId ?? "")}:${String(item.metadata?.kpiId ?? "")}:${attachCount}`} />
 
       {/* 9, "Add to task" (e) */}
       {canEdit && addRows.length > 0 ? (

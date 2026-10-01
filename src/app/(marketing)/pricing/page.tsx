@@ -4,7 +4,7 @@
 // loudest thing in each plan. What has changed since this note was written
 // is that the plans are bordered CARDS again, with the recommended one
 // marked by a border and a filled button. That is the category's pattern
-// (ClickUp, Asana, monday.com), it is the register the founder asked for,
+// (the category's biggest work platforms), it is the register the founder asked for,
 // and it is the same three card shape the rebuilt home page uses, so the
 // two pages read as one site. The six currency pills are still six words,
 // and the notes under the tier grid are still one line.
@@ -36,6 +36,7 @@
 
 import Link from "next/link";
 import type { Metadata } from "next";
+import { OG_DEFAULT_ALT } from "@/components/marketing/og";
 
 import { MarketingCta, PrimaryCta } from "@/components/marketing/cta";
 import { flags, moduleNames, tierCta, tierCtaIsPrimary } from "@/components/marketing/config";
@@ -261,12 +262,13 @@ export async function generateMetadata({ searchParams }: PricingPageProps): Prom
           overrides: shared.overrides,
         })}`
       : "/opengraph-image";
+  const imageAlt = shared.selected.length > 0 ? "A stack receipt from the WorkwrK pricing page" : OG_DEFAULT_ALT;
   return {
     title: "Pricing",
     description: PRICING_DESCRIPTION,
     alternates: { canonical: `${SITE}/pricing` },
-    openGraph: { images: [{ url: image, width: 1200, height: 630 }] },
-    twitter: { card: "summary_large_image", images: [{ url: image }] },
+    openGraph: { images: [{ url: image, width: 1200, height: 630, alt: imageAlt }] },
+    twitter: { card: "summary_large_image", images: [{ url: image, alt: imageAlt }] },
   };
 }
 

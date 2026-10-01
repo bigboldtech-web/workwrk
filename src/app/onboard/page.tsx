@@ -33,6 +33,7 @@ import { useViewer } from "@/lib/access/use-access";
 import { ORG_ROLE_BLURB } from "@/lib/access/labels";
 import { onboardView, readConsole, type ConsoleState } from "@/lib/setup/console-state";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { SignupTemplateNote } from "./signup-template-note";
 
 const STEP_LABELS = ["Make it yours", "Invite your team", "Create your departments", "Turn on what you need"] as const;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -614,6 +615,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
           <div className="wz-card wz-done">
             <FourDotsDrawing />
             <h1 className="wa-title">You are set up</h1>
+            <SignupTemplateNote enabled />
             {done.length > 0 ? (
               <ul>
                 {done.map((l) => (
@@ -666,6 +668,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
 
       <main className="wz-main">
         <WorkspaceMoveNotice />
+        {step === 1 ? <SignupTemplateNote enabled /> : null}
         <div className="wa-card__head">
           <h1 className="wa-title">{titles[step].title}</h1>
           <p className="wa-sub">{titles[step].sub}</p>

@@ -11,6 +11,8 @@ import { seedOrgDefaults, seedStarterSpace } from "@/lib/org/seed-org-defaults";
 import { sendVerificationEmail, appBaseUrl } from "@/lib/auth/send-verification";
 import { logAuditEvent } from "@/lib/activity";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { signupTemplateKey } from "@/lib/templates/tuesday-template";
+import { applySignupTemplate } from "@/lib/templates/apply-tuesday";
 
 // The Terms and Privacy Policy version a signup agrees to (the consent line
 // on /signup). Bumped when either document changes; recorded on the
@@ -124,6 +126,19 @@ export async function POST(req: Request) {
     // The General Space and its first List, through the same code the
     // Spaces API uses. Best effort: the workspace is complete without it.
     await seedStarterSpace({ organizationId: result.organization.id, userId: result.user.id });
+
+    // The template the visitor chose on the site (/signup?template=tuesday),
+    // applied ONCE, after the org defaults and the General Space, to this
+    // brand new workspace only (apply-tuesday.ts claims a marker first, so a
+    // repeat never doubles it). /join never reaches this route. Best effort:
+    // a failure is recorded on the marker and the setup wizard offers Try
+    // again; the workspace itself is already complete.
+    const templateKey = signupTemplateKey(template);
+    if (templateKey) {
+      await applySignupTemplate({ organizationId: result.organization.id, userId: result.user.id, key: templateKey }).catch((err) => {
+        console.error("[Register] signup template failed", err);
+      });
+    }
 
     logAuditEvent({
       type: "terms.accepted",

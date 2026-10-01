@@ -59,10 +59,21 @@ export const flags = {
   sandbox: false,
   /** A REAL video file. Until one exists there is no play control of any kind (decision 15). */
   watchTuesdayVideo: false,
-  /** The task connection trail as a product feature. Until then the receipt renders from the fixture. */
-  connectionTrailFeature: false,
-  /** The Tuesday template applied at signup. The launch gate for "Get this for your team" (7.2). */
-  tuesdayTemplateAtSignup: false,
+  /**
+   * The task connection trail as a product feature. ON (Phase 10 Stage E):
+   * GET /api/items/[id]/trail and the Connection trail block on the task page
+   * and drawer, proved locally as an owner and an employee (a restricted doc
+   * shows for the owner and not for the employee). The receipt itself still
+   * renders from the fixture, and says so in its footer.
+   */
+  connectionTrailFeature: true,
+  /**
+   * The Tuesday template applied at signup. ON (Phase 10 Stage E): a new
+   * workspace signed up through /signup?template=tuesday on the local server
+   * got the Space, the Onboarding List, the step-by-step SOP, the two job
+   * titles, the KRA and KPI, the goal and the doc, once (apply-tuesday.ts).
+   */
+  tuesdayTemplateAtSignup: true,
   /** The migration concierge line on the top tier. */
   migrationConcierge: false,
   /** Uptime, SLA and support-response numbers. Needs a published status page. */

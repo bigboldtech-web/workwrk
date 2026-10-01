@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import type { Prisma } from "@/generated/prisma";
 import { templatesAppGate } from "@/lib/templates/gate";
+import { ensureTuesdayTemplateRow } from "@/lib/templates/apply-tuesday";
 
 const KINDS = ["TASK", "LIST", "SPACE", "FOLDER", "DOC", "VIEW", "WHITEBOARD"] as const;
 const COMPLEXITY = ["BEGINNER", "INTERMEDIATE", "ADVANCED"] as const;
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
   if (error) return error;
   const orgId = getOrgId(session);
   const sp = new URL(req.url).searchParams;
+  // The Tuesday template's built-in row exists wherever the gallery is read
+  // (created once per process when missing; apply-tuesday.ts).
+  await ensureTuesdayTemplateRow();
 
   const where: Prisma.TemplateWhereInput = {
     OR: [{ organizationId: orgId }, { builtIn: true }],

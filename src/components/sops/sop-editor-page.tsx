@@ -81,6 +81,7 @@ import { SopVersionsTab } from "@/components/sops/sop-versions-tab";
 import { SopShareDialog } from "@/components/sops/sop-share-dialog";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
 import { StartRunDialog } from "@/components/sops/start-run-dialog";
+import { RunStepsDialog } from "@/components/sops/run-steps-dialog";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
@@ -594,6 +595,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   };
 
   const [runOpen, setRunOpen] = useState(false);
+  const [stepsRunOpen, setStepsRunOpen] = useState(false);
   const [requestState, setRequestState] = useState<"idle" | "busy" | "sent">("idle");
   const requestAccess = async () => {
     if (!sop || requestState !== "idle") return;
@@ -632,11 +634,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       // Esc closes only the topmost overlay: a Picker, panel or dialog on
       // the shell's layer stack takes it, and only a bare edit mode leaves.
       const overlayOpen = layerCount > 0 || e.defaultPrevented || !!document.querySelector('[role="listbox"], [role="dialog"], [data-radix-popper-content-wrapper]');
-      if (e.key === "Escape" && editing && !typing && !overlayOpen && !presentOpen && !runOpen && !assignOpen && !shareOpen && !publishOpen) { void leaveEdit(); }
+      if (e.key === "Escape" && editing && !typing && !overlayOpen && !presentOpen && !runOpen && !stepsRunOpen && !assignOpen && !shareOpen && !publishOpen) { void leaveEdit(); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editing, canEdit, enterEdit, leaveEdit, flush, copyLink, presentOpen, runOpen, assignOpen, shareOpen, publishOpen, layerCount]);
+  }, [editing, canEdit, enterEdit, leaveEdit, flush, copyLink, presentOpen, runOpen, stepsRunOpen, assignOpen, shareOpen, publishOpen, layerCount]);
 
   /* ── details strip collapsed state ── */
   const detailsCollapsed = prefs.home.ui?.sopDetailsCollapsed === true;
@@ -685,6 +687,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const displayTitle = (editing ? title : sop?.title ?? title) || (creating ? "" : "Untitled SOP");
   const headerTitle = displayTitle || `New ${SOP_KIND_LABEL[kind].toLowerCase()} SOP`;
 
+  // A published step-by-step SOP with a step marked "Creates a task" runs:
+  // each such step becomes a task owned by its job title (run-steps-dialog).
+  const runsSteps = kind === "steps" && status === "PUBLISHED" && Array.isArray((sop?.content as { steps?: unknown } | undefined)?.steps)
+    && ((sop!.content as { steps: Array<{ createsTask?: unknown }> }).steps).some((st) => st?.createsTask === true);
+
   /* the one blue button */
   let primary: PrimaryAction | undefined;
   if (!editing && openAssignment && !isChecklist) {
@@ -695,6 +702,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       : { label: "Start run", icon: Play, onClick: () => setRunOpen(true) };
   } else if (!creating && canEdit && (status === "DRAFT" || status === "APPROVED") && !openAssignment) {
     primary = { label: "Publish", icon: Send, onClick: () => setPublishOpen(true) };
+  } else if (!editing && !creating && runsSteps) {
+    primary = { label: "Run steps", icon: Play, onClick: () => setStepsRunOpen(true) };
   }
   const PrimaryIcon = primary?.icon ?? null;
 
@@ -703,6 +712,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   if (!creating && canEdit && !editing) more.push({ label: "Edit", icon: Edit3, onClick: enterEdit });
   if (!creating && (kind === "steps" || kind === "recording")) more.push({ label: "Present", icon: Play, onClick: () => setPresentOpen(true) });
   if (!creating && canEdit) more.push({ label: "Assign…", icon: UserPlus, onClick: () => setAssignOpen(true) });
+  if (!creating && !editing && runsSteps && primary?.label !== "Run steps") more.push({ label: "Run steps as tasks…", icon: Play, onClick: () => setStepsRunOpen(true) });
   if (!creating && isChecklist && status === "PUBLISHED" && canEdit && primary?.label !== "Start run") more.push({ label: "Start run", icon: Play, onClick: () => setRunOpen(true) });
   if (!creating && canEdit && status === "DRAFT") more.push({ label: "Submit for review", icon: Send, onClick: () => void transition("IN_REVIEW", "Submitted for review") });
   if (!creating && canEdit && status === "IN_REVIEW") {
@@ -972,6 +982,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       {sop ? (
         <>
           <StartRunDialog open={runOpen} onClose={() => setRunOpen(false)} sop={{ id: sop.id, title: sop.title }} defaultAssigneeId={openAssignment ? boot.viewer.id : null} onStarted={(run) => { setPeopleKey((k) => k + 1); if (run.shareToken) window.open(`/run/${run.shareToken}`, "_blank", "noopener"); void load(); }} />
+          {kind === "steps" ? <RunStepsDialog open={stepsRunOpen} onClose={() => setStepsRunOpen(false)} sop={{ id: sop.id, title: sop.title }} /> : null}
           <AssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} object={{ type: "sop", id: sop.id, title: sop.title }} onAssigned={() => { setPeopleKey((k) => k + 1); setTab("people"); }} />
           <SopShareDialog
             open={shareOpen !== null}

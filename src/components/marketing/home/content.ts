@@ -171,7 +171,7 @@ export function tuesdayCtaHeadline(): string {
 
 export function tuesdayCtaLede(): string {
   return flags.tuesdayTemplateAtSignup
-    ? "The Tuesday workspace, the SOP, the board, the goal and the roles, is a template on your first screen."
+    ? "The Tuesday workspace, the SOP, the board, the KRA and KPI, the goal and the roles, comes with the workspace this button starts."
     : "The SOP, the board, the goal and the roles are all things you build on day one. The Tuesday workspace as a one click template is in build, so the button below opens an empty workspace and not a seeded one.";
 }
 

@@ -8,7 +8,7 @@
 // and quoted top is a pattern a buyer can already read, and the rebuilt
 // home page uses the same three card shape, so matching it here is what
 // keeps the two pages reading as one site. The founder named this register
-// (ClickUp, Asana, monday.com) after rejecting the quiet one twice.
+// (the category's three biggest work platforms) after rejecting the quiet one twice.
 //
 // The number is still the loudest thing in each card. What changed is that
 // the card has an edge, and the recommended one is marked with a border as

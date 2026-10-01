@@ -213,7 +213,11 @@ export const realQuote = {
   name: "Mohsin S.",
   title: "COO · 280-person services firm",
   initials: "MS",
-  source: "src/app/(auth)/layout.tsx",
+  // The login page carried this quote until Phase 8 (commit 4398af0a took it
+  // off src/app/(auth)/layout.tsx), and nothing on the site renders it now.
+  // It is kept here, attribution verbatim, so that if it ever returns it
+  // returns exactly as the customer said it; it is not shown anywhere.
+  source: "src/app/(auth)/layout.tsx, until 4398af0a; rendered nowhere since",
 } as const;
 
 /**

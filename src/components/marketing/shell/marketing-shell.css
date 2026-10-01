@@ -135,6 +135,8 @@
   /* ── Type. The nine product sizes, unchanged, so a surface drawn
      here is the size it is in the product. ─────────────────────── */
   --os-font:   var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Mirrored from the product, and read by nothing on the site: Inter only
+     (.mk-mono and code set Inter with tabular figures, marketing.css). */
   --os-f-mono: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --os-t-rail:       10px; --os-t-rail-lh:       12px;
@@ -329,15 +331,16 @@
 }
 
 /* Tabular figures: the clock, the counter, both receipts and the 14 to 1
-   mark (spec 13.7). JetBrains Mono is already loaded; the fallback is the
-   grotesk's own tabular set. */
+   mark (spec 13.7). Inter only: the figures come from Inter's own tabular
+   set, never from a second family. */
 .mk-figures {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 .mk-mono {
-  font-family: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--os-font);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 /* ═════════════════════════════════════════════════════════════════

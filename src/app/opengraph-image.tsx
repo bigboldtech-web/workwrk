@@ -269,10 +269,12 @@ export default async function OgImage() {
                 categories of tool it stands in for", which is true and is
                 nowhere on the site: a share card and the page it opens said
                 different things directly under the same H1. `headline.sub`
-                is `headlineSub()`, the one gated positioning sentence that
-                the hero, the meta description, the og:description and both
-                JSON-LD descriptions already render, so the card now moves
-                with the gate instead of beside it. */}
+                is the one sentence headline.ts holds beside the six word
+                claim (a literal there, not positioning.ts headlineSub()), so
+                the card and the module that owns the claim cannot drift. The
+                rebuilt home page's H1 is a different sentence: a known
+                difference between the card and the page, left for the
+                founder to settle rather than rewritten here. */}
             <div style={{ display: "flex", fontSize: 21, color: T.ink2, lineHeight: 1.4 }}>{headline.sub}</div>
           </div>
 

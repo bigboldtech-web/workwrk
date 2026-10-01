@@ -74,7 +74,7 @@ const INDUSTRY_SLUGS = [
  * BUMP THIS when the marketing pages change in a way worth recrawling.
  * Blog posts do not use it: they carry their own publication dates.
  */
-const SITE_REVISED = new Date("2026-09-22T00:00:00.000Z");
+const SITE_REVISED = new Date("2026-10-01T00:00:00.000Z");
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = SITE_REVISED;

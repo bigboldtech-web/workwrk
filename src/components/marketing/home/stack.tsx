@@ -3,7 +3,7 @@
 // This file replaces home/chain.tsx. The page it replaced argued in a quiet
 // consumer-hardware register: six-word headlines at 80px, one object per
 // section, no card grids, almost no colour. It was rejected twice, and the
-// founder named the register he wants instead: ClickUp, Asana, monday.com.
+// founder named the register he wants instead: the category's three biggest work platforms.
 //
 // The section order below is the order all four surveyed rivals use, and
 // each one is commented with the rule it satisfies. The survey lives in
@@ -209,7 +209,7 @@ const VIEWS: Array<{
   {
     hub: "talk",
     breadcrumb: ["Talk", "#onboarding"],
-    note: "Channels, threads, huddles and calls, in the workspace where the tasks are. A decision in a thread can become a task without leaving it.",
+    note: "Channels, threads, huddles and calls, in the workspace where the tasks are.",
     a11y: "A chat channel with a threaded conversation and a task referenced inside it.",
     canvas: <TalkThreadSurface />,
   },
@@ -280,14 +280,19 @@ function Breadth() {
  * ═══════════════════════════════════════════════════════════════════ */
 
 const TILE: Record<string, { bg: string; fg: string }> = {
-  work: { bg: "var(--os-blue-50)", fg: "var(--os-blue-700)" },
-  planner: { bg: "#FFF4E5", fg: "#B25E02" },
-  ai: { bg: "#F3EEFF", fg: "#5B3DC4" },
-  talk: { bg: "#E8F8EF", fg: "#12734A" },
-  teams: { bg: "#FFEFEF", fg: "#B42318" },
-  docs: { bg: "var(--os-blue-50)", fg: "var(--os-blue-700)" },
-  tables: { bg: "#E8F8EF", fg: "#12734A" },
-  goals: { bg: "#FFF4E5", fg: "#B25E02" },
+  // Tokens from the marketing scope, never literals (the copy gate's
+  // no-raw-hex rule): blue for Work, Docs and AI, yellow for Planner and
+  // Goals, green for Talk and Tables, red for Teams. --os-blue-700 was read
+  // here and is not a marketing token, so the blue tiles' glyphs fell back to
+  // the ink colour; --os-brand-deep is the deep blue the scope does carry.
+  work: { bg: "var(--os-blue-50)", fg: "var(--os-brand-deep)" },
+  planner: { bg: "var(--os-warning-bg)", fg: "var(--os-warning-text)" },
+  ai: { bg: "var(--os-brand-soft)", fg: "var(--os-brand-deep)" },
+  talk: { bg: "var(--os-success-bg)", fg: "var(--os-success-text)" },
+  teams: { bg: "var(--os-danger-bg)", fg: "var(--os-danger-text)" },
+  docs: { bg: "var(--os-blue-50)", fg: "var(--os-brand-deep)" },
+  tables: { bg: "var(--os-success-bg)", fg: "var(--os-success-text)" },
+  goals: { bg: "var(--os-warning-bg)", fg: "var(--os-warning-text)" },
 };
 
 function Modules() {
@@ -393,7 +398,7 @@ function UseCases() {
     <Section py="lg" variant="tint">
       <Container>
         {ROWS.map((row, index) => (
-          <div className={`mk-row${index % 2 === 1 ? " mk-row--flip" : ""}`} key={row.title}>
+          <div className="mk-row" data-flip={index % 2 === 1 ? "" : undefined} key={row.title}>
             <div>
               <p className="mk-eyebrow">{row.eyebrow}</p>
               <h3 className="mk-row__h3">{row.title}</h3>
@@ -515,7 +520,7 @@ function Plans({ currency }: { currency: MarketingCurrency }) {
             const perSeat = tierPerSeat(id, currency);
             const featured = id === "growth";
             return (
-              <div className={`mk-plan${featured ? " mk-plan--featured" : ""}`} key={id}>
+              <div className="mk-plan" data-featured={featured ? "" : undefined} key={id}>
                 {/* Always rendered, hidden when off, so the three cards keep
                     their rows on the same lines. See stack.css. */}
                 <span className="mk-plan__flag" data-on={featured} aria-hidden={!featured}>

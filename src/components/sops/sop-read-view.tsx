@@ -42,6 +42,8 @@ export interface ReadStep {
   title?: string;
   description?: string;
   image?: string;
+  jobTitle?: { roleId: string; title: string } | null;
+  createsTask?: boolean;
 }
 export interface ReadRecordedStep {
   order?: number;
@@ -169,6 +171,8 @@ export function StepsRead({ steps }: { steps: ReadStep[] }) {
           <div className="flex h-11 items-center gap-3 px-3">
             <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
             <span className="min-w-0 flex-1 truncate text-row font-medium text-ink">{step.title || `Step ${i + 1}`}</span>
+            {step.jobTitle?.title ? <Chip size="default" className="h-6 shrink-0 px-2 text-xs" disabled>{step.jobTitle.title}</Chip> : null}
+            {step.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
           </div>
           {step.description || step.image ? (
             <div className="flex flex-col gap-2 px-4 pb-4 ps-12">
