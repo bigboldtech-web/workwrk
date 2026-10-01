@@ -18,7 +18,8 @@ import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-
 import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { lockOrgSettings } from "@/lib/access/access-grant-store";
 import { canManageProcess } from "@/lib/process-scope";
-import { settingsDoorAllows } from "@/lib/access/settings-door";
+import { freshDoorActor, settingsDoorAllows } from "@/lib/access/settings-door";
+import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { scoringWriteAllowed, sessionScoringWriteAllowed } from "@/lib/access/settings-legacy";
 import { delegateOn } from "@/lib/access/flags";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
@@ -177,10 +178,20 @@ export async function GET() {
     // stored session fields stay with the doors that edit them.
     // A reader the one door decision admits (the People team under the
     // engine gate) reads the full blob as the manager tier does today.
+    //
+    // Every flag below is read from the actor as the DATABASE has them now
+    // (freshDoorActor, one lookup and only when the session claims the
+    // manager tier or above), not the session's claim: the claim is
+    // re-checked only every five minutes, so an Admin demoted a moment ago
+    // would otherwise keep reading the sign-in policy, the invite rules and
+    // the access toggles. A session the database no longer backs reads the
+    // member body, which every member surface still renders from.
+    const fresh = await freshDoorActor(session);
+    const reader = fresh ? fresh.ok && sessionIsSettingsReader(session) && legacyIsManagerLevel(fresh.level) : sessionIsSettingsReader(session);
     if (
-      !sessionIsSettingsReader(session) &&
-      !(await settingsDoorAllows("access", session)) &&
-      !(await settingsDoorAllows("scoring", session))
+      !reader &&
+      !(await settingsDoorAllows("access", session, { fresh })) &&
+      !(await settingsDoorAllows("scoring", session, { fresh }))
     ) {
       const { access: _access, process: _process, businessType: _b, industry: _i, teamSize: _t, security, signIn: _si, signInLegacy: _sl, users: _u, retention: _r, data: _d, work: _w, ...rest } = body.settings;
       void _access; void _process; void _b; void _i; void _t; void _si; void _sl; void _u; void _r; void _d; void _w;
@@ -199,13 +210,20 @@ export async function GET() {
     }
     // Who is asking, for the Owner-only rows (Danger zone, Security):
     // answered by the one rule in src/lib/access/workspace-admin.ts.
-    const admin = sessionIsWorkspaceAdmin(session);
-    const viewer = {
-      isOwner: admin ? await sessionIsWorkspaceOwner(session) : false,
-      mayManageOwnerPages: admin ? await sessionMayManageOwnerPage(session) : false,
-      // The scoring section's own write rule (PATCH below), one function.
-      canEditScoring: sessionScoringWriteAllowed(session, { admin, engineDoor: delegateOn("settings") }),
-    };
+    const admin = fresh ? fresh.ok && fresh.admin : sessionIsWorkspaceAdmin(session);
+    const viewer = fresh?.ok
+      ? {
+          isOwner: fresh.owner,
+          mayManageOwnerPages: freshMayManageOwnerPage(fresh),
+          // The scoring section's own write rule (PATCH below), one function,
+          // over the same fresh level PATCH checks.
+          canEditScoring: scoringWriteAllowed(fresh.level, { admin, engineDoor: delegateOn("settings") }),
+        }
+      : {
+          isOwner: admin ? await sessionIsWorkspaceOwner(session) : false,
+          mayManageOwnerPages: admin ? await sessionMayManageOwnerPage(session) : false,
+          canEditScoring: sessionScoringWriteAllowed(session, { admin, engineDoor: delegateOn("settings") }),
+        };
     return NextResponse.json({ ...body, viewer });
   } catch (error) {
     console.error("Settings GET error:", error);

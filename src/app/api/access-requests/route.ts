@@ -12,10 +12,11 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
-import { recordAccessRequest, requestNodeRef, REQUEST_TTL_MS } from "@/lib/access/access-requests";
-import { nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
+import { recordAccessRequest, requestNodeRef, roleCoversRequest, REQUEST_TTL_MS } from "@/lib/access/access-requests";
+import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
-import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { logActivity } from "@/lib/activity";
 
 const bodySchema = z.object({
   objectType: z.string().min(1).max(40),
@@ -142,7 +143,11 @@ export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
   if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const admin = sessionIsWorkspaceAdmin(session);
+  // Every request in the workspace (with the requester's own message) is for
+  // an Owner or Admin as the DATABASE has them now: the session's claim is
+  // re-checked only every five minutes, so an Admin demoted a moment ago
+  // falls back at once to the requests on objects they own.
+  const admin = sessionIsWorkspaceAdmin(session) ? await freshWorkspaceActor(session).then((f) => f.ok && f.admin) : false;
   const since = new Date(Date.now() - REQUEST_TTL_MS);
   const outgoingOnly = new URL(req.url).searchParams.get("scope") === "outgoing";
   const [pending, mine] = await Promise.all([
@@ -162,6 +167,7 @@ export async function GET(req: Request) {
     }),
   ]);
   const ctx = pending.length > 0 ? await nodeCtxFromSession() : null;
+  const requesterCtx = new Map<string, Awaited<ReturnType<typeof nodeCtxForUser>>>();
   const incoming = [];
   for (const r of pending) {
     if (r.requesterId === u.id) continue;
@@ -172,6 +178,24 @@ export async function GET(req: Request) {
       if (!ctx) continue;
       const d = await nodeRole(ctx, node);
       if (d.role === "none") continue;
+    }
+    // Already answered some other way: the requester now owns the object, or
+    // holds at least what they asked for on the node (shared from its menu
+    // before grants closed requests, or through a Team or Everyone). The row
+    // closes here instead of waiting 14 days for a Decline that would tell
+    // them "declined" while they hold the access.
+    let answered = t.ownerId === r.requesterId;
+    if (!answered && node) {
+      let rc = requesterCtx.get(r.requesterId);
+      if (!rc) {
+        rc = await nodeCtxForUser(r.requesterId, u.organizationId);
+        requesterCtx.set(r.requesterId, rc);
+      }
+      answered = roleCoversRequest((await nodeRole(rc, node)).role, r.role);
+    }
+    if (answered) {
+      await prisma.accessRequest.updateMany({ where: { id: r.id, status: "PENDING" }, data: { status: "APPROVED", decidedAt: new Date() } }).catch(() => {});
+      continue;
     }
     incoming.push({
       id: r.id,
@@ -188,3 +212,62 @@ export async function GET(req: Request) {
   }
   return NextResponse.json({ incoming, outgoing: mine }, { headers: { "Cache-Control": "no-store" } });
 }
+
+/**
+ * PATCH /api/access-requests  { id, decision: "shared" }
+ *
+ * Close a request on a kind the card cannot grant (a SOP, a goal, a tool, an
+ * agreement) after its owner shared it from the object's own page: APPROVED,
+ * with no inbox row, so the requester is never told "declined" for access
+ * they were given. A node (Space, Folder, List, Doc, Table, Canvas, Form) is
+ * answered with a real grant (PATCH /api/access-requests/[id]), which also
+ * closes it, so it is refused here: this is never a way to mark access given
+ * that was not. The same people who may decline it may close it: its owner,
+ * or an Owner or Admin as the database has them now.
+ */
+const closeSchema = z.object({ id: z.string().min(1).max(80), decision: z.literal("shared") }).strict();
+
+export async function PATCH(req: Request) {
+  const session = await getServerSession(authOptions);
+  const u = session?.user as { id?: string; organizationId?: string; firstName?: string; lastName?: string } | undefined;
+  if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+  const parsed = closeSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "invalid_body" }, { status: 400, headers: NO_STORE });
+  const request = await prisma.accessRequest.findFirst({ where: { id: parsed.data.id, organizationId: u.organizationId } });
+  if (!request) return NextResponse.json({ error: "Not found" }, { status: 404, headers: NO_STORE });
+  if (request.status !== "PENDING" || Date.now() - request.createdAt.getTime() > REQUEST_TTL_MS) {
+    return NextResponse.json({ error: "closed", status: request.status }, { status: 409, headers: NO_STORE });
+  }
+  if (request.requesterId === u.id) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
+  if (requestNodeRef(request.objectType, request.objectId)) {
+    return NextResponse.json({ error: "use_grant" }, { status: 409, headers: NO_STORE });
+  }
+  const t = await targetFor(request.objectType, request.objectId, u.organizationId);
+  let may = t.ownerId === u.id;
+  if (!may && sessionIsWorkspaceAdmin(session)) {
+    const fresh = await freshWorkspaceActor(session);
+    may = fresh.ok && fresh.admin;
+  }
+  if (!may) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
+  // One conditional update: when two people answer at once exactly one wins.
+  const won = await prisma.accessRequest.updateMany({ where: { id: request.id, status: "PENDING" }, data: { status: "APPROVED", decidedById: u.id, decidedAt: new Date() } });
+  if (won.count !== 1) {
+    const row = await prisma.accessRequest.findUnique({ where: { id: request.id }, select: { status: true } });
+    return NextResponse.json({ error: "closed", status: row?.status ?? "CANCELLED" }, { status: 409, headers: NO_STORE });
+  }
+  const actorName = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone";
+  await logActivity({
+    organizationId: u.organizationId,
+    actorId: u.id,
+    type: CLOSED_TYPE,
+    targetType: request.objectType,
+    targetId: request.objectId,
+    description: `${actorName} marked an access request as shared`,
+    metadata: { requestId: request.id, requesterId: request.requesterId, role: request.role },
+  }).catch(() => {});
+  return NextResponse.json({ ok: true, status: "APPROVED" }, { headers: NO_STORE });
+}
+
+const NO_STORE = { "Cache-Control": "no-store" } as const;
+// The activity type, beside access.request.granted and .declined.
+const CLOSED_TYPE = "access.request.shared";

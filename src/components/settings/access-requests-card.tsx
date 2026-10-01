@@ -6,7 +6,10 @@
 // click to give it, give view instead, or decline. A grant goes through
 // PATCH /api/access-requests/[id], which writes it with grants.ts, so the
 // Manage access dialog's rules hold. A kind grants.ts does not own opens the
-// object to share it there.
+// object to share it there, and once shared there "Mark as shared" closes the
+// request without telling the requester "declined" (PATCH /api/access-
+// requests). Sharing a node from its menu, or adding someone to a goal by
+// name, closes their request by itself.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -71,10 +74,24 @@ export function AccessRequestsCard() {
     setItems((list) => (list ?? []).filter((x) => x.id !== req.id));
   };
 
+  // Close a request answered on the object's own page. No inbox row goes to
+  // the requester: the share itself was the answer.
+  const markShared = async (req: IncomingRequest) => {
+    setBusy(req.id);
+    setRowError((e) => ({ ...e, [req.id]: "" }));
+    const r = await apiFetch("/api/access-requests", { method: "PATCH", json: { id: req.id, decision: "shared" } });
+    setBusy(null);
+    if (!r.ok) {
+      setRowError((e) => ({ ...e, [req.id]: r.error || "Couldn't close that request" }));
+      return;
+    }
+    setItems((list) => (list ?? []).filter((x) => x.id !== req.id));
+  };
+
   const btn = "os-chrome inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:text-ink-3";
 
   return (
-    <SettingsCard title="Access requests" id="access.requests" wide="access.toggles" description="People asking to open something. Answering here is the same as sharing it from its menu.">
+    <SettingsCard title="Access requests" id="access.requests" wide="access.toggles" description="People asking to open something. Giving access here is the same as sharing it from its menu, and sharing it there closes the request too. Shared something from its own page and it is still listed? Mark it as shared.">
       {error ? (
         <ErrorState what="the open requests" hint={error} onRetry={() => { void load(); }} />
       ) : items === null ? (
@@ -109,9 +126,14 @@ export function AccessRequestsCard() {
                       </button>
                     ) : null}
                   </>
-                ) : req.link ? (
-                  <Link href={req.link} className={btn}>Open to share</Link>
-                ) : null}
+                ) : (
+                  <>
+                    {req.link ? <Link href={req.link} className={btn}>Open to share</Link> : null}
+                    <button type="button" className={btn} disabled={busy === req.id} onClick={() => { void markShared(req); }}>
+                      Mark as shared
+                    </button>
+                  </>
+                )}
                 <button type="button" className={btn} disabled={busy === req.id} onClick={() => { void decide(req, "decline"); }}>
                   Decline
                 </button>

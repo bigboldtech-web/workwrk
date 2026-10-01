@@ -34,6 +34,11 @@ export async function GET(req: Request) {
       if (!(await hasPermission(session, "people", "create"))) {
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
       }
+      // hasPermission reads the session's level, re-checked only every five
+      // minutes: a session the database no longer backs (a demotion's
+      // tokenVersion bump, signed out elsewhere) is refused now, as POST is.
+      const fresh = await freshWorkspaceActor(session);
+      if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
       const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
       const rules = usersSettingsOf(org?.settings, org?.domain);
       return NextResponse.json(
@@ -49,7 +54,9 @@ export async function GET(req: Request) {
     // the people who manage invitations: the same people Settings > Members
     // (its one reader) admits, through the one door decision (the manager
     // tier today, the engine's page table once ACCESS_V2_RESOLVER is on). A
-    // Member gets a 403, not a way to enumerate pending Admin invites.
+    // Member gets a 403, not a way to enumerate pending Admin invites. The
+    // door re-reads the person from the database (settings-door.ts), so an
+    // Admin demoted a moment ago is refused now too.
     if (!(await settingsDoorAllows("members", session))) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }

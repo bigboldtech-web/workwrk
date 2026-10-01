@@ -80,6 +80,7 @@ import { accessPanel } from "./node-access";
 import { nodeName } from "./node-tree";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
 import { writeOrgSettingsKeys } from "../org-settings-write";
+import { requestRolesCoveredBy, requestTypesForNode, resolveRequestsFor } from "./access-requests";
 
 export const GRANT_ERROR_STATUS: Readonly<Record<GrantErrorCode, number>> = {
   not_found: 404,
@@ -600,6 +601,18 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
   if (outcome.notify === "shared" || outcome.notify === "upgraded") {
     await notifyGrantee(actor, ref, gate.rows, userId, requested, outcome.notify);
   }
+  // A grant answers the person's open Request access on this node (spec 5.6
+  // item 2), whichever door made it: the dialog, a members route or the
+  // Access requests card. The row this person holds on this node now decides
+  // which asks it covers (on no change that is the row they already held).
+  await resolveRequestsFor({
+    organizationId: actor.organizationId,
+    objectTypes: requestTypesForNode(ref.kind),
+    objectId: ref.id,
+    requesterId: userId,
+    roles: requestRolesCoveredBy(outcome.role),
+    deciderId: actor.userId,
+  });
   const change: GrantChange = {
     userId,
     role: outcome.role,

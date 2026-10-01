@@ -19,26 +19,65 @@ import { LEGACY_SETTINGS_RULES, OWNER_SETTINGS_PAGES, legacySettingsAllows } fro
 import { accessV2Resolver, settingsGateLogOnly } from "./flags";
 import { SETTINGS_GATE_AUDIT_COLLAPSE_MS, engineWithOwnerFloor, logSettingsGateDisagreement, settingsGateAuditRow, settingsGateDecision, settingsGateMode } from "./settings-gate-engine";
 import { logActivity } from "@/lib/activity";
-import { scopeForOwnerPage, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "./workspace-admin";
+import { freshMayManageOwnerPage, freshWorkspaceActor, scopeForOwnerPage, sessionIsWorkspaceAdmin, sessionMayManageOwnerPage, type FreshActor } from "./workspace-admin";
+import { legacyIsManagerLevel } from "./legacy-levels";
 import type { SettingsPageKey } from "./types";
 
 type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } } | null | undefined;
 
-async function legacyDoor(page: SettingsPageKey, session: SessionLike): Promise<boolean> {
+/**
+ * The person as the DATABASE has them now, for the door. The session token is
+ * re-checked only every five minutes (src/lib/auth.ts REVALIDATE_MS), so an
+ * Admin demoted a moment ago still carries an Admin claim: before this the
+ * page gate and the reader APIs (Members, Teams, the invitations list) kept
+ * opening for that stale claim while every write already refused it. Read
+ * only when the session claims the manager tier or above, the only claims
+ * that open a door the legacy table guards, so a Member pays nothing (null).
+ */
+export async function freshDoorActor(session: unknown): Promise<FreshActor | null> {
+  const level = (session as SessionLike)?.user?.accessLevel;
+  if (!legacyIsManagerLevel(level)) return null;
+  return freshWorkspaceActor(session);
+}
+
+/**
+ * Today's table, asked of BOTH the session's claim and the database's level
+ * when the latter was read: a demotion lands now (the database says no), a
+ * promotion still lands on the next session check (the claim says no), the
+ * same both-must-agree rule freshWorkspaceActor applies to writes.
+ */
+async function legacyDoor(page: SettingsPageKey, session: SessionLike, fresh: FreshActor | null): Promise<boolean> {
   if (!LEGACY_SETTINGS_RULES[page]) return true;
   const ok = legacySettingsAllows(page, session?.user?.accessLevel ?? null);
-  if (!ok || !OWNER_SETTINGS_PAGES.has(page)) return ok;
+  if (!ok) return false;
+  if (fresh) {
+    if (!fresh.ok || !legacySettingsAllows(page, fresh.level)) return false;
+    if (!OWNER_SETTINGS_PAGES.has(page)) return true;
+    return freshMayManageOwnerPage(fresh, scopeForOwnerPage(page));
+  }
+  if (!OWNER_SETTINGS_PAGES.has(page)) return true;
   return sessionMayManageOwnerPage(session, scopeForOwnerPage(page));
 }
 
 /**
  * May the signed-in person open this Workspace settings page (and read the
- * data its cards load)? Pass the session when the caller already holds it.
+ * data its cards load)? Pass the session when the caller already holds it,
+ * and `fresh` (freshDoorActor) when the caller asks about several pages or
+ * needs the fresh actor itself, so the database is read once per request.
  */
-export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unknown, opts: { visit?: boolean } = {}): Promise<boolean> {
+export async function settingsDoorAllows(
+  page: SettingsPageKey,
+  sessionIn?: unknown,
+  opts: { visit?: boolean; fresh?: FreshActor | null } = {},
+): Promise<boolean> {
   const session = (sessionIn ?? (await getServerSession(authOptions))) as SessionLike;
   if (!session?.user?.id) return false;
-  const legacy = await legacyDoor(page, session);
+  const fresh = opts.fresh !== undefined ? opts.fresh : await freshDoorActor(session);
+  // A session the database no longer backs (signed out elsewhere, a
+  // demotion's tokenVersion bump, removed) opens no door at all, under the
+  // engine too: nothing below may read the stale claim as an answer.
+  if (fresh && !fresh.ok) return false;
+  const legacy = await legacyDoor(page, session, fresh);
   const mode = settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() });
   if (mode === "legacy" || !LEGACY_SETTINGS_RULES[page]) return legacy;
   const { can, viewerFromSession } = await import("./index");
@@ -50,8 +89,12 @@ export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unkn
     legacy,
     engine: decision.allowed,
     ownerPage,
-    workspaceAdmin: sessionIsWorkspaceAdmin(session),
-    mayManageOwnerPage: ownerPage ? await sessionMayManageOwnerPage(session, scopeForOwnerPage(page)) : false,
+    workspaceAdmin: fresh ? fresh.ok && fresh.admin : sessionIsWorkspaceAdmin(session),
+    mayManageOwnerPage: ownerPage
+      ? fresh
+        ? freshMayManageOwnerPage(fresh, scopeForOwnerPage(page))
+        : await sessionMayManageOwnerPage(session, scopeForOwnerPage(page))
+      : false,
   };
   const verdict = settingsGateDecision(mode, inputs);
   if (verdict.disagree) {
@@ -82,8 +125,10 @@ export async function settingsDoorAllows(page: SettingsPageKey, sessionIn?: unkn
 
 /** The reader pages below Admin (Members, Structure, Access, Scoring) this person opens now. */
 export async function settingsReaderPagesFor(sessionIn?: unknown): Promise<SettingsPageKey[]> {
+  const session = (sessionIn ?? (await getServerSession(authOptions))) as SessionLike;
   const candidates: SettingsPageKey[] = ["members", "structure", "access", "scoring"];
   const out: SettingsPageKey[] = [];
-  for (const p of candidates) if (await settingsDoorAllows(p, sessionIn)) out.push(p);
+  const fresh = await freshDoorActor(session);
+  for (const p of candidates) if (await settingsDoorAllows(p, session, { fresh })) out.push(p);
   return out;
 }

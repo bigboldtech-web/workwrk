@@ -15,7 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
-import { settingsDoorAllows } from "@/lib/access/settings-door";
+import { freshDoorActor, settingsDoorAllows } from "@/lib/access/settings-door";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 const createSchema = z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(280).optional() }).strict();
@@ -24,7 +24,11 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   const orgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
-  if (!(await settingsDoorAllows("members", session))) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE });
+  // One fresh read of the person (the database, not the five-minute session
+  // claim) decides both the door and canEdit, so an Admin demoted a moment
+  // ago neither reads the Teams nor is shown Make team, Rename and Archive.
+  const fresh = await freshDoorActor(session);
+  if (!(await settingsDoorAllows("members", session, { fresh }))) return NextResponse.json({ error: "no_access", page: "members" }, { status: 403, headers: NO_STORE });
   const teams = await prisma.team.findMany({
     where: { organizationId: orgId, archivedAt: null },
     orderBy: { name: "asc" },
@@ -37,7 +41,7 @@ export async function GET() {
   });
   return NextResponse.json(
     {
-      canEdit: sessionIsWorkspaceAdmin(session),
+      canEdit: fresh ? fresh.ok && fresh.admin : sessionIsWorkspaceAdmin(session),
       teams: teams.map((t) => ({
         id: t.id,
         name: t.name,
