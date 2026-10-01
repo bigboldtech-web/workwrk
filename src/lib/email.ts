@@ -290,18 +290,28 @@ export async function sendEmail(params: QueueEmailParams): Promise<void> {
 // Get/update email preferences
 // ==========================================
 
+/**
+ * What a person with no EmailPreference row is shown. It must say exactly
+ * what shouldSendEmail does for them (no row = every category sends) and
+ * what the schema creates on their first change (every category true,
+ * digest false). The KRA key was once `taskNotifications`, a field that does
+ * not exist: the page read the missing `kraNotifications` as Off while KPI
+ * reminders kept going out, and the switch then flipped On by itself the
+ * moment any other category was saved and the row was created.
+ */
+export const EMAIL_PREFERENCE_DEFAULTS = {
+  kraNotifications: true,
+  reviewNotifications: true,
+  sopNotifications: true,
+  kudosNotifications: true,
+  dailyDigest: false,
+} as const;
+
 export async function getEmailPreferences(userId: string) {
   const pref = await prisma.emailPreference.findUnique({ where: { userId } });
   if (pref) return pref;
 
-  // Return defaults
-  return {
-    taskNotifications: true,
-    reviewNotifications: true,
-    sopNotifications: true,
-    kudosNotifications: true,
-    dailyDigest: false,
-  };
+  return { ...EMAIL_PREFERENCE_DEFAULTS };
 }
 
 export async function updateEmailPreferences(
