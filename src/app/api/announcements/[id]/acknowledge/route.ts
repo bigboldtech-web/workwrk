@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { clientIpFromHeaders } from "@/lib/client-ip";
 import { canSeeAckRoster } from "@/lib/announcement-access";
 import { announcementViewer } from "@/lib/announcement-server";
 import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
@@ -59,8 +60,7 @@ export async function POST(
     return jsonError("This announcement does not require acknowledgment", 400);
   }
 
-  const fwd = req.headers.get("x-forwarded-for") ?? "";
-  const ip = fwd.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+  const ip = clientIpFromHeaders(req.headers);
 
   const result = await prisma.announcementAcknowledgment.upsert({
     where: { announcementId_userId: { announcementId, userId } },

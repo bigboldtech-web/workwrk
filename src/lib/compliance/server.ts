@@ -1,6 +1,7 @@
 import "server-only";
 import { headers } from "next/headers";
 import { resolveRegime, regimeLabel, type ConsentRegime } from "./regions";
+import { clientIpFromHeaders } from "@/lib/client-ip";
 
 /** Current privacy-policy version. Bump whenever material terms change — all
  * users will be re-prompted to re-consent. */
@@ -36,7 +37,7 @@ export async function getVisitorGeo(): Promise<VisitorGeo> {
 
 export async function getClientIp(): Promise<string | null> {
   const h = await headers();
-  const forwarded = h.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return h.get("x-real-ip") ?? h.get("cf-connecting-ip") ?? null;
+  // The order a client cannot forge (src/lib/client-ip.ts). There is no CDN in
+  // front of the app, so a cf-connecting-ip header could only be the client's own.
+  return clientIpFromHeaders(h);
 }

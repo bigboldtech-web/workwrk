@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 import { prisma } from "./prisma";
 import { createHash, randomBytes } from "crypto";
+import { clientIpFromHeaders } from "./client-ip";
 import type { ApiKeyScope } from "@/generated/prisma";
 
 /**
@@ -130,10 +131,7 @@ export async function authenticate(
         where: { id: record.id },
         data: {
           lastUsedAt: now,
-          lastUsedIp:
-            req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-            req.headers.get("x-real-ip") ||
-            null,
+          lastUsedIp: clientIpFromHeaders(req.headers),
           requestCount: { increment: 1 },
         },
       })

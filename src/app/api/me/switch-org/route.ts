@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { clientIpFromHeaders } from "@/lib/client-ip";
 import { reanchorUser } from "@/lib/access/workspace-anchor";
 
 /**
@@ -63,8 +64,7 @@ export async function POST(req: NextRequest) {
   // Security-sensitive: org switches show up in the audit trail of
   // BOTH the leaving org (severity warning) and the entering org so
   // ops can correlate cross-tenant activity.
-  const fwd = req.headers.get("x-forwarded-for") ?? "";
-  const ipAddress = fwd.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+  const ipAddress = clientIpFromHeaders(req.headers);
   const userAgent = req.headers.get("user-agent") ?? null;
   await Promise.all([
     logAuditEvent({

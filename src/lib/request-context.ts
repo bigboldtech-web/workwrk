@@ -8,6 +8,8 @@
 // AgreementParty signature was written with no IP and no user agent while the
 // Evidence panel and the CSV export presented both as proof.
 
+import { clientIpFromHeaders } from "./client-ip";
+
 type HeaderSource = { headers?: { get(name: string): string | null } | null } | null | undefined;
 
 export interface RequestContext {
@@ -19,10 +21,9 @@ export function getRequestContext(req?: HeaderSource): RequestContext {
   const headers = req?.headers;
   if (!headers || typeof headers.get !== "function") return { ipAddress: null, userAgent: null };
 
-  const forwarded = headers.get("x-forwarded-for");
-  const ipAddress = (forwarded ? forwarded.split(",")[0]?.trim() : "")
-    || headers.get("x-real-ip")?.trim()
-    || null;
+  // The order a client cannot forge (src/lib/client-ip.ts): evidence that
+  // names an address must name the one the connection came from.
+  const ipAddress = clientIpFromHeaders(headers);
   const ua = headers.get("user-agent")?.trim();
   const userAgent = ua ? ua.slice(0, 512) : null;
 

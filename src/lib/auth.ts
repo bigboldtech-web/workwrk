@@ -9,6 +9,7 @@ import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
+import { clientIpFromRecord } from "./client-ip";
 import { mfaRequiredFor, passwordAgeOf, passwordMaxAgeDaysOf } from "@/lib/auth/security-policy";
 import { signInPolicyOf } from "@/lib/settings/org-policy";
 import { sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
@@ -121,12 +122,11 @@ async function verifyAndConsumeBackupCode(
   return false;
 }
 
-// Best-effort client IP from proxy headers (behind nginx: x-forwarded-for).
+// The client's address from the proxy headers, in the order a client cannot
+// forge (src/lib/client-ip.ts): the sign-in throttle and the security log key
+// on it, so a made-up x-forwarded-for hop must never pick a fresh bucket.
 function clientIp(req: unknown): string | null {
-  const h = (req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers;
-  const raw = h?.["x-forwarded-for"] ?? h?.["x-real-ip"];
-  const val = Array.isArray(raw) ? raw[0] : raw;
-  return val ? val.split(",")[0].trim() : null;
+  return clientIpFromRecord((req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers);
 }
 
 // Google OAuth is only registered when the env vars are present. This

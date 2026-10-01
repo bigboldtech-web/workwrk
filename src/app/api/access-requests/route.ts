@@ -181,9 +181,11 @@ export async function GET(req: Request) {
     }
     // Already answered some other way: the requester now owns the object, or
     // holds at least what they asked for on the node (shared from its menu
-    // before grants closed requests, or through a Team or Everyone). The row
-    // closes here instead of waiting 14 days for a Decline that would tell
-    // them "declined" while they hold the access.
+    // before grants closed requests, or through a Team or Everyone). It is
+    // left off the card, so nobody is asked to Decline access the person
+    // holds, and nothing is written: a GET never changes data (a grant made
+    // through the access engine closes its requests on the write side,
+    // src/lib/access/access-requests.ts; an untouched row lapses after 14 days).
     let answered = t.ownerId === r.requesterId;
     if (!answered && node) {
       let rc = requesterCtx.get(r.requesterId);
@@ -193,10 +195,7 @@ export async function GET(req: Request) {
       }
       answered = roleCoversRequest((await nodeRole(rc, node)).role, r.role);
     }
-    if (answered) {
-      await prisma.accessRequest.updateMany({ where: { id: r.id, status: "PENDING" }, data: { status: "APPROVED", decidedAt: new Date() } }).catch(() => {});
-      continue;
-    }
+    if (answered) continue;
     incoming.push({
       id: r.id,
       objectType: r.objectType,
