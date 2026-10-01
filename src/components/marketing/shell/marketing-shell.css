@@ -107,6 +107,19 @@
   --os-presence:      #15803D;
   --os-attention:     #D92D20;
 
+  /* ── Module tiles. The home page's hub grid, as the founder approved
+     it on 2026-09-22. These are NOT the semantic trio above and must not
+     be swapped for it: the trio is status inside a surface and draws a
+     pale yellow and brown, a mint and a pinker red, while the approved
+     grid is an orange, a green and a red tint. Marketing only, so the
+     drift test skips them (the product has no tile tokens). Teams draws
+     its glyph in --os-danger-text, which is already the approved red. ── */
+  --mk-tile-orange-bg: #FFF4E5;
+  --mk-tile-orange-fg: #B25E02;
+  --mk-tile-green-bg:  #E8F8EF;
+  --mk-tile-green-fg:  #12734A;
+  --mk-tile-red-bg:    #FFEFEF;
+
   /* ── Chrome: the navy frame. The only dark element on the whole
      public site. Blue never sits on it. ────────────────────────── */
   --os-chrome-bg:        #1B2537;

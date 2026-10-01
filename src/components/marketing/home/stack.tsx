@@ -281,18 +281,22 @@ function Breadth() {
 
 const TILE: Record<string, { bg: string; fg: string }> = {
   // Tokens from the marketing scope, never literals (the copy gate's
-  // no-raw-hex rule): blue for Work, Docs and AI, yellow for Planner and
+  // no-raw-hex rule): blue for Work, Docs and AI, orange for Planner and
   // Goals, green for Talk and Tables, red for Teams. --os-blue-700 was read
   // here and is not a marketing token, so the blue tiles' glyphs fell back to
   // the ink colour; --os-brand-deep is the deep blue the scope does carry.
+  // The orange, green and red read the --mk-tile tokens, which hold the
+  // approved values exactly. The semantic warning, success and danger trio
+  // looks close but is not the same colour: swapping to it turned the
+  // approved orange tiles yellow and brown (marketing-shell.css says why).
   work: { bg: "var(--os-blue-50)", fg: "var(--os-brand-deep)" },
-  planner: { bg: "var(--os-warning-bg)", fg: "var(--os-warning-text)" },
+  planner: { bg: "var(--mk-tile-orange-bg)", fg: "var(--mk-tile-orange-fg)" },
   ai: { bg: "var(--os-brand-soft)", fg: "var(--os-brand-deep)" },
-  talk: { bg: "var(--os-success-bg)", fg: "var(--os-success-text)" },
-  teams: { bg: "var(--os-danger-bg)", fg: "var(--os-danger-text)" },
+  talk: { bg: "var(--mk-tile-green-bg)", fg: "var(--mk-tile-green-fg)" },
+  teams: { bg: "var(--mk-tile-red-bg)", fg: "var(--os-danger-text)" },
   docs: { bg: "var(--os-blue-50)", fg: "var(--os-brand-deep)" },
-  tables: { bg: "var(--os-success-bg)", fg: "var(--os-success-text)" },
-  goals: { bg: "var(--os-warning-bg)", fg: "var(--os-warning-text)" },
+  tables: { bg: "var(--mk-tile-green-bg)", fg: "var(--mk-tile-green-fg)" },
+  goals: { bg: "var(--mk-tile-orange-bg)", fg: "var(--mk-tile-orange-fg)" },
 };
 
 function Modules() {
