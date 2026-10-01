@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { parseAccessSettings } from "@/lib/access/settings";
+import { roleCountsFor } from "@/lib/access/role-counts";
 import { MODULE_SLUGS } from "@/lib/modules";
 import { getReviewCadences } from "@/lib/review-cadence";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
@@ -64,7 +65,7 @@ async function overview() {
   const orgId = su.organizationId;
 
   const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-  const [org, pref, members, pending, departments, titles, offices, itemTypes, tags, modulesOn, keys, hooks, events7, lastExport] = await Promise.all([
+  const [org, pref, members, pending, departments, titles, offices, itemTypes, tags, modulesOn, keys, hooks, events7, lastExport, roleCounts] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, plan: true, status: true, logo: true, settings: true } }),
     prisma.orgPreference.findUnique({ where: { organizationId: orgId }, select: { sidebarDefault: true } }),
     prisma.user.count({ where: { organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" } } }),
@@ -79,6 +80,7 @@ async function overview() {
     prisma.webhookSubscription.count({ where: { organizationId: orgId } }),
     prisma.activityLog.count({ where: { organizationId: orgId, createdAt: { gte: weekAgo } } }),
     prisma.activityLog.findFirst({ where: { organizationId: orgId, type: "data.exported" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
+    roleCountsFor(orgId),
   ]);
   if (!org) return NextResponse.json({ error: "Organization not found" }, { status: 404 });
 
@@ -97,6 +99,15 @@ async function overview() {
   const seats = PLAN_LIMITS[String(org.plan)]?.users ?? null;
   const ownerOk = await sessionMayManageOwnerPage(session);
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  // The People team count comes from roleCountsFor, the same count Structure,
+  // Members and Access show: the saved list when there is one, else everyone
+  // at HR, who hold People team powers today (peopleTeamOf in org-role.ts).
+  // Counting only the saved list read "0 people named" on a workspace whose
+  // HR person really does look after people information.
+  const peopleTeamNamed = access.peopleTeamUserIds.length > 0;
+  const peopleTeam = peopleTeamNamed
+    ? `People team: ${plural(roleCounts.peopleTeam, "person", "people")} named`
+    : `People team: ${plural(roleCounts.peopleTeam, "person", "people")} (everyone at HR level)`;
 
   const cards: Record<string, [string, string]> = {
     identity: [plural(values, "core value"), profile.mission?.trim() ? "Mission set" : "No mission yet"],
@@ -104,7 +115,7 @@ async function overview() {
     apps: [`${modulesOn} of ${MODULE_SLUGS.length} modules on`, plural(hidden, "app") + " hidden"],
     members: [plural(members, "member"), plural(pending, "pending invite")],
     structure: [plural(departments, "department"), `${plural(titles, "job title")} · ${plural(offices, "office")}`],
-    access: [`People team: ${plural(access.peopleTeamUserIds.length, "person", "people")} named`, `Public links: ${access.publicLinks === "view" ? "on, view only" : "off"}`],
+    access: [peopleTeam, `Public links: ${access.publicLinks === "view" ? "on, view only" : "off"}`],
     tasks: [plural(itemTypes, "task type"), plural(tags, "tag")],
     scoring: [onCadences.length ? onCadences.map(cap).join(", ") : "No review cadence on", `Weights sum to ${weightsTotal(weights)}`],
     security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${signIn.sessionIdleMinutes} minutes`],
