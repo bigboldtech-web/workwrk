@@ -28,6 +28,51 @@ import { PeoplePickerField, type PickPerson } from "@/components/people/person-b
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
+/** One field save that failed: what it sent and showed, so Retry resends exactly that. */
+export interface FailedSave {
+  memberId: string;
+  body: Record<string, unknown>;
+  optimistic: Partial<MemberRow>;
+}
+
+/**
+ * The save keys one write replaces (pure; tested). Role and Tier both write
+ * orgRole and memberTier, so a newer attempt on either row retires the older
+ * one's failure: a stale Tier Retry must never undo a Role that has since
+ * saved.
+ */
+export function saveGroup(key: string): string[] {
+  return key === "role" || key === "tier" ? ["role", "tier"] : [key];
+}
+
+/** A copy of a keyed record without these keys (pure; tested). */
+export function withoutKeys<T>(rec: Record<string, T>, keys: string[]): Record<string, T> {
+  const n = { ...rec };
+  for (const k of keys) delete n[k];
+  return n;
+}
+
+/**
+ * The save a Retry on this row resends, or null (pure; tested). Only a
+ * failure for the person the drawer shows now counts, so an error left from
+ * someone else never resends onto this person.
+ */
+export function retrySave(failed: Record<string, FailedSave>, key: string, memberId: string): FailedSave | null {
+  const f = failed[key];
+  return f && f.memberId === memberId ? f : null;
+}
+
+/**
+ * The fields to put back when a save fails (pure; tested): only the ones this
+ * save changed, read from before it, so a failed Department never undoes a
+ * Role that saved while it was in flight.
+ */
+export function undoFor(before: MemberRow, optimistic: Partial<MemberRow>): Partial<MemberRow> {
+  const undo: Record<string, unknown> = {};
+  for (const k of Object.keys(optimistic)) undo[k] = before[k as keyof MemberRow];
+  return undo as Partial<MemberRow>;
+}
+
 export function MemberDrawer({
   member,
   canEdit,
@@ -62,9 +107,15 @@ export function MemberDrawer({
   const showUpcoming = useShowUpcoming();
   // The scopes a failed save meant to set, so Retry sends them again.
   const failedScopes = useRef<string[] | null>(null);
+  // The field saves that failed, by row key, so each row's Retry resends
+  // what that save sent (the capacity row keeps the typed hours in cap).
+  const [failed, setFailed] = useState<Record<string, FailedSave>>({});
+  // The newest attempt per save group: an older attempt that answers late
+  // (two capacity pauses, say) never reverts or flags over a newer one.
+  const attempt = useRef<Record<string, number>>({});
   const [saved, setSaved] = useState<Record<string, number>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const [confirmRole, setConfirmRole] = useState<{ role: MemberRole; tier: string | null } | null>(null);
+  const [confirmRole, setConfirmRole] = useState<{ role: MemberRole; tier: string | null; key: string } | null>(null);
   const [cap, setCap] = useState<number | "">(member.weeklyCapacityHours ?? "");
   const capTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -73,19 +124,37 @@ export function MemberDrawer({
   }, [member]);
 
   const patch = async (key: string, body: Record<string, unknown>, optimistic: Partial<MemberRow>) => {
-    const prev = m;
-    setM({ ...m, ...optimistic });
-    const r = await apiFetch(`/api/users/${m.id}`, { method: "PATCH", json: body });
+    // A new attempt (a fresh change or a Retry) replaces any older failure on
+    // the same fields; its error clears while it is in flight and comes back
+    // only if this attempt fails too.
+    const group = saveGroup(key);
+    const gid = group.join("+");
+    const n = (attempt.current[gid] ?? 0) + 1;
+    attempt.current[gid] = n;
+    setFailed((f) => withoutKeys(f, group));
+    setErrs((e) => withoutKeys(e, group));
+    const undo = undoFor(m, optimistic);
+    const memberId = m.id;
+    setM((cur) => ({ ...cur, ...optimistic }));
+    const r = await apiFetch(`/api/users/${memberId}`, { method: "PATCH", json: body });
+    const newest = attempt.current[gid] === n;
     if (!r.ok) {
-      setM(prev);
+      if (!newest) return false; // the newer attempt's answer decides the row
+      setM((cur) => ({ ...cur, ...undo }));
+      setFailed((f) => ({ ...f, [key]: { memberId, body, optimistic } }));
       setErrs((e) => ({ ...e, [key]: r.error }));
       toast(r.error);
       return false;
     }
-    setErrs((e) => { const n = { ...e }; delete n[key]; return n; });
     setSaved((s) => ({ ...s, [key]: Date.now() }));
     onChanged();
     return true;
+  };
+
+  // The row's "Couldn't save" with a Retry that resends the failed save.
+  const errFor = (key: string) => {
+    const f = retrySave(failed, key, m.id);
+    return errs[key] && f ? { message: errs[key], onRetry: () => { void patch(key, f.body, f.optimistic); } } : null;
   };
 
   const saveScopes = async (scopes: string[]) => {
@@ -104,10 +173,12 @@ export function MemberDrawer({
     onChanged();
   };
 
-  const askRole = (role: MemberRole, tier: string | null) => {
+  // key is the row that asked ("role" or "tier"), so a failure and its Retry
+  // show on the row the person changed.
+  const askRole = (role: MemberRole, tier: string | null, key: "role" | "tier" = "role") => {
     const sensitive = role === "OWNER" || m.role === "OWNER" || m.id === viewerId;
-    if (sensitive) { setConfirmRole({ role, tier }); return; }
-    void patch("role", { orgRole: role, memberTier: role === "MEMBER" ? tier : null }, { role, tier: role === "MEMBER" ? tier : null });
+    if (sensitive) { setConfirmRole({ role, tier, key }); return; }
+    void patch(key, { orgRole: role, memberTier: role === "MEMBER" ? tier : null }, { role, tier: role === "MEMBER" ? tier : null });
   };
 
   const pick = (list: Lookup[], cur: { id: string } | null) => [{ value: "", label: "None" }, ...list.map((l) => ({ value: l.id, label: l.label }))].concat(cur && !list.some((l) => l.id === cur.id) ? [{ value: cur.id, label: "Current" }] : []);
@@ -142,7 +213,7 @@ export function MemberDrawer({
           label="Role"
           helper={m.role === "OWNER" ? "Runs the company account." : m.role === "ADMIN" ? "Runs the workspace day to day." : "Works in the Spaces they are added to."}
           savedAt={saved.role}
-          error={errs.role ? { message: errs.role, onRetry: () => setErrs((e) => { const n = { ...e }; delete n.role; return n; }) } : null}
+          error={errFor("role")}
           readOnlyValue={canEdit && (viewerIsOwner || m.role !== "OWNER") ? undefined : ROLE_WORD[m.role]}
           control={
             <NativeSelect<MemberRole>
@@ -187,14 +258,15 @@ export function MemberDrawer({
           <SettingsRow
             label="Tier"
             helper="Decides which manager pages they open until the new access roles are on. Agent is for frontline staff."
-            savedAt={saved.role}
+            savedAt={saved.tier}
+            error={errFor("tier")}
             readOnlyValue={canEdit ? undefined : m.tierLabel ?? "Member"}
             control={
               <NativeSelect
                 ariaLabel="Tier"
                 value={m.tier ?? "EMPLOYEE"}
                 options={TIER_OPTIONS}
-                onChange={(tier) => askRole("MEMBER", tier)}
+                onChange={(tier) => askRole("MEMBER", tier, "tier")}
               />
             }
           />
@@ -202,6 +274,7 @@ export function MemberDrawer({
         <SettingsRow
           label="Job title"
           savedAt={saved.roleId}
+          error={errFor("roleId")}
           readOnlyValue={canEditPeople ? undefined : m.jobTitle?.title ?? "None"}
           control={
             <NativeSelect ariaLabel="Job title" value={m.jobTitle?.id ?? ""} options={pick(lookups.roles, m.jobTitle)} className="max-w-[220px]"
@@ -211,6 +284,7 @@ export function MemberDrawer({
         <SettingsRow
           label="Department"
           savedAt={saved.departmentId}
+          error={errFor("departmentId")}
           readOnlyValue={canEditPeople ? undefined : m.department?.name ?? "None"}
           control={
             <NativeSelect ariaLabel="Department" value={m.department?.id ?? ""} options={pick(lookups.depts, m.department)} className="max-w-[220px]"
@@ -220,6 +294,7 @@ export function MemberDrawer({
         <SettingsRow
           label="Office"
           savedAt={saved.officeId}
+          error={errFor("officeId")}
           readOnlyValue={canEditPeople ? undefined : m.office?.name ?? "None"}
           control={
             <NativeSelect ariaLabel="Office" value={m.office?.id ?? ""} options={pick(lookups.offices, m.office)} className="max-w-[220px]"
@@ -229,6 +304,7 @@ export function MemberDrawer({
         <SettingsRow
           label="Reports to"
           savedAt={saved.managerId}
+          error={errFor("managerId")}
           readOnlyValue={canEditPeople ? undefined : m.manager?.name ?? "Nobody"}
           control={
             <span className="w-[220px]">
@@ -251,6 +327,7 @@ export function MemberDrawer({
           label="Weekly capacity"
           helper="Blank uses the workspace's working week."
           savedAt={saved.cap}
+          error={errFor("cap")}
           readOnlyValue={canEditPeople ? undefined : m.weeklyCapacityHours != null ? `${m.weeklyCapacityHours} hours` : "Workspace default"}
           control={
             <NumberInput value={cap} min={0} max={168} suffix="hours" ariaLabel="Weekly capacity hours"
@@ -265,7 +342,7 @@ export function MemberDrawer({
               }} />
           }
         />
-        <SettingsRow label="Status" readOnlyValue={STATUS_WORD[m.status] ?? m.status} />
+        <SettingsRow label="Status" savedAt={saved.status} error={errFor("status")} readOnlyValue={STATUS_WORD[m.status] ?? m.status} />
         {canEdit && m.id !== viewerId && m.role === "OWNER" && !viewerIsOwner ? (
           <p className="mt-4 border-t border-line pt-4 text-sm text-ink-2">Only an Owner can change, deactivate or remove an Owner.</p>
         ) : canEdit && m.id !== viewerId ? (
@@ -289,7 +366,7 @@ export function MemberDrawer({
         onConfirm={async () => {
           const c = confirmRole;
           setConfirmRole(null);
-          if (c) await patch("role", { orgRole: c.role, memberTier: c.role === "MEMBER" ? c.tier : null }, { role: c.role, tier: c.role === "MEMBER" ? c.tier : null });
+          if (c) await patch(c.key, { orgRole: c.role, memberTier: c.role === "MEMBER" ? c.tier : null }, { role: c.role, tier: c.role === "MEMBER" ? c.tier : null });
         }}
       >
         {confirmRole?.role === "OWNER" ? (
