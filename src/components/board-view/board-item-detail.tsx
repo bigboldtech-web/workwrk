@@ -183,6 +183,39 @@ export function listFieldCarriesValue(
   return (item.connections?.[key]?.length ?? 0) > 0;
 }
 
+/** Who holds the task, as one string: the resolved assignees, else the ids, else the owner. */
+export function trailAssigneeSignature(item: Pick<BoardItemRow, "assignees" | "assigneeIds" | "ownerId">): string {
+  if (item.assignees?.length) return item.assignees.map((a) => a.id).join(",");
+  if (item.assigneeIds?.length) return item.assigneeIds.join(",");
+  return item.ownerId ?? "";
+}
+
+/**
+ * When the Connection trail must read again because the assignees changed.
+ *
+ * The trail's "nobody held the job title, so this task is unassigned" notice
+ * is decided by the server from the STORED assignees. Assigning someone used
+ * to leave it on screen until a reload, because the trail never read again.
+ * Reading again the moment the picker changes is not enough either: that
+ * render is the optimistic one, the PATCH is still in flight, and a trail read
+ * that wins the race answers with the old assignees. So an assignee change
+ * with the same `updatedAt` (the optimistic render) only marks the trail
+ * pending, and the next `updatedAt` (the save's answer merged in) is what
+ * bumps `n`. A change that arrives WITH a new `updatedAt` (a reload, another
+ * person's edit over realtime) is already the server's word and bumps at
+ * once, as does a host that never carries `updatedAt`. A refused save
+ * reloads the old assignees, so the trail it already shows stays right.
+ */
+export interface TrailAssigneeStamp { sig: string; at: string; pending: boolean; n: number }
+export function settleTrailAssignees(prev: TrailAssigneeStamp, sig: string, at: string): TrailAssigneeStamp {
+  if (sig !== prev.sig) {
+    if (at !== prev.at || !at) return { sig, at, pending: false, n: prev.n + 1 };
+    return { sig, at, pending: true, n: prev.n };
+  }
+  if (at !== prev.at) return prev.pending ? { sig, at, pending: false, n: prev.n + 1 } : { ...prev, at };
+  return prev;
+}
+
 /**
  * One key of `metadata`, changed without touching the rest of it.
  *
@@ -280,6 +313,13 @@ export function BoardItemDetail({
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [subtaskCount, setSubtaskCount] = useState<number | null>(null);
   const [attachCount, setAttachCount] = useState<number | null>(null);
+  // The trail reads again once an assignee change has SAVED (settleTrailAssignees).
+  // Derived during render, React's pattern for state that follows a prop.
+  const trailSig = trailAssigneeSignature(item);
+  const trailAt = item.updatedAt ? String(item.updatedAt) : "";
+  const [trailStamp, setTrailStamp] = useState<TrailAssigneeStamp>(() => ({ sig: trailSig, at: trailAt, pending: false, n: 0 }));
+  const nextTrailStamp = settleTrailAssignees(trailStamp, trailSig, trailAt);
+  if (nextTrailStamp !== trailStamp) setTrailStamp(nextTrailStamp);
   const reveal = (s: string) => setRevealed((prev) => new Set(prev).add(s));
 
   const checklistItems = Array.isArray(item.metadata?.checklist) ? (item.metadata!.checklist as unknown[]) : [];
@@ -478,7 +518,7 @@ export function BoardItemDetail({
       </div>
 
       {/* The connection trail: read only, rendered only when it has entries. */}
-      <TaskTrail itemId={item.id} refreshKey={`${String(item.metadata?.kraId ?? "")}:${String(item.metadata?.kpiId ?? "")}:${attachCount}`} />
+      <TaskTrail itemId={item.id} refreshKey={`${String(item.metadata?.kraId ?? "")}:${String(item.metadata?.kpiId ?? "")}:${attachCount}:${nextTrailStamp.n}`} />
 
       {/* 9, "Add to task" (e) */}
       {canEdit && addRows.length > 0 ? (
