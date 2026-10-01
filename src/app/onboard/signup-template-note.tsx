@@ -21,6 +21,7 @@ interface TemplateView {
   kpiId?: string | null;
   goalId?: string | null;
   docId?: string | null;
+  sampleTaskId?: string | null;
   jobTitles?: number;
   skipped?: string[];
   retryable?: boolean;
@@ -39,6 +40,12 @@ export function appliedPieces(t: TemplateView): string {
   else if (t.kraId) parts.push("a KRA");
   if (t.goalId) parts.push("a company goal");
   if (t.docId) parts.push("a playbook doc");
+  // The marker only reaches "applied" after the sample task step, so an
+  // applied template always made it. The route does not send its id today:
+  // absent means "made", and only an explicit null (a marker that says it
+  // was not made) leaves it out, so the note never names a task that is not
+  // there and never forgets one that is.
+  if (t.sampleTaskId !== null) parts.push("a sample task on the List");
   return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 

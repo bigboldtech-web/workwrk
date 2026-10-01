@@ -252,7 +252,7 @@ function SignupFormInner({ planLine, termsHref, privacyHref }: SignupLinks) {
         </p>
         {withTuesday ? (
           <p className="wa-help" data-testid="signup-template-line">
-            Your workspace starts with the Tuesday: client onboarding template: an Operations Space with its Onboarding List, the Client onboarding SOP, the Onboarding lead and Finance job titles, a KRA and KPI, a company goal and a playbook doc.
+            Your workspace starts with the Tuesday: client onboarding template: an Operations Space with its Onboarding List, the Client onboarding SOP, the Onboarding lead and Finance job titles, a KRA and KPI, a company goal, a playbook doc and a sample task on the List.
           </p>
         ) : null}
         <button type="submit" className="wa-btn wa-btn--primary wa-btn--block" data-pending={loading || undefined}>
