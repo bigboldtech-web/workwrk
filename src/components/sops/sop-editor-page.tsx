@@ -730,6 +730,19 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
 
   const crumbs = [{ label: "SOPs", href: "/sops" }, ...(sop?.folder ? [{ label: sop.folder.name, href: `/sops?folderId=${sop.folder.id}` }] : []), { label: headerTitle }];
 
+  /* The status, kind and version chips. They do not shrink, so on a phone the
+     title row has no room for them beside Share and the one blue: the title
+     collapsed to nothing and the chips slid under the buttons. Below sm they
+     leave the title row and sit on their own line at the top of the page, so
+     a person still reads which kind and version they are about to run. */
+  const metaChips = (
+    <>
+      <StatusChip color={SOP_STATUS_COLOR[status]} label={SOP_STATUS_LABEL[status]} disabled />
+      <Chip size="default" className="h-6 px-2 text-xs" disabled>{SOP_KIND_LABEL[kind]}</Chip>
+      {!creating ? <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{sop?.version ?? 1}</span> : null}
+    </>
+  );
+
   return (
     <>
       {/* In Work the WorkPlacementProvider declares the crumb (Work > SOP). */}
@@ -749,26 +762,33 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
                 placeholder="Untitled SOP"
                 aria-label="SOP title"
                 autoFocus={creating}
-                className="h-9 min-w-0 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none"
+                className="h-9 min-w-[4rem] flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none"
               />
             ) : (
-              <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{headerTitle}</h1>
+              /* min-w keeps a readable start of the title on a phone; the full
+                 name stays in the top bar and the breadcrumb. */
+              <h1 className="min-w-[4rem] flex-1 truncate text-xl font-semibold text-ink" title={headerTitle}>{headerTitle}</h1>
             )}
-            <StatusChip color={SOP_STATUS_COLOR[status]} label={SOP_STATUS_LABEL[status]} disabled />
-            <Chip size="default" className="h-6 px-2 text-xs" disabled>{SOP_KIND_LABEL[kind]}</Chip>
-            {!creating ? <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{sop?.version ?? 1}</span> : null}
+            <div className="flex shrink-0 items-center gap-2 max-sm:hidden">{metaChips}</div>
           </>
         }
         autosave={editing ? (
-          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} />
+          /* On a phone the idle hint ("Auto-saves as you type") pushed the
+             title, the blue and the "…" menu off the row. Below sm only that
+             hint goes quiet (screen readers still hear it); every live state,
+             Saving, Not saved and Retry, still draws. */
+          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={saveState.status === "idle" ? "max-sm:[&>span]:sr-only" : undefined} />
         ) : undefined}
         actions={
           <>
             {!creating ? <ShareOrRoleChip role={role} onOpen={(mode) => setShareOpen(mode)} /> : null}
             {primary && primary.onClick ? (
-              <button type="button" onClick={primary.onClick} disabled={primary.busy} className="ms-1 inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">
+              /* On a phone the label gives way (icon only, like the Back button)
+                 so the title keeps the room; it stays the button's accessible
+                 name through sr-only, and the tooltip. */
+              <button type="button" onClick={primary.onClick} disabled={primary.busy} title={primary.label} className="ms-1 inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4 max-md:gap-0">
                 {primary.busy ? <Dots variant="pending" /> : PrimaryIcon ? <PrimaryIcon className="h-4 w-4" strokeWidth={1.5} aria-hidden /> : null}
-                {primary.label}
+                <span className="max-md:sr-only">{primary.label}</span>
               </button>
             ) : null}
           </>
@@ -777,6 +797,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       />
 
       <div className="os-chrome mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pb-32 pt-2 sm:px-6">
+        {/* The phone home of the header's status, kind and version chips. */}
+        <div className="-mb-3 flex flex-wrap items-center gap-2 sm:hidden">{metaChips}</div>
         {readOnly && !creating ? (
           <ReadOnlyBanner
             variant="inline"
@@ -940,9 +962,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
         )}
       </div>
 
-      {/* The sticky save bar: unsaved changes on a published SOP, or a failed save. */}
+      {/* The sticky save bar: unsaved changes on a published SOP, or a failed save.
+          Below lg the hub sidebar is hidden (os-shell), so the bar starts at
+          the rail alone; offset by the sidebar's 264px too, it began past a
+          phone's edge and Save and Done were drawn off screen. */}
       {editing && saveState.showSaveBar ? (
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 max-lg:start-[var(--os-rail-w)] flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-base text-ink">{failed ? "Not saved" : "Unsaved changes"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
           <button type="button" onClick={() => void flush()} disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">
@@ -952,7 +977,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       ) : editing && !creating ? (
         /* Nothing dirty: one way out for a mouse user on drafts AND on
            published SOPs (Esc is the keyboard's). */
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 max-lg:start-[var(--os-rail-w)] flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{autosaves ? "Editing · drafts save as you type" : "Editing · changes are saved when you press Save"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base font-medium text-ink hover:bg-hover">
             <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Done
