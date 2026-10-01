@@ -351,6 +351,13 @@ function SidebarTab() {
   const order = prefs.sidebar.sectionsOrder?.length ? prefs.sidebar.sectionsOrder : SECTIONS.map((s) => s.key);
   const visibleOrder = [...order.filter((k) => SECTIONS.some((s) => s.key === k)), ...SECTIONS.map((s) => s.key).filter((k) => !order.includes(k))];
   const cards = readSidebarCards(prefs.home?.cards);
+  // An admin can lock Home cards (home.cards) under Identity & culture >
+  // Appearance defaults. The server still stores a member's own value but
+  // re-stamps the effective one from the org default, so a live switch here
+  // would show Saved and snap back with nothing to explain why. Locked rows
+  // render the workspace's value with the lock instead, as Density does and
+  // as the Customize panel's Sidebar rows do.
+  const cardsLocked = new Set(prefs.lockedKeys ?? []).has("home.cards");
 
   const togglePin = (group: string, key: string, on: boolean) => {
     const next = on ? [...pins.filter((k) => k !== key), key] : pins.filter((k) => k !== key);
@@ -365,6 +372,8 @@ function SidebarTab() {
     void write("sections", { sidebar: { sectionsOrder: arr } });
   };
   const toggleCard = (key: SidebarOptionalKey, on: boolean) => {
+    // A write under the lock cannot take effect, so it never runs.
+    if (cardsLocked) return;
     const next = on ? [...new Set([...cards, key])] : cards.filter((k) => k !== key);
     void write("cards", { home: { cards: next } });
   };
@@ -469,6 +478,7 @@ function SidebarTab() {
               key={r.key}
               label={r.label}
               {...(i === 0 ? row("cards") : {})}
+              lock={cardsLocked ? { value: cards.includes(r.key) ? "On" : "Off" } : null}
               control={<Switch checked={cards.includes(r.key)} onChange={(v) => toggleCard(r.key, v)} aria-label={`Show ${r.label}`} />}
             />
           ))}
