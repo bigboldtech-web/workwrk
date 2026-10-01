@@ -19,7 +19,7 @@
 //   - resetSessionExpired() before navigating (the expiry latch).
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { getProviders, signIn } from "next-auth/react";
+import { getProviders, signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { resetSessionExpired } from "@/lib/session-expiry";
@@ -34,6 +34,27 @@ import { PasswordField } from "@/components/auth/password-field";
 import { SignedInStrip } from "@/components/auth/signed-in-strip";
 
 const LAST_EMAIL_KEY = "workwrk:last-email";
+
+const LOGGED_OUT_NOTICE: LoginNotice = { tone: "info", text: "You were logged out. Log in to pick up where you left off." };
+
+/**
+ * The strip above the form. An explicit flag (loginNotice) always wins. The
+ * "You were logged out" guess (a callbackUrl plus an email this tab
+ * remembers) is shown only once the session is known to be gone: a person
+ * who is still signed in and follows a bookmarked or pasted
+ * /login?callbackUrl= link would otherwise read "Logged in as X" directly
+ * above "You were logged out". While the session is still loading the guess
+ * waits, so it never flashes up and then vanishes.
+ */
+export function loginStripNotice(
+  explicit: LoginNotice | null,
+  looksLoggedOut: boolean,
+  sessionStatus: "loading" | "authenticated" | "unauthenticated",
+): LoginNotice | null {
+  if (explicit) return explicit;
+  if (looksLoggedOut && sessionStatus === "unauthenticated") return LOGGED_OUT_NOTICE;
+  return null;
+}
 
 function readLastEmail(): string {
   try {
@@ -64,6 +85,7 @@ function GoogleGlyph() {
 function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
   const router = useRouter();
   const sp = useSearchParams();
+  const { status: sessionStatus } = useSession();
   const fallback = staffConsole ? "/admin" : WORK_HOME_HREF;
   const rawCallback = sp.get("callbackUrl");
   const callbackUrl = safeCallbackUrl(rawCallback, fallback);
@@ -77,6 +99,9 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [notice, setNotice] = useState<LoginNotice | null>(null);
+  // Set once on arrival; whether it shows depends on the session at render
+  // time (loginStripNotice), not on what the session was at mount.
+  const [looksLoggedOut, setLooksLoggedOut] = useState(false);
   const [loading, setLoading] = useState(false);
   const [google, setGoogle] = useState(false);
   const verifyTouched = useRef(false);
@@ -91,7 +116,7 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
     const last = readLastEmail();
     if (last) setEmail((e) => e || last);
     if (n) setNotice(n);
-    else if (rawCallback && last) setNotice({ tone: "info", text: "You were logged out. Log in to pick up where you left off." });
+    else if (rawCallback && last) setLooksLoggedOut(true);
     if (err) setError(friendlyError(err, { email: params.get("email") }));
     const hadFlag = ONE_TIME_LOGIN_FLAGS.some((k) => params.has(k));
     if (hadFlag) {
@@ -215,12 +240,13 @@ function LoginFormInner({ staffConsole }: { staffConsole: boolean }) {
     </AuthBanner>
   ) : null;
 
+  const stripNotice = loginStripNotice(notice, looksLoggedOut, sessionStatus);
   const topStrip = (
     <>
       {staffConsole ? null : <SignedInStrip continueHref={callbackUrl} logoutCallback="/login" />}
-      {notice && !mfaRequired ? (
-        <AuthBanner tone={notice.tone} strip>
-          <p>{notice.text}</p>
+      {stripNotice && !mfaRequired ? (
+        <AuthBanner tone={stripNotice.tone} strip>
+          <p>{stripNotice.text}</p>
         </AuthBanner>
       ) : null}
     </>
