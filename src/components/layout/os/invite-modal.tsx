@@ -4,7 +4,8 @@
 // button + Settings → Members header).
 //
 //   Emails row: multi-email chip input (comma / space / Enter separated)
-//   Access level: same ACCESS_LEVELS catalog the Members page uses
+//   Access level: same ACCESS_LEVELS catalog the Members page uses, cut to
+//     the levels this inviter may give (inviteLevelChoices below)
 //   Role: optional — the role IS the definition (user 2026-08-27): its
 //     KRAs and their published SOPs seed automatically when the invite
 //     is accepted. No per-item picking.
@@ -24,6 +25,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
+import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { useOsToast } from "./toast";
 import { useViewerRole } from "./boot-context";
 import { Dots } from "@/components/ui/dots";
@@ -79,6 +81,59 @@ export function inviteLevelOptionText(l: { label: string; description: string })
   return `${l.label}: ${description}`;
 }
 
+// The invite dialog's own words for Company Admin. The shared catalog's
+// "Org owner, full access (cannot be modified)" is wrong here: every other
+// screen calls this level Admin, an Admin is not the Owner, and an Admin's
+// level can be changed. The catalog also feeds the access page, so the
+// override stays local to this dialog.
+const INVITE_LEVEL_TEXT: Partial<Record<AccessLevel, { label: string; description: string }>> = {
+  COMPANY_ADMIN: { label: "Admin", description: "Full access to the workspace" },
+};
+
+export interface InviteLevelChoice {
+  value: AccessLevel;
+  text: string;
+}
+
+/**
+ * The Access level options a viewer at `viewerLevel` is offered: only the
+ * levels POST /api/invitations would accept from them (the same pure
+ * resolveInviteLevel rule), so a Manager is never offered Company Admin, HR
+ * or a rung above their own just to be refused after Send. The server still
+ * rechecks against the inviter's current level, so a stale level here only
+ * shows a stale list, never a real grant.
+ */
+export function inviteLevelChoices(viewerLevel: string | null | undefined): InviteLevelChoice[] {
+  return INVITE_LEVELS.filter((l) => resolveInviteLevel(viewerLevel, l.value).ok).map((l) => ({
+    value: l.value,
+    text: inviteLevelOptionText(INVITE_LEVEL_TEXT[l.value] ?? l),
+  }));
+}
+
+/**
+ * The level the picker shows: the wanted one when it is on offer, else
+ * Employee, else the first level on offer. A default from Invite rules (or a
+ * pick made before the session loaded) that this viewer may not give falls
+ * back rather than leaving the select on a value it does not list.
+ */
+export function inviteLevelInChoices(wanted: AccessLevel, choices: InviteLevelChoice[]): AccessLevel {
+  if (choices.some((c) => c.value === wanted)) return wanted;
+  if (choices.some((c) => c.value === "EMPLOYEE")) return "EMPLOYEE";
+  return choices[0]?.value ?? "EMPLOYEE";
+}
+
+/**
+ * Which level the options are built from. Boot's org role is read fresh
+ * from the database on every load, the session can be hours old: an Admin
+ * by boot is an Admin, and a session that still says Admin when boot says
+ * otherwise (someone just demoted) is not trusted for the admin options.
+ */
+export function inviteViewerLevel(sessionLevel: string | null | undefined, bootIsAdmin: boolean): string | null {
+  if (bootIsAdmin) return "COMPANY_ADMIN";
+  if (sessionLevel === "COMPANY_ADMIN" || sessionLevel === "SUPER_ADMIN") return null;
+  return sessionLevel ?? null;
+}
+
 export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaultLevel }: Props) {
   const { toast } = useOsToast();
 
@@ -119,7 +174,9 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
   const ruleLevel: AccessLevel = defaultLevel ?? (rules?.inviteDefaultRole === "ADMIN" && isAdmin ? ("COMPANY_ADMIN" as AccessLevel) : "EMPLOYEE");
   const [picked, setAccessLevel] = useState<AccessLevel | null>(null);
   const [agent, setAgent] = useState(false);
-  const chosenLevel: AccessLevel = picked ?? ruleLevel;
+  const viewerLevel = inviteViewerLevel(sessionData?.user?.accessLevel, isAdmin);
+  const levelChoices = useMemo(() => inviteLevelChoices(viewerLevel), [viewerLevel]);
+  const chosenLevel: AccessLevel = inviteLevelInChoices(picked ?? ruleLevel, levelChoices);
   const accessLevel: AccessLevel = agent ? ("AGENT" as AccessLevel) : chosenLevel;
   const [message, setMessage] = useState("");
 
@@ -336,9 +393,9 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
             onChange={(e) => setAccessLevel(e.target.value as AccessLevel)}
             className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-base text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
           >
-            {INVITE_LEVELS.map((l) => (
+            {levelChoices.map((l) => (
               <option key={l.value} value={l.value}>
-                {inviteLevelOptionText(l)}
+                {l.text}
               </option>
             ))}
           </select>
