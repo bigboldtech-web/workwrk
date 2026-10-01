@@ -84,6 +84,13 @@ function useLeaveDialog() {
 // route that renders inside another page's row can name itself again.
 const ALSO_ACTIVE_CRUMBS: Record<string, string> = {};
 
+/**
+ * Fired by Workspace settings > Identity after the workspace name saves,
+ * with `{ organizationId, name }`, so the crumb below reads the new name at
+ * once in the tab that renamed it (boot was read before the save).
+ */
+export const WORKSPACE_RENAMED_EVENT = "workwrk:workspace-renamed";
+
 export function SettingsShell({ children, door = "me" }: { children: ReactNode; door?: SettingsDoorProp }) {
   const pathname = usePathname() || "";
   const router = useRouter();
@@ -150,7 +157,29 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
   const override = useActiveSettingsRowOverride();
   const activeKey = override ?? (current && current.door === shownDoor ? current.key : null);
   const firstName = (session?.user as { firstName?: string } | undefined)?.firstName;
-  const orgName = (session?.user as { organizationName?: string } | undefined)?.organizationName;
+  const sessionOrgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
+  // The workspace name for the crumb. The session's copy is the name the
+  // token was issued with, so after a rename it stayed old for every member
+  // until they signed in again (the revalidation now refreshes it within
+  // five minutes). Boot reads the row on every load, and the rename event
+  // covers the tab that saved; each applies only to the workspace this
+  // session acts in, so a stale boot from before a switch never names the
+  // wrong company. The session's name stays the fallback.
+  const [renamed, setRenamed] = useState<{ organizationId: string; name: string } | null>(null);
+  useEffect(() => {
+    const onRenamed = (e: Event) => {
+      const d = (e as CustomEvent<{ organizationId?: unknown; name?: unknown }>).detail;
+      if (d && typeof d.organizationId === "string" && typeof d.name === "string" && d.name.trim()) {
+        setRenamed({ organizationId: d.organizationId, name: d.name.trim() });
+      }
+    };
+    window.addEventListener(WORKSPACE_RENAMED_EVENT, onRenamed);
+    return () => window.removeEventListener(WORKSPACE_RENAMED_EVENT, onRenamed);
+  }, []);
+  const orgName =
+    (renamed && renamed.organizationId === sessionOrgId ? renamed.name : null) ??
+    (boot.org?.id && boot.org.id === sessionOrgId && boot.org.name ? boot.org.name : null) ??
+    (session?.user as { organizationName?: string } | undefined)?.organizationName;
 
   const crumbs = useMemo<BreadcrumbItem[]>(() => {
     const items: BreadcrumbItem[] = [];

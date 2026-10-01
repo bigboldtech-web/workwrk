@@ -26,13 +26,83 @@ function userAgentOf(req: unknown): string | null {
 
 // TOTP verification at login — mirrors the enrolment route (otplib, ±1 step of
 // clock-drift leeway) so a code that enrolled will validate here.
+// Returns the RFC 6238 time step the code matched, or null when it did not
+// match, so the caller can refuse a code that was already spent (below).
 const MFA_TOLERANCE: [number, number] = [1, 1];
-function verifyTotpCode(code: string, secret: string): boolean {
+const TOTP_PERIOD_S = 30;
+function verifyTotpCode(code: string, secret: string): number | null {
   try {
-    return !!verifySync({ token: code, secret, epochTolerance: MFA_TOLERANCE })?.valid;
+    const r = verifySync({ token: code, secret, epochTolerance: MFA_TOLERANCE });
+    if (!r?.valid) return null;
+    // otplib's TOTP result carries timeStep; the epoch it matched at is the
+    // same number by another route, kept as a fallback.
+    if ("timeStep" in r && typeof r.timeStep === "number") return r.timeStep;
+    if ("epoch" in r && typeof r.epoch === "number") return Math.floor(r.epoch / TOTP_PERIOD_S);
+    return null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// Authenticator codes are one-time too. A code stays valid for its whole
+// 30 second step (plus the drift leeway), so without this anyone who saw or
+// phished the password and the code just typed could sign in again with the
+// same six digits and get a session of their own. The last step accepted
+// for each person is remembered and a code at or before it is refused, the
+// way a spent backup code is. The check and the record are one synchronous
+// step, with no await between them, so two submits of one code racing each
+// other cannot both pass.
+//
+// In-memory and per-process, like login-throttle: right while production
+// runs one pm2 instance, and an entry only has to outlive the code's own
+// window. Swap for a User column (or Redis) when scaling horizontally.
+const lastTotpStep = new Map<string, number>();
+const TOTP_STEP_ENTRIES_MAX = 20_000;
+
+/**
+ * Claim a matched time step for a person: true the first time, false for
+ * that step or any earlier one again (a replay). Exported for the tests.
+ */
+export function claimTotpStep(userId: string, step: number, nowStep = Math.floor(Date.now() / 1000 / TOTP_PERIOD_S)): boolean {
+  const last = lastTotpStep.get(userId);
+  if (typeof last === "number" && step <= last) return false;
+  if (lastTotpStep.size >= TOTP_STEP_ENTRIES_MAX) {
+    // An entry older than the drift window can no longer stop anything:
+    // every code at or before it has expired on its own.
+    for (const [id, s] of lastTotpStep) if (s < nowStep - 2) lastTotpStep.delete(id);
+  }
+  lastTotpStep.set(userId, step);
+  return true;
+}
+
+/**
+ * The one account a typed email names, whatever its case. Signup keeps the
+ * address as typed ("Priya@Co.com") and refuses a second one that differs
+ * only by case, so a person typing "priya@co.com" later (a phone keyboard
+ * capitalises the first letter, an invite lowercases it) means the same
+ * account; an exact-case lookup told them their password was wrong and
+ * counted it toward the lockout. `rows` are the case-insensitive matches.
+ *
+ * Older data can hold two accounts that differ only by case (from before
+ * signup refused that). An exact-case match still wins, so those people sign
+ * in exactly as before; a typed spelling that matches neither exactly and
+ * more than one live account is ambiguous and matches nothing, which is
+ * what it did before too. Among same-case rows a live account wins over a
+ * removed one; a removed account alone is still returned, so its owner
+ * hears "no longer active" after the password check rather than a vague
+ * refusal. Pure; tested.
+ */
+export function pickAccountForEmail<T extends { email: string; deletedAt?: Date | null }>(rows: readonly T[], typed: string): T | null {
+  const want = typed.trim();
+  const live = (list: readonly T[]) => list.filter((r) => !r.deletedAt);
+  const exact = rows.filter((r) => r.email === want);
+  if (exact.length) return live(exact)[0] ?? exact[0];
+  const lower = want.toLowerCase();
+  const same = rows.filter((r) => r.email.toLowerCase() === lower);
+  const sameLive = live(same);
+  if (sameLive.length === 1) return sameLive[0];
+  if (sameLive.length === 0 && same.length === 1) return same[0];
+  return null;
 }
 // Backup codes are one-time: a match is CONSUMED (removed from the stored set)
 // so the same code can never be replayed.
@@ -141,10 +211,23 @@ const providers = [
         throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
-      const user = await prisma.user.findFirst({
-        where: { email: credentials.email },
-        include: { organization: true },
-      });
+      // The exact spelling first, the same query as before, so nobody who
+      // signs in today is affected; only a miss falls back to a
+      // case-insensitive match with one account picked (pickAccountForEmail),
+      // since the address as typed and as stored can differ by case.
+      const user =
+        (await prisma.user.findFirst({
+          where: { email: credentials.email },
+          include: { organization: true },
+        })) ??
+        pickAccountForEmail(
+          await prisma.user.findMany({
+            where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
+            include: { organization: true },
+            take: 10,
+          }),
+          credentials.email,
+        );
 
       if (!user) {
         // Spend the same bcrypt time as the wrong-password branch so an
@@ -184,7 +267,10 @@ const providers = [
           // Signal the client to collect a code and resubmit email+password+code.
           throw new Error("MFA_REQUIRED");
         }
-        const totpOk = verifyTotpCode(code, user.mfaSecret);
+        // A code that matched but whose step was already accepted is a
+        // replay: refused like a wrong code, and counted like one.
+        const step = verifyTotpCode(code, user.mfaSecret);
+        const totpOk = step !== null && claimTotpStep(user.id, step);
         const backupOk = totpOk
           ? false
           : await verifyAndConsumeBackupCode(user.id, code, user.mfaBackupCodes);
@@ -645,6 +731,13 @@ export const authOptions: NextAuthOptions = {
             token.organizationId = account_.organizationId;
             token.organizationName = account_.organization?.name;
             token.accessLevel = account_.accessLevel;
+          } else if (acting?.name) {
+            // Healthy and still a member here: carry the workspace's current
+            // name. Without this a rename in Workspace settings > Identity
+            // reached a token only on the next sign in, so the settings
+            // crumb (and every other reader of organizationName) showed the
+            // old name for the rest of the session, for every member.
+            token.organizationName = acting.name;
           }
 
           // The server side of the workspace two step rule. authorize()

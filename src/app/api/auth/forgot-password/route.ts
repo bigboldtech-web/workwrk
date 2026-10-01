@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetTemplate } from "@/lib/email-templates";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
+import { pickAccountForEmail } from "@/lib/auth";
 import crypto from "crypto";
 
 export async function POST(req: Request) {
@@ -28,16 +29,28 @@ export async function POST(req: Request) {
       return successResponse;
     }
 
-    const user = await prisma.user.findFirst({
-      where: { email, deletedAt: null },
-      select: { id: true, firstName: true, email: true, organizationId: true },
-    });
+    // Case-insensitive, like log in (pickAccountForEmail in src/lib/auth.ts):
+    // signup keeps the address as typed, so "priya@co.com" must find the
+    // account stored as "Priya@Co.com". The exact-case lookup answered
+    // "check your inbox" and sent nothing.
+    const user = pickAccountForEmail(
+      await prisma.user.findMany({
+        where: { email: { equals: String(email).trim(), mode: "insensitive" }, deletedAt: null },
+        select: { id: true, firstName: true, email: true, organizationId: true },
+        take: 10,
+      }),
+      String(email),
+    );
 
     if (!user) return successResponse;
 
+    // From here on the address is the STORED spelling, never the typed one:
+    // reset-password and the password-policy check find the account again
+    // with an exact match on the token's email, so a token carrying the
+    // typed case would open a link that then says it is invalid.
     // Invalidate any existing tokens for this email
     await prisma.passwordResetToken.updateMany({
-      where: { email, used: false },
+      where: { email: user.email, used: false },
       data: { used: true },
     });
 
@@ -51,7 +64,7 @@ export async function POST(req: Request) {
     await prisma.passwordResetToken.create({
       data: {
         token: tokenHash,
-        email,
+        email: user.email,
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
@@ -65,7 +78,7 @@ export async function POST(req: Request) {
 
     try {
       await sendEmail({
-        to: email,
+        to: user.email,
         subject,
         html,
         template: "password-reset",

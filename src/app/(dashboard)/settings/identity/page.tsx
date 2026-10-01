@@ -39,6 +39,7 @@ import { normalizeDomain } from "@/lib/settings/org-policy";
 import { SPLASH_POLICIES } from "@/lib/settings/org-settings-sections";
 import { AppearanceDefaults } from "./appearance-defaults";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { WORKSPACE_RENAMED_EVENT } from "@/components/layout/os/settings-shell";
 
 const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
 const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
@@ -121,6 +122,8 @@ function withCurrent(list: string[], current: string): { value: string; label: s
 
 function ProfileTab() {
   const s = useSettingsSection("profile", selectProfile);
+  const { data: session } = useSession();
+  const sessionOrgId = (session?.user as { organizationId?: string } | undefined)?.organizationId;
   const showUpcoming = useShowUpcoming();
   const { toast } = useOsToast();
   const [draft, setDraft] = useState<ProfileForm | null>(null);
@@ -156,8 +159,14 @@ function ProfileTab() {
     setDraft(null);
     toast("Profile saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
+    // The settings crumb reads the workspace name; tell it the new one. Not
+    // session.update(): that re-anchors the token to the account's home
+    // workspace, which is not always the one this tab acts in.
+    if (sessionOrgId && base && draft.name.trim() !== base.name) {
+      window.dispatchEvent(new CustomEvent(WORKSPACE_RENAMED_EVENT, { detail: { organizationId: sessionOrgId, name: draft.name.trim() } }));
+    }
     return true;
-  }, [draft, s, toast]);
+  }, [draft, s, toast, base, sessionOrgId]);
 
   async function onPickLogo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
