@@ -36,7 +36,11 @@ export function effectiveLockout(policy?: LockoutPolicy | null): { maxFails: num
 const MAX_ENTRIES = 20_000; // hard cap so the map can't grow unbounded
 
 export function throttleKey(ip: string | null | undefined, email: string): string {
-  return `${(ip || "?").trim()}|${email.trim().toLowerCase()}`;
+  // The IP comes from a request header, so a caller can put anything in it.
+  // A "|" in it is swapped out so the FIRST "|" in a key always ends the IP
+  // part, which is what clearLoginFailuresForEmail relies on to find a key's
+  // email without being fooled by a forged IP or an email containing "|".
+  return `${(ip || "?").trim().replace(/\|/g, "_")}|${email.trim().toLowerCase()}`;
 }
 
 /** Seconds remaining on a lockout for this key, or 0 if not locked. */
@@ -69,6 +73,28 @@ export function recordLoginFailure(key: string, policy?: LockoutPolicy | null): 
 /** A successful sign-in clears the counter for that key. */
 export function clearLoginFailures(key: string): void {
   buckets.delete(key);
+}
+
+/**
+ * A successful password reset clears every counter and lockout for that
+ * email, from every IP. The reset proves the person owns the mailbox and
+ * replaces the password that was being guessed, so leaving them locked out
+ * would only tell them their new password failed. The failed sign-ins were
+ * often made from another device than the one the reset link is opened on,
+ * so clearing just the reset request's own IP|email key is not enough.
+ * An attacker gains nothing: a cleared bucket restarts the normal budget
+ * against a password they do not know.
+ */
+export function clearLoginFailuresForEmail(email: string): void {
+  const target = email.trim().toLowerCase();
+  if (!target) return;
+  for (const k of buckets.keys()) {
+    // Exact match on the part after the first "|" (throttleKey keeps "|" out
+    // of the IP part), never a suffix match, so resetting b@x.com cannot lift
+    // a lockout on a different account such as a|b@x.com.
+    const at = k.indexOf("|");
+    if (at >= 0 && k.slice(at + 1) === target) buckets.delete(k);
+  }
 }
 
 function sweep(now: number): void {

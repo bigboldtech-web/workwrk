@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
+import { clearLoginFailuresForEmail } from "@/lib/login-throttle";
 
 // POST /api/auth/reset-password { token, password }
 //
@@ -22,7 +23,9 @@ import { logAuditEvent } from "@/lib/activity";
 //     both succeed, and a racing second request gets the "not valid" answer;
 //   - a per-IP rate limit (20 an hour) on guesses;
 //   - passwordChangedAt and a `password_reset` security activity row, which
-//     the person's own Security page lists.
+//     the person's own Security page lists;
+//   - a successful reset lifts the sign-in lockout for that email, so the
+//     new password works at once (src/lib/login-throttle.ts).
 // The reset link never logs anyone in; the page sends them to /login?reset=1.
 
 const INVALID = "This reset link is not valid any more. Links work for 60 minutes and only once.";
@@ -79,6 +82,12 @@ export async function POST(req: Request) {
     if (!changed) {
       return NextResponse.json({ error: INVALID, code: "invalid_token" }, { status: 400 });
     }
+
+    // Lift any sign-in lockout on this email (every IP), so a person locked
+    // out after too many wrong tries can log in with the new password right
+    // away. Only here, after the token was claimed and the password written:
+    // an invalid link or a password the policy refused clears nothing.
+    clearLoginFailuresForEmail(user.email);
 
     logAuditEvent({
       type: "password_reset",
