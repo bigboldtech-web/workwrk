@@ -4,9 +4,10 @@
 // KRA and KPI, the step-by-step SOP, the goal, the doc and one sample task.
 // src/lib/templates/apply-tuesday.ts materializes it.
 //
-// SEEDED FROM THE SITE'S OWN FIXTURE. Names, steps, the KRA weight, the KPI
-// target and the goal come from src/components/marketing/data/tuesday.json,
-// so what the site shows and what a new workspace gets cannot drift apart.
+// SEEDED FROM THE SITE'S OWN FIXTURE. Names, steps, the KPI target and the
+// goal come from src/components/marketing/data/tuesday.json, so what the site
+// shows and what a new workspace gets cannot drift apart. The one exception
+// is the KRA weight: see TUESDAY_KRA_WEIGHT below.
 // The fixture's people (Maya, Sam, Priya) and clients (Bluefin Foods and the
 // rest) are a storyboard and are NOT seeded: no invented person becomes a
 // user, and the one sample task says it is a sample.
@@ -78,6 +79,17 @@ const STEP_NOTES: Readonly<Record<number, string>> = {
   7: "Introduce the account team and hand the client over.",
 };
 
+// The seeded KRA's weight. The fixture's 30 is the story's Onboarding lead,
+// who carries other KRAs the site does not show ("30% of the role"). Here it
+// is the ONLY KRA on the job title, and every KRA surface (the KRA list, the
+// role page, a holder's profile) warns while a job title's weights do not
+// total 100, so seeding 30 opened every new workspace on a warning the owner
+// did not cause. 100 is the honest weight for a lone KRA; the fixture keeps
+// its 30 so the approved site is unchanged. (A Template Center apply onto a
+// workspace whose Onboarding lead already has KRAs reuses that title and adds
+// this one beside them; the warning there is real and theirs to rebalance.)
+export const TUESDAY_KRA_WEIGHT = 100;
+
 /** The Tuesday template payload, built from the fixture. Pure. */
 export function tuesdayPayload(): TuesdayPayload {
   const f = fixture;
@@ -97,7 +109,7 @@ export function tuesdayPayload(): TuesdayPayload {
         name: f.kra.title,
         description: `Every client is onboarded inside ${f.sop.slaDays} days of signing.`,
         category: "Operations",
-        weight: f.kra.weight,
+        weight: TUESDAY_KRA_WEIGHT,
         jobTitle: f.role.title,
       },
       kpi: {
