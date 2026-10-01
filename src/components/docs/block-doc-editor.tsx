@@ -171,6 +171,61 @@ export const DOC_SAVE_REFUSAL_COPY: Record<DocSaveRefusal, string> = {
   archived: "This doc was moved to Trash, so your changes were not saved. They are kept in this tab: copy them before you leave.",
 };
 
+// The Request link on the Can view and Can comment strips (access 5.6). It
+// POSTS an access request for edit (objectType "doc", which the server sends
+// to the doc's creator, or to the workspace admins with none), the same row
+// RequestAccessButton and the SOP and goal pages write. It used to open the
+// read-only "Who has access" dialog, which has no way to ask, so the person
+// thought they had asked and the owner never heard. That dialog stays behind
+// the role chip.
+//
+// The person's own latest request on this doc (GET /api/access-requests
+// ?scope=outgoing, newest first) sets where the strip starts: pending says
+// so instead of offering a second ask, declined says so and offers asking
+// again. A request for a level the person already holds (asked for Can
+// comment, then given it from the share dialog, so the row is still open)
+// is no longer theirs to wait on, so the strip offers the next ask.
+export type DocAccessAsk =
+  | { state: "idle" }
+  | { state: "pending"; since: string }
+  | { state: "declined"; decidedAt: string | null };
+export type OutgoingAccessRow = { objectType: string; objectId: string; role: string; status: string; createdAt: string; decidedAt: string | null };
+export function docAccessAsk(rows: OutgoingAccessRow[] | null | undefined, docId: string, myRole: "comment" | "view"): DocAccessAsk {
+  const mine = (rows ?? []).find((r) => r.objectType === "doc" && r.objectId === docId);
+  if (!mine) return { state: "idle" };
+  const rank: Record<string, number> = { VIEW: 0, COMMENT: 1, EDIT: 2 };
+  const held = myRole === "comment" ? 1 : 0;
+  if ((rank[mine.role] ?? 2) <= held) return { state: "idle" };
+  if (mine.status === "PENDING") return { state: "pending", since: mine.createdAt };
+  if (mine.status === "DENIED") return { state: "declined", decidedAt: mine.decidedAt };
+  return { state: "idle" };
+}
+
+// What the strip says and which verb it offers, for every step of the ask.
+// `send` is this tab's POST ("busy" while it is in flight). A failed POST
+// keeps the verb as Retry, which resends the same request; a sent or
+// pending one offers nothing, so a second click never looks like a second
+// ask. `when` formats an ISO date for the person's date preferences.
+export type DocAskSend = "idle" | "busy" | "sent" | "failed";
+export function docRequestStrip(
+  ask: DocAccessAsk,
+  send: DocAskSend,
+  myRole: "comment" | "view",
+  ownerName: string | null | undefined,
+  when: (iso: string) => string,
+): { message: string; label: string | null } {
+  const who = ownerName?.trim() || "";
+  const lead = myRole === "comment" ? "You can read and comment on this doc." : "View only.";
+  if (send === "busy") return { message: `${lead} Sending your request for edit access.`, label: null };
+  if (send === "sent") return { message: `${lead} Request sent${who ? ` to ${who}` : ""}.`, label: null };
+  if (send === "failed") return { message: `${lead} Couldn't send your request for edit access.`, label: "Retry" };
+  if (ask.state === "pending") return { message: `${lead} Edit request pending since ${when(ask.since)}${who ? `. ${who} has it` : ""}.`, label: null };
+  if (ask.state === "declined") {
+    return { message: `${lead} Your edit request was declined${ask.decidedAt ? ` on ${when(ask.decidedAt)}` : ""}. You can ask again.`, label: "Request" };
+  }
+  return { message: myRole === "comment" ? lead : `View only. Ask ${who || "the owner"} for edit access.`, label: "Request" };
+}
+
 // Convert legacy HTML into a one-shot paragraph-per-line block array.
 function htmlToBlocks(html: string): Block[] {
   const text = html
@@ -295,6 +350,32 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [location, setLocation] = useState<{ type: string; name: string; icon: string | null; color: string | null; href: string | null } | null>(null);
   const [parentDoc, setParentDoc] = useState<{ id: string; title: string } | null>(null);
   const [owner, setOwner] = useState<{ id: string; name: string | null } | null>(null);
+  // The strip's access request (docAccessAsk / docRequestStrip above): where
+  // this person's last ask on this doc stands, and this tab's POST.
+  const [accessAsk, setAccessAsk] = useState<DocAccessAsk>({ state: "idle" });
+  const [askSend, setAskSend] = useState<DocAskSend>("idle");
+  const askBusyRef = useRef(false);
+  const readOnlyRole: "comment" | "view" | null = myRole === "edit" ? null : myRole;
+  useEffect(() => {
+    setAccessAsk({ state: "idle" });
+    setAskSend("idle");
+    if (!readOnlyRole || pane === "peek") return;
+    let alive = true;
+    void apiFetch<{ outgoing?: OutgoingAccessRow[] }>("/api/access-requests?scope=outgoing", { cache: "no-store" }).then((r) => {
+      // A failed read leaves the plain Request link: asking again is safe,
+      // the server keeps one open request per person per doc.
+      if (alive && r.ok) setAccessAsk(docAccessAsk(r.data.outgoing, docId, readOnlyRole));
+    });
+    return () => { alive = false; };
+  }, [docId, readOnlyRole, pane]);
+  const requestEditAccess = useCallback(async () => {
+    if (askBusyRef.current) return;
+    askBusyRef.current = true;
+    setAskSend("busy");
+    const r = await apiFetch("/api/access-requests", { method: "POST", json: { objectType: "doc", objectId: docId, role: "EDIT" } });
+    askBusyRef.current = false;
+    setAskSend(r.ok ? "sent" : "failed");
+  }, [docId]);
   // The AutosaveIndicator (design-system 5.17) observes persist(); it never
   // changes what persist() does. `saveStuck` holds the retry after the
   // budget is spent, so the word becomes "Not saved" with a Retry link.
@@ -1210,12 +1291,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <ReadOnlyBanner message={`Locked by ${lock.byName ?? "someone"}. Ask them to unlock.`} />
       ) : pane !== "peek" && lock && canManage ? (
         <ReadOnlyBanner message={`Locked by ${lock.byId === me?.id ? "you" : lock.byName ?? "someone"}. Everyone else can read and comment.`} onRequest={() => void toggleLock()} requestLabel="Unlock" />
-      ) : pane !== "peek" && myRole === "comment" ? (
-        // Can comment with no lock: the content is read only and the
-        // comment doors stay, so the strip says both halves.
-        <ReadOnlyBanner message="You can read and comment on this doc." onRequest={() => setShareOpen(true)} />
-      ) : pane !== "peek" && myRole === "view" ? (
-        <ReadOnlyBanner ownerName={owner?.name} onRequest={() => setShareOpen(true)} />
+      ) : pane !== "peek" && readOnlyRole ? (
+        // Can comment or Can view with no lock. Can comment says both halves
+        // (the content is read only, the comment doors stay). Request asks
+        // the owner for edit (docRequestStrip); "Who has access" stays on the
+        // role chip in the title row.
+        (() => {
+          const strip = docRequestStrip(accessAsk, askSend, readOnlyRole, owner?.name, (iso) => fmt.date(iso));
+          return (
+            <ReadOnlyBanner
+              message={strip.message}
+              onRequest={strip.label ? () => void requestEditAccess() : undefined}
+              requestLabel={strip.label ?? undefined}
+            />
+          );
+        })()
       ) : null}
       {conflict ? (
         <ConflictStrip
