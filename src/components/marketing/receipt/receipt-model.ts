@@ -65,16 +65,14 @@ export function workReceiptModel(options?: { share?: boolean }): ReceiptModel {
 /**
  * The line under the work receipt.
  *
- * It named the Tuesday workspace template ("The Tuesday workspace" on the
- * shared card, "Tuesday workspace template" on the page), and that template
- * does not exist: `flags.tuesdayTemplateAtSignup` is false, the deep link
- * refuses to add ?template=tuesday because of it, and both spine sentences
- * already swap for the same reason. The two footers were the only consumers
- * of that flag that were not reading it, and they are on the artefact that
- * travels furthest, which is exactly backwards.
- *
- * With the flag off the footer says what the receipt IS: a storyboard, drawn
- * from the fixture this site and the product's own components share.
+ * It reads `flags.tuesdayTemplateAtSignup`, like the deep link and both
+ * spine sentences. With the flag on (signup applies the Tuesday template,
+ * src/lib/templates/apply-tuesday.ts, proven end to end before the flag was
+ * turned on) the footer names the template and still says the receipt is a
+ * storyboard: the template seeds the Space, the SOP and the governance, never
+ * the people or the client in the story. With the flag off the footer says
+ * only what the receipt IS: a storyboard, drawn from the fixture this site
+ * and the product's own components share.
  *
  * AND THE SHARED CARD CARRIES THE DISCLAIMER, not just the page.
  *

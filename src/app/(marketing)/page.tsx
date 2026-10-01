@@ -1,8 +1,8 @@
 // The home route.
 //
 // The page is built in the project-management category's own register, the
-// the category's three biggest work platforms share, because that is the register the
-// founder asked for after rejecting a quieter one twice. The bands, and the
+// one the category's three biggest work platforms share, because that is the
+// register the founder asked for after rejecting a quieter one twice. The bands, and the
 // survey rule each one answers, are documented in
 // src/components/marketing/home/stack.tsx; the visual half is stack.css.
 //
@@ -36,9 +36,11 @@ import { HomeStack } from "@/components/marketing/home/stack";
 import { HOME_DESCRIPTION, HOME_KEYWORDS, homeJsonLd } from "@/components/marketing/home/json-ld";
 import { detectCurrency } from "@/components/marketing/geo";
 import { SITE_TITLE_DEFAULT } from "@/components/marketing/positioning";
+import { OG_DEFAULT_ALT } from "@/components/marketing/og";
 
 const SITE = "https://workwrk.com";
-const OG_ALT = "WorkwrK: the work platform your whole company runs on.";
+// The card's own description (og.ts): the home page shows the default card.
+const OG_ALT = OG_DEFAULT_ALT;
 
 export const metadata: Metadata = {
   title: SITE_TITLE_DEFAULT,

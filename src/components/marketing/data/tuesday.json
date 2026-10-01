@@ -5,7 +5,7 @@
     "sidebarLabel": "Sample workspace: Northwind Ops",
     "templateName": "Tuesday: client onboarding",
     "templateDeepLink": "/signup?template=tuesday",
-    "notice": "The Tuesday workspace is a template. It's yours on day one.",
+    "notice": "The Tuesday workspace is a template. Its Space, List, SOP, job titles, KRA, KPI, goal and doc are yours on day one; the people and the client are a storyboard.",
     "receiptFooterSite": "The Tuesday workspace template. A storyboard, not a customer.",
     "receiptFooterShare": "Tuesday template. A storyboard, not a customer."
   },
@@ -786,7 +786,7 @@
       "truthGate": {
         "mechanism": "A Sidekick answer with four source chips, and kudos landing as review evidence",
         "shipped": false,
-        "status": "Kudos with values shipped, and the connection trail ships on every task. Source chips on an answer and kudos as review evidence are in build, and the receipt renders from this fixture",
+        "status": "Kudos with company values and the connection trail on every task have shipped. Source chips on an answer and kudos as review evidence are in build.",
         "fallbackNarration": "Ask reads the workspace it is in. Naming the records behind an answer is in build, and so is filing a kudos as review evidence. Every task carries its own connection trail."
       },
       "trailFallback": "6:02 Kudos \"Own it\" recorded for Sam"

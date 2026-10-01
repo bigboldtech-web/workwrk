@@ -21,7 +21,11 @@ function view(marker: SignupTemplateMarker | null) {
   if (!marker || marker.key !== TUESDAY_TEMPLATE_KEY) return null;
   const base = { key: marker.key, name: TUESDAY_TEMPLATE_ROW.name, status: marker.status };
   if (marker.status === "applied") {
-    return { ...base, spaceSlug: marker.spaceSlug, boardSlug: marker.boardSlug, sopId: marker.sopId, goalId: marker.goalId, docId: marker.docId };
+    return {
+      ...base, spaceSlug: marker.spaceSlug, boardSlug: marker.boardSlug, sopId: marker.sopId, goalId: marker.goalId, docId: marker.docId,
+      kraId: marker.kraId ?? null, kpiId: marker.kpiId ?? null, jobTitles: Array.isArray(marker.jobTitleIds) ? marker.jobTitleIds.length : 0,
+      skipped: Array.isArray(marker.skipped) ? marker.skipped.filter((x): x is string => typeof x === "string") : [],
+    };
   }
   if (marker.status === "applying") {
     const stale = Date.now() - Date.parse(marker.startedAt) > 10 * 60 * 1000;

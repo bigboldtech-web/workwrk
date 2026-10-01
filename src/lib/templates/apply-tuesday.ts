@@ -72,6 +72,14 @@ export interface ApplyTuesdayCtx {
   onSpace?: (space: { id: string; slug: string }) => Promise<void>;
 }
 
+/** The doc's line when some pieces were not made: a non-admin apply, or the plan's SOP cap. Pure. */
+export function tuesdayDocPartial(made: { sop: boolean; governance: boolean }): string {
+  if (!made.governance) {
+    return "This Space has the Onboarding List and a sample task. When a workspace admin applies this template, it also adds the Client onboarding SOP with its job titles, a KRA and KPI, and a company goal.";
+  }
+  return "The Client onboarding SOP was not added: the plan's SOP limit was reached. The job titles, the KRA and KPI and the goal are here.";
+}
+
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function quarterBounds(now: Date): { label: string; start: Date; end: Date } {
@@ -199,8 +207,15 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
 
   // 3. The playbook doc, in the Space.
   const existingDoc = await prisma.doc.findFirst({ where: { organizationId: orgId, entityType: "SPACE", entityId: space.id, title: b.doc.title }, select: { id: true } });
+  // A block that describes a piece this apply did not make is left out, so
+  // the doc never points at an SOP, KRA, KPI or goal that is not there.
+  const pieces = { sop: !!sopId, governance: !!(kraId && goalId) };
+  const kept = b.doc.blocks.filter((blk) => !blk.needs || pieces[blk.needs]);
+  const docBlocks = kept.length < b.doc.blocks.length
+    ? [...kept.slice(0, 2), { kind: "paragraph", text: tuesdayDocPartial(pieces) }, ...kept.slice(2)]
+    : kept;
   const docId = existingDoc?.id ?? (await applyDocTemplate(
-    { content: { blocks: b.doc.blocks.map((blk, i) => ({ ...blk, id: `tuesday.${i + 1}` })), meta: { icon: "📘" } } },
+    { content: { blocks: docBlocks.map(({ needs: _n, ...blk }, i) => { void _n; return { ...blk, id: `tuesday.${i + 1}` }; }), meta: { icon: "📘" } } },
     { organizationId: orgId, userId, spaceId: space.id, name: b.doc.title },
   )).docId;
 
@@ -234,7 +249,7 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
 export type SignupTemplateMarker =
   | { key: string; status: "applying"; startedAt: string; spaceId?: string | null }
   | { key: string; status: "failed"; failedAt: string; error: string; spaceId?: string | null }
-  | ({ key: string; status: "applied"; appliedAt: string } & Omit<TuesdayApplied, "governance" | "skipped">);
+  | ({ key: string; status: "applied"; appliedAt: string } & Omit<TuesdayApplied, "governance" | "skipped"> & { skipped?: string[] });
 
 /** The marker as stored, or null. Tolerates any JSON. */
 export function readSignupMarker(settings: unknown): SignupTemplateMarker | null {
@@ -292,9 +307,10 @@ async function runAndRecord(orgId: string, userId: string, key: string, resumeSp
         await writeOrgSettingsKeys(orgId, { signupTemplate: { key, status: "applying", startedAt: new Date().toISOString(), spaceId } });
       },
     });
-    const { governance: _g, skipped: _s, ...rest } = res;
+    // `skipped` is kept, so the wizard names only the pieces that were made
+    // and says which were left out (a plan cap), never all of them.
+    const { governance: _g, ...rest } = res;
     void _g;
-    void _s;
     const marker: SignupTemplateMarker = { key, status: "applied", appliedAt: new Date().toISOString(), ...rest };
     await writeOrgSettingsKeys(orgId, { signupTemplate: marker });
     await prisma.template.updateMany({ where: { key, builtIn: true }, data: { usedCount: { increment: 1 } } }).catch(() => undefined);

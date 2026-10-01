@@ -74,7 +74,7 @@ export default async function YourStackPage() {
         initialCurrency={currency}
         glyphs={glyphs}
         pricingHref={routes.pricing}
-        receiptCta={<PrimaryCta placement="your-stack-receipt" template />}
+        receiptCta={<PrimaryCta placement="your-stack-receipt" />}
         escalateCta={
           <MarketingCta
             cta={secondaryCta("your-stack-escalate", { label: "Book a migration call" })}

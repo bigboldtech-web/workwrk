@@ -3,6 +3,7 @@ import {
   availableFrom,
   contentSpawnBoardId,
   pickJobTitleHolder,
+  planRunPicks,
   readSopStepOrigin,
   runnableSteps,
   stepCreatesTask,
@@ -107,5 +108,34 @@ describe("the stored step fields", () => {
     const o = readSopStepOrigin({ sopStep: { sopId: "s", stepId: "st", n: 3, sopTitle: "SOP", stepTitle: "Step", runId: "run_1", jobTitle: { roleId: "r", title: "Lead" }, assignedBy: "none", notice: "Nobody" } });
     expect(o).toMatchObject({ sopId: "s", n: 3, jobTitle: { roleId: "r", title: "Lead" }, assignedBy: "none", notice: "Nobody" });
     expect(readSopStepOrigin({})).toBeNull();
+  });
+});
+
+describe("planRunPicks (one run, step by step)", () => {
+  const steps = [
+    { stepId: "a", n: 1, title: "One", jobTitle: { roleId: "lead", title: "Lead" }, createsTask: true },
+    { stepId: "b", n: 2, title: "Two", jobTitle: null, createsTask: false },
+    { stepId: "c", n: 3, title: "Three", jobTitle: { roleId: "lead", title: "Lead" }, createsTask: true },
+    { stepId: "d", n: 4, title: "Four", jobTitle: { roleId: "gone", title: "Gone" }, createsTask: true },
+  ];
+  const holders = new Map([["lead", [person({ id: "amy" }), person({ id: "bob" })]]]);
+  const titles = new Map([["lead", "Onboarding lead"]]);
+
+  it("spreads two steps with the same job title across its holders within one run", () => {
+    const plan = planRunPicks(steps, holders, titles, NOW);
+    const who = plan.map((s) => (s.pick?.kind === "assigned" ? s.pick.userId : s.pick?.kind ?? null));
+    expect(who).toEqual(["amy", null, "bob", "nobody"]);
+    expect(plan[0].currentTitle).toBe("Onboarding lead");
+  });
+
+  it("counts nothing extra for a step a retried run already made", () => {
+    const plan = planRunPicks(steps, holders, titles, NOW, new Set(["a"]));
+    expect(plan[2].pick).toMatchObject({ kind: "assigned", userId: "amy" });
+  });
+
+  it("gives a deleted job title the visible nobody notice, never a guess", () => {
+    const plan = planRunPicks(steps, holders, titles, NOW);
+    expect(plan[3].pick).toMatchObject({ kind: "nobody" });
+    expect(plan[3].currentTitle).toBeNull();
   });
 });

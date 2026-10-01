@@ -8,8 +8,8 @@ import { goalVisibilityOr } from "@/lib/goal-audience";
 import { readableFileIds } from "@/lib/file-access";
 import { idsWithRole, type NodeCtx } from "@/lib/access/node-access";
 import type { Viewer } from "@/lib/access/types";
-import { readSopStepOrigin } from "@/lib/sop-step-owner";
-import { assembleTrail, formatLogged, type TrailCandidate, type TrailEntry, type TrailKind } from "@/lib/task-trail";
+import { readSopStepOrigin, runnableSteps } from "@/lib/sop-step-owner";
+import { assembleTrail, formatLogged, ownerNoticeFor, type TrailCandidate, type TrailEntry, type TrailKind } from "@/lib/task-trail";
 
 /** The session as the SOP and goal rules read it, passed through untouched. */
 type SessionLike = Parameters<typeof sopVisibilityWhere>[0] & Parameters<typeof goalVisibilityOr>[0];
@@ -32,13 +32,21 @@ export interface TrailTask {
   organizationId: string;
   boardId: string;
   metadata: unknown;
+  /** Who the task is assigned to NOW (the notice is only true while this is empty). */
+  assigneeIds: string[];
+  ownerId: string | null;
   board: { spaceId: string | null };
 }
 
 export interface TaskTrail {
   entries: TrailEntry[];
-  /** The SOP run's notice when the step's job title found nobody (shown on the task). */
+  /** Why an SOP-spawned task has nobody on it, while it still has nobody (shown on the task). */
   ownerNotice: string | null;
+}
+
+/** May this viewer give people a job title (People, the role pages)? */
+function managesJobTitles(viewer: Viewer): boolean {
+  return viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
 }
 
 const TASK_TYPES = ["BOARD_ITEM", "TASK"] as const;
@@ -56,7 +64,19 @@ export async function loadTaskTrail(reader: TrailReader, task: TrailTask): Promi
   const userId = viewer.userId;
   const member = viewer.orgRole !== "GUEST";
   const meta = (task.metadata && typeof task.metadata === "object" ? task.metadata : {}) as Record<string, unknown>;
-  const origin = readSopStepOrigin(meta);
+  // The stored origin is only a pointer: the step must still be a step of
+  // that SOP in this workspace, and its number and text are read from the
+  // SOP itself, so a hand-written metadata.sopStep can name nothing made up.
+  const stored = readSopStepOrigin(meta);
+  const originSop = stored
+    ? await prisma.sOP.findFirst({ where: { id: stored.sopId, organizationId: orgId }, select: { content: true } })
+    : null;
+  const realStep = stored && originSop ? runnableSteps(originSop.content).find((st) => st.stepId === stored.stepId) ?? null : null;
+  // The job title it was routed by must be the step's own job title too;
+  // otherwise the task shows the step but no owner line and no notice.
+  const origin = stored && realStep
+    ? { ...stored, n: realStep.n, stepTitle: realStep.title, jobTitle: stored.jobTitle && realStep.jobTitle?.roleId === stored.jobTitle.roleId ? stored.jobTitle : null }
+    : null;
   const kraIds = new Set<string>();
   const kpiIds = new Set<string>();
   if (typeof meta.kraId === "string" && meta.kraId) kraIds.add(meta.kraId);
@@ -122,7 +142,10 @@ export async function loadTaskTrail(reader: TrailReader, task: TrailTask): Promi
       const role = await prisma.role.findFirst({ where: { id: origin.jobTitle.roleId, organizationId: orgId }, select: { id: true, title: true } });
       if (role) {
         allow("job-title", role.id);
-        cands.push({ kind: "job-title", id: role.id, title: role.title, href: `/people/roles/${role.id}`, detail: origin.assignedBy === "job-title" ? "Assigned by the soonest available holder" : null });
+        // "Assigned by" only while the person the rule picked is still on it.
+        const pickedStillOn = origin.assignedBy === "job-title"
+          && (origin.assigneeId ? task.assigneeIds.includes(origin.assigneeId) || task.ownerId === origin.assigneeId : task.assigneeIds.length > 0 || !!task.ownerId);
+        cands.push({ kind: "job-title", id: role.id, title: role.title, href: `/people/roles/${role.id}`, detail: pickedStillOn ? "Assigned by the soonest available holder" : null });
       }
     }
   }
@@ -205,5 +228,10 @@ export async function loadTaskTrail(reader: TrailReader, task: TrailTask): Promi
   }
 
   const entries = assembleTrail(cands, (kind, id) => allowed.has(`${kind}:${id}`));
-  return { entries, ownerNotice: origin?.notice ?? null };
+  let titleNow: string | null = null;
+  if (member && origin?.jobTitle && origin.assignedBy === "none" && task.assigneeIds.length === 0 && !task.ownerId) {
+    const role = await prisma.role.findFirst({ where: { id: origin.jobTitle.roleId, organizationId: orgId }, select: { title: true } });
+    titleNow = role?.title ?? origin.jobTitle.title;
+  }
+  return { entries, ownerNotice: member ? ownerNoticeFor(origin, titleNow, task, managesJobTitles(viewer)) : null };
 }

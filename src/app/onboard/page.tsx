@@ -668,7 +668,7 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
 
       <main className="wz-main">
         <WorkspaceMoveNotice />
-        {step === 1 ? <SignupTemplateNote enabled /> : null}
+        <SignupTemplateNote enabled problemsOnly={step !== 1} />
         <div className="wa-card__head">
           <h1 className="wa-title">{titles[step].title}</h1>
           <p className="wa-sub">{titles[step].sub}</p>

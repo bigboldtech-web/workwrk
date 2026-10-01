@@ -91,9 +91,10 @@ vi.mock("@/lib/template-center", () => ({
     (db.board ??= []).push(row);
     return { boardId: row.id, slug: row.slug };
   },
-  applyDocTemplate: async (_p: unknown, ctx: { spaceId: string; name: string; organizationId: string }) => {
+  applyDocTemplate: async (p: { content?: { blocks?: Array<{ text?: string }> } }, ctx: { spaceId: string; name: string; organizationId: string }) => {
     if (failOn === "doc") throw new Error("boom in doc");
-    const row = { id: nid("doc"), title: ctx.name, entityType: "SPACE", entityId: ctx.spaceId, organizationId: ctx.organizationId };
+    const text = (p?.content?.blocks ?? []).map((b) => b.text ?? "").join("\n");
+    const row = { id: nid("doc"), title: ctx.name, entityType: "SPACE", entityId: ctx.spaceId, organizationId: ctx.organizationId, text };
     (db.doc ??= []).push(row);
     return { docId: row.id };
   },
@@ -218,6 +219,19 @@ describe("applyTuesdayBundle from the Template Center", () => {
     expect(res.governance).toBe(false);
     expect([count("space"), count("board"), count("doc"), count("item")]).toEqual([1, 1, 1, 1]);
     expect([count("role"), count("kRA"), count("kPI"), count("sOP"), count("oKR")]).toEqual([0, 0, 0, 0, 0]);
+    // The doc never points at the SOP, KRA, KPI or goal this apply did not make.
+    const text = String(db.doc[0].text);
+    expect(text).not.toContain("choose Run steps");
+    expect(text).not.toContain("KPI sit on");
+    expect(text).toContain("When a workspace admin applies this template");
+  });
+
+  it("an admin apply's doc describes the SOP, KRA, KPI and goal it made", async () => {
+    await applyTuesdayBundle(tuesdayPayload(), { organizationId: ORG, userId: USER, name: "Operations", governance: true });
+    const text = String(db.doc[0].text);
+    expect(text).toContain("choose Run steps");
+    expect(text).toContain("KPI sit on");
+    expect(text).not.toContain("When a workspace admin applies this template");
   });
 
   it("a second admin apply reuses the workspace's job titles, KRA, KPI, SOP and goal", async () => {
@@ -234,5 +248,7 @@ describe("applyTuesdayBundle from the Template Center", () => {
     expect(res.sopId).toBeNull();
     expect(res.skipped[0]).toContain("plan limit");
     expect(db.entityLink.some((l) => l.targetType === "SOP")).toBe(false);
+    expect(String(db.doc[0].text)).toContain("The Client onboarding SOP was not added");
+    expect(String(db.doc[0].text)).not.toContain("choose Run steps");
   });
 });

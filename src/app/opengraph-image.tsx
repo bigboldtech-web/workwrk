@@ -38,9 +38,11 @@ import { ImageResponse } from "next/og";
 import { DOT_HEX, tuesday } from "@/components/marketing/data/tuesday";
 import { heroHeadline } from "@/components/marketing/headline";
 import { workReceiptModel } from "@/components/marketing/receipt/receipt-model";
+import { OG_DEFAULT_ALT } from "@/components/marketing/og";
 
 export const runtime = "nodejs";
-export const alt = "WorkwrK: the work platform your whole company runs on.";
+// The alt describes the card itself (og.ts), not the site's tagline.
+export const alt = OG_DEFAULT_ALT;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 

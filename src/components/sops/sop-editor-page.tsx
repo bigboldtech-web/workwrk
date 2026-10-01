@@ -89,6 +89,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { getSopKind, getSopLayout, SOP_KIND_LABEL, SOP_STATUS_COLOR, SOP_STATUS_LABEL, sopTypeForKind, type SopKind, type SopLayout, type SopStatus } from "@/lib/sop-kind";
 import { deriveSopSaveState, isMeaningfulFirstChange, nextRetryDelay } from "@/lib/sop-save-state";
+import { runnableSteps } from "@/lib/sop-step-owner";
 import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-placement";
 import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -689,8 +690,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
 
   // A published step-by-step SOP with a step marked "Creates a task" runs:
   // each such step becomes a task owned by its job title (run-steps-dialog).
-  const runsSteps = kind === "steps" && status === "PUBLISHED" && Array.isArray((sop?.content as { steps?: unknown } | undefined)?.steps)
-    && ((sop!.content as { steps: Array<{ createsTask?: unknown }> }).steps).some((st) => st?.createsTask === true);
+  // The same steps the run reads (the list layout, else the flow's).
+  const runsSteps = kind === "steps" && status === "PUBLISHED" && runnableSteps(sop?.content).some((st) => st.createsTask);
 
   /* the one blue button */
   let primary: PrimaryAction | undefined;

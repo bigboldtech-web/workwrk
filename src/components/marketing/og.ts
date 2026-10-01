@@ -21,9 +21,15 @@
 // Pages with a card of their OWN (the home page, /pricing, /tuesday) pass
 // their own images array and never import this.
 
-/** Alt text for the default card: the beat 6 pull-back frame. */
+import { heroHeadline } from "@/components/marketing/headline";
+
+/**
+ * Alt text for the default card (src/app/opengraph-image.tsx), describing
+ * what the card shows: its headline, read from the same function the card
+ * prints, and the beat 6 pull-back frame beside it.
+ */
 export const OG_DEFAULT_ALT =
-  "WorkwrK: people, processes, work and goals in one system";
+  `WorkwrK card: "${heroHeadline().h1}" beside the eight hubs wired into one task's receipt, in a sample workspace`;
 
 /** The default og:image entry. Spread into a page's `openGraph.images`. */
 export const OG_DEFAULT_IMAGE = {

@@ -10,14 +10,16 @@
 //   - Item.metadata.kraId when the SOP is owned by a KRA, so the task lands
 //     on the Effort card of every goal linked to that KRA
 //   - an EntityLink BOARD_ITEM -> SOP (Required reading, position = the
-//     step number, context "Step 3: ...") so the task's Related section
-//     and the SOP's "Used by" both show it
+//     step number, context "Step 3: ...") so the task's trail and the SOP's
+//     "Used by" (GET /api/backlinks, each task gated for its reader) both
+//     show it
 //   - the assignment notification for the person picked
 //
 // ONCE PER RUN. The caller passes a run id made when the dialog opened; a
 // second POST with the same id (a double click, a retry after a timeout that
-// did land) finds the tasks that run already made and returns them, so it
-// never doubles the work. A run that failed part way is finished by retrying
+// did land, even one sent while the first is still running: the advisory
+// lock in runSopSteps makes it wait) finds the tasks that run already made
+// and returns them, so it never doubles the work. A run that failed part way is finished by retrying
 // with the same id: the steps it already created are skipped.
 //
 // Server only: prisma.
@@ -27,12 +29,11 @@ import { createBoardItem } from "@/lib/board-items";
 import { notifyItemAssigned } from "@/lib/notify-item";
 import { jobTitleHolders } from "@/lib/access/job-title-holders";
 import {
-  pickJobTitleHolder,
+  planRunPicks,
   runnableSteps,
   type HolderCandidate,
-  type RunnableStep,
-  type HolderPick,
   type SopStepOrigin,
+  type StepPlan,
 } from "@/lib/sop-step-owner";
 
 const DONE_NAMES = ["done", "complete", "completed", "closed", "resolved"];
@@ -71,14 +72,19 @@ export async function loadHolders(organizationId: string, roleIds: string[]): Pr
   return out;
 }
 
-export interface PlannedStep extends RunnableStep {
-  pick: HolderPick | null;
-  /** The job title's CURRENT name (a renamed title reads as it is now), or null when it was deleted. */
-  currentTitle: string | null;
-}
+export type PlannedStep = StepPlan;
 
-/** Who each step would go to right now. Read only. */
-export async function planSopRun(organizationId: string, content: unknown, now: Date = new Date()): Promise<PlannedStep[]> {
+/**
+ * Who each step would go to right now, step by step (planRunPicks: a task
+ * this run gives a holder counts toward the next step). Read only.
+ * `alreadyMade` names the steps a retried run already created.
+ */
+export async function planSopRun(
+  organizationId: string,
+  content: unknown,
+  now: Date = new Date(),
+  alreadyMade: ReadonlySet<string> = new Set(),
+): Promise<PlannedStep[]> {
   const steps = runnableSteps(content);
   const roleIds = steps.map((s) => s.jobTitle?.roleId).filter((x): x is string => !!x);
   const [holders, roles] = await Promise.all([
@@ -87,15 +93,7 @@ export async function planSopRun(organizationId: string, content: unknown, now: 
       ? prisma.role.findMany({ where: { organizationId, id: { in: [...new Set(roleIds)] } }, select: { id: true, title: true } })
       : Promise.resolve([] as Array<{ id: string; title: string }>),
   ]);
-  const titleOf = new Map(roles.map((r) => [r.id, r.title]));
-  return steps.map((s) => {
-    if (!s.jobTitle) return { ...s, pick: null, currentTitle: null };
-    const currentTitle = titleOf.get(s.jobTitle.roleId) ?? null;
-    const label = currentTitle ?? s.jobTitle.title;
-    // A deleted job title has no holders: the same visible "nobody" notice.
-    const pick = pickJobTitleHolder(currentTitle ? holders.get(s.jobTitle.roleId) ?? [] : [], label, now);
-    return { ...s, pick, currentTitle };
-  });
+  return planRunPicks(steps, holders, new Map(roles.map((r) => [r.id, r.title])), now, alreadyMade);
 }
 
 export interface SpawnedTask {
@@ -133,12 +131,38 @@ async function tasksOfRun(organizationId: string, sopId: string, runId: string) 
   return new Map(rows.filter((r) => r.stepId).map((r) => [r.stepId as string, r]));
 }
 
-/** Run the SOP: create the task of every "Creates a task" step not yet made by this run. */
+/** How long one run may hold its lock (a long SOP on a slow database still fits). */
+const RUN_LOCK_TIMEOUT_MS = 60_000;
+
+/**
+ * Run the SOP: create the task of every "Creates a task" step not yet made
+ * by this run.
+ *
+ * One run at a time per (SOP, run id): a transaction takes a Postgres
+ * advisory lock on the pair and holds it until the run is done, so a second
+ * request with the same id (a double click, a retry sent while the first is
+ * still working) waits, then reads the tasks the first one made and returns
+ * them instead of making them again. Each task is still written through
+ * createBoardItem and committed as it is made, so a run that fails part way
+ * keeps what it made and a retry with the same id finishes it.
+ */
 export async function runSopSteps(input: RunSopInput): Promise<SpawnedTask[]> {
+  const lockKey = `${input.sop.id}:${input.runId}`;
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"sop-run:" + lockKey}))`;
+      return runSopStepsLocked(input);
+    },
+    { maxWait: 15_000, timeout: RUN_LOCK_TIMEOUT_MS },
+  );
+}
+
+async function runSopStepsLocked(input: RunSopInput): Promise<SpawnedTask[]> {
   const now = input.now ?? new Date();
-  const plan = (await planSopRun(input.organizationId, input.sop.content, now)).filter((s) => s.createsTask);
-  if (plan.length === 0) return [];
+  if (!runnableSteps(input.sop.content).some((s) => s.createsTask)) return [];
   const already = await tasksOfRun(input.organizationId, input.sop.id, input.runId);
+  const plan = (await planSopRun(input.organizationId, input.sop.content, now, new Set(already.keys()))).filter((s) => s.createsTask);
+  if (plan.length === 0) return [];
   const names = new Map<string, string>();
   const out: SpawnedTask[] = [];
   for (const step of plan) {
@@ -161,6 +185,8 @@ export async function runSopSteps(input: RunSopInput): Promise<SpawnedTask[]> {
       runId: input.runId,
       jobTitle,
       assignedBy: assigneeId ? "job-title" : "none",
+      assigneeId,
+      reason: pick && pick.kind !== "assigned" ? pick.kind : null,
       notice,
     };
     const metadata: Record<string, unknown> = { sopStep: origin };

@@ -126,7 +126,13 @@ export function pickJobTitleHolder(candidates: readonly HolderCandidate[], title
 export const SOONEST_AVAILABLE_RULE =
   "Each task goes to the person holding the step's job title who is available soonest: people out of office are counted from their return time, then the one with the fewest open tasks. When nobody holds the title, the task is created unassigned with a note saying so.";
 
-/** What a spawned task stores at metadata.sopStep (a plain, non-reserved key). */
+/**
+ * What a spawned task stores at metadata.sopStep. It is a plain key, so it
+ * travels with every normal metadata save, and anyone who can edit the task
+ * can also write it: the trail therefore never shows its step text or its
+ * notice as stored. It checks the step against the SOP's own content and
+ * words the notice from current facts (src/lib/task-trail-server.ts).
+ */
 export interface SopStepOrigin {
   sopId: string;
   sopTitle: string;
@@ -137,6 +143,10 @@ export interface SopStepOrigin {
   jobTitle: StepJobTitle | null;
   /** "job-title" when the rule picked someone, "none" when it could not. */
   assignedBy: "job-title" | "none";
+  /** The person the rule picked, when it picked someone. */
+  assigneeId?: string | null;
+  /** Why nobody was picked: no holder, or every holder away with no return date. */
+  reason?: "nobody" | "unavailable" | null;
   notice: string | null;
 }
 
@@ -152,6 +162,8 @@ export function readSopStepOrigin(metadata: unknown): SopStepOrigin | null {
     runId: typeof o.runId === "string" ? o.runId : "",
     jobTitle: stepJobTitle(o),
     assignedBy: o.assignedBy === "job-title" ? "job-title" : "none",
+    assigneeId: typeof o.assigneeId === "string" && o.assigneeId ? o.assigneeId : null,
+    reason: o.reason === "nobody" || o.reason === "unavailable" ? o.reason : null,
     notice: typeof o.notice === "string" ? o.notice : null,
   };
 }
@@ -177,4 +189,42 @@ export function runnableSteps(content: unknown): RunnableStep[] {
     out.push({ stepId, n: i + 1, title, jobTitle: stepJobTitle(raw), createsTask: stepCreatesTask(raw) });
   });
   return out;
+}
+
+export interface StepPlan extends RunnableStep {
+  pick: HolderPick | null;
+  /** The job title's CURRENT name (a renamed title reads as it is now), or null when it was deleted. */
+  currentTitle: string | null;
+}
+
+/**
+ * Who each step of ONE run goes to, step by step. Pure.
+ *
+ * The rule is applied in step order, and every task the run gives a holder
+ * counts as one more open task for the steps after it, so two steps with
+ * the same job title are spread across its holders the way two runs would
+ * be. A step the run already made (`alreadyMade`, a retry of the same run)
+ * is already in the open-task counts, so it adds nothing.
+ */
+export function planRunPicks(
+  steps: readonly RunnableStep[],
+  holdersByRole: ReadonlyMap<string, readonly HolderCandidate[]>,
+  currentTitleOf: ReadonlyMap<string, string>,
+  now: Date = new Date(),
+  alreadyMade: ReadonlySet<string> = new Set(),
+): StepPlan[] {
+  const extra = new Map<string, number>();
+  return steps.map((s) => {
+    if (!s.jobTitle) return { ...s, pick: null, currentTitle: null };
+    const currentTitle = currentTitleOf.get(s.jobTitle.roleId) ?? null;
+    const label = currentTitle ?? s.jobTitle.title;
+    // A deleted job title has no holders: the same visible "nobody" notice.
+    const pool = currentTitle ? holdersByRole.get(s.jobTitle.roleId) ?? [] : [];
+    const counted = pool.map((c) => ({ ...c, openTasks: c.openTasks + (extra.get(c.id) ?? 0) }));
+    const pick = pickJobTitleHolder(counted, label, now);
+    if (pick.kind === "assigned" && s.createsTask && !alreadyMade.has(s.stepId)) {
+      extra.set(pick.userId, (extra.get(pick.userId) ?? 0) + 1);
+    }
+    return { ...s, pick, currentTitle };
+  });
 }

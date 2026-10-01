@@ -29,6 +29,8 @@
 // The pure half (assembleTrail) is tested in task-trail.test.ts; the loader
 // below gathers the candidates and the access facts.
 
+import type { SopStepOrigin } from "@/lib/sop-step-owner";
+
 export type TrailKind =
   | "sop-step" | "sop" | "job-title" | "kra" | "kpi" | "goal"
   | "doc" | "canvas" | "table" | "file" | "list" | "contract" | "kudos" | "timer";
@@ -89,4 +91,24 @@ export function formatLogged(ms: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return h > 0 ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+}
+
+/**
+ * The notice on a task an SOP run could not assign, worded from what is
+ * true now, never from the stored text (any task editor can write that).
+ * Null as soon as anyone is assigned. Pure.
+ */
+export function ownerNoticeFor(
+  origin: Pick<SopStepOrigin, "assignedBy" | "reason" | "notice"> | null,
+  jobTitle: string | null,
+  task: { assigneeIds: readonly string[]; ownerId: string | null },
+  canGiveTitles: boolean,
+): string | null {
+  if (!origin || origin.assignedBy !== "none" || !jobTitle) return null;
+  if (task.assigneeIds.length > 0 || task.ownerId) return null;
+  const reason = origin.reason ?? (origin.notice && /away with no return date/.test(origin.notice) ? "unavailable" : "nobody");
+  const why = reason === "unavailable"
+    ? `Everyone holding the ${jobTitle} job title was away with no return date when this SOP ran, so this task is unassigned.`
+    : `Nobody held the ${jobTitle} job title when this SOP ran, so this task is unassigned.`;
+  return canGiveTitles ? `${why} Give someone the title in People, or assign the task.` : `${why} Anyone who can edit the task can assign it.`;
 }

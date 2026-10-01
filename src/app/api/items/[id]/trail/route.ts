@@ -26,7 +26,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (!session || !viewer || !nodeCtx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     const trail = await loadTaskTrail(
       { session: session as Parameters<typeof loadTaskTrail>[0]["session"], viewer, nodeCtx, fileViewer: c },
-      { id: gate.item.id, organizationId: gate.item.organizationId, boardId: gate.item.boardId, metadata: gate.item.metadata, board: { spaceId: gate.item.board.spaceId } },
+      { id: gate.item.id, organizationId: gate.item.organizationId, boardId: gate.item.boardId, metadata: gate.item.metadata, assigneeIds: gate.item.assigneeIds ?? [], ownerId: gate.item.ownerId ?? null, board: { spaceId: gate.item.board.spaceId } },
     );
     return NextResponse.json(trail, noStore);
   } catch (err) {

@@ -243,12 +243,15 @@ export function Qa({ items }: { items: readonly QaItem[] }) {
  * button" is a thing the kit does rather than a thing forty pages each
  * remember to do.
  */
-export function Close({ headline, placement }: { headline: string; placement: string }) {
+export function Close({ headline, placement, template = false }: { headline: string; placement: string; template?: boolean }) {
+  // `template` only where the headline promises the Tuesday template (the
+  // share route): the button then opens the same workspace as the story's
+  // own button above it, never an empty one.
   return (
     <Band air="wide" labelledBy={`${placement}-close`}>
       <Headline id={`${placement}-close`}>{headline}</Headline>
       <div className="ic-cta">
-        <PrimaryCta placement={placement} />
+        <PrimaryCta placement={placement} template={template} />
       </div>
     </Band>
   );

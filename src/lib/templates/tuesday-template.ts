@@ -50,7 +50,13 @@ export interface TuesdayBundle {
     steps: Array<{ title: string; description: string; jobTitle: string | null; createsTask: boolean }>;
   };
   goal: { title: string; description: string };
-  doc: { title: string; blocks: Array<{ kind: string; text: string; tone?: string }> };
+  /**
+   * `needs` marks a block that describes a piece only some applies make:
+   * "sop" (the SOP, left out at the plan's SOP cap or for a non-admin) and
+   * "governance" (the KRA, KPI and goal, admins only). Such a block is left
+   * out of the doc whenever its piece was not made (apply-tuesday.ts).
+   */
+  doc: { title: string; blocks: Array<{ kind: string; text: string; tone?: string; needs?: "sop" | "governance" }> };
   sampleTask: { title: string; list: string; stepN: number };
 }
 
@@ -120,13 +126,13 @@ export function tuesdayPayload(): TuesdayPayload {
       doc: {
         title: "Client onboarding playbook",
         blocks: [
-          { kind: "callout", text: "This workspace came with the Tuesday: client onboarding template. Change anything; it is yours.", tone: "info" },
+          { kind: "callout", text: "This Space came from the Tuesday: client onboarding template. Change anything; it is yours.", tone: "info" },
           { kind: "h2", text: "How onboarding runs here" },
-          { kind: "paragraph", text: "The Client onboarding SOP holds the steps. Open it and choose Run steps to create the step's task on the Onboarding List." },
-          { kind: "bullet", text: `Each step names a job title. The task goes to whoever holds that title and is available soonest.` },
-          { kind: "bullet", text: "Nobody holds a title yet? The task is created unassigned, with a note saying so. Give the title to someone in People." },
-          { kind: "bullet", text: `The ${f.kra.title} KRA and the ${f.kpi.name} KPI sit on the ${f.role.title} job title.` },
-          { kind: "bullet", text: `The goal "${f.goal.title}" shows the work on the Onboarding List on its Effort card.` },
+          { kind: "paragraph", text: "The Client onboarding SOP holds the steps. Open it and choose Run steps to create the step's task on the Onboarding List.", needs: "sop" },
+          { kind: "bullet", text: `Each step names a job title. The task goes to whoever holds that title and is available soonest.`, needs: "sop" },
+          { kind: "bullet", text: "Nobody holds a title yet? The task is created unassigned, with a note saying so. Give the title to someone in People.", needs: "sop" },
+          { kind: "bullet", text: `The ${f.kra.title} KRA and the ${f.kpi.name} KPI sit on the ${f.role.title} job title.`, needs: "governance" },
+          { kind: "bullet", text: `The goal "${f.goal.title}" shows the work on the Onboarding List on its Effort card.`, needs: "governance" },
           { kind: "h2", text: "Notes" },
           { kind: "paragraph", text: "" },
         ],

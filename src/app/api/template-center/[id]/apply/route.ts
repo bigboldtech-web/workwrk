@@ -56,7 +56,7 @@ import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { resolveCreate } from "@/lib/access/node-placement";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { applyTuesdayBundle } from "@/lib/templates/apply-tuesday";
-import type { TuesdayPayload } from "@/lib/templates/tuesday-template";
+import { TUESDAY_TEMPLATE_KEY, tuesdayPayload, type TuesdayPayload } from "@/lib/templates/tuesday-template";
 import {
   applyDocTemplate,
   applyFolderTemplate,
@@ -140,7 +140,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // its pieces through apply-tuesday.ts; the job titles, KRA, KPI, SOP
       // and goal only for a workspace admin, who owns those objects.
       if ((payload as { bundle?: { key?: unknown } }).bundle?.key === "tuesday") {
-        const res = await applyTuesdayBundle(payload as unknown as TuesdayPayload, {
+        // The built-in row's stored payload is a snapshot taken when the row
+        // was first made; the code is the source of truth, so a row seeded by
+        // an older build still applies today's pieces and today's doc.
+        const bundlePayload = tpl.builtIn && tpl.key === TUESDAY_TEMPLATE_KEY ? tuesdayPayload() : (payload as unknown as TuesdayPayload);
+        const res = await applyTuesdayBundle(bundlePayload, {
           organizationId: orgId,
           userId,
           name,
