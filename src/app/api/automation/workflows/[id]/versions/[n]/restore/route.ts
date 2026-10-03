@@ -15,7 +15,8 @@
 //      can open come from version n. A version that ran Everywhere restores
 //      as Everywhere, unless the draft keeps places the restorer cannot
 //      open: that would drop them unseen, so it is refused and they can
-//      choose Everywhere in Where it runs themselves.
+//      choose Everywhere in Where it runs themselves. "On a schedule" keeps
+//      the draft's places exactly as they are (its scope is moot).
 //
 // Both writes happen in one transaction, reading the draft under the row
 // lock. Body {}. Returns { ok: true, draftUpdated: true, keptVersion: number | null }.
@@ -25,7 +26,7 @@ import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { SCOPE_REFUSAL, definitionWithScope, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
-import { scopeReadable } from "@/lib/automation/places-server";
+import { livePlaces, scopeReadable } from "@/lib/automation/places-server";
 
 const EVERYWHERE_OVER_HIDDEN = "That version runs everywhere, and this draft also runs in places you can't open. Restoring it would drop them, so choose Everywhere in Where it runs yourself, or ask someone who can open them to restore it.";
 const HIDDEN_VERSION = "That version runs only in places you can't open, so it can't be restored here without making it run everywhere. Someone who can open them can restore it.";
@@ -64,19 +65,29 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const target = versions.find((v) => v.versionNumber === number);
     if (!target) return { notFound: true as const };
 
-    // Where it runs, by the save rule (see the header).
+    // Where it runs, by the save rule (see the header). Out of the
+    // restorer's sight means a place that exists and they cannot open; one in
+    // Trash, or deleted, exists for nobody and follows the version like any
+    // place they can open. "On a schedule" fires for the workspace, not for a
+    // place, so its scope is moot: no refusal, the draft's hidden places kept.
     const stored = readScope(wf.definition);
     const fromVersion = readScope(target.definitionJson);
-    const readable = await scopeReadable(ctx.viewer, [stored, fromVersion]);
-    const { hidden } = splitScope(stored, readable);
-    if (isEverywhere(fromVersion) && !isEverywhere(hidden)) return { refused: { error: EVERYWHERE_OVER_HIDDEN, code: "scope_everywhere_over_hidden" } };
-    const { shown } = splitScope(fromVersion, readable);
-    const scope = restoreHiddenScope({ stored, submitted: shown, hidden, readable, everywhere: isEverywhere(fromVersion) });
-    if (!scope.ok) return { refused: { error: SCOPE_REFUSAL[scope.error], code: scope.error } };
+    const placeless = draftTrigger(withoutSnapshotNote(target.definitionJson), wf.triggerEvent) === "schedule.every";
+    const [readable, exists] = await Promise.all([scopeReadable(ctx.viewer, [stored, fromVersion]), livePlaces(ctx.orgId, [stored, fromVersion])]);
+    const opens = (kind: "list" | "folder" | "space", placeId: string) => readable(kind, placeId) || !exists(kind, placeId);
+    const { hidden } = splitScope(stored, opens);
+    if (!placeless && isEverywhere(fromVersion) && !isEverywhere(hidden)) return { refused: { error: EVERYWHERE_OVER_HIDDEN, code: "scope_everywhere_over_hidden" } };
+    const { shown } = splitScope(fromVersion, opens);
+    const merged = restoreHiddenScope({ stored, submitted: shown, hidden, readable: opens, everywhere: isEverywhere(fromVersion) && isEverywhere(hidden) });
+    if (!merged.ok) return { refused: { error: SCOPE_REFUSAL[merged.error], code: merged.error } };
+    // A schedule keeps the draft's places exactly as they are: moot while it
+    // runs on a schedule, and never Everywhere by accident if the trigger is
+    // later changed to a task event.
+    const scope = placeless ? { ok: true as const, scope: stored } : merged;
     // A version that ran in chosen places never comes back as Everywhere: when
     // every one of its places is out of the restorer's sight and the draft
     // keeps none, nothing would be left to name.
-    if (!isEverywhere(fromVersion) && isEverywhere(scope.scope)) return { refused: { error: HIDDEN_VERSION, code: "scope_hidden_version" } };
+    if (!placeless && !isEverywhere(fromVersion) && isEverywhere(scope.scope)) return { refused: { error: HIDDEN_VERSION, code: "scope_hidden_version" } };
 
     const trigger = draftTrigger(wf.definition, wf.triggerEvent);
     const draftNow = stableJson({ ...withoutSnapshotNote(wf.definition), trigger });

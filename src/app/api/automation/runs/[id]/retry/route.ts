@@ -89,6 +89,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       publisherId: run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById,
       retrierId: ctx.userId,
     }),
+    manualRetry: true,
   };
 
   let stillFailing = 0;

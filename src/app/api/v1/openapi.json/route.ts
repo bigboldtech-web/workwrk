@@ -295,7 +295,7 @@ export async function GET(req: Request) {
         get: { summary: "Feed", responses: { "200": { description: "OK" } } },
         post: {
           summary: "Send kudos",
-          description: "Fires Slack notification + `kudos.created` webhook.",
+          description: "Thanks the receiver (an inbox notification and an email, by their own settings, unless they are a Guest or deactivated), logs it, posts to Slack and fires the `kudos.created` webhook. Both people must be in the workspace and not removed from it.",
           requestBody: {
             required: true,
             content: {
@@ -313,7 +313,11 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Created" } },
+          responses: {
+            "201": { description: "Created" },
+            "400": { description: "A field is missing, or the giver and the receiver are the same person" },
+            "404": { description: "The giver or the receiver is not in this workspace, or was removed from it" },
+          },
         },
       },
       "/tasks": {

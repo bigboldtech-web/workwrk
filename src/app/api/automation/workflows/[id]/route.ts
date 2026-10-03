@@ -76,7 +76,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         })
       : null,
     workflow.createdById
-      ? prisma.user.findFirst({ where: { id: workflow.createdById, organizationId: ctx.orgId }, select: { firstName: true, lastName: true } })
+      ? prisma.user.findFirst({ where: { id: workflow.createdById, organizationId: ctx.orgId, deletedAt: null }, select: { firstName: true, lastName: true } })
       : null,
   ]);
   const trigger = draftTrigger(workflow.definition, workflow.triggerEvent);
@@ -93,6 +93,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ...workflow,
         definition: forViewer.definition,
         scopeHidden: forViewer.scopeHidden,
+        scopeKept: forViewer.scopeKept,
         revision: draftRevision(workflow),
         // The draft trigger the builder edits; `liveTrigger` is what runs.
         triggerEvent: trigger,
@@ -101,6 +102,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         versions,
         where: namer(readScope(workflow.definition)),
         createdByName: creator ? `${creator.firstName} ${creator.lastName}`.trim() : null,
+        // The creator is no longer in the workspace: the engine reaches no List for them (author-reach.ts).
+        creatorGone: Boolean(workflow.createdById) && !creator,
         can: workflow.status === "ARCHIVED" ? { edit: false, archive: rights.archive } : rights,
       },
     },
@@ -193,7 +196,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!workflow) return staleDraft();
   // Answered as the builder reads it, so the hidden places never reach the page.
   const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
-  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
+  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, scopeKept: forViewer.scopeKept, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
 }
 
 /** Someone else saved the draft after this editor loaded it: nothing is written. */

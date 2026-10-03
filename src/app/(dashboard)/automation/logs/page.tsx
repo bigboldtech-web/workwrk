@@ -144,13 +144,15 @@ function RunDrawer({ runId, known, onClose, onRetried, onMissing }: { runId: str
   const retry = async () => {
     if (!run) return;
     setRetrying(true);
-    const r = await apiFetch<{ status?: string }>(`/api/automation/runs/${run.id}/retry`, { method: "POST", json: {} });
+    const r = await apiFetch<{ recovered?: boolean; status?: string | null }>(`/api/automation/runs/${run.id}/retry`, { method: "POST", json: {} });
     setRetrying(false);
     if (!r.ok) {
       toast(r.error || "The retry didn't run", { tone: "danger" });
       return;
     }
-    toast("Retried the failed steps");
+    // The answer says whether every step worked; a step refused again says why in the run.
+    if (r.data.recovered) toast("Retried. Every step worked.");
+    else toast("Retried, but some steps still failed. Each one says why.", { tone: "danger" });
     void load(run.id);
     onRetried();
   };

@@ -98,6 +98,29 @@ export async function scopeReadable(viewer: Viewer, scopes: AutomationScope[]): 
   return (kind, id) => readable.has(refKey({ kind, id }));
 }
 
+/**
+ * Which of these places exist now: a live Space, Folder or List of this
+ * workspace. One in Trash, or deleted, exists for nobody: no viewer, an
+ * Owner included, can open it, so it is never "a place you can't open".
+ */
+export async function livePlaces(orgId: string, scopes: AutomationScope[]): Promise<(kind: "list" | "folder" | "space", id: string) => boolean> {
+  const lists = new Set<string>();
+  const folders = new Set<string>();
+  const spaces = new Set<string>();
+  for (const sc of scopes) {
+    sc.listIds.forEach((id) => lists.add(id));
+    sc.folderIds.forEach((id) => folders.add(id));
+    sc.spaceIds.forEach((id) => spaces.add(id));
+  }
+  const [l, f, sp] = await Promise.all([
+    lists.size ? prisma.board.findMany({ where: { id: { in: [...lists] }, organizationId: orgId }, select: { id: true } }) : [],
+    folders.size ? prisma.folder.findMany({ where: { id: { in: [...folders] }, organizationId: orgId }, select: { id: true } }) : [],
+    spaces.size ? prisma.space.findMany({ where: { id: { in: [...spaces] }, organizationId: orgId }, select: { id: true } }) : [],
+  ]);
+  const live = new Set([...l.map((r) => `list:${r.id}`), ...f.map((r) => `folder:${r.id}`), ...sp.map((r) => `space:${r.id}`)]);
+  return (kind, id) => live.has(`${kind}:${id}`);
+}
+
 export interface ScopeSummary {
   /** "Everywhere", or the readable names, in the order the scope lists them. */
   names: string[];
