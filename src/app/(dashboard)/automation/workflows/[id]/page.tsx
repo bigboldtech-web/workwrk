@@ -100,7 +100,7 @@ interface ApiRun {
 interface ApiVersion {
   number: number;
   publishedAt: string;
-  publishedBy: { id: string; name: string } | null;
+  publishedBy: { id: string; name: string; gone?: boolean } | null;
   isLive: boolean;
   kind: "published" | "kept";
   restoredFrom: number | null;
@@ -120,6 +120,8 @@ interface ApiWorkflow {
   lastRunAt: string | null;
   createdById: string | null;
   createdByName: string | null;
+  /** The creator is no longer in the workspace. */
+  creatorGone?: boolean;
   definition: unknown;
   /** Places this viewer cannot open are kept in the scope (never which or how many). */
   scopeHidden?: boolean;
@@ -482,6 +484,8 @@ export default function AutomationBuilderPage() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const nameAtFocus = useRef("");
   const saveAgain = useRef<() => void>(() => {});
+  // The sections a save refusal marked, so the next save that lands clears only those.
+  const saveRefused = useRef(new Set<"when" | "where">());
   // "Only in chosen Lists" picked with no List yet: the scope is still
   // Everywhere until one is chosen, and the section says so.
   const [listsMode, setListsMode] = useState(false);
@@ -586,12 +590,12 @@ export default function AutomationBuilderPage() {
   // Looked up in chunks of 50. An id is done once a lookup answered (found
   // or not); a failed lookup is tried again, up to three times, a little
   // later each time.
-  const peopleAnswered = useRef(new Set<string>());
+  const [peopleAnswered, setPeopleAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const peopleInFlight = useRef(new Set<string>());
   const peopleTries = useRef(new Map<string, number>());
   const [peopleRetry, setPeopleRetry] = useState(0);
   useEffect(() => {
-    const missing = chosenPeopleKey.split(",").filter((x) => x && !peopleAnswered.current.has(x) && !peopleInFlight.current.has(x) && (peopleTries.current.get(x) ?? 0) < 3);
+    const missing = chosenPeopleKey.split(",").filter((x) => x && !peopleAnswered.has(x) && !peopleInFlight.current.has(x) && (peopleTries.current.get(x) ?? 0) < 3);
     if (missing.length === 0) return;
     // Marked in flight only when the lookup really starts: a cancelled
     // timer leaves nothing marked, so the next pass asks again.
@@ -604,7 +608,7 @@ export default function AutomationBuilderPage() {
           for (const x of chunk) peopleInFlight.current.delete(x);
           const ok = r.ok && Array.isArray(r.data.people);
           if (ok) {
-            for (const x of chunk) peopleAnswered.current.add(x);
+            setPeopleAnswered((prev) => new Set([...prev, ...chunk]));
             setNamed((prev) => [...prev.filter((p) => !chunk.includes(p.id)), ...r.data.people]);
           } else {
             let wait = 0;
@@ -621,7 +625,21 @@ export default function AutomationBuilderPage() {
       }
     }, 0);
     return () => clearTimeout(t);
-  }, [chosenPeopleKey, peopleRetry]);
+  }, [chosenPeopleKey, peopleRetry, peopleAnswered]);
+  // A lookup that gave up is asked again when the window comes back or the
+  // connection returns, never left failed until a reload.
+  useEffect(() => {
+    const again = () => {
+      peopleTries.current.clear();
+      setPeopleRetry((v) => v + 1);
+    };
+    window.addEventListener("online", again);
+    window.addEventListener("focus", again);
+    return () => {
+      window.removeEventListener("online", again);
+      window.removeEventListener("focus", again);
+    };
+  }, []);
 
   // Typing in a person picker searches the whole company, not only the
   // first page already loaded: everyone who can sign in for a condition,
@@ -646,10 +664,14 @@ export default function AutomationBuilderPage() {
     }, 200);
     return () => clearTimeout(t);
   }, [conditionQuery, mergeInto]);
-  const personLabel = (value: string): string | null =>
-    peopleLoading.has(value) && !people.some((p) => p.id === value) ? "Loading"
-    : peopleFailed.has(value) && !people.some((p) => p.id === value) ? "Couldn't load this name"
-    : userLabel(value, people);
+  // A colleague is named, still Loading, or Couldn't load; "Someone no longer
+  // here" only once a lookup answered without them.
+  const personLabel = (value: string): string | null => {
+    if (!value || value.includes("@") || USER_SPECIALS.some((x) => x.value === value) || people.some((p) => p.id === value)) return userLabel(value, people);
+    if (peopleFailed.has(value) && !peopleLoading.has(value)) return "Couldn't load this name";
+    if (peopleAnswered.has(value)) return userLabel(value, people);
+    return "Loading";
+  };
 
   const update = useCallback((patch: Partial<Draft> | ((d: Draft) => Draft)) => {
     setDraft((d) => (d ? (typeof patch === "function" ? patch(d) : { ...d, ...patch }) : d));
@@ -698,6 +720,7 @@ export default function AutomationBuilderPage() {
       // dropped connection, a timeout or a server error does.
       const section = r.issues && typeof r.issues === "object" ? (r.issues as { section?: unknown }).section : undefined;
       if (r.status === 400 && (section === "where" || section === "when")) {
+        saveRefused.current.add(section);
         setProblems((p) => ({ conditions: {}, actions: {}, ...(p ?? {}), [section]: r.error }));
         toast("Not saved. See what is marked.", { tone: "danger" });
         return false;
@@ -709,8 +732,13 @@ export default function AutomationBuilderPage() {
       });
       return false;
     }
-    // A refusal shown from an earlier save no longer holds once a save lands.
-    setProblems((p) => (p && (p.where || p.when) ? { ...p, where: undefined, when: undefined } : p));
+    // A refusal an earlier save showed no longer holds once a save lands; a
+    // publish check's own marks stay until the next publish.
+    if (saveRefused.current.size) {
+      const cleared = new Set(saveRefused.current);
+      saveRefused.current.clear();
+      setProblems((p) => (p ? { ...p, ...(cleared.has("where") ? { where: undefined } : {}), ...(cleared.has("when") ? { when: undefined } : {}) } : p));
+    }
     setBaseline(draftSnapshot(draft));
     // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
     const saved = r.data.workflow;
@@ -961,10 +989,19 @@ export default function AutomationBuilderPage() {
   // republished just stops running in the Admin's private Lists with
   // nothing to show why.
   const liveVersion = wf.versions.find((v) => v.isLive);
+  const publisher = liveVersion?.publishedBy ?? null;
   const creatorName = wf.createdByName || "its creator";
-  const cappedNote = published && !archived && liveVersion?.publishedBy && wf.createdById && liveVersion.publishedBy.id !== wf.createdById
-    ? `Published by ${liveVersion.publishedBy.name}, so it runs only where both ${liveVersion.publishedBy.name} and ${creatorName} can open and change things. When ${creatorName} republishes it, it runs with their own reach.`
-    : null;
+  const cappedNote = !published || archived
+    ? null
+    : wf.creatorGone
+      ? "Its creator is no longer in the workspace, so it no longer runs on tasks in any List. Make a copy to run it as yours."
+      : publisher?.gone
+        ? "Its live version was published by someone no longer in the workspace, so it no longer runs on tasks in any List. Republish it to run it again."
+        : publisher && !wf.createdById
+          ? `Published by ${publisher.name}, so it runs only where ${publisher.name} can open and change things.`
+          : publisher && publisher.id !== wf.createdById
+            ? `Published by ${publisher.name}, so it runs only where both ${publisher.name} and ${creatorName} can open and change things. When ${creatorName} republishes it, it runs with their own reach.`
+            : null;
   const busy = saving || publishing;
   const offlineTitle = offline ? "You're offline. Save and Publish wait for the network." : undefined;
 

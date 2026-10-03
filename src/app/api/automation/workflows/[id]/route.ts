@@ -102,6 +102,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         versions,
         where: namer(readScope(workflow.definition)),
         createdByName: creator ? `${creator.firstName} ${creator.lastName}`.trim() : null,
+        // The creator is no longer in the workspace: the engine reaches no List for them (author-reach.ts).
+        creatorGone: Boolean(workflow.createdById) && !creator,
         can: workflow.status === "ARCHIVED" ? { edit: false, archive: rights.archive } : rights,
       },
     },
