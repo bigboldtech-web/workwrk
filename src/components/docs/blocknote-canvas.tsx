@@ -253,7 +253,10 @@ async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   return out;
 }
 
-function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string, onNotTold?: (name: string) => void): DefaultReactSuggestionItem[] {
+/** Why a person mentioned was not told: they cannot open the doc, or the notice did not go out (with a way to send it again). */
+type NotTold = (name: string, why: "no_access" | "failed", retry?: () => void) => void;
+
+function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string, onNotTold?: NotTold): DefaultReactSuggestionItem[] {
   return rows.map((row) => ({
     title: row.label,
     subtext: row.mkind === "user" ? "Person" : "Page",
@@ -262,8 +265,10 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
     onItemClick: () => {
       // Cast the insert: our custom `mention` inline type isn't in the
       // editor's default inline-content union as TS infers it, though it is
-      // registered in the runtime schema.
-      const insertInline = editor.insertInlineContent as (content: unknown) => void;
+      // registered in the runtime schema. Called ON the editor: the method
+      // reads `this`, and a detached copy threw on every pick, so no mention
+      // was ever inserted and nobody was told.
+      const insertInline = (content: unknown) => (editor.insertInlineContent as (c: unknown) => void).call(editor, content);
       insertInline([
         { type: "mention", props: { mkind: row.mkind, refId: row.id, label: row.label, href: row.href } },
         " ", // trailing space so the caret lands after the pill
@@ -271,16 +276,23 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
       // Mentioning a person drops them an Inbox notification (server honors
       // their "Mentions" toggle). Best-effort — the pill already inserted.
       if (row.mkind === "user" && docId) {
-        // Someone who cannot open the doc is not told (the route says so):
-        // the writer hears it, so a mention never looks sent when it was not.
-        void fetch(`/api/docs/${docId}/mention`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: row.id }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => { if (d?.skipped === "no_access") onNotTold?.(row.label); })
-          .catch(() => {});
+        // Someone who cannot open the doc is not told (the route says so),
+        // and a notice that did not go out is not sent: either way the writer
+        // hears it, so a mention never looks sent when it was not.
+        const tell = () => {
+          void fetch(`/api/docs/${docId}/mention`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: row.id }),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (!d) onNotTold?.(row.label, "failed", tell);
+              else if (d.skipped === "no_access") onNotTold?.(row.label, "no_access");
+            })
+            .catch(() => onNotTold?.(row.label, "failed", tell));
+        };
+        tell();
       }
     },
   }));
@@ -574,7 +586,9 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
             notification via /api/docs/[id]/mention (pref-gated server-side). */}
         <SuggestionMenuController
           triggerCharacter="@"
-          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId, (name) => toast(`${name} can't open this doc, so they were not told.`))}
+          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId, (name, why, retry) => (why === "no_access"
+            ? toast(`${name} can't open this doc, so they were not told.`)
+            : toast(`Couldn't tell ${name} about the mention.`, { tone: "danger", action: retry ? { label: "Try again", onClick: retry } : undefined })))}
         />
         {/* Custom drag-handle: + add-block button and our Notion block menu.
             The provider feeds live docId/callbacks to the menu through

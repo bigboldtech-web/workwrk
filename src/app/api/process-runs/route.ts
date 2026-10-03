@@ -8,6 +8,7 @@ import { canManageRun } from "@/lib/process-run-access";
 import crypto from "crypto";
 import { allowedRunsViews, effectiveRunStatus, isRunStatus, parseRunsSort, type RunsView } from "@/lib/process-runs";
 import { runProgress } from "@/lib/sop-kind";
+import { employedAmong } from "@/lib/people/employed.server";
 
 const ORG_WIDE = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
@@ -45,7 +46,11 @@ export async function GET(req: NextRequest) {
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
   const sp = new URL(req.url).searchParams;
-  const { viewer } = viewerOf(session as { user: { accessLevel?: string } });
+  const { viewer: byLevel } = viewerOf(session as { user: { accessLevel?: string } });
+  // Team runs is for anyone with reports, whatever their level (canManageRun
+  // reads the same tree), so a lead below manager level sees the runs they
+  // started for their reports.
+  const viewer = byLevel.hasReports ? byLevel : { ...byLevel, hasReports: (await getTeamUserIds(orgId, callerId)).length > 1 };
   const allowed = allowedRunsViews(viewer);
 
   const requestedRaw = sp.get("scope");
@@ -180,6 +185,11 @@ export async function POST(req: NextRequest) {
   // The picker returns null for "Anyone with the link"; the retired "none"
   // sentinel is still folded to null so an older client cannot write it.
   const assignee = typeof assigneeId === "string" && assigneeId && assigneeId !== "none" ? assigneeId : null;
+  // A run goes only to someone in this workspace who can still be given work:
+  // never an id from elsewhere, never a colleague who was deactivated.
+  if (assignee && (await employedAmong(orgId, [assignee])).length === 0) {
+    return jsonError("That person can't be given a run. Choose someone else.", 400);
+  }
 
   const run = await prisma.processRun.create({
     data: {

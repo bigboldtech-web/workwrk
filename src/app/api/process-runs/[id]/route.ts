@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activity";
 import { canManageRun } from "@/lib/process-run-access";
 import { effectiveRunStatus } from "@/lib/process-runs";
 import { runProgress } from "@/lib/sop-kind";
+import { employedAmong } from "@/lib/people/employed.server";
 
 /**
  * /api/process-runs/[id] (spec-process section 2 `/process-runs` Data):
@@ -85,9 +86,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (action === "reassign") {
     const next = typeof body.assigneeId === "string" && body.assigneeId && body.assigneeId !== "none" ? body.assigneeId : null;
-    if (next) {
-      const person = await prisma.user.findFirst({ where: { id: next, organizationId: orgId }, select: { id: true } });
-      if (!person) return jsonError("Person not found", 404);
+    // Never to someone who was deactivated or removed: they cannot sign in.
+    if (next && (await employedAmong(orgId, [next])).length === 0) {
+      return jsonError("That person can't be given a run. Choose someone else.", 400);
     }
     await prisma.processRun.update({ where: { id }, data: { assigneeId: next } });
     if (next && next !== callerId) {

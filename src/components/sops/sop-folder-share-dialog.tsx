@@ -20,6 +20,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
@@ -120,7 +121,7 @@ export function SopFolderShareDialog({ open, onClose, folder, onSaved }: {
           )}
           <span className="relative mt-2 block">
             <button type="button" onClick={() => setAddOpen((o) => !o)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-brand-deep hover:bg-hover"><UserPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add people</button>
-            <Picker open={addOpen} onClose={() => setAddOpen(false)} ariaLabel="Add people" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && options.length === 0} onSelect={add} sections={[{ options }]} width={320} />
+            <Picker open={addOpen} onClose={() => setAddOpen(false)} ariaLabel="Add people" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && options.length === 0} emptyLabel={peopleEmptyLabel(picker)} footer={peopleFailedFooter(picker)} onSelect={add} sections={[{ options }]} width={320} />
           </span>
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">

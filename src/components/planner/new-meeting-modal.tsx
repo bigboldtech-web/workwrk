@@ -43,6 +43,7 @@ import {
 } from "@/lib/meeting-type";
 import { MEETING_LENGTHS } from "@/lib/meeting-list";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 
 type UserLite = { id: string; firstName?: string | null; lastName?: string | null; email?: string | null };
 
@@ -269,7 +270,8 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
             loading={picker.loading && peopleOptions.length === 0}
             sections={[{ options: peopleOptions }]}
             onSelect={(v) => setPeople((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
-            emptyLabel={picker.query.trim() ? "No one matches" : "Nobody to add"}
+            emptyLabel={peopleEmptyLabel(picker, "Nobody to add")}
+            footer={peopleFailedFooter(picker)}
           />
           <span className="text-sm text-ink-3">
             You are always in your own meeting. A video room is created with it.

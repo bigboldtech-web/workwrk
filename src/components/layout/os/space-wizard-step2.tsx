@@ -42,6 +42,9 @@ interface Step2Props {
   loadingUsers: boolean;
   /** The owner search reaches the server too: the list grows with what it finds. */
   onSearchUsers?: (q: string) => void;
+  /** The people read failed: the owner list says so and offers Try again. */
+  usersFailed?: boolean;
+  onRetryUsers?: () => void;
   /** The chosen owner's name, looked up by id (they may not be in the list). */
   ownerName?: string | null;
   onChange: (next: WorkflowConfig) => void;
@@ -60,6 +63,8 @@ export function SpaceWizardStep2(props: Step2Props) {
         users={props.users}
         loading={props.loadingUsers}
         onSearch={props.onSearchUsers}
+        failed={props.usersFailed ?? false}
+        onRetry={props.onRetryUsers}
         ownerId={workflow.ownerId}
         onChange={(id) => props.onChange({ ...workflow, ownerId: id })}
         onClose={() => props.onSubScreen(null)}
@@ -300,6 +305,8 @@ function OwnerSubScreen({
   users,
   loading,
   onSearch,
+  failed,
+  onRetry,
   ownerId,
   onChange,
   onClose,
@@ -308,6 +315,8 @@ function OwnerSubScreen({
   users: UserOption[];
   loading: boolean;
   onSearch?: (q: string) => void;
+  failed: boolean;
+  onRetry?: () => void;
   ownerId: string | null;
   onChange: (id: string | null) => void;
   onClose: () => void;
@@ -359,12 +368,20 @@ function OwnerSubScreen({
           {ownerId === null ? <Check className="h-4 w-4" style={{ color: accent }} /> : null}
         </button>
 
+        {failed ? (
+          <div className="text-sm text-muted py-3 text-center">
+            Couldn&apos;t load people.{" "}
+            {onRetry ? <button type="button" onClick={onRetry} className="font-medium text-brand-deep hover:underline">Try again</button> : null}
+          </div>
+        ) : null}
         {loading ? (
           <div className="text-sm text-muted py-6 text-center">Loading people…</div>
         ) : filtered.length === 0 ? (
-          <div className="text-sm text-muted py-6 text-center">
-            {query ? `No match for "${query}"` : "No people available"}
-          </div>
+          failed ? null : (
+            <div className="text-sm text-muted py-6 text-center">
+              {query ? `No match for "${query}"` : "No people available"}
+            </div>
+          )
         ) : (
           <div className="rounded-lg border border-border divide-y divide-border">
             {filtered.map((u) => {

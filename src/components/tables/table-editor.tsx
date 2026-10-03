@@ -1261,6 +1261,8 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const titleBeforeEditRef = useRef<string | null>(null);
   // Org users (for Person columns), lazy-loaded when one exists.
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
+  // The people a Person cell holds, looked up by id: names only, never offered.
+  const [namedUsers, setNamedUsers] = useState<OrgUser[]>([]);
   // The BackButton target (back-map 7): the table's Space page and name when
   // `spaceId` is set, else /tables labelled Tables.
   const [spaceBack, setSpaceBack] = useState<{ fallbackHref: string; label: string } | null>(null);
@@ -1948,15 +1950,11 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   // report tree, which is all /api/users answered below org-wide levels; and
   // every person a Person cell already holds, looked up by id, so each reads
   // by name. A cell's search box searches the server too (searchPeople).
+  // The lookup by id names a deactivated person for those who may see them,
+  // so what it finds labels chips and is never offered as a pick.
   const hasPersonCol = (table?.columns ?? []).some((c) => c.type === "person");
-  const mergeOrgUsers = useCallback((got: OrgUser[]) => {
-    if (got.length === 0) return;
-    setOrgUsers((prev) => {
-      const byId = new Map(prev.map((u) => [u.id, u]));
-      for (const u of got) byId.set(u.id, u);
-      return [...byId.values()];
-    });
-  }, []);
+  const mergeOrgUsers = useCallback((got: OrgUser[]) => mergeUsersById(setOrgUsers, got), []);
+  const mergeNamedUsers = useCallback((got: OrgUser[]) => mergeUsersById(setNamedUsers, got), []);
   const firstPeopleAsked = useRef(false);
   useEffect(() => {
     if (!hasPersonCol || firstPeopleAsked.current) return;
@@ -1989,10 +1987,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       // reach "all": a deactivated person a cell holds is named for those who may see them.
       void fetch(pickUrl({ ids: chunk, reach: "all" }))
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); else forget(); })
+        .then((d) => { if (Array.isArray(d?.people)) mergeNamedUsers(d.people); else forget(); })
         .catch(forget);
     }
-  }, [personIdsKey, mergeOrgUsers]);
+  }, [personIdsKey, mergeNamedUsers]);
   const searchPeople = useCallback((q: string) => {
     const term = q.trim();
     if (!term) return;
@@ -2001,6 +1999,13 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); })
       .catch(() => {});
   }, [mergeOrgUsers]);
+  // Everyone known by id, for naming: the people offered, then those looked up.
+  const peopleById = useMemo(() => {
+    const m = new Map<string, OrgUser>();
+    for (const u of namedUsers) m.set(u.id, u);
+    for (const u of orgUsers) m.set(u.id, u);
+    return m;
+  }, [orgUsers, namedUsers]);
 
   // Lazy-load the org table list the first time the relation config opens.
   useEffect(() => {
@@ -4645,7 +4650,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       case "multi_select": return Array.isArray(v) ? (v as string[]).join(", ") : null;
       case "person": {
         const arr = Array.isArray(v) ? (v as string[]) : [];
-        return arr.length ? arr.map((id) => userName(orgUsers.find((u) => u.id === id))).join(", ") : null;
+        return arr.length ? arr.map((id) => userName(peopleById.get(id))).join(", ") : null;
       }
       case "link": {
         const lt = c.linkTableId ? linkedTables[c.linkTableId] : undefined;
@@ -4815,7 +4820,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       case "multi_select": return Array.isArray(v) ? (v as string[]).join(", ") : "";
       case "person": {
         const arr = Array.isArray(v) ? (v as string[]) : [];
-        return arr.map((id) => userName(orgUsers.find((u) => u.id === id))).join(", ");
+        return arr.map((id) => userName(peopleById.get(id))).join(", ");
       }
       case "link": {
         const lt = col.linkTableId ? linkedTables[col.linkTableId] : undefined;
@@ -5486,7 +5491,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     ) : c.type === "attachment" ? (
       <AttachmentCell value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : c.type === "person" ? (
-      <PersonCell value={r.values[c.id]} users={orgUsers} onSearch={searchPeople} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+      <PersonCell value={r.values[c.id]} users={orgUsers} named={peopleById} onSearch={searchPeople} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : (
       <CellEditor column={c} value={r.values[c.id]} cellStyle={readCellStyle(r.values, c.id)} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
     );
@@ -6861,7 +6866,17 @@ function AttachmentCell({ value, onChange }: { value: unknown; onChange: (v: Att
   );
 }
 
-function PersonCell({ value, users, onSearch, onChange }: { value: unknown; users: OrgUser[]; onSearch?: (q: string) => void; onChange: (v: string[]) => void }) {
+/** Add people to a list by id, the newest copy of each kept. */
+function mergeUsersById(set: React.Dispatch<React.SetStateAction<OrgUser[]>>, got: OrgUser[]): void {
+  if (got.length === 0) return;
+  set((prev) => {
+    const byId = new Map(prev.map((u) => [u.id, u]));
+    for (const u of got) byId.set(u.id, u);
+    return [...byId.values()];
+  });
+}
+
+function PersonCell({ value, users, named, onSearch, onChange }: { value: unknown; users: OrgUser[]; named: ReadonlyMap<string, OrgUser>; onSearch?: (q: string) => void; onChange: (v: string[]) => void }) {
   const ids = Array.isArray(value) ? (value as string[]) : [];
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -6874,7 +6889,7 @@ function PersonCell({ value, users, onSearch, onChange }: { value: unknown; user
   // A stored person who cannot be named (still loading, or no longer here)
   // stays a chip, so the cell never looks emptier than it is and they can
   // still be removed.
-  const chosen = ids.map((id) => ({ id, user: users.find((u) => u.id === id) }));
+  const chosen = ids.map((id) => ({ id, user: named.get(id) }));
   const candidates = q.trim() ? users.filter((u) => userName(u).toLowerCase().includes(q.trim().toLowerCase())) : users;
   const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   return (

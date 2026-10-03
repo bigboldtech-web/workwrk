@@ -23,6 +23,7 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { RowMoreButton } from "@/components/ui/table-card";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { PARTY_ROLE_LABEL, isValidEmail, partyHue, type PartyRole } from "@/lib/contracts";
 import type { BuilderParty, FieldType } from "@/components/agreements/field-builder";
 import { cn } from "@/lib/utils";
@@ -82,7 +83,7 @@ export function PartiesPanel({ parties, activePartyId, onActiveParty, pendingToo
         <button type="button" onClick={onAddParty} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add party</button>
         <span className="relative block">
           <button type="button" onClick={() => setTeamOpen((o) => !o)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><UserPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add a teammate</button>
-          <Picker open={teamOpen} onClose={() => setTeamOpen(false)} ariaLabel="Add a teammate" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && people.length === 0} onSelect={(v) => { const person = picker.person(v); if (person) onAddTeammate(person); setTeamOpen(false); }} sections={[{ options: peopleOptions }]} />
+          <Picker open={teamOpen} onClose={() => setTeamOpen(false)} ariaLabel="Add a teammate" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && people.length === 0} emptyLabel={peopleEmptyLabel(picker)} footer={peopleFailedFooter(picker)} onSelect={(v) => { const person = picker.person(v); if (person) onAddTeammate(person); setTeamOpen(false); }} sections={[{ options: peopleOptions }]} />
         </span>
       </div>
 

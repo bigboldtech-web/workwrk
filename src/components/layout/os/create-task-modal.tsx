@@ -52,6 +52,7 @@ import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-d
 import { PRIORITY_LOOKUP } from "@/lib/board-items-shared";
 import { ITEM_FIELD_LABELS, type ItemFieldKey } from "@/lib/item-fields";
 import { useOsToast } from "@/components/layout/os/toast";
+import { pickUrl } from "@/lib/people-pick";
 
 // ── Task types ─────────────────────────────────────────────────────
 // No `type` column on Item: the chosen type is persisted into
@@ -88,6 +89,8 @@ type BoardRow = { id: string; slug: string; name: string; spaceId: string | null
 type SelectedList = { id: string; slug: string; name: string; spaceId: string | null };
 
 const LAST_LIST_KEY = "workwrk:create-task:last-list";
+// The List roster is read a page at a time; a full page means there is more.
+const ROSTER_PAGE = 200;
 
 // Context-aware destination (tasks-spec §1): derive the list/space from
 // the current route so every "+" lands correctly without asking.
@@ -175,26 +178,44 @@ function Avatar({ person, size = 24 }: { person: Person; size?: number }) {
   return <SharedAvatar person={person} size={size} />;
 }
 
+/** `known` with these people added, the newest copy of each kept. */
+function withPeople(known: ReadonlyMap<string, Person>, list: readonly Person[]): ReadonlyMap<string, Person> {
+  if (list.length === 0) return known;
+  const out = new Map(known);
+  for (const p of list) out.set(p.id, p);
+  return out;
+}
+
 // Reusable people picker (single for assignee, multi for followers).
 function PeoplePicker({
-  people, me, selected, onToggle, position = "top",
+  people, me, selected, onToggle, position = "top", onSearch, failed = false, onRetry,
 }: {
   people: Person[];
   me: Person | null;
   selected: string[];
   onToggle: (id: string) => void;
   position?: "top" | "bottom";
+  /** The search reaches the server too, a moment after the typing stops: what it finds joins `people`. */
+  onSearch?: (q: string) => void;
+  /** The people could not be read: only you are offered, with Try again. */
+  failed?: boolean;
+  onRetry?: () => void;
 }) {
   const [q, setQ] = useState("");
+  useEffect(() => {
+    if (!q.trim() || !onSearch) return;
+    const t = setTimeout(() => onSearch(q), 180);
+    return () => clearTimeout(t);
+  }, [q, onSearch]);
   const ordered = useMemo(() => {
     const seen = new Set<string>();
     const out: Person[] = [];
     if (me) { out.push(me); seen.add(me.id); }
-    for (const p of people) { if (!seen.has(p.id)) { out.push(p); seen.add(p.id); } }
+    for (const p of failed ? [] : people) { if (!seen.has(p.id)) { out.push(p); seen.add(p.id); } }
     const needle = q.trim().toLowerCase();
     if (!needle) return out;
     return out.filter((p) => personName(p).toLowerCase().includes(needle) || (p.email ?? "").toLowerCase().includes(needle));
-  }, [people, me, q]);
+  }, [people, me, q, failed]);
   return (
     <div className={`absolute ${position === "top" ? "bottom-full mb-1" : "top-full mt-1"} start-0 w-[300px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] overflow-hidden`}>
       <div className="p-2 border-b border-zinc-100">
@@ -217,7 +238,13 @@ function PeoplePicker({
             {selected.includes(p.id) && <Check className="w-3.5 h-3.5 text-brand-deep" />}
           </button>
         ))}
-        {ordered.length === 0 && <div className="px-4 py-4 text-center text-base text-zinc-400">No people found.</div>}
+        {ordered.length === 0 && !failed && <div className="px-4 py-4 text-center text-base text-zinc-400">No people found.</div>}
+        {failed ? (
+          <div className="px-2.5 py-2 text-sm text-zinc-500">
+            Couldn&apos;t load who can be given work here.{" "}
+            {onRetry ? <button type="button" onClick={onRetry} className="font-medium text-brand-deep hover:underline">Try again</button> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -241,6 +268,10 @@ export function CreateTaskModal() {
   const [itemTypes, setItemTypes] = useState<ItemTypeOpt[]>([]);
   const [itemTypeId, setItemTypeId] = useState<string | null>(null);
   const [selectedList, setSelectedList] = useState<SelectedList | null>(null);
+  const listId = selectedList?.id ?? null;
+  // The List chosen now, for answers that arrive later.
+  const listIdRef = useRef(listId);
+  useEffect(() => { listIdRef.current = listId; }, [listId]);
   // THE SAME FIELD MEMORY THE TASK DRAWER KEEPS (spec-task-detail section 4
   // step 5). Create used to render six always-on chips and a separate "..."
   // menu, so a person who had hidden Tags on a List still got a Tags chip the
@@ -288,7 +319,24 @@ export function CreateTaskModal() {
   // Data
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [boards, setBoards] = useState<BoardRow[]>([]);
-  const [people, setPeople] = useState<Person[]>([]);
+  // `people`: who the pickers offer now (the chosen List's roster, or the
+  // workspace before one is chosen). `known`: everyone read so far, so a
+  // chosen person always reads by name.
+  const [people, setPeopleState] = useState<Person[]>([]);
+  const [known, setKnown] = useState<ReadonlyMap<string, Person>>(() => new Map());
+  /** Offer these people (in place of the last list); they join `known`. */
+  const setPeople = useCallback((list: Person[]) => {
+    setPeopleState(list);
+    setKnown((m) => withPeople(m, list));
+  }, []);
+  /** Offer these people too (a search's finds); they join `known`. */
+  const addPeople = useCallback((more: Person[]) => {
+    setPeopleState((cur) => {
+      const seen = new Set(cur.map((p) => p.id));
+      return [...cur, ...more.filter((p) => !seen.has(p.id))];
+    });
+    setKnown((m) => withPeople(m, more));
+  }, []);
   const [loadingLists, setLoadingLists] = useState(false);
   const [statusCache, setStatusCache] = useState<Record<string, StatusDef[]>>({});
 
@@ -329,8 +377,8 @@ export function CreateTaskModal() {
   const assignee = useMemo(() => {
     if (!assigneeId) return null;
     if (me && me.id === assigneeId) return me;
-    return people.find((p) => p.id === assigneeId) ?? null;
-  }, [assigneeId, me, people]);
+    return known.get(assigneeId) ?? null;
+  }, [assigneeId, me, known]);
 
   // Preselect the destination list when the opener passed one (board
   // page "+ Task"). Runs on every open so re-opening from a different
@@ -376,7 +424,11 @@ export function CreateTaskModal() {
       .then(([s, b, u, t, it, kr, kp]) => {
         setSpaces(Array.isArray(s.spaces) ? s.spaces : []);
         setBoards(Array.isArray(b.boards) ? b.boards : []);
-        setPeople(Array.isArray(u.people) ? u.people : []);
+        // The workspace's people are offered only while no List is chosen:
+        // a List's roster that arrived first is never replaced by them.
+        const workspace: Person[] = Array.isArray(u.people) ? u.people : [];
+        if (listIdRef.current) setKnown((m) => withPeople(m, workspace));
+        else setPeople(workspace);
         setTemplates(Array.isArray(t.templates) ? t.templates : []);
         // /api/kras is paginated ({ data: [...] }); /api/kpis returns a raw array.
         setKras(Array.isArray(kr?.data) ? kr.data : Array.isArray(kr) ? kr : []);
@@ -401,40 +453,87 @@ export function CreateTaskModal() {
   // board-scoped endpoint even though its own header already names the
   // destination ("In BUG7 Private Shared List").
   //
-  // A list whose roster cannot be read leaves the previous candidates in place
-  // rather than emptying the picker: a picker that goes blank is worse than a
-  // picker that is one list out of date.
-  const listId = selectedList?.id ?? null;
+  // A List whose roster cannot be read offers only you, says so and offers
+  // Try again, and a task is not created with people it could not check:
+  // the previous List's people are never offered as this one's.
   // The people already chosen, read when the roster arrives.
   const chosenRef = useRef({ assigneeId, followers, meId: me?.id ?? null });
   useEffect(() => { chosenRef.current = { assigneeId, followers, meId: me?.id ?? null }; }, [assigneeId, followers, me]);
   const { toast } = useOsToast();
+  // Whether THIS List's roster was read, and so the people picked checked.
+  const [roster, setRoster] = useState<{ listId: string; state: "loading" | "ok" | "failed" } | null>(null);
+  const [rosterAttempt, setRosterAttempt] = useState(0);
   useEffect(() => {
     if (!createTaskOpen || !listId) return;
     let active = true;
-    fetch(`/api/boards/${encodeURIComponent(listId)}/assignable?limit=200`, { cache: "no-store" })
+    const base = `/api/boards/${encodeURIComponent(listId)}/assignable`;
+    const read = async (url: string): Promise<Person[] | null> => {
+      try {
+        const r = await fetch(url, { cache: "no-store" });
+        const d = r.ok ? await r.json() : null;
+        return Array.isArray(d?.data) ? (d.data as Person[]) : null;
+      } catch {
+        return null;
+      }
+    };
+    void (async () => {
+      const page = await read(`${base}?limit=${ROSTER_PAGE}`);
+      if (!active) return;
+      if (!page) { setPeople([]); setRoster({ listId, state: "failed" }); return; }
+      setPeople(page);
+      // Someone picked before this List was chosen who cannot be given work
+      // in it is let go, and the person is told: a task is never assigned,
+      // or followed, by someone out of sight. You always stay.
+      const on = new Set(page.map((p) => p.id));
+      const { assigneeId: a, followers: f, meId } = chosenRef.current;
+      if (meId) on.add(meId);
+      let off = [...new Set([...(a ? [a] : []), ...f])].filter((id) => !on.has(id));
+      // A full page is only the start of the roster (a List open to a whole
+      // large workspace): the people picked off it are asked about by id,
+      // never let go for sorting after the 200th name.
+      if (off.length > 0 && page.length >= ROSTER_PAGE) {
+        const checked = await read(`${base}?ids=${off.map(encodeURIComponent).join(",")}`);
+        if (!active) return;
+        if (!checked) { setRoster({ listId, state: "failed" }); return; }
+        addPeople(checked);
+        const yes = new Set(checked.map((p) => p.id));
+        off = off.filter((id) => !yes.has(id));
+      }
+      if (off.length > 0) {
+        const gone = new Set(off);
+        setAssigneeId((cur) => (cur && gone.has(cur) ? null : cur));
+        setFollowers((cur) => cur.filter((id) => !gone.has(id)));
+        toast("Someone you picked can't be given work in this List, so they were taken off. Choose from this List's people.", { tone: "danger" });
+      }
+      setRoster({ listId, state: "ok" });
+    })();
+    return () => { active = false; };
+  }, [createTaskOpen, listId, toast, rosterAttempt, setPeople, addPeople]);
+  const rosterFailed = !!listId && roster?.listId === listId && roster.state === "failed";
+  // Asked again: "loading" until it answers (a roster for another List already reads as not checked).
+  const retryRoster = useCallback(() => {
+    setRoster((r) => (r ? { ...r, state: "loading" } : r));
+    setRosterAttempt((v) => v + 1);
+  }, []);
+  // A picker search reaches the server: the chosen List's roster, or the
+  // whole workspace before one is chosen. An answer for another List is
+  // thrown away.
+  const searchPeople = useCallback((q: string) => {
+    const term = q.trim();
+    if (!term) return;
+    const target = listIdRef.current;
+    const url = target
+      ? `/api/boards/${encodeURIComponent(target)}/assignable?limit=30&search=${encodeURIComponent(term)}`
+      : pickUrl({ includeSelf: true, q: term, limit: 30 });
+    void fetch(url, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!active || !Array.isArray(d?.data) || d.data.length === 0) return;
-        const roster: Person[] = d.data;
-        setPeople(roster);
-        // Someone picked before this List was chosen who cannot be given work
-        // in it is let go, and the person is told: a task is never assigned,
-        // or followed, by someone out of sight. You always stay.
-        const on = new Set(roster.map((p) => p.id));
-        const { assigneeId: a, followers: f, meId } = chosenRef.current;
-        if (meId) on.add(meId);
-        const dropAssignee = !!a && !on.has(a);
-        const keptFollowers = f.filter((id) => on.has(id));
-        if (dropAssignee) setAssigneeId(null);
-        if (keptFollowers.length !== f.length) setFollowers(keptFollowers);
-        if (dropAssignee || keptFollowers.length !== f.length) {
-          toast("Someone you picked can't be given work in this List, so they were taken off. Choose from this List's people.", { tone: "danger" });
-        }
+        if (listIdRef.current !== target) return;
+        const rows: Person[] | null = target ? (Array.isArray(d?.data) ? d.data : null) : Array.isArray(d?.people) ? d.people : null;
+        if (rows && rows.length > 0) addPeople(rows);
       })
       .catch(() => {});
-    return () => { active = false; };
-  }, [createTaskOpen, listId, toast]);
+  }, [addPeople]);
 
   // The chosen List's defaults. An answer that arrives after the person has
   // picked another List is thrown away, so a create is never shaped by the
@@ -469,7 +568,7 @@ export function CreateTaskModal() {
     : null;
   const defaultPriorityLabel = !touched.has("priority") && listDefaults?.priority ? PRIORITY_LOOKUP[listDefaults.priority]?.label ?? null : null;
   const defaultAssignee = !touched.has("ownerId") && listDefaults?.assigneeIds?.length
-    ? (people.find((p) => p.id === listDefaults.assigneeIds![0]) ?? null)
+    ? (known.get(listDefaults.assigneeIds[0]) ?? null)
     : null;
   const defaultTagCount = !touched.has("tagIds") && listDefaults?.tagIds?.length ? listDefaults.tagIds.length : 0;
   const defaultTypeLabel = !touched.has("itemTypeId") && listDefaults?.itemTypeId
@@ -904,6 +1003,19 @@ export function CreateTaskModal() {
     setNotice(null);
     if (!selectedList) { setOpenMenu("list"); return null; }
     if (!taskName.trim()) { setError("Add a name"); return null; }
+    // The people picked are checked against THIS List's roster first: a task
+    // is never created with someone the modal could not check.
+    const picked = [...(assigneeId ? [assigneeId] : []), ...followers].filter((id) => id !== me?.id);
+    const checked = roster?.listId === selectedList.id ? roster.state : "loading";
+    if (picked.length > 0 && checked !== "ok") {
+      if (checked === "failed") {
+        setError("Couldn't check this List's people. Try again.");
+        retryRoster();
+      } else {
+        setError("Still checking this List's people. Try again in a moment.");
+      }
+      return null;
+    }
     setSubmitting(true);
     try {
       // The List's default values fill what the person did not set: an
@@ -980,7 +1092,7 @@ export function CreateTaskModal() {
       setSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist, kraId, kpiId, listSettings, touched]);
+  }, [selectedList, taskName, selectedStatus, assigneeId, startAt, dueAt, subtasks, itemTypeId, description, priority, tags, followers, timeEstimate, checklist, kraId, kpiId, listSettings, touched, roster, me, retryRoster]);
 
   type Variant = "default" | "open" | "another" | "duplicate";
   const handleCreate = useCallback(async (variant: Variant) => {
@@ -1276,7 +1388,7 @@ export function CreateTaskModal() {
                     : "Assignee"}
               </Chip>
               {openMenu === "assignee" && (
-                <PeoplePicker people={people} me={me} selected={assigneeId ? [assigneeId] : []} onToggle={(id) => { setAssigneeId((cur) => (cur === id ? null : id)); touch("ownerId"); setOpenMenu(null); }} />
+                <PeoplePicker people={people} me={me} selected={assigneeId ? [assigneeId] : []} onToggle={(id) => { setAssigneeId((cur) => (cur === id ? null : id)); touch("ownerId"); setOpenMenu(null); }} onSearch={searchPeople} failed={rosterFailed} onRetry={retryRoster} />
               )}
             </div>
 
@@ -1632,7 +1744,7 @@ export function CreateTaskModal() {
                 {followers.length > 0 && <span className="text-sm font-medium">{followers.length}</span>}
               </button>
               {openMenu === "followers" && (
-                <PeoplePicker people={people} me={me} selected={followers} onToggle={(id) => setFollowers((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))} position="top" />
+                <PeoplePicker people={people} me={me} selected={followers} onToggle={(id) => setFollowers((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))} position="top" onSearch={searchPeople} failed={rosterFailed} onRetry={retryRoster} />
               )}
             </div>
           </div>

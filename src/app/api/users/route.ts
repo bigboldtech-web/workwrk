@@ -85,13 +85,28 @@ export async function GET(req: NextRequest) {
     const teamIds = await getTeamUserIds(orgId, callerId);
     where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
   }
-  if (pagination.search) {
-    where.OR = [
-      { firstName: { contains: pagination.search, mode: "insensitive" } },
-      { lastName: { contains: pagination.search, mode: "insensitive" } },
-      { email: { contains: pagination.search, mode: "insensitive" } },
-    ];
+  // Matched WORD BY WORD, as /api/people/pick does: a person types the name
+  // they know, "Zoe Young", and it lives in two columns, so one `contains`
+  // over the whole text matched no single column and a search found no one.
+  // Each word must match the first name, the last name or the email; the
+  // words are capped so a pasted paragraph cannot fan out.
+  const words = (pagination.search ?? "").split(/\s+/).filter(Boolean).slice(0, 6);
+  if (words.length > 0) {
+    const andClause = (where.AND as Prisma.UserWhereInput[] | undefined) ?? [];
+    for (const word of words) {
+      andClause.push({
+        OR: [
+          { firstName: { contains: word, mode: "insensitive" } },
+          { lastName: { contains: word, mode: "insensitive" } },
+          { email: { contains: word, mode: "insensitive" } },
+        ],
+      });
+    }
+    where.AND = andClause;
   }
+  // ?employed=1: everyone who can still be given work (on leave, on probation
+  // and serving notice included), never someone deactivated.
+  if (searchParams.get("employed") === "1" && !status) where.status = { not: "INACTIVE" };
 
   // Tag filter: ANDed with scope via `AND` so it composes with the existing
   // `where.id` (team scope) instead of clobbering it. An empty resolved set

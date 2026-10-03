@@ -173,6 +173,8 @@ export function NewSpaceDialog({
             users={users}
             loadingUsers={ownerPicker.loading && users.length === 0}
             onSearchUsers={ownerPicker.setQuery}
+            usersFailed={ownerPicker.failed}
+            onRetryUsers={ownerPicker.retry}
             ownerName={state.workflow.ownerId ? ownerPicker.nameOf(state.workflow.ownerId, "Selected") : null}
             onChange={(w) => set("workflow", w)}
             onSubScreen={(s) => set("subScreen", s)}

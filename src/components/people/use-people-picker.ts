@@ -42,8 +42,9 @@ function listUrl(source: "pick" | "team", o: PickQuery & { q?: string; limit: nu
   // "team": who the caller may give this work to, as /api/users answers it
   // (the caller and their report tree, everyone for an org-wide level), for
   // an action whose own rule is the report tree (a process run is read by its
-  // assignee, their manager chain and org-wide roles).
-  const sp = new URLSearchParams({ scope: "all", limit: String(o.limit) });
+  // assignee, their manager chain and org-wide roles). Active people only, as
+  // reach "active" lists them: never a colleague who was deactivated.
+  const sp = new URLSearchParams({ scope: "all", status: "ACTIVE", limit: String(o.limit) });
   if (o.q?.trim()) sp.set("search", o.q.trim());
   return `/api/users?${sp}`;
 }
@@ -110,18 +111,22 @@ export function usePeoplePicker(opts: PickQuery & {
 
   // The people the caller shows, by id, in chunks of 50. An id is done once a
   // lookup answered (found or not); a failed lookup is tried again, up to
-  // three times, a little later each time. Labels only: a person found here
-  // is never offered by a picker whose reach would not list them.
+  // three times, a little later each time (never sooner: a search answering
+  // in between re-runs this, and must not spend the tries while the person
+  // types). Labels only: a person found here is never offered by a picker
+  // whose reach would not list them.
   const namedKey = [...new Set(opts.named ?? [])].filter(Boolean).sort().join(",");
   const inFlight = useRef(new Set<string>());
   const tries = useRef(new Map<string, number>());
+  const notBefore = useRef(new Map<string, number>());
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const [loadingIds, setLoadingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     // An id already read (from the list or a search) needs no lookup.
-    const missing = namedKey.split(",").filter((x) => x && !read.has(x) && !answered.has(x) && !inFlight.current.has(x) && (tries.current.get(x) ?? 0) < 3);
+    const now = Date.now();
+    const missing = namedKey.split(",").filter((x) => x && !read.has(x) && !answered.has(x) && !inFlight.current.has(x) && (tries.current.get(x) ?? 0) < 3 && (notBefore.current.get(x) ?? 0) <= now);
     if (missing.length === 0) return;
     const t = setTimeout(() => {
       for (const x of missing) inFlight.current.add(x);
@@ -140,6 +145,7 @@ export function usePeoplePicker(opts: PickQuery & {
               tries.current.set(x, n);
               wait = Math.max(wait, n * 2000);
             }
+            for (const x of chunk) notBefore.current.set(x, Date.now() + wait);
             setTimeout(() => setRetry((v) => v + 1), wait);
           }
           setLoadingIds((s) => new Set([...s].filter((x) => !chunk.includes(x))));
@@ -168,6 +174,7 @@ export function usePeoplePicker(opts: PickQuery & {
   const retryAll = useCallback(() => {
     setFailed(false);
     tries.current.clear();
+    notBefore.current.clear();
     setAttempt((v) => v + 1);
     setRetry((v) => v + 1);
   }, []);

@@ -41,6 +41,7 @@ import { DueDateDialog } from "@/components/process/due-date-dialog";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { StartRunDialog } from "@/components/sops/start-run-dialog";
 import { RunDrawer } from "@/components/process/run-drawer";
 import { apiFetch } from "@/lib/api-fetch";
@@ -359,7 +360,7 @@ export default function ProcessRunsPage() {
       {reassignFor ? (
         /* Pinned under the row's "…" (or at the right-click point) so the
            picker stays attached to the row it changes. */
-        <Picker open onClose={() => setReassignFor(null)} ariaLabel="Reassign" searchPlaceholder="Find a person" alwaysSearch onSearchChange={reassignPicker.setQuery} loading={reassignPicker.loading && reassignPicker.people.length === 0} anchorPoint={reassignFor.point ?? { top: 80, left: 80 }} selected={reassignFor.row.assigneeId ?? "__anyone__"} onSelect={(v) => void reassign(reassignFor.row, v === "__anyone__" ? null : v)} sections={[{ options: peopleOptions }]} width={300} />
+        <Picker open onClose={() => setReassignFor(null)} ariaLabel="Reassign" searchPlaceholder="Find a person" alwaysSearch onSearchChange={reassignPicker.setQuery} loading={reassignPicker.loading && reassignPicker.people.length === 0} emptyLabel={peopleEmptyLabel(reassignPicker)} footer={peopleFailedFooter(reassignPicker)} anchorPoint={reassignFor.point ?? { top: 80, left: 80 }} selected={reassignFor.row.assigneeId ?? "__anyone__"} onSelect={(v) => void reassign(reassignFor.row, v === "__anyone__" ? null : v)} sections={[{ options: peopleOptions }]} width={300} />
       ) : null}
       {dueFor ? (
         <DueDateDialog open value={dueFor.dueDate} description={`${dueFor.title}${dueFor.assignee ? ` · ${personName(dueFor.assignee)}` : ""}`} onClose={() => setDueFor(null)} onSave={(next) => saveDue(dueFor, next)} />

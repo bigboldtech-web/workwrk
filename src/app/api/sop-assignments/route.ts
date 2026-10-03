@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManage
 import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
+import { employedAmong } from "@/lib/people/employed.server";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -110,8 +111,10 @@ export async function POST(req: NextRequest) {
     stepsTotal = sections.reduce((sum, s) => sum + (s?.steps?.length || 0), 0);
   }
 
-  // Resolve user IDs — either from userIds array or from departmentId
-  let resolvedUserIds: string[] = userIds || [];
+  // Resolve user IDs — either from userIds array or from departmentId. The
+  // people named are kept only while they can still be given work here:
+  // never someone deactivated or removed, never an id from another workspace.
+  let resolvedUserIds: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
 
   if (departmentId) {
     const deptUsers = await prisma.user.findMany({
@@ -134,6 +137,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (resolvedUserIds.length === 0) {
+    if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {
+      return jsonError("No one you chose can be given work here: they were deactivated or are not in this workspace.");
+    }
     return jsonError("No users specified. Provide userIds[], departmentId or all:true");
   }
 

@@ -17,6 +17,7 @@ import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-p
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 
 type Audience = "everyone" | "department" | "people";
 type Dept = { id: string; name: string; _count?: { members?: number } };
@@ -61,6 +62,9 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
   // everyone): a first page, grown by a search on the server as the person
   // types, so a large workspace is never cut at one page.
   const [peopleQuery, setPeopleQuery] = useState("");
+  // A failed read says so with Try again: an empty list never stands in for "no one".
+  const [peopleFailed, setPeopleFailed] = useState(false);
+  const [peopleAttempt, setPeopleAttempt] = useState(0);
   const mergePeople = (got: PersonRef[]) => setPeople((prev) => {
     const byId = new Map(prev.map((p) => [p.id, p]));
     for (const p of got) byId.set(p.id, p);
@@ -70,26 +74,29 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     if (!open) return;
     let live = true;
     void (async () => {
+      // ?employed=1: never someone deactivated (the server keeps to the same rule).
       const [p, d] = await Promise.all([
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=100", { cache: "no-store" }),
+        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&employed=1&limit=100", { cache: "no-store" }),
         apiFetch<Dept[] | { data?: Dept[] }>("/api/departments", { cache: "no-store" }),
       ]);
       if (!live) return;
-      setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []);
+      if (p.ok) mergePeople(Array.isArray(p.data) ? p.data : p.data?.data ?? []);
+      setPeopleFailed(!p.ok);
       setDepts(d.ok ? (Array.isArray(d.data) ? d.data : d.data?.data ?? []) : []);
     })();
     return () => { live = false; };
-  }, [open]);
+  }, [open, peopleAttempt]);
   useEffect(() => {
     const q = peopleQuery.trim();
     if (!open || !q) return;
     const t = setTimeout(() => {
-      void apiFetch<{ data?: PersonRef[] } | PersonRef[]>(`/api/users?scope=all&limit=50&search=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+      void apiFetch<{ data?: PersonRef[] } | PersonRef[]>(`/api/users?scope=all&employed=1&limit=50&search=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
         if (r.ok) mergePeople(Array.isArray(r.data) ? r.data : r.data?.data ?? []);
+        setPeopleFailed(!r.ok);
       });
     }, 200);
     return () => clearTimeout(t);
-  }, [open, peopleQuery]);
+  }, [open, peopleQuery, peopleAttempt]);
   const matchesQuery = (p: PersonRef) => {
     const words = peopleQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const fields = [p.firstName ?? "", p.lastName ?? "", p.email ?? ""].map((f) => f.toLowerCase());
@@ -176,6 +183,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
                   ))}
                 </button>
                 <Picker open={pickOpen} onClose={() => setPickOpen(false)} ariaLabel="People" searchPlaceholder="Find a person" multi alwaysSearch onSearchChange={setPeopleQuery} selected={selected}
+                  emptyLabel={peopleEmptyLabel({ failed: peopleFailed, query: peopleQuery })} footer={peopleFailedFooter({ failed: peopleFailed, retry: () => setPeopleAttempt((v) => v + 1) })}
                   onSelect={(v) => setSelected((s) => (s.includes(v) ? s.filter((id) => id !== v) : [...s, v]))} sections={[{ options }]} width={320} />
               </span>
             </div>

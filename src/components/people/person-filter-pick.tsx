@@ -8,10 +8,12 @@
 // someone who left, to see what they owned; everyone else finds everyone
 // who can sign in.
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { Picker, type PickerOption } from "@/components/ui/picker";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
 import { pickPersonName } from "@/lib/people-pick";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 
 export function PersonFilterPick({
   value,
@@ -29,6 +31,20 @@ export function PersonFilterPick({
   placeholder?: string;
 }) {
   const picker = usePeoplePicker({ enabled: open, reach: "all", named: value ? [value] : [] });
+  // The filter panel scrolls, so a popover hung under the button was cut off
+  // at the panel's edge (names and Try again clipped): the picker is pinned to
+  // the button's place on screen instead, measured before paint and again
+  // whenever it redraws (a banner that appears above moves the button).
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [point, setPoint] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = triggerRef.current;
+    if (!open || !el) return;
+    const r = el.getBoundingClientRect();
+    const top = Math.round(r.bottom + 4);
+    const left = Math.round(r.left);
+    if (top !== point?.top || left !== point?.left) setPoint({ top, left });
+  });
   // (The lookup by id names a deactivated owner too, for those who may see them.)
   const current = value ? picker.person(value) : undefined;
   const options: PickerOption[] = picker.people.map((p) => ({
@@ -39,7 +55,7 @@ export function PersonFilterPick({
   }));
   return (
     <span className="relative block">
-      <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-8 max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
+      <button ref={triggerRef} type="button" onClick={() => setOpen(!open)} className="inline-flex h-8 max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
         {current ? (
           <>
             <PersonAvatar person={current} size={20} />
@@ -54,15 +70,14 @@ export function PersonFilterPick({
       <Picker
         open={open}
         onClose={() => setOpen(false)}
+        anchorPoint={open ? point : null}
         ariaLabel={ariaLabel}
         searchPlaceholder="Find a person"
         alwaysSearch
         onSearchChange={picker.setQuery}
         loading={picker.loading && options.length === 0}
-        emptyLabel={picker.failed ? "Couldn't load people" : picker.query.trim() ? "No one matches" : "No one to show yet"}
-        footer={picker.failed ? (
-          <button type="button" onClick={picker.retry} className="w-full px-2 py-1.5 text-start text-sm font-medium text-brand-deep hover:underline">Try again</button>
-        ) : undefined}
+        emptyLabel={peopleEmptyLabel(picker)}
+        footer={peopleFailedFooter(picker)}
         selected={value}
         onSelect={(v) => {
           onChange(v);

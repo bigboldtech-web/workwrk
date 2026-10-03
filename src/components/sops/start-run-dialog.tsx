@@ -15,6 +15,7 @@ import { DateField } from "@/components/ui/date-field";
 import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
@@ -140,6 +141,7 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
                 {assignee ? <><PersonAvatar person={assignee} size={20} />{personName(assignee)}</> : assigneeId ? <span className="text-ink-2">{picker.nameOf(assigneeId)}</span> : <span className="text-ink-2">Anyone with the link</span>}
               </button>
               <Picker open={peopleOpen} onClose={() => setPeopleOpen(false)} ariaLabel="Assign to" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && picker.people.length === 0} selected={assigneeId ?? "__anyone__"}
+                emptyLabel={peopleEmptyLabel(picker)} footer={peopleFailedFooter(picker)}
                 onSelect={(v) => { setAssigneeId(v === "__anyone__" ? null : v); setPeopleOpen(false); }} sections={[{ options: peopleOptions }]} width={320} />
             </span>
           </label>

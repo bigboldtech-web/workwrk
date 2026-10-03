@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { policyAssignedTemplate } from "@/lib/email-templates";
 import { inScope, personScope } from "@/lib/process-scope";
 import { parseProcessSettings, defaultAckDueDate } from "@/lib/process-settings";
+import { employedAmong } from "@/lib/people/employed.server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -70,7 +71,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   ]);
   if (!policy) return jsonError("Policy not found", 404);
 
-  let resolved: string[] = Array.isArray(userIds) ? userIds.filter((x): x is string => typeof x === "string") : [];
+  // The people named are kept only while they can still be given work here:
+  // never someone deactivated or removed, never an id from another workspace.
+  let resolved: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
   if (typeof departmentId === "string" && departmentId) {
     // Everyone in it who can sign in (on leave or on probation included), never someone removed.
     const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
@@ -80,7 +83,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
     resolved = [...new Set([...resolved, ...allUsers.map((u) => u.id)])];
   }
-  if (resolved.length === 0) return jsonError("No recipients. Provide userIds[], departmentId, or all:true");
+  if (resolved.length === 0) {
+    if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {
+      return jsonError("No one you chose can be given work here: they were deactivated or are not in this workspace.");
+    }
+    return jsonError("No recipients. Provide userIds[], departmentId, or all:true");
+  }
 
   const scope = await personScope(session);
   if (!scope.orgWide) {

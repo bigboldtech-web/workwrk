@@ -44,6 +44,7 @@ import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
 import { readNotetakerLastList } from "@/lib/docs-prefs";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { matchPeople, pickUrl } from "@/lib/people-pick";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { cn } from "@/lib/utils";
@@ -626,6 +627,9 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
                     searchPlaceholder="Find a person"
                     alwaysSearch
                     onSearchChange={picker.setQuery}
+                    loading={picker.loading && peopleOptions.length === 0}
+                    emptyLabel={peopleEmptyLabel(picker)}
+                    footer={peopleFailedFooter(picker)}
                     selected={a.assigneeId ?? null}
                     onSelect={(v) => { patchAction(a.key, { assigneeId: v }); setOwnerFor(null); }}
                     sections={[{ options: peopleOptions }]}
@@ -670,6 +674,9 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
                   searchPlaceholder="Find a person"
                   alwaysSearch
                   onSearchChange={picker.setQuery}
+                  loading={picker.loading && peopleOptions.length === 0}
+                  emptyLabel={peopleEmptyLabel(picker)}
+                  footer={peopleFailedFooter(picker)}
                   selected={a.userId ?? null}
                   onSelect={(v) => { const p = byId.get(v); patch({ attendees: result.attendees.map((x) => (x.key === a.key ? { ...x, userId: v, name: p ? personName(p) : x.name, email: p?.email ?? x.email } : x)) }); setAttendeeFor(null); }}
                   sections={[{ options: peopleOptions }]}
