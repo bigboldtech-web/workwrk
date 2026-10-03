@@ -292,7 +292,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       case "recording":
         return { ...original, type: original.type === "RECORDED" ? "RECORDED" : "recorded", steps: recSteps };
       default:
-        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow, steps) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps) };
+        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow, steps) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps, flow) };
     }
   }, [sop?.content, kind, bnDoc, blocks, sections, recSteps, layout, steps, flow]);
 
@@ -913,7 +913,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
           <div className="flex flex-col gap-3">
             {editing && kind === "steps" ? (
               <div className="flex items-center justify-end">
-                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow, steps)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps, flow)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow, steps)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
                   <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {layout === "list" ? "Show as flow" : "Show as list"}
                 </button>
               </div>
