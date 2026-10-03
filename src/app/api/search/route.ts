@@ -8,6 +8,8 @@ import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { addressHref } from "@/lib/nav/object-href";
 import { getUserTagIds } from "@/lib/user-tags";
 import { announcementInFeed } from "@/lib/announcement-view";
+import { sopVisibilityWhere } from "@/lib/sop-access";
+import { goalVisibilityOr } from "@/lib/goal-audience";
 import {
   parseAnnouncementAudience,
   viewerInAnnouncementAudience,
@@ -71,6 +73,13 @@ export async function GET(req: NextRequest) {
   // searched whether the module is on or off. A Guest finds only the forms
   // and tables they made or were given: the resolver's answer below.
   const tablesOn = await isModuleActive(orgId, "workwrk-tables").catch(() => false);
+
+  // SOPs and goals carry their own read rules, the SOP list's
+  // (sopVisibilityWhere) and the Goals list's (goalVisibilityOr), so a title
+  // the viewer could not open on its own page is never named here. Before,
+  // search matched every SOP (drafts and restricted folders included) and
+  // every goal in the workspace.
+  const [sopVisible, goalVisible] = await Promise.all([sopVisibilityWhere(session), goalVisibilityOr(session)]);
 
   const [
     users,
@@ -145,7 +154,7 @@ export async function GET(req: NextRequest) {
       take: take * 3,
     }),
     prisma.sOP.findMany({
-      where: { organizationId: orgId, title: ci },
+      where: { AND: [{ organizationId: orgId, title: ci }, sopVisible] },
       select: { id: true, title: true, status: true, category: true },
       orderBy: { updatedAt: "desc" },
       take,
@@ -161,7 +170,7 @@ export async function GET(req: NextRequest) {
       take: 3,
     }),
     prisma.oKR.findMany({
-      where: { organizationId: orgId, OR: [{ title: ci }, { description: ci }] },
+      where: { organizationId: orgId, OR: [{ title: ci }, { description: ci }], ...(goalVisible ? { AND: [{ OR: goalVisible }] } : {}) },
       select: { id: true, title: true, level: true, status: true, quarter: true },
       orderBy: { updatedAt: "desc" },
       take,
