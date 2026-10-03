@@ -28,3 +28,12 @@ describe("agreementReadWhere", () => {
     expect(await agreementReadWhere({ user: {} })).toEqual({ id: { in: [] } });
   });
 });
+
+describe("legacyContractWhere", () => {
+  it("the manager tier reaches every contract, anyone else the ones they own, nobody without a user", async () => {
+    const { legacyContractWhere } = await import("./agreement-read");
+    expect(legacyContractWhere(legacyTestSession("u-m", "MANAGER"))).toEqual({});
+    expect(legacyContractWhere(legacyTestSession("u-1", "EMPLOYEE"))).toEqual({ ownerId: "u-1" });
+    expect(legacyContractWhere(null)).toEqual({ id: { in: [] } });
+  });
+});

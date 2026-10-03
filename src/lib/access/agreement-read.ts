@@ -22,3 +22,15 @@ export async function agreementReadWhere(session: ReaderSession): Promise<Prisma
     parties: { some: { OR: [{ userId }, ...(email ? [{ email: { equals: email, mode: "insensitive" as const } }] : [])] } },
   };
 }
+
+/**
+ * The older Contract table (the rows Ask AI's contract tools track, with no
+ * page of their own since the Legal surface left the rail) follows the same
+ * tiers: the manager tier reads and changes every one; anyone else only the
+ * ones they own. A Contract has no parties, so owning it is the one door.
+ */
+export function legacyContractWhere(session: ReaderSession): Prisma.ContractWhereInput {
+  const userId = session?.user?.id;
+  if (!userId) return { id: { in: [] } };
+  return legacyIsManagerLevel(session?.user?.accessLevel) ? {} : { ownerId: userId };
+}

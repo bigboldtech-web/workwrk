@@ -21,6 +21,7 @@ import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
+import { legacyContractWhere } from "@/lib/access/agreement-read";
 import type { ToolName } from "./tool-names";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
 import { sopVisibilityWhere } from "@/lib/sop-access";
@@ -349,13 +350,19 @@ const searchContracts: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
+    const limit = clampLimit(input.limit, 20, 50);
     const expWindow = input.expiringWithinDays as number | undefined;
     const expiresBefore = expWindow != null ? new Date(Date.now() + expWindow * 86400000) : null;
+    // The contract tiers (legacyContractWhere): the manager tier reads every
+    // contract, anyone else only the ones they own. Read fresh; a person no
+    // longer in the workspace reads nothing.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, contracts: [] };
 
     const contracts = await prisma.contract.findMany({
       where: {
         organizationId: ctx.orgId,
+        AND: [legacyContractWhere(session)],
         ...(input.counterpartyContains ? { counterparty: { contains: input.counterpartyContains as string, mode: "insensitive" } } : {}),
         ...(input.status ? { status: input.status as "DRAFT" | "IN_REVIEW" | "IN_NEGOTIATION" | "AWAITING_SIGNATURE" | "SIGNED" | "ACTIVE" | "EXPIRED" | "RENEWED" | "TERMINATED" | "CANCELLED" } : {}),
         ...(expiresBefore ? { expiresAt: { lte: expiresBefore, gte: new Date() } } : {}),
@@ -627,9 +634,14 @@ const updateContract: ToolDefinition = {
     required: ["contractId"],
   },
   handler: async (ctx, input) => {
-    const existing = await prisma.contract.findFirst({
-      where: { id: input.contractId as string, organizationId: ctx.orgId },
-    });
+    // Only a contract the person may change (the manager tier, or its owner);
+    // any other reads as not found, so a guessed id confirms nothing.
+    const session = await callerSession(ctx);
+    const existing = session
+      ? await prisma.contract.findFirst({
+          where: { id: input.contractId as string, organizationId: ctx.orgId, AND: [legacyContractWhere(session)] },
+        })
+      : null;
     if (!existing) return { error: "Contract not found in this org" };
 
     const now = new Date();

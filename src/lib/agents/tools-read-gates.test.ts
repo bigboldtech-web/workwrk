@@ -12,12 +12,24 @@ import { legacyLevelOf, legacyLevelRow } from "@/lib/access/test-fixtures";
 let level: string | null;
 let meetingWhere: Record<string, unknown> | null;
 let sopWhere: Record<string, unknown> | null;
+let contractWhere: Record<string, unknown> | null;
+let contractUpdated: boolean;
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findFirst: async () => (level ? legacyLevelRow(level) : null) },
     meeting: { findMany: async (args: { where: Record<string, unknown> }) => { meetingWhere = args.where; return []; } },
     sOP: { findMany: async (args: { where: Record<string, unknown> }) => { sopWhere = args.where; return []; } },
+    contract: {
+      findMany: async (args: { where: Record<string, unknown> }) => { contractWhere = args.where; return []; },
+      // the mocked table holds one contract, c-1, owned by u-other
+      findFirst: async (args: { where: { id: string; AND: Array<{ ownerId?: string }> } }) => {
+        contractWhere = args.where as unknown as Record<string, unknown>;
+        const owner = args.where.AND[0]?.ownerId;
+        return args.where.id === "c-1" && (owner === undefined || owner === "u-other") ? { id: "c-1", signedAt: null } : null;
+      },
+      update: async () => { contractUpdated = true; return { id: "c-1" }; },
+    },
   },
 }));
 vi.mock("@/lib/sop-access", () => ({
@@ -35,6 +47,8 @@ beforeEach(() => {
   level = "EMPLOYEE";
   meetingWhere = null;
   sopWhere = null;
+  contractWhere = null;
+  contractUpdated = false;
 });
 
 describe("search_meetings", () => {
@@ -68,5 +82,30 @@ describe("search_sops", () => {
     level = null;
     expect(await TOOLS.search_sops.handler(ctx, {})).toEqual({ count: 0, sops: [] });
     expect(sopWhere).toBeNull();
+  });
+});
+
+describe("search_contracts and update_contract", () => {
+  it("an employee reads only the contracts they own; the manager tier reads them all", async () => {
+    await TOOLS.search_contracts.handler(ctx, {});
+    expect(contractWhere).toMatchObject({ organizationId: "org-1", AND: [{ ownerId: "u-1" }] });
+    level = "MANAGER";
+    await TOOLS.search_contracts.handler(ctx, {});
+    expect(contractWhere).toMatchObject({ organizationId: "org-1", AND: [{}] });
+  });
+
+  it("an employee cannot change a contract someone else owns, and it reads as not found", async () => {
+    expect(await TOOLS.update_contract.handler(ctx, { contractId: "c-1", status: "SIGNED" })).toEqual({ error: "Contract not found in this org" });
+    expect(contractUpdated).toBe(false);
+    level = "MANAGER";
+    expect(await TOOLS.update_contract.handler(ctx, { contractId: "c-1", status: "SIGNED" })).toMatchObject({ ok: true });
+    expect(contractUpdated).toBe(true);
+  });
+
+  it("a person no longer in the workspace reads and changes nothing", async () => {
+    level = null;
+    expect(await TOOLS.search_contracts.handler(ctx, {})).toEqual({ count: 0, contracts: [] });
+    expect(contractWhere).toBeNull();
+    expect(await TOOLS.update_contract.handler(ctx, { contractId: "c-1" })).toEqual({ error: "Contract not found in this org" });
   });
 });
