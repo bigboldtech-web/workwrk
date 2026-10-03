@@ -15,19 +15,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { readSignupMarker, retrySignupTemplate, spaceInTrash, type SignupTemplateMarker } from "@/lib/templates/apply-tuesday";
+import { readSignupMarker, retrySignupTemplate, trashedPieceOf, type SignupTemplateMarker, type TrashedPieceKind } from "@/lib/templates/apply-tuesday";
 import { restoreTrashRow } from "@/lib/trash-server";
 import { TUESDAY_TEMPLATE_KEY, TUESDAY_TEMPLATE_ROW } from "@/lib/templates/tuesday-template";
 
 const noStore = { "Cache-Control": "no-store" };
 
-/** The unfinished template's Space when it is in Trash (the wizard then asks: restore it, or start fresh). */
-async function trashedSpaceOf(orgId: string, marker: SignupTemplateMarker | null): Promise<{ rowId: string; name: string } | null> {
-  if (!marker || marker.status === "applied" || !marker.spaceId) return null;
-  return spaceInTrash(orgId, marker.spaceId);
-}
-
-function view(marker: SignupTemplateMarker | null, trashed: { name: string } | null = null) {
+function view(marker: SignupTemplateMarker | null, trashed: { name: string; kind: TrashedPieceKind } | null = null) {
   if (!marker || marker.key !== TUESDAY_TEMPLATE_KEY) return null;
   const base = { key: marker.key, name: TUESDAY_TEMPLATE_ROW.name, status: marker.status };
   if (marker.status === "applied") {
@@ -37,7 +31,7 @@ function view(marker: SignupTemplateMarker | null, trashed: { name: string } | n
       skipped: Array.isArray(marker.skipped) ? marker.skipped.filter((x): x is string => typeof x === "string") : [],
     };
   }
-  const inTrash = trashed ? { name: trashed.name } : null;
+  const inTrash = trashed ? { name: trashed.name, kind: trashed.kind } : null;
   if (marker.status === "applying") {
     const stale = Date.now() - Date.parse(marker.startedAt) > 10 * 60 * 1000;
     return { ...base, retryable: stale, spaceInTrash: stale ? inTrash : null };
@@ -55,7 +49,7 @@ async function gate() {
 async function currentView(orgId: string) {
   const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
   const marker = readSignupMarker(org?.settings);
-  return view(marker, await trashedSpaceOf(orgId, marker));
+  return view(marker, await trashedPieceOf(orgId, marker));
 }
 
 export async function GET() {
@@ -71,10 +65,11 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { choice?: unknown };
   const choice = body.choice === "restore" || body.choice === "fresh" ? body.choice : null;
   if (choice === "restore") {
-    // Bring the Space back out of Trash (the Trash page's own restore and
-    // its checks), then resume in it.
+    // Bring the piece back out of Trash (the Trash page's own restore and
+    // its checks), then resume in it. A refusal says why, with both choices
+    // still offered.
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
-    const trashed = await trashedSpaceOf(orgId, readSignupMarker(org?.settings));
+    const trashed = await trashedPieceOf(orgId, readSignupMarker(org?.settings));
     if (trashed) {
       const res = await restoreTrashRow(g.viewer, trashed.rowId);
       if (!res.ok) return NextResponse.json({ template: await currentView(orgId), error: res.message }, { status: res.status, headers: noStore });
@@ -82,5 +77,5 @@ export async function POST(req: Request) {
   }
   const marker = await retrySignupTemplate({ organizationId: orgId, userId: g.viewer.userId, fresh: choice === "fresh" });
   if (!marker) return NextResponse.json({ template: await currentView(orgId) }, { status: 409, headers: noStore });
-  return NextResponse.json({ template: view(marker, await trashedSpaceOf(orgId, marker)) }, { status: marker.status === "applied" ? 200 : 500, headers: noStore });
+  return NextResponse.json({ template: view(marker, await trashedPieceOf(orgId, marker)) }, { status: marker.status === "applied" ? 200 : 500, headers: noStore });
 }

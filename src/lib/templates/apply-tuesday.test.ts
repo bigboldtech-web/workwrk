@@ -47,6 +47,12 @@ function table(name: string) {
       return row;
     },
     updateMany: async () => ({ count: 0 }),
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = db[name].find((r) => r.id === where.id);
+      if (!row) throw new Error(`no ${name} ${where.id}`);
+      Object.assign(row, data);
+      return row;
+    },
   };
 }
 
@@ -215,9 +221,12 @@ describe("applySignupTemplate", () => {
       await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
       failOn = null;
       const space = db.space[0];
+      // Deleted to a snapshot: the Space row and, by cascade, its Lists go.
+      const boards = db.board.filter((b) => b.spaceId === space.id);
       db.space = [];
+      db.board = db.board.filter((b) => b.spaceId !== space.id);
       db.trashItem = [{ id: "trash_1", organizationId: ORG, entityType: "space", entityId: space.id, label: "Operations" }];
-      return space;
+      return Object.assign(space, { boards });
     }
 
     it("a plain Try again builds no second Space and leaves the choice to the person", async () => {
@@ -236,9 +245,48 @@ describe("applySignupTemplate", () => {
       expect(count("trashItem")).toBe(1);
     });
 
+    it("Start fresh points the reused SOP's task step at the new List, never the one in Trash", async () => {
+      const old = await failThenTrash();
+      const oldBoardId = (old as unknown as { boards: Array<{ id: string }> }).boards[0].id;
+      expect((db.sOP[0].content as { spawn: { boardId: string } }).spawn.boardId).toBe(oldBoardId);
+      await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(count("sOP")).toBe(1);
+      expect((db.sOP[0].content as { spawn: { boardId: string } }).spawn.boardId).toBe(db.board[0].id);
+      expect(db.board[0].id).not.toBe(oldBoardId);
+    });
+
+    it("a stale Start fresh, after the Space was restored elsewhere, finishes in it rather than doubling it", async () => {
+      const old = await failThenTrash();
+      db.space = [old];
+      db.board = [...(old as unknown as { boards: Row[] }).boards];
+      db.trashItem = [];
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(done?.status).toBe("applied");
+      expect(db.space.map((x) => x.id)).toEqual([old.id]);
+      expect(count("board")).toBe(1);
+    });
+
+    it("a List in Trash stops with the choice; Make a new List leaves it there", async () => {
+      failOn = "doc";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      db.board[0].archivedAt = new Date();
+      const stopped = await retrySignupTemplate({ organizationId: ORG, userId: USER });
+      expect(stopped?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ status: "failed", error: "list_in_trash", trash: { kind: "list", name: "Onboarding" } });
+      expect(count("board")).toBe(1);
+      // A plain Try again now asks rather than running.
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+      const fresh = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(fresh?.status).toBe("applied");
+      expect(count("space")).toBe(1);
+      expect(count("board")).toBe(2);
+    });
+
     it("once restored, Try again finishes in that same Space", async () => {
       const old = await failThenTrash();
       db.space = [old];
+      db.board = [...(old as unknown as { boards: Row[] }).boards];
       db.trashItem = [];
       const done = await retrySignupTemplate({ organizationId: ORG, userId: USER });
       expect(done?.status).toBe("applied");

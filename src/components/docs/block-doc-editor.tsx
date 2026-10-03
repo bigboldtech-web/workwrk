@@ -1213,14 +1213,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                   <MenuItem icon={ListTree} label="Show outline" selected={outlineOpen} onClick={() => { setOutlineOpen(!outlineOpen); }} />
                   <MenuItem icon={BookOpen} label="Reading mode" selected={readingMode} onClick={() => { setMoreOpen(false); setReadingMode((r) => !r); }} />
                   <MenuSeparator />
-                  {myRole === "edit" ? (
+                  {/* The appearance rows write the doc, so they follow the one
+                      flag the body reads; Lock page stays for whoever can
+                      manage it, so a locked page can always be unlocked. */}
+                  {myRole === "edit" && (chromeEditable || canManage) ? (
                     <MenuSubmenu icon={TypeIcon} label="Page options" width={220}>
-                      <MenuItem label="System" leading={<span className="w-4 text-center text-xs font-medium text-ink-2">Aa</span>} selected={(meta.font ?? "default") === "default"} onClick={() => void saveMeta({ font: "default" })} />
-                      <MenuItem label="Serif" leading={<span className="w-4 text-center font-serif text-xs font-medium text-ink-2">Ss</span>} selected={meta.font === "serif"} onClick={() => void saveMeta({ font: "serif" })} />
-                      <MenuItem label="Mono" leading={<span className="w-4 text-center font-mono text-xs font-medium text-ink-2">00</span>} selected={meta.font === "mono"} onClick={() => void saveMeta({ font: "mono" })} />
-                      <MenuSeparator />
-                      <MenuItem icon={TypeIcon} label="Small text" selected={!!meta.smallText} onClick={() => void saveMeta({ smallText: !meta.smallText })} />
-                      <MenuItem icon={MoveHorizontal} label="Full width" selected={!!meta.fullWidth} onClick={() => void saveMeta({ fullWidth: !meta.fullWidth })} />
+                      {chromeEditable ? (
+                        <>
+                          <MenuItem label="System" leading={<span className="w-4 text-center text-xs font-medium text-ink-2">Aa</span>} selected={(meta.font ?? "default") === "default"} onClick={() => void saveMeta({ font: "default" })} />
+                          <MenuItem label="Serif" leading={<span className="w-4 text-center font-serif text-xs font-medium text-ink-2">Ss</span>} selected={meta.font === "serif"} onClick={() => void saveMeta({ font: "serif" })} />
+                          <MenuItem label="Mono" leading={<span className="w-4 text-center font-mono text-xs font-medium text-ink-2">00</span>} selected={meta.font === "mono"} onClick={() => void saveMeta({ font: "mono" })} />
+                          <MenuSeparator />
+                          <MenuItem icon={TypeIcon} label="Small text" selected={!!meta.smallText} onClick={() => void saveMeta({ smallText: !meta.smallText })} />
+                          <MenuItem icon={MoveHorizontal} label="Full width" selected={!!meta.fullWidth} onClick={() => void saveMeta({ fullWidth: !meta.fullWidth })} />
+                        </>
+                      ) : null}
                       {canManage ? <MenuItem icon={Lock} label="Lock page" selected={!!lock || !!meta.locked} onClick={() => { setMoreOpen(false); void toggleLock(); }} /> : null}
                     </MenuSubmenu>
                   ) : null}
@@ -1460,7 +1467,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <div className="bdoc__legacy-banner">
               <Sparkles />
               <span>This doc is in the old rich-text format.</span>
-              <button type="button" onClick={convertLegacy}>Convert to blocks</button>
+              {/* Converting rewrites the doc: never offered to someone whose save would be refused. */}
+              {chromeEditable ? <button type="button" onClick={convertLegacy}>Convert to blocks</button> : null}
             </div>
             <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
           </div>
@@ -1552,6 +1560,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <VersionHistoryPanel
           docId={docId}
           onClose={() => setPanel(null)}
+          restoreBlocked={chromeEditable ? null : meta.locked ? "Unlock the page to restore a version." : readingMode ? "Leave reading mode to restore a version." : "You can no longer change this doc."}
           onRestore={(restoredBlocks, restoredMeta, restoredTitle) => {
             // Restoring an old version: drop the live BN doc and let the
             // canvas re-convert from the legacy blocks. restoreNonce bump
@@ -2283,10 +2292,12 @@ type VersionMeta = {
   authorName?: string | null;
 };
 
-function VersionHistoryPanel({ docId, onClose, onRestore }: {
+function VersionHistoryPanel({ docId, onClose, onRestore, restoreBlocked = null }: {
   docId: string;
   onClose: () => void;
   onRestore: (blocks: Block[], meta: DocMeta, title: string) => void;
+  /** Why a version cannot be restored now (a locked page, reading mode), in place of the button. */
+  restoreBlocked?: string | null;
 }) {
   const { toast } = useOsToast();
   const fmt = useFormat();
@@ -2402,10 +2413,14 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
                 <BlockNoteCanvas initialBnDoc={null} legacyBlocks={preview.blocks} readonly onChange={() => {}} />
               </div>
               <footer className="bdoc__hist-foot">
-                <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
-                  {restoring ? <Dots variant="pending" /> : <RotateCcw />}
-                  Restore this version
-                </button>
+                {restoreBlocked ? (
+                  <span className="text-sm text-ink-2">{restoreBlocked}</span>
+                ) : (
+                  <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
+                    {restoring ? <Dots variant="pending" /> : <RotateCcw />}
+                    Restore this version
+                  </button>
+                )}
               </footer>
             </>
           ) : (
