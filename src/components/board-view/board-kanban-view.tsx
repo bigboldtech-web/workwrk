@@ -13,6 +13,7 @@ import { Check, CheckCircle2, Columns3, Network, Pencil, Plus, Repeat, X } from 
 import { PRIORITY_OPTIONS, buildSubtaskBody, isDoneStatus, splitBulkResults, bulkFailureMessage, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { ItemRole } from "@/lib/item-role";
 import { countSubtasksByParent, groupCardsByStatus } from "@/lib/kanban-columns";
+import { byPosition, indexAtPointer, planDrop } from "@/lib/work/reorder";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
@@ -155,7 +156,13 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // parent's subtask count is the signal; opening the parent shows the
   // children. A subtask whose parent is not on this board is re-rooted rather
   // than hidden. See lib/kanban-columns.ts for both rules and their tests.
-  const grouped = useMemo(() => groupCardsByStatus(items, statusOrder, statusOf), [items, statusOrder, statusOf]);
+  // Each column top to bottom in the List's one order (position, then id), so
+  // a card dragged up or down stays exactly where it was dropped.
+  const grouped = useMemo(() => {
+    const g = groupCardsByStatus(items, statusOrder, statusOf);
+    for (const [k, arr] of g) g.set(k, [...arr].sort(byPosition));
+    return g;
+  }, [items, statusOrder, statusOf]);
 
   // Visible card order (column order, top→bottom) — the axis shift-select
   // ranges over.
@@ -374,11 +381,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
 
   // Optimistic PATCH — merges a display patch locally, sends the API body, and
   // refetches on failure. Backs assignee / due / priority / tags / status edits.
-  const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => {
+  /** Saves one card's change; true when the server took it. */
+  const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>): Promise<boolean> => {
     const card = itemsRef.current.find((r) => r.id === id);
     // A card shown here through a link is edited only as far as the viewer's
     // role on the TASK goes.
-    if (!canEdit || (card && !linkedRowEditable(card, canEdit))) return;
+    if (!canEdit || (card && !linkedRowEditable(card, canEdit))) return false;
     const linked = card ? linkedRowKind(card, boardId) !== "home" : false;
     const optimisticFor = (r: BoardItemRow): BoardItemRow => {
       const next: BoardItemRow = { ...r, ...localPatch };
@@ -393,7 +401,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         // Every write from a card shown here through a link names this List.
         body: JSON.stringify({ ...apiBody, ...writeContext(card, boardId) }),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(accessMessage(d, "Couldn't save that change.")); await refetch(); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(accessMessage(d, "Couldn't save that change.")); await refetch(); return false; }
       const d = await res.json().catch(() => null);
       const fresh = d?.item as BoardItemRow | undefined;
       // A linked card takes the answer, which is the card as THIS List shows
@@ -406,7 +414,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         } else {
           await refetch();
         }
-        return;
+        return true;
       }
       // Recurring task completed → server rolled it forward (reset status +
       // advanced dates). Apply the returned row so the card visibly recurs.
@@ -414,29 +422,108 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...fresh } : r)));
         onItemPatched?.(id, fresh as Partial<BoardItemRow>);
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); }
+      return true;
+    } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); return false; }
   }, [canEdit, refetch, onItemPatched, boardId]);
 
-  // A drop into a column. A card shown here through a link writes the HOME
-  // status that column maps to (its status belongs to its home set); with no
-  // home set known, it cannot be dragged at all. A column its home has no
-  // status for is refused and SAID (homeStatusTarget): the old remap wrote
-  // the home's first Active status instead, so a drop on In Progress saved
-  // To Do, reopened a Done task and put the card back where it came from.
-  const moveTo = useCallback((id: string, newStatus: string) => {
+  // ── Dragging a card up or down, and across ────────────────────────────
+  // Where the pointer would drop the card: a column and a place among that
+  // column's OTHER cards (src/lib/work/reorder.ts indexFor).
+  const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
+  const showDrop = useCallback((status: string, index: number) => {
+    setDropAt((cur) => (cur && cur.status === status && cur.index === index ? cur : { status, index }));
+  }, []);
+
+  /** The List renumbered with the card between two neighbours that had no room between them; false when it could not be saved. */
+  const putOrder = useCallback(async (movedId: string, afterId: string, beforeId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/boards/${boardId}/order`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ movedId, afterId, beforeId }),
+      });
+      if (res.ok) return true;
+      const d = await res.json().catch(() => ({}));
+      setError(accessMessage(d, "Couldn't save the new order."));
+    } catch {
+      setError("Couldn't save the new order. Check your connection and try again.");
+    }
+    return false;
+  }, [boardId]);
+
+  /**
+   * A card dropped into `status` at `index`: its status when the column is
+   * another one, and its place among that column's cards, the midpoint of its
+   * new neighbours.
+   *
+   * A card shown here through a link writes the HOME status the column maps
+   * to (its status belongs to its home set); with no home set known it cannot
+   * be dragged at all. A column its home has no status for is refused and
+   * SAID (homeStatusTarget): an old remap wrote the home's first Active status
+   * instead, so a drop on In Progress saved To Do, reopened a Done task and
+   * put the card back where it came from. Its place is its LINK's place in
+   * this List; its home order is never touched from here.
+   *
+   * Neighbours with no room between them get the whole List renumbered
+   * first, in the order on screen (src/lib/work/reorder.ts).
+   */
+  const dropCard = useCallback(async (id: string, status: string, index: number) => {
     const card = itemsRef.current.find((r) => r.id === id);
-    if (card && linkedRowKind(card, boardId) !== "home") {
-      const target = homeStatusTarget(card, newStatus, statuses);
+    if (!card || !canEdit || !linkedRowEditable(card, canEdit)) return;
+    const kind = linkedRowKind(card, boardId);
+    const statusChange = statusOf(card) !== status;
+    let homeStatus: string | null = null;
+    if (statusChange && kind !== "home") {
+      const target = homeStatusTarget(card, status, statuses);
       if (!target.ok) {
-        const label = statuses.find((s) => s.value === newStatus)?.label ?? newStatus;
+        const label = statuses.find((s) => s.value === status)?.label ?? status;
         setError(linkedStatusRefusal(card, label, target.reason));
         return;
       }
-      void patchCard(id, { status: target.status }, { status: target.status });
+      homeStatus = target.status;
+    }
+    const now = groupCardsByStatus(itemsRef.current, statusOrder, statusOf);
+    const column = [...(now.get(status) ?? [])].sort(byPosition);
+    const plan = planDrop(column, id, index);
+    if (!statusChange && plan.kind === "none") return;
+    // The status first: one the server refuses leaves the card where it was,
+    // so nothing is half saved under a banner that says nothing was. A card
+    // homed here carries its new position in the same write.
+    if (kind === "home") {
+      const body: Record<string, unknown> = { ...(statusChange ? { status } : {}), ...(plan.kind === "position" ? { position: plan.position } : {}) };
+      if (Object.keys(body).length > 0 && !(await patchCard(id, body, body as Partial<BoardItemRow>))) return;
+    } else if (homeStatus && !(await patchCard(id, { status: homeStatus }, { status: homeStatus }))) {
       return;
     }
-    void patchCard(id, { status: newStatus }, { status: newStatus });
-  }, [patchCard, boardId, statuses]);
+    // Then the place, where the status write did not carry it.
+    if (plan.kind === "renumber") {
+      await putOrder(id, plan.afterId, plan.beforeId);
+      // Saved or not, every card's number may have moved: read the List back.
+      await refetch();
+      return;
+    }
+    if (kind !== "home" && plan.kind === "position") {
+      const p = plan.position;
+      const withPlace = (r: BoardItemRow): BoardItemRow => ({ ...r, position: p, ...(r.listLink ? { listLink: { ...r.listLink, position: p } } : {}) });
+      setItems((prev) => prev.map((r) => (r.id === id ? withPlace(r) : r)));
+      onItemPatched?.(id, withPlace(card));
+      try {
+        const res = await fetch(`/api/boards/${boardId}/links/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ position: p }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setError(accessMessage(d, "Couldn't save the new order."));
+          await refetch();
+        }
+      } catch {
+        setError("Couldn't save the new order. Check your connection and try again.");
+        await refetch();
+      }
+    }
+  }, [canEdit, boardId, statusOf, statuses, statusOrder, putOrder, refetch, patchCard, onItemPatched]);
 
   const toggleComplete = useCallback((card: BoardItemRow) => {
     // A card shown through a link completes in its HOME set.
@@ -605,6 +692,13 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
             : null;
           const refusal = dragCard && dragTarget && !dragTarget.ok ? linkedStatusRefusal(dragCard, meta.label, dragTarget.reason) : null;
           const refusesDrag = refusal !== null;
+          // Where the drop line shows: above the card at that place among the
+          // column's other cards, or under the last one; never where the card
+          // already sits (that drop changes nothing).
+          const others = dragId ? cards.filter((c) => c.id !== dragId) : cards;
+          const placeOf = new Map(others.map((c, i) => [c.id, i] as const));
+          const wasAt = dragId ? cards.findIndex((c) => c.id === dragId) : -1;
+          const lineAt = dragId && !refusesDrag && dropAt && dropAt.status === status && !(wasAt !== -1 && wasAt === dropAt.index) ? dropAt.index : null;
           return (
             <div
               key={status}
@@ -618,6 +712,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 if (!canEdit || !dragId) return;
                 e.preventDefault();
                 setHoverColumn(status);
+                // Past the cards (the column's empty space): the bottom.
+                showDrop(status, cards.filter((c) => c.id !== dragId).length);
               }}
               onDragLeave={(e) => {
                 if (e.currentTarget === e.target) setHoverColumn(null);
@@ -626,13 +722,23 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 e.preventDefault();
                 setHoverColumn(null);
                 if (!dragId || !canEdit) return;
-                const card = items.find((r) => r.id === dragId);
-                // "Already in this column" is the card's status HERE.
-                if (card && statusOf(card) !== status) moveTo(dragId, status);
+                const index = dropAt && dropAt.status === status ? dropAt.index : cards.filter((c) => c.id !== dragId).length;
+                void dropCard(dragId, status, index);
                 setDragId(null);
+                setDropAt(null);
               }}
             >
-              <div className="flex items-center gap-2 px-1 pt-0.5 pb-2.5">
+              <div
+                className="flex items-center gap-2 px-1 pt-0.5 pb-2.5"
+                onDragOver={(e) => {
+                  if (!canEdit || !dragId) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setHoverColumn(status);
+                  // Over the column's name: the top.
+                  showDrop(status, 0);
+                }}
+              >
                 <span
                   className="inline-flex items-center h-5 rounded-[5px] px-2 text-micro font-semibold uppercase tracking-wider text-white"
                   style={{ background: meta.color }}
@@ -652,7 +758,24 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 ) : null}
               </div>
 
-              <div className="flex-1 space-y-2 min-h-[40px]">
+              <div
+                className="relative flex-1 space-y-2 min-h-[40px]"
+                onDragOver={(e) => {
+                  if (!canEdit || !dragId) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setHoverColumn(status);
+                  // The place is read from the pointer against the OTHER cards,
+                  // so the gap between two cards belongs to the card below it
+                  // and the dragged card's own spot means it stays put.
+                  const boxes = [...e.currentTarget.querySelectorAll<HTMLElement>(":scope > [data-place]")].map((el) => {
+                    const r = el.getBoundingClientRect();
+                    return { place: Number(el.dataset.place), top: r.top, height: r.height };
+                  });
+                  showDrop(status, indexAtPointer(e.clientY, boxes, others.length));
+                }}
+              >
+                {lineAt !== null && others.length === 0 ? <DropLine edge="top" /> : null}
                 {cards.map((card) => {
                   // A card shown here THROUGH A LINK: edited only as far as
                   // the task role goes, dragged only when its home set is
@@ -663,7 +786,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   const flags = linkedMenuFlags(card, boardId, canEdit, currentUserId ?? null, { personalList });
                   // A linked card drags only when its home set is known here:
                   // the columns it can go in are then the ones its home maps.
-                  const draggable = cardCanEdit && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
+                  // A subtask shown on its own (a filter hid its parent) keeps its
+                  // order under its parent, so it is not dragged among the cards.
+                  const draggable = cardCanEdit && !card.parentItemId && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
                   const listContext: ItemMenuListContext | undefined = kind === "home"
                     ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
                     : {
@@ -676,9 +801,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                         canAddToList: flags.canAddToList,
                         linkedSubtask: flags.linkedSubtask,
                       };
+                  const place = placeOf.get(card.id);
                   return (
+                  <div key={card.id} className="relative" data-place={place}>
+                  {lineAt !== null && place !== undefined && place === lineAt ? <DropLine edge="top" /> : null}
+                  {lineAt !== null && place !== undefined && place === others.length - 1 && lineAt === others.length ? <DropLine edge="bottom" /> : null}
                   <KanbanCard
-                    key={card.id}
                     boardId={boardId}
                     card={card}
                     chipFields={chipFields}
@@ -706,7 +834,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                         : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId)
                     }
                     onDragStart={() => setDragId(card.id)}
-                    onDragEnd={() => { setDragId(null); setHoverColumn(null); }}
+                    onDragEnd={() => { setDragId(null); setHoverColumn(null); setDropAt(null); }}
                     isDragging={dragId === card.id}
                     selected={selected.has(card.id)}
                     onToggleSelect={toggleSelect}
@@ -723,6 +851,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     tagsEnabled={tagsEnabled}
                     timeTrackingEnabled={timeTrackingEnabled}
                   />
+                  </div>
                   );
                 })}
                 {canEdit ? (
@@ -1138,5 +1267,15 @@ function KanbanCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Where a dragged card would land: a line between cards that never moves them. */
+function DropLine({ edge }: { edge: "top" | "bottom" }) {
+  return (
+    <span
+      aria-hidden
+      className={`pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-[var(--os-brand)] ${edge === "top" ? "-top-[5px]" : "-bottom-[5px]"}`}
+    />
   );
 }

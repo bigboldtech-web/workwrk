@@ -5,20 +5,27 @@
 // a status pill + owner per row, lets you add a new subtask and open one.
 //
 // The children come from GET /api/items/[id]/subtasks (the same children in
-// the same order, position then createdAt), not from a read of the whole
+// the same order, position then id), not from a read of the whole
 // List filtered in the browser. In a List the task is shown in through a
 // link (Phase 5b) the read names that List, so each child is projected for
 // it, and a new subtask is POSTed to that List, which creates it in the
 // parent's home with its parent: it appears wherever its parent does.
+//
+// ORDER. Subtasks are dragged up and down by the handle (or moved with Alt
+// and the arrow keys), landing at the midpoint of their new neighbours
+// (src/lib/work/reorder.ts); siblings that share a position are renumbered
+// under their parent first. Their order is the HOME List's, so in a List the
+// task is only linked into they keep it and cannot be dragged there.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, ChevronRight } from "lucide-react";
+import { Plus, ChevronRight, GripVertical } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { isDoneStatus } from "@/lib/board-items-shared";
 import { accessMessage } from "@/lib/access-message";
 import { subtaskCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { PersonAvatar } from "./assignee-picker";
+import { dropSide, indexFor, planDrop } from "@/lib/work/reorder";
 
 export function ItemSubtasks({
   item,
@@ -131,6 +138,45 @@ export function ItemSubtasks({
   const list = rows ?? [];
   const doneCount = list.filter((r) => isDoneStatus(statuses, r.status)).length;
 
+  // ── Order ──────────────────────────────────────────────────────────
+  const canReorder = canEdit && !!homeBoardId && !(contextBoardId && contextBoardId !== homeBoardId);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [over, setOver] = useState<{ id: string; side: "before" | "after" } | null>(null);
+  /** Move one subtask to `index` among the others; saved, or put back with the reason. */
+  const moveTo = async (id: string, index: number) => {
+    const plan = planDrop(list, id, index);
+    if (plan.kind === "none" || !homeBoardId) return;
+    const others = list.filter((r) => r.id !== id);
+    const moved = list.find((r) => r.id === id);
+    if (!moved) return;
+    const at = Math.max(0, Math.min(index, others.length));
+    setRows([...others.slice(0, at), plan.kind === "position" ? { ...moved, position: plan.position } : moved, ...others.slice(at)]);
+    setError(null);
+    try {
+      const res = plan.kind === "renumber"
+        ? await fetch(`/api/boards/${homeBoardId}/order`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ movedId: id, afterId: plan.afterId, beforeId: plan.beforeId, parentId: item.id }),
+          })
+        : await fetch(`/api/items/${id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ position: plan.position }),
+          });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError(accessMessage(d, "Couldn't save the new order."));
+        await load();
+        return;
+      }
+      if (plan.kind === "renumber") await load();
+    } catch {
+      setError("Couldn't save the new order. Check your connection and try again.");
+      await load();
+    }
+  };
+
   if (!canEdit && list.length === 0) return null;
 
   return (
@@ -141,21 +187,69 @@ export function ItemSubtasks({
       {rows === null ? (
         <div className="py-1"><Dots variant="pending" label="Loading subtasks" className="text-ink-3" /></div>
       ) : (
-        <div className="rounded-lg border border-zinc-200 divide-y divide-zinc-100">
-          {list.map((r) => {
+        <div data-subtask-list className="rounded-lg border border-line divide-y divide-line-soft">
+          {list.map((r, i) => {
             const st = r.status ? statuses.find((o) => o.value === r.status) : null;
+            const side = over && over.id === r.id && dragId && dragId !== r.id ? over.side : null;
             return (
-              <button
+              <div
                 key={r.id}
-                type="button"
-                onClick={() => onOpenItem?.(r.id)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-50"
+                draggable={canReorder}
+                onDragStart={(e) => {
+                  if (!canReorder) return;
+                  e.dataTransfer.effectAllowed = "move";
+                  try { e.dataTransfer.setData("text/plain", r.id); } catch { /* a browser that refuses still drags */ }
+                  setDragId(r.id);
+                }}
+                onDragOver={(e) => {
+                  if (!canReorder || !dragId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const next = dropSide(e.clientY, e.currentTarget.getBoundingClientRect());
+                  setOver((cur) => (cur && cur.id === r.id && cur.side === next ? cur : { id: r.id, side: next }));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId) void moveTo(dragId, indexFor(list, dragId, r.id, dropSide(e.clientY, e.currentTarget.getBoundingClientRect())));
+                  setDragId(null);
+                  setOver(null);
+                }}
+                onDragEnd={() => { setDragId(null); setOver(null); }}
+                className={`group/sub flex items-center ${dragId === r.id ? "opacity-40" : ""} ${
+                  side === "before" ? "shadow-[inset_0_2px_0_0_var(--os-brand)]" : side === "after" ? "shadow-[inset_0_-2px_0_0_var(--os-brand)]" : ""
+                }`}
               >
-                <ChevronRight className="w-3 h-3 text-zinc-300 shrink-0" />
-                <span className={`flex-1 text-base truncate ${isDoneStatus(statuses, r.status) ? "line-through text-zinc-400" : "text-zinc-800"}`}>{r.title}</span>
-                {st ? <span className="text-xs px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: `${st.color}22`, color: st.color }}>{st.label}</span> : null}
-                {r.owner ? <span className="shrink-0"><PersonAvatar person={{ ...r.owner, email: null }} size={18} /></span> : null}
-              </button>
+                {canReorder ? (
+                  <span className="pl-1.5 text-ink-3 opacity-0 group-hover/sub:opacity-100 cursor-grab" title="Drag to reorder" aria-hidden>
+                    <GripVertical className="w-3 h-3" />
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onOpenItem?.(r.id)}
+                  data-subtask-id={r.id}
+                  onKeyDown={(e) => {
+                    // Alt with an arrow moves it one place, for anyone not using a mouse.
+                    if (!canReorder || !e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+                    e.preventDefault();
+                    const to = e.key === "ArrowUp" ? i - 1 : i + 1;
+                    if (to < 0 || to >= list.length) return;
+                    const host = e.currentTarget.closest("[data-subtask-list]");
+                    void moveTo(r.id, to);
+                    // Moving a row's node blurs it in some browsers: focus stays on what moved.
+                    requestAnimationFrame(() => {
+                      host?.querySelector<HTMLButtonElement>(`[data-subtask-id="${r.id}"]`)?.focus();
+                    });
+                  }}
+                  aria-keyshortcuts={canReorder ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
+                  className={`min-w-0 flex-1 flex items-center gap-2 ${canReorder ? "pl-1.5" : "pl-3"} pr-3 py-2 text-left hover:bg-hover`}
+                >
+                  <ChevronRight className="w-3 h-3 text-ink-3 shrink-0" />
+                  <span className={`flex-1 text-base truncate ${isDoneStatus(statuses, r.status) ? "line-through text-ink-3" : "text-ink"}`}>{r.title}</span>
+                  {st ? <span className="text-xs px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: `${st.color}22`, color: st.color }}>{st.label}</span> : null}
+                  {r.owner ? <span className="shrink-0"><PersonAvatar person={{ ...r.owner, email: null }} size={18} /></span> : null}
+                </button>
+              </div>
             );
           })}
           {list.length === 0 ? <div className="px-3 py-2 text-base text-zinc-400">No subtasks yet.</div> : null}
