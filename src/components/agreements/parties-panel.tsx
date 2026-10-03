@@ -15,14 +15,14 @@
 //
 // The panel is inert for a party who has signed (their row is read-only).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Calendar, CheckSquare, ChevronDown, Mail, PenLine, Plus, Signature, Trash2, Type, UserPlus } from "lucide-react";
 import { Picker, type PickerOption } from "@/components/ui/picker";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { RowMoreButton } from "@/components/ui/table-card";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
-import { apiFetch } from "@/lib/api-fetch";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
 import { PARTY_ROLE_LABEL, isValidEmail, partyHue, type PartyRole } from "@/lib/contracts";
 import type { BuilderParty, FieldType } from "@/components/agreements/field-builder";
 import { cn } from "@/lib/utils";
@@ -55,11 +55,10 @@ export function PartiesPanel({ parties, activePartyId, onActiveParty, pendingToo
   sendErrors?: Record<string, string>;
 }) {
   const [teamOpen, setTeamOpen] = useState(false);
-  const [people, setPeople] = useState<PersonRef[]>([]);
-  useEffect(() => {
-    if (!teamOpen || people.length) return;
-    void apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=200", { cache: "no-store" }).then((r) => setPeople(r.ok ? (Array.isArray(r.data) ? r.data : r.data?.data ?? []) : []));
-  }, [teamOpen, people.length]);
+  // Any teammate who can sign in can be a party, searched as the person
+  // types: the whole workspace, never only the sender's report tree.
+  const picker = usePeoplePicker({ enabled: teamOpen, reach: "signin" });
+  const people = picker.people;
   const peopleOptions: PickerOption[] = useMemo(() => people.map((p) => ({ value: p.id, label: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "", description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })), [people]);
   const ordered = useMemo(() => [...parties].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [parties]);
 
@@ -83,7 +82,7 @@ export function PartiesPanel({ parties, activePartyId, onActiveParty, pendingToo
         <button type="button" onClick={onAddParty} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add party</button>
         <span className="relative block">
           <button type="button" onClick={() => setTeamOpen((o) => !o)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"><UserPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add a teammate</button>
-          <Picker open={teamOpen} onClose={() => setTeamOpen(false)} ariaLabel="Add a teammate" searchPlaceholder="Find a person" onSelect={(v) => { const person = people.find((x) => x.id === v); if (person) onAddTeammate(person); setTeamOpen(false); }} sections={[{ options: peopleOptions }]} />
+          <Picker open={teamOpen} onClose={() => setTeamOpen(false)} ariaLabel="Add a teammate" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && people.length === 0} onSelect={(v) => { const person = picker.person(v); if (person) onAddTeammate(person); setTeamOpen(false); }} sections={[{ options: peopleOptions }]} />
         </span>
       </div>
 
