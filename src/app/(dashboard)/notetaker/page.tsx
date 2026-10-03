@@ -43,6 +43,8 @@ import { useLocalDraft } from "@/hooks/use-local-draft";
 import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
 import { readNotetakerLastList } from "@/lib/docs-prefs";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { matchPeople, pickUrl } from "@/lib/people-pick";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { cn } from "@/lib/utils";
 
@@ -202,8 +204,10 @@ export default function NotetakerPage() {
     if (!aiOn) return;
     let live = true;
     void (async () => {
-      const r = await apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" });
-      if (live && r.ok) setPeople(Array.isArray(r.data?.data) ? r.data.data : []);
+      // The whole workspace (/api/people/pick), never only the caller's report
+      // tree, which is all /api/users answered below org-wide levels.
+      const r = await apiFetch<{ people: PersonRef[] }>(pickUrl({ limit: 50 }), { cache: "no-store" });
+      if (live && r.ok) setPeople(Array.isArray(r.data?.people) ? r.data.people : []);
     })();
     return () => { live = false; };
   }, [aiOn]);
@@ -247,17 +251,29 @@ export default function NotetakerPage() {
     if (!r.ok) { setExtractError(r.error || "Couldn't structure this transcript"); return; }
     const d = r.data.data;
     if (!d) { setRawText(r.data.rawText ?? ""); setResult(null); return; }
+    // Each person the transcript names is looked for across the whole
+    // workspace (their email, else their name), so a colleague outside the
+    // first page of people is still matched.
+    const terms = [...new Set([
+      ...(d.actionItems ?? []).map((a) => (a.assigneeEmail || a.assigneeName || "").trim()),
+      ...(d.attendees ?? []).map((a) => (a.email || a.name || "").trim()),
+    ].filter(Boolean))].slice(0, 20);
+    const found = await Promise.all(terms.map((q) => apiFetch<{ people: PersonRef[] }>(pickUrl({ q, limit: 5 }), { cache: "no-store" })));
+    const pool = new Map(people.map((p) => [p.id, p]));
+    for (const f of found) if (f.ok && Array.isArray(f.data.people)) for (const p of f.data.people) pool.set(p.id, p);
+    const known = [...pool.values()];
+    setPeople(known);
     setResult({
       title: d.title ?? "",
       type: d.type && TYPE_LABELS[d.type] ? d.type : "ADHOC",
       summary: d.summary ?? "",
       decisions: (d.decisions ?? []).map((text) => ({ key: k(), text })),
       actionItems: (d.actionItems ?? []).map((a) => {
-        const m = matchPerson(people, a.assigneeName, a.assigneeEmail);
+        const m = matchPerson(known, a.assigneeName, a.assigneeEmail);
         return { key: k(), title: a.title, assigneeName: a.assigneeName, assigneeEmail: a.assigneeEmail ?? null, assigneeId: m?.id ?? null, deadlineDays: a.deadlineDays ?? null, due: dueFromDays(a.deadlineDays) };
       }),
       attendees: (d.attendees ?? []).map((a) => {
-        const m = matchPerson(people, a.name, a.email);
+        const m = matchPerson(known, a.name, a.email);
         return { key: k(), name: a.name, email: a.email ?? null, userId: m?.id ?? null };
       }),
     });
@@ -527,11 +543,21 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
 }) {
   const [ownerFor, setOwnerFor] = useState<string | null>(null);
   const [attendeeFor, setAttendeeFor] = useState<string | null>(null);
+  // Matching a person searches the whole workspace as they type; the people
+  // the transcript already matched are known too.
+  const picker = usePeoplePicker({ enabled: ownerFor !== null || attendeeFor !== null, reach: "active" });
+  const pool = useMemo(() => {
+    const m = new Map<string, PersonRef>(people.map((p) => [p.id, p]));
+    for (const p of picker.people) m.set(p.id, p);
+    return [...m.values()];
+  }, [people, picker.people]);
   const peopleOptions = useMemo<PickerOption[]>(
-    () => people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} />, keywords: p.email ?? undefined })),
-    [people],
+    () => matchPeople(pool.map((p) => ({ ...p, email: p.email ?? null })), picker.query).map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} />, keywords: p.email ?? undefined })),
+    [pool, picker.query],
   );
-  const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const byId = useMemo(() => new Map(pool.map((p) => [p.id, p])), [pool]);
+  const openOwner = (key: string) => { picker.setQuery(""); setAttendeeFor(null); setOwnerFor(ownerFor === key ? null : key); };
+  const openAttendee = (key: string) => { picker.setQuery(""); setOwnerFor(null); setAttendeeFor(attendeeFor === key ? null : key); };
 
   const patch = (next: Partial<Extracted>) => setResult({ ...result, ...next });
   const patchAction = (key: string, next: Partial<ActionItem>) => patch({ actionItems: result.actionItems.map((a) => (a.key === key ? { ...a, ...next } : a)) });
@@ -586,7 +612,7 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
               <li key={a.key} className="flex min-h-9 flex-wrap items-center gap-2 py-0.5">
                 <input value={a.title} onChange={(e) => patchAction(a.key, { title: e.target.value })} className={cn(inputCls, "h-8 min-w-[160px] flex-1")} placeholder="What needs doing" />
                 <span className="relative">
-                  <button type="button" onClick={() => setOwnerFor(ownerFor === a.key ? null : a.key)} aria-haspopup="listbox" aria-expanded={ownerFor === a.key} className={cn("inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium", owner ? "bg-hover text-ink" : "bg-hover text-ink-2")} title={owner ? "Change owner" : "Match to a person"}>
+                  <button type="button" onClick={() => openOwner(a.key)} aria-haspopup="listbox" aria-expanded={ownerFor === a.key} className={cn("inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium", owner ? "bg-hover text-ink" : "bg-hover text-ink-2")} title={owner ? "Change owner" : "Match to a person"}>
                     {owner ? <PersonAvatar person={owner} size={20} /> : <UserPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
                     <span className="max-w-[140px] truncate">{owner ? personName(owner) : a.assigneeName ? `${a.assigneeName} (not matched)` : "Owner"}</span>
                   </button>
@@ -595,6 +621,8 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
                     onClose={() => setOwnerFor(null)}
                     ariaLabel="Owner"
                     searchPlaceholder="Find a person"
+                    alwaysSearch
+                    onSearchChange={picker.setQuery}
                     selected={a.assigneeId ?? null}
                     onSelect={(v) => { patchAction(a.key, { assigneeId: v }); setOwnerFor(null); }}
                     sections={[{ options: peopleOptions }]}
@@ -625,7 +653,7 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
             const person = a.userId ? byId.get(a.userId) ?? null : null;
             return (
               <span key={a.key} className="relative inline-flex h-7 items-center gap-1 rounded-md bg-hover ps-1 pe-1 text-sm text-ink">
-                <button type="button" onClick={() => setAttendeeFor(attendeeFor === a.key ? null : a.key)} aria-haspopup="listbox" aria-expanded={attendeeFor === a.key} className="inline-flex items-center gap-1.5 rounded px-1 hover:bg-active" title={person ? "Change person" : "Match to a person"}>
+                <button type="button" onClick={() => openAttendee(a.key)} aria-haspopup="listbox" aria-expanded={attendeeFor === a.key} className="inline-flex items-center gap-1.5 rounded px-1 hover:bg-active" title={person ? "Change person" : "Match to a person"}>
                   {person ? <PersonAvatar person={person} size={20} /> : null}
                   <span className="max-w-[160px] truncate">{person ? personName(person) : `${a.name} (not matched)`}</span>
                 </button>
@@ -637,6 +665,8 @@ function ResultEditor({ result, setResult, people, typeOpen, setTypeOpen }: {
                   onClose={() => setAttendeeFor(null)}
                   ariaLabel="Attendee"
                   searchPlaceholder="Find a person"
+                  alwaysSearch
+                  onSearchChange={picker.setQuery}
                   selected={a.userId ?? null}
                   onSelect={(v) => { const p = byId.get(v); patch({ attendees: result.attendees.map((x) => (x.key === a.key ? { ...x, userId: v, name: p ? personName(p) : x.name, email: p?.email ?? x.email } : x)) }); setAttendeeFor(null); }}
                   sections={[{ options: peopleOptions }]}
