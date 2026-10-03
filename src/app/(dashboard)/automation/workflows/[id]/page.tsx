@@ -27,7 +27,7 @@
  * draft changes nothing until Republish.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, ChevronDown, Copy, GripVertical, History, Plus, ScrollText, Trash2, X } from "lucide-react";
@@ -435,17 +435,35 @@ export default function AutomationBuilderPage() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [baseline, setBaseline] = useState<string>("");
-  const [people, setPeople] = useState<PersonRef[]>([]);
-  const [peopleQuery, setPeopleQuery] = useState("");
-  // People arrive from three reads (the first page, a search, the ones the
-  // draft already names), merged by id and kept in name order.
-  const mergePeople = useCallback((got: PersonRef[]) => {
-    setPeople((prev) => {
+  // Two lists to choose from, and the people the draft already names. A
+  // recipient (a notification, an email, an assignee) must be ACTIVE: the
+  // engine delivers to nobody else (registry-actions resolveUser), so the
+  // action pickers offer only them. A condition's person can be anyone who
+  // can sign in: a task can be assigned to someone on leave or on probation.
+  const [recipients, setRecipients] = useState<PersonRef[]>([]);
+  const [signIn, setSignIn] = useState<PersonRef[]>([]);
+  const [named, setNamed] = useState<PersonRef[]>([]);
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [conditionQuery, setConditionQuery] = useState("");
+  // Each list grows from its first page and its searches, merged by id and
+  // kept in name order.
+  const mergeInto = useCallback((set: Dispatch<SetStateAction<PersonRef[]>>) => (got: PersonRef[]) => {
+    set((prev) => {
       const byId = new Map(prev.map((p) => [p.id, p]));
       for (const p of got) byId.set(p.id, p);
       return [...byId.values()].sort((a, b) => personName(a).localeCompare(personName(b)));
     });
   }, []);
+  // Every person read, for names on chips and pickers.
+  const people = useMemo(() => {
+    const byId = new Map<string, PersonRef>();
+    for (const p of [...signIn, ...recipients, ...named]) byId.set(p.id, p);
+    return [...byId.values()];
+  }, [signIn, recipients, named]);
+  // Ids whose lookup has not answered yet, and ids whose lookup failed: their
+  // chips say so, never that the person is gone.
+  const [peopleLoading, setPeopleLoading] = useState<ReadonlySet<string>>(() => new Set());
+  const [peopleFailed, setPeopleFailed] = useState<ReadonlySet<string>>(() => new Set());
   const [places, setPlaces] = useState<Places | null>(null);
   const [canCreate, setCanCreate] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -498,7 +516,10 @@ export default function AutomationBuilderPage() {
     // own report tree: a Member could pick only themselves as a recipient, and
     // every colleague already chosen read as "Someone no longer here".
     void apiFetch<{ people: PersonRef[] }>("/api/people/pick?includeSelf=1&limit=50", { cache: "no-store" }).then((r) => {
-      if (alive && r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
+      if (alive && r.ok && Array.isArray(r.data.people)) mergeInto(setRecipients)(r.data.people);
+    });
+    void apiFetch<{ people: PersonRef[] }>("/api/people/pick?includeSelf=1&limit=50&reach=signin", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok && Array.isArray(r.data.people)) mergeInto(setSignIn)(r.data.people);
     });
     void apiFetch<Places>("/api/automation/places", { cache: "no-store" }).then((r) => {
       if (alive && r.ok) setPlaces(r.data);
@@ -511,7 +532,7 @@ export default function AutomationBuilderPage() {
     return () => {
       alive = false;
     };
-  }, [mergePeople]);
+  }, [mergeInto]);
 
   // This page never autosaves, so the shell's offline strip must not say it will.
   useEffect(() => {
@@ -560,28 +581,73 @@ export default function AutomationBuilderPage() {
     }
     return [...ids].sort().join(",");
   }, [draft, actionByKey, trigger]);
-  const askedPeople = useRef(new Set<string>());
+  // Looked up in chunks of 50. An id is done once a lookup answered (found
+  // or not); a failed lookup is tried again, up to three times, a little
+  // later each time.
+  const peopleAnswered = useRef(new Set<string>());
+  const peopleInFlight = useRef(new Set<string>());
+  const peopleTries = useRef(new Map<string, number>());
+  const [peopleRetry, setPeopleRetry] = useState(0);
   useEffect(() => {
-    const missing = chosenPeopleKey.split(",").filter((x) => x && !askedPeople.current.has(x));
+    const missing = chosenPeopleKey.split(",").filter((x) => x && !peopleAnswered.current.has(x) && !peopleInFlight.current.has(x) && (peopleTries.current.get(x) ?? 0) < 3);
     if (missing.length === 0) return;
-    for (const x of missing) askedPeople.current.add(x);
-    void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?ids=${missing.slice(0, 50).map(encodeURIComponent).join(",")}`, { cache: "no-store" }).then((r) => {
-      if (r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
-    });
-  }, [chosenPeopleKey, mergePeople]);
+    // Marked in flight only when the lookup really starts: a cancelled
+    // timer leaves nothing marked, so the next pass asks again.
+    const t = setTimeout(() => {
+      for (const x of missing) peopleInFlight.current.add(x);
+      setPeopleLoading((prev) => new Set([...prev, ...missing]));
+      for (let i = 0; i < missing.length; i += 50) {
+        const chunk = missing.slice(i, i + 50);
+        void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?ids=${chunk.map(encodeURIComponent).join(",")}`, { cache: "no-store" }).then((r) => {
+          for (const x of chunk) peopleInFlight.current.delete(x);
+          const ok = r.ok && Array.isArray(r.data.people);
+          if (ok) {
+            for (const x of chunk) peopleAnswered.current.add(x);
+            setNamed((prev) => [...prev.filter((p) => !chunk.includes(p.id)), ...r.data.people]);
+          } else {
+            let wait = 0;
+            for (const x of chunk) {
+              const n = (peopleTries.current.get(x) ?? 0) + 1;
+              peopleTries.current.set(x, n);
+              wait = Math.max(wait, n * 2000);
+            }
+            setTimeout(() => setPeopleRetry((v) => v + 1), wait);
+          }
+          setPeopleLoading((prev) => new Set([...prev].filter((x) => !chunk.includes(x))));
+          setPeopleFailed((prev) => (ok ? new Set([...prev].filter((x) => !chunk.includes(x))) : new Set([...prev, ...chunk])));
+        });
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [chosenPeopleKey, peopleRetry]);
 
   // Typing in a person picker searches the whole company, not only the
-  // first page already loaded.
+  // first page already loaded: everyone who can sign in for a condition,
+  // the people a run can deliver to for an action.
   useEffect(() => {
-    const q = peopleQuery.trim();
+    const q = recipientQuery.trim();
     if (!q) return;
     const t = setTimeout(() => {
       void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?includeSelf=1&limit=20&q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
-        if (r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
+        if (r.ok && Array.isArray(r.data.people)) mergeInto(setRecipients)(r.data.people);
       });
     }, 200);
     return () => clearTimeout(t);
-  }, [peopleQuery, mergePeople]);
+  }, [recipientQuery, mergeInto]);
+  useEffect(() => {
+    const q = conditionQuery.trim();
+    if (!q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?includeSelf=1&limit=20&reach=signin&q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok && Array.isArray(r.data.people)) mergeInto(setSignIn)(r.data.people);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [conditionQuery, mergeInto]);
+  const personLabel = (value: string): string | null =>
+    peopleLoading.has(value) && !people.some((p) => p.id === value) ? "Loading"
+    : peopleFailed.has(value) && !people.some((p) => p.id === value) ? "Couldn't load this name"
+    : userLabel(value, people);
 
   const update = useCallback((patch: Partial<Draft> | ((d: Draft) => Draft)) => {
     setDraft((d) => (d ? (typeof patch === "function" ? patch(d) : { ...d, ...patch }) : d));
@@ -641,7 +707,8 @@ export default function AutomationBuilderPage() {
       });
       return false;
     }
-    setProblems((p) => (p?.where ? { ...p, where: undefined } : p));
+    // A refusal shown from an earlier save no longer holds once a save lands.
+    setProblems((p) => (p && (p.where || p.when) ? { ...p, where: undefined, when: undefined } : p));
     setBaseline(draftSnapshot(draft));
     // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
     const saved = r.data.workflow;
@@ -887,6 +954,15 @@ export default function AutomationBuilderPage() {
 
   const published = Boolean(wf.publishedVersionId);
   const archived = wf.status === "ARCHIVED";
+  // The live version's publisher caps where it runs (author-reach.ts,
+  // runReach): said here, or an automation an Admin made and a manager
+  // republished just stops running in the Admin's private Lists with
+  // nothing to show why.
+  const liveVersion = wf.versions.find((v) => v.isLive);
+  const creatorName = wf.createdByName || "its creator";
+  const cappedNote = published && !archived && liveVersion?.publishedBy && wf.createdById && liveVersion.publishedBy.id !== wf.createdById
+    ? `Published by ${liveVersion.publishedBy.name}, so it runs only where both ${liveVersion.publishedBy.name} and ${creatorName} can open and change things. When ${creatorName} republishes it, it runs with their own reach.`
+    : null;
   const busy = saving || publishing;
   const offlineTitle = offline ? "You're offline. Save and Publish wait for the network." : undefined;
 
@@ -1010,7 +1086,7 @@ export default function AutomationBuilderPage() {
     if (kind === "none") return null;
     if (readOnly) {
       const shown =
-        kind === "user" ? userLabel(row.value, people)
+        kind === "user" ? personLabel(row.value)
         : kind === "status" ? statusOptions.find((o) => o.value === row.value)?.label ?? row.value
         : kind === "priority" ? PRIORITY_OPTIONS.find((o) => o.value === row.value)?.label ?? row.value
         : kind === "list" ? listLabel(row.value) ?? "A List you can't open"
@@ -1018,8 +1094,8 @@ export default function AutomationBuilderPage() {
       return <NeutralChip className="h-8 px-2 text-sm">{shown || "Nothing"}</NeutralChip>;
     }
     if (kind === "user") {
-      return <Token label={userLabel(row.value, people)} placeholder="Pick a person" ariaLabel="Condition person" readOnly={false} alwaysSearch onSearchChange={setPeopleQuery}
-        sections={peopleSections(people, peopleQuery, false, false, false)} selected={row.value} onSelect={set} invalid={invalid} />;
+      return <Token label={personLabel(row.value)} placeholder="Pick a person" ariaLabel="Condition person" readOnly={false} alwaysSearch onSearchChange={setConditionQuery}
+        sections={peopleSections(signIn, conditionQuery, false, false, false)} selected={row.value} onSelect={set} invalid={invalid} />;
     }
     if (kind === "status") {
       return <StatusToken value={row.value} options={statusOptions} ariaLabel="Condition status" onChange={set} invalid={invalid} />;
@@ -1066,7 +1142,7 @@ export default function AutomationBuilderPage() {
     if (p.key === "itemId") return null; // The triggering task: the builder never asks for an id.
     if (readOnly) {
       const shown =
-        p.type === "user" ? userLabel(value, people)
+        p.type === "user" ? personLabel(value)
         : p.type === "board" ? (value ? listLabel(value) ?? "A List you can't open" : null)
         : p.type === "status" ? statusOptions.find((o) => o.value === value)?.label ?? value
         : p.type === "field" ? (value === "priority" ? "Priority" : listFieldOptions.find((o) => o.value === value)?.label ?? value)
@@ -1076,8 +1152,8 @@ export default function AutomationBuilderPage() {
     }
     if (p.type === "user") {
       const allowAdmins = action.key === "create_notification" && p.key === "userId";
-      return <Token label={userLabel(value, people)} placeholder="Pick a person" ariaLabel={p.label} readOnly={false} alwaysSearch onSearchChange={setPeopleQuery}
-        sections={peopleSections(people, peopleQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
+      return <Token label={personLabel(value)} placeholder="Pick a person" ariaLabel={p.label} readOnly={false} alwaysSearch onSearchChange={setRecipientQuery}
+        sections={peopleSections(recipients, recipientQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
     }
     if (p.type === "board") {
       return <Token label={value ? listLabel(value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel={p.label} readOnly={false}
@@ -1228,6 +1304,7 @@ export default function AutomationBuilderPage() {
         ) : (
           <p className="m-0 text-base text-ink-2">{wf.status === "ACTIVE" ? "On" : "Paused"}</p>
         )}
+        {cappedNote ? <p className="m-0 text-sm text-ink-2">{cappedNote}</p> : null}
       </div>
       <dl className="m-0 flex flex-col">
         <div className="flex h-9 items-center justify-between text-sm">
