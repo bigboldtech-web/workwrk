@@ -35,6 +35,7 @@
 //      never guesses (it never falls back to the person running the SOP).
 
 import { decodePresence } from "./people/presence-codec";
+import type { SopKind } from "./sop-kind";
 
 export interface StepJobTitle {
   roleId: string;
@@ -59,6 +60,9 @@ export function stepCreatesTask(step: unknown): boolean {
   return (step as { createsTask?: unknown } | null)?.createsTask === true;
 }
 
+/** The fields of a recorded step the public read view draws (RecordingRead). */
+const PUBLIC_RECORDED_STEP_KEYS = ["order", "action", "description", "url", "screenshot"] as const;
+
 /**
  * A copy of an SOP's content safe to send to a signed-out reader: no
  * `spawn` (the id of the List a run fills), and no `jobTitle` or
@@ -66,10 +70,31 @@ export function stepCreatesTask(step: unknown): boolean {
  * workspace's internal names and the ids are internal; the public read view
  * already hides them on screen, but a client component receives its whole
  * prop, so anything left in the content is readable in the page source.
+ *
+ * A RECORDED SOP (pass its kind) keeps only what the read view draws: the
+ * content's type, and per step its order, action, description, url and
+ * screenshot. The capture also stores the clicked element's text and tag,
+ * the screenshot's storage key and the recorder's session id; the element
+ * text can be a customer's name in a row the recorder clicked, even when the
+ * step's caption was edited to leave it out. A field added to recordings
+ * later stays private until it is added to the list above.
+ *
  * Never mutates the stored content. Pure.
  */
-export function publicSopContent<T>(content: T): T {
+export function publicSopContent<T>(content: T, kind?: SopKind): T {
   if (!content || typeof content !== "object" || Array.isArray(content)) return content;
+  if (kind === "recording") {
+    const c = content as Record<string, unknown>;
+    const steps = Array.isArray(c.steps)
+      ? c.steps.map((step) => {
+          const from = step && typeof step === "object" && !Array.isArray(step) ? (step as Record<string, unknown>) : {};
+          const kept: Record<string, unknown> = {};
+          for (const k of PUBLIC_RECORDED_STEP_KEYS) if (k in from) kept[k] = from[k];
+          return kept;
+        })
+      : [];
+    return { ...(typeof c.type === "string" ? { type: c.type } : {}), steps } as T;
+  }
   const strip = (steps: unknown): unknown =>
     Array.isArray(steps)
       ? steps.map((step) => {

@@ -254,3 +254,27 @@ describe("publicSopContent", () => {
     expect(publicSopContent({ steps: "not a list" })).toEqual({ steps: "not a list" });
   });
 });
+
+describe("publicSopContent, recorded SOPs", () => {
+  const recorded = {
+    type: "recorded",
+    clientSessionId: "rec-session-123",
+    steps: [
+      { order: 1, action: "click", description: "Open the client", url: "https://crm.example/clients", screenshot: "https://s3.example/presigned", screenshotKey: "org/abc/shot1.png", elementText: "Priya Sharma, priya@client.example", elementTag: "TD" },
+    ],
+  };
+
+  it("keeps only what the read view draws: type, and per step order, action, description, url and screenshot", () => {
+    const out = publicSopContent(recorded, "recording") as unknown as { type: string; steps: Array<Record<string, unknown>>; clientSessionId?: string };
+    expect(out).toEqual({ type: "recorded", steps: [{ order: 1, action: "click", description: "Open the client", url: "https://crm.example/clients", screenshot: "https://s3.example/presigned" }] });
+    const text = JSON.stringify(out);
+    for (const secret of ["rec-session-123", "org/abc/shot1.png", "Priya Sharma", "priya@client.example", "elementTag"]) expect(text).not.toContain(secret);
+  });
+
+  it("never changes the stored recording, and other kinds keep their fields", () => {
+    const before = JSON.stringify(recorded);
+    publicSopContent(recorded, "recording");
+    expect(JSON.stringify(recorded)).toBe(before);
+    expect(publicSopContent({ type: "blocks", blocks: [{ type: "p" }] }, "written")).toEqual({ type: "blocks", blocks: [{ type: "p" }] });
+  });
+});

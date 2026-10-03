@@ -63,9 +63,9 @@ export default async function PublicSopPage({ params }: { params: Promise<{ toke
   // steps' job titles, "Creates a task" and the run's List id are internal
   // to the workspace (the read view hides them in public mode, but hiding is
   // not withholding).
-  content = publicSopContent(content);
-
   const kind = getSopKind(sop.sopType, content);
+  content = publicSopContent(content, kind);
+
   const org = { name: sop.organization.name, logo: sop.organization.logo };
 
   return (
