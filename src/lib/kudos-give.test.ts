@@ -22,7 +22,13 @@ vi.mock("@/lib/prisma", () => ({
     notification: { create: async () => { done.push("notify"); return {}; } },
   },
 }));
-vi.mock("@/lib/access/viewer", () => ({ viewerForUser: async () => (role ? { userId: "u-eve", orgRole: role } : null) }));
+// The giver (u-eve) has `role`; the receiver (u-lea) has `receiverRole` and `receiverStatus`.
+let receiverRole: "MEMBER" | "GUEST" = "MEMBER";
+let receiverStatus = "ACTIVE";
+vi.mock("@/lib/access/viewer", () => ({
+  viewerForUser: async (_org: string, userId: string) =>
+    userId === "u-lea" ? { userId, orgRole: receiverRole, status: receiverStatus } : role ? { userId, orgRole: role, status: "ACTIVE" } : null,
+}));
 vi.mock("@/lib/notify-prefs", () => ({ shouldNotify: async () => true, shouldEmail: async () => true }));
 vi.mock("@/lib/email", () => ({ sendEmail: async () => { done.push("email"); } }));
 vi.mock("@/lib/email-templates", () => ({ kudosTemplate: () => ({ subject: "s", html: "h" }) }));
@@ -31,7 +37,7 @@ vi.mock("@/services/performanceScoreService", () => ({ triggerRecalculation: () 
 vi.mock("@/services/slackNotifier", () => ({ notifyKudosPosted: async () => { done.push("slack"); } }));
 vi.mock("@/services/webhookDispatcher", () => ({ dispatchEvent: async (e: { event: string }) => { done.push(`event:${e.event}`); } }));
 
-const { giveKudos } = await import("./kudos-give");
+const { giveKudos, kudosAftermath } = await import("./kudos-give");
 const base = { organizationId: "org-1", giverId: "u-eve", receiverId: "u-lea", message: "  Thanks for the launch  " };
 
 beforeEach(() => {
@@ -39,6 +45,8 @@ beforeEach(() => {
   role = "MEMBER";
   receiver = { id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com" };
   dupe = null;
+  receiverRole = "MEMBER";
+  receiverStatus = "ACTIVE";
 });
 
 describe("giveKudos", () => {
@@ -69,5 +77,33 @@ describe("giveKudos", () => {
     dupe = { id: "k-0", message: "Thanks for the launch" };
     expect(await giveKudos(base)).toMatchObject({ ok: true, duplicate: true, kudos: { id: "k-0" } });
     expect(done).toEqual([]);
+  });
+});
+
+describe("thanks reach only a teammate who can open the wall", () => {
+  it("the wall and Ask AI never thank a Guest or someone deactivated", async () => {
+    receiverRole = "GUEST";
+    expect(await giveKudos(base)).toEqual({ ok: false, status: 400, error: "You can only thank a teammate who can sign in." });
+    receiverRole = "MEMBER";
+    receiverStatus = "INACTIVE";
+    expect(await giveKudos(base)).toMatchObject({ ok: false, status: 400 });
+    expect(done).toEqual([]);
+  });
+
+  it("a kudos the public API made for someone deactivated is logged and fires, but tells and emails no one", async () => {
+    receiverStatus = "INACTIVE";
+    await kudosAftermath({
+      organizationId: "org-1",
+      kudos: { id: "k-2", message: "Thanks", companyValue: null, giverId: "u-eve", receiverId: "u-lea", createdAt: new Date(0) },
+      giver: { id: "u-eve", firstName: "Eve", lastName: "Reader" },
+      receiver: { id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com" },
+    });
+    expect(done).toEqual(["log", "score", "slack", "event:kudos.created"]);
+  });
+
+  it("someone on leave can still be thanked and told", async () => {
+    receiverStatus = "ON_LEAVE";
+    expect(await giveKudos(base)).toMatchObject({ ok: true });
+    expect(done).toContain("notify");
   });
 });

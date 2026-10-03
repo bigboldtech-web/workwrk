@@ -103,7 +103,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await kudosAftermath({ organizationId: ctx.organizationId, kudos, giver, receiver });
+  // After the answer, so the public API answers as fast as it always has.
+  void kudosAftermath({ organizationId: ctx.organizationId, kudos, giver, receiver }).catch(() => {});
 
   return Response.json(kudos, { status: 201 });
 }

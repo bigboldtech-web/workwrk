@@ -10,7 +10,9 @@
 // took both people's ids on trust, another workspace's included.
 //
 // giveKudos is the wall's rules and is used by the wall and by Ask AI;
-// kudosAftermath is everything that follows a kudos, used by all four.
+// kudosAftermath is everything that follows a kudos, used by all four. Only
+// a teammate who can open the wall (a Member who can sign in) is told and
+// emailed; the wall and Ask AI thank no one else.
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
@@ -45,8 +47,11 @@ export async function kudosAftermath(input: {
 }): Promise<void> {
   const { organizationId: orgId, kudos, giver, receiver } = input;
   const giverName = nameOf(giver) || "Someone";
+  // Told and emailed only when they can open the wall the link leads to: a
+  // Member who can sign in. A Guest, or someone deactivated, is not.
+  const reachable = await canReadTheWall(orgId, receiver.id);
   try {
-    if (await shouldNotify(receiver.id, "kudos")) {
+    if (reachable && (await shouldNotify(receiver.id, "kudos"))) {
       await prisma.notification.create({
         data: {
           // spec-teams-performance /kudos: "{name} thanked you".
@@ -66,7 +71,7 @@ export async function kudosAftermath(input: {
   // Gated by both the /settings/notifications email toggle and the legacy
   // EmailPreference kudos category (checked inside sendEmail).
   try {
-    if (receiver.email && (await shouldEmail(receiver.id, "kudos"))) {
+    if (reachable && receiver.email && (await shouldEmail(receiver.id, "kudos"))) {
       const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
       const senderName = nameOf(giver);
       const { subject, html } = kudosTemplate({ senderName, message: kudos.message, dashboardLink: `${baseUrl}/kudos?view=received` });
@@ -114,6 +119,12 @@ export async function kudosAftermath(input: {
   }).catch(() => {});
 }
 
+/** May this person open the kudos wall: a Member (never a Guest) who can sign in. */
+async function canReadTheWall(orgId: string, userId: string): Promise<boolean> {
+  const viewer = await viewerForUser(orgId, userId);
+  return !!viewer && viewer.orgRole !== "GUEST" && viewer.status !== "INACTIVE";
+}
+
 export type GiveKudosResult =
   | { ok: true; duplicate: boolean; kudos: Awaited<ReturnType<typeof createWithPeople>> }
   | { ok: false; status: 400 | 404; error: string };
@@ -155,6 +166,8 @@ export async function giveKudos(input: {
     select: { id: true, firstName: true, lastName: true, email: true },
   });
   if (!receiver) return { ok: false, status: 404, error: "User not found" };
+  // Thanks go to a teammate who can see them: never a Guest, never someone deactivated.
+  if (!(await canReadTheWall(orgId, receiver.id))) return { ok: false, status: 400, error: "You can only thank a teammate who can sign in." };
 
   const dupe = await prisma.kudos.findFirst({
     where: {

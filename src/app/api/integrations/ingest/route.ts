@@ -216,7 +216,7 @@ async function handleKudosGive(orgId: string, data: Record<string, unknown>) {
     select: { id: true, message: true, companyValue: true, giverId: true, receiverId: true, createdAt: true },
   });
   // Everything a kudos does (told, emailed, logged, scored, Slack, "kudos.created").
-  await kudosAftermath({ organizationId: orgId, kudos: created, giver, receiver });
+  void kudosAftermath({ organizationId: orgId, kudos: created, giver, receiver }).catch(() => {});
   const kudos = { id: created.id, message: created.message, createdAt: created.createdAt };
   return Response.json({ ok: true, kudos }, { status: 201 });
 }
