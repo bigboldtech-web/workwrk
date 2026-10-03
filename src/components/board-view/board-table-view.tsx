@@ -1750,7 +1750,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     const picker = statusPickerFor(row, boardId, statuses);
     const colour = rowColorRules.length > 0 ? rowColorFor(row, rowColorRules, statusOf) : null;
     const listContext: ItemMenuListContext | undefined = kind === "home"
-      ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+      ? { boardId, kind: "home", canAddToList: flags.canAddToList, canShareHome: flags.canShareHome }
       : {
           boardId,
           kind: "linked",
@@ -1760,6 +1760,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           canLinkMove: flags.canLinkMove,
           canAddToList: flags.canAddToList,
           linkedSubtask: flags.linkedSubtask,
+          canShareHome: flags.canShareHome,
         };
     const nodes: React.ReactNode[] = [
       <Row

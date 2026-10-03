@@ -46,6 +46,7 @@ export const ITEM_MENU_KEYS = [
   "watch",
   "save-template",
   "share",
+  "public-link",
   "remove-from-list",
   "archive",
   "delete",
@@ -112,6 +113,12 @@ export interface ItemMenuContext {
   canRemoveFromList?: boolean;
   /** A subtask shown through its linked parent: never removed, moved or linked alone. */
   linkedSubtask?: boolean;
+  /**
+   * May the viewer share this task publicly from here: the home's share rule
+   * and the workspace allowing task links (or an admin, who can allow them).
+   * Absent: the host does not know, and the row follows the task role.
+   */
+  canSharePublicly?: boolean;
 }
 
 function rank(role: ItemRole): number {
@@ -165,6 +172,14 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   if (canEdit && !ctx.isGuest) rows.push({ key: "save-template", label: "Save as template" });
   if (!ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest) {
     rows.push({ key: "share", label: isFull || canEdit ? "Share" : "Who has access" });
+  }
+  // A public, view-only link to this one task (access toggle 10). It is the
+  // home's to share (the add-to-another-List rule) while the workspace allows
+  // task links, never a Personal List task's, and never a subtask's shown
+  // through its linked parent. The dialog asks the server for the rest and
+  // says why when it cannot be turned on.
+  if (canEdit && ctx.canSharePublicly !== false && !ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest && !ctx.linkedSubtask) {
+    rows.push({ key: "public-link", label: "Public link" });
   }
 
   const tail: ItemMenuRow[] = [];

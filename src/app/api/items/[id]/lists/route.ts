@@ -26,6 +26,7 @@ import {
 import { publishItemChanged } from "@/lib/notify-realtime";
 import { prisma } from "@/lib/prisma";
 import { isSystemItemType } from "@/lib/system-items";
+import { mayShareTaskPublicly, readTaskLink } from "@/lib/task-public-link";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await itemCtx();
@@ -74,6 +75,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       !item.archivedAt &&
       !isSystemItemType(item.itemType) &&
       (await canContributeFor(c, item.boardId));
+    // The Public link row's facts: who may share the task publicly (a
+    // subtask and a task in Trash included: a link must always be
+    // withdrawable) and whether it has a link on.
+    // A meeting's own Item (system-items.ts) is plumbing, never shared.
+    const [canSharePublicly, publicLink] = isSystemItemType(item.itemType)
+      ? [false, null]
+      : await Promise.all([
+          mayShareTaskPublicly(c, { boardId: item.boardId, organizationId: item.organizationId }),
+          readTaskLink(item.id),
+        ]);
 
     return NextResponse.json(
       {
@@ -83,6 +94,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         viaParentId: viaParent && linked.length > 0 ? rootId : null,
         canShare,
         canUnshareAll: gate.decision.role === "FULL",
+        canSharePublicly,
+        publicLinkOn: canSharePublicly && !!publicLink,
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

@@ -160,7 +160,7 @@ export function ItemContextMenuHost({
   const flags = target && boardId ? linkedMenuFlags(target, boardId, canEdit, currentUserId, { personalList }) : null;
   const listContext: ItemMenuListContext | undefined = target && boardId && flags
     ? kind === "home"
-      ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+      ? { boardId, kind: "home", canAddToList: flags.canAddToList, canShareHome: flags.canShareHome }
       : {
           boardId,
           kind: "linked",
@@ -170,6 +170,7 @@ export function ItemContextMenuHost({
           canLinkMove: flags.canLinkMove,
           canAddToList: flags.canAddToList,
           linkedSubtask: flags.linkedSubtask,
+          canShareHome: flags.canShareHome,
         }
     : undefined;
   const role = kind !== "home" && flags?.role ? flags.role : canEdit && target ? "EDIT" : "VIEW";

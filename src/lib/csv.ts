@@ -86,6 +86,18 @@ export function csvExportCell(text: string): string {
   return CSV_SAFE_NUMBER.test(text) ? text : csvFormulaSafe(text);
 }
 
+/** The byte order mark a CSV starts with, so Excel reads it as UTF-8. */
+export const CSV_BOM = "\uFEFF";
+
+/**
+ * One line of a CSV written a piece at a time (the workspace export streams
+ * its large files): text through csvExportCell, every cell escaped as
+ * toCsvMatrix escapes it, and the line break. Start the file with CSV_BOM.
+ */
+export function csvLine(cells: readonly CsvCell[]): string {
+  return cells.map((v) => escapeCell(typeof v === "string" ? csvExportCell(v) : v)).join(",") + "\r\n";
+}
+
 /** A header row plus data rows, all text, serialised with the same rules. */
 export function toCsvMatrix(rows: readonly (readonly CsvCell[])[]): string {
   return "﻿" + rows.map((r) => r.map(escapeCell).join(",")).join("\r\n") + "\r\n";

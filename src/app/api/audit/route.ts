@@ -224,6 +224,8 @@ async function accessSummaries(
         row: r,
         kind: kind && NODE_KINDS.has(kind) ? (kind as AccessNodeKind) : null,
         nodeId: str(m.nodeId),
+        // A task's public link (src/lib/task-public-link.ts): not a node, named as a task.
+        taskId: kind === "task" ? str(m.nodeId) : null,
         granteeId: str(m.granteeId),
         // An email invitation names an address: the invitee has no account yet.
         email: str(m.email),
@@ -243,14 +245,22 @@ async function accessSummaries(
       : Promise.resolve([]),
   ]);
   const readable = refs.filter((r) => roleAtLeast(decisions.get(`${r.kind}:${r.id}`)?.role ?? "none", "VIEW"));
-  const names = await nodeNames(orgId, readable);
+  const taskIds = [...new Set(access.map((a) => a.taskId).filter((v): v is string => !!v))];
+  const [names, tasks] = await Promise.all([
+    nodeNames(orgId, readable),
+    // The audit page is an Owner's and an Admin's (settingsWriteGate "audit"),
+    // who open every task (node-rules R1), so a task is named by its title.
+    taskIds.length ? prisma.item.findMany({ where: { id: { in: taskIds }, organizationId: orgId }, select: { id: true, title: true } }) : Promise.resolve([]),
+  ]);
+  const taskTitle = new Map(tasks.map((t) => [t.id, t.title]));
   const personName = new Map(people.map((p) => [p.id, [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email || "Someone"]));
 
   for (const a of access) {
     if (!isAccessActivityType(a.row.type)) continue;
     out.set(a.row.id, accessAuditSentence(a.row.type, {
       kind: a.kind,
-      nodeName: a.kind && a.nodeId ? names.get(`${a.kind}:${a.nodeId}`) ?? null : null,
+      noun: a.taskId ? "task" : null,
+      nodeName: a.kind && a.nodeId ? names.get(`${a.kind}:${a.nodeId}`) ?? null : a.taskId ? taskTitle.get(a.taskId) ?? null : null,
       granteeName: a.granteeId ? personName.get(a.granteeId) ?? "a former member" : a.email,
       role: a.role,
       previousRole: a.previousRole,

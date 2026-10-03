@@ -110,7 +110,7 @@ export function zipTextFile(name: string, content: string): ZipFile {
   return { name, data: utf8Encode(content) };
 }
 
-function utf8Encode(s: string): Uint8Array {
+export function utf8Encode(s: string): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
@@ -127,8 +127,13 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(data: Uint8Array): number {
-  let c = 0xffffffff;
+/**
+ * CRC-32 of `data`, or of everything so far when `crc` is the value for the
+ * bytes before it (the streaming writer, src/lib/zip-stream.ts, sums an
+ * entry piece by piece).
+ */
+export function crc32(data: Uint8Array, crc = 0): number {
+  let c = (crc ^ 0xffffffff) >>> 0;
   for (let i = 0; i < data.length; i++) {
     c = CRC_TABLE[(c ^ data[i]) & 0xff] ^ (c >>> 8);
   }

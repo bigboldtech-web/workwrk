@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { exportRunning } from "@/lib/export/workspace-export.server";
 import { sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 
 // GET /api/settings/data-summary: what Workspace settings > Data needs beyond
@@ -46,8 +47,13 @@ export async function GET() {
         // Older rows were written "1 skill rows" / "(1 rows)": read in the singular.
         what: e.description.replace(/\b1 (\w+ )?rows\b/g, (_m, w: string | undefined) => `1 ${w ?? ""}row`),
         kind: (e.metadata as { kind?: string } | null)?.kind ?? null,
+        // A workspace export says whether it finished: started, completed or stopped.
+        status: (e.metadata as { status?: string } | null)?.status ?? null,
       })),
       matrixRetired: matrix ? { id: matrix.id, at: matrix.createdAt.toISOString() } : null,
+      // A workspace export holding this server's slot right now: the one
+      // fact that tells "running" from "did not finish".
+      exportRunning: exportRunning(orgId),
       canPurge,
     },
     { headers: { "Cache-Control": "no-store" } },

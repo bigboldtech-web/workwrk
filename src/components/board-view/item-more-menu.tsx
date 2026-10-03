@@ -32,7 +32,9 @@ import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 import { useItemTypes } from "./use-item-types";
 import { OsShellContext } from "@/components/layout/os/shell-context";
+import { BootContext } from "@/components/layout/os/boot-context";
 import { AddToListPicker } from "./add-to-list-picker";
+import { TaskPublicLinkDialog } from "./task-public-link-dialog";
 import { distinctSectionLabels } from "@/lib/list-link-rows";
 
 export interface ItemMoreMenuItem {
@@ -63,6 +65,14 @@ export interface ItemMenuListContext {
   canLinkMove?: boolean;
   canAddToList?: boolean;
   linkedSubtask?: boolean;
+  /**
+   * May the viewer share this task outside its home: contribute on the home
+   * List, or an org admin (the add rule, linkedRowAccess canShare). The
+   * Public link row follows it. Absent: the host does not know.
+   */
+  canShareHome?: boolean;
+  /** The task has a public link on, so its sharer can always reach it to turn it off. */
+  publicLinkOn?: boolean;
 }
 
 export interface ItemMoreMenuProps {
@@ -151,11 +161,23 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   // Outside the shell (none today) there is no Ask AI to open.
   const shell = useContext(OsShellContext);
   const askAi = Boolean(shell?.askAiVisible);
+  // "Public link" is offered to someone who may share the task, while the
+  // workspace allows task links; an Owner or Admin always gets it, since they
+  // can turn the switch on (the dialog says how), and so does the sharer of a
+  // task whose link is on, so it can always be turned off.
+  const bootState = useContext(BootContext);
+  const orgAdmin = bootState?.boot.viewer.orgRole === "OWNER" || bootState?.boot.viewer.orgRole === "ADMIN";
+  const taskLinksOn = Boolean(bootState?.boot.org.taskPublicLinks);
+  // The dialog's own answer beats the host's older Lists answer.
+  const [linkOnHere, setLinkOnHere] = useState<boolean | null>(null);
+  const linkOn = linkOnHere ?? Boolean(listContext?.publicLinkOn);
+  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin || linkOn);
   const openSidekick = shell?.openSidekick;
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);
   const [linkMovePicker, setLinkMovePicker] = useState(false);
   const [addPicker, setAddPicker] = useState(false);
+  const [publicLink, setPublicLink] = useState(false);
   const [lists, setLists] = useState<{ id: string; name: string; spaceName: string | null }[]>([]);
   // Three states, not two. "Still loading" and "the request failed" both used
   // to render as an empty list under the sentence "No other list you can write
@@ -297,6 +319,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     inSecondaryList: linked ? true : undefined,
     canRemoveFromList: linked ? Boolean(listContext?.canRemoveFromList) : undefined,
     linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
+    canSharePublicly,
   }).filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0));
 
   const close = useCallback(() => setOpen(false), []);
@@ -438,6 +461,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
         case "share":
           close();
           onShare?.();
+          return;
+        case "public-link":
+          close();
+          setPublicLink(true);
           return;
         case "archive": {
           close();
@@ -663,6 +690,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
           onMoved={(targetId) => onMoved?.(targetId)}
         />
       ) : null}
+      {publicLink ? <TaskPublicLinkDialog itemId={item.id} open onClose={() => setPublicLink(false)} onChanged={setLinkOnHere} /> : null}
       {listContext?.canAddToList ? (
         <AddToListPicker
           open={addPicker}

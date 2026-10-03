@@ -118,6 +118,7 @@ model Organization {
   dashboards           Dashboard[]
   // Phase 5b: scheduled email reports of a dashboard or a saved view.
   reportSchedules      ReportSchedule[]
+  itemPublicLinks      ItemPublicLink[]
   integrationRequests  IntegrationRequest[]
   appSuggestions       AppSuggestion[]
   // 🆕 Phase 4 — universal Doc + version history. Polymorphic; can
@@ -4768,6 +4769,27 @@ model ItemListLink {
   @@index([boardId, position])
 }
 
+/// A public, view-only link to one task (access-model toggle 10, "Public
+/// links"): /share/task/<itemId>.<secret>. Its own table, never the task's
+/// metadata, which reaches every reader. One per task: off deletes the row,
+/// on again mints a new secret. prisma/sql/2026-10-04-item-public-link.sql.
+model ItemPublicLink {
+  itemId         String       @id
+  item           Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  secret         String
+  /// Who turned it on. No relation on purpose, like ItemListLink.addedById.
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  /// When the address stops working; null for never.
+  expiresAt      DateTime?
+  /// The page also shows the assignees' first names and the comments.
+  showPeople     Boolean      @default(false)
+
+  @@index([organizationId])
+}
+
 enum ViewType {
   TABLE
   KANBAN
@@ -4853,6 +4875,8 @@ model Item {
   // still `boardId`: a move changes the home, a link never does. Only a
   // top-level task carries links; its subtasks appear wherever it does.
   otherLists     ItemListLink[]
+  // Its public, view-only link, when someone turned one on (toggle 10).
+  publicLink     ItemPublicLink?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
