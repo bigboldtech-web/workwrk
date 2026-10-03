@@ -762,7 +762,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
                 placeholder="Untitled SOP"
                 aria-label="SOP title"
                 autoFocus={creating}
-                className="h-9 min-w-[4rem] flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none"
+                /* The input keeps a readable start of the title on a phone only
+                   while the save indicator is quiet. While a save is running or
+                   has failed, it gives way, so "Not saved" and Retry are never
+                   drawn under it (a failure must stay readable). */
+                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${saveState.status === "error" || saveState.status === "saving" ? "min-w-0" : "min-w-[4rem]"}`}
               />
             ) : (
               /* min-w keeps a readable start of the title on a phone; the full
