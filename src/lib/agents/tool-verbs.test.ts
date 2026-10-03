@@ -69,9 +69,9 @@ describe("toolOutcome", () => {
   it("a search cut short at its cap says how far it read, so a 0 never reads as none", () => {
     const cut = toolOutcome("search_tasks", { count: 0, tasks: [], partial: true, searched: 1000, note: "Only the 1,000 most recently updated tasks were searched." });
     expect(cut.searched).toBe(1000);
-    expect(toolOutcomeSentence("search_tasks", {}, cut).text).toBe("Searched the newest 1,000 tasks, found 0");
+    expect(toolOutcomeSentence("search_tasks", {}, cut).text).toBe("Searched the 1,000 most recently updated tasks, found 0");
     const forms = toolOutcome("list_forms", { forms: [{}, {}], partial: true, searched: 2000 });
-    expect(toolOutcomeSentence("list_forms", {}, forms).text).toBe("Looked up the newest 2,000 forms, found 2");
+    expect(toolOutcomeSentence("list_forms", {}, forms).text).toBe("Looked up the 2,000 most recently updated forms, found 2");
     expect(toolOutcome("search_tasks", { count: 3, tasks: [] }).searched).toBeNull();
   });
   it("keeps the plain sentence when nothing is known", () => {

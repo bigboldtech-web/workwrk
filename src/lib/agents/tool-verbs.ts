@@ -177,7 +177,8 @@ export function toolOutcomeSentence(name: string, input: Record<string, unknown>
   if (words.includes("your")) return { concept: base.concept, text: `${words.slice(0, words.indexOf("your")).join(" ")} ${outcome.count} of your ${outcome.count === 1 ? noun[0] : noun[1]}` };
   const phrase = words.length > 2 && words[1] === "up" ? `${lead} up` : lead;
   // A search cut short says so, so a capped "0" never reads as "none":
-  // "Searched the newest 1,000 tasks, found 0".
-  if (outcome.searched) return { concept: base.concept, text: `${phrase} the newest ${outcome.searched.toLocaleString("en-US")} ${noun[1]}, found ${outcome.count}` };
+  // "Searched the 1,000 most recently updated tasks, found 0" (the tools
+  // read in order of the last change, not of creation).
+  if (outcome.searched) return { concept: base.concept, text: `${phrase} the ${outcome.searched.toLocaleString("en-US")} most recently updated ${noun[1]}, found ${outcome.count}` };
   return { concept: base.concept, text: `${phrase} ${outcome.count} ${outcome.count === 1 ? noun[0] : noun[1]}` };
 }

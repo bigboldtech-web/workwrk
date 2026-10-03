@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   // The SOP read rule (the SOP list's and the SOP page's), for the target
   // and for every SOP that links to it.
-  const sopVisible = await sopVisibilityWhere({ user: { id: ctx.userId, accessLevel: ctx.accessLevel } });
+  const sopVisible = await sopVisibilityWhere({ user: { id: ctx.userId, organizationId: ctx.orgId, accessLevel: ctx.accessLevel } });
 
   // Only for a doc or SOP the person can open: the panel of one they cannot
   // is not theirs to read, and it would confirm the id and count its sources.
