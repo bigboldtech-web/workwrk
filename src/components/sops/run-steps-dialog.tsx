@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Dots } from "@/components/ui/dots";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
-import { readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
+import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 
 type Pick = { kind: "assigned"; userId: string; name: string; holders: number } | { kind: "nobody" | "unavailable"; notice: string; holders: number };
 interface PlanStep { stepId: string; n: number; title: string; createsTask: boolean; jobTitle: string | null; pick: Pick | null }
@@ -26,6 +26,9 @@ interface Plan { published: boolean; rule: string; defaultBoard: { id: string; n
 interface RunTask { stepId: string; n: number; itemId: string; title: string; assigneeId: string | null; assigneeName: string | null; notice: string | null; existing: boolean }
 
 const FIELD = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink focus:outline-none focus-visible:border-brand";
+
+/** The List picker's sections: each List under its Space, as every other List picker shows them. */
+type ListGroup = { key: string; label: string; lists: Array<{ id: string; name: string }> };
 
 function newRunId(): string {
   return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -35,7 +38,7 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
   const { toast } = useOsToast();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [lists, setLists] = useState<Array<{ id: string; name: string }>>([]);
+  const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [boardId, setBoardId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,15 +70,27 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
       if (!live) return;
       if (!p.ok) { setPlanError(p.error || "Couldn't read the steps."); return; }
       setPlan(p.data);
-      const rows = l.ok && Array.isArray(l.data?.boards) ? l.data.boards.map((b) => ({ id: b.id, name: b.name })) : [];
-      const withDefault = p.data.defaultBoard && !rows.some((r) => r.id === p.data.defaultBoard!.id) ? [p.data.defaultBoard, ...rows] : rows;
-      setLists(withDefault);
+      // Grouped under their Spaces (groupReadableLists, the same sections the
+      // other List pickers use): a template applied for a second team makes a
+      // second "Onboarding" List, and a bare name cannot say which team's List
+      // the tasks land on. The SOP's own List leads in its own section when it
+      // is not among the Lists the viewer may add to (the server still decides).
+      const res: ReadableListsResponse = l.ok && Array.isArray(l.data?.boards)
+        ? { boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], truncated: !!l.data.truncated }
+        : { boards: [], spaces: [], truncated: false };
+      const groups: ListGroup[] = groupReadableLists(res).map((g) => ({ key: g.key, label: g.label, lists: g.lists.map((b) => ({ id: b.id, name: b.name })) }));
+      const def = p.data.defaultBoard;
+      setListGroups(def && !res.boards.some((r) => r.id === def.id) ? [{ key: "sop-default", label: "This SOP's List", lists: [def] }, ...groups] : groups);
       setBoardId((cur) => cur || p.data.defaultBoard?.id || "");
     })();
     return () => { live = false; };
   }, [open, sop.id, attempt]);
 
   const spawning = useMemo(() => (plan?.steps ?? []).filter((s) => s.createsTask), [plan]);
+  // A closed select shows only the List's name, so the chosen List's Space is
+  // said under it: two teams' "Onboarding" Lists read the same otherwise.
+  const chosenGroup = listGroups.find((g) => g.lists.some((b) => b.id === boardId)) ?? null;
+  const chosenWhere = !chosenGroup || chosenGroup.key === "sop-default" ? null : chosenGroup.key.startsWith("space:") ? `In the ${chosenGroup.label} Space` : chosenGroup.label;
 
   async function run() {
     if (busy || !boardId || spawning.length === 0) return;
@@ -146,9 +161,14 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
               <span className="text-sm font-medium text-ink-2">List</span>
               <select value={boardId} onChange={(e) => setBoardId(e.target.value)} className={FIELD} aria-label="List the tasks go on">
                 <option value="">Choose a List</option>
-                {lists.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {listGroups.map((g) => (
+                  <optgroup key={g.key} label={g.label}>
+                    {g.lists.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </optgroup>
+                ))}
               </select>
-              {lists.length === 0 ? <span className="text-xs text-ink-2">There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP.</span> : null}
+              {chosenWhere ? <span className="text-xs text-ink-2">{chosenWhere}</span> : null}
+              {listGroups.length === 0 ? <span className="text-xs text-ink-2">There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP.</span> : null}
             </label>
             {error ? (
               <p className="text-sm text-danger-text" role="alert">{error}</p>
