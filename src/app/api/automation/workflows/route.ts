@@ -272,12 +272,12 @@ export async function POST(req: NextRequest) {
   const submitted = readScope({ scope: parsed.data.definition?.scope });
   const none = { listIds: [], folderIds: [], spaceIds: [] };
   const restored = restoreHiddenScope({ stored: none, submitted, hidden: none, readable: await scopeReadable(ctx.viewer, [submitted]), everywhere: parsed.data.definition?.everywhere ?? false });
-  if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where" }, { status: 400 });
+  if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where", issues: { section: "where" } }, { status: 400 });
   const definition = await definitionWithScopeInOrg(ctx.orgId, definitionForSave({ ...(parsed.data.definition ?? {}), scope: restored.scope }));
   const triggerEvent = parsed.data.triggerEvent ?? (typeof definition.trigger === "string" ? definition.trigger : null);
   if (triggerEvent) {
     const problem = await triggerProblem(ctx, triggerEvent);
-    if (problem) return NextResponse.json({ error: problem, section: "when" }, { status: 400 });
+    if (problem) return NextResponse.json({ error: problem, section: "when", issues: { section: "when" } }, { status: 400 });
     definition.trigger = triggerEvent;
   }
 

@@ -77,6 +77,7 @@ import {
   type ActionRow,
   type CondRow,
   type Draft,
+  type DraftScope,
   type PublishProblems,
 } from "@/lib/automation/builder-state";
 import { dateArrivesWords, scheduleWords } from "@/lib/automation/schedule";
@@ -434,6 +435,15 @@ export default function AutomationBuilderPage() {
   const [baseline, setBaseline] = useState<string>("");
   const [people, setPeople] = useState<PersonRef[]>([]);
   const [peopleQuery, setPeopleQuery] = useState("");
+  // People arrive from three reads (the first page, a search, the ones the
+  // draft already names), merged by id and kept in name order.
+  const mergePeople = useCallback((got: PersonRef[]) => {
+    setPeople((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      for (const p of got) byId.set(p.id, p);
+      return [...byId.values()].sort((a, b) => personName(a).localeCompare(personName(b)));
+    });
+  }, []);
   const [places, setPlaces] = useState<Places | null>(null);
   const [canCreate, setCanCreate] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -481,8 +491,12 @@ export default function AutomationBuilderPage() {
   // Picker sources, non-blocking.
   useEffect(() => {
     let alive = true;
-    void apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=100", { cache: "no-store" }).then((r) => {
-      if (alive && r.ok && Array.isArray(r.data.data)) setPeople(r.data.data);
+    // The whole company, as every people picker reads it (/api/people/pick),
+    // not /api/users, which answers anybody below an org-wide level with their
+    // own report tree: a Member could pick only themselves as a recipient, and
+    // every colleague already chosen read as "Someone no longer here".
+    void apiFetch<{ people: PersonRef[] }>("/api/people/pick?includeSelf=1&limit=50", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
     });
     void apiFetch<Places>("/api/automation/places", { cache: "no-store" }).then((r) => {
       if (alive && r.ok) setPlaces(r.data);
@@ -495,7 +509,7 @@ export default function AutomationBuilderPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [mergePeople]);
 
   // This page never autosaves, so the shell's offline strip must not say it will.
   useEffect(() => {
@@ -528,6 +542,45 @@ export default function AutomationBuilderPage() {
   const actionByKey = useMemo(() => new Map(catalog.actions.map((a) => [a.key, a])), [catalog.actions]);
   const trigger: CatalogTrigger | undefined = draft?.trigger ? triggerByKey.get(draft.trigger) : undefined;
 
+  // The people the draft already names (a recipient, a condition's person),
+  // looked up by id once each, so one outside the first page reads by name.
+  // An id the lookup does not return is someone no longer here.
+  const chosenPeopleKey = useMemo(() => {
+    if (!draft) return "";
+    const ids = new Set<string>();
+    const isPerson = (v: unknown): v is string => typeof v === "string" && v.length > 0 && !v.includes("@") && !USER_SPECIALS.some((x) => x.value === v);
+    for (const a of draft.actions) {
+      for (const p of (a.key ? actionByKey.get(a.key)?.params : undefined) ?? []) if (p.type === "user" && isPerson(a.params[p.key])) ids.add(a.params[p.key] as string);
+    }
+    for (const c of draft.conditions) {
+      const f = (trigger?.fields ?? []).find((x) => x.key === c.field);
+      if (valueKindFor(f?.type, c.operator) === "user" && isPerson(c.value)) ids.add(c.value);
+    }
+    return [...ids].sort().join(",");
+  }, [draft, actionByKey, trigger]);
+  const askedPeople = useRef(new Set<string>());
+  useEffect(() => {
+    const missing = chosenPeopleKey.split(",").filter((x) => x && !askedPeople.current.has(x));
+    if (missing.length === 0) return;
+    for (const x of missing) askedPeople.current.add(x);
+    void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?ids=${missing.slice(0, 50).map(encodeURIComponent).join(",")}`, { cache: "no-store" }).then((r) => {
+      if (r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
+    });
+  }, [chosenPeopleKey, mergePeople]);
+
+  // Typing in a person picker searches the whole company, not only the
+  // first page already loaded.
+  useEffect(() => {
+    const q = peopleQuery.trim();
+    if (!q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?includeSelf=1&limit=20&q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok && Array.isArray(r.data.people)) mergePeople(r.data.people);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [peopleQuery, mergePeople]);
+
   const update = useCallback((patch: Partial<Draft> | ((d: Draft) => Draft)) => {
     setDraft((d) => (d ? (typeof patch === "function" ? patch(d) : { ...d, ...patch }) : d));
   }, []);
@@ -547,13 +600,25 @@ export default function AutomationBuilderPage() {
     const r = await apiFetch<{ workflow: Partial<ApiWorkflow> }>(`/api/automation/workflows/${wf.id}`, { method: "PUT", json: body });
     setSaving(false);
     if (!r.ok) {
-      // The form stays dirty and the guard stays armed.
-      toast(r.status === 401 ? "Not saved. Sign in again; your changes are still here." : "Not saved", {
+      // The form stays dirty and the guard stays armed. A refusal the server
+      // explains for one section (where it runs, what starts it) is shown in
+      // that section; repeating the same save would be refused again, so it
+      // offers no Try again. Neither does any other refusal with a reason; a
+      // dropped connection, a timeout or a server error does.
+      const section = r.issues && typeof r.issues === "object" ? (r.issues as { section?: unknown }).section : undefined;
+      if (r.status === 400 && (section === "where" || section === "when")) {
+        setProblems((p) => ({ conditions: {}, actions: {}, ...(p ?? {}), [section]: r.error }));
+        toast("Not saved. See what is marked.", { tone: "danger" });
+        return false;
+      }
+      const retryable = r.status === 0 || r.status === 401 || r.status === 408 || r.status === 429 || r.status >= 500;
+      toast(r.status === 401 ? "Not saved. Sign in again; your changes are still here." : retryable ? "Not saved" : `Not saved. ${r.error}`, {
         tone: "danger",
-        action: { label: "Try again", onClick: () => saveAgain.current() },
+        ...(retryable ? { action: { label: "Try again", onClick: () => saveAgain.current() } } : {}),
       });
       return false;
     }
+    setProblems((p) => (p?.where ? { ...p, where: undefined } : p));
     setBaseline(draftSnapshot(draft));
     // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
     setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: r.data.workflow?.scopeHidden ?? prev.scopeHidden } : prev));
@@ -1031,8 +1096,17 @@ export default function AutomationBuilderPage() {
   // Places this editor cannot open stay in the scope unless they choose
   // Everywhere; they are never listed, named, counted or removable here.
   const keptHidden = Boolean(wf?.scopeHidden) && !draft.everywhere;
-  const everywhere = draft.everywhere || (draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0 && !keptHidden);
+  const shownEmpty = draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0;
+  const everywhere = draft.everywhere || (shownEmpty && !keptHidden);
   const whereMode: "everywhere" | "lists" = everywhere && !listsMode ? "everywhere" : "lists";
+  // A place added or removed restates the choice to match what the section
+  // shows: with every place gone and none kept that this editor cannot open,
+  // it is Everywhere (so undoing an edit by hand leaves nothing unsaved).
+  const withScope = (d: Draft, scope: DraftScope): Draft => ({
+    ...d,
+    scope,
+    everywhere: scope.listIds.length + scope.folderIds.length + scope.spaceIds.length === 0 ? !wf?.scopeHidden : false,
+  });
 
   const header = (
     <OsPageHeader
@@ -1358,7 +1432,7 @@ export default function AutomationBuilderPage() {
               ) : draft.actions.length === 0 ? <p className="m-0 text-sm text-ink-2">No actions yet.</p> : null}
             </Section>
 
-            <Section title="Where it runs" id="sec-where">
+            <Section title="Where it runs" id="sec-where" error={problems?.where}>
               {draft.trigger === "schedule.every" ? (
                 // A schedule fires for the workspace, not for a task, so it
                 // has no List to match: offering the choice would let someone
@@ -1389,35 +1463,43 @@ export default function AutomationBuilderPage() {
                   {draft.scope.spaceIds.map((sid) => (
                     <NeutralChip key={sid} className="h-8 px-2 text-sm">
                       Space: {places?.spaces.find((s) => s.id === sid)?.name ?? "one you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this Space" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, spaceIds: d.scope.spaceIds.filter((x) => x !== sid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this Space" onClick={() => update((d) => withScope(d, { ...d.scope, spaceIds: d.scope.spaceIds.filter((x) => x !== sid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {draft.scope.folderIds.map((fid) => (
                     <NeutralChip key={fid} className="h-8 px-2 text-sm">
                       Folder: {places?.folders.find((f) => f.id === fid)?.name ?? "one you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this Folder" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, folderIds: d.scope.folderIds.filter((x) => x !== fid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this Folder" onClick={() => update((d) => withScope(d, { ...d.scope, folderIds: d.scope.folderIds.filter((x) => x !== fid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {draft.scope.listIds.map((lid) => (
                     <NeutralChip key={lid} className="h-8 px-2 text-sm">
                       {listLabel(lid) ?? "A List you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this List" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, listIds: d.scope.listIds.filter((x) => x !== lid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this List" onClick={() => update((d) => withScope(d, { ...d.scope, listIds: d.scope.listIds.filter((x) => x !== lid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {!readOnly ? (
                     <Token label="Add Lists" placeholder="Add Lists" ariaLabel="Choose Lists" readOnly={false} multi width={300}
                       sections={[{ options: listOptions }]} selected={draft.scope.listIds}
-                      onSelect={(v) => update((d) => ({ ...d, everywhere: false, scope: { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] } }))} />
+                      onSelect={(v) => update((d) => withScope(d, { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] }))} />
                   ) : null}
                 </div>
               ) : null}
-              {whereMode === "lists" && keptHidden ? <p className="m-0 mt-2 text-sm text-ink-2">Some places you can&apos;t open are kept.</p> : null}
+              {whereMode === "lists" && keptHidden ? (
+                <p className="m-0 mt-2 text-sm text-ink-2">
+                  {shownEmpty
+                    ? readOnly ? "It runs only in places you can't open." : "It runs only in places you can't open. They are kept."
+                    : readOnly ? "It also runs in places you can't open." : "Some places you can't open are kept."}
+                </p>
+              ) : null}
               <p className="m-0 mt-2 text-sm text-ink-2">
                 {everywhere && listsMode
                   ? "Pick at least one List. With none picked, it runs everywhere."
                   : everywhere
                     ? "It runs for every task in the workspace that matches."
-                    : "It runs only for tasks in these places. Events with no List, like a KPI reading, never run it."}
+                    : shownEmpty
+                      ? "Events with no List, like a KPI reading, never run it."
+                      : "It runs only for tasks in these places. Events with no List, like a KPI reading, never run it."}
               </p>
               </>)}
             </Section>

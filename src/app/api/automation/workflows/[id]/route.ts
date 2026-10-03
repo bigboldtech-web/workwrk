@@ -135,7 +135,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (bodyTrigger) {
     // A trigger the draft already has is never refused (an older workflow stays editable).
     const problem = await triggerProblem(ctx, bodyTrigger, draftTrigger(existing.definition, existing.triggerEvent));
-    if (problem) return NextResponse.json({ error: problem, section: "when" }, { status: 400 });
+    if (problem) return NextResponse.json({ error: problem, section: "when", issues: { section: "when" } }, { status: 400 });
   }
 
   const data: Prisma.AutomationWorkflowUpdateInput = { updatedById: ctx.userId };
@@ -156,7 +156,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const readable = await scopeReadable(ctx.viewer, [stored, submitted]);
       const { hidden } = splitScope(stored, readable);
       const restored = restoreHiddenScope({ stored, submitted, hidden, readable, everywhere: parsed.data.definition.everywhere });
-      if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where" }, { status: 400 });
+      if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where", issues: { section: "where" } }, { status: 400 });
       next = await definitionWithScopeInOrg(ctx.orgId, definitionForSave({ ...parsed.data.definition, scope: restored.scope }));
     } else {
       next = { ...((existing.definition as Record<string, unknown> | null) ?? {}) };

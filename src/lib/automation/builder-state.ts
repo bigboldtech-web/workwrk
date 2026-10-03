@@ -219,6 +219,8 @@ export function operatorsFor(fieldType: string | undefined): string[] {
 export interface PublishProblems {
   when?: string;
   then?: string;
+  /** A save the server refused for where it runs (too many places, a place the editor cannot open). */
+  where?: string;
   /** Keyed by CondRow id: a condition whose operator needs a value and has none. */
   conditions: Record<string, string>;
   actions: Record<string, string>;
