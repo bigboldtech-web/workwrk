@@ -56,6 +56,7 @@ import { BlockDragMenu, BlockDragMenuProvider } from "./blocknote-blocks/block-d
 import { currentOpenObject, useWorkPlacement } from "@/components/layout/os/work-placement";
 import { editorLinkHref } from "@/lib/nav/object-href";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
+import { pickUrl } from "@/lib/people-pick";
 
 // Schema = BlockNote defaults + our workspace-specific custom blocks +
 // custom inline content (mentions). Adding a new custom block is a two-line
@@ -225,9 +226,11 @@ function askAiSlashItem(onAskAI: () => void): DefaultReactSuggestionItem {
 
 // ───────── @-mention suggestion items ─────────
 //
-// Fetches people (/api/users) and pages (/api/docs) matching the query and
-// returns insert handlers that drop a `mention` inline-content pill at the
-// cursor. Both lists are capped so the menu stays snappy.
+// Fetches people matching the query from the whole workspace (/api/people/pick,
+// not /api/users, whose team scope let an Employee mention only themselves)
+// and returns insert handlers that drop a `mention` inline-content pill at
+// the cursor. The mention route tells a person only when they can open the
+// doc, so offering everyone names nothing to someone it is hidden from.
 type MentionRow = { id: string; label: string; href: string; mkind: "user" | "doc" };
 
 // "@" is for PEOPLE only — linking a page has its own docs-only flow (the
@@ -235,13 +238,13 @@ type MentionRow = { id: string; label: string; href: string; mkind: "user" | "do
 // it was asking for a name/email.
 async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   const q = query.trim();
-  const users = await fetch(`/api/users?scope=all&limit=8${q ? `&search=${encodeURIComponent(q)}` : ""}`)
+  const users = await fetch(pickUrl({ q, limit: 8 }))
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 
   const out: MentionRow[] = [];
-  const userList: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string }> =
-    users?.data ?? users?.users ?? [];
+  const userList: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null }> =
+    Array.isArray(users?.people) ? users.people : [];
   for (const u of userList.slice(0, 8)) {
     const name = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown";
     out.push({ id: u.id, label: name, href: `/people/${u.id}`, mkind: "user" });
