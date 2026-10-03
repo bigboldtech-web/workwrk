@@ -123,6 +123,8 @@ interface SopPayload {
 }
 
 type Snapshot = { title: string; description: string; content: Record<string, unknown> };
+/** What one save is asked to do beyond writing the content. */
+type FlushOpts = { keepalive?: boolean; publish?: { reacknowledge: boolean } };
 
 const AUTOSAVE_MS = 700;
 const KEEPALIVE_LIMIT = 60_000;
@@ -326,7 +328,16 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const [retrying, setRetrying] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const inFlightRef = useRef(false);
-  const queuedRef = useRef(false);
+  // A save asked for while one is in flight waits for the NEXT save's real
+  // result, with its options carried (Publish included). It used to answer
+  // true at once and run later as a plain save, so Publish could say
+  // "Published" over a Draft and Done could discard the local backup of
+  // words still on their way.
+  const queuedRef = useRef<{ opts: FlushOpts; waiters: Array<(ok: boolean) => void> } | null>(null);
+  // One number per edit session. Leaving or discarding starts a new one, and
+  // a retry, a queued save or a toast's Retry from an ended session sends
+  // nothing: a discarded edit is never written by a retry fired afterwards.
+  const sessionRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
@@ -349,9 +360,17 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const mountedAtRef = useRef(Date.now());
   const draftFromEarlier = !!draft.pending && Date.parse(draft.pending.at) < mountedAtRef.current;
 
-  const flush = useCallback(async (opts: { keepalive?: boolean; publish?: { reacknowledge: boolean } } = {}): Promise<boolean> => {
+  const flush = useCallback(async (opts: FlushOpts = {}): Promise<boolean> => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    if (inFlightRef.current) { queuedRef.current = true; return true; }
+    if (inFlightRef.current) {
+      return new Promise<boolean>((resolve) => {
+        const q = queuedRef.current ?? { opts: {}, waiters: [] };
+        q.opts = { keepalive: q.opts.keepalive || opts.keepalive, publish: opts.publish ?? q.opts.publish };
+        q.waiters.push(resolve);
+        queuedRef.current = q;
+      });
+    }
+    const gen = sessionRef.current;
     const snap = snapshotRef.current;
     const sent = serialRef.current;
     const id = sopIdRef.current;
@@ -406,20 +425,38 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       attemptRef.current += 1;
       if (delay !== null) {
         setRetrying(true);
-        retryRef.current = setTimeout(() => { retryRef.current = null; void flush(); }, delay);
+        retryRef.current = setTimeout(() => { retryRef.current = null; if (gen === sessionRef.current) void flush(); }, delay);
       } else {
         setRetrying(false);
         attemptRef.current = 0;
         const reason = fatal && e instanceof Error ? e.message : "Couldn't save. Check your connection and keep this tab open.";
-        toast(id ? reason : `Couldn't create the SOP. ${reason}`, { tone: "danger", action: { label: "Retry", onClick: () => void flush() } });
+        toast(id ? reason : `Couldn't create the SOP. ${reason}`, { tone: "danger", action: { label: "Retry", onClick: () => { if (gen === sessionRef.current) void flush(); } } });
       }
       return false;
     } finally {
       inFlightRef.current = false;
       setSaving(false);
-      if (queuedRef.current) { queuedRef.current = false; void flush(); }
+      const q = queuedRef.current;
+      if (q) {
+        queuedRef.current = null;
+        if (gen === sessionRef.current) void flush(q.opts).then((ok) => q.waiters.forEach((w) => w(ok)));
+        else q.waiters.forEach((w) => w(false));
+      }
     }
   }, [kind, draft, toast, bumpRowVersion]);
+
+  /** Ends the edit session: nothing it scheduled may send, and no failure carries into the next one. */
+  const endSaveSession = useCallback(() => {
+    sessionRef.current += 1;
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (retryRef.current) { clearTimeout(retryRef.current); retryRef.current = null; }
+    const q = queuedRef.current;
+    queuedRef.current = null;
+    q?.waiters.forEach((w) => w(false));
+    attemptRef.current = 0;
+    setFailed(false);
+    setRetrying(false);
+  }, []);
 
   /** Every change in edit mode: mirror to the local draft and, on a draft, queue the autosave. */
   const queueSave = useCallback(() => {
@@ -482,11 +519,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   /* ── actions ── */
   const enterEdit = useCallback(() => {
     if (!canEdit || !sop) return;
+    endSaveSession();
     baselinePendingRef.current = true;
     hydrate(sop);
     setEditing(true);
     router.replace(`${workSelf ?? `/sops/${sop.id}`}?edit=1`);
-  }, [canEdit, sop, hydrate, router, workSelf]);
+  }, [canEdit, sop, hydrate, router, workSelf, endSaveSession]);
 
   const leaveEdit = useCallback(async (opts: { discard?: boolean } = {}) => {
     if (!sop) {
@@ -508,13 +546,13 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
         if (!ok) return;
       }
     }
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    endSaveSession();
     draft.discard();
     setEditing(false);
     const fresh = await load();
     if (fresh) { baselinePendingRef.current = true; hydrate(fresh); }
     router.replace(workSelf ?? `/sops/${sop.id}`);
-  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething, workSelf]);
+  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething, workSelf, endSaveSession]);
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [reack, setReack] = useState(false);
