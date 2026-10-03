@@ -123,6 +123,8 @@ interface ApiWorkflow {
   definition: unknown;
   /** Places this viewer cannot open are kept in the scope (never which or how many). */
   scopeHidden?: boolean;
+  /** Why: some exist and this viewer cannot open them, some are in Trash or deleted. */
+  scopeKept?: { cannotOpen: boolean; gone: boolean };
   /** The draft's fingerprint when it was read; a save sends it back so it never replaces someone else's newer save unasked. */
   revision?: string;
   versions: ApiVersion[];
@@ -712,7 +714,7 @@ export default function AutomationBuilderPage() {
     setBaseline(draftSnapshot(draft));
     // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
     const saved = r.data.workflow;
-    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: saved?.scopeHidden ?? prev.scopeHidden, revision: saved?.revision ?? prev.revision } : prev));
+    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: saved?.scopeHidden ?? prev.scopeHidden, scopeKept: saved?.scopeKept ?? prev.scopeKept, revision: saved?.revision ?? prev.revision } : prev));
     notifyAiChatsChanged();
     if (!opts.quiet) toast("Draft saved");
     return true;
@@ -1586,12 +1588,15 @@ export default function AutomationBuilderPage() {
                   ) : null}
                 </div>
               ) : null}
-              {whereMode === "lists" && keptHidden ? (
+              {whereMode === "lists" && keptHidden && (wf.scopeKept?.cannotOpen ?? true) ? (
                 <p className="m-0 mt-2 text-sm text-ink-2">
-                  {shownEmpty
+                  {shownEmpty && !wf.scopeKept?.gone
                     ? readOnly ? "It runs only in places you can't open." : "It runs only in places you can't open. They are kept."
                     : readOnly ? "It also runs in places you can't open." : "Some places you can't open are kept."}
                 </p>
+              ) : null}
+              {whereMode === "lists" && keptHidden && wf.scopeKept?.gone ? (
+                <p className="m-0 mt-2 text-sm text-ink-2">Some places it runs in are in Trash or were deleted, so it does not run there now.</p>
               ) : null}
               <p className="m-0 mt-2 text-sm text-ink-2">
                 {everywhere && listsMode

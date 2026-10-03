@@ -93,6 +93,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ...workflow,
         definition: forViewer.definition,
         scopeHidden: forViewer.scopeHidden,
+        scopeKept: forViewer.scopeKept,
         revision: draftRevision(workflow),
         // The draft trigger the builder edits; `liveTrigger` is what runs.
         triggerEvent: trigger,
@@ -193,7 +194,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!workflow) return staleDraft();
   // Answered as the builder reads it, so the hidden places never reach the page.
   const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
-  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
+  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, scopeKept: forViewer.scopeKept, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
 }
 
 /** Someone else saved the draft after this editor loaded it: nothing is written. */
