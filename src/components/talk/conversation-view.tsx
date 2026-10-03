@@ -89,7 +89,7 @@ type ConversationMeta = PanelConversation & {
   role: TalkRole;
   joinable?: boolean;
   memberCount?: number;
-  owner?: { id: string; name: string } | null;
+  owner?: { id: string; name: string; canRestore?: boolean } | null;
   activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
 };
 
@@ -641,7 +641,10 @@ export function ConversationView({
       const res = await fetch(`/api/conversations/${id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        // The optimistic row's id is the message's key: a Retry (or a
+        // keepalive send that landed while this tab thought it had failed)
+        // is answered with the first send's message, never a second copy.
+        body: JSON.stringify({ ...payload, clientId: tempId }),
         // keepalive so a send survives the tab being closed mid-flight: a
         // message typed and sent is never lost to a navigation.
         keepalive: true,
@@ -1246,7 +1249,8 @@ export function ConversationView({
   if (meta.role === "none") return null;
 
   const others = meta.members.filter((m) => m.userId !== meId);
-  const banner = readOnlyReason(meta, role, meta.owner?.name ?? null);
+  // The owner is named only while they can restore it (in a private channel, still in it; not gone).
+  const banner = readOnlyReason(meta, role, meta.owner && meta.owner.canRestore !== false ? meta.owner.name : null);
   // The other person's title and department, for the DM start-of-history
   // block. Either half may be missing; the line is dropped when both are.
   const dmOther = meta.type === "DM" ? others[0]?.user : undefined;

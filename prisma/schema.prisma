@@ -6038,6 +6038,12 @@ model ConversationMessage {
   parentId       String?
   /// Reactions, attachments, call cards ({ kind: "call" }).
   metadata       Json?
+  /// The sender's key for one composed message: a retried send with the
+  /// same key answers the message the first send made, never a second.
+  /// Unique per conversation and author where set, by a PARTIAL unique index
+  /// (prisma/sql/2026-10-03-message-client-id.sql), so it is not declared
+  /// as @@unique here.
+  clientId       String?
 
   @@index([conversationId, createdAt])
   @@index([conversationId, updatedAt])

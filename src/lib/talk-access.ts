@@ -159,6 +159,19 @@ export function canEditTopic(c: TalkConversationFacts, role: TalkRole): boolean 
   return atLeast(role, "full");
 }
 
+/**
+ * Archive or Restore a channel as an Owner or Admin from Browse channels ›
+ * All channels (spec-talk section 1, the private channel row: "may Archive
+ * it (org.archive_channel, audited), never read it"): any channel but
+ * #general, private ones included. This is not a role and reads nothing:
+ * talkRole never sees it, so a private channel still answers 404 to every
+ * other request an Owner makes of it.
+ */
+export function canAdminArchive(c: Pick<TalkConversationFacts, "type" | "name">, orgRole: TalkOrgRole): boolean {
+  if (c.type !== "CHANNEL" || isGeneralChannel(c)) return false;
+  return orgRole === "OWNER" || orgRole === "ADMIN";
+}
+
 /** Archive. Full only, channels except #general. Restore is the same right. */
 export function canArchive(c: TalkConversationFacts, role: TalkRole): boolean {
   if (c.type !== "CHANNEL") return false;

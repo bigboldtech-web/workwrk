@@ -14,23 +14,17 @@
 // the miss reads as "absent" and absent means ON. The keys are declared here,
 // the default is declared here, and every reader goes through one function.
 //
-// WHAT IS WIRED TODAY, and what is not. The two fan-outs read these keys:
-// src/app/api/conversations/[id]/messages/route.ts and
-// src/app/api/announcements/route.ts both call inboxRecordOf + inboxRowEnabled
-// before they write an Inbox row. The WRITER is still missing: nothing renders
-// a switch for dm, channel, calls or announcements, so no person has yet
-// written one of these keys and both fan-outs currently keep everybody.
-// Nothing regressed, these four rows never existed before this module, but the
-// feature is not finished until the control ships.
-//
-// WHERE THE CONTROL LANDS: the Inbox section of
-// src/app/(dashboard)/account/notifications/page.tsx, as four more entries in
-// its INBOX_ROWS list. That page already round-trips arbitrary keys through the
-// same loose `inbox` record its six older rows use, so the rows need no schema
-// change and no migration: map TALK_INBOX_KEYS through TALK_INBOX_LABELS and
-// mark all four live, since both fan-outs honour them the moment a false is
-// written. TALK_INBOX_DEFAULTS is there for that page to paint an unwritten
-// switch in its ON position without inventing a default of its own.
+// WHAT IS WIRED. The readers: src/app/api/conversations/[id]/messages/route.ts
+// (dm, channel, and calls for a call card, through inboxKeyForMessage) and
+// src/app/api/announcements/route.ts (announcements) both call inboxRecordOf +
+// inboxRowEnabled before they write an Inbox row. The writer: the Inbox
+// section of src/app/(dashboard)/account/notifications/page.tsx maps
+// TALK_INBOX_KEYS through TALK_INBOX_LABELS into four switches, on the same
+// loose `inbox` record its older rows use (no schema change, no migration).
+// TALK_INBOX_DEFAULTS is there for that page to paint an unwritten switch in
+// its ON position without inventing a default of its own. The ringing of an
+// incoming call is a separate setting, home.notifications.desktopRingCalls,
+// written on the same page and read by src/components/calls/incoming-call-watcher.tsx.
 //
 // DEFAULT ON, and the reason matters: a person who has never opened the
 // notifications page must not lose a notification. Only an explicit `false`

@@ -20,8 +20,11 @@ export async function GET() {
   const userId = gate.userId;
   const orgId = gate.organizationId;
 
+  // An archived conversation never rings: nobody in it may start or join a
+  // call (archive caps everyone at view), so a session still open in one
+  // is not offered.
   const memberships = await prisma.conversationMember.findMany({
-    where: { userId, hidden: false, notifyLevel: { not: "mute" } },
+    where: { userId, hidden: false, notifyLevel: { not: "mute" }, conversation: { archivedAt: null } },
     select: { conversationId: true },
   });
   const convoIds = memberships.map((m) => m.conversationId);
@@ -46,7 +49,7 @@ export async function GET() {
   if (live.length === 0) return NextResponse.json({ calls: [] });
 
   const convos = await prisma.conversation.findMany({
-    where: { id: { in: live.map((s) => s.conversationId).filter((x): x is string => !!x) } },
+    where: { id: { in: live.map((s) => s.conversationId).filter((x): x is string => !!x) }, archivedAt: null },
     select: {
       id: true,
       type: true,
@@ -56,7 +59,8 @@ export async function GET() {
   });
   const byId = new Map(convos.map((c) => [c.id, c]));
 
-  const calls = live.map((s) => {
+  // A conversation archived between the two reads is not offered either.
+  const calls = live.filter((s) => byId.has(s.conversationId as string)).map((s) => {
     const c = byId.get(s.conversationId as string);
     const roster = s.participants as RosterEntry[];
     const callerName = roster[0]?.name || "Someone";
