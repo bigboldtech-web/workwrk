@@ -823,7 +823,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // only. Unlocking also clears the legacy content flag so a doc locked the
   // old way opens again for everyone the server allows.
   async function toggleLock() {
-    const next = !lock;
+    // A page locked the old way (meta.locked, no lock row) reads as locked,
+    // so the first press unlocks it, as the checked row says it will.
+    const next = !(lock || meta.locked);
     const r = await apiFetch<{ lockedById: string | null; lockedAt: string | null }>(`/api/docs/${docId}/lock`, { method: "POST", json: { locked: next } });
     if (!r.ok) { toast(r.error || "Couldn't change the lock", { tone: "danger" }); return; }
     setLock(next ? { byId: r.data.lockedById ?? (me?.id ?? ""), byName: me ? [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || null : null, at: r.data.lockedAt } : null);
@@ -1560,7 +1562,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <VersionHistoryPanel
           docId={docId}
           onClose={() => setPanel(null)}
-          restoreBlocked={chromeEditable ? null : meta.locked ? "Unlock the page to restore a version." : readingMode ? "Leave reading mode to restore a version." : "You can no longer change this doc."}
+          restoreBlocked={chromeEditable ? null
+            : lostAccess ? "You can no longer change this doc."
+            : meta.locked ? (canManage ? "Unlock the page to restore a version." : "This page is locked. Ask someone with Full access to unlock it.")
+            : readingMode ? "Leave reading mode to restore a version."
+            : "You can no longer change this doc."}
           onRestore={(restoredBlocks, restoredMeta, restoredTitle) => {
             // Restoring an old version: drop the live BN doc and let the
             // canvas re-convert from the legacy blocks. restoreNonce bump

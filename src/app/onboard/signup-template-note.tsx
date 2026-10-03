@@ -81,19 +81,21 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
       const r = await fetch("/api/onboard/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(choice ? { choice } : {}),
+        // The piece the person was shown travels with the choice: one made
+        // in a stale tab over another piece is asked again, never run.
+        body: JSON.stringify(choice ? { choice, kind: tpl?.spaceInTrash?.kind ?? null } : {}),
       });
       const d = (await r.json().catch(() => null)) as { template?: TemplateView | null; error?: string } | null;
       if (d?.template) setTpl(d.template);
       if (!r.ok && d?.template?.status !== "applied") {
-        // Asked to choose is not a failure: the note then offers the choice.
-        // A choice that did not go through says why, beside both choices.
-        if (choice) setChoiceError(d?.error || "Couldn't do that. Try again.");
+        // A refusal says why. Being asked about a piece in Trash (the same
+        // one in a fresh tab, or the next one after a restore that worked)
+        // is a question, not a failure. Anything else did not finish.
+        if (d?.error) setChoiceError(d.error);
         else if (!d?.template?.spaceInTrash) setRetryFailed(true);
       }
     } catch {
-      if (choice) setChoiceError("Couldn't do that. Try again.");
-      else setRetryFailed(true);
+      setRetryFailed(true);
     } finally {
       setBusy(false);
     }
@@ -146,6 +148,7 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
     <AuthBanner tone="warning">
       <p>
         {tpl.name} did not finish setting up{retryFailed ? ", and the retry did not finish either" : ""}. Nothing it added is lost.{" "}
+        {choiceError ? <>{choiceError.replace(/\.?$/, ".")}{" "}</> : null}
         <button type="button" className="wa-link" onClick={() => void retry()} disabled={busy}>
           {busy ? <Dots variant="pending" label="Trying again" /> : "Try again"}
         </button>

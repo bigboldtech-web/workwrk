@@ -62,20 +62,27 @@ export async function POST(req: Request) {
   const g = await gate();
   if ("error" in g) return g.error;
   const orgId = g.viewer.organizationId;
-  const body = (await req.json().catch(() => ({}))) as { choice?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { choice?: unknown; kind?: unknown };
   const choice = body.choice === "restore" || body.choice === "fresh" ? body.choice : null;
+  // The piece the person was shown: a choice over another one (a stale tab)
+  // is asked again rather than run against what is in Trash now.
+  const shown: TrashedPieceKind | null = body.kind === "space" || body.kind === "list" || body.kind === "doc" ? body.kind : null;
   if (choice === "restore") {
     // Bring the piece back out of Trash (the Trash page's own restore and
     // its checks), then resume in it. A refusal says why, with both choices
     // still offered.
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
     const trashed = await trashedPieceOf(orgId, readSignupMarker(org?.settings));
+    if (trashed && shown && trashed.kind !== shown) return NextResponse.json({ template: await currentView(orgId) }, { status: 409, headers: noStore });
     if (trashed) {
       const res = await restoreTrashRow(g.viewer, trashed.rowId);
       if (!res.ok) return NextResponse.json({ template: await currentView(orgId), error: res.message }, { status: res.status, headers: noStore });
     }
   }
-  const marker = await retrySignupTemplate({ organizationId: orgId, userId: g.viewer.userId, fresh: choice === "fresh" });
+  const marker = await retrySignupTemplate({ organizationId: orgId, userId: g.viewer.userId, fresh: choice === "fresh", kind: choice === "fresh" ? shown : null });
   if (!marker) return NextResponse.json({ template: await currentView(orgId) }, { status: 409, headers: noStore });
-  return NextResponse.json({ template: view(marker, await trashedPieceOf(orgId, marker)) }, { status: marker.status === "applied" ? 200 : 500, headers: noStore });
+  const trashed = await trashedPieceOf(orgId, marker);
+  // Stopped at a piece in Trash is a question (409), not a fault (500).
+  const status = marker.status === "applied" ? 200 : trashed ? 409 : 500;
+  return NextResponse.json({ template: view(marker, trashed) }, { status, headers: noStore });
 }

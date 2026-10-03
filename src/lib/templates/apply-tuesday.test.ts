@@ -63,6 +63,15 @@ vi.mock("@/lib/prisma", () => ({
       // The conditional marker claims (apply-tuesday.ts claimMarker).
       $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         const sql = strings.join("?");
+        // repointSopSpawn: one key, only while it still names the old List.
+        if (sql.includes("jsonb_set(content, '{spawn,boardId}'")) {
+          const [boardId, sopId, , current] = values as string[];
+          const row = (db.sOP ?? []).find((r) => r.id === sopId && (r.content as { spawn?: { boardId?: string } })?.spawn?.boardId === current);
+          if (!row) return 0;
+          const c = row.content as { spawn: Record<string, unknown> };
+          row.content = { ...c, spawn: { ...c.spawn, boardId } };
+          return 1;
+        }
         const next = JSON.parse(String(values[0])) as { signupTemplate: Record<string, unknown> };
         const cur = settings.signupTemplate as { status?: string; startedAt?: string } | undefined;
         if (sql.includes("? 'signupTemplate'")) {
@@ -108,6 +117,7 @@ vi.mock("@/lib/template-center", () => ({
 }));
 vi.mock("@/lib/board-items", () => ({
   createBoardItem: async (input: { boardId: string; title: string; organizationId: string; metadata?: Record<string, unknown> }) => {
+    if (failOn === "item") throw new Error("boom in item");
     const row = { id: nid("item"), boardId: input.boardId, title: input.title, organizationId: input.organizationId, metadata: input.metadata ?? {} };
     (db.item ??= []).push(row);
     return row;
@@ -281,6 +291,27 @@ describe("applySignupTemplate", () => {
       expect(fresh?.status).toBe("applied");
       expect(count("space")).toBe(1);
       expect(count("board")).toBe(2);
+    });
+
+    it("Make a new List leaves the List in Trash, and a doc in Trash too still stops to ask", async () => {
+      failOn = "item";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      db.board[0].archivedAt = new Date();
+      db.doc[0].archivedAt = new Date();
+      expect((await retrySignupTemplate({ organizationId: ORG, userId: USER }))?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ error: "list_in_trash" });
+      const next = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true, kind: "list" });
+      expect(next?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ error: "doc_in_trash", trash: { kind: "doc" } });
+      expect(count("board")).toBe(2);
+      expect(count("doc")).toBe(1);
+    });
+
+    it("a stale Make a new List, when the whole Space is in Trash now, is asked again rather than run", async () => {
+      await failThenTrash();
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true, kind: "list" })).toBeNull();
+      expect(count("space")).toBe(0);
     });
 
     it("once restored, Try again finishes in that same Space", async () => {
