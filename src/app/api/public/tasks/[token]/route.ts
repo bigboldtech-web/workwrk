@@ -127,8 +127,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       comments: comments
         .map((c) => ({ author: (c.authorId && firstName.get(c.authorId)) || "Someone", text: markdownOrText(c.body).slice(0, 10_000), at: c.createdAt.toISOString() }))
         .filter((c) => c.text),
-      // How many there are, so the page can say when it shows only the latest.
+      // How many there are, so the page can say when it shows only the
+      // latest: only when the window really cut some off.
       commentsTotal,
+      commentsMore: latest.length === COMMENT_CAP && commentsTotal > COMMENT_CAP,
       updatedAt: item.updatedAt.toISOString(),
       // Dates read as the workspace reads them: its time zone and formats.
       locale: (() => {

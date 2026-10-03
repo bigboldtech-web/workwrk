@@ -43,6 +43,7 @@ type ShareData = {
   assignees: string[];
   comments?: Array<{ author: string; text: string; at: string }>;
   commentsTotal?: number;
+  commentsMore?: boolean;
   updatedAt: string;
   locale?: { timezone: string; dateFormat: string; timeFormat: string } | null;
   org?: { name: string; logo: string | null } | null;
@@ -62,6 +63,11 @@ function StatusPill({ status }: { status: StatusView }) {
 }
 
 type PageLocale = { timezone?: string; dateFormat?: string; timeFormat?: string } | null | undefined;
+
+/** The workspace's time zone and formats, for every date on the page. */
+function pagePrefs(locale: PageLocale): Parameters<typeof formatDate>[1] {
+  return (locale ?? null) as Parameters<typeof formatDate>[1];
+}
 
 /**
  * A start or due date as the task page writes it, in the workspace's time
@@ -131,7 +137,7 @@ export default function PublicTaskPage() {
           <article className="os-prose-col px-6 pb-16 pt-6">
             <h1 className="text-xl font-semibold text-ink [overflow-wrap:anywhere]">{data.title || "Untitled task"}</h1>
             <p className="mt-1 text-xs font-medium text-ink-2">
-              Shared read-only · <span title={formatDateTitle(data.updatedAt)}>Updated {formatDate(data.updatedAt)}</span>
+              Shared read-only · <span title={formatDateTitle(data.updatedAt, pagePrefs(data.locale))}>Updated {formatDate(data.updatedAt, pagePrefs(data.locale))}</span>
             </p>
 
             <dl className="mt-5 flex flex-col gap-2.5">
@@ -206,16 +212,16 @@ export default function PublicTaskPage() {
             {data.comments && data.comments.length > 0 ? (
               <section className="mt-7">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Comments</h2>
-                {data.commentsTotal && data.commentsTotal > data.comments.length ? (
+                {data.commentsMore ? (
                   <p className="mb-3 text-xs text-ink-2">
-                    Showing the latest {data.comments.length} of {data.commentsTotal} comments.
+                    Showing the latest 200 of {data.commentsTotal} comments.
                   </p>
                 ) : null}
                 <ol className="flex flex-col gap-4">
                   {data.comments.map((c, i) => (
                     <li key={i} className="min-w-0">
                       <p className="text-xs text-ink-2">
-                        <span className="font-semibold text-ink">{c.author}</span> · <span title={formatDateTitle(c.at)}>{formatDate(c.at)}</span>
+                        <span className="font-semibold text-ink">{c.author}</span> · <span title={formatDateTitle(c.at, pagePrefs(data.locale))}>{formatDate(c.at, pagePrefs(data.locale))}</span>
                       </p>
                       <MarkdownLite source={c.text} className="mt-1 text-base leading-relaxed text-ink [overflow-wrap:anywhere]" />
                     </li>

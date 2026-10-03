@@ -23,6 +23,7 @@ import { NextResponse } from "next/server";
 import { gateItem, itemCtx, itemServerError } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
 import { orgPublicLinksTurnedOn } from "@/lib/public-links";
+import { isSystemItemType } from "@/lib/system-items";
 import {
   TASK_SHARE_PATH,
   changeTaskLink,
@@ -56,7 +57,9 @@ async function standing(id: string, c: Ctx) {
   ]);
   const allowed = orgPublicLinksTurnedOn(org?.settings);
   const inTrash: InTrash = item.archivedAt ? "task" : place.inTrash ? "place" : null;
-  return { item, allowed, canManage, personal: place.personal, inTrash } as const;
+  // A meeting's own Item (system-items.ts) is plumbing: never shared publicly.
+  const system = isSystemItemType(item.itemType);
+  return { item, allowed, canManage, personal: place.personal, inTrash, system } as const;
 }
 
 type Standing = Exclude<Awaited<ReturnType<typeof standing>>, { error: NextResponse }>;
@@ -69,8 +72,9 @@ function answer(s: Standing, link: TaskLinkRow | null) {
       canManage: s.canManage,
       // May it be turned on from here: the right, the switch, a live task in
       // a live place, and not a Personal List.
-      canTurnOn: s.canManage && s.allowed && !s.inTrash && !s.personal,
+      canTurnOn: s.canManage && s.allowed && !s.inTrash && !s.personal && !s.system,
       personal: s.personal,
+      system: s.system,
       inTrash: s.inTrash,
       on,
       // The address only for people who may share it, like a Doc's.
@@ -137,6 +141,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return refuse(409, "public_links_off", "Public links are turned off for this workspace. A workspace admin can turn them on in Settings, Access.");
     }
     if (s.personal) return refuse(409, "personal_list", "A task in a Personal List is yours alone, so it can't be shared publicly.");
+    if (s.system) return refuse(409, "system_item", "This belongs to a meeting, so it can't be shared publicly.");
     if (s.inTrash === "task") return refuse(409, "item_archived", "This task is in Trash, so it can't be shared.");
     if (s.inTrash === "place") return refuse(409, "place_archived", "This task's List, Folder or Space is in Trash, so it can't be shared.");
     const row = await turnOnTaskLink(s.item.id, c.organizationId, c.userId, {

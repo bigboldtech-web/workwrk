@@ -118,6 +118,11 @@ export function takeExportSlot(orgId: string, now = Date.now()): { release: () =
   };
 }
 
+/** Is an export of this workspace being written right now (this server's own slot)? */
+export function exportRunning(orgId: string): boolean {
+  return running.has(orgId);
+}
+
 // ── The export ───────────────────────────────────────────────────────
 
 export interface ExportSummary {

@@ -194,8 +194,10 @@ export async function changeTaskLink(itemId: string, organizationId: string, use
     };
     const same = (next.expiresAt?.getTime() ?? null) === (current.expiresAt?.getTime() ?? null) && next.showPeople === current.showPeople;
     if (same) return current;
-    // updateMany: a link turned off a moment ago is "not on", not an error.
-    const changed = await tx.itemPublicLink.updateMany({ where: { itemId }, data: next });
+    // updateMany on the link that was read: one turned off a moment ago (or
+    // off and on again, a new secret) is "not on", not an error and never
+    // the old address.
+    const changed = await tx.itemPublicLink.updateMany({ where: { itemId, secret: current.secret }, data: next });
     if (changed.count === 0) return null;
     await recordLink(tx, "changed", { itemId, organizationId, userId, settings: next });
     return { ...current, ...next };

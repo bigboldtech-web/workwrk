@@ -168,7 +168,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   const bootState = useContext(BootContext);
   const orgAdmin = bootState?.boot.viewer.orgRole === "OWNER" || bootState?.boot.viewer.orgRole === "ADMIN";
   const taskLinksOn = Boolean(bootState?.boot.org.taskPublicLinks);
-  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin || Boolean(listContext?.publicLinkOn));
+  // The dialog's own answer beats the host's older Lists answer.
+  const [linkOnHere, setLinkOnHere] = useState<boolean | null>(null);
+  const linkOn = linkOnHere ?? Boolean(listContext?.publicLinkOn);
+  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin || linkOn);
   const openSidekick = shell?.openSidekick;
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);
@@ -687,7 +690,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
           onMoved={(targetId) => onMoved?.(targetId)}
         />
       ) : null}
-      {publicLink ? <TaskPublicLinkDialog itemId={item.id} open onClose={() => setPublicLink(false)} /> : null}
+      {publicLink ? <TaskPublicLinkDialog itemId={item.id} open onClose={() => setPublicLink(false)} onChanged={setLinkOnHere} /> : null}
       {listContext?.canAddToList ? (
         <AddToListPicker
           open={addPicker}

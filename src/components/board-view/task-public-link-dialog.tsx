@@ -26,6 +26,7 @@ type LinkState = {
   canManage: boolean;
   canTurnOn: boolean;
   personal: boolean;
+  system?: boolean;
   inTrash: "task" | "place" | null;
   on: boolean;
   url: string | null;
@@ -48,7 +49,18 @@ function refusalText(d: unknown, fallback: string): string {
   return typeof message === "string" && message.trim() ? message : accessMessage(d, fallback);
 }
 
-export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string; open: boolean; onClose: () => void }) {
+export function TaskPublicLinkDialog({
+  itemId,
+  open,
+  onClose,
+  onChanged,
+}: {
+  itemId: string;
+  open: boolean;
+  onClose: () => void;
+  /** Whether the link is on, each time the server answers, so the host's menu row follows it. */
+  onChanged?: (on: boolean) => void;
+}) {
   const boot = useContext(BootContext)?.boot;
   const isAdmin = boot?.viewer.orgRole === "OWNER" || boot?.viewer.orgRole === "ADMIN";
   const [state, setState] = useState<LinkState | null>(null);
@@ -69,10 +81,11 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
         return;
       }
       setState(d as LinkState);
+      onChanged?.(Boolean((d as LinkState).on));
     } catch {
       setLoadError("Couldn't read this task's public link. Check your connection and try again.");
     }
-  }, [base]);
+  }, [base, onChanged]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,6 +111,7 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
         return;
       }
       setState(d as LinkState);
+      onChanged?.(Boolean((d as LinkState).on));
       setCopy("idle");
     } catch {
       setError("Couldn't save that. Check your connection and try again.");
@@ -126,7 +140,9 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
     ? null
     : !state.allowed
       ? "public_links_off"
-      : state.personal
+      : state.system
+        ? "This belongs to a meeting, so it can't be shared publicly."
+        : state.personal
         ? "This task is in your Personal List, which is yours alone, so it can't be shared publicly."
         : state.inTrash === "task"
           ? "This task is in Trash, so it can't be shared."

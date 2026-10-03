@@ -78,10 +78,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // The Public link row's facts: who may share the task publicly (a
     // subtask and a task in Trash included: a link must always be
     // withdrawable) and whether it has a link on.
-    const [canSharePublicly, publicLink] = await Promise.all([
-      mayShareTaskPublicly(c, { boardId: item.boardId, organizationId: item.organizationId }),
-      readTaskLink(item.id),
-    ]);
+    // A meeting's own Item (system-items.ts) is plumbing, never shared.
+    const [canSharePublicly, publicLink] = isSystemItemType(item.itemType)
+      ? [false, null]
+      : await Promise.all([
+          mayShareTaskPublicly(c, { boardId: item.boardId, organizationId: item.organizationId }),
+          readTaskLink(item.id),
+        ]);
 
     return NextResponse.json(
       {

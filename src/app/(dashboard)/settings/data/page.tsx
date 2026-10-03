@@ -92,6 +92,8 @@ type Summary = {
   legacy: { purchaseOrders: number; invoices: number };
   recentExports: { id: string; when: string; who: string; what: string; kind: string | null; status?: string | null }[];
   matrixRetired: { id: string; at: string } | null;
+  /** A workspace export is being written right now. Absent from an older server. */
+  exportRunning?: boolean;
   canPurge: boolean;
 };
 
@@ -219,7 +221,7 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
               label={row.title}
               helper={<>{row.desc}{last ? (
                 <span className="block">
-                  {exportLine(last)}
+                  {exportLine(last, row.key === "all" && Boolean(s?.exportRunning))}
                   <DateText value={last.when} style="relative" />
                 </span>
               ) : null}</>}
@@ -798,11 +800,9 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-/** A started export is running for the 30 minutes the server holds its slot; after that it did not finish. */
-const RUNNING_FOR_MS = 30 * 60_000;
-
-function exportLine(last: { who: string; when: string; status?: string | null }): string {
-  if (last.status === "started" && Date.now() - new Date(last.when).getTime() < RUNNING_FOR_MS) return `An export by ${last.who} is running, started `;
+/** The last export's line: running while the server is writing it, "did not finish" when it started and is no longer being written or stopped. */
+function exportLine(last: { who: string; when: string; status?: string | null }, running: boolean): string {
+  if (last.status === "started" && running) return `An export by ${last.who} is running, started `;
   if (last.status === "started" || last.status === "stopped") return `The last export by ${last.who} did not finish, `;
   return `Last exported by ${last.who}, `;
 }
