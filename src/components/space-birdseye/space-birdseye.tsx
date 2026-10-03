@@ -43,6 +43,7 @@ import { BirdseyeOverview, type CardActions } from "./birdseye-overview";
 import { BirdseyeFocus } from "./birdseye-focus";
 import { BirdseyeSkeleton } from "./birdseye-skeleton";
 import { useBirdseye, type ItemCreatedDetail, type ItemEventDetail } from "./use-birdseye";
+import type { StatusPick } from "@/lib/work/birdseye-linked";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -269,9 +270,10 @@ export function SpaceBirdseye({
   }, [pathname, basePath, refreshCard, loadSubtasks]);
 
   const onOpen = useCallback(
-    (id: string) => {
+    (id: string, listId?: string) => {
       lastOpened.current = id;
-      openTask(router, id);
+      // A linked task opens in the List it is shown in.
+      openTask(router, id, listId ? { listId } : undefined);
     },
     [router],
   );
@@ -290,7 +292,10 @@ export function SpaceBirdseye({
   }, [applyItemEvent, applyItemCreated]);
 
   const { changeStatus } = data;
-  const onChangeStatus = useCallback((card: BirdseyeCard, next: string) => void changeStatus(card, next), [changeStatus]);
+  const onChangeStatus = useCallback(
+    (card: BirdseyeCard, next: string, pick?: StatusPick) => void changeStatus(card, next, pick),
+    [changeStatus],
+  );
   const actions: CardActions = { now, onOpen, onChangeStatus, onLoadSubtasks: loadSubtasks };
 
   // ── Render ────────────────────────────────────────────────────────

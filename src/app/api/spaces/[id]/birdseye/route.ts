@@ -27,6 +27,7 @@ import { readListDefaults } from "@/lib/list-comfort";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { newTaskStatus, parseBirdseyeQuery, type BirdseyeBody, type BirdseyeList } from "@/lib/work/birdseye";
 import { loadFocus, loadFocusPage, loadListPage, loadOverview, type ListCounts, type LoaderList } from "@/lib/work/birdseye-server";
+import { linkedCardsFor, type LinkedList } from "@/lib/work/birdseye-linked.server";
 
 export const dynamic = "force-dynamic";
 
@@ -67,8 +68,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const filters = { q: query.q, hideClosed: query.hideClosed };
     const loaderLists: LoaderList[] = rows.map((r) => ({ id: r.id, statuses: getBoardStatuses(r) }));
     const byId = new Map(loaderLists.map((l) => [l.id, l]));
+    // The tasks linked into these Lists, through the List's own projection
+    // (the one place that decides a linked row), for the loader to merge.
+    const linkedLists: LinkedList[] = rows.map((r) => ({ id: r.id, statuses: byId.get(r.id)?.statuses ?? getBoardStatuses(r), canContribute: r.canContribute }));
+    const linkedFor = (only?: string) => linkedCardsFor(only ? linkedLists.filter((l) => l.id === only) : linkedLists, c, filters);
 
-    const summarize = (counts: Record<string, ListCounts>): BirdseyeList[] =>
+    const summarize = (counts: Record<string, ListCounts>, capped: ReadonlySet<string> = new Set()): BirdseyeList[] =>
       rows.map((r) => {
         const statuses = byId.get(r.id)?.statuses ?? getBoardStatuses(r);
         const own = counts[r.id];
@@ -83,12 +88,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           newTaskStatus: newTaskStatus(statuses, storedDefaultStatus(r.settings)),
           total: own?.total ?? 0,
           statusCounts: own?.statusCounts ?? {},
+          ...(capped.has(r.id) ? { linkedCapped: true } : {}),
         };
       });
 
     if (query.mode === "overview") {
-      const { counts, columns } = await loadOverview(loaderLists, filters, c.organizationId);
-      const body: BirdseyeBody = { mode: "overview", lists: summarize(counts), columns };
+      const linked = await linkedFor();
+      const { counts, columns } = await loadOverview(loaderLists, filters, c.organizationId, linked.byList);
+      const body: BirdseyeBody = { mode: "overview", lists: summarize(counts, linked.capped), columns };
       return answer(body);
     }
 
@@ -97,16 +104,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (!list) return answer({ error: "list_not_found" }, 404);
 
     if (query.mode === "list-page") {
-      const pageBody = await loadListPage(list, filters, query.cursor, c.organizationId);
+      const linked = await linkedFor(list.id);
+      const pageBody = await loadListPage(list, filters, query.cursor, c.organizationId, linked.byList.get(list.id));
       const body: BirdseyeBody = { mode: "list-page", boardId: list.id, ...pageBody };
       return answer(body);
     }
     if (query.mode === "focus") {
-      const { counts, columns } = await loadFocus(loaderLists, list, filters, c.organizationId);
-      const body: BirdseyeBody = { mode: "focus", lists: summarize(counts), focus: { boardId: list.id, columns } };
+      const linked = await linkedFor();
+      const { counts, columns } = await loadFocus(loaderLists, list, filters, c.organizationId, linked.byList);
+      const body: BirdseyeBody = { mode: "focus", lists: summarize(counts, linked.capped), focus: { boardId: list.id, columns } };
       return answer(body);
     }
-    const pageBody = await loadFocusPage(list, query.status, filters, query.cursor, c.organizationId);
+    const linked = await linkedFor(list.id);
+    const pageBody = await loadFocusPage(list, query.status, filters, query.cursor, c.organizationId, linked.byList.get(list.id));
     const body: BirdseyeBody = { mode: "focus-page", boardId: list.id, status: query.status, ...pageBody };
     return answer(body);
   } catch (err) {

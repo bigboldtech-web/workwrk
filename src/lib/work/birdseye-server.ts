@@ -23,10 +23,13 @@
 //   Pages resume from a keyset cursor, (column, position, id) in the
 //   overview and (position, id) in focus; the id breaks position ties.
 //
-// HOME ROWS ONLY. The List's own views read its home rows (tasks linked in
-// from other Lists are not drawn on any List canvas yet), so Bird's eye does
-// too; birdseye-server.contract.test.ts fails the day linked rows go live on
-// the canvas, until the union is added here.
+// HOME ROWS HERE, LINKED ROWS HANDED IN. The statements read a List's home
+// rows. The tasks linked into it from other Lists (Phase 5b) are built by
+// src/lib/work/birdseye-linked.server.ts through the List's own projection
+// and handed to these functions as cards with their column already decided;
+// they are merged into the counts and pages by the same (rank, position, id)
+// order the statements sort by, so a page boundary is the same wherever a
+// card came from. This file still names no link table and reads no access.
 //
 // WHAT IS ACCEPTED (enterprise scale, no schema change). Q1 and Q2 touch
 // every live top-level row of the readable Lists once, because the rank, the
@@ -47,12 +50,14 @@ import { prisma } from "@/lib/prisma";
 import type { StatusOption } from "@/lib/board-items-shared";
 import {
   BIRDSEYE_PAGE,
+  afterListCursor,
   bucketFor,
   closedValuesPresent,
   encodeBucketCursor,
   encodeListCursor,
   isClosedStatus,
   likePattern,
+  mergeCardPage,
   type BirdseyeCard,
   type BirdseyeColumn,
   type BirdseyeFocusColumn,
@@ -60,6 +65,14 @@ import {
   type BucketCursor,
   type ListCursor,
 } from "@/lib/work/birdseye";
+
+/** A card handed in from outside the statements (a linked task), with its column. */
+export interface ExtraCard extends BirdseyeCard {
+  bucket: string;
+}
+
+/** Cards by List, already filtered by the same search and Hide closed. */
+export type ExtraCards = ReadonlyMap<string, readonly ExtraCard[]>;
 
 export interface BirdseyeFilters {
   q: string;
@@ -187,7 +200,7 @@ function page<T>(rows: readonly T[]): { rows: T[]; more: boolean } {
 
 // ── Q1 ──────────────────────────────────────────────────────────────
 
-async function countLists(lists: readonly LoaderList[], filters: BirdseyeFilters, orgId: string): Promise<Record<string, ListCounts>> {
+async function countLists(lists: readonly LoaderList[], filters: BirdseyeFilters, orgId: string, extra?: ExtraCards): Promise<Record<string, ListCounts>> {
   const out: Record<string, ListCounts> = {};
   if (lists.length === 0) return out;
   const ids = lists.map((l) => l.id);
@@ -217,6 +230,10 @@ async function countLists(lists: readonly LoaderList[], filters: BirdseyeFilters
       statusCounts[bucket] = (statusCounts[bucket] ?? 0) + g.n;
       total += g.n;
     }
+    for (const card of extra?.get(list.id) ?? []) {
+      statusCounts[card.bucket] = (statusCounts[card.bucket] ?? 0) + 1;
+      total += 1;
+    }
     out[list.id] = { total, statusCounts, closed: closedValuesPresent(list.statuses, groups.map((g) => g.status)) };
   }
   return out;
@@ -229,9 +246,10 @@ export async function loadOverview(
   lists: readonly LoaderList[],
   filters: BirdseyeFilters,
   orgId: string,
+  extra?: ExtraCards,
 ): Promise<{ counts: Record<string, ListCounts>; columns: Record<string, BirdseyeColumn> }> {
   if (lists.length === 0) return { counts: {}, columns: {} };
-  const counts = await countLists(lists, filters, orgId);
+  const counts = await countLists(lists, filters, orgId, extra);
   const meta = lists.map((l) => ({ b: l.id, r: rankMap(l.statuses), c: counts[l.id]?.closed ?? [] }));
   const rows = await prisma.$queryRaw<CardRow[]>`
     SELECT x.*, ${subtasksOf(Prisma.sql`x`)} AS "subtaskCount"
@@ -258,8 +276,9 @@ export async function loadOverview(
   }
   const columns: Record<string, BirdseyeColumn> = {};
   for (const list of lists) {
-    const { rows: kept, more } = page(byList.get(list.id) ?? []);
-    const cards = kept.map((r) => toCard(r, people, Number(r.rank ?? 0)));
+    const home = byList.get(list.id) ?? [];
+    const homeCards = home.slice(0, LIMIT).map((r) => toCard(r, people, Number(r.rank ?? 0)));
+    const { cards, more } = mergeCardPage(homeCards.slice(0, BIRDSEYE_PAGE), home.length > BIRDSEYE_PAGE, extra?.get(list.id) ?? []);
     const last = cards[cards.length - 1];
     columns[list.id] = { cards, nextCursor: more && last ? encodeListCursor(last.rank, last.position, last.id) : null };
   }
@@ -272,6 +291,7 @@ export async function loadListPage(
   filters: BirdseyeFilters,
   cursor: ListCursor,
   orgId: string,
+  extra?: readonly ExtraCard[],
 ): Promise<{ cards: BirdseyeCard[]; nextCursor: string | null }> {
   // The closed values come from Q1, and only matter when they are hidden.
   const closed = filters.hideClosed ? ((await countLists([list], filters, orgId))[list.id]?.closed ?? []) : [];
@@ -293,8 +313,9 @@ export async function loadListPage(
     ) y
   `;
   const people = await peopleFor(rows, orgId);
-  const { rows: kept, more } = page(rows);
-  const cards = kept.map((r) => toCard(r, people, Number(r.rank ?? 0)));
+  const { rows: kept, more: homeMore } = page(rows);
+  const homeCards = kept.map((r) => toCard(r, people, Number(r.rank ?? 0)));
+  const { cards, more } = mergeCardPage(homeCards, homeMore, (extra ?? []).filter((c) => afterListCursor(c, cursor)));
   const last = cards[cards.length - 1];
   return { cards, nextCursor: more && last ? encodeListCursor(last.rank, last.position, last.id) : null };
 }
@@ -307,8 +328,9 @@ export async function loadFocus(
   focusList: LoaderList,
   filters: BirdseyeFilters,
   orgId: string,
+  extra?: ExtraCards,
 ): Promise<{ counts: Record<string, ListCounts>; columns: Record<string, BirdseyeFocusColumn> }> {
-  const counts = await countLists(lists.some((l) => l.id === focusList.id) ? lists : [...lists, focusList], filters, orgId);
+  const counts = await countLists(lists.some((l) => l.id === focusList.id) ? lists : [...lists, focusList], filters, orgId, extra);
   const own = counts[focusList.id] ?? { total: 0, statusCounts: {}, closed: [] };
   const declared = jsonParam(focusList.statuses.map((s) => s.value));
   const first = focusList.statuses[0]?.value ?? "";
@@ -339,9 +361,11 @@ export async function loadFocus(
     else byBucket.set(key, [r]);
   }
   const columns: Record<string, BirdseyeFocusColumn> = {};
+  const extraHere = extra?.get(focusList.id) ?? [];
   focusList.statuses.forEach((s, rank) => {
-    const { rows: kept, more } = page(byBucket.get(s.value) ?? []);
-    const cards = kept.map((r) => toCard(r, people, rank));
+    const { rows: kept, more: homeMore } = page(byBucket.get(s.value) ?? []);
+    const homeCards = kept.map((r) => toCard(r, people, rank));
+    const { cards, more } = mergeCardPage(homeCards, homeMore, extraHere.filter((c) => c.bucket === s.value).map((c) => ({ ...c, rank })));
     const last = cards[cards.length - 1];
     columns[s.value] = {
       cards,
@@ -359,6 +383,7 @@ export async function loadFocusPage(
   filters: BirdseyeFilters,
   cursor: BucketCursor,
   orgId: string,
+  extra?: readonly ExtraCard[],
 ): Promise<{ cards: BirdseyeCard[]; nextCursor: string | null }> {
   const closed = filters.hideClosed ? ((await countLists([list], filters, orgId))[list.id]?.closed ?? []) : [];
   const declared = jsonParam(list.statuses.map((s) => s.value));
@@ -382,8 +407,14 @@ export async function loadFocusPage(
     ) y
   `;
   const people = await peopleFor(rows, orgId);
-  const { rows: kept, more } = page(rows);
-  const cards = kept.map((r) => toCard(r, people, rank));
+  const { rows: kept, more: homeMore } = page(rows);
+  const homeCards = kept.map((r) => toCard(r, people, rank));
+  const after = (c: BirdseyeCard) => c.position > cursor.position || (c.position === cursor.position && c.id > cursor.id);
+  const { cards, more } = mergeCardPage(
+    homeCards,
+    homeMore,
+    (extra ?? []).filter((c) => c.bucket === bucketValue && after(c)).map((c) => ({ ...c, rank })),
+  );
   const last = cards[cards.length - 1];
   return { cards, nextCursor: more && last ? encodeBucketCursor(last.position, last.id) : null };
 }

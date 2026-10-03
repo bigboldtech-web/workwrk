@@ -27,7 +27,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { accessMessage } from "@/lib/access-message";
+import { boardStatusFor, homeStatusTarget, linkedStatusRefusal } from "@/lib/list-link-rows";
+import type { BoardItemRow } from "@/lib/board-items-shared";
 import { useOsToast } from "@/components/layout/os/toast";
+import { cardOf, columnForHomeValue, linkedCardFromRow, linkedRowOf, withHomeValue, type StatusPick } from "@/lib/work/birdseye-linked";
 import {
   applyStatusMove,
   bucketFor,
@@ -480,17 +483,60 @@ export function useBirdseye({
   // only while the card still shows the status the failure rolled it back to.
   // A person who picked another status since has moved on, and resending the
   // old target would overwrite their newer choice on the server.
-  const resendRef = useRef<(card: BirdseyeCard, next: string) => Promise<void>>(async () => {});
+  const resendRef = useRef<(card: BirdseyeCard, next: string, pick?: StatusPick) => Promise<void>>(async () => {});
+  // refreshCard is declared further down; a status write reaches it here.
+  const refreshRef = useRef<(id: string) => Promise<void>>(async () => {});
+  // Each card's latest write: an older answer never clears a newer mark or
+  // rolls back a newer pick.
+  const writeSeq = useRef(new Map<string, number>());
   const changeStatus = useCallback(
-    async (card: BirdseyeCard, next: string): Promise<void> => {
+    async (card: BirdseyeCard, next: string, pick?: StatusPick): Promise<void> => {
       const from = card.status;
-      if (from === next) return;
-      pending.current.set(card.id, next);
-      moveEverywhere(card, from, next);
-      // A later pick on the same card owns the pending mark; this write only
-      // clears its own.
+      const list = listById(card.boardId);
+      const statusesHere = list?.statuses ?? [];
+      // What is written, and the column the card lands in. A home row: the
+      // status is the column. A linked card is written in its HOME set: a
+      // column (a drop, or a pick from this List's statuses) maps to the home
+      // value the Board would write, or is refused with the Board's own
+      // sentence (nothing moves, nothing is saved); a status picked from its
+      // own home set, the Board's pill, is written as it is and lands where
+      // the Board places it.
+      let column = next;
+      let homeValue: string | null = null;
+      if (card.linked) {
+        if (pick?.home) {
+          if (next === card.linked.homeValue || !list) return;
+          homeValue = next;
+          column = columnForHomeValue(card, list, next) ?? from ?? next;
+        } else {
+          if (from === next) return;
+          const t = homeStatusTarget(linkedRowOf(card), next, statusesHere);
+          if (!t.ok) {
+            const label = statusesHere.find((st) => st.value === next)?.label ?? next;
+            toast(linkedStatusRefusal(linkedRowOf(card), label, t.reason), { tone: "danger" });
+            return;
+          }
+          homeValue = t.status;
+        }
+      } else if (from === next) {
+        return;
+      }
+      const wire: Record<string, unknown> = homeValue !== null ? { status: homeValue, contextBoardId: card.boardId } : { status: next };
+      const mine = (writeSeq.current.get(card.id) ?? 0) + 1;
+      writeSeq.current.set(card.id, mine);
+      const latest = () => writeSeq.current.get(card.id) === mine;
+      pending.current.set(card.id, column);
+      if (column !== from) moveEverywhere(card, from, column);
+      // The new home value shows at once (its picker, its reason line).
+      const before = card.linked;
+      if (before && homeValue !== null && list) {
+        const hv = homeValue;
+        const show = (c: BirdseyeCard) => withHomeValue(c, list, hv);
+        setOverview((prev) => mapCards(prev, card.id, show));
+        setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, card.id, show) } : prev));
+      }
       const settle = () => {
-        if (pending.current.get(card.id) === next) pending.current.delete(card.id);
+        if (latest()) pending.current.delete(card.id);
       };
       const resend = () => {
         const s = stateRef.current;
@@ -499,11 +545,27 @@ export function useBirdseye({
           toast("The status was changed since, so nothing was resent.", { tone: "info" });
           return;
         }
-        void resendRef.current({ ...card, status: from }, next);
+        void resendRef.current({ ...card, status: from, linked: before }, next, pick);
       };
       const fail = (body: unknown) => {
+        const own = latest();
         settle();
-        moveEverywhere({ ...card, status: next }, next, from);
+        // Rolled back only while it is still the card's latest pick.
+        if (own) {
+          if (column !== from) moveEverywhere({ ...card, status: column }, column, from);
+          if (before) {
+            const restore = (c: BirdseyeCard) => ({ ...c, linked: before });
+            setOverview((prev) => mapCards(prev, card.id, restore));
+            setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, card.id, restore) } : prev));
+          }
+        }
+        // Unlinked from this List since it loaded: a retry can never land, so
+        // the card is re-read (it leaves) and the toast says why.
+        if (card.linked && (body as { error?: unknown } | null)?.error === "invalid_context") {
+          toast("This task is no longer linked into this List, so its status wasn't changed here.", { tone: "info" });
+          void refreshRef.current(card.id);
+          return;
+        }
         toast(accessMessage(body, "Couldn't change the status."), { tone: "danger", action: { label: "Try again", onClick: resend } });
       };
       let res: Response;
@@ -512,7 +574,7 @@ export function useBirdseye({
         res = await fetch(`/api/items/${encodeURIComponent(card.id)}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: next }),
+          body: JSON.stringify(wire),
         });
       } catch {
         fail(null);
@@ -523,8 +585,34 @@ export function useBirdseye({
         fail(body);
         return;
       }
+      const own = latest();
       settle();
       const saved = body?.item;
+      if (saved && card.linked) {
+        // The answer is projected for THIS List: the card is rebuilt from it,
+        // so it lands where the Board would place the home value written, and
+        // its reason line names the new home status. No link here in the
+        // answer (unlinked meanwhile): re-read, and it leaves. A newer pick in
+        // flight keeps its own column and home value.
+        const link = (saved as { listLink?: BoardItemRow["listLink"] }).listLink;
+        const fresh = list && link && link.boardId === card.boardId ? linkedCardFromRow(saved as unknown as BoardItemRow, list) : null;
+        if (!fresh) {
+          void refreshRef.current(card.id);
+          return;
+        }
+        const rebuilt = cardOf(fresh);
+        if (own && rebuilt.status !== column) moveEverywhere({ ...card, status: column }, column, rebuilt.status);
+        const merge = (c: BirdseyeCard): BirdseyeCard => ({
+          ...rebuilt,
+          subtaskCount: c.subtaskCount,
+          status: c.status,
+          rank: c.rank,
+          linked: own ? rebuilt.linked : c.linked,
+        });
+        setOverview((prev) => mapCards(prev, card.id, merge));
+        setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, card.id, merge) } : prev));
+        return;
+      }
       if (saved) {
         const landed = saved.status ?? null;
         // A recurring task completed on the server rolls forward (its status
@@ -535,7 +623,7 @@ export function useBirdseye({
         setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, card.id, merge) } : prev));
       }
     },
-    [moveEverywhere, toast],
+    [moveEverywhere, toast, listById],
   );
   useEffect(() => {
     resendRef.current = changeStatus;
@@ -608,22 +696,31 @@ export function useBirdseye({
 
   const loadSubtasks = useCallback(async (parentId: string) => {
     setSubtasks((prev) => ({ ...prev, [parentId]: { state: "loading", rows: prev[parentId]?.rows ?? [] } }));
-    const r = await apiFetch<{ subtasks: Array<{ id: string; title: string; status: string | null }> }>(
-      `/api/items/${encodeURIComponent(parentId)}/subtasks`,
-      { cache: "no-store" },
-    );
+    // A linked card's subtasks are read in the List it is shown in.
+    const parent = findCard(stateRef.current.overview, parentId) ?? (stateRef.current.focus ? findCard(stateRef.current.focus.columns, parentId) : null);
+    const ctx = parent?.linked ? `?list=${encodeURIComponent(parent.boardId)}` : "";
+    const r = await apiFetch<{ subtasks: BoardItemRow[] }>(`/api/items/${encodeURIComponent(parentId)}/subtasks${ctx}`, {
+      cache: "no-store",
+    });
     if (!mounted.current) return;
     if (!r.ok) {
       setSubtasks((prev) => ({ ...prev, [parentId]: { state: "error", rows: prev[parentId]?.rows ?? [] } }));
       return;
     }
-    const rows = (r.data.subtasks ?? []).map((st) => ({ id: st.id, title: st.title, status: st.status ?? null }));
+    // A linked parent's subtasks keep their home statuses; each shows under
+    // this List's matching status, as the Board shows them.
+    const statusesHere = parent?.linked ? (listById(parent.boardId)?.statuses ?? []) : null;
+    const rows = (r.data.subtasks ?? []).map((st) => ({
+      id: st.id,
+      title: st.title,
+      status: (statusesHere && parent ? boardStatusFor(st, parent.boardId, statusesHere) : st.status) ?? null,
+    }));
     setSubtasks((prev) => ({ ...prev, [parentId]: { state: "ready", rows } }));
     // The pill counts what this route opens, so a fresh answer is the count.
     const setCount = (c: BirdseyeCard) => (c.subtaskCount === rows.length ? c : { ...c, subtaskCount: rows.length });
     setOverview((prev) => mapCards(prev, parentId, setCount));
     setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, parentId, setCount) } : prev));
-  }, []);
+  }, [listById]);
 
   // ── Other people's changes ────────────────────────────────────────
 
@@ -667,7 +764,11 @@ export function useBirdseye({
 
   const refreshCard = useCallback(
     async (id: string) => {
-      const r = await apiFetch<ItemBody>(`/api/items/${encodeURIComponent(id)}`, { cache: "no-store" });
+      // A linked card is read in the List it is shown in (?list=), so the
+      // answer carries its link there.
+      const was = findCard(stateRef.current.overview, id) ?? (stateRef.current.focus ? findCard(stateRef.current.focus.columns, id) : null);
+      const ctx = was?.linked ? `?list=${encodeURIComponent(was.boardId)}` : "";
+      const r = await apiFetch<ItemBody>(`/api/items/${encodeURIComponent(id)}${ctx}`, { cache: "no-store" });
       if (!mounted.current) return;
       const s = stateRef.current;
       const onScreen = findCard(s.overview, id) ?? (s.focus ? findCard(s.focus.columns, id) : null);
@@ -684,6 +785,36 @@ export function useBirdseye({
         if (parentId && (findCard(s.overview, parentId) || (s.focus && findCard(s.focus.columns, parentId)))) {
           void loadSubtasks(parentId);
         }
+        return;
+      }
+      // A linked card stays in the List it is shown in while it is still
+      // linked there, and moves columns the Board's way; unlinked, archived or
+      // no longer a root, it leaves.
+      if (onScreen.linked) {
+        // Rebuilt by the server's own builder, so its column, reason line
+        // and drag follow a new home status or a new role on the task.
+        const list = listById(onScreen.boardId);
+        const fresh = list && !item.archivedAt && !item.parentItemId ? linkedCardFromRow(item as unknown as BoardItemRow, list) : null;
+        if (!fresh) {
+          removeCard(id);
+          return;
+        }
+        const rebuilt = cardOf(fresh);
+        const placed = rebuilt.status;
+        const busy = pending.current.has(id);
+        if (placed !== onScreen.status && !busy) moveEverywhere(onScreen, onScreen.status, placed);
+        // While a status change is in flight its optimistic column and home
+        // value stand; the answer after it lands brings the rest.
+        const mergeLinked = (c: BirdseyeCard): BirdseyeCard => ({
+          ...rebuilt,
+          subtaskCount: c.subtaskCount,
+          status: busy ? c.status : placed,
+          rank: c.rank,
+          linked: busy ? c.linked : rebuilt.linked,
+        });
+        setOverview((prev) => mapCards(prev, id, mergeLinked));
+        setFocus((prev) => (prev ? { ...prev, columns: mapCards(prev.columns, id, mergeLinked) } : prev));
+        if (stateRef.current.subtasks[id]) void loadSubtasks(id);
         return;
       }
       // It became a subtask of a card on screen: it is no longer a card of its
@@ -711,6 +842,9 @@ export function useBirdseye({
     },
     [removeCard, loadSubtasks, listById, placeNew, moveEverywhere],
   );
+  useEffect(() => {
+    refreshRef.current = refreshCard;
+  }, [refreshCard]);
 
   const applyItemEvent = useCallback(
     (detail: ItemEventDetail | null | undefined) => {

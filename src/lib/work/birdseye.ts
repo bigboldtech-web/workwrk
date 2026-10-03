@@ -8,7 +8,7 @@
 // types) and work-buckets (the product's due-date words), and neither of them
 // imports anything impure.
 
-import { isDoneStatus, isDoneStatusName, type StatusOption } from "@/lib/board-items-shared";
+import { isDoneStatus, isDoneStatusName, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import { bucketFor as dueBucketFor, dueChipLabel } from "@/lib/work-buckets";
 
 /** Cards per page, per column. The loader asks for one more to know there is more. */
@@ -39,6 +39,28 @@ export interface BirdseyeCard {
   /** At most two, primary first. */
   assignees: BirdseyePerson[];
   assigneeCount: number;
+  /**
+   * Present on a task shown in this List THROUGH A LINK (Phase 5b): its home
+   * is another List. `boardId` is then the List it is shown in and `status`
+   * the column the List's own Board groups it under (boardStatusFor), never
+   * its home value, which `listLink.homeStatus` carries. Every write from
+   * the card names this List as its context.
+   */
+  linked?: BirdseyeLinked;
+}
+
+/** What a linked card carries: the List's own row link, so the Board's helpers decide it. */
+export interface BirdseyeLinked {
+  /** The projected row's link (src/lib/board-items-shared.ts BoardItemRow.listLink). */
+  listLink: NonNullable<BoardItemRow["listLink"]>;
+  /** The task's stored status, a value of its HOME set. */
+  homeValue: string | null;
+  /** The few words under the title when it sits under a column that is not its own status. */
+  short: string | null;
+  /** The full sentence, the title's tooltip. */
+  note: string | null;
+  /** May it be dragged between this List's columns here (the Board's own rule)? */
+  canDrag: boolean;
 }
 
 export interface BirdseyeList {
@@ -55,6 +77,8 @@ export interface BirdseyeList {
   total: number;
   /** The same tasks, per column (declared status value). */
   statusCounts: Record<string, number>;
+  /** More tasks are linked into this List than Bird's eye shows (src/lib/work/birdseye-linked.server.ts LINKED_CAP). */
+  linkedCapped?: boolean;
 }
 
 export interface BirdseyeColumn {
@@ -394,6 +418,32 @@ export interface ListCursor {
   id: string;
 }
 
+/**
+ * The loader's own order, column then position then id. JS compares ids by
+ * code unit; the ids are cuids (lowercase letters and digits), which the
+ * database's collation orders the same way, so a merged page and a keyset
+ * page agree on every tie.
+ */
+export function cardOrder(a: { rank: number; position: number; id: string }, b: { rank: number; position: number; id: string }): number {
+  return a.rank - b.rank || a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/** After an overview keyset cursor, in cardOrder. */
+export function afterListCursor(c: { rank: number; position: number; id: string }, cursor: ListCursor): boolean {
+  return cardOrder(c, cursor) > 0;
+}
+
+/**
+ * One page from a statement's answer (a page, plus whether it had one row
+ * more) and the cards handed in beside it (linked tasks). Every handed-in
+ * card is known and the statement's rows are its smallest, so the first
+ * BIRDSEYE_PAGE of the merge are exact either way.
+ */
+export function mergeCardPage<T extends BirdseyeCard>(home: readonly T[], homeMore: boolean, extra: readonly T[]): { cards: T[]; more: boolean } {
+  const all = [...home, ...extra].sort(cardOrder);
+  return { cards: all.slice(0, BIRDSEYE_PAGE), more: homeMore || all.length > BIRDSEYE_PAGE };
+}
+
 export interface BucketCursor {
   position: number;
   id: string;
@@ -548,6 +598,26 @@ function person(p: { id: string; firstName?: string | null; lastName?: string | 
 export function cardFromRow(row: CardSourceRow, prev?: BirdseyeCard | null): BirdseyeCard {
   const people = row.assignees && row.assignees.length > 0 ? row.assignees : row.owner ? [row.owner] : [];
   const payloadCount = typeof row.subtaskCount === "number" && Number.isFinite(row.subtaskCount) ? row.subtaskCount : null;
+  // A card shown here through a link keeps the List it is shown in, its
+  // column and its place in that List: an answer names the task's HOME List
+  // and home status, which are not where this card sits. The caller moves
+  // its column, through the Board's own placement, when it knows the List.
+  if (prev?.linked) {
+    const link = (row as { listLink?: BirdseyeLinked["listLink"] | null }).listLink;
+    return {
+      ...prev,
+      title: row.title,
+      dueAt: isoOrNull(row.dueAt),
+      hasDescription: descriptionPresent(row.metadata),
+      assignees: people.slice(0, 2).map(person),
+      assigneeCount: row.assigneeIds ? row.assigneeIds.length : people.length,
+      linked: {
+        ...prev.linked,
+        homeValue: row.status ?? prev.linked.homeValue,
+        listLink: link && link.boardId === prev.boardId ? link : prev.linked.listLink,
+      },
+    };
+  }
   return {
     id: row.id,
     boardId: row.boardId ?? prev?.boardId ?? "",

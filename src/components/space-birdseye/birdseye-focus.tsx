@@ -35,6 +35,7 @@ import { EmptyColumnLine, ShowMore, type CardActions } from "./birdseye-overview
 import { BirdseyeSkeleton } from "./birdseye-skeleton";
 import type { FocusState, LoadMoreTarget, SubtaskEntry } from "./use-birdseye";
 import { ErrorState } from "@/components/ui/error-state";
+import { LinkedCappedNote } from "./linked-capped-note";
 
 function ChipRow({
   lists,
@@ -341,6 +342,7 @@ export function BirdseyeFocus({
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col")}>
       {strip}
+      <LinkedCappedNote list={list} className="shrink-0 border-b border-line-soft px-6 py-1.5 text-xs leading-snug text-ink-3" />
       <BirdseyeGrid columns={columns} label={`${list.name} by status`} />
     </div>
   );

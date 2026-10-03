@@ -23,12 +23,15 @@ import { AddTaskRow } from "./add-task-row";
 import { BirdseyeCard } from "./birdseye-card";
 import { BirdseyeGrid, type GridColumn } from "./birdseye-grid";
 import { BirdseyeStatusStrip } from "./birdseye-status-strip";
+import { LinkedCappedNote } from "./linked-capped-note";
 import type { ColumnState, LoadMoreTarget, SubtaskEntry } from "./use-birdseye";
+import type { StatusPick } from "@/lib/work/birdseye-linked";
 
 export interface CardActions {
   now: Date;
-  onOpen: (id: string) => void;
-  onChangeStatus: (card: Card, next: string) => void;
+  /** `listId`: the List a linked card is shown in, so the task opens there. */
+  onOpen: (id: string, listId?: string) => void;
+  onChangeStatus: (card: Card, next: string, pick?: StatusPick) => void;
   onLoadSubtasks: (id: string) => void;
 }
 
@@ -192,6 +195,7 @@ export const BirdseyeOverview = forwardRef<
             onClick={() => onLoadMore({ kind: "list", boardId: list.id })}
           />
         ) : null}
+        <LinkedCappedNote list={list} />
       </>
     );
     return { key: list.id, label: list.name, header, body };
