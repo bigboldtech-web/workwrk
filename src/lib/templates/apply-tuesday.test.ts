@@ -17,9 +17,10 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
   if (!where) return true;
   return Object.entries(where).every(([k, v]) => {
     if (v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)) {
-      const o = v as { equals?: unknown; mode?: string; in?: unknown[] };
+      const o = v as { equals?: unknown; mode?: string; in?: unknown[]; not?: unknown };
       if ("equals" in o) return String(row[k]).toLowerCase() === String(o.equals).toLowerCase();
       if ("in" in o) return (o.in ?? []).includes(row[k]);
+      if ("not" in o) return (row[k] ?? null) !== o.not;
       return true;
     }
     return row[k] === v;
@@ -107,7 +108,7 @@ vi.mock("@/lib/board-items", () => ({
   },
 }));
 
-import { applySignupTemplate, applyTuesdayBundle, retrySignupTemplate, readSignupMarker } from "./apply-tuesday";
+import { applySignupTemplate, applyTuesdayBundle, retrySignupTemplate, readSignupMarker, SpaceInTrashError } from "./apply-tuesday";
 import { TUESDAY_TEMPLATE_KEY, signupTemplateKey, tuesdayPayload } from "./tuesday-template";
 
 const ORG = "org_1";
@@ -204,6 +205,54 @@ describe("applySignupTemplate", () => {
     expect([count("space"), count("board"), count("role"), count("kRA"), count("kPI"), count("sOP"), count("oKR"), count("doc"), count("item")]).toEqual([1, 1, 2, 1, 1, 1, 1, 1, 1]);
     // Nothing left to retry once applied.
     expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+  });
+
+  describe("when the Space it was building is in Trash", () => {
+    // The first attempt fails after making the Space; the owner then deletes
+    // that Space (Trash keeps a snapshot, the row is gone).
+    async function failThenTrash() {
+      failOn = "doc";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      const space = db.space[0];
+      db.space = [];
+      db.trashItem = [{ id: "trash_1", organizationId: ORG, entityType: "space", entityId: space.id, label: "Operations" }];
+      return space;
+    }
+
+    it("a plain Try again builds no second Space and leaves the choice to the person", async () => {
+      await failThenTrash();
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+      expect(count("space")).toBe(0);
+      expect(readSignupMarker(settings)?.status).toBe("failed");
+    });
+
+    it("Start fresh makes one new Space and leaves the one in Trash where it is", async () => {
+      const old = await failThenTrash();
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(done?.status).toBe("applied");
+      expect(count("space")).toBe(1);
+      expect(db.space[0].id).not.toBe(old.id);
+      expect(count("trashItem")).toBe(1);
+    });
+
+    it("once restored, Try again finishes in that same Space", async () => {
+      const old = await failThenTrash();
+      db.space = [old];
+      db.trashItem = [];
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER });
+      expect(done?.status).toBe("applied");
+      expect(db.space.map((s) => s.id)).toEqual([old.id]);
+    });
+
+    it("a resume that finds it in Trash stops with the Trash row to restore", async () => {
+      const old = await failThenTrash();
+      await expect(applyTuesdayBundle(tuesdayPayload(), { organizationId: ORG, userId: USER, name: "Operations", governance: true, resumeSpaceId: old.id }))
+        .rejects.toBeInstanceOf(SpaceInTrashError);
+      await expect(applyTuesdayBundle(tuesdayPayload(), { organizationId: ORG, userId: USER, name: "Operations", governance: true, resumeSpaceId: old.id }))
+        .rejects.toMatchObject({ trashRowId: "trash_1", spaceName: "Operations" });
+      expect(count("space")).toBe(0);
+    });
   });
 
   it("does not let a retry run while a fresh apply is still in flight", async () => {

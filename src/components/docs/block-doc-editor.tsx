@@ -361,7 +361,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     setAskSend("idle");
     if (!readOnlyRole || pane === "peek") return;
     let alive = true;
-    void apiFetch<{ outgoing?: OutgoingAccessRow[] }>("/api/access-requests?scope=outgoing", { cache: "no-store" }).then((r) => {
+    void apiFetch<{ outgoing?: OutgoingAccessRow[] }>(`/api/access-requests?scope=outgoing&objectType=doc&objectId=${encodeURIComponent(docId)}`, { cache: "no-store" }).then((r) => {
       // A failed read leaves the plain Request link: asking again is safe,
       // the server keeps one open request per person per doc.
       if (alive && r.ok) setAccessAsk(docAccessAsk(r.data.outgoing, docId, readOnlyRole));
@@ -1087,6 +1087,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }
 
   const hasCover = !!(meta.coverUrl || meta.coverGradient);
+  // Who changes the doc: its body, title, icon and cover all read this one flag.
+  const chromeEditable = myRole === "edit" && !readingMode && !meta.locked && !lostAccess;
   const coverStyle: React.CSSProperties = meta.coverUrl
     ? { backgroundImage: `url(${meta.coverUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
     : { background: gradientCSS(meta.coverGradient) };
@@ -1127,7 +1129,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             Comments and the bordered "..." at the right. Peek panes keep the
             indicator only; DocSplitView owns their header. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} /> : null}
+          {/* On a phone the Back label gives way (arrow only), as every page
+              header's does: it ran under Ask AI at 390. */}
+          {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} compactOnPhone /> : null}
           {/* After a final refusal there is no retry in hand, and the default
               error word would read "Not saved, retrying": it is not. */}
           <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} labels={lostAccess ? { error: "Not saved" } : undefined} />
@@ -1142,7 +1146,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               aria-pressed={panel?.kind === "ask"}
               className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
             >
-              <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Ask AI
+              <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="max-sm:sr-only">Ask AI</span>
             </button>
           ) : null}
           {pane !== "peek" ? (
@@ -1341,6 +1345,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       <div className="flex items-start">
       <div className="flex-1 min-w-0" ref={contentColRef}>
 
+      {/* The doc's icon, cover and title change only for someone who can edit
+          it, as the body does: a Can comment or Can view grantee, a reading
+          mode or a locked doc sees them, never the controls that change them
+          (which the save would only refuse). */}
       {/* Cover. The picker is a SIBLING of the clipped cover (not a child):
           .bdoc__cover has overflow:hidden + a fixed height, so a picker inside
           it gets clipped and stuck behind the image. The wrapper is the
@@ -1348,15 +1356,17 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       {hasCover && (
         <div className="bdoc__cover-wrap">
           <div className="bdoc__cover" style={coverStyle}>
-            <button
-              type="button"
-              className="bdoc__cover-edit"
-              onClick={() => setCoverOpen((s) => !s)}
-            >
-              <ImagePlus /> Change cover
-            </button>
+            {chromeEditable ? (
+              <button
+                type="button"
+                className="bdoc__cover-edit"
+                onClick={() => setCoverOpen((s) => !s)}
+              >
+                <ImagePlus /> Change cover
+              </button>
+            ) : null}
           </div>
-          {coverOpen && (
+          {chromeEditable && coverOpen && (
             <>
               <div className="bdoc__cover-scrim" onClick={() => setCoverOpen(false)} aria-hidden="true" />
               <div className="bdoc__cover-pop-anchor">
@@ -1375,21 +1385,25 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {/* Emoji + add-cover-row */}
         <div className="bdoc__chrome">
           {meta.icon ? (
-            <button
-              type="button"
-              className="bdoc__emoji"
-              onClick={() => setEmojiOpen((s) => !s)}
-              aria-label="Change icon"
-            >
-              {renderNoteIcon(meta.icon)}
-            </button>
-          ) : (
+            chromeEditable ? (
+              <button
+                type="button"
+                className="bdoc__emoji"
+                onClick={() => setEmojiOpen((s) => !s)}
+                aria-label="Change icon"
+              >
+                {renderNoteIcon(meta.icon)}
+              </button>
+            ) : (
+              <span className="bdoc__emoji" aria-hidden="true">{renderNoteIcon(meta.icon)}</span>
+            )
+          ) : chromeEditable ? (
             <button type="button" className="bdoc__add-emoji" onClick={() => setEmojiOpen((s) => !s)}>
               <Smile /> Add icon
             </button>
-          )}
+          ) : null}
 
-          {!hasCover && (
+          {!hasCover && chromeEditable && (
             <button type="button" className="bdoc__add-cover" onClick={() => setCoverOpen((s) => !s)}>
               <ImagePlus /> Add cover
             </button>
@@ -1402,7 +1416,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           ) : null}
         </div>
 
-        {emojiOpen && (
+        {chromeEditable && emojiOpen && (
           <NoteIconPicker
             current={meta.icon}
             onPick={(value) => { void saveMeta({ icon: value }); setEmojiOpen(false); }}
@@ -1410,7 +1424,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           />
         )}
 
-        {!hasCover && coverOpen && (
+        {chromeEditable && !hasCover && coverOpen && (
           <CoverPicker
             meta={meta}
             onPick={(patch) => { void saveMeta(patch); setCoverOpen(false); }}
@@ -1425,7 +1439,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled doc"
-          readOnly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
+          readOnly={!chromeEditable}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
@@ -1464,7 +1478,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               // lostAccess is left out of the key on purpose: BlockNote takes
               // `editable` live, and a remount could drop the last debounced
               // keystrokes from the screen the person is about to copy.
-              readonly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
+              readonly={!chromeEditable}
               onChange={handleEditorChange}
               docId={docId}
               // No comment action for a Can view grant: the canvas hides the

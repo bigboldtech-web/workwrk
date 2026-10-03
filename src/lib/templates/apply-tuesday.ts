@@ -41,6 +41,7 @@ import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { TUESDAY_TEMPLATE_KEY, TUESDAY_TEMPLATE_ROW, tuesdayPayload, type TuesdayPayload } from "@/lib/templates/tuesday-template";
+import { archiveRowId } from "@/lib/trash-view";
 
 export interface TuesdayApplied {
   spaceId: string;
@@ -70,6 +71,29 @@ export interface ApplyTuesdayCtx {
   resumeSpaceId?: string | null;
   /** Called once the Space exists, so a caller can record it before anything else can fail. */
   onSpace?: (space: { id: string; slug: string }) => Promise<void>;
+}
+
+/**
+ * The Space a retry would resume is in Trash. A retry used to pass it by and
+ * build a second Space; restoring the first one later left two. The caller
+ * restores it or starts fresh, never a silent second.
+ */
+export class SpaceInTrashError extends Error {
+  constructor(readonly trashRowId: string, readonly spaceName: string) {
+    super("space_in_trash");
+  }
+}
+
+/** The Trash row holding this Space (archived in place, or deleted to a snapshot), or null. */
+export async function spaceInTrash(orgId: string, spaceId: string): Promise<{ rowId: string; name: string } | null> {
+  const archived = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId, archivedAt: { not: null } }, select: { name: true } });
+  if (archived) return { rowId: archiveRowId("space", spaceId), name: archived.name };
+  const snap = await prisma.trashItem.findFirst({
+    where: { organizationId: orgId, entityType: "space", entityId: spaceId },
+    orderBy: { deletedAt: "desc" },
+    select: { id: true, label: true },
+  });
+  return snap ? { rowId: snap.id, name: snap.label } : null;
 }
 
 /** The doc's line when some pieces were not made: a non-admin apply, or the plan's SOP cap. Pure. */
@@ -116,6 +140,10 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
   let space = ctx.resumeSpaceId
     ? await prisma.space.findFirst({ where: { id: ctx.resumeSpaceId, organizationId: orgId, archivedAt: null }, select: { id: true, slug: true } })
     : null;
+  if (!space && ctx.resumeSpaceId) {
+    const trashed = await spaceInTrash(orgId, ctx.resumeSpaceId);
+    if (trashed) throw new SpaceInTrashError(trashed.rowId, trashed.name);
+  }
   if (!space) {
     const made = await applySpaceTemplate({ ...payload, lists: [] }, { organizationId: orgId, userId, name: ctx.name, visibility: ctx.visibility });
     space = { id: made.spaceId, slug: made.slug };
@@ -248,7 +276,7 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
 
 export type SignupTemplateMarker =
   | { key: string; status: "applying"; startedAt: string; spaceId?: string | null }
-  | { key: string; status: "failed"; failedAt: string; error: string; spaceId?: string | null }
+  | { key: string; status: "failed"; failedAt: string; error: string; spaceId?: string | null; trash?: { rowId: string; name: string } }
   | ({ key: string; status: "applied"; appliedAt: string } & Omit<TuesdayApplied, "governance" | "skipped"> & { skipped?: string[] });
 
 /** The marker as stored, or null. Tolerates any JSON. */
@@ -316,6 +344,12 @@ async function runAndRecord(orgId: string, userId: string, key: string, resumeSp
     await prisma.template.updateMany({ where: { key, builtIn: true }, data: { usedCount: { increment: 1 } } }).catch(() => undefined);
     return marker;
   } catch (err) {
+    if (err instanceof SpaceInTrashError) {
+      // Not a fault: the person chooses (restore it, or start fresh).
+      const marker: SignupTemplateMarker = { key, status: "failed", failedAt: new Date().toISOString(), error: "space_in_trash", spaceId, trash: { rowId: err.trashRowId, name: err.spaceName } };
+      await writeOrgSettingsKeys(orgId, { signupTemplate: marker }).catch(() => undefined);
+      return marker;
+    }
     console.error("[signup-template] apply failed", err);
     const marker: SignupTemplateMarker = { key, status: "failed", failedAt: new Date().toISOString(), error: err instanceof Error ? err.message.slice(0, 200) : "Unknown error", spaceId };
     await writeOrgSettingsKeys(orgId, { signupTemplate: marker }).catch(() => undefined);
@@ -338,15 +372,22 @@ export async function applySignupTemplate(input: { organizationId: string; userI
   return runAndRecord(input.organizationId, input.userId, input.key, null);
 }
 
-/** Finish a signup template that failed (or died) part way. Null when there is nothing to retry. */
-export async function retrySignupTemplate(input: { organizationId: string; userId: string }): Promise<SignupTemplateMarker | null> {
+/**
+ * Finish a signup template that failed (or died) part way. Null when there is
+ * nothing to retry. `fresh`: the Space it was building is in Trash and the
+ * person chose a new one (the one in Trash stays there, restorable). Without
+ * it, a Space still in Trash is not passed by: null, and the wizard asks.
+ */
+export async function retrySignupTemplate(input: { organizationId: string; userId: string; fresh?: boolean }): Promise<SignupTemplateMarker | null> {
   const org = await prisma.organization.findUnique({ where: { id: input.organizationId }, select: { settings: true } });
   const marker = readSignupMarker(org?.settings);
   if (!marker || marker.status === "applied" || marker.key !== TUESDAY_TEMPLATE_KEY) return null;
+  const resumeSpaceId = input.fresh ? null : marker.spaceId ?? null;
+  if (resumeSpaceId && !input.fresh && (await spaceInTrash(input.organizationId, resumeSpaceId))) return null;
   const startedAt = new Date().toISOString();
-  const won = await claimMarker(input.organizationId, { key: marker.key, status: "applying", startedAt, spaceId: marker.spaceId ?? null }, marker.status === "failed" ? "failed" : "stale");
+  const won = await claimMarker(input.organizationId, { key: marker.key, status: "applying", startedAt, spaceId: resumeSpaceId }, marker.status === "failed" ? "failed" : "stale");
   if (!won) return null;
-  return runAndRecord(input.organizationId, input.userId, marker.key, marker.spaceId ?? null);
+  return runAndRecord(input.organizationId, input.userId, marker.key, resumeSpaceId);
 }
 
 // ── the Template Center row ────────────────────────────────────────

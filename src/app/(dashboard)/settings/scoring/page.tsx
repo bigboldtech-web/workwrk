@@ -145,7 +145,10 @@ export default function ScoringSettingsPage() {
                   <span className="text-base text-ink-2">{c.enabled ? `On · ${anchorWord(key, c.anchor)} · remind ${c.reminderLeadDays} days before${c.autoOpen ? " · opens itself" : ""}` : "Off"}</span>
                 ) : (
                   <>
-                    <Switch checked={c.enabled} onChange={(on) => patch({ enabled: on })} aria-label={`${CADENCE_LABELS[key]} on`} />
+                    {/* Off hides the cadence's day and reminder fields, so a value
+                        typed into them and left invalid is forgotten with them: the
+                        Save bar never asks to fix a field that is not on screen. */}
+                    <Switch checked={c.enabled} onChange={(on) => { if (!on) nums.clear(`cad.${key}.`); patch({ enabled: on }); }} aria-label={`${CADENCE_LABELS[key]} on`} />
                     {c.enabled ? (
                       <>
                         <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })}

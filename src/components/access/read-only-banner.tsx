@@ -42,12 +42,14 @@ export function ReadOnlyBanner({
       role="status"
       className={cn(
         "os-chrome flex items-center gap-3 bg-subtle text-ink",
-        variant === "inline" ? "h-9 rounded-md border border-line px-3 text-sm text-ink-2" : "min-h-11 border-b border-line px-6 text-base",
+        // Below sm the sentence wraps (the owner's name is the point of it), so
+        // the inline strip grows from 36px instead of cutting it off.
+        variant === "inline" ? "min-h-9 rounded-md border border-line px-3 py-1.5 text-sm text-ink-2 sm:h-9 sm:py-0" : "min-h-11 border-b border-line px-6 py-2 text-base sm:py-0",
         className,
       )}
     >
       <Eye className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{message ?? `View only. Ask ${who} for edit access.`}</span>
+      <span className="min-w-0 flex-1 sm:truncate">{message ?? `View only. Ask ${who} for edit access.`}</span>
       {onRequest ? (
         <button type="button" onClick={onRequest} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
           {requestLabel}

@@ -25,6 +25,8 @@ interface TemplateView {
   jobTitles?: number;
   skipped?: string[];
   retryable?: boolean;
+  /** The Space it was building is in Trash: restore it, or start fresh (never a silent second Space). */
+  spaceInTrash?: { name: string } | null;
 }
 
 /**
@@ -69,14 +71,19 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
     return () => { live = false; };
   }, [enabled]);
 
-  async function retry() {
+  async function retry(choice?: "restore" | "fresh") {
     setBusy(true);
     setRetryFailed(false);
     try {
-      const r = await fetch("/api/onboard/template", { method: "POST" });
+      const r = await fetch("/api/onboard/template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(choice ? { choice } : {}),
+      });
       const d = (await r.json().catch(() => null)) as { template?: TemplateView | null } | null;
       if (d?.template) setTpl(d.template);
-      if (!r.ok && d?.template?.status !== "applied") setRetryFailed(true);
+      // Asked to choose is not a failure: the note then offers the choice.
+      if (!r.ok && d?.template?.status !== "applied" && !d?.template?.spaceInTrash) setRetryFailed(true);
     } catch {
       setRetryFailed(true);
     } finally {
@@ -103,6 +110,23 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
     return (
       <AuthBanner tone="info">
         <p>{tpl.name} is still being added to your workspace.</p>
+      </AuthBanner>
+    );
+  }
+  if (tpl.spaceInTrash) {
+    return (
+      <AuthBanner tone="warning">
+        <p>
+          {tpl.name} did not finish setting up, and the {tpl.spaceInTrash.name} Space it was building is in Trash.{" "}
+          {busy ? <Dots variant="pending" label="Working" /> : (
+            <>
+              <button type="button" className="wa-link" onClick={() => void retry("restore")}>Restore it and finish</button>
+              {" or "}
+              <button type="button" className="wa-link" onClick={() => void retry("fresh")}>Start fresh in a new Space</button>
+              {" "}(the one in Trash stays there).
+            </>
+          )}
+        </p>
       </AuthBanner>
     );
   }

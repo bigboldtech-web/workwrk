@@ -77,7 +77,7 @@ export function goalRequestStanding(outgoing: readonly OutgoingRequestRow[] | nu
 }
 
 async function loadGoalRequestStanding(okrId: string): Promise<GoalRequestStanding | undefined> {
-  const r = await apiFetch<{ outgoing?: OutgoingRequestRow[] }>("/api/access-requests?scope=outgoing", { cache: "no-store" });
+  const r = await apiFetch<{ outgoing?: OutgoingRequestRow[] }>(`/api/access-requests?scope=outgoing&objectType=goal&objectId=${encodeURIComponent(okrId)}`, { cache: "no-store" });
   return r.ok ? goalRequestStanding(r.data.outgoing, okrId) : undefined;
 }
 

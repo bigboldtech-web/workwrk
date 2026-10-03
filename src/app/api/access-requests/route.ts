@@ -12,7 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
-import { recordAccessRequest, requestNodeRef, roleCoversRequest, REQUEST_TTL_MS } from "@/lib/access/access-requests";
+import { recordAccessRequest, requestNodeRef, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS } from "@/lib/access/access-requests";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
@@ -149,7 +149,18 @@ export async function GET(req: Request) {
   // falls back at once to the requests on objects they own.
   const admin = sessionIsWorkspaceAdmin(session) ? await freshWorkspaceActor(session).then((f) => f.ok && f.admin) : false;
   const since = new Date(Date.now() - REQUEST_TTL_MS);
-  const outgoingOnly = new URL(req.url).searchParams.get("scope") === "outgoing";
+  const sp = new URL(req.url).searchParams;
+  const outgoingOnly = sp.get("scope") === "outgoing";
+  // ?objectType=&objectId=: only the person's own requests for that one
+  // object (under any spelling its kind is stored as), so a pending request
+  // is found however many newer ones they sent since. The newest 20 used to
+  // be the whole answer, and past them a pending request read "Request" again.
+  const forType = sp.get("objectType");
+  const forId = sp.get("objectId");
+  const forNode = forType && forId ? requestNodeRef(forType, forId) : null;
+  const forObject = forType && forId
+    ? { objectType: { in: forNode ? requestTypesForNode(forNode.kind) : [forType] }, objectId: forId }
+    : {};
   const [pending, mine] = await Promise.all([
     outgoingOnly
       ? Promise.resolve([])
@@ -160,7 +171,7 @@ export async function GET(req: Request) {
           include: { requester: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } } },
         }),
     prisma.accessRequest.findMany({
-      where: { requesterId: u.id, createdAt: { gte: since } },
+      where: { requesterId: u.id, createdAt: { gte: since }, ...forObject },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: { id: true, objectType: true, objectId: true, role: true, status: true, createdAt: true, decidedAt: true },
