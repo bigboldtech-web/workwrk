@@ -318,7 +318,9 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       case "written": return blocks.some((b) => (b as { text?: string }).text?.trim());
       case "checklist": return sections.some((s) => s.steps.length > 0 || s.title.trim());
       case "recording": return recSteps.length > 0;
-      default: return layout === "flow" ? flow.steps.length > 0 : steps.some((s) => s.title.trim() || s.description);
+      // A step with only an image or an owner is content too: on the create
+      // route nothing else saves it, and leaving would drop it unasked.
+      default: return layout === "flow" ? flow.steps.length > 0 : steps.some((s) => s.title.trim() || s.description || s.image || s.jobTitle || s.createsTask === true);
     }
   }, [kind, blocks, sections, recSteps, layout, flow, steps]);
 
