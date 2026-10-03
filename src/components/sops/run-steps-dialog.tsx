@@ -98,7 +98,7 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
       void apiFetch<ReadableListsResponse>(readableListsUrl({ q, ids, targets: true, writable: true, limit: 100 }), { cache: "no-store" }).then((l) => {
         if (!live) return;
         if (!l.ok || !Array.isArray(l.data?.boards)) { setListsState("failed"); return; }
-        setListsRes({ boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], truncated: !!l.data.truncated });
+        setListsRes({ boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], pathSpaces: Array.isArray(l.data.pathSpaces) ? l.data.pathSpaces : [], truncated: !!l.data.truncated });
         setListsState("ready");
       });
     }, q ? 250 : 0);
@@ -123,7 +123,7 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
   // said under it: two teams' "Onboarding" Lists read the same otherwise.
   const chosenGroup = listGroups.find((g) => g.lists.some((b) => b.id === boardId)) ?? null;
   const inSpace = (name: string) => (/\bspace$/i.test(name.trim()) ? `In the ${name}` : `In the ${name} Space`);
-  const chosenWhere = !chosenGroup || chosenGroup.key === "sop-default" ? null : chosenGroup.key.startsWith("space:") ? inSpace(chosenGroup.label) : chosenGroup.label;
+  const chosenWhere = !chosenGroup || chosenGroup.key === "sop-default" ? null : chosenGroup.key.startsWith("space:") || chosenGroup.key.startsWith("path:") ? inSpace(chosenGroup.label) : chosenGroup.label;
 
   async function run() {
     if (busy || !boardId || spawning.length === 0) return;

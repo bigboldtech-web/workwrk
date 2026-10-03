@@ -32,9 +32,18 @@ export interface ReadableSpace {
   color: string | null;
 }
 
+/** A Space named only to label its Lists: the viewer passes through it (a Folder or List grant). */
+export interface ReadableSpaceLabel {
+  id: string;
+  name: string;
+}
+
 export interface ReadableListsResponse {
   boards: ReadableListRow[];
+  /** The Spaces the viewer reads in full: the only ones any picker may offer as a source. */
   spaces: ReadableSpace[];
+  /** Labels only, never a source: the Spaces the viewer passes through to a List returned here. */
+  pathSpaces?: ReadableSpaceLabel[];
   /** More candidates existed than the server checked; ask with a narrower q. */
   truncated: boolean;
 }
@@ -94,16 +103,21 @@ export interface ReadableListGroup {
 /**
  * Picker sections, in the order the product's other List pickers use: the
  * Personal List first under "My work", then each Space in the order the server
- * sent them (the viewer's own Space order), then "Shared with you" for Lists
- * whose Space the viewer does not read in full (a direct grant, an ORG-visible
- * List in someone else's Space) and space-less Lists that are not the Personal
- * List. Empty groups are left out, so no header ever sits over nothing.
+ * sent them (the viewer's own Space order), then each Space the viewer only
+ * passes through to a returned List (`pathSpaces`: a Folder or List grant,
+ * labelled by its name, `spaceId` null so it is never mistaken for a Space
+ * source), then "Shared with you" for the rest (an ORG-visible List in someone
+ * else's Space, a space-less List that is not the Personal List). Empty groups
+ * are left out, so no header ever sits over nothing.
  */
 export function groupReadableLists(res: ReadableListsResponse): ReadableListGroup[] {
   const personal: ReadableListRow[] = [];
   const bySpace = new Map<string, ReadableListRow[]>();
   const shared: ReadableListRow[] = [];
   const spaceIds = new Set(res.spaces.map((s) => s.id));
+  const pathSpaces = (res.pathSpaces ?? []).filter((s) => !spaceIds.has(s.id));
+  const pathIds = new Set(pathSpaces.map((s) => s.id));
+  const byPath = new Map<string, ReadableListRow[]>();
   const seen = new Set<string>();
   for (const row of res.boards) {
     if (seen.has(row.id)) continue;
@@ -114,6 +128,10 @@ export function groupReadableLists(res: ReadableListsResponse): ReadableListGrou
       const list = bySpace.get(row.spaceId) ?? [];
       list.push(row);
       bySpace.set(row.spaceId, list);
+    } else if (row.spaceId && pathIds.has(row.spaceId)) {
+      const list = byPath.get(row.spaceId) ?? [];
+      list.push(row);
+      byPath.set(row.spaceId, list);
     } else {
       shared.push(row);
     }
@@ -126,6 +144,11 @@ export function groupReadableLists(res: ReadableListsResponse): ReadableListGrou
     const lists = bySpace.get(space.id);
     if (!lists || lists.length === 0) continue;
     groups.push({ key: `space:${space.id}`, label: space.name, spaceId: space.id, lists });
+  }
+  for (const space of pathSpaces) {
+    const lists = byPath.get(space.id);
+    if (!lists || lists.length === 0) continue;
+    groups.push({ key: `path:${space.id}`, label: space.name, spaceId: null, lists });
   }
   if (shared.length > 0) {
     groups.push({ key: "shared", label: "Shared with you", spaceId: null, lists: shared });
