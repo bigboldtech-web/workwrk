@@ -194,6 +194,7 @@ import { copyObjectLink, objectHrefNow, sectionHrefNow } from "@/components/layo
 import { canonicalHref } from "@/lib/nav/object-href";
 import { FunctionReferenceDrawer } from "@/components/tables/function-reference-drawer";
 import { useSheetShortcutList } from "@/components/tables/sheet-shortcut-list";
+import { chunkIds, pickUrl } from "@/lib/people-pick";
 
 // The zoom steps (lib/tables-prefs ZOOM_LEVELS: 75 90 100 125 150). CSS
 // `zoom` (not transform scale) so the layout REFLOWS: the kernel's
@@ -1942,14 +1943,63 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     return () => { active = false; };
   }, [referencedTableIds, linkedTables]);
 
-  // Lazy-load org users once a Person column exists.
+  // People for Person columns, once one exists: the whole workspace
+  // (/api/people/pick, everyone who can sign in), never only the viewer's
+  // report tree, which is all /api/users answered below org-wide levels; and
+  // every person a Person cell already holds, looked up by id, so each reads
+  // by name. A cell's search box searches the server too (searchPeople).
   const hasPersonCol = (table?.columns ?? []).some((c) => c.type === "person");
+  const mergeOrgUsers = useCallback((got: OrgUser[]) => {
+    if (got.length === 0) return;
+    setOrgUsers((prev) => {
+      const byId = new Map(prev.map((u) => [u.id, u]));
+      for (const u of got) byId.set(u.id, u);
+      return [...byId.values()];
+    });
+  }, []);
+  const firstPeopleAsked = useRef(false);
   useEffect(() => {
-    if (!hasPersonCol || orgUsers.length > 0) return;
-    void fetch("/api/users?scope=all&limit=200").then((r) => (r.ok ? r.json() : { data: [] }))
-      .then((d) => setOrgUsers(Array.isArray(d?.data) ? d.data : []))
+    if (!hasPersonCol || firstPeopleAsked.current) return;
+    firstPeopleAsked.current = true;
+    void fetch(pickUrl({ reach: "signin", limit: 50 }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); else firstPeopleAsked.current = false; })
+      .catch(() => { firstPeopleAsked.current = false; });
+  }, [hasPersonCol, mergeOrgUsers]);
+  const personIdsKey = useMemo(() => {
+    if (!hasPersonCol) return "";
+    const cols = (table?.columns ?? []).filter((c) => c.type === "person");
+    const ids = new Set<string>();
+    for (const r of rows ?? []) {
+      for (const c of cols) {
+        const v = r.values[c.id];
+        if (Array.isArray(v)) for (const id of v) if (typeof id === "string" && id) ids.add(id);
+      }
+    }
+    return [...ids].sort().join(",");
+  }, [hasPersonCol, table?.columns, rows]);
+  const peopleLookedUp = useRef(new Set<string>());
+  useEffect(() => {
+    const missing = personIdsKey.split(",").filter((x) => x && !peopleLookedUp.current.has(x));
+    if (missing.length === 0) return;
+    for (const x of missing) peopleLookedUp.current.add(x);
+    for (const chunk of chunkIds(missing)) {
+      // A failed lookup is asked again the next time the cells change.
+      const forget = () => { for (const x of chunk) peopleLookedUp.current.delete(x); };
+      void fetch(pickUrl({ ids: chunk }))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); else forget(); })
+        .catch(forget);
+    }
+  }, [personIdsKey, mergeOrgUsers]);
+  const searchPeople = useCallback((q: string) => {
+    const term = q.trim();
+    if (!term) return;
+    void fetch(pickUrl({ reach: "signin", q: term, limit: 30 }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); })
       .catch(() => {});
-  }, [hasPersonCol, orgUsers.length]);
+  }, [mergeOrgUsers]);
 
   // Lazy-load the org table list the first time the relation config opens.
   useEffect(() => {
@@ -5435,7 +5485,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     ) : c.type === "attachment" ? (
       <AttachmentCell value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : c.type === "person" ? (
-      <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+      <PersonCell value={r.values[c.id]} users={orgUsers} onSearch={searchPeople} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : (
       <CellEditor column={c} value={r.values[c.id]} cellStyle={readCellStyle(r.values, c.id)} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
     );
@@ -6810,10 +6860,16 @@ function AttachmentCell({ value, onChange }: { value: unknown; onChange: (v: Att
   );
 }
 
-function PersonCell({ value, users, onChange }: { value: unknown; users: OrgUser[]; onChange: (v: string[]) => void }) {
+function PersonCell({ value, users, onSearch, onChange }: { value: unknown; users: OrgUser[]; onSearch?: (q: string) => void; onChange: (v: string[]) => void }) {
   const ids = Array.isArray(value) ? (value as string[]) : [];
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  // The search reaches the whole workspace, a moment after the typing stops.
+  useEffect(() => {
+    if (!open || !q.trim() || !onSearch) return;
+    const t = setTimeout(() => onSearch(q), 200);
+    return () => clearTimeout(t);
+  }, [open, q, onSearch]);
   const chosen = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is OrgUser => !!u);
   const candidates = q.trim() ? users.filter((u) => userName(u).toLowerCase().includes(q.trim().toLowerCase())) : users;
   const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
