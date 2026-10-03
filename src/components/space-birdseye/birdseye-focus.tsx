@@ -33,7 +33,7 @@ import { BirdseyeGrid, type GridColumn } from "./birdseye-grid";
 import { BirdseyeListSwitcher } from "./birdseye-list-switcher";
 import { EmptyColumnLine, ShowMore, type CardActions } from "./birdseye-overview";
 import { BirdseyeSkeleton } from "./birdseye-skeleton";
-import type { FocusState, LoadMoreTarget, SubtaskEntry } from "./use-birdseye";
+import { copyKey, type FocusState, type LoadMoreTarget, type SubtaskEntry } from "./use-birdseye";
 import { ErrorState } from "@/components/ui/error-state";
 import { LinkedCappedNote } from "./linked-capped-note";
 
@@ -297,7 +297,7 @@ export function BirdseyeFocus({
               key={card.id}
               card={card}
               list={list}
-              subtasks={subtasks[card.id]}
+              subtasks={subtasks[copyKey(card.boardId, card.id)]}
               now={actions.now}
               onOpen={actions.onOpen}
               onChangeStatus={actions.onChangeStatus}

@@ -30,6 +30,12 @@
 // they are merged into the counts and pages by the same (rank, position, id)
 // order the statements sort by, so a page boundary is the same wherever a
 // card came from. This file still names no link table and reads no access.
+// ONE RECORDED DIFFERENCE from the Board: a home task whose parent is linked
+// into this same List (a subtask moved into a List its parent is linked
+// into) is a card of its own here, where the List's Board folds it under
+// that parent. It stays visible and nothing is lost; folding it would mean
+// these statements reading the link table, for a case that needs a subtask
+// moved away from its parent's List.
 //
 // WHAT IS ACCEPTED (enterprise scale, no schema change). Q1 and Q2 touch
 // every live top-level row of the readable Lists once, because the rank, the

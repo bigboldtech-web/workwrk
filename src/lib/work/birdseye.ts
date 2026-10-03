@@ -326,8 +326,10 @@ export function countDelta<T extends ListTally>(
   status: string | null,
   delta: 1 | -1,
   hideClosed: boolean,
+  /** Whether the card counts as closed, when its column alone does not say (a linked card done in its home set). */
+  closed: boolean = isClosedStatus(statuses, status),
 ): T {
-  if (hideClosed && isClosedStatus(statuses, status)) return tally;
+  if (hideClosed && closed) return tally;
   const bucket = bucketFor(statuses, status);
   const statusCounts = { ...tally.statusCounts, [bucket]: Math.max(0, (tally.statusCounts[bucket] ?? 0) + delta) };
   if (statusCounts[bucket] === 0) delete statusCounts[bucket];
@@ -341,9 +343,11 @@ export function moveStatusCounts<T extends ListTally>(
   from: string | null,
   to: string | null,
   hideClosed: boolean,
+  /** Closed before and after, when the columns alone do not say (a linked card). */
+  closed: { from: boolean; to: boolean } = { from: isClosedStatus(statuses, from), to: isClosedStatus(statuses, to) },
 ): T {
-  if (from === to) return tally;
-  return countDelta(countDelta(tally, statuses, from, -1, hideClosed), statuses, to, 1, hideClosed);
+  if (from === to && closed.from === closed.to) return tally;
+  return countDelta(countDelta(tally, statuses, from, -1, hideClosed, closed.from), statuses, to, 1, hideClosed, closed.to);
 }
 
 // ── Colour ──────────────────────────────────────────────────────────

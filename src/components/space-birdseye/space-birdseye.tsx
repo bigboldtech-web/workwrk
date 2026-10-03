@@ -260,7 +260,7 @@ export function SpaceBirdseye({
   // with its subtasks, so whatever changed in the drawer shows at once.
   const lastOpened = useRef<string | null>(null);
   const wasAway = useRef(false);
-  const { refreshCard, loadSubtasks } = data;
+  const { refreshTask, loadSubtasks, loadSubtasksOf } = data;
   useEffect(() => {
     if (pathname !== basePath) {
       if (lastOpened.current) wasAway.current = true;
@@ -270,9 +270,10 @@ export function SpaceBirdseye({
     const id = lastOpened.current;
     wasAway.current = false;
     lastOpened.current = null;
-    void refreshCard(id);
-    void loadSubtasks(id);
-  }, [pathname, basePath, refreshCard, loadSubtasks]);
+    // Every copy of it on screen (it may show in two Lists), each in its own List.
+    void refreshTask(id);
+    loadSubtasksOf(id);
+  }, [pathname, basePath, refreshTask, loadSubtasksOf]);
 
   const onOpen = useCallback(
     (id: string, listId?: string) => {
@@ -301,7 +302,8 @@ export function SpaceBirdseye({
     (card: BirdseyeCard, next: string, pick?: StatusPick) => void changeStatus(card, next, pick),
     [changeStatus],
   );
-  const actions: CardActions = { now, onOpen, onChangeStatus, onLoadSubtasks: loadSubtasks };
+  const onLoadSubtasks = useCallback((listId: string, id: string) => void loadSubtasks(listId, id), [loadSubtasks]);
+  const actions: CardActions = { now, onOpen, onChangeStatus, onLoadSubtasks };
 
   // ── Render ────────────────────────────────────────────────────────
   const toolbar = (

@@ -65,7 +65,7 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   /** `listId`: the List a linked card is shown in, so the task opens there. */
   onOpen: (id: string, listId?: string) => void;
   onChangeStatus: (card: Card, next: string, pick?: StatusPick) => void;
-  onLoadSubtasks: (id: string) => void;
+  onLoadSubtasks: (listId: string, id: string) => void;
   /** Focus mode, for someone who may write: the card drags between status columns. */
   draggable?: boolean;
   onDragStart?: (card: Card) => void;
@@ -97,7 +97,7 @@ export const BirdseyeCard = memo(function BirdseyeCard({
     e.stopPropagation();
     const next = !expanded;
     setExpanded(next);
-    if (next && (!subtasks || subtasks.state === "error")) onLoadSubtasks(card.id);
+    if (next && (!subtasks || subtasks.state === "error")) onLoadSubtasks(card.boardId, card.id);
   };
 
   return (
@@ -200,7 +200,7 @@ export const BirdseyeCard = memo(function BirdseyeCard({
         ) : null}
 
         {expanded && card.subtaskCount > 0 ? (
-          <SubtaskList entry={subtasks} list={list} onOpen={(id) => onOpen(id, listId)} onRetry={() => onLoadSubtasks(card.id)} />
+          <SubtaskList entry={subtasks} list={list} onOpen={(id) => onOpen(id, listId)} onRetry={() => onLoadSubtasks(card.boardId, card.id)} />
         ) : null}
       </div>
     </li>

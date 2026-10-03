@@ -47,6 +47,7 @@ import { FolderTabs } from "./folder-tabs";
 import { NewListGhostRow, NewFolderGhostRow } from "./new-in-folder";
 import { SpaceListItemsTable } from "../../spaces/[slug]/space-list-items";
 import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
+import { readableFolderLists } from "@/lib/space";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 // A Folder page is Work, so what is on the shelf opens at its Work address
 // (src/lib/nav/object-href.ts), with the Work tree beside it.
@@ -137,27 +138,6 @@ export default async function FolderPage(props: {
   const canCreateInFolder = canEdit;
   const folderRole = toContainerRole(decision.role) ?? "view";
 
-  // Everything nested under this folder, so the Tasks tab covers the shelf and
-  // every shelf below it.
-  const allFolders = await prisma.folder.findMany({
-    where: { spaceId: folder.spaceId, archivedAt: null },
-    select: { id: true, parentFolderId: true },
-  });
-  const childrenByParent = new Map<string, string[]>();
-  for (const f of allFolders) {
-    const arr = childrenByParent.get(f.parentFolderId ?? "__root__") ?? [];
-    arr.push(f.id);
-    childrenByParent.set(f.parentFolderId ?? "__root__", arr);
-  }
-  const descendantIds = new Set<string>([folder.id]);
-  const queue = [folder.id];
-  while (queue.length) {
-    const cur = queue.shift()!;
-    for (const child of childrenByParent.get(cur) ?? []) {
-      if (!descendantIds.has(child)) { descendantIds.add(child); queue.push(child); }
-    }
-  }
-
   const childFolders = await prisma.folder.findMany({
     where: { spaceId: folder.spaceId, parentFolderId: folder.id, archivedAt: null },
     orderBy: [{ position: "asc" }, { name: "asc" }],
@@ -166,28 +146,22 @@ export default async function FolderPage(props: {
       _count: { select: { boards: true, childFolders: true } },
     },
   });
-  const rawBoards = await prisma.board.findMany({
-    where: { folderId: { in: Array.from(descendantIds) }, organizationId: u.organizationId, archivedAt: null },
-    orderBy: { name: "asc" },
-    select: {
-      id: true, slug: true, name: true, icon: true, color: true,
-      visibility: true, ownerId: true, folderId: true, updatedAt: true, statuses: true,
-    },
-  });
   // ONE world for every sub-folder and every List below this shelf: the
   // child Folder rows show the ones the viewer can open or passes through,
   // and every List read here (the rows, the Tasks tab, the counts, the
   // statuses) is one the viewer can open. A PRIVATE List, or a List under a
   // PRIVATE sub-folder, that the viewer cannot open is never read, named or
-  // counted.
-  const [childDecisions, listRoles] = await Promise.all([
+  // counted. The Lists are readableFolderLists (src/lib/space.ts), the one
+  // read this page's Bird's eye tab answers from too, so the three tabs
+  // always agree.
+  const [childDecisions, boards] = await Promise.all([
     nodeRoles(nodeCtx, childFolders.map((f) => ({ kind: "folder" as const, id: f.id })), { paths: true }),
-    nodeRoleMap(nodeCtx, "list", rawBoards.map((b) => b.id)),
+    readableFolderLists({ id: folder.id, spaceId: folder.spaceId }, { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel }),
   ]);
+  const listRoles = new Map(boards.map((b) => [b.id, b.role] as const));
   const childRole = (id: string): NodeRole => childDecisions.get(refKey({ kind: "folder", id }))?.role ?? "none";
   const childIsPath = (id: string): boolean => childDecisions.get(refKey({ kind: "folder", id }))?.path ?? false;
   const visibleChildFolders = childFolders.filter((f) => roleAtLeast(childRole(f.id), "VIEW") || childIsPath(f.id));
-  const boards = rawBoards.filter((b) => roleAtLeast(listRoles.get(b.id) ?? "none", "VIEW"));
   const directBoards = boards.filter((b) => b.folderId === folder.id);
   const boardIds = boards.map((b) => b.id);
   const readableListsIn = new Map<string, number>();

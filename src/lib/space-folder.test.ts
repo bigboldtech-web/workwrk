@@ -1,66 +1,43 @@
-// folderSubtree: one Folder of a viewer's Space tree as a tree of its own,
-// the cut readableListsInFolder hands readableListsInSpace.
+// folderShelfOrder: a Folder and the live Folders below it in the sidebar's
+// walk, the order readableFolderLists puts a Folder's Lists in.
 
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
-import { folderSubtree } from "./space";
-import type { FolderNode, ListNode, SpaceTreeResult } from "@/lib/access/node-tree";
+import { folderShelfOrder } from "./space";
 
-function list(id: string): ListNode {
-  return { id, slug: id, name: id, icon: null, color: null, visibility: "WORKSPACE", ownerId: null, settings: null, role: "view" };
-}
+const f = (id: string, parentFolderId: string | null, position: number, name = id) => ({ id, parentFolderId, position, name });
 
-function folder(id: string, boards: ListNode[], childFolders: FolderNode[] = []): FolderNode {
-  return {
-    id,
-    name: id,
-    icon: null,
-    color: null,
-    position: 0,
-    visibility: "WORKSPACE",
-    ownerId: null,
-    role: "view",
-    path: false,
-    _count: { boards: boards.length, childFolders: childFolders.length },
-    childFolders,
-    boards,
-  } as FolderNode;
-}
+describe("folderShelfOrder", () => {
+  // Space: A { C { G }, B }, D. B sits before C by position.
+  const FOLDERS = [f("A", null, 0), f("C", "A", 2), f("G", "C", 0), f("B", "A", 1), f("D", null, 1)];
 
-const C = folder("C", [list("c1")]);
-const B = folder("B", [list("b1"), list("b2")], [C]);
-const A = folder("A", [list("a1")], [B]);
-const D = folder("D", [list("d1")]);
-const TREE = {
-  spaceRole: "view",
-  access: "member",
-  privateRule: "legacy",
-  folders: [A, D],
-  boards: [list("root1")],
-  tables: [],
-  docs: [{ id: "doc1", title: "Doc", role: "view" }],
-  whiteboards: [],
-} as unknown as SpaceTreeResult;
-
-describe("folderSubtree", () => {
-  it("finds a Folder at any depth and keeps only it, with everything below it", () => {
-    const sub = folderSubtree(TREE, "B")!;
-    expect(sub.folders).toEqual([B]);
-    expect(sub.folders[0].childFolders).toEqual([C]);
-    // Nothing beside or above it: no root Lists, no sibling Folder, no docs.
-    expect(sub.boards).toEqual([]);
-    expect(sub.docs).toEqual([]);
-    expect(sub.folders.map((f) => f.id)).not.toContain("D");
-    // The viewer's standing in the Space is carried as it was.
-    expect(sub.spaceRole).toBe("view");
-    expect(folderSubtree(TREE, "C")!.folders).toEqual([C]);
-    expect(folderSubtree(TREE, "D")!.folders).toEqual([D]);
+  it("walks each Folder's sub-folders first, depth first by position, then the Folder itself", () => {
+    expect(folderShelfOrder(FOLDERS, "A")).toEqual(["B", "G", "C", "A"]);
+    expect(folderShelfOrder(FOLDERS, "C")).toEqual(["G", "C"]);
+    expect(folderShelfOrder(FOLDERS, "D")).toEqual(["D"]);
   });
 
-  it("is null for a Folder the viewer's tree does not carry", () => {
-    expect(folderSubtree(TREE, "nope")).toBeNull();
-    expect(folderSubtree({ ...TREE, folders: [] }, "A")).toBeNull();
+  it("breaks a position tie by name, as the sidebar does", () => {
+    const tied = [f("A", null, 0), f("z", "A", 0, "Zeta"), f("y", "A", 0, "Alpha")];
+    expect(folderShelfOrder(tied, "A")).toEqual(["y", "z", "A"]);
+  });
+
+  it("leaves out the Space's other Folders, and an archived sub-folder with everything below it", () => {
+    // C archived: absent from the live Folders, so G (whose parent is C) is
+    // unreachable from A, exactly as the page's own walk skips it.
+    const live = FOLDERS.filter((x) => x.id !== "C");
+    expect(folderShelfOrder(live, "A")).toEqual(["B", "A"]);
+  });
+
+  it("still answers for a Folder whose own parent is archived: the walk starts at it", () => {
+    const live = FOLDERS.filter((x) => x.id !== "A");
+    expect(folderShelfOrder(live, "C")).toEqual(["G", "C"]);
+  });
+
+  it("never loops on a cycle in bad data", () => {
+    const cyclic = [f("A", "B", 0), f("B", "A", 0)];
+    expect(folderShelfOrder(cyclic, "A")).toEqual(["B", "A"]);
   });
 });

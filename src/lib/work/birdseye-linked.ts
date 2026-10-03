@@ -32,11 +32,13 @@ export interface LinkedList {
   canContribute: boolean;
 }
 
-/** Closed here: its column is closed in this List, or it is done in its home set. */
-function closedHere(row: BoardItemRow, statuses: readonly StatusOption[], bucket: string): boolean {
+/**
+ * Closed here: its column is closed in this List, or it is done in its home
+ * set. The server's Hide closed and the client's counts both read this.
+ */
+function closedHere(homeStatus: StatusOption | null | undefined, statuses: readonly StatusOption[], bucket: string): boolean {
   if (isClosedStatus(statuses, bucket)) return true;
-  const home = row.listLink?.homeStatus;
-  return !!home && isDoneStatus([home], home.value);
+  return !!homeStatus && isDoneStatus([homeStatus], homeStatus.value);
 }
 
 /** The card for one projected linked root, shown in `list`. */
@@ -61,7 +63,7 @@ export function linkedCardFromRow(row: BoardItemRow, list: LinkedList): LinkedCa
       canDrag: linkedRowEditable(row, list.canContribute) && statusPickerFor(row, list.id, list.statuses).editable,
     },
     bucket,
-    closed: closedHere(row, list.statuses, bucket),
+    closed: closedHere(link.homeStatus, list.statuses, bucket),
   };
 }
 
@@ -106,9 +108,20 @@ export interface StatusPick {
   home?: boolean;
 }
 
-/** The row the Board's helpers read for a linked card: its home value and its link here. */
+/** The row the Board's helpers read for a linked card: the List it is shown in, its home value and its link here. */
 export function linkedRowOf(card: BirdseyeCard): BoardItemRow {
-  return { id: card.id, status: card.linked?.homeValue ?? null, listLink: card.linked?.listLink } as unknown as BoardItemRow;
+  return { id: card.id, boardId: card.boardId, status: card.linked?.homeValue ?? null, listLink: card.linked?.listLink } as unknown as BoardItemRow;
+}
+
+/**
+ * Is a card closed for this List's counts? A home card: its column is a
+ * closed status. A linked card: the server's rule (closedHere), its column
+ * is closed here or it is done in its home set, read at `column`.
+ */
+export function cardClosedHere(card: BirdseyeCard, statuses: readonly StatusOption[], column: string | null = card.status): boolean {
+  const bucket = bucketFor(statuses, column);
+  if (!card.linked) return isClosedStatus(statuses, column);
+  return closedHere(card.linked.listLink.homeStatus, statuses, bucket);
 }
 
 /**

@@ -138,22 +138,35 @@ describe("the routes Bird's eye added never read the legacy signal", () => {
   });
 });
 
-describe("one Folder's Lists go through the Space's one predicate", () => {
-  const folderFn = between(SPACE, "export async function readableListsInFolder", "\nexport ");
+describe("one Folder's Lists are the Folder page's own, for every tab", () => {
+  const readFn = between(SPACE, "export async function readableFolderLists", "\nexport ");
+  const asSpaceRows = between(SPACE, "export async function readableListsInFolder", "\nexport ");
   const gateFn = between(SPACE, "export async function folderForViewer", "\nexport ");
+  const page = code("src/app/(dashboard)/folders/[id]/page.tsx");
 
-  it("cuts the one resolver's tree to the Folder and reads it with readableListsInSpace", () => {
-    expect(folderFn).toMatch(/const tree = await spaceTree\(ctx, folder\.spaceId\);/);
-    expect(folderFn).toMatch(/const sub = tree \? folderSubtree\(tree, folder\.id\) : null;/);
-    expect(folderFn).toMatch(/readableListsInSpace\(folder\.spaceId, viewer, \{ \.\.\.opts, tree: sub \}\)/);
-    expect(folderFn).not.toMatch(/prisma\./);
+  it("reads the live Folders and Lists below the Folder, then decides every List over one world", () => {
+    expect(readFn).toMatch(/prisma\.folder\.findMany\(\{\s*where: \{ spaceId: folder\.spaceId, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(readFn).toMatch(/const order = folderShelfOrder\(folders, folder\.id\);/);
+    expect(readFn).toMatch(/prisma\.board\.findMany\(\{\s*where: \{ folderId: \{ in: order \}, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(readFn).toMatch(/const roles = await nodeRoleMap\(ctx, "list", boards\.map\(\(b\) => b\.id\)\);/);
+    expect(readFn).toMatch(/!roleAtLeast\(role, "VIEW"\)\) continue;/);
+    expect(readFn).not.toMatch(/spaceTree\(/);
+  });
+
+  it("is what the Folder page's tabs and its Bird's eye both read", () => {
+    expect(page).toMatch(/readableFolderLists\(\{ id: folder\.id, spaceId: folder\.spaceId \}, \{ userId: u\.id, organizationId: u\.organizationId, accessLevel: u\.accessLevel \}\)/);
+    // No second List read of its own on the page (its one other board read
+    // is the home statuses of tasks linked in, by id).
+    expect(page).not.toMatch(/prisma\.board\.findMany\(\{\s*where: \{ folderId/);
+    expect(page).not.toMatch(/descendantIds/);
+    expect(asSpaceRows).toMatch(/const rows = await readableFolderLists\(folder, viewer, opts\);/);
+    expect(asSpaceRows).toMatch(/canContribute: roleAtLeast\(r\.role, "EDIT"\)/);
   });
 
   it("gates as the Folder page does: the org's live Folder, Can view or higher by nodeRole", () => {
     expect(gateFn).toMatch(/where: \{ id: folderId, organizationId: viewer\.organizationId, archivedAt: null \}/);
     expect(gateFn).toMatch(/const decision = await nodeRole\(ctx, \{ kind: "folder", id: folder\.id \}\);/);
     expect(gateFn).toMatch(/roleAtLeast\(decision\.role, "VIEW"\)/);
-    const page = code("src/app/(dashboard)/folders/[id]/page.tsx");
     expect(page).toMatch(/if \(!roleAtLeast\(decision\.role, "VIEW"\)\) \{/);
   });
 });
