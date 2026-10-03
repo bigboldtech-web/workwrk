@@ -13,11 +13,22 @@ let level: string | null;
 let meetingWhere: Record<string, unknown> | null;
 let sopWhere: Record<string, unknown> | null;
 let contractWhere: Record<string, unknown> | null;
+let employeeWhere: Record<string, unknown> | null;
+let engineRole: "OWNER" | "ADMIN" | "MEMBER" | "GUEST" | null;
+let gave: Record<string, unknown> | null;
 let contractUpdated: boolean;
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findFirst: async () => (level ? legacyLevelRow(level) : null) },
+    user: {
+      // A lookup by email is send_kudos finding the receiver; any other is the caller's level.
+      findFirst: async (args: { where: { email?: unknown } }) => (args.where.email ? { id: "u-lea", firstName: "Lea", lastName: "Alpha" } : level ? legacyLevelRow(level) : null),
+      findMany: async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) => {
+        employeeWhere = args.where;
+        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", accessLevel: "EMPLOYEE", department: null, role: null }];
+      },
+    },
+    conversationMember: { findMany: async () => [{ userId: "u-lea" }] },
     meeting: { findMany: async (args: { where: Record<string, unknown> }) => { meetingWhere = args.where; return []; } },
     sOP: { findMany: async (args: { where: Record<string, unknown> }) => { sopWhere = args.where; return []; } },
     contract: {
@@ -35,6 +46,15 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/sop-access", () => ({
   sopVisibilityWhere: async (s: { user: { accessLevel?: string } }) => (legacyLevelOf(s) === "COMPANY_ADMIN" ? {} : { OR: [{ visibleTo: "u-1" }] }),
 }));
+vi.mock("@/lib/access/viewer", () => ({
+  viewerForUser: async () => (engineRole ? { userId: "u-1", organizationId: "org-1", orgRole: engineRole, peopleTeam: false } : null),
+}));
+vi.mock("@/lib/kudos-give", () => ({
+  giveKudos: async (input: Record<string, unknown>) => {
+    gave = input;
+    return engineRole === "GUEST" ? { ok: false, status: 404, error: "Not found" } : { ok: true, duplicate: false, kudos: { id: "k-1", message: input.message, companyValue: null } };
+  },
+}));
 vi.mock("@/lib/api-helpers", () => ({
   hasPermission: async () => true,
   isOrgAdmin: (s: { user: { accessLevel?: string } }) => ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(legacyLevelOf(s)),
@@ -49,6 +69,9 @@ beforeEach(() => {
   sopWhere = null;
   contractWhere = null;
   contractUpdated = false;
+  employeeWhere = null;
+  engineRole = "MEMBER";
+  gave = null;
 });
 
 describe("search_meetings", () => {
@@ -107,5 +130,41 @@ describe("search_contracts and update_contract", () => {
     expect(await TOOLS.search_contracts.handler(ctx, {})).toEqual({ count: 0, contracts: [] });
     expect(contractWhere).toBeNull();
     expect(await TOOLS.update_contract.handler(ctx, { contractId: "c-1" })).toEqual({ error: "Contract not found in this org" });
+  });
+});
+
+describe("search_employees", () => {
+  it("a Member finds colleagues without their access level; an admin sees it", async () => {
+    const member = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
+    expect(member.employees[0]).not.toHaveProperty("accessLevel");
+    expect(employeeWhere).toMatchObject({ organizationId: "org-1", status: "ACTIVE", deletedAt: null });
+    engineRole = "ADMIN";
+    const admin = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
+    expect(admin.employees[0]).toHaveProperty("accessLevel", "EMPLOYEE");
+  });
+
+  it("a Guest finds only the people they share a conversation with", async () => {
+    engineRole = "GUEST";
+    await TOOLS.search_employees.handler(ctx, {});
+    expect(employeeWhere).toMatchObject({ id: { in: ["u-lea"] } });
+  });
+
+  it("a person no longer in the workspace finds nobody", async () => {
+    engineRole = null;
+    expect(await TOOLS.search_employees.handler(ctx, {})).toEqual({ count: 0, employees: [] });
+    expect(employeeWhere).toBeNull();
+  });
+});
+
+describe("send_kudos", () => {
+  it("gives the kudos the wall's way, so the person thanked is told", async () => {
+    const r = await TOOLS.send_kudos.handler(ctx, { receiverEmail: "LEA@x.com ", message: "Thanks" });
+    expect(gave).toMatchObject({ organizationId: "org-1", giverId: "u-1", receiverId: "u-lea", message: "Thanks" });
+    expect(r).toMatchObject({ ok: true, receiver: "Lea Alpha" });
+  });
+
+  it("a Guest is told they cannot, and nothing is given", async () => {
+    engineRole = "GUEST";
+    expect(await TOOLS.send_kudos.handler(ctx, { receiverEmail: "lea@x.com", message: "Thanks" })).toEqual({ error: "You can't give kudos in this workspace." });
   });
 });

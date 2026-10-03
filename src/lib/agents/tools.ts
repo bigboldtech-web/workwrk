@@ -22,6 +22,8 @@ import { isDoneStatusName } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
+import { viewerForUser } from "@/lib/access/viewer";
+import { giveKudos } from "@/lib/kudos-give";
 import type { ToolName } from "./tool-names";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
 import { sopVisibilityWhere } from "@/lib/sop-access";
@@ -241,23 +243,32 @@ const sendKudos: ToolDefinition = {
     required: ["receiverEmail", "message"],
   },
   handler: async (ctx, input) => {
-    const receiver = await prisma.user.findFirst({
-      where: { email: input.receiverEmail as string, organizationId: ctx.orgId },
-      select: { id: true, firstName: true, lastName: true },
-    });
+    const email = typeof input.receiverEmail === "string" ? input.receiverEmail.trim() : "";
+    const receiver = email
+      ? await prisma.user.findFirst({
+          where: { email: { equals: email, mode: "insensitive" }, organizationId: ctx.orgId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null;
     if (!receiver) return { error: `No user with email '${input.receiverEmail}' in this organization.` };
 
-    const kudos = await prisma.kudos.create({
-      data: {
-        organizationId: ctx.orgId,
-        giverId: ctx.userId,
-        receiverId: receiver.id,
-        message: input.message as string,
-        companyValue: (input.companyValue as string) ?? null,
-      },
-      select: { id: true, message: true, companyValue: true },
+    // The kudos wall's own way (src/lib/kudos-give.ts): its rules (never a
+    // Guest, never yourself, up to 500 characters, a resend answered once)
+    // and everything that follows, so the person thanked is told.
+    const given = await giveKudos({
+      organizationId: ctx.orgId,
+      giverId: ctx.userId,
+      receiverId: receiver.id,
+      message: typeof input.message === "string" ? input.message : "",
+      companyValue: typeof input.companyValue === "string" ? input.companyValue : null,
     });
-    return { ok: true, kudos, receiver: `${receiver.firstName ?? ""} ${receiver.lastName ?? ""}`.trim() };
+    if (!given.ok) return { error: given.error === "Not found" ? "You can't give kudos in this workspace." : given.error };
+    return {
+      ok: true,
+      kudos: { id: given.kudos.id, message: given.kudos.message, companyValue: given.kudos.companyValue },
+      receiver: `${receiver.firstName ?? ""} ${receiver.lastName ?? ""}`.trim(),
+      ...(given.duplicate ? { duplicate: true } : {}),
+    };
   },
 };
 
@@ -391,12 +402,31 @@ const searchEmployees: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
-    const limit = Math.min(30, Number(input.limit ?? 10));
-    const q = input.query as string | undefined;
+    const limit = clampLimit(input.limit, 10, 30);
+    const q = typeof input.query === "string" && input.query.trim() ? input.query.trim() : undefined;
+    // The directory's rules, read fresh: a Guest finds only the people they
+    // already share a conversation with (the people picker's rule), and only
+    // an admin or the People team sees anyone's access level (the directory
+    // card leaves it out for everyone else).
+    const viewer = await viewerForUser(ctx.orgId, ctx.userId);
+    if (!viewer) return { count: 0, employees: [] };
+    let visibleIds: string[] | null = null;
+    if (viewer.orgRole === "GUEST") {
+      const shared = await prisma.conversationMember.findMany({
+        where: { conversation: { organizationId: ctx.orgId, members: { some: { userId: ctx.userId } } } },
+        select: { userId: true },
+        take: 500,
+      });
+      visibleIds = [...new Set(shared.map((r) => r.userId))];
+      if (visibleIds.length === 0) return { count: 0, employees: [] };
+    }
+    const seesLevels = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
     const employees = await prisma.user.findMany({
       where: {
         organizationId: ctx.orgId,
         status: "ACTIVE",
+        deletedAt: null,
+        ...(visibleIds ? { id: { in: visibleIds } } : {}),
         ...(input.department ? { department: { name: { equals: input.department as string, mode: "insensitive" } } } : {}),
         ...(q ? {
           OR: [
@@ -422,7 +452,7 @@ const searchEmployees: ToolDefinition = {
         email: e.email,
         department: e.department?.name ?? null,
         role: e.role?.title ?? null,
-        accessLevel: e.accessLevel,
+        ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
       })),
     };
   },

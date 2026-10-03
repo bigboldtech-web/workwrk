@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
-import { triggerRecalculation } from "@/services/performanceScoreService";
-import { notifyKudosPosted } from "@/services/slackNotifier";
-import { dispatchEvent } from "@/services/webhookDispatcher";
+import { kudosAftermath } from "@/lib/kudos-give";
 
 /**
  * GET /api/v1/kudos — feed, paginated.
@@ -50,7 +48,9 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/v1/kudos — give kudos.
  * Body: { giverId, receiverId, message, companyValue? }
- * Fires: Slack notify, performance recalc, webhook "kudos.created".
+ * Fires everything a kudos does (kudosAftermath): the person thanked is
+ * told and emailed, it is logged, their score is recalculated, Slack, and
+ * webhook "kudos.created".
  */
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
@@ -72,15 +72,15 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Cannot give kudos to yourself" }, { status: 400 });
   }
 
-  // Both users must be in the caller's org.
+  // Both users must be in the caller's org, and not removed from it.
   const [giver, receiver] = await Promise.all([
     prisma.user.findFirst({
-      where: { id: body.giverId, organizationId: ctx.organizationId },
+      where: { id: body.giverId, organizationId: ctx.organizationId, deletedAt: null },
       select: { id: true, firstName: true, lastName: true },
     }),
     prisma.user.findFirst({
-      where: { id: body.receiverId, organizationId: ctx.organizationId },
-      select: { id: true, firstName: true, lastName: true },
+      where: { id: body.receiverId, organizationId: ctx.organizationId, deletedAt: null },
+      select: { id: true, firstName: true, lastName: true, email: true },
     }),
   ]);
   if (!giver || !receiver) return Response.json({ error: "User not found" }, { status: 404 });
@@ -103,19 +103,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  triggerRecalculation(body.receiverId, ctx.organizationId);
-  notifyKudosPosted({
-    organizationId: ctx.organizationId,
-    giverName: `${giver.firstName} ${giver.lastName}`,
-    receiverName: `${receiver.firstName} ${receiver.lastName}`,
-    value: body.companyValue?.trim() || null,
-    message: body.message.trim(),
-  }).catch(() => {});
-  dispatchEvent({
-    organizationId: ctx.organizationId,
-    event: "kudos.created",
-    payload: kudos,
-  }).catch(() => {});
+  await kudosAftermath({ organizationId: ctx.organizationId, kudos, giver, receiver });
 
   return Response.json(kudos, { status: 201 });
 }

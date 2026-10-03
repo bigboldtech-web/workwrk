@@ -54,6 +54,22 @@ export function viewerFromSessionObject(session: SessionLike | null | undefined)
   };
 }
 
+/**
+ * The Viewer for a person by id, hydrated: their role as the engine reads it
+ * now, for code that acts for someone other than the session (Ask AI's
+ * tools, a shared write path). Null when they are not in this workspace or
+ * were removed.
+ */
+export async function viewerForUser(organizationId: string, userId: string): Promise<Viewer | null> {
+  const row = await prisma.user.findFirst({
+    where: { id: userId, organizationId, deletedAt: null },
+    select: { id: true, accessLevel: true },
+  });
+  if (!row) return null;
+  const viewer = viewerFromSessionObject({ user: { id: row.id, organizationId, accessLevel: row.accessLevel } });
+  return viewer ? hydrate(viewer) : null;
+}
+
 /** The server-side entry point every API route and page gate uses. */
 export async function viewerFromSession(): Promise<Viewer | null> {
   const session = (await getServerSession(authOptions)) as SessionLike | null;
