@@ -130,3 +130,23 @@ export function htmlToText(html: unknown): string {
   while (out.length > 0 && out[out.length - 1] === "") out.pop();
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
+
+/**
+ * Was this stored as HTML? An older description or comment (TipTap) always
+ * opens with a block tag; today's are Markdown, which may mention a tag
+ * ("use the <div> element", "<lea@acme.com>") anywhere but never opens with
+ * one of these.
+ */
+export function looksLikeStoredHtml(text: string): boolean {
+  return /^\s*<(?:p|div|h[1-6]|ul|ol|li|blockquote|pre|table|br)\b[^>]*>/i.test(text);
+}
+
+/**
+ * Stored text for a page that renders Markdown safely (MarkdownLite: every
+ * node a React element): Markdown exactly as written, an older HTML body
+ * reduced to plain text, anything else empty.
+ */
+export function markdownOrText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return looksLikeStoredHtml(value) ? htmlToText(value) : value.trim();
+}

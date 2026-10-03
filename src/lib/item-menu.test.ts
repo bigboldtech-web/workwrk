@@ -230,10 +230,12 @@ describe("the Public link row", () => {
     expect(keys(ctx({ personalList: true }))).not.toContain("public-link");
   });
 
-  it("in a List the task is only shown in, follows the home's share rule", () => {
-    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, canAddToList: false }))).not.toContain("public-link");
-    expect(keys(ctx({ role: "EDIT", inSecondaryList: true }))).not.toContain("public-link");
-    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, canAddToList: true }))).toContain("public-link");
+  it("follows the host's share answer: the home's rule and the workspace switch", () => {
+    expect(keys(ctx({ role: "EDIT", canSharePublicly: false }))).not.toContain("public-link");
+    expect(keys(ctx({ role: "FULL", canSharePublicly: false }))).not.toContain("public-link");
+    expect(keys(ctx({ role: "EDIT", canSharePublicly: true }))).toContain("public-link");
+    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, canSharePublicly: true }))).toContain("public-link");
+    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, linkedSubtask: true, canSharePublicly: true }))).not.toContain("public-link");
   });
 });
 

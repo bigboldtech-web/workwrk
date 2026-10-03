@@ -790,7 +790,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   // order under its parent, so it is not dragged among the cards.
                   const draggable = cardCanEdit && !card.parentItemId && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
                   const listContext: ItemMenuListContext | undefined = kind === "home"
-                    ? (flags.canAddToList ? { boardId, kind: "home", canAddToList: true } : undefined)
+                    ? { boardId, kind: "home", canAddToList: flags.canAddToList, canShareHome: flags.canShareHome }
                     : {
                         boardId,
                         kind: "linked",
@@ -800,6 +800,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                         canLinkMove: flags.canLinkMove,
                         canAddToList: flags.canAddToList,
                         linkedSubtask: flags.linkedSubtask,
+                        canShareHome: flags.canShareHome,
                       };
                   const place = placeOf.get(card.id);
                   return (

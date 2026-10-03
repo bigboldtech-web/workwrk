@@ -65,7 +65,7 @@ type ExportRow = {
 };
 
 const EXPORTS: ExportRow[] = [
-  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "Everything in the workspace: people, Spaces, Folders, Lists, every task with its description, checklist, tags, custom fields and comments, Docs and SOPs as Markdown, Tables as CSV, Goals and reviews. Comments name their files; the files themselves are not inside. Personal notes stay their owner's." },
+  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles. Not included: files and attachments, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's. A large workspace can take a few minutes: keep this page open." },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
   { key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)", desc: "The activity log: who acted (a person, your identity provider or WorkwrK staff), what, when, the target and the IP. The newest 50,000 events." },
@@ -90,7 +90,7 @@ const DATA_TABS: readonly SettingsTab[] = settingsTabs("data");
 
 type Summary = {
   legacy: { purchaseOrders: number; invoices: number };
-  recentExports: { id: string; when: string; who: string; what: string; kind: string | null }[];
+  recentExports: { id: string; when: string; who: string; what: string; kind: string | null; status?: string | null }[];
   matrixRetired: { id: string; at: string } | null;
   canPurge: boolean;
 };
@@ -98,6 +98,7 @@ type Summary = {
 export default function DataSettingsPage() {
   const { toast } = useOsToast();
   const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
   const [summary, setSummary] = useState<Summary | null | "error">(null);
   const flow = usePeopleImport();
   const ready = flow.state.staged?.summary.ready ?? 0;
@@ -128,7 +129,29 @@ export default function DataSettingsPage() {
         toast(msg);
         return;
       }
-      const blob = await res.blob();
+      // Read it as it arrives, so a long export shows how far it has got, and
+      // a download that breaks partway says so in words.
+      let blob: Blob;
+      try {
+        const reader = res.body?.getReader();
+        if (!reader) {
+          blob = await res.blob();
+        } else {
+          const parts: Uint8Array[] = [];
+          let got = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parts.push(value);
+            got += value.length;
+            setProgress(`${(got / 1_048_576).toFixed(got < 10 * 1_048_576 ? 1 : 0)} MB`);
+          }
+          blob = new Blob(parts as BlobPart[], { type: res.headers.get("Content-Type") ?? "application/octet-stream" });
+        }
+      } catch {
+        toast("The export stopped before it finished, so nothing was saved. Try again.");
+        return;
+      }
       if (blob.size === 0) { toast("Nothing to export yet: this is empty."); return; }
       const filename = filenameFromDisposition(res.headers.get("Content-Disposition") ?? "", row.fallbackName);
       const url = URL.createObjectURL(blob);
@@ -141,10 +164,11 @@ export default function DataSettingsPage() {
       URL.revokeObjectURL(url);
       toast(`Exported ${filename}`);
       void loadSummary();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Export failed");
+    } catch {
+      toast("Couldn't start the export. Check your connection and try again.");
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   }, [busy, toast, loadSummary]);
 
@@ -164,7 +188,7 @@ export default function DataSettingsPage() {
         ) : tab === "trash" ? (
           <TrashTab />
         ) : (
-          <ExportTab summary={summary} busy={busy} onRun={download} onRetry={() => { setSummary(null); void loadSummary(); }} />
+          <ExportTab summary={summary} busy={busy} progress={progress} onRun={download} onRetry={() => { setSummary(null); void loadSummary(); }} />
         )
       }
     </SettingsPage>
@@ -173,7 +197,7 @@ export default function DataSettingsPage() {
 
 /* ───────────────────────── Export ───────────────────────── */
 
-function ExportTab({ summary, busy, onRun, onRetry }: { summary: Summary | null | "error"; busy: string | null; onRun: (r: ExportRow) => void; onRetry: () => void }) {
+function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summary | null | "error"; busy: string | null; progress: string | null; onRun: (r: ExportRow) => void; onRetry: () => void }) {
   const s = summary && summary !== "error" ? summary : null;
   const lastFor = (key: string) => s?.recentExports.find((e) => e.kind === key || (key === "all" && e.kind === "workspace"));
   const legacy = s ? LEGACY_EXPORTS.filter((r) => (r.key === "invoices" ? s.legacy.invoices : s.legacy.purchaseOrders) > 0) : [];
@@ -192,8 +216,13 @@ function ExportTab({ summary, busy, onRun, onRetry }: { summary: Summary | null 
               key={row.key}
               id={`data.export.${row.key}`}
               label={row.title}
-              helper={<>{row.desc}{last ? <span className="block">Last exported by {last.who}, <DateText value={last.when} style="relative" /></span> : null}</>}
-              control={<ExportButton row={row} busy={busy} onRun={onRun} />}
+              helper={<>{row.desc}{last ? (
+                <span className="block">
+                  {last.status === "started" || last.status === "stopped" ? `The last export by ${last.who} did not finish, ` : `Last exported by ${last.who}, `}
+                  <DateText value={last.when} style="relative" />
+                </span>
+              ) : null}</>}
+              control={<ExportButton row={row} busy={busy} progress={busy === row.key ? progress : null} onRun={onRun} />}
             />
           );
         })}
@@ -769,17 +798,19 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 function ExportButton({
-  row, busy, onRun,
+  row, busy, progress, onRun,
 }: {
   row: ExportRow;
   busy: string | null;
+  /** How much has arrived, while this export downloads. */
+  progress?: string | null;
   onRun: (row: ExportRow) => void;
 }) {
   const isBusy = busy === row.key;
   return (
     <button type="button" onClick={() => onRun(row)} disabled={busy !== null} className={btn.secondary} aria-label={row.title ? `Download ${row.title}` : "Download"}>
-      {isBusy ? <Pending label="Preparing" /> : <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
-      Download
+      {isBusy ? <Pending label={progress ? `Downloading ${progress}` : "Preparing"} /> : <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
+      {isBusy && progress ? progress : "Download"}
     </button>
   );
 }

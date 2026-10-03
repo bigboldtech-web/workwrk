@@ -96,6 +96,49 @@ describe("sopToMarkdown", () => {
     expect(html).toContain("Keep it short.");
   });
 
+  it("keeps a recording's screenshots, a checklist's approval, added blocks and images in step text", () => {
+    const rec = sopToMarkdown({
+      title: "Rec",
+      sopType: "RECORDED",
+      content: { type: "recorded", steps: [{ order: 1, description: "Click Save", url: "https://example.com/a", screenshot: "https://cdn.example.com/s1.png" }] },
+    });
+    expect(rec).toContain("1. Click Save\n   ![Step 1](https://cdn.example.com/s1.png)\n   On <https://example.com/a>");
+    const list = sopToMarkdown({
+      title: "Check",
+      sopType: "CHECKLIST",
+      content: {
+        type: "CHECKLIST",
+        sections: [{ id: "s", title: "Close", steps: [{
+          id: "1", type: "approval", title: "Manager signs off", description: "<p>See <img src=\"https://cdn.example.com/form.png\"></p>",
+          contentBlocks: [
+            { id: "a", type: "text", content: "Use the blue pen." },
+            { id: "b", type: "horizontal_line", content: "" },
+            { id: "c", type: "image", content: "data:image/png;base64,iVBORw0KGgo=" },
+            { id: "d", type: "video", content: "https://cdn.example.com/how.mp4" },
+          ],
+        }] }],
+      },
+    });
+    expect(list).toContain("- [ ] Manager signs off (Approval)");
+    expect(list).toContain("  ![Step image](https://cdn.example.com/form.png)");
+    expect(list).toContain("  Use the blue pen.\n  ---\n  ![Image](data:image/png;base64,iVBORw0KGgo=)\n  [Video](https://cdn.example.com/how.mp4)");
+  });
+
+  it("writes a flow-layout SOP from its flow copy, so a step only the flow holds is kept", () => {
+    const md = sopToMarkdown({
+      title: "Flow",
+      sopType: "WRITTEN",
+      content: {
+        type: "steps",
+        layout: "flow",
+        steps: [{ id: "a", title: "First", image: "https://cdn.example.com/a.png" }],
+        flow: { type: "process_flow", steps: [{ id: "a", type: "action", title: "First" }, { id: "b", type: "action", title: "Only in the flow" }] },
+      },
+    });
+    expect(md).toContain("1. **First**\n   ![Step 1](https://cdn.example.com/a.png)");
+    expect(md).toContain("2. **Only in the flow**");
+  });
+
   it("escapes Markdown's own characters in text people typed", () => {
     const md = sopToMarkdown({ title: "Use *only* [approved] tools", sopType: "WRITTEN", content: { type: "steps", steps: [{ id: "1", title: "Run `deploy`" }] } });
     expect(md).toContain("# Use \\*only\\* \\[approved\\] tools");

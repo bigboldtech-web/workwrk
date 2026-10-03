@@ -4,15 +4,19 @@
 // Modelled on /api/public/docs/[token]. The token is `${itemId}.${secret}`;
 // the secret is compared timing-safe against the task's own link row. Every
 // way a link can be dead answers the same 404 (access invariant 14): no
-// such task, no link or another secret, the link turned off, the task or its
-// List in Trash, or the workspace's public links switched off (toggle 10).
+// such task, no link or another secret, the link turned off or past its
+// expiry, the task, its List, a Folder above it or its Space in Trash, or
+// the workspace's task links not turned on.
 //
 // THE PAYLOAD IS FIXED AND SMALL, and nothing else ever rides along: the
-// title, status, priority, dates, the description as its Markdown text (an
-// older HTML one reduced to plain text: never HTML, this page is on the
-// app's own domain, see src/lib/html-text.ts), the checklist, its subtasks'
-// titles and statuses, and the assignees' first names. Never comments, attachments, activity, custom fields, connected
-// tasks, the List or Space it is in, ids of people, or any email.
+// title, status, priority, dates, the description as its Markdown (an older
+// HTML one reduced to plain text: never HTML, this page is on the app's own
+// domain, see src/lib/html-text.ts markdownOrText), the checklist, its
+// subtasks' titles and statuses, and the workspace's name and logo. Only
+// when the sharer turned on "Show assignees and comments": the assignees'
+// first names and the comments (first name, text, time), never their files.
+// Never attachments, activity, custom fields, connected tasks, the List or
+// Space it is in, ids, or any email.
 //
 // GET only, so any write is 405. Opening the link is recorded, sampled
 // (src/lib/public-link-audit.ts).
@@ -23,10 +27,14 @@ import { publicSecretMatches } from "@/lib/doc-sharing";
 import { orgPublicLinksTurnedOn } from "@/lib/public-links";
 import { auditPublicLinkUse } from "@/lib/public-link-audit";
 import { PRIORITY_OPTIONS, getBoardStatuses, isDoneStatus, makeStatusLookup } from "@/lib/board-items-shared";
-import { htmlToText } from "@/lib/html-text";
-import { parseTaskLinkToken, readTaskLink } from "@/lib/task-public-link";
+import { markdownOrText } from "@/lib/html-text";
+import { BOARD_ITEM_ENTITY_TYPE } from "@/lib/item-thread";
+import { parseTaskLinkToken, readTaskLink, taskLinkExpired, taskLinkPlace } from "@/lib/task-public-link";
 
 const NOT_FOUND = () => NextResponse.json({ error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+
+/** The most comments one page carries, oldest first. */
+const COMMENT_CAP = 200;
 
 function checklistOf(metadata: unknown): Array<{ text: string; done: boolean }> {
   const raw = metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>).checklist : null;
@@ -57,14 +65,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       organizationId: true,
       boardId: true,
       assigneeIds: true,
-      board: { select: { statuses: true, archivedAt: true } },
+      board: { select: { statuses: true } },
       organization: { select: { settings: true, name: true, logo: true } },
     },
   });
-  if (!item || item.archivedAt || item.board?.archivedAt) return NOT_FOUND();
+  if (!item || item.archivedAt) return NOT_FOUND();
   if (!orgPublicLinksTurnedOn(item.organization?.settings)) return NOT_FOUND();
   const link = await readTaskLink(item.id);
-  if (!link || !publicSecretMatches(link.secret, parsed.secret)) return NOT_FOUND();
+  if (!link || !publicSecretMatches(link.secret, parsed.secret) || taskLinkExpired(link)) return NOT_FOUND();
+  if ((await taskLinkPlace(item.boardId)).inTrash) return NOT_FOUND();
 
   const statuses = getBoardStatuses(item.board);
   const lookup = makeStatusLookup(statuses);
@@ -73,20 +82,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     const s = lookup[value];
     return { label: s?.label ?? value, color: s?.color ?? "#98A2B3", done: isDoneStatus(statuses, value) };
   };
-  const [subtasks, people] = await Promise.all([
+  const [subtasks, comments] = await Promise.all([
     prisma.item.findMany({
       where: { parentItemId: item.id, boardId: item.boardId, organizationId: item.organizationId, archivedAt: null },
       orderBy: [{ position: "asc" }, { id: "asc" }],
       select: { title: true, status: true },
       take: 200,
     }),
-    item.assigneeIds.length
-      ? prisma.user.findMany({ where: { id: { in: item.assigneeIds }, organizationId: item.organizationId }, select: { id: true, firstName: true } })
-      : Promise.resolve([] as Array<{ id: string; firstName: string | null }>),
+    link.showPeople
+      ? prisma.itemUpdate.findMany({
+          where: { organizationId: item.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: item.id, archivedAt: null },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { authorId: true, body: true, createdAt: true },
+          take: COMMENT_CAP,
+        })
+      : Promise.resolve([] as Array<{ authorId: string | null; body: string; createdAt: Date }>),
   ]);
-  const firstNames = item.assigneeIds
-    .map((pid) => people.find((p) => p.id === pid)?.firstName?.trim())
-    .filter((n): n is string => !!n);
+  // First names only, and only with the sharer's say-so.
+  const personIds = link.showPeople ? [...new Set([...item.assigneeIds, ...comments.map((c) => c.authorId).filter((v): v is string => !!v)])] : [];
+  const people = personIds.length
+    ? await prisma.user.findMany({ where: { id: { in: personIds }, organizationId: item.organizationId }, select: { id: true, firstName: true } })
+    : [];
+  const firstName = new Map(people.map((p) => [p.id, p.firstName?.trim() || null]));
+  const assignees = link.showPeople ? item.assigneeIds.map((pid) => firstName.get(pid)).filter((n): n is string => !!n) : [];
   const priority = PRIORITY_OPTIONS.find((p) => p.value === item.priority) ?? null;
 
   void auditPublicLinkUse({ organizationId: item.organizationId, targetType: "BOARD_ITEM", targetId: item.id, title: item.title });
@@ -98,10 +116,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       priority: priority ? { label: priority.label, color: priority.color } : null,
       startAt: item.startAt ? item.startAt.toISOString() : null,
       dueAt: item.dueAt ? item.dueAt.toISOString() : null,
-      description: htmlToText((item.metadata as Record<string, unknown> | null)?.description).slice(0, 50_000),
+      description: markdownOrText((item.metadata as Record<string, unknown> | null)?.description).slice(0, 50_000),
       checklist: checklistOf(item.metadata),
       subtasks: subtasks.map((s) => ({ title: s.title, status: statusOf(s.status) })),
-      assignees: firstNames,
+      assignees,
+      comments: comments
+        .map((c) => ({ author: (c.authorId && firstName.get(c.authorId)) || "Someone", text: markdownOrText(c.body).slice(0, 10_000), at: c.createdAt.toISOString() }))
+        .filter((c) => c.text),
       updatedAt: item.updatedAt.toISOString(),
       org: { name: item.organization?.name ?? "", logo: item.organization?.logo ?? null },
     },

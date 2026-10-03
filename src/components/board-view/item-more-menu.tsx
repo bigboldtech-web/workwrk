@@ -32,6 +32,7 @@ import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from "@/lib/readable-lists";
 import { useItemTypes } from "./use-item-types";
 import { OsShellContext } from "@/components/layout/os/shell-context";
+import { BootContext } from "@/components/layout/os/boot-context";
 import { AddToListPicker } from "./add-to-list-picker";
 import { TaskPublicLinkDialog } from "./task-public-link-dialog";
 import { distinctSectionLabels } from "@/lib/list-link-rows";
@@ -64,6 +65,12 @@ export interface ItemMenuListContext {
   canLinkMove?: boolean;
   canAddToList?: boolean;
   linkedSubtask?: boolean;
+  /**
+   * May the viewer share this task outside its home: contribute on the home
+   * List, or an org admin (the add rule, linkedRowAccess canShare). The
+   * Public link row follows it. Absent: the host does not know.
+   */
+  canShareHome?: boolean;
 }
 
 export interface ItemMoreMenuProps {
@@ -152,6 +159,13 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   // Outside the shell (none today) there is no Ask AI to open.
   const shell = useContext(OsShellContext);
   const askAi = Boolean(shell?.askAiVisible);
+  // "Public link" is offered to someone who may share the task, while the
+  // workspace allows task links; an Owner or Admin always gets it, since they
+  // can turn the switch on (the dialog says how).
+  const bootState = useContext(BootContext);
+  const orgAdmin = bootState?.boot.viewer.orgRole === "OWNER" || bootState?.boot.viewer.orgRole === "ADMIN";
+  const taskLinksOn = Boolean(bootState?.boot.org.taskPublicLinks);
+  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin);
   const openSidekick = shell?.openSidekick;
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);
@@ -299,6 +313,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     inSecondaryList: linked ? true : undefined,
     canRemoveFromList: linked ? Boolean(listContext?.canRemoveFromList) : undefined,
     linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
+    canSharePublicly,
   }).filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0));
 
   const close = useCallback(() => setOpen(false), []);

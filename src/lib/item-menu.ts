@@ -113,6 +113,12 @@ export interface ItemMenuContext {
   canRemoveFromList?: boolean;
   /** A subtask shown through its linked parent: never removed, moved or linked alone. */
   linkedSubtask?: boolean;
+  /**
+   * May the viewer share this task publicly from here: the home's share rule
+   * and the workspace allowing task links (or an admin, who can allow them).
+   * Absent: the host does not know, and the row follows the task role.
+   */
+  canSharePublicly?: boolean;
 }
 
 function rank(role: ItemRole): number {
@@ -167,11 +173,12 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   if (!ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest) {
     rows.push({ key: "share", label: isFull || canEdit ? "Share" : "Who has access" });
   }
-  // A public, view-only link to this one task (access toggle 10). The dialog
-  // asks the server who may turn it on, and says why when it cannot be. In a
-  // List the task is only shown in, it is the home's to share, the same
-  // home rule as adding it to another List, so the row follows that flag.
-  if (canEdit && !ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest && (!ctx.inSecondaryList || ctx.canAddToList)) {
+  // A public, view-only link to this one task (access toggle 10). It is the
+  // home's to share (the add-to-another-List rule) while the workspace allows
+  // task links, never a Personal List task's, and never a subtask's shown
+  // through its linked parent. The dialog asks the server for the rest and
+  // says why when it cannot be turned on.
+  if (canEdit && ctx.canSharePublicly !== false && !ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest && !ctx.linkedSubtask) {
     rows.push({ key: "public-link", label: "Public link" });
   }
 

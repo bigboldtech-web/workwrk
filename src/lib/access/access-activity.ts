@@ -28,6 +28,8 @@ export const ACCESS_ACTIVITY_TYPES = [
   "access.restricted_changed",
   "access.public_link.on",
   "access.public_link.off",
+  // A task's public link: its expiry or whether it shows people (src/lib/task-public-link.ts).
+  "access.public_link.changed",
   "access.private_rule_changed",
   "access.invited",
 ] as const;
@@ -68,6 +70,8 @@ export function accessActivityDescription(type: AccessActivityType, kind: Access
       return `Turned on the public link of ${noun}`;
     case "access.public_link.off":
       return `Turned off the public link of ${noun}`;
+    case "access.public_link.changed":
+      return `Changed the public link of ${noun}`;
     case "access.private_rule_changed":
       return "Changed the rule for Private items in this workspace";
     case "access.invited":
@@ -148,6 +152,8 @@ const SPACE_GENERAL_LABEL: Readonly<Record<string, string>> = {
 
 export interface AccessAuditFacts {
   kind: AccessNodeKind | null;
+  /** The noun for a target that is not a node (a task's public link): "task". Absent reads "item". */
+  noun?: string | null;
   /** The node's name, or null when the auditor cannot open it (it is then named by its noun only). */
   nodeName: string | null;
   /** The person given or losing access; null on a change that is not about one person. */
@@ -162,7 +168,7 @@ export interface AccessAuditFacts {
  * carries stays name free for every other feed.
  */
 export function accessAuditSentence(type: AccessActivityType, f: AccessAuditFacts): string {
-  const noun = f.kind ? ACCESS_NODE_NOUN[f.kind] : "item";
+  const noun = f.kind ? ACCESS_NODE_NOUN[f.kind] : f.noun || "item";
   const node = f.nodeName ? `the ${noun} ${f.nodeName}` : withArticle(noun);
   const who = f.granteeName ?? "someone";
   const role = auditRoleLabel(f.role, f.kind);
@@ -186,6 +192,8 @@ export function accessAuditSentence(type: AccessActivityType, f: AccessAuditFact
       return `Turned on the public link of ${node}`;
     case "access.public_link.off":
       return `Turned off the public link of ${node}`;
+    case "access.public_link.changed":
+      return `Changed the public link of ${node}`;
     case "access.private_rule_changed":
       return accessActivityDescription(type, null);
     case "access.invited":

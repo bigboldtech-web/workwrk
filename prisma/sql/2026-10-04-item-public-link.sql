@@ -18,6 +18,13 @@
 -- they shared, and must not quietly keep it alive either, which the
 -- organization switch (off by default) and the task's own state decide.
 --
+-- Two settings ride on the row (founder decision 4, competitor-gap-2026-09.md
+-- section 7: "view-only, optional expiry, and a toggle to hide assignees and
+-- comments"): "expiresAt", null for a link that never expires, and
+-- "showPeople", false unless the sharer turns on showing the assignees and
+-- comments. Off by default: a link given to a vendor never carries internal
+-- discussion or names unless someone chose that.
+--
 -- ADDITIVE ONLY. One new table. No existing table gains, loses, renames or
 -- retypes a column, and no existing row is read or written. The Prisma
 -- fields on "Item" and "Organization" are relation fields with no column.
@@ -32,8 +39,14 @@ CREATE TABLE IF NOT EXISTS "ItemPublicLink" (
   "secret"         TEXT NOT NULL,
   "createdById"    TEXT,
   "createdAt"      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "expiresAt"      TIMESTAMP(3),
+  "showPeople"     BOOLEAN NOT NULL DEFAULT false,
   CONSTRAINT "ItemPublicLink_pkey" PRIMARY KEY ("itemId")
 );
+
+-- The same two columns on a table made by an earlier copy of this file.
+ALTER TABLE "ItemPublicLink" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMP(3);
+ALTER TABLE "ItemPublicLink" ADD COLUMN IF NOT EXISTS "showPeople" BOOLEAN NOT NULL DEFAULT false;
 
 -- The workspace's links, for the access page's count and the off switch.
 CREATE INDEX IF NOT EXISTS "ItemPublicLink_organizationId_idx"

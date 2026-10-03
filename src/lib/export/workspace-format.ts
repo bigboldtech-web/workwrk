@@ -180,6 +180,65 @@ export function taskCsvLine(t: TaskForExport, ctx: { statusLabel: string; tags: 
   return csvLine(cells);
 }
 
+// ── list-tasks.jsonl ─────────────────────────────────────────────────
+
+/**
+ * One task exactly as stored, one JSON object a line: the columns, its tags,
+ * the other Lists it is in, and its whole metadata (the description and
+ * checklist as written, every List's field values by key). The CSV is for a
+ * spreadsheet; this is the copy that loses nothing.
+ */
+export function taskJsonLine(
+  t: TaskForExport & { position?: number; itemTypeId?: string | null },
+  ctx: { statusLabel: string; tags: readonly string[]; otherLists: ReadonlyArray<{ listId: string; position: number; addedAt: string }> },
+): string {
+  return (
+    JSON.stringify({
+      id: t.id,
+      listId: t.boardId,
+      parentId: t.parentItemId,
+      title: t.title,
+      status: t.status,
+      statusLabel: ctx.statusLabel || null,
+      priority: t.priority,
+      ownerId: t.ownerId,
+      assigneeIds: t.assigneeIds,
+      startAt: t.startAt ? t.startAt.toISOString() : null,
+      dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+      archivedAt: t.archivedAt ? t.archivedAt.toISOString() : null,
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString(),
+      position: t.position ?? null,
+      itemTypeId: t.itemTypeId ?? null,
+      tags: ctx.tags,
+      otherLists: ctx.otherLists,
+      metadata: t.metadata ?? {},
+    }) + "\n"
+  );
+}
+
+/** One comment exactly as stored, with its files by id and name. */
+export function commentJsonLine(
+  c: { id: string; entityId: string; authorId: string | null; body: string; createdAt: Date; updatedAt: Date },
+  author: string,
+  fileIds: readonly string[],
+  files: readonly string[],
+): string {
+  return (
+    JSON.stringify({
+      id: c.id,
+      taskId: c.entityId,
+      authorId: c.authorId,
+      author: author || null,
+      body: c.body,
+      fileIds,
+      files,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+    }) + "\n"
+  );
+}
+
 // ── list-links.csv ───────────────────────────────────────────────────
 
 export const LINK_COLUMNS = ["taskId", "listId", "position", "fields", "addedAt"] as const;
@@ -199,11 +258,16 @@ export function linkCsvLine(
 
 // ── list-fields.csv ──────────────────────────────────────────────────
 
-export const FIELD_COLUMNS = ["listId", "key", "name", "type", "choices"] as const;
+export const FIELD_COLUMNS = ["listId", "key", "name", "type", "choices", "stored"] as const;
+
+/** Is this field's value kept on the task (yes), or worked out when it is shown (no)? */
+export function fieldIsStored(f: Pick<FieldDef, "type">): boolean {
+  return !COMPUTED.has(f.type);
+}
 
 export function fieldCsvLine(listId: string, f: FieldDef): string {
   const choices = Array.isArray(f.options?.choices) ? f.options!.choices!.map((c) => c?.label).filter((l): l is string => typeof l === "string") : [];
-  return csvLine([listId, f.key, fieldName(f), f.type, choices.join("; ")]);
+  return csvLine([listId, f.key, fieldName(f), f.type, choices.join("; "), fieldIsStored(f) ? "yes" : "no"]);
 }
 
 // ── task-comments.csv ────────────────────────────────────────────────

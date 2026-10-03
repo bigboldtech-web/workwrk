@@ -71,7 +71,7 @@ describe("the six kinds the spec names land where a reader expects", () => {
 
   it("lifecycle holds create, archive, restore, move, subtask added and the public link turned on or off", () => {
     expect(actionsForKind("lifecycle").sort()).toEqual(
-      ["ARCHIVED", "CREATED", "MOVED", "PUBLIC_LINK_OFF", "PUBLIC_LINK_ON", "RESTORED", "SUBTASK_ADDED"],
+      ["ARCHIVED", "CREATED", "MOVED", "PUBLIC_LINK_CHANGED", "PUBLIC_LINK_OFF", "PUBLIC_LINK_ON", "RESTORED", "SUBTASK_ADDED"],
     );
   });
 });

@@ -114,3 +114,27 @@ describe("escapeText", () => {
     expect(escapeText("a_b *c* [d] `e` \\")).toBe("a\\_b \\*c\\* \\[d\\] \\`e\\` \\\\");
   });
 });
+
+describe("docToMarkdown: page mentions", () => {
+  const doc = [
+    {
+      type: "paragraph",
+      content: [
+        text("See "),
+        { type: "mention", props: { mkind: "doc", refId: "d9", label: "Pricing page", href: "/docs/d9" } },
+        text(" and ask "),
+        { type: "mention", props: { mkind: "user", refId: "u1", label: "Lea Alpha", href: "/people/u1" } },
+      ],
+      children: [],
+    },
+  ];
+
+  it("links a page mention to the page's file when it has one, a person mention stays a name", () => {
+    const md = docToMarkdown("Notes", { bnDoc: doc }, (id) => (id === "d9" ? "pricing-page-d9.md" : null));
+    expect(md).toContain("See [@Pricing page](pricing-page-d9.md) and ask @Lea Alpha");
+  });
+
+  it("keeps a page mention as its name when the page is not in the copy", () => {
+    expect(docToMarkdown("Notes", { bnDoc: doc })).toContain("See @Pricing page and ask @Lea Alpha");
+  });
+});

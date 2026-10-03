@@ -3,19 +3,24 @@
 //
 //   written       its document: BlockNote (bnDoc), the first block editor
 //                 (blocks), or stored HTML (html, body)
-//   step-by-step  the numbered steps with their owner, and for a flow its
-//                 decisions and where each branch goes
-//   checklist     each section's steps as boxes, with what a step asks for
-//   recording     the recorded actions in order, with the page each was on
+//   step-by-step  the numbered steps with their owner, in the layout the
+//                 SOP is shown in (a flow draws content.flow), and for a
+//                 flow its decisions and where each branch goes
+//   checklist     each section's steps as boxes, approval steps marked,
+//                 with what a step asks for and its added text, images,
+//                 videos and dividers
+//   recording     the recorded actions in order, each with its screenshot
+//                 and the page it was on
 //
 // A step's pasted image is a data URL and stays one, so the file holds it;
-// an image or a file saved by address keeps its address.
+// an image or a file saved by address keeps its address, and so does an
+// image inside a step's own text.
 //
 // Pure: the export route and the tests share it.
 
 import { blockNoteToMarkdown, escapeText, legacyBlocksToMarkdown } from "@/lib/docs/content-markdown";
 import { htmlToText } from "@/lib/html-text";
-import { SOP_KIND_LABEL, SOP_STATUS_LABEL, checklistAsksFor, getSopKind, isSopStatus } from "@/lib/sop-kind";
+import { SOP_KIND_LABEL, SOP_STATUS_LABEL, checklistAsksFor, getSopKind, getSopLayout, isSopStatus } from "@/lib/sop-kind";
 
 export interface SopForMarkdown {
   title: string;
@@ -55,6 +60,22 @@ function imageLine(src: string, alt: string, indent: string): string | null {
   return null;
 }
 
+/** The images inside a step's own rich text, which the plain text leaves out. */
+function imagesIn(html: unknown, alt: string, indent: string): string[] {
+  if (typeof html !== "string" || !html.includes("<img")) return [];
+  const out: string[] = [];
+  for (const m of html.matchAll(/<img\b[^>]*?\bsrc\s*=\s*("([^"]*)"|'([^']*)')/gi)) {
+    const line = imageLine((m[2] ?? m[3] ?? "").trim(), alt, indent);
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+/** A step's rich text as indented lines, then the images it holds. */
+function stepText(html: unknown, alt: string, indent: string): string[] {
+  return [...textUnder(html, indent), ...imagesIn(html, alt, indent)];
+}
+
 export function sopToMarkdown(sop: SopForMarkdown): string {
   const out: string[] = [];
   out.push(`# ${escapeText(sop.title.trim() || "Untitled SOP")}`, "");
@@ -89,14 +110,18 @@ function writtenBody(c: Obj): string[] {
 function stepsBody(c: Obj): string[] {
   const list = arr(c.steps).map(obj).filter((s): s is Obj => !!s);
   const flow = arr(obj(c.flow)?.steps).map(obj).filter((s): s is Obj => !!s);
-  // The flow copy holds the decisions; the list copy holds the images.
-  const steps = list.length ? list : flow;
+  // The steps in the layout the SOP is shown in: a flow draws its flow copy
+  // (which holds the decisions), a list its list copy (which holds the
+  // images). Each borrows from the other by id what it does not carry.
+  const steps = getSopLayout(c) === "flow" && flow.length ? flow : list.length ? list : flow;
   if (!steps.length) return [];
   const flowById = new Map(flow.map((s) => [str(s.id), s]));
+  const listById = new Map(list.map((s) => [str(s.id), s]));
   const numberOf = new Map(steps.map((s, i) => [str(s.id), i + 1]));
   const out: string[] = ["## Steps", ""];
   steps.forEach((s, i) => {
     const f = flowById.get(str(s.id)) ?? s;
+    const l = listById.get(str(s.id)) ?? s;
     const decision = str(f.type) === "decision";
     out.push(`${i + 1}. ${decision ? "Decision: " : ""}**${escapeText(str(s.title).trim() || `Step ${i + 1}`)}**`);
     const owner = str(obj(s.jobTitle ?? f.jobTitle)?.title).trim();
@@ -104,8 +129,8 @@ function stepsBody(c: Obj): string[] {
     const minutes = typeof f.durationMinutes === "number" && f.durationMinutes > 0 ? f.durationMinutes : null;
     const facts = [owner ? `Owner: ${owner}` : null, who ? `Who: ${who}` : null, minutes ? `About ${minutes} min` : null].filter(Boolean);
     if (facts.length) out.push(`   ${escapeText(facts.join(" · "))}`);
-    out.push(...textUnder(s.description ?? s.body, "   "));
-    const image = str(s.image);
+    out.push(...stepText(s.description ?? s.body ?? l.description ?? l.body, `Step ${i + 1}`, "   "));
+    const image = str(s.image) || str(l.image);
     const img = image ? imageLine(image, `Step ${i + 1}`, "   ") : null;
     if (img) out.push(img);
     for (const b of arr(f.branches).map(obj).filter((x): x is Obj => !!x)) {
@@ -124,10 +149,23 @@ function checklistBody(c: Obj): string[] {
     const steps = arr(section.steps).map(obj).filter((s): s is Obj => !!s);
     out.push(`## ${escapeText(str(section.title).trim() || "Steps")}`, "");
     for (const s of steps) {
-      out.push(`- [ ] ${escapeText(str(s.title).trim() || "Untitled step")}`);
-      out.push(...textUnder(s.description, "  "));
+      const approval = str(s.type) === "approval";
+      out.push(`- [ ] ${escapeText(str(s.title).trim() || "Untitled step")}${approval ? " (Approval)" : ""}`);
+      out.push(...stepText(s.description, "Step image", "  "));
       const asks = checklistAsksFor(arr(s.inputs).map(obj).filter((x): x is Obj => !!x).map((x) => ({ type: str(x.type), label: str(x.label) })));
       if (asks) out.push(`  ${escapeText(asks)}`);
+      for (const b of arr(s.contentBlocks).map(obj).filter((x): x is Obj => !!x)) {
+        const kind = str(b.type);
+        const content = str(b.content).trim();
+        if (kind === "horizontal_line") out.push("  ---");
+        else if (kind === "text" && content) out.push(...content.split("\n").map((t) => (t ? `  ${escapeText(t)}` : "")));
+        else if (kind === "image" && content) {
+          const img = imageLine(content, "Image", "  ");
+          if (img) out.push(img);
+        } else if (kind === "video" && content) {
+          out.push(/^(https?:\/\/|\/)/i.test(content) ? `  [Video](${content})` : "  _A video is attached to this step in WorkwrK._");
+        }
+      }
     }
     out.push("");
   }
@@ -145,6 +183,9 @@ function recordingBody(c: Obj): string[] {
   steps.forEach(({ s }, i) => {
     const what = htmlToText(s.description) || str(s.action) || `Step ${i + 1}`;
     out.push(`${i + 1}. ${escapeText(what)}`);
+    const shot = str(s.screenshot);
+    const img = shot ? imageLine(shot, `Step ${i + 1}`, "   ") : null;
+    if (img) out.push(img);
     const url = str(s.url);
     if (/^https?:\/\//i.test(url)) out.push(`   On <${url}>`);
     out.push("");

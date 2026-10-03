@@ -435,7 +435,7 @@ function targetName(row: ActivityRow): string | null {
 }
 
 const QUOTED_NAME = /["\u201c\u2018']([^"\u201d\u2019']{1,160})["\u201d\u2019']/;
-const ACCESS_NOUN_TAIL = /\s+an?\s+(?:Space|Folder|List|Doc|Table|Canvas|Form|node)$/;
+const ACCESS_NOUN_TAIL = /\s+an?\s+(?:Space|Folder|List|Doc|Table|Canvas|Form|node|task)$/;
 
 /**
  * The words after the actor on an access row. grants.ts writes a name-free

@@ -10,12 +10,15 @@ import {
   asciiSlug,
   checklistText,
   commentCsvLine,
+  commentJsonLine,
   contentFileName,
+  fieldCsvLine,
   fieldValues,
   isNoteDoc,
   linkCsvLine,
   taskCsvHeader,
   taskCsvLine,
+  taskJsonLine,
   type DocTreeRow,
   type TaskForExport,
 } from "./workspace-format";
@@ -166,5 +169,38 @@ describe("list-links.csv and task-comments.csv", () => {
       ["brief.pdf", "photo.png"],
     ));
     expect(row.slice(0, 6)).toEqual(["c1", "t1", "u1", "Mona Mech", "<p>Looks <i>good</i> to me</p>", "brief.pdf; photo.png"]);
+  });
+});
+
+describe("the exact copies (JSON Lines) and list-fields.csv", () => {
+  const task: TaskForExport = {
+    id: "t9", boardId: "b1", parentItemId: null, title: "=SUM(A1)", status: "todo", priority: null, ownerId: null, assigneeIds: [],
+    startAt: null, dueAt: null, archivedAt: null, createdAt: new Date("2026-10-01T00:00:00Z"), updatedAt: new Date("2026-10-01T00:00:00Z"),
+    metadata: { description: "- first\n- 'second", export_points: 8, $lists: { b2: { rank: 3 } } },
+  };
+
+  it("writes a task exactly as stored, where the CSV guards it for spreadsheets", () => {
+    const line = taskJsonLine({ ...task, position: 2048, itemTypeId: null }, { statusLabel: "To do", tags: ["Q4"], otherLists: [{ listId: "b2", position: 1024, addedAt: "2026-10-02T00:00:00.000Z" }] });
+    expect(line.endsWith("\n")).toBe(true);
+    const o = JSON.parse(line);
+    expect(o.title).toBe("=SUM(A1)");
+    expect(o.metadata.description).toBe("- first\n- 'second");
+    expect(o.metadata.$lists).toEqual({ b2: { rank: 3 } });
+    expect(o.otherLists[0].listId).toBe("b2");
+    expect(o.tags).toEqual(["Q4"]);
+    // The spreadsheet copy carries the guard instead.
+    const csvRow = cells(taskCsvLine(task, { statusLabel: "", tags: [], fields: [] }));
+    expect(csvRow[TASK_COLUMNS.indexOf("title")]).toBe("'=SUM(A1)");
+    expect(csvRow[TASK_COLUMNS.indexOf("description")]).toBe("'- first\n- 'second");
+  });
+
+  it("writes a comment exactly as stored", () => {
+    const o = JSON.parse(commentJsonLine({ id: "c1", entityId: "t9", authorId: "u1", body: "@Lea please check", createdAt: new Date("2026-10-03T00:00:00Z"), updatedAt: new Date("2026-10-03T00:00:00Z") }, "Mona Mech", ["f1"], ["brief.pdf"]));
+    expect(o).toMatchObject({ id: "c1", taskId: "t9", body: "@Lea please check", fileIds: ["f1"], files: ["brief.pdf"], author: "Mona Mech" });
+  });
+
+  it("says which fields keep a value and which are worked out when shown", () => {
+    expect(cells(fieldCsvLine("b1", { key: "pts", label: "Points", type: "NUMBER", position: 0 }))).toEqual(["b1", "pts", "Points", "NUMBER", "", "yes"]);
+    expect(cells(fieldCsvLine("b1", { key: "tot", label: "Total", type: "FORMULA", position: 1 })).at(-1)).toBe("no");
   });
 });

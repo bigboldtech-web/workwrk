@@ -68,7 +68,7 @@ function codeSpan(text: string): string {
 
 type BnBlock = { type?: unknown; props?: Record<string, unknown>; content?: unknown; children?: unknown };
 
-function bnInline(content: unknown): string {
+function bnInline(content: unknown, linkDoc: DocLinker = () => null): string {
   if (typeof content === "string") return escapeText(content);
   if (!Array.isArray(content)) return "";
   return content
@@ -86,16 +86,21 @@ function bnInline(content: unknown): string {
         return t;
       }
       if (n.type === "link") {
-        const label = bnInline(n.content) || escapeText(str(n.href));
+        const label = bnInline(n.content, linkDoc) || escapeText(str(n.href));
         return `[${label}](${str(n.href)})`;
       }
-      if (n.type === "mention") return `@${escapeText(str(n.props?.label) || "someone")}`;
-      return bnInline(n.content);
+      if (n.type === "mention") {
+        const label = `@${escapeText(str(n.props?.label) || "someone")}`;
+        // A page mention links to the page, as a sub-page block does.
+        const href = n.props?.mkind === "doc" && str(n.props?.refId) ? linkDoc(str(n.props?.refId)) : null;
+        return href ? `[${label}](${href})` : label;
+      }
+      return bnInline(n.content, linkDoc);
     })
     .join("");
 }
 
-function bnTable(content: unknown): string[] {
+function bnTable(content: unknown, linkDoc: DocLinker = () => null): string[] {
   const rows = (content as { rows?: unknown } | null)?.rows;
   if (!Array.isArray(rows) || rows.length === 0) return [];
   const cells = rows.map((r) => {
@@ -103,7 +108,7 @@ function bnTable(content: unknown): string[] {
     return Array.isArray(list)
       ? list.map((cell) => {
           const inner = cell && typeof cell === "object" && !Array.isArray(cell) && "content" in (cell as object) ? (cell as { content?: unknown }).content : cell;
-          return bnInline(inner).replace(/\|/g, "\\|").replace(/\n/g, " ");
+          return bnInline(inner, linkDoc).replace(/\|/g, "\\|").replace(/\n/g, " ");
         })
       : [];
   });
@@ -122,7 +127,7 @@ export function blockNoteToMarkdown(blocks: readonly unknown[], linkDoc: DocLink
     const b = raw as BnBlock;
     const type = str(b.type);
     const props = b.props ?? {};
-    const text = bnInline(b.content);
+    const text = bnInline(b.content, linkDoc);
     const kids = Array.isArray(b.children) ? b.children : [];
     numbered = type === "numberedListItem" ? numbered + 1 : 0;
     const listItem = type === "bulletListItem" || type === "numberedListItem" || type === "checkListItem" || type === "toggleListItem";
@@ -194,7 +199,7 @@ export function blockNoteToMarkdown(blocks: readonly unknown[], linkDoc: DocLink
         break;
       }
       case "table":
-        out.push(...bnTable(b.content).map((l) => `${indent}${l}`), "");
+        out.push(...bnTable(b.content, linkDoc).map((l) => `${indent}${l}`), "");
         break;
       case "toc":
         out.push(`${indent}_Table of contents_`, "");

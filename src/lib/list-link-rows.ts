@@ -268,6 +268,8 @@ export interface LinkedMenuFlags {
   canRemoveFromList: boolean;
   canLinkMove: boolean;
   canAddToList: boolean;
+  /** May the viewer share the task outside its home (contribute on the home, or org admin): the Public link row's rule. */
+  canShareHome: boolean;
 }
 
 /** The task menu's link-related flags for one row. */
@@ -291,6 +293,8 @@ export function linkedMenuFlags(
       // A subtask is shared with its parent, never alone, and a Personal
       // List task is its owner's alone.
       canAddToList: canContribute && !row.parentItemId && !opts.personalList,
+      // At home, contributing here is contributing to the home.
+      canShareHome: canContribute,
     };
   }
   const link = row.listLink!;
@@ -303,6 +307,7 @@ export function linkedMenuFlags(
     canRemoveFromList: root && !!link.canRemove,
     canLinkMove: root && !!link.canRemove && !!link.canShare,
     canAddToList: root && !!link.canShare,
+    canShareHome: !!link.canShare,
   };
 }
 

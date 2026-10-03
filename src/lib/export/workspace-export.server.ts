@@ -6,19 +6,35 @@
 // the workspace, not a people-and-HR slice):
 //   the people and HR tables, as before
 //   spaces, folders, lists, list-fields (each List's fields), goals, tables
-//   list-tasks.csv   every task with its description exactly as stored,
-//                    its checklist, tags and its home List's field values
-//   list-links.csv   each task shown in another List, with that List's values
-//   task-comments.csv every live comment on a task, exactly as stored
-//   docs/*.md        every live Doc as Markdown, sub-pages linked by file
-//   tables/*.csv     every table's rows, the values the grid shows
-//   sops/*.md        every SOP as Markdown
-//   manifest.json    last: the counts, each file's size, and every limit hit
+//   list-tasks.csv     every task for a spreadsheet: description, checklist,
+//                      tags, status name and its home List's field values
+//   list-tasks.jsonl   every task EXACTLY as stored, one JSON object a line:
+//                      the columns, its tags, the other Lists it is in, and
+//                      its whole metadata (description, checklist, every
+//                      List's field values)
+//   list-links.csv     each task shown in another List, with that List's values
+//   task-comments.csv  every live comment on a task, for a spreadsheet
+//   task-comments.jsonl every live comment exactly as stored
+//   docs/*.md          every live Doc as Markdown, sub-pages linked by file
+//   tables/*.csv       every table's rows, the values the grid shows
+//   sops/*.md          every SOP as Markdown
+//   manifest.json      last: the counts, each file's size and rows, and
+//                      every limit hit
+//
+// The CSVs are for spreadsheets, so a text cell that starts with = + - @, a
+// tab or a return gets one leading apostrophe (csv.ts csvExportCell), the
+// guard Excel needs; the JSON Lines files carry the same text unguarded, so
+// nothing is lost.
 //
 // Never in it: personal notes and the pages under them (node-rules R6a: an
 // admin cannot open them either, see src/lib/export/workspace-format.ts),
 // Docs in Trash (listed in docs.csv, no page), and files: comments name the
-// files they carry, the files themselves are not inside.
+// files they carry, the files themselves are not inside. The manifest says
+// what else is not in it.
+//
+// Every paged read is a keyset on the id (never a cursor row that a delete
+// could take away mid-export), and each streamed file's manifest entry says
+// how many rows it wrote.
 //
 // Server-only.
 
@@ -28,19 +44,23 @@ import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { docToMarkdown } from "@/lib/docs/content-markdown";
 import { sopToMarkdown } from "@/lib/sop-markdown";
 import { tableCsv } from "@/lib/table-csv";
+import { isModuleActive } from "@/lib/entitlements";
 import { CSV_BOM, csvLine, toCsv, type CsvCell } from "@/lib/csv";
 import type { ZipStreamEntry } from "@/lib/zip-stream";
+import type { Prisma } from "@/generated/prisma";
 import {
   COMMENT_COLUMNS,
   FIELD_COLUMNS,
   LINK_COLUMNS,
   commentCsvLine,
+  commentJsonLine,
   contentFileName,
   fieldCsvLine,
   isNoteDoc,
   linkCsvLine,
   taskCsvHeader,
   taskCsvLine,
+  taskJsonLine,
   type DocTreeRow,
 } from "@/lib/export/workspace-format";
 
@@ -67,6 +87,7 @@ export const EXPORT_LIMITS = {
 } as const;
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : "");
+const n = (v: number) => v.toLocaleString("en-US");
 
 // ── One export at a time ─────────────────────────────────────────────
 
@@ -78,23 +99,32 @@ const STALE_MS = 30 * 60_000;
 const MAX_RUNNING = 2;
 
 /**
- * Take this workspace's export slot, or null when one is already running
- * (or the server is running its limit). The release is safe to call more
- * than once.
+ * Take this workspace's export slot: the release (safe to call more than
+ * once), or why not, "workspace" when this workspace already has one running
+ * and "server" when the server is running its limit for every workspace.
  */
-export function takeExportSlot(orgId: string, now = Date.now()): (() => void) | null {
+export function takeExportSlot(orgId: string, now = Date.now()): { release: () => void } | { busy: "workspace" | "server" } {
   for (const [id, started] of running) if (now - started > STALE_MS) running.delete(id);
-  if (running.has(orgId) || running.size >= MAX_RUNNING) return null;
+  if (running.has(orgId)) return { busy: "workspace" };
+  if (running.size >= MAX_RUNNING) return { busy: "server" };
   running.set(orgId, now);
   let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    if (running.get(orgId) === now) running.delete(orgId);
+  return {
+    release: () => {
+      if (released) return;
+      released = true;
+      if (running.get(orgId) === now) running.delete(orgId);
+    },
   };
 }
 
 // ── The export ───────────────────────────────────────────────────────
+
+export interface ExportSummary {
+  /** The rows each streamed file wrote, by file name. */
+  rows: Record<string, number>;
+  files: number;
+}
 
 export interface PreparedExport {
   /** What the audit row records, known before the first byte is sent. */
@@ -102,18 +132,34 @@ export interface PreparedExport {
   entries: AsyncGenerator<ZipStreamEntry>;
 }
 
-type Sized = { name: string; bytes: number };
+type Sized = { name: string; bytes: number; rows?: number };
 
 function personName(u: { firstName: string | null; lastName: string | null } | undefined): string {
   return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() : "";
 }
 
+const TASK_SELECT = {
+  id: true, boardId: true, parentItemId: true, title: true, status: true, priority: true, ownerId: true, assigneeIds: true,
+  startAt: true, dueAt: true, archivedAt: true, createdAt: true, updatedAt: true, position: true, itemTypeId: true, metadata: true,
+} as const;
+type TaskRow = Prisma.ItemGetPayload<{ select: typeof TASK_SELECT }>;
+
+const COMMENT_SELECT = {
+  id: true, entityId: true, authorId: true, body: true, createdAt: true, updatedAt: true, attachments: { select: { fileId: true } },
+} as const;
+type CommentRow = Prisma.ItemUpdateGetPayload<{ select: typeof COMMENT_SELECT }>;
+
 /**
  * Everything small read now, so a failure is an ordinary error answer, and
  * the counts for the audit row; the large files read as the archive is
- * written. `done` runs when the entries end, however they end.
+ * written. `finish` runs once when the entries end, however they end:
+ * "completed" after the manifest was handed on, "stopped" otherwise.
  */
-export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, done: () => void): Promise<PreparedExport> {
+export async function prepareWorkspaceExport(
+  orgId: string,
+  exportedAt: Date,
+  finish: (outcome: "completed" | "stopped", summary: ExportSummary) => void,
+): Promise<PreparedExport> {
   const [users, departments, legacyTasks, sops, reviews, meetings, kras, activity] = await Promise.all([
     prisma.user.findMany({
       where: { organizationId: orgId },
@@ -184,6 +230,9 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
     prisma.itemListLink.count({ where: { item: { organizationId: orgId } } }),
     prisma.itemUpdate.count({ where: { organizationId: orgId, entityType: "BOARD_ITEM", archivedAt: null } }),
   ]);
+  // Tables made while the module was on stay the workspace's data when it is
+  // off: they are exported, and the manifest says why they are there.
+  const tablesModuleOn = tables.length === 0 || (await isModuleActive(orgId, "workwrk-tables").catch(() => true));
 
   // Notes (and the pages under them) are their owner's alone: never listed.
   const tree = new Map<string, DocTreeRow>(docTree.map((d) => [d.id, d]));
@@ -213,21 +262,93 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
   };
 
   const limits: string[] = [];
-  if (taskCount > EXPORT_LIMITS.tasks) limits.push(`list-tasks.csv holds the first ${EXPORT_LIMITS.tasks.toLocaleString("en-US")} of ${taskCount.toLocaleString("en-US")} tasks.`);
-  if (linkCount > EXPORT_LIMITS.links) limits.push(`list-links.csv holds the first ${EXPORT_LIMITS.links.toLocaleString("en-US")} of ${linkCount.toLocaleString("en-US")} tasks shown in other Lists.`);
-  if (commentCount > EXPORT_LIMITS.comments) limits.push(`task-comments.csv holds the first ${EXPORT_LIMITS.comments.toLocaleString("en-US")} of ${commentCount.toLocaleString("en-US")} comments.`);
+  if (taskCount > EXPORT_LIMITS.tasks) limits.push(`list-tasks.csv and list-tasks.jsonl hold the first ${n(EXPORT_LIMITS.tasks)} of ${n(taskCount)} tasks.`);
+  if (linkCount > EXPORT_LIMITS.links) limits.push(`list-links.csv holds the first ${n(EXPORT_LIMITS.links)} of ${n(linkCount)} tasks shown in other Lists.`);
+  if (commentCount > EXPORT_LIMITS.comments) limits.push(`task-comments.csv and task-comments.jsonl hold the first ${n(EXPORT_LIMITS.comments)} of ${n(commentCount)} comments.`);
   const pageable = docs.filter((d) => !d.archivedAt && !d.isFolder).length;
-  if (pageable > withPage.length) limits.push(`docs/ holds ${withPage.length.toLocaleString("en-US")} of ${pageable.toLocaleString("en-US")} Docs; export the rest one at a time from each Doc.`);
-  if (tables.length > EXPORT_LIMITS.tables) limits.push(`tables/ holds ${EXPORT_LIMITS.tables.toLocaleString("en-US")} of ${tables.length.toLocaleString("en-US")} tables.`);
-  if (sops.length > EXPORT_LIMITS.sops) limits.push(`sops/ holds ${EXPORT_LIMITS.sops.toLocaleString("en-US")} of ${sops.length.toLocaleString("en-US")} SOPs.`);
+  if (pageable > withPage.length) limits.push(`docs/ holds ${n(withPage.length)} of ${n(pageable)} Docs; export the rest one at a time from each Doc.`);
+  if (tables.length > EXPORT_LIMITS.tables) limits.push(`tables/ holds ${n(EXPORT_LIMITS.tables)} of ${n(tables.length)} tables.`);
+  if (sops.length > EXPORT_LIMITS.sops) limits.push(`sops/ holds ${n(EXPORT_LIMITS.sops)} of ${n(sops.length)} SOPs.`);
+  if (!tablesModuleOn) limits.push("Tables is turned off for this workspace. Its tables are still the workspace's, so tables/ holds them; turn Tables on in Settings, Apps and modules to open them.");
 
   const fieldsOf = new Map<string, FieldDef[]>(lists.map((l) => [l.id, parseBoardSchema(l.schema).fields.filter((f) => f && typeof f.key === "string")]));
   const statusOf = new Map(lists.map((l) => [l.id, makeStatusLookup(getBoardStatuses(l))]));
   const userById = new Map(users.map((u) => [u.id, u]));
+  const statusLabel = (boardId: string, status: string | null) => (status ? statusOf.get(boardId)?.[status]?.label ?? status : "");
+
+  // ── paged reads, each a keyset on the id ─────────────────────────────
+
+  async function* taskPages() {
+    let after: string | null = null;
+    let sent = 0;
+    while (sent < EXPORT_LIMITS.tasks) {
+      const take = Math.min(PAGE, EXPORT_LIMITS.tasks - sent);
+      const page: TaskRow[] = await prisma.item.findMany({
+        where: { organizationId: orgId, ...(after ? { id: { gt: after } } : {}) },
+        select: TASK_SELECT,
+        orderBy: { id: "asc" },
+        take,
+      });
+      if (page.length === 0) return;
+      const ids = page.map((t) => t.id);
+      const tagRows = await prisma.tagAssignment.findMany({
+        where: { entityType: "BOARD_ITEM", entityId: { in: ids } },
+        select: { entityId: true, tag: { select: { name: true, archived: true, organizationId: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+      const tags = new Map<string, string[]>();
+      for (const r of tagRows) {
+        if (r.tag.archived || r.tag.organizationId !== orgId) continue;
+        tags.set(r.entityId, [...(tags.get(r.entityId) ?? []), r.tag.name]);
+      }
+      yield { page, tags };
+      sent += page.length;
+      after = page[page.length - 1].id;
+      if (page.length < take) return;
+    }
+  }
+
+  async function* commentPages() {
+    let after: string | null = null;
+    let sent = 0;
+    while (sent < EXPORT_LIMITS.comments) {
+      const take = Math.min(PAGE, EXPORT_LIMITS.comments - sent);
+      const page: CommentRow[] = await prisma.itemUpdate.findMany({
+        where: { organizationId: orgId, entityType: "BOARD_ITEM", archivedAt: null, ...(after ? { id: { gt: after } } : {}) },
+        select: COMMENT_SELECT,
+        orderBy: { id: "asc" },
+        take,
+      });
+      if (page.length === 0) return;
+      // A comment on a task that no longer exists is not shown anywhere.
+      const [live, fileRows] = await Promise.all([
+        prisma.item.findMany({ where: { id: { in: [...new Set(page.map((c) => c.entityId))] }, organizationId: orgId }, select: { id: true } }),
+        prisma.fileEntry.findMany({
+          where: { organizationId: orgId, id: { in: [...new Set(page.flatMap((c) => c.attachments.map((a) => a.fileId)))] } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const liveIds = new Set(live.map((i) => i.id));
+      const fileName = new Map(fileRows.map((f) => [f.id, f.name]));
+      yield {
+        page: page.filter((c) => liveIds.has(c.entityId)).map((c) => ({
+          ...c,
+          author: personName(c.authorId ? userById.get(c.authorId) : undefined),
+          fileIds: c.attachments.map((a) => a.fileId),
+          files: c.attachments.map((a) => fileName.get(a.fileId)).filter((f): f is string => !!f),
+        })),
+      };
+      sent += page.length;
+      after = page[page.length - 1].id;
+      if (page.length < take) return;
+    }
+  }
 
   async function* entries(): AsyncGenerator<ZipStreamEntry> {
     const files: Sized[] = [];
     const folderSizes: Record<string, { files: number; bytes: number }> = {};
+    const rowsOf: Record<string, number> = {};
+    let completed = false;
     const whole = (name: string, data: string): ZipStreamEntry => {
       files.push({ name, bytes: Buffer.byteLength(data) });
       return { name, data };
@@ -238,7 +359,9 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
       f.bytes += Buffer.byteLength(data);
       return { name, data };
     };
-    // A streamed file's size is known once its last piece is out.
+    // A streamed file is written a piece at a time; its size and rows are
+    // known once its last piece is out. Each piece generator counts its rows
+    // into rowsOf[name].
     const streamed = (name: string, pieces: AsyncIterable<string>): ZipStreamEntry => ({
       name,
       data: (async function* () {
@@ -247,9 +370,25 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
           bytes += Buffer.byteLength(p);
           yield p;
         }
-        files.push({ name, bytes });
+        files.push({ name, bytes, rows: rowsOf[name] ?? 0 });
       })(),
     });
+    // Lines gathered into pieces of at most PIECE_CHARS.
+    async function* lines(name: string, header: string, source: AsyncIterable<string[]>): AsyncGenerator<string> {
+      rowsOf[name] = 0;
+      let chunk = header;
+      for await (const batch of source) {
+        for (const line of batch) {
+          chunk += line;
+          rowsOf[name] += 1;
+          if (chunk.length >= PIECE_CHARS) {
+            yield chunk;
+            chunk = "";
+          }
+        }
+      }
+      if (chunk) yield chunk;
+    }
     const csv = (rows: Record<string, CsvCell>[], columns: string[]) => toCsv(rows, columns, { formulaSafe: true });
 
     try {
@@ -276,50 +415,30 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
         yield whole("list-fields.csv", body);
       }
 
-      yield streamed("list-tasks.csv", (async function* () {
-        yield taskCsvHeader();
-        let cursor: string | undefined;
-        let sent = 0;
-        while (sent < EXPORT_LIMITS.tasks) {
-          const page = await prisma.item.findMany({
-            where: { organizationId: orgId },
-            select: { id: true, boardId: true, parentItemId: true, title: true, status: true, priority: true, ownerId: true, assigneeIds: true, startAt: true, dueAt: true, archivedAt: true, createdAt: true, updatedAt: true, metadata: true },
-            orderBy: { id: "asc" },
-            take: Math.min(PAGE, EXPORT_LIMITS.tasks - sent),
-            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-          });
-          if (page.length === 0) break;
-          const tagRows = await prisma.tagAssignment.findMany({
-            where: { entityType: "BOARD_ITEM", entityId: { in: page.map((t) => t.id) } },
-            select: { entityId: true, tag: { select: { name: true, archived: true, organizationId: true } } },
-            orderBy: { createdAt: "asc" },
-          });
-          const tags = new Map<string, string[]>();
-          for (const r of tagRows) {
-            if (r.tag.archived || r.tag.organizationId !== orgId) continue;
-            tags.set(r.entityId, [...(tags.get(r.entityId) ?? []), r.tag.name]);
-          }
-          let chunk = "";
-          for (const t of page) {
-            const label = t.status ? statusOf.get(t.boardId)?.[t.status]?.label ?? t.status : "";
-            chunk += taskCsvLine(t, { statusLabel: label, tags: tags.get(t.id) ?? [], fields: fieldsOf.get(t.boardId) ?? [] });
-            if (chunk.length >= PIECE_CHARS) {
-              yield chunk;
-              chunk = "";
-            }
-          }
-          if (chunk) yield chunk;
-          sent += page.length;
-          cursor = page[page.length - 1].id;
-          if (page.length < PAGE) break;
+      yield streamed("list-tasks.csv", lines("list-tasks.csv", taskCsvHeader(), (async function* () {
+        for await (const { page, tags } of taskPages()) {
+          yield page.map((t) => taskCsvLine(t, { statusLabel: statusLabel(t.boardId, t.status), tags: tags.get(t.id) ?? [], fields: fieldsOf.get(t.boardId) ?? [] }));
         }
-      })());
+      })()));
 
-      yield streamed("list-links.csv", (async function* () {
-        yield CSV_BOM + csvLine([...LINK_COLUMNS]);
+      yield streamed("list-tasks.jsonl", lines("list-tasks.jsonl", "", (async function* () {
+        for await (const { page, tags } of taskPages()) {
+          const placed = await prisma.itemListLink.findMany({
+            where: { itemId: { in: page.map((t) => t.id) } },
+            select: { itemId: true, boardId: true, position: true, createdAt: true },
+            orderBy: [{ itemId: "asc" }, { boardId: "asc" }],
+          });
+          const others = new Map<string, Array<{ listId: string; position: number; addedAt: string }>>();
+          for (const p of placed) others.set(p.itemId, [...(others.get(p.itemId) ?? []), { listId: p.boardId, position: p.position, addedAt: iso(p.createdAt) }]);
+          yield page.map((t) => taskJsonLine(t, { statusLabel: statusLabel(t.boardId, t.status), tags: tags.get(t.id) ?? [], otherLists: others.get(t.id) ?? [] }));
+        }
+      })()));
+
+      yield streamed("list-links.csv", lines("list-links.csv", CSV_BOM + csvLine([...LINK_COLUMNS]), (async function* () {
         let sent = 0;
         let after: { itemId: string; boardId: string } | null = null;
         while (sent < EXPORT_LIMITS.links) {
+          const take = Math.min(PAGE, EXPORT_LIMITS.links - sent);
           const page: Array<{ itemId: string; boardId: string; position: number; createdAt: Date; item: { metadata: unknown } }> = await prisma.itemListLink.findMany({
             where: {
               item: { organizationId: orgId },
@@ -327,70 +446,28 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
             },
             select: { itemId: true, boardId: true, position: true, createdAt: true, item: { select: { metadata: true } } },
             orderBy: [{ itemId: "asc" }, { boardId: "asc" }],
-            take: Math.min(PAGE, EXPORT_LIMITS.links - sent),
+            take,
           });
-          if (page.length === 0) break;
-          let chunk = "";
-          for (const l of page) {
-            chunk += linkCsvLine(l, l.item.metadata, fieldsOf.get(l.boardId) ?? []);
-            if (chunk.length >= PIECE_CHARS) {
-              yield chunk;
-              chunk = "";
-            }
-          }
-          if (chunk) yield chunk;
+          if (page.length === 0) return;
+          yield page.map((l) => linkCsvLine(l, l.item.metadata, fieldsOf.get(l.boardId) ?? []));
           sent += page.length;
           after = { itemId: page[page.length - 1].itemId, boardId: page[page.length - 1].boardId };
-          if (page.length < PAGE) break;
+          if (page.length < take) return;
         }
-      })());
+      })()));
 
-      yield streamed("task-comments.csv", (async function* () {
-        yield CSV_BOM + csvLine([...COMMENT_COLUMNS]);
-        let cursor: string | undefined;
-        let sent = 0;
-        while (sent < EXPORT_LIMITS.comments) {
-          const page = await prisma.itemUpdate.findMany({
-            where: { organizationId: orgId, entityType: "BOARD_ITEM", archivedAt: null },
-            select: { id: true, entityId: true, authorId: true, body: true, createdAt: true, updatedAt: true, attachments: { select: { fileId: true } } },
-            orderBy: { id: "asc" },
-            take: Math.min(PAGE, EXPORT_LIMITS.comments - sent),
-            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-          });
-          if (page.length === 0) break;
-          // A comment on a task that no longer exists is not shown anywhere.
-          const [live, fileRows] = await Promise.all([
-            prisma.item.findMany({ where: { id: { in: [...new Set(page.map((c) => c.entityId))] }, organizationId: orgId }, select: { id: true } }),
-            prisma.fileEntry.findMany({
-              where: { organizationId: orgId, id: { in: [...new Set(page.flatMap((c) => c.attachments.map((a) => a.fileId)))] } },
-              select: { id: true, name: true },
-            }),
-          ]);
-          const liveIds = new Set(live.map((i) => i.id));
-          const fileName = new Map(fileRows.map((f) => [f.id, f.name]));
-          let chunk = "";
-          for (const c of page) {
-            if (!liveIds.has(c.entityId)) continue;
-            const names = c.attachments.map((a) => fileName.get(a.fileId)).filter((n): n is string => !!n);
-            chunk += commentCsvLine(c, personName(c.authorId ? userById.get(c.authorId) : undefined), names);
-            if (chunk.length >= PIECE_CHARS) {
-              yield chunk;
-              chunk = "";
-            }
-          }
-          if (chunk) yield chunk;
-          sent += page.length;
-          cursor = page[page.length - 1].id;
-          if (page.length < PAGE) break;
-        }
-      })());
+      yield streamed("task-comments.csv", lines("task-comments.csv", CSV_BOM + csvLine([...COMMENT_COLUMNS]), (async function* () {
+        for await (const { page } of commentPages()) yield page.map((c) => commentCsvLine(c, c.author, c.files));
+      })()));
 
-      yield whole("docs.csv", csv(
-        docs.map((x) => ({ id: x.id, title: x.title, entityType: x.entityType, entityId: x.entityId, parentId: x.parentId, createdById: x.createdById, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt), isFolder: x.isFolder, file: pageOf.get(x.id) ?? "" })),
-        ["id", "title", "entityType", "entityId", "parentId", "createdById", "archivedAt", "createdAt", "updatedAt", "isFolder", "file"],
-      ));
+      yield streamed("task-comments.jsonl", lines("task-comments.jsonl", "", (async function* () {
+        for await (const { page } of commentPages()) yield page.map((c) => commentJsonLine(c, c.author, c.fileIds, c.files));
+      })()));
+
+      // Docs: the pages first, then docs.csv naming only the files written.
       // A sub-page links to its own file, in the same folder; one without a
       // file (in Trash, a note, past the limit) keeps its title alone.
+      const writtenDocs = new Set<string>();
       const linkDoc = (id: string) => {
         const f = pageOf.get(id);
         return f ? f.slice("docs/".length) : null;
@@ -402,14 +479,17 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
         for (const id of ids) {
           const d = byId.get(id);
           if (!d) continue;
+          writtenDocs.add(id);
           yield inFolder("docs", pageOf.get(id)!, docToMarkdown(d.title, d.content, linkDoc));
         }
       }
-
-      yield whole("tables.csv", csv(
-        tables.map((x) => ({ id: x.id, name: x.name, spaceId: x.spaceId, createdById: x.createdById, createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt), file: contentFileName("tables", x.name, x.id, "csv", "table") })),
-        ["id", "name", "spaceId", "createdById", "createdAt", "updatedAt", "file"],
+      yield whole("docs.csv", csv(
+        docs.map((x) => ({ id: x.id, title: x.title, entityType: x.entityType, entityId: x.entityId, parentId: x.parentId, createdById: x.createdById, archivedAt: iso(x.archivedAt), createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt), isFolder: x.isFolder, file: writtenDocs.has(x.id) ? pageOf.get(x.id) ?? "" : "" })),
+        ["id", "title", "entityType", "entityId", "parentId", "createdById", "archivedAt", "createdAt", "updatedAt", "isFolder", "file"],
       ));
+
+      // Tables: the files first, then tables.csv naming only the files written.
+      const tableFile = new Map<string, string>();
       for (const t of tables.slice(0, EXPORT_LIMITS.tables)) {
         const [full, rows] = await Promise.all([
           prisma.dataTable.findFirst({ where: { id: t.id, organizationId: orgId }, select: { columns: true, settings: true } }),
@@ -421,20 +501,25 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
           }),
         ]);
         if (!full) continue;
+        const name = contentFileName("tables", t.name, t.id, "csv", "table");
         if (rows.length > EXPORT_LIMITS.tableRows) {
-          limits.push(`tables/${contentFileName("tables", t.name, t.id, "csv", "table").slice("tables/".length)} holds the first ${EXPORT_LIMITS.tableRows.toLocaleString("en-US")} rows; export the table itself for all of them.`);
+          limits.push(`${name} holds the first ${n(EXPORT_LIMITS.tableRows)} rows; export the table itself for all of them.`);
         }
-        yield inFolder("tables", contentFileName("tables", t.name, t.id, "csv", "table"), tableCsv(full, rows.slice(0, EXPORT_LIMITS.tableRows)));
+        tableFile.set(t.id, name);
+        yield inFolder("tables", name, tableCsv(full, rows.slice(0, EXPORT_LIMITS.tableRows)));
       }
+      yield whole("tables.csv", csv(
+        tables.map((x) => ({ id: x.id, name: x.name, spaceId: x.spaceId, createdById: x.createdById, createdAt: iso(x.createdAt), updatedAt: iso(x.updatedAt), file: tableFile.get(x.id) ?? "" })),
+        ["id", "name", "spaceId", "createdById", "createdAt", "updatedAt", "file"],
+      ));
 
       yield whole("goals.csv", csv(
         goals.map((x) => ({ id: x.id, title: x.title, level: x.level, status: x.status, progress: x.progress, ownerId: x.ownerId, parentId: x.parentId, startDate: iso(x.startDate), createdAt: iso(x.createdAt) })),
         ["id", "title", "level", "status", "progress", "ownerId", "parentId", "startDate", "createdAt"],
       ));
-      yield whole("sops.csv", csv(
-        sops.map((s) => ({ id: s.id, title: s.title, category: s.category, status: s.status, version: s.version, createdAt: iso(s.createdAt), file: contentFileName("sops", s.title, s.id, "md", "sop") })),
-        ["id", "title", "category", "status", "version", "createdAt", "file"],
-      ));
+
+      // SOPs: the files first, then sops.csv naming only the files written.
+      const sopFile = new Map<string, string>();
       const sopIds = sops.slice(0, EXPORT_LIMITS.sops).map((s) => s.id);
       for (let i = 0; i < sopIds.length; i += CONTENT_PAGE) {
         const ids = sopIds.slice(i, i + CONTENT_PAGE);
@@ -446,9 +531,15 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
         for (const id of ids) {
           const s = byId.get(id);
           if (!s) continue;
-          yield inFolder("sops", contentFileName("sops", s.title, s.id, "md", "sop"), sopToMarkdown(s));
+          const name = contentFileName("sops", s.title, s.id, "md", "sop");
+          sopFile.set(id, name);
+          yield inFolder("sops", name, sopToMarkdown(s));
         }
       }
+      yield whole("sops.csv", csv(
+        sops.map((s) => ({ id: s.id, title: s.title, category: s.category, status: s.status, version: s.version, createdAt: iso(s.createdAt), file: sopFile.get(s.id) ?? "" })),
+        ["id", "title", "category", "status", "version", "createdAt", "file"],
+      ));
 
       yield whole("tasks.csv", csv(
         legacyTasks.map((t) => ({ id: t.id, title: t.title, status: t.status, date: t.date ? t.date.toISOString().split("T")[0] : "", assignee: personName(t.assignee ?? undefined), kra: t.kra?.name ?? "", createdAt: iso(t.createdAt) })),
@@ -475,18 +566,30 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
         counts,
         limits,
         notes: [
-          "WorkwrK workspace export. Spreadsheet files are UTF-8 CSV; Docs and SOPs are Markdown.",
-          "list-tasks.csv holds every task on every List: its description exactly as stored (Markdown; older ones may be HTML), its checklist, its tags, and its home List's field values as one JSON object keyed by field name (people and connected tasks as ids, which people.csv and list-tasks.csv resolve). list-fields.csv names each List's fields.",
+          "WorkwrK workspace export. Spreadsheet files are UTF-8 CSV starting with a byte order mark, so Excel reads accents (Python: encoding='utf-8-sig'). Docs and SOPs are Markdown.",
+          "In the CSV files a text cell that starts with =, +, -, @, a tab or a return has one apostrophe added in front, so a spreadsheet does not run it as a formula. list-tasks.jsonl and task-comments.jsonl hold the same text exactly as stored.",
+          "list-tasks.csv holds every task on every List: its description, checklist, tags, status name and its home List's field values as one JSON object keyed by field name (choices by their label, people and connected tasks as ids, which people.csv and list-tasks.csv resolve). list-fields.csv names each List's fields; a field it marks stored=no (formula, rollup, mirror, automatic progress, button) is worked out when shown and has no values here.",
+          "list-tasks.jsonl holds every task exactly as stored: its columns, tags, the other Lists it is in, and its whole metadata, every List's field values included (under $lists for the Lists it is linked into).",
           "list-links.csv holds each task shown in a List other than its home, with that List's own field values.",
-          "task-comments.csv holds every comment on a task exactly as stored, with the names of the files it carries. The files themselves are not inside this archive.",
-          "docs/ holds every Doc as Markdown; a sub-page links to its own file. Docs in Trash are listed in docs.csv without a page. Personal notes are their owner's alone and are not in this export.",
+          "task-comments.csv holds every live comment on a task, with the names of the files it carries. The files themselves are not inside this archive.",
+          "docs/ holds every Doc as Markdown; a sub-page links to its own file. Docs in Trash are listed in docs.csv without a file. Personal notes are their owner's alone and are not in this export.",
           "tables/ holds each table's rows as the grid shows them. sops/ holds each SOP as Markdown.",
           "tasks.csv is the older task table. activity.csv is the 500 most recent rows; the full audit log is its own export.",
         ],
+        notIncluded: [
+          "Files and attachments (comments list the names of theirs)",
+          "Canvases (whiteboards)",
+          "Forms and their responses",
+          "Talk messages and calls",
+          "Comments on Docs",
+          "Review answers and scores (reviews.csv lists the review cycles)",
+          "Images inside Docs (their links point at the workspace)",
+        ],
       };
       yield whole("manifest.json", JSON.stringify(manifest, null, 2));
+      completed = true;
     } finally {
-      done();
+      finish(completed ? "completed" : "stopped", { rows: { ...rowsOf }, files: files.length + Object.values(folderSizes).reduce((a, f) => a + f.files, 0) });
     }
   }
 

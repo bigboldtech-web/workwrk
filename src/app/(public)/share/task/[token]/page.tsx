@@ -8,8 +8,9 @@
  *
  * What it shows is what the route sends and nothing more
  * (src/app/api/public/tasks/[token]): the title, status, priority, dates,
- * assignees by first name, the description, the checklist and the subtasks'
- * titles and statuses. The description renders as the task page renders it
+ * the description, the checklist and the subtasks' titles and statuses;
+ * when the sharer chose it, the assignees by first name and the comments.
+ * The description and comments render as the task page renders them
  * (MarkdownLite: bold, italic, lists, http and mailto links, every node a
  * React element), so no HTML is ever inserted. Every non-ok answer, an unknown token
  * included, is the one sentence "This link is invalid or has been turned
@@ -26,6 +27,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { MarkdownLite } from "@/components/ui/markdown-lite";
 import { LogoMark } from "@/components/brand/logo";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
+import { formatTaskDate, hasTimeOfDay } from "@/lib/item-date";
 
 type StatusView = { label: string; color: string; done: boolean } | null;
 
@@ -39,6 +41,7 @@ type ShareData = {
   checklist: Array<{ text: string; done: boolean }>;
   subtasks: Array<{ title: string; status: StatusView }>;
   assignees: string[];
+  comments?: Array<{ author: string; text: string; at: string }>;
   updatedAt: string;
   org?: { name: string; logo: string | null } | null;
 };
@@ -54,6 +57,11 @@ function StatusPill({ status }: { status: StatusView }) {
       {status.label}
     </span>
   );
+}
+
+/** A start or due date as the task page writes it: the day, and the time only when one was set. */
+function TaskDate({ value }: { value: string }) {
+  return <span title={formatDateTitle(value)}>{formatTaskDate(value, null, { withTime: hasTimeOfDay(value, null) })}</span>;
 }
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -132,12 +140,12 @@ export default function PublicTaskPage() {
               ) : null}
               {data.startAt ? (
                 <Fact label="Start">
-                  <span title={formatDateTitle(data.startAt)}>{formatDate(data.startAt)}</span>
+                  <TaskDate value={data.startAt} />
                 </Fact>
               ) : null}
               {data.dueAt ? (
                 <Fact label="Due">
-                  <span title={formatDateTitle(data.dueAt)}>{formatDate(data.dueAt)}</span>
+                  <TaskDate value={data.dueAt} />
                 </Fact>
               ) : null}
             </dl>
@@ -161,7 +169,7 @@ export default function PublicTaskPage() {
                         aria-hidden
                         className={`mt-1 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border ${c.done ? "border-[var(--os-brand)] bg-[var(--os-brand)]" : "border-line"}`}
                       />
-                      <span className={c.done ? "text-ink-3 line-through" : "text-ink"}>
+                      <span className={`min-w-0 [overflow-wrap:anywhere] ${c.done ? "text-ink-3 line-through" : "text-ink"}`}>
                         <span className="sr-only">{c.done ? "Done: " : "To do: "}</span>
                         {c.text}
                       </span>
@@ -177,13 +185,29 @@ export default function PublicTaskPage() {
                 <ul className="divide-y divide-line-soft rounded-lg border border-line">
                   {data.subtasks.map((s, i) => (
                     <li key={i} className="flex items-center gap-3 px-3 py-2">
-                      <span className={`min-w-0 flex-1 truncate text-base ${s.status?.done ? "text-ink-3 line-through" : "text-ink"}`} title={s.title}>
+                      <span className={`min-w-0 flex-1 text-base [overflow-wrap:anywhere] ${s.status?.done ? "text-ink-3 line-through" : "text-ink"}`}>
                         {s.title}
                       </span>
                       <StatusPill status={s.status} />
                     </li>
                   ))}
                 </ul>
+              </section>
+            ) : null}
+
+            {data.comments && data.comments.length > 0 ? (
+              <section className="mt-7">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Comments</h2>
+                <ol className="flex flex-col gap-4">
+                  {data.comments.map((c, i) => (
+                    <li key={i} className="min-w-0">
+                      <p className="text-xs text-ink-2">
+                        <span className="font-semibold text-ink">{c.author}</span> · <span title={formatDateTitle(c.at)}>{formatDate(c.at)}</span>
+                      </p>
+                      <MarkdownLite source={c.text} className="mt-1 text-base leading-relaxed text-ink [overflow-wrap:anywhere]" />
+                    </li>
+                  ))}
+                </ol>
               </section>
             ) : null}
           </article>

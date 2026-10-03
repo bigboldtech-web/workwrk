@@ -4782,6 +4782,10 @@ model ItemPublicLink {
   /// Who turned it on. No relation on purpose, like ItemListLink.addedById.
   createdById    String?
   createdAt      DateTime     @default(now())
+  /// When the address stops working; null for never.
+  expiresAt      DateTime?
+  /// The page also shows the assignees' first names and the comments.
+  showPeople     Boolean      @default(false)
 
   @@index([organizationId])
 }

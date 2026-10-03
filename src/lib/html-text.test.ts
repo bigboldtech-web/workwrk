@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToText } from "./html-text";
+import { htmlToText, looksLikeStoredHtml, markdownOrText } from "./html-text";
 
 describe("htmlToText", () => {
   it("keeps paragraphs apart and decodes entities", () => {
@@ -31,5 +31,26 @@ describe("htmlToText", () => {
 
   it("turns a break into a new line", () => {
     expect(htmlToText("<p>one<br>two</p>")).toBe("one\ntwo");
+  });
+});
+
+describe("markdownOrText", () => {
+  it("keeps Markdown exactly, tag-like text and all", () => {
+    const md = "Use the <div> element.\n\n- Send it to <lea@acme.com>\n- **Bold** and <https://example.com>";
+    expect(markdownOrText(md)).toBe(md);
+    expect(markdownOrText("  Plain text  ")).toBe("Plain text");
+  });
+
+  it("reduces an older HTML body to plain text", () => {
+    expect(looksLikeStoredHtml("<p>Hello <b>team</b></p>")).toBe(true);
+    expect(looksLikeStoredHtml("<ul><li>a</li></ul>")).toBe(true);
+    expect(looksLikeStoredHtml("Use the <div> element")).toBe(false);
+    expect(looksLikeStoredHtml("<lea@acme.com> asked")).toBe(false);
+    expect(markdownOrText("<p>Hello <b>team</b></p><script>alert(1)</script>")).toBe("Hello team");
+  });
+
+  it("is empty for anything that is not text", () => {
+    expect(markdownOrText(null)).toBe("");
+    expect(markdownOrText({ html: "<p>x</p>" })).toBe("");
   });
 });

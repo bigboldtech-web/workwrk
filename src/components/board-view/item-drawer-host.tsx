@@ -208,13 +208,18 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         canLinkMove: Boolean(entry?.canRemove) && canShare,
         canAddToList: canShare,
         linkedSubtask: Boolean(parentItemId),
+        canShareHome: lists ? canShare : undefined,
       };
     }
     // At home: Add to another List when its home may share it, never for a
-    // Personal List task (its owner's alone).
-    return lists?.canShare && board?.spaceId && !parentItemId
-      ? { boardId: context.boardId, kind: "home", canAddToList: true }
-      : undefined;
+    // Personal List task (its owner's alone). The share right itself rides
+    // along for the Public link row (unknown until the Lists answer is in).
+    return {
+      boardId: context.boardId,
+      kind: "home",
+      canAddToList: Boolean(lists?.canShare && board?.spaceId && !parentItemId),
+      canShareHome: lists ? Boolean(lists.canShare) : undefined,
+    };
   };
 
   if (hardLoad) return null;

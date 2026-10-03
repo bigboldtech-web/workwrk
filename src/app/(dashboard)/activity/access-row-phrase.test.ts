@@ -56,6 +56,11 @@ describe("accessRowPhrase", () => {
     }
   });
 
+  it("a task's public link sentence gives way to the chip too", () => {
+    expect(accessRowPhrase("Turned on the public link of a task", "Kick off")).toBe("turned on the public link of");
+    expect(accessRowPhrase("Changed the public link of a task", null)).toBe("changed the public link of a task");
+  });
+
   it("is null without a sentence", () => {
     expect(accessRowPhrase(null, "X")).toBeNull();
     expect(accessRowPhrase("   ", null)).toBeNull();

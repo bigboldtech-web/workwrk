@@ -49,6 +49,8 @@ export const ITEM_ACTIVITY_ACTIONS = [
   // Batch 5: the task's public, view-only link (access toggle 10).
   "PUBLIC_LINK_ON",
   "PUBLIC_LINK_OFF",
+  // Its expiry or whether it shows the assignees and comments changed.
+  "PUBLIC_LINK_CHANGED",
 ] as const;
 
 export type ItemActivityAction = (typeof ITEM_ACTIVITY_ACTIONS)[number];
@@ -101,6 +103,7 @@ const ACTION_KIND: Readonly<Record<ItemActivityAction, ItemActivityKind>> = {
   SUBTASK_ADDED: "lifecycle",
   PUBLIC_LINK_ON: "lifecycle",
   PUBLIC_LINK_OFF: "lifecycle",
+  PUBLIC_LINK_CHANGED: "lifecycle",
 };
 
 const KIND_SET: ReadonlySet<string> = new Set(ITEM_ACTIVITY_KINDS);

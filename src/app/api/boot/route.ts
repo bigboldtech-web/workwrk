@@ -27,6 +27,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth";
+import { orgPublicLinksTurnedOn } from "@/lib/public-links";
 import { prisma } from "@/lib/prisma";
 import { countPoliciesToAck } from "@/lib/policies-to-ack";
 import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
@@ -176,6 +177,13 @@ export interface BootPayload {
     aiEnabled: boolean;
     /** settings.currency (Settings > Locale and work week), USD when unset. */
     currency: string;
+    /**
+     * Task public links are turned on (Public links set to View only,
+     * src/lib/public-links.ts orgPublicLinksTurnedOn), so the task menu
+     * offers "Public link" to people who may share. Optional for an older
+     * payload (read as off).
+     */
+    taskPublicLinks?: boolean;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -465,6 +473,7 @@ export async function GET(req: NextRequest) {
         trashDays: retentionDays((settings as { retention?: { trashDays?: unknown } }).retention?.trashDays),
         aiEnabled: aiEnabledFromSettings(settings),
         currency: orgCurrencyFromSettings(settings),
+        taskPublicLinks: orgPublicLinksTurnedOn(settings),
       },
       counts: cf.counts,
       timer,

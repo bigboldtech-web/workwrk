@@ -46,6 +46,8 @@ export async function GET() {
         // Older rows were written "1 skill rows" / "(1 rows)": read in the singular.
         what: e.description.replace(/\b1 (\w+ )?rows\b/g, (_m, w: string | undefined) => `1 ${w ?? ""}row`),
         kind: (e.metadata as { kind?: string } | null)?.kind ?? null,
+        // A workspace export says whether it finished: started, completed or stopped.
+        status: (e.metadata as { status?: string } | null)?.status ?? null,
       })),
       matrixRetired: matrix ? { id: matrix.id, at: matrix.createdAt.toISOString() } : null,
       canPurge,
