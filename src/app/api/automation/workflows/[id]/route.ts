@@ -17,22 +17,10 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
-import { SCOPE_REFUSAL, definitionWithScope, draftDiffersFromLive, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope } from "@/lib/automation/definition";
+import { SCOPE_REFUSAL, draftDiffersFromLive, draftTrigger, readScope, restoreHiddenScope, splitScope } from "@/lib/automation/definition";
+import { definitionForViewer } from "@/lib/automation/definition-view";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
-import type { Viewer } from "@/lib/access/types";
-
-/**
- * The definition as this viewer may see it: its scope cut to the places they
- * can open, and whether others are kept (never which, never how many). The
- * builder edits only the shown part; the save keeps the rest on the server.
- */
-async function definitionForViewer(viewer: Viewer, definition: unknown): Promise<{ definition: Record<string, unknown>; scopeHidden: boolean }> {
-  const stored = readScope(definition);
-  if (isEverywhere(stored)) return { definition: definitionWithScope(definition, stored), scopeHidden: false };
-  const { shown, hidden } = splitScope(stored, await scopeReadable(viewer, [stored]));
-  return { definition: definitionWithScope(definition, shown), scopeHidden: !isEverywhere(hidden) };
-}
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),

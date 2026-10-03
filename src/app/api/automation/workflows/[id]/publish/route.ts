@@ -7,7 +7,7 @@
 // every action must exist in the registry and be available today, and
 // every condition whose operator takes a value must carry one.
 
-import { Prisma } from "@/generated/prisma";
+import { Prisma, type AutomationWorkflow, type AutomationWorkflowVersion } from "@/generated/prisma";
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
@@ -15,6 +15,7 @@ import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
+import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
 import { firstConditionMissingValue } from "@/lib/automation/builder-state";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -72,7 +73,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   // not both compute the same next versionNumber: the workflow row is locked
   // for the transaction, so the second waits and numbers after the first.
   // Should the unique index still trip, the answer is a sentence, not a 500.
-  let result: { workflow: unknown; version: unknown };
+  let result: { workflow: AutomationWorkflow; version: AutomationWorkflowVersion };
   try {
     result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${workflow.id} FOR UPDATE`;
@@ -119,5 +120,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     throw err;
   }
 
-  return NextResponse.json(result);
+  // The answer carries the definition as this editor may see it: places they
+  // cannot open stay out of the row and out of the version's snapshot.
+  return NextResponse.json({ workflow: await workflowForViewer(ctx.viewer, result.workflow), version: await versionForViewer(ctx.viewer, result.version) });
 }

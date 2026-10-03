@@ -7,6 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
+import { workflowForViewer } from "@/lib/automation/definition-view";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -31,12 +32,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   }
   if (workflow.status === "ACTIVE") {
     const unchanged = await prisma.automationWorkflow.findUnique({ where: { id } });
-    return NextResponse.json({ workflow: unchanged });
+    return NextResponse.json({ workflow: unchanged ? await workflowForViewer(ctx.viewer, unchanged) : null });
   }
 
   const updated = await prisma.automationWorkflow.update({
     where: { id },
     data: { status: "ACTIVE", updatedById: ctx.userId },
   });
-  return NextResponse.json({ workflow: updated });
+  return NextResponse.json({ workflow: await workflowForViewer(ctx.viewer, updated) });
 }
