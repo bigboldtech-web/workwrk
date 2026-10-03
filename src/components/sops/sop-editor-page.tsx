@@ -292,7 +292,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       case "recording":
         return { ...original, type: original.type === "RECORDED" ? "RECORDED" : "recorded", steps: recSteps };
       default:
-        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps) };
+        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow, steps) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps) };
     }
   }, [sop?.content, kind, bnDoc, blocks, sections, recSteps, layout, steps, flow]);
 
@@ -762,11 +762,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
                 placeholder="Untitled SOP"
                 aria-label="SOP title"
                 autoFocus={creating}
-                /* The input keeps a readable start of the title on a phone only
-                   while the save indicator is quiet. While a save is running or
-                   has failed, it gives way, so "Not saved" and Retry are never
-                   drawn under it (a failure must stay readable). */
-                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${saveState.status === "error" || saveState.status === "saving" ? "min-w-0" : "min-w-[4rem]"}`}
+                /* On a phone the input keeps a readable start of the title, and
+                   gives way only to a failed save, so "Not saved" and Retry are
+                   never drawn under it (a failure must stay readable). The
+                   indicator's other states are quiet on a phone (below), so the
+                   row does not jump on every autosave. */
+                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${saveState.status === "error" ? "min-w-0" : "min-w-[4rem]"}`}
               />
             ) : (
               /* min-w keeps a readable start of the title on a phone; the full
@@ -777,11 +778,14 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
           </>
         }
         autosave={editing ? (
-          /* On a phone the idle hint ("Auto-saves as you type") pushed the
-             title, the blue and the "…" menu off the row. Below sm only that
-             hint goes quiet (screen readers still hear it); every live state,
-             Saving, Not saved and Retry, still draws. */
-          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={saveState.status === "idle" ? "max-sm:[&>span]:sr-only" : undefined} />
+          /* On a phone the title row has no room for a word beside the title,
+             the Share chip and the blue. Below sm every state but a failure goes
+             quiet (screen readers still hear it). A published SOP's unsaved
+             changes are on the sticky save bar ("Not saved" with Save); a draft
+             saves itself within a second; and a failure (Not saved, Retry)
+             still draws here, with the title giving way to it, and brings the
+             save bar up too. */
+          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={saveState.status === "error" ? undefined : "max-sm:[&>span]:sr-only"} />
         ) : undefined}
         actions={
           <>
@@ -908,7 +912,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
           <div className="flex flex-col gap-3">
             {editing && kind === "steps" ? (
               <div className="flex items-center justify-end">
-                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow, steps)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
                   <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {layout === "list" ? "Show as flow" : "Show as list"}
                 </button>
               </div>

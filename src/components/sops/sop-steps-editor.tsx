@@ -24,39 +24,20 @@ import { ProcessFlowBuilder, type ProcessFlow, type ProcessFlowStep } from "@/co
 import { FlowStepOwners } from "@/components/sops/sop-read-view";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
-import { stepJobTitle, type StepJobTitle } from "@/lib/sop-step-owner";
+import { ownerFields, type LayoutStep } from "@/lib/sop-step-layout";
 
-export interface EditStep {
-  id: string;
-  title: string;
-  description?: string;
-  image?: string;
-  /** The step's owner, by job title (src/lib/sop-step-owner.ts). */
-  jobTitle?: StepJobTitle | null;
-  /** Running the SOP creates a task for this step. */
-  createsTask?: boolean;
-}
+/** A step as the editor holds it (src/lib/sop-step-layout.ts owns the shape). */
+export type EditStep = LayoutStep;
+
+/**
+ * The conversions between the two layouts live in src/lib/sop-step-layout.ts
+ * (pure and tested): the image, the job title and "Creates a task" ride along
+ * both ways, so switching the layout or saving in flow mode never drops one.
+ */
+export { flowFromSteps, stepsFromFlow } from "@/lib/sop-step-layout";
 
 export function newStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** The owner fields a step carries in both layouts, only when set. */
-function ownerFields(s: { jobTitle?: unknown; createsTask?: unknown }): Pick<EditStep, "jobTitle" | "createsTask"> {
-  const jobTitle = stepJobTitle(s);
-  return { ...(jobTitle ? { jobTitle } : {}), ...(s.createsTask === true ? { createsTask: true } : {}) };
-}
-
-/**
- * The conversions between the two layouts (branches do not survive the
- * list). The job title and "Creates a task" ride along both ways, so
- * switching the layout or saving in flow mode never drops a step's owner.
- */
-export function flowFromSteps(steps: EditStep[]): ProcessFlow {
-  return { type: "process_flow", steps: steps.map((s) => ({ id: s.id, title: s.title || "Untitled", description: s.description, type: "action" as const, ...ownerFields(s) })) };
-}
-export function stepsFromFlow(flow: ProcessFlow | null | undefined): EditStep[] {
-  return (flow?.steps ?? []).map((s) => ({ id: s.id, title: s.title, description: s.description, ...ownerFields(s as { jobTitle?: unknown; createsTask?: unknown }) }));
 }
 
 type JobTitleOption = { id: string; title: string };
@@ -139,8 +120,10 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
     </button>
   );
   if (!editing) return <FlowStepOwners steps={flow.steps} action={toggle} />;
-  const patch = (id: string, p: Partial<EditStep>) =>
-    onFlowChange({ ...flow, steps: flow.steps.map((s) => (s.id === id ? ({ ...s, ...p } as ProcessFlowStep) : s)) });
+  // By position, not id: a flow step stored without an id would otherwise
+  // match every other id-less step and take the same owner.
+  const patch = (index: number, p: Partial<EditStep>) =>
+    onFlowChange({ ...flow, steps: flow.steps.map((s, j) => (j === index ? ({ ...s, ...p } as ProcessFlowStep) : s)) });
   return (
     <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
       <div className="flex h-11 items-center gap-3 px-3">
@@ -149,7 +132,7 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
       </div>
       <ol className="flex flex-col divide-y divide-line border-t border-line">
         {flow.steps.map((s, i) => (
-          <li key={s.id} className="flex flex-col gap-2 px-3 py-2">
+          <li key={s.id ?? i} className="flex flex-col gap-2 px-3 py-2">
             <span className="flex items-center gap-3">
               <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
               <span className="min-w-0 flex-1 truncate text-row text-ink">{s.title || `Step ${i + 1}`}</span>
@@ -159,7 +142,7 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
               titles={jobTitles.titles}
               failed={jobTitles.failed}
               retry={jobTitles.retry}
-              onChange={(p) => patch(s.id, p)}
+              onChange={(p) => patch(i, p)}
             />
           </li>
         ))}
