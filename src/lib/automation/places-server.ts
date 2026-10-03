@@ -162,9 +162,15 @@ export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise
       : [],
   ]);
   const inTrash = new Set(trashed.map((t) => t.entityId));
+  // A List or Folder moved to Trash WITH its Folder or Space has no Trash
+  // row of its own: it travels inside the parent's snapshot, and restoring
+  // the parent brings it back with the same id. It stays in the scope too.
+  const live = new Set([...lists, ...folders, ...spaces].map((r) => r.id));
+  const missing = all.filter((id) => !live.has(id) && !inTrash.has(id));
+  const insideTrash = missing.length ? await idsInTrashedContainers(orgId, missing) : new Set<string>();
   const keep = (rows: Array<{ id: string }>, ids: string[]) => {
     const ok = new Set(rows.map((r) => r.id));
-    return ids.filter((id) => ok.has(id) || inTrash.has(id));
+    return ids.filter((id) => ok.has(id) || inTrash.has(id) || insideTrash.has(id));
   };
   const pruned = { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
   // Never wider than asked: pruning a scope that named places down to
@@ -172,6 +178,22 @@ export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise
   // in the workspace. Such a scope (places gone with a whole Space, say) is
   // kept as it was and simply matches nothing.
   return isEverywhere(pruned) && !isEverywhere(scope) ? scope : pruned;
+}
+
+/** Which of these ids sit inside a Folder or Space in this workspace's Trash (its Lists, Folders and child Spaces). */
+async function idsInTrashedContainers(orgId: string, ids: string[]): Promise<Set<string>> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT DISTINCT child->>'id' AS id
+    FROM "TrashItem" t,
+      jsonb_array_elements(
+        COALESCE(t."snapshot"->'children'->'boards', '[]'::jsonb)
+        || COALESCE(t."snapshot"->'children'->'folders', '[]'::jsonb)
+        || COALESCE(t."snapshot"->'children'->'childSpaces', '[]'::jsonb)
+      ) AS child
+    WHERE t."organizationId" = ${orgId}
+      AND t."entityType" IN ('folder', 'space')
+      AND child->>'id' = ANY(${ids})`;
+  return new Set(rows.map((r) => r.id));
 }
 
 /**
