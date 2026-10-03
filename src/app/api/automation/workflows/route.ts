@@ -98,7 +98,16 @@ export async function GET(req: NextRequest) {
     const namer = await scopeNamer(ctx.viewer, ctx.orgId, [own]);
     const name = namer(own).names[0] ?? null;
     if (!name) return NextResponse.json({ error: "That place is not in this workspace" }, { status: 404 });
-    container = { kind: containerKind, id: containerId, listIds: contents.listIds, folderIds: contents.folderIds };
+    // Matched only through the Lists and Folders inside it the viewer can
+    // open: a match through a private List would say an automation reaches
+    // inside a place they cannot see.
+    const inside = await scopeReadable(ctx.viewer, [{ listIds: contents.listIds, folderIds: contents.folderIds, spaceIds: [] }]);
+    container = {
+      kind: containerKind,
+      id: containerId,
+      listIds: contents.listIds.filter((id) => inside("list", id)),
+      folderIds: contents.folderIds.filter((id) => inside("folder", id)),
+    };
     containerOut = { kind: containerKind, id: containerId, name };
   }
 
