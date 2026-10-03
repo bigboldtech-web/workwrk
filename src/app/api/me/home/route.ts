@@ -28,6 +28,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getEffectivePreferences } from "@/lib/preferences";
+import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
 import { parseRecentDocViews } from "@/lib/recent-doc-views";
 import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
@@ -63,7 +64,7 @@ export async function GET() {
   // `settled` rather than `all`: one widget's failure is that widget's error
   // row, never the page's.
   const [work, inbox, reminders, goals, weeklyReview, recentDocs] = await Promise.all([
-    loadWork(userId, organizationId, now, locale).catch(() => null),
+    loadWork(userId, organizationId, u.accessLevel, now, locale).catch(() => null),
     loadInbox(userId, organizationId, now).catch(() => null),
     isGuest ? Promise.resolve(null) : loadReminders(userId, organizationId, now, locale).catch(() => null),
     isGuest ? Promise.resolve(null) : loadGoals(userId, organizationId).catch(() => null),
@@ -86,7 +87,7 @@ export async function GET() {
 
 // ── My work ───────────────────────────────────────────────────────
 
-async function loadWork(userId: string, organizationId: string, now: Date, locale: LocaleContext) {
+async function loadWork(userId: string, organizationId: string, accessLevel: string | null | undefined, now: Date, locale: LocaleContext) {
   const endOfWeek = endOfWeekInstant(now, locale);
   // The read is narrowed to "anything that could land in one of the three
   // groups": due before the end of the viewer's week. Everything further out
@@ -118,6 +119,8 @@ async function loadWork(userId: string, organizationId: string, now: Date, local
   });
 
   const open = rows.filter((r) => !isDoneStatusName(r.status));
+  // The Lists where being assigned does not let this viewer change a task.
+  const readOnlyBoardIds = await liftWithheldListIds({ userId, organizationId, accessLevel }, open.map((r) => r.board?.id));
   const groups: { overdue: HomeTaskRow[]; today: HomeTaskRow[]; week: HomeTaskRow[] } = { overdue: [], today: [], week: [] };
   for (const r of open) {
     const bucket = homeBucketFor(r.dueAt ?? r.startAt, now, locale);
@@ -130,6 +133,7 @@ async function loadWork(userId: string, organizationId: string, now: Date, local
       dueAt: r.dueAt ? r.dueAt.toISOString() : null,
       list: r.board ? { id: r.board.id, slug: r.board.slug, name: r.board.name } : null,
       doneStatus: firstDoneStatus(r.board),
+      canEdit: !(r.board && readOnlyBoardIds.has(r.board.id)),
     });
   }
 

@@ -182,23 +182,25 @@ export default async function BoardPage(props: {
   const canContribute = roleAtLeast(self.role, "EDIT");
   const canManage = roleAtLeast(self.role, "FULL");
   // Below Can edit, the tasks assigned to this viewer are still theirs to
-  // change (rule 9), except at Can comment (founder decision 3): the views
-  // open those rows and cards, never the List's own arranging.
+  // change (rule 9), except at Can comment held as their whole access here
+  // (founder decision 3; with Can view from anywhere else the resolver
+  // already answers Can edit assigned tasks): the views open those rows and
+  // cards, never the List's own arranging.
   const assigneeEdit = !canContribute ? { userId: u.id, lift: self.role !== "COMMENT" } : null;
   const accessChip =
     self.role === "ASSIGNED"
       ? {
           label: "Can edit assigned tasks",
-          title: `You can read and discuss every task in ${board.name} and change the tasks assigned to you. Adding tasks, views, custom fields or statuses needs Can edit. Ask a List or Space admin to change your access.`,
+          title: `You can read and discuss every task in ${board.name} and change the tasks assigned to you. Adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
         }
       : self.role === "COMMENT"
         ? {
             label: "Can comment",
-            title: `You can read and discuss every task in ${board.name}, but not change one. Ask a List or Space admin to change your access.`,
+            title: `You can read and discuss every task in ${board.name}, but not change one, not even your own. Ask a List or Space admin to change your access.`,
           }
         : {
             label: "View only",
-            title: `You have view access to ${board.name}: you can switch views, read tasks and change a task assigned to you, but adding views, custom fields, statuses or tasks needs Can edit. Ask a List or Space admin to change your access.`,
+            title: `You have view access to ${board.name}: you can switch views, read tasks and change a task assigned to you, but adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
           };
   const canDeleteTasks = canManage;
   // A connect column names only the Lists this viewer can read, a mirror only

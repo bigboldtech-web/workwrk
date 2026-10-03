@@ -220,8 +220,9 @@ export function itemsUrl(boardId: string): string {
 export function linkedRowAccess(i: {
   orgAdmin: boolean;
   homeRole: ItemRole;
-  /** Rule 9's lift on the home List (item-role.ts taskSideOfListRole); absent reads as true. */
+  /** Rules 9 and 5's lifts on the home List (item-role.ts taskSideOfListRole); absent reads as true. */
   assigneeLift?: boolean;
+  creatorLift?: boolean;
   assignee: boolean;
   creator: boolean;
   archived: boolean;
@@ -233,6 +234,7 @@ export function linkedRowAccess(i: {
     creator: i.creator,
     assignee: i.assignee,
     assigneeLift: i.assigneeLift,
+    creatorLift: i.creatorLift,
     listRole: i.homeRole,
     archived: i.archived,
     linkedList: { id: "context", name: null },
@@ -263,10 +265,11 @@ export function linkedRowEditable(row: BoardItemRow, canContribute: boolean): bo
 }
 
 /**
- * The viewer of a List they cannot add to, as rule 9 reads them: being
- * assigned a task lifts them to Can edit on it, except at Can comment
- * (founder decision 3, item-role.ts taskSideOfListRole). Null for someone who
- * may add to the List (every row is already theirs to edit).
+ * The viewer of a List they cannot add to, as rules 9 and 5 read them: being
+ * assigned a task lifts them to Can edit on it, and a task they made stays
+ * theirs, except at Can comment held as their whole access to the List
+ * (founder decision 3, item-role.ts taskSideOfListRole: `lift` false). Null
+ * for someone who may add to the List (every row is already theirs to edit).
  */
 export interface AssigneeEdit {
   userId: string;
@@ -274,14 +277,35 @@ export interface AssigneeEdit {
 }
 
 /**
- * May this viewer change this row in place because it is assigned to them?
- * Home rows only: a row shown through a link carries its own role. Only the
- * row's own fields: arranging the List (drag order, new subtasks, bulk) still
- * needs Can edit on it, as the server says.
+ * May this viewer change this row in place because it is assigned to them or
+ * they made it (rules 9 and 5, the task gate's own reading)? Home rows only: a
+ * row shown through a link carries its own role. Only the row's own fields:
+ * arranging the List (drag order, new subtasks, bulk) still needs Can edit on
+ * it, as the server says, and so do the List writes in its menu.
  */
 export function assignedRowEditable(row: BoardItemRow, a: AssigneeEdit | null | undefined): boolean {
   if (!a || !a.lift || row.listLink || row.archivedAt) return false;
-  return row.ownerId === a.userId || (row.assigneeIds ?? []).includes(a.userId);
+  return row.ownerId === a.userId || (row.assigneeIds ?? []).includes(a.userId) || row.createdBy?.id === a.userId;
+}
+
+/**
+ * May this viewer change this row's own fields from a List view: a row they
+ * may arrange (linkedRowEditable), or, below Can edit, a home row assigned to
+ * them (assignedRowEditable). Every view draws its cells from this AND lets
+ * its saves through by it, so a cell that looks editable always saves.
+ */
+export function rowFieldsEditable(row: BoardItemRow, canContribute: boolean, a: AssigneeEdit | null | undefined): boolean {
+  return linkedRowEditable(row, canContribute) || (!canContribute && assignedRowEditable(row, a));
+}
+
+/**
+ * A change that only adds or removes watchers: personal, like a reminder. Any
+ * reader may watch or unwatch, and PATCH /api/items/[id] applies it at Can
+ * view to the caller alone, so a view sends it whatever the row's role.
+ */
+export function watchOnlyPatch(patch: object): boolean {
+  const keys = Object.keys(patch).filter((k) => (patch as Record<string, unknown>)[k] !== undefined);
+  return keys.length > 0 && keys.every((k) => k === "watcherIds");
 }
 
 export interface LinkedMenuFlags {

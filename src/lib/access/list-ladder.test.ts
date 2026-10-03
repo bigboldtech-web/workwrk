@@ -35,7 +35,8 @@ import { planGrant, storedRoleFor } from "./grant-plan";
 import { accessEntries } from "./node-tree";
 import { grantsWithViewer } from "./node-world";
 import { allowsItemAction, decideItem, taskSideOfListRole } from "../item-role";
-import { assignedRowEditable } from "../list-link-rows";
+import { assignedRowEditable, rowFieldsEditable, watchOnlyPatch } from "../list-link-rows";
+import { roleCoversRequest } from "./access-requests";
 import type { BoardItemRow } from "../board-items-shared";
 
 const ORG = "org-1";
@@ -73,8 +74,9 @@ describe("the List ladder: what a share offers and stores", () => {
     expect(ROLES_BY_KIND.space).toEqual(["OWNER", "FULL", "EDIT", "VIEW"]);
     expect(panelRoleLabel("ASSIGNED")).toBe("Can edit assigned tasks");
     expect(panelRoleLabel("COMMENT")).toBe("Can comment");
-    expect(panelRoleBlurb("list", "COMMENT")).toMatch(/never change one, even one assigned to them/);
-    expect(panelRoleBlurb("list", "VIEW")).toMatch(/except a task assigned to them/);
+    expect(panelRoleBlurb("list", "COMMENT")).toMatch(/change none, not even their own, unless they can open the List another way/);
+    expect(panelRoleBlurb("list", "VIEW")).toMatch(/except tasks assigned to them or that they made/);
+    expect(panelRoleBlurb("list", "ASSIGNED")).toMatch(/change only tasks assigned to them or that they made/);
     expect(panelRoleBlurb("doc", "COMMENT")).toBe("Read and discuss, never change.");
   });
 
@@ -169,13 +171,13 @@ describe("the List ladder: a rung survives every copy of a person's rows", () =>
 describe("the List ladder: what it gives on a task", () => {
   const signals = { orgAdmin: false, guest: false, creator: false, archived: false };
 
-  it("maps every List role to its task half and its lift", () => {
-    expect(taskSideOfListRole("ASSIGNED")).toEqual({ listRole: "COMMENT", assigneeLift: true });
-    expect(taskSideOfListRole("COMMENT")).toEqual({ listRole: "COMMENT", assigneeLift: false });
-    expect(taskSideOfListRole("VIEW")).toEqual({ listRole: "VIEW", assigneeLift: true });
-    expect(taskSideOfListRole("EDIT")).toEqual({ listRole: "EDIT", assigneeLift: true });
-    expect(taskSideOfListRole("OWNER")).toEqual({ listRole: "FULL", assigneeLift: true });
-    expect(taskSideOfListRole("none")).toEqual({ listRole: "none", assigneeLift: true });
+  it("maps every List role to its task half and its two lifts", () => {
+    expect(taskSideOfListRole("ASSIGNED")).toEqual({ listRole: "COMMENT", assigneeLift: true, creatorLift: true });
+    expect(taskSideOfListRole("COMMENT")).toEqual({ listRole: "COMMENT", assigneeLift: false, creatorLift: false });
+    expect(taskSideOfListRole("VIEW")).toEqual({ listRole: "VIEW", assigneeLift: true, creatorLift: true });
+    expect(taskSideOfListRole("EDIT")).toEqual({ listRole: "EDIT", assigneeLift: true, creatorLift: true });
+    expect(taskSideOfListRole("OWNER")).toEqual({ listRole: "FULL", assigneeLift: true, creatorLift: true });
+    expect(taskSideOfListRole("none")).toEqual({ listRole: "none", assigneeLift: true, creatorLift: true });
   });
 
   it("Can edit assigned tasks: changes a task assigned to them, comments on every other, never more", () => {
@@ -204,10 +206,142 @@ describe("the List ladder: what it gives on a task", () => {
     expect(decideItem({ ...signals, assignee: false, ...side }).role).toBe("VIEW");
   });
 
-  it("a creator and an org admin keep Full access whatever the rung", () => {
+  it("Can comment: a task they made stays read and discuss too, and never deletes", () => {
     const side = taskSideOfListRole("COMMENT");
-    expect(decideItem({ ...signals, creator: true, assignee: true, ...side }).role).toBe("FULL");
-    expect(decideItem({ ...signals, orgAdmin: true, assignee: false, ...side }).role).toBe("FULL");
+    const made = decideItem({ ...signals, creator: true, assignee: true, ...side });
+    expect(made.role).toBe("COMMENT");
+    expect(allowsItemAction(made, "edit", { creator: true })).toBe(false);
+    expect(allowsItemAction(made, "delete", { creator: true })).toBe(false);
+  });
+
+  it("a creator keeps Full access at Can edit assigned tasks and Can view, and an org admin at every rung", () => {
+    for (const rung of ["ASSIGNED", "VIEW"] as const) {
+      expect(decideItem({ ...signals, creator: true, assignee: false, ...taskSideOfListRole(rung) }).role, rung).toBe("FULL");
+    }
+    for (const rung of ["COMMENT", "ASSIGNED", "VIEW"] as const) {
+      expect(decideItem({ ...signals, orgAdmin: true, assignee: false, ...taskSideOfListRole(rung) }).role, rung).toBe("FULL");
+    }
+  });
+});
+
+describe("the List ladder: a share only adds (Can comment with Can view from elsewhere)", () => {
+  // The person's own List row is Can comment; what else reaches the List?
+  function withOther(other: (rows: NodeRows, g: ViewerGrants) => void): { role: NodeRole; via: string } {
+    const { rows, g } = world();
+    g.list.set("l", "GUEST");
+    (g.listRung ??= new Map()).set("l", "COMMENT");
+    g.since!.set("list:l", CUTOFF + 1);
+    other(rows, g);
+    const res = new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" });
+    return { role: res.role, via: res.via.type };
+  }
+
+  it("held alone, Can comment stays Can comment: nothing changes, not even their own tasks", () => {
+    expect(withOther(() => {}).role).toBe("COMMENT");
+  });
+
+  it("with Can view through the Space, it is Can edit assigned tasks, named from the Space", () => {
+    const r = withOther((_rows, g) => {
+      g.space.set("s", "GUEST");
+      g.since!.set("space:s", CUTOFF + 1);
+    });
+    expect(r).toEqual({ role: "ASSIGNED", via: "inherited" });
+  });
+
+  it("with the Space open to the whole company, it is Can edit assigned tasks, named from everyone", () => {
+    const r = withOther((rows) => {
+      rows.spaces.set("s", { ...rows.spaces.get("s")!, visibility: "ORG" });
+    });
+    expect(r).toEqual({ role: "ASSIGNED", via: "everyone" });
+  });
+
+  it("a higher source still wins outright: Space Member gives Can edit", () => {
+    const r = withOther((_rows, g) => {
+      g.space.set("s", "MEMBER");
+      g.since!.set("space:s", CUTOFF + 1);
+    });
+    expect(r.role).toBe("EDIT");
+  });
+
+  it("a Private List takes nothing from above, so Can comment alone stays Can comment", () => {
+    const r = withOther((rows, g) => {
+      rows.lists.set("l", { ...rows.lists.get("l")!, visibility: "PRIVATE" });
+      g.space.set("s", "GUEST");
+      g.since!.set("space:s", CUTOFF + 1);
+    });
+    expect(r.role).toBe("COMMENT");
+  });
+
+  it("under the strict Private rule the union holds too", () => {
+    const r = withOther((rows, g) => {
+      rows.privateRule = "strict";
+      g.space.set("s", "GUEST");
+    });
+    expect(r.role).toBe("ASSIGNED");
+  });
+
+  it("the share panel shows the row as Can comment and the rest as also Can edit assigned tasks from the Space", () => {
+    const { rows } = world();
+    const g = grantsWithViewer(viewer(), {
+      space: new Map([["s", "GUEST"]]),
+      folder: new Map(),
+      list: new Map([["l", "GUEST"]]),
+      listRung: new Map([["l", "COMMENT"]]),
+      object: new Map(),
+      since: new Map([["list:l", CUTOFF + 1], ["space:s", CUTOFF + 1]]),
+    });
+    const eve = { person: { id: ME, name: "Eve", email: "eve@acme.test", avatar: null, active: true }, grants: g };
+    const owner = {
+      person: { id: OTHER, name: "Mona", email: "mona@acme.test", avatar: null, active: true },
+      grants: emptyGrants({ userId: OTHER, orgAdmin: false, orgGuest: false, isAgent: false, denied: false }),
+    };
+    owner.grants.space.set("s", "MEMBER");
+    const out = accessEntries({ rows, ref: { kind: "list", id: "l" }, people: [eve, owner], viewer: owner.grants, orgName: "Acme", hrefOf: () => null });
+    const row = out.direct.find((d) => d.person.id === ME)!;
+    expect(row.role).toBe("COMMENT");
+    expect(row.alsoVia?.role).toBe("ASSIGNED");
+  });
+});
+
+describe("the List ladder: what hangs off a List never reads a task-only rung", () => {
+  it("a doc on the List reads Can edit assigned tasks as Can comment (a row of this release)", () => {
+    const { rows, g } = world();
+    rows.docs.set("d", { id: "d", organizationId: ORG, title: "d", entityType: "BOARD", entityId: "l", parentId: null, createdById: OTHER });
+    g.list.set("l", "GUEST");
+    (g.listRung ??= new Map()).set("l", "ASSIGNED");
+    // Written after the cutoff, so the doc follows the List's role (A5)
+    // rather than the older rule's "every reach edits an unrestricted doc" (A8).
+    g.since!.set("list:l", CUTOFF + 1);
+    expect(new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role).toBe("COMMENT");
+  });
+
+  it("a form that sends answers to the List opens read-only at either rung, as at Can view", () => {
+    for (const rung of ["COMMENT", "ASSIGNED"] as const) {
+      const { rows, g } = world();
+      rows.privateRule = "strict";
+      rows.forms.set("f", { id: "f", organizationId: ORG, createdById: OTHER, name: "f", targetBoardId: "l", targetTableId: null });
+      g.list.set("l", "GUEST");
+      (g.listRung ??= new Map()).set("l", rung);
+      expect(new NodeEvaluator(rows, g).effective({ kind: "form", id: "f" }).role, rung).toBe("VIEW");
+    }
+  });
+});
+
+describe("the List ladder: an access request is answered by the rung that covers it", () => {
+  it("Can edit assigned tasks answers a request for Can view or Can comment, never one for Can edit", () => {
+    expect(roleCoversRequest("ASSIGNED", "VIEW")).toBe(true);
+    expect(roleCoversRequest("ASSIGNED", "COMMENT")).toBe(true);
+    expect(roleCoversRequest("ASSIGNED", "EDIT")).toBe(false);
+  });
+
+  it("keeps the request ladder in the panel's order", () => {
+    const roles = Object.keys(PANEL_ROLE_RANK).filter((r) => r !== "none");
+    for (const held of roles) {
+      for (const asked of ["VIEW", "COMMENT", "EDIT"] as const) {
+        const rank = PANEL_ROLE_RANK as Record<string, number>;
+        expect(roleCoversRequest(held, asked), `${held} for ${asked}`).toBe(rank[held] >= rank[asked]);
+      }
+    }
   });
 });
 
@@ -219,11 +353,32 @@ describe("the List ladder: which rows a List view opens", () => {
     const lift = { userId: ME, lift: true };
     expect(assignedRowEditable(row({ assigneeIds: [ME] }), lift)).toBe(true);
     expect(assignedRowEditable(row({ ownerId: ME }), lift)).toBe(true);
+    // A task they made stays theirs (rule 5), and is shut where the lift is.
+    const mine = { id: ME, firstName: "Eve", lastName: "", avatar: null };
+    expect(assignedRowEditable(row({ createdBy: mine }), lift)).toBe(true);
+    expect(assignedRowEditable(row({ createdBy: mine }), { userId: ME, lift: false })).toBe(false);
     expect(assignedRowEditable(row({ assigneeIds: [OTHER] }), lift)).toBe(false);
     expect(assignedRowEditable(row({ assigneeIds: [ME] }), { userId: ME, lift: false })).toBe(false);
     expect(assignedRowEditable(row({ assigneeIds: [ME] }), null)).toBe(false);
     expect(assignedRowEditable(row({ assigneeIds: [ME], archivedAt: new Date() }), lift)).toBe(false);
     // A row shown through a link carries its own role: never opened here.
     expect(assignedRowEditable(row({ assigneeIds: [ME], listLink: { boardId: "x", position: 1, rootId: "t" } as BoardItemRow["listLink"] }), lift)).toBe(false);
+  });
+
+  it("lets a view save exactly what it draws as editable", () => {
+    const lift = { userId: ME, lift: true };
+    // Can edit on the List: every home row.
+    expect(rowFieldsEditable(row({ assigneeIds: [OTHER] }), true, null)).toBe(true);
+    // Below it: only the rows assigned to them, where the lift applies.
+    expect(rowFieldsEditable(row({ assigneeIds: [ME] }), false, lift)).toBe(true);
+    expect(rowFieldsEditable(row({ assigneeIds: [OTHER] }), false, lift)).toBe(false);
+    expect(rowFieldsEditable(row({ assigneeIds: [ME] }), false, { userId: ME, lift: false })).toBe(false);
+  });
+
+  it("lets any reader watch: a change that only touches watchers", () => {
+    expect(watchOnlyPatch({ watcherIds: [ME] })).toBe(true);
+    expect(watchOnlyPatch({ watcherIds: [ME], status: "DONE" })).toBe(false);
+    expect(watchOnlyPatch({ status: "DONE" })).toBe(false);
+    expect(watchOnlyPatch({})).toBe(false);
   });
 });

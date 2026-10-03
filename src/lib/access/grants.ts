@@ -596,7 +596,13 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
     });
     if (plan.error) throw new GrantError(plan.error);
     const writeRole = stored ?? plan.writeRole;
-    const noChange = stored ? cur.stored === stored : plan.noChange;
+    // The member routes' vocabulary cannot name a List rung, so their GUEST
+    // onto a GUEST row that carries one ("COMMENT" or "ASSIGNED") is that
+    // same row: no change. Rewriting it would silently reset Can comment or
+    // Can edit assigned tasks to plain Can view; only the share dialog moves
+    // between them.
+    const rungRowKept = stored === "GUEST" && ref.kind === "list" && (cur.stored === "COMMENT" || cur.stored === "ASSIGNED");
+    const noChange = stored ? cur.stored === stored || rungRowKept : plan.noChange;
     if (noChange || !writeRole) return { previousRole: cur.role, role: cur.role, noChange: true, notify: "none" as const };
     await writeRow(tx, actor.organizationId, ref, userId, writeRole, actor.userId, cur);
     await activity(tx, actor, ref, cur.role ? T_CHANGED : T_GRANTED, {

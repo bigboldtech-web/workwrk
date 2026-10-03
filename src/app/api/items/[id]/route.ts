@@ -572,6 +572,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
+  // Where a task sits in its List (its order, and the older group key) is the
+  // List's arrangement, a List write: Can edit on the List, the same rule as
+  // PUT /api/boards/[id]/order. Being assigned opens a task's content to
+  // change (rule 9), never its place among everyone else's.
+  if ((parsed.data.position !== undefined || parsed.data.groupKey !== undefined) && !gate.canAddToList) {
+    return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
+  }
+
   // EVERY assignee id is a real, live person in THIS organization.
   //
   // Item.ownerId and Item.assigneeIds are bare String columns with no

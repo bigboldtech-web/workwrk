@@ -20,8 +20,8 @@ import { MANAGE_BAR, ROLES_BY_KIND, panelRoleBlurb, panelRoleLabel, type PanelRo
 import { roleAtLeast } from "./node-rules";
 import { allowsItemAction, decideItem, taskSideOfListRole, type ItemAction } from "../item-role";
 
-/** yes; no; only the tasks assigned to them; only the tasks they made. */
-export type MatrixCell = "yes" | "no" | "assigned" | "own";
+/** yes; no; only the tasks assigned to them; only the tasks they made; the tasks assigned to them or made by them. */
+export type MatrixCell = "yes" | "no" | "assigned" | "own" | "assignedOrOwn";
 
 export interface MatrixColumn {
   role: PanelRole;
@@ -42,18 +42,22 @@ export interface PermissionMatrix {
 
 const BASE = { orgAdmin: false, guest: false, archived: false } as const;
 
-/** What a holder of `role` on a List may do to a task in it: to any task, to one assigned to them, or to one they made. */
+/**
+ * What a holder of `role` on a List may do to a task in it: to any task, to
+ * one assigned to them, or to one they made. A task they made is asked at
+ * every rung, not only where tasks can be added: someone lowered after making
+ * tasks, or whose task was moved into the List, is still its creator.
+ */
 export function taskCell(role: PanelRole, action: ItemAction): MatrixCell {
   const side = taskSideOfListRole(role);
-  const any = decideItem({ ...BASE, ...side, assignee: false, creator: false });
-  if (allowsItemAction(any, action, { creator: false })) return "yes";
-  const assigned = decideItem({ ...BASE, ...side, assignee: true, creator: false });
-  if (allowsItemAction(assigned, action, { creator: false })) return "assigned";
-  // A task they made: only someone who may add tasks here ever makes one.
-  if (roleAtLeast(role, "EDIT")) {
-    const made = decideItem({ ...BASE, ...side, assignee: false, creator: true });
-    if (allowsItemAction(made, action, { creator: true })) return "own";
-  }
+  const may = (assignee: boolean, creator: boolean) =>
+    allowsItemAction(decideItem({ ...BASE, ...side, assignee, creator }), action, { creator });
+  if (may(false, false)) return "yes";
+  const assigned = may(true, false);
+  const made = may(false, true);
+  if (assigned && made) return "assignedOrOwn";
+  if (assigned) return "assigned";
+  if (made) return "own";
   return "no";
 }
 
@@ -96,10 +100,18 @@ export interface MatrixRule {
  * people see; the rule each one is stays here.
  */
 export const RELATIONSHIP_RULES: readonly MatrixRule[] = [
-  // item-role rule 9, cut by taskSideOfListRole on Can comment.
-  { key: "assignee", who: "Someone a task is assigned to", gets: "Can edit on that task, at every level except Can comment." },
-  // item-role rule 5.
-  { key: "creator", who: "The person who made a task", gets: "Full access on that task." },
+  // item-role rule 9, withheld by taskSideOfListRole at Can comment.
+  { key: "assignee", who: "Someone a task is assigned to", gets: "Can edit on that task, unless Can comment on its List is all the access they hold there." },
+  // item-role rule 5, withheld the same way.
+  { key: "creator", who: "The person who made a task", gets: "Full access on that task, unless Can comment on its List is all the access they hold there." },
+  // node-rules listCommentUnion: a share only adds.
+  {
+    key: "union",
+    who: "Someone with Can comment who can also open the List another way",
+    gets: "Can edit assigned tasks. A share only adds, so it never takes away what the Space, a Folder or the whole company already gives.",
+  },
+  // Assigning is an edit of the task (items PATCH, gated at Can edit), and rule 9 opens the task to the new assignee.
+  { key: "assigning", who: "Anyone who can change a task", gets: "Can assign it to anyone in the workspace, which opens that task to them." },
   // node-rules R1 and R6a.
   { key: "admin", who: "Workspace Owners and Admins", gets: "Full access on every Space, Folder, List, task, Doc and table, never on someone's personal notes." },
   // node-rules R3 and R4: the owner rule reaches through the parent unless the node is Private.

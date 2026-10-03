@@ -62,7 +62,10 @@ describe("break 2 and 4: a form's destination change is a move, and its role com
     const rules = read("src/lib/access/node-rules.ts");
     const r9 = rules.slice(rules.indexOf("  // R9\n  private form(id: string): Res {"), rules.indexOf("   * R9 RESPONSES:"));
     expect(r9).toMatch(/const dest = formDestinationRef\(f\);/);
-    expect(r9).toMatch(/if \(parentRes\.role !== "none"\) cands\.push\(up\(parentRes\)\);/);
+    // The destination's role, with the List ladder's rungs below Can edit
+    // read as Can view (a form has no comments; founder decision 3).
+    expect(r9).toMatch(/const fromDest = up\(parentRes\);/);
+    expect(r9).toMatch(/cands\.push\(fromDest\.role === "COMMENT" \? \{ \.\.\.fromDest, role: "VIEW" \} : fromDest\);/);
     expect(r9).toMatch(/if \(member\) cands\.push\(\{ role: "VIEW", via: \{ type: "everyone", node: null \}, prio: P_EVERYONE \}\);/);
     expect(r9).not.toMatch(/if \(!this\.grants\.viewer\.orgGuest\) cands\.push\(\{ role: "EDIT"/);
   });

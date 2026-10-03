@@ -22,6 +22,20 @@ describe("container copy diff (access step 7)", () => {
     const d = diffContainerCopies([], [{ id: "c", objectType: "SPACE", objectId: "s", subjectId: "u", role: "ADMIN" }]);
     expect(d.remove).toHaveLength(1);
   });
+  it("never counts a List row with a rung as equal: its GUEST copy reads as Can view, so --verify must report it", () => {
+    const comment: MemberRow = { ...m("LIST", "b", "u1", "GUEST"), rung: "COMMENT" };
+    const assigned: MemberRow = { ...m("LIST", "b", "u2", "GUEST"), rung: "ASSIGNED" };
+    const d = diffContainerCopies(
+      [comment, assigned, m("LIST", "b", "u3", "GUEST")],
+      [
+        { id: "c1", objectType: "LIST", objectId: "b", subjectId: "u1", role: "GUEST" },
+        { id: "c3", objectType: "LIST", objectId: "b", subjectId: "u3", role: "GUEST" },
+      ],
+    );
+    expect(d.rungNotCarried).toBe(2);
+    expect(d.equal).toBe(1);
+    expect(d.insert.map((r) => r.userId)).toEqual(["u2"]);
+  });
   it("assertions compare per type", () => {
     expect(copyAssertions({ SPACE: 2, FOLDER: 0, LIST: 1, GOAL: 0 }, { SPACE: 2, FOLDER: 0, LIST: 1, GOAL: 0 })).toEqual([]);
     expect(copyAssertions({ SPACE: 2, FOLDER: 0, LIST: 1, GOAL: 0 }, { SPACE: 1, FOLDER: 0, LIST: 1, GOAL: 0 })).toHaveLength(1);

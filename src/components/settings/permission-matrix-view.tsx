@@ -11,8 +11,9 @@ import { listMatrix, RELATIONSHIP_RULES, WORKSPACE_ROLES, type MatrixCell } from
 
 const CELL_WORD: Record<Exclude<MatrixCell, "yes">, string> = {
   no: "No",
-  assigned: "Their tasks",
-  own: "Their own",
+  assigned: "Assigned to them",
+  own: "Made by them",
+  assignedOrOwn: "Assigned to or made by them",
 };
 
 function Cell({ value }: { value: MatrixCell }) {
@@ -34,13 +35,16 @@ export function PermissionMatrixView() {
       <SettingsCard title="On a List and its tasks" wide="access.matrix" id="access.matrix">
         <p className="m-0 max-w-[720px] text-sm text-ink-2">
           The level someone is given when a List is shared with them. Every cell is worked out by the rule that enforces it, so this is what WorkwrK
-          does today. &ldquo;Their tasks&rdquo; means the tasks assigned to them; &ldquo;Their own&rdquo; means the tasks they made.
+          does today. A cell that names tasks applies to those tasks only: the ones assigned to them, or the ones they made.
         </p>
-        <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+        {/* Positioned, so the cells' screen-reader words (absolutely placed)
+            are clipped by this scroller instead of widening the page on a phone. */}
+        <div className="relative mt-4 overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[720px] border-collapse text-sm">
+            <caption className="sr-only">Who can do what on a List and its tasks, by the level the List is shared at</caption>
             <thead>
               <tr className="bg-[var(--os-table-head-bg)]">
-                <th scope="col" className="px-3 py-2 text-start text-xs font-semibold text-ink-2">
+                <th scope="col" className="sticky left-0 z-10 bg-[var(--os-table-head-bg)] px-3 py-2 text-start text-xs font-semibold text-ink-2">
                   What they can do
                 </th>
                 {m.columns.map((c) => (
@@ -53,7 +57,7 @@ export function PermissionMatrixView() {
             <tbody>
               {m.rows.map((r) => (
                 <tr key={r.key} className="border-t border-line-soft">
-                  <th scope="row" className="px-3 py-2 text-start font-normal text-ink">
+                  <th scope="row" className="sticky left-0 z-10 bg-raised px-3 py-2 text-start font-normal text-ink">
                     {r.label}
                   </th>
                   {r.cells.map((v, i) => (
@@ -68,9 +72,8 @@ export function PermissionMatrixView() {
         </div>
         <dl className="mt-4 grid max-w-[720px] gap-2 text-sm">
           {m.columns.map((c) => (
-            <div key={c.role} className="flex flex-wrap gap-x-2">
-              <dt className="font-medium text-ink">{c.label}:</dt>
-              <dd className="m-0 text-ink-2">{c.blurb}</dd>
+            <div key={c.role}>
+              <dt className="inline font-medium text-ink">{c.label}:</dt> <dd className="m-0 inline text-ink-2">{c.blurb}</dd>
             </div>
           ))}
         </dl>

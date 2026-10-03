@@ -124,11 +124,17 @@ export interface ItemSignals {
   listRole: ItemRole;
   /**
    * Rule 9's lift: may being assigned raise this viewer to Can edit? Every
-   * List role lifts except "Can comment" (founder decision 3: "Read and
-   * discuss, never change"). Absent reads as true, today's rule.
-   * taskSideOfListRole works it out from the List role.
+   * List role lifts except "Can comment" (founder decision 3: comment only).
+   * The resolver reads Can comment that way only when it is the whole of the
+   * person's access to the List (node-rules listCommentUnion). Absent reads
+   * as true, today's rule. taskSideOfListRole works it out from the List role.
    */
   assigneeLift?: boolean;
+  /**
+   * Rule 5's lift, withheld exactly where rule 9's is: at Can comment a
+   * person changes nothing, not even a task they made. Absent reads as true.
+   */
+  creatorLift?: boolean;
   /** Rule 12: an archived task is read-only for everyone but FULL. */
   archived: boolean;
   /** The List, for `viaObject`. */
@@ -144,34 +150,40 @@ export interface ItemSignals {
 }
 
 /**
- * The task half of a List role (rule 10), and whether rule 9 lifts an
- * assignee (founder decision 3, the List ladder's two lower rungs):
+ * The task half of a List role (rule 10), and whether rules 9 and 5 lift an
+ * assignee and a creator (founder decision 3, the List ladder's two lower
+ * rungs):
  *
  *   Can edit assigned tasks ("ASSIGNED")  reads as Can comment on the List,
- *                                          and an assignee is lifted to Can
- *                                          edit: they change their own tasks
- *   Can comment ("COMMENT")                reads as Can comment and is never
- *                                          lifted: read and discuss, never
- *                                          change, even a task assigned to them
- *   every other role                       as it always has, lifted
+ *                                          and both lifts apply: they change
+ *                                          the tasks assigned to them, and a
+ *                                          task they made stays theirs
+ *   Can comment ("COMMENT")                reads as Can comment and neither
+ *                                          lift applies: read and discuss,
+ *                                          change nothing, even their own
+ *   every other role                       as it always has, both lifts
+ *
+ * The resolver hands over "COMMENT" only when Can comment is the whole of
+ * the person's access to the List; with Can view from anywhere else it
+ * answers "ASSIGNED" (node-rules listCommentUnion), because a share only adds.
  *
  * Takes the resolver's role as a string so this module keeps no imports.
  */
-export function taskSideOfListRole(role: string): { listRole: ItemRole; assigneeLift: boolean } {
+export function taskSideOfListRole(role: string): { listRole: ItemRole; assigneeLift: boolean; creatorLift: boolean } {
   switch (role) {
     case "OWNER":
     case "FULL":
-      return { listRole: "FULL", assigneeLift: true };
+      return { listRole: "FULL", assigneeLift: true, creatorLift: true };
     case "EDIT":
-      return { listRole: "EDIT", assigneeLift: true };
+      return { listRole: "EDIT", assigneeLift: true, creatorLift: true };
     case "ASSIGNED":
-      return { listRole: "COMMENT", assigneeLift: true };
+      return { listRole: "COMMENT", assigneeLift: true, creatorLift: true };
     case "COMMENT":
-      return { listRole: "COMMENT", assigneeLift: false };
+      return { listRole: "COMMENT", assigneeLift: false, creatorLift: false };
     case "VIEW":
-      return { listRole: "VIEW", assigneeLift: true };
+      return { listRole: "VIEW", assigneeLift: true, creatorLift: true };
     default:
-      return { listRole: "none", assigneeLift: true };
+      return { listRole: "none", assigneeLift: true, creatorLift: true };
   }
 }
 
@@ -198,7 +210,7 @@ export function decideItem(s: ItemSignals): ItemDecision {
   }
   if (s.linkedList) consider("VIEW", "linked-list", { type: "list", id: s.linkedList.id, name: s.linkedList.name });
   if (s.assignee && s.assigneeLift !== false) consider("EDIT", "assignee");
-  if (s.creator) consider("FULL", "creator");
+  if (s.creator && s.creatorLift !== false) consider("FULL", "creator");
   if (s.orgAdmin) consider("FULL", "org-admin");
 
   if (role === "none") {

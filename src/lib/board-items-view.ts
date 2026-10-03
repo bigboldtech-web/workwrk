@@ -45,7 +45,7 @@ import { linkedRowAccess } from "@/lib/list-link-rows";
 import { taskSideOfListRole, type ItemRole } from "@/lib/item-role";
 import { withoutStoredSopTitle } from "@/lib/sop-step-owner";
 
-/** A home List read for a linked row: the task role it gives and rule 9's lift. */
+/** A home List read for a linked row: the task role it gives and rules 9 and 5's lifts (always equal). */
 type HomeSide = { role: ItemRole; lift: boolean };
 
 export interface LinkedRowInfo {
@@ -224,8 +224,9 @@ export async function viewRows(
   // only borrows. Home rows are untouched.
   const orgAdmin = viewerIsOrgAdmin(viewer);
   const homeRoles = new Map<string, Promise<HomeSide>>();
-  // The home List's task half: its role and rule 9's lift (the List
-  // ladder's Can comment withholds it, item-role.ts taskSideOfListRole).
+  // The home List's task half: its role and rules 9 and 5's lifts, which
+  // always go together (the List ladder's Can comment withholds both,
+  // item-role.ts taskSideOfListRole).
   const homeRoleOf = (homeId: string): Promise<HomeSide> => {
     let p = homeRoles.get(homeId);
     if (!p) {
@@ -311,6 +312,7 @@ export async function viewRows(
         orgAdmin,
         homeRole: homeSide.role,
         assigneeLift: homeSide.lift,
+        creatorLift: homeSide.lift,
         assignee: p.row.ownerId === viewer.userId || (p.row.assigneeIds ?? []).includes(viewer.userId),
         creator: p.row.createdBy?.id === viewer.userId,
         archived: !!p.row.archivedAt,

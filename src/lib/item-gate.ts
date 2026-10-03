@@ -287,13 +287,14 @@ export async function gateItem(
   // the admin holds no grant on, which is a lie the header chip and support
   // would both repeat.
   let listRole: ItemDecision["role"] = "none";
-  // Rule 9's lift, which the List ladder's Can comment rung withholds
-  // (taskSideOfListRole, founder decision 3).
+  // Rules 9 and 5's lifts, which the List ladder's Can comment rung
+  // withholds (taskSideOfListRole, founder decision 3).
   let assigneeLift = true;
+  let creatorLift = true;
   let canAddToList = orgAdmin;
   if (!orgAdmin) {
     const d = await nodeRole(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id: item.boardId });
-    ({ listRole, assigneeLift } = taskSideOfListRole(d.role));
+    ({ listRole, assigneeLift, creatorLift } = taskSideOfListRole(d.role));
     canAddToList = roleAtLeast(d.role, "EDIT");
   }
 
@@ -331,6 +332,7 @@ export async function gateItem(
     creator: !!creatorId && creatorId === c.userId,
     assignee,
     assigneeLift,
+    creatorLift,
     listRole,
     archived: !!item.archivedAt,
     list: { id: item.board.id, name: item.board.name },

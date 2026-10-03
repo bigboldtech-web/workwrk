@@ -185,7 +185,9 @@ export function ItemSubtasks({
     }
   };
 
-  if (!mayAdd && !canEdit && list.length === 0) return null;
+  // Nothing to show and nothing they may add (a reader, or someone who may
+  // change this task only because it is assigned to them): no section at all.
+  if (!mayAdd && list.length === 0) return null;
 
   return (
     <div>

@@ -355,8 +355,11 @@ export function BoardItemDetail({
   const showChecklist = revealed.has("checklist") || checklistItems.length > 0;
   const showRelated = revealed.has("related") || (attachCount ?? 0) > 0;
 
+  // Adding a subtask is a List write (Can edit on the List): someone who may
+  // change this task only because it is assigned to them is not offered it.
+  const mayAddSubtasks = canAddSubtasks ?? canEdit;
   const addRows = [
-    !showSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
+    !showSubtasks && mayAddSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
     !showChecklist ? { key: "checklist", icon: ClipboardList, label: "Add checklist", onClick: () => reveal("checklist") } : null,
     !showRelated ? { key: "related", icon: Paperclip, label: "Attach file", onClick: () => reveal("related") } : null,
   ].filter((r): r is { key: string; icon: LucideIcon; label: string; onClick: () => void } => r !== null);
@@ -500,7 +503,7 @@ export function BoardItemDetail({
         <ItemSubtasks
           item={item}
           canEdit={canEdit}
-          canAdd={canAddSubtasks ?? canEdit}
+          canAdd={mayAddSubtasks}
           statuses={statusOptions}
           onOpenItem={onOpenItem}
           onCountChange={setSubtaskCount}

@@ -48,7 +48,9 @@ import {
   linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
+  rowFieldsEditable,
   statusPickerFor,
+  watchOnlyPatch,
   writeContext,
   type AssigneeEdit,
   type RowPatchReport,
@@ -1250,9 +1252,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   /** Saves one row's change; true when the server took it. */
   const handleUpdate = useCallback(async (id: string, patch: RowPatch): Promise<boolean> => {
     const row = itemsRef.current.find((r) => r.id === id);
-    // A row shown here through a link is edited here only as far as the
-    // viewer's role on the TASK goes (list-link-rows.ts linkedRowEditable).
-    if (!canEdit || (row && !linkedRowEditable(row, canEdit))) return false;
+    // The row's own rule, the one it is drawn by (list-link-rows.ts
+    // rowFieldsEditable): a row shown here through a link is edited only as
+    // far as the viewer's role on the TASK goes, and below Can edit a home row
+    // assigned to the viewer is theirs to change. Watching is personal, so any
+    // reader's watch goes through (the route applies it to them alone).
+    const may = row ? rowFieldsEditable(row, canEdit, assigneeEdit) : canEdit;
+    if (!may && !watchOnlyPatch(patch)) return false;
     const linked = row ? linkedRowKind(row, boardId) !== "home" : false;
     // Optimistic (zod on the API strips unknown keys like `owner`,
     // which only exists for the local optimistic row).
@@ -1331,7 +1337,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       setError(e instanceof Error ? e.message : "Failed to save change");
       return false;
     }
-  }, [boardId, canEdit, onItemPatched, refetchList]);
+  }, [boardId, canEdit, assigneeEdit, onItemPatched, refetchList]);
 
   // Drag-to-reorder. The row lands at the midpoint of its new neighbours in
   // the order shown (its group's, when grouped), so nothing else is
@@ -1463,7 +1469,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const commitConnect = useCallback(async (id: string, key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
     const row = itemsRef.current.find((r) => r.id === id);
     if (!row) return { ok: false, message: "That task is no longer in this List." };
-    if (!linkedRowEditable(row, canEdit)) return { ok: false, message: "You can't change this task here." };
+    if (!rowFieldsEditable(row, canEdit, assigneeEdit)) return { ok: false, message: "You can't change this task here." };
     const hadValue = !!row.metadata && key in row.metadata;
     const prevValue = row.metadata?.[key];
     const hadConn = !!row.connections && key in row.connections;
@@ -1506,23 +1512,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       restore();
       return { ok: false, message: "Couldn't reach the server. Your selection is kept; try again." };
     }
-  }, [boardId, canEdit, onItemPatched]);
+  }, [boardId, canEdit, assigneeEdit, onItemPatched]);
 
-  const handleArchive = useCallback(async (id: string) => {
-    if (!canEdit) return;
-    if (!(await confirm({ title: "Archive task", description: "Archive this task? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
+  // The row menu has already asked and archived the task on the server
+  // (item-more-menu.tsx "archive"), for whoever the server let do it, a
+  // member's own assigned task included: the row only leaves this List here.
+  // Asking and archiving a second time put a second dialog in front of every
+  // List editor and left a member's archived task on screen.
+  const handleArchived = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
     reportRemoved(id);
-    try {
-      const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        setError("Couldn't archive. Refreshing");
-        await refetchList();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to archive");
-    }
-  }, [canEdit, confirm, reportRemoved, refetchList]);
+  }, [reportRemoved]);
 
   // select + name + actions (3 fixed) + optional status/owner/priority/type/
   // tags/created + custom fields.
@@ -1758,7 +1758,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // the viewer it is assigned to, as the task gate already allows.
     const rowCanArrange = linkedRowEditable(row, canEdit);
     const assignedHere = !canEdit && assignedRowEditable(row, assigneeEdit);
-    const rowCanEdit = rowCanArrange || assignedHere;
+    const rowCanEdit = rowFieldsEditable(row, canEdit, assigneeEdit);
     const flags = linkedMenuFlags(row, boardId, canEdit, currentUserId ?? null, { personalList });
     const picker = statusPickerFor(row, boardId, statuses);
     const colour = rowColorRules.length > 0 ? rowColorFor(row, rowColorRules, statusOf) : null;
@@ -1785,17 +1785,20 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         itemTypeMap={itemTypeMap}
         showStatus={showStatus}
         canEdit={rowCanEdit}
+        canArrange={rowCanArrange}
         currentUserId={currentUserId ?? null}
         canDelete={
           kind !== "home" || canDeleteTasks === undefined
             ? undefined
-            : canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId)
+            // The creator deletes their own task (rule 5), except at Can comment
+            // held as their whole access here, which withholds rule 5 too.
+            : canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId && (assigneeEdit?.lift ?? true))
         }
         monday={monday}
         selected={selected.has(row.id)}
         onToggleSelect={toggleRow}
         onUpdate={handleUpdate}
-        onArchive={handleArchive}
+        onArchive={handleArchived}
         onDeleted={(id) => { setItems((prev) => prev.filter((r) => r.id !== id)); reportRemoved(id); }}
         timeTrackingEnabled={timeTrackingEnabled}
         titleSuffix={renderTitleSuffix?.(row)}
@@ -2189,6 +2192,7 @@ function Row({
   itemTypeMap,
   showStatus = true,
   canEdit,
+  canArrange,
   currentUserId,
   canDelete,
   monday = false,
@@ -2256,6 +2260,13 @@ function Row({
   onOpen?: () => void;
   onDuplicate?: (row: BoardItemRow) => void;
   onAddSubtask?: () => void;
+  /**
+   * May the viewer arrange this row in the List: drag it, select it for the
+   * bulk bar, add a subtask under it (Can edit on the List). A row open to
+   * them only because it is assigned to them is edited in place and has none
+   * of these.
+   */
+  canArrange: boolean;
   dragEnabled: boolean;
   /** What the drag handle says: how to reorder, or why it is off. */
   dragHint: string;
@@ -2502,7 +2513,7 @@ function Row({
     >
       <td className="pl-1 pr-0 py-1.5 w-[34px]" style={stick("__leading")}>
         <div className="flex items-center gap-1">
-          {canEdit ? (
+          {canArrange ? (
             <span
               className={`w-3 shrink-0 inline-flex justify-center opacity-0 group-hover:opacity-100 transition-opacity ${dragEnabled ? "text-zinc-400 cursor-grab" : "text-zinc-300"}`}
               title={dragHint}
@@ -2511,7 +2522,7 @@ function Row({
               <GripVertical className="w-3 h-3" />
             </span>
           ) : null}
-          {canEdit ? (
+          {canArrange ? (
             <CheckBox
               checked={selected}
               onChange={(shift) => onToggleSelect(row.id, shift)}
@@ -2524,9 +2535,10 @@ function Row({
         <div className="flex items-center gap-1.5" style={{ paddingLeft: indent * 20 }}>
           {/* Expand caret. Top-level tasks always reserve the slot (visible when
               they have subtasks / are open, else on hover → add the first
-              subtask). Subtasks don't get the add-subtask arrow — only a spacer,
-              unless they already have nested children to expand. */}
-          {indent === 0 || hasSubtasks ? (
+              subtask, for someone who may add one). Subtasks don't get the
+              add-subtask arrow — only a spacer, unless they already have
+              nested children to expand. */}
+          {hasSubtasks || (indent === 0 && canArrange) ? (
             <button
               type="button"
               onClick={onToggleExpand}
@@ -2551,6 +2563,7 @@ function Row({
           {titleSuffix}
           <RowHoverActions
             canEdit={canEdit}
+            canAddSubtask={canArrange}
             tags={row.tags ?? []}
             isSubtask={indent > 0}
             onAddSubtask={() => onAddSubtask?.()}
@@ -3688,8 +3701,10 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
 // Row hover options — each icon in its OWN bordered box (like ClickUp), not one
 // container. A top-level task shows Add-subtask + Tags + Rename (3); a subtask
 // shows only Tags + Rename (2, no add-subtask). No copy-link.
-function RowHoverActions({ canEdit, tags, isSubtask, onAddSubtask, onTagsChange, onRename }: {
+function RowHoverActions({ canEdit, canAddSubtask, tags, isSubtask, onAddSubtask, onTagsChange, onRename }: {
   canEdit: boolean;
+  /** Adding a subtask is a List write (Can edit on the List), not the row's own. */
+  canAddSubtask: boolean;
   tags: ItemTag[];
   isSubtask: boolean;
   onAddSubtask: () => void;
@@ -3700,7 +3715,7 @@ function RowHoverActions({ canEdit, tags, isSubtask, onAddSubtask, onTagsChange,
   const box = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-200 bg-white shadow-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors dark:bg-[#262B33] dark:border-[#2A2F38] dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-[#2A2F38]";
   return (
     <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 shrink-0 ml-2">
-      {!isSubtask ? (
+      {!isSubtask && canAddSubtask ? (
         <button type="button" onClick={(e) => { e.stopPropagation(); onAddSubtask(); }} className={box} title="Add subtask" aria-label="Add subtask">
           <Plus className="w-3.5 h-3.5" />
         </button>

@@ -22,6 +22,8 @@ export interface MemberRow {
   userId: string;
   role: CopyRole;
   createdAt: Date;
+  /** A List row's rung ("COMMENT" or "ASSIGNED", BoardMember.rung), which no copy holds yet. */
+  rung?: string | null;
 }
 
 export interface CopyRow {
@@ -65,6 +67,15 @@ export interface CopyDiff {
   heldByProtected: number;
   /** Protected rows seen (G5 and anything else not written by this script), never touched. */
   protectedKept: number;
+  /**
+   * List member rows with a rung (Can comment, Can edit assigned tasks). The
+   * copy holds their GUEST row, which reads as Can view, and that is wrong in
+   * both directions: Can view lets an assignee change their task, which Can
+   * comment does not, and Can edit assigned tasks discusses every task. Such
+   * a row is never counted equal, so --verify reports it until the copies
+   * carry the rung, and no reader may move to the copies before then.
+   */
+  rungNotCarried: number;
 }
 
 const key = (t: string, o: string, u: string) => `${t}:${o}:${u}`;
@@ -81,7 +92,7 @@ export function diffContainerCopies(members: readonly MemberRow[], rows: readonl
   const protectedKeys = new Set(rows.filter((r) => !isStep7Copy(r)).map((c) => key(c.objectType, c.objectId, c.subjectId)));
   const byKey = new Map(copies.map((c) => [key(c.objectType, c.objectId, c.subjectId), c]));
   const seen = new Set<string>();
-  const out: CopyDiff = { insert: [], update: [], remove: [], equal: 0, heldByProtected: 0, protectedKept: protectedKeys.size };
+  const out: CopyDiff = { insert: [], update: [], remove: [], equal: 0, heldByProtected: 0, protectedKept: protectedKeys.size, rungNotCarried: 0 };
   for (const m of members) {
     const k = key(m.objectType, m.objectId, m.userId);
     if (seen.has(k)) continue;
@@ -90,10 +101,11 @@ export function diffContainerCopies(members: readonly MemberRow[], rows: readonl
       out.heldByProtected++;
       continue;
     }
+    if (m.rung) out.rungNotCarried++;
     const c = byKey.get(k);
     if (!c) out.insert.push(m);
     else if (c.role !== m.role) out.update.push({ id: c.id, role: m.role, from: c.role });
-    else out.equal++;
+    else if (!m.rung) out.equal++;
   }
   for (const [k, c] of byKey) if (!seen.has(k)) out.remove.push(c);
   return out;

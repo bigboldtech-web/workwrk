@@ -7,8 +7,10 @@
 -- change only the tasks assigned to them). Both are stored as the row's
 -- existing GUEST role plus this rung, never as a new SpaceRole value: every
 -- reader that does not know the rung (the legacy floor, the member routes,
--- raw role reads) keeps reading the row as Can view, so an unknown reader can
--- only under-grant and a lowered row can never read as Can edit again.
+-- raw role reads) keeps reading the row as Can view, so a lowered row can
+-- never read as Can edit again. Can view is not the rung, though: it lets an
+-- assignee change their task, which Can comment does not, so every reader
+-- that decides access loads the rung (src/lib/access/node-world.ts).
 --
 -- ADDITIVE ONLY. One new nullable column on "BoardMember" and its CHECK. No
 -- existing column is changed and no existing row is read or written: a row

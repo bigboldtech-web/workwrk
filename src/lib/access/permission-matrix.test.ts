@@ -15,12 +15,13 @@ describe("listMatrix", () => {
   });
 
   it("states each task right as the task gate decides it", () => {
-    //                       Full   Edit   Assigned    Comment View
+    //                       Full   Edit   Assigned          Comment View
     expect(cellsOf("read")).toEqual(["yes", "yes", "yes", "yes", "yes"]);
-    expect(cellsOf("comment")).toEqual(["yes", "yes", "yes", "yes", "assigned"]);
-    expect(cellsOf("edit")).toEqual(["yes", "yes", "assigned", "no", "assigned"]);
-    expect(cellsOf("archive")).toEqual(["yes", "yes", "assigned", "no", "assigned"]);
-    expect(cellsOf("delete")).toEqual(["yes", "own", "no", "no", "no"]);
+    expect(cellsOf("comment")).toEqual(["yes", "yes", "yes", "yes", "assignedOrOwn"]);
+    expect(cellsOf("edit")).toEqual(["yes", "yes", "assignedOrOwn", "no", "assignedOrOwn"]);
+    expect(cellsOf("archive")).toEqual(["yes", "yes", "assignedOrOwn", "no", "assignedOrOwn"]);
+    // A creator holds Full access (rule 5) at every rung but Can comment.
+    expect(cellsOf("delete")).toEqual(["yes", "own", "own", "no", "own"]);
   });
 
   it("states each List right as the List routes decide it", () => {
@@ -30,12 +31,12 @@ describe("listMatrix", () => {
     expect(cellsOf("share")).toEqual(["yes", "no", "no", "no", "no"]);
   });
 
-  it("never claims a cut that the gate does not make: Can comment changes nothing", () => {
+  it("never claims a cut that the gate does not make: Can comment changes nothing, not even their own", () => {
     for (const action of ["edit", "archive", "delete", "move", "duplicate"] as const) expect(taskCell("COMMENT", action), action).toBe("no");
   });
 
   it("names every relationship rule and workspace role in plain words", () => {
-    expect(RELATIONSHIP_RULES.map((r) => r.key)).toEqual(["assignee", "creator", "admin", "owner", "linked", "inherit", "trash", "agent"]);
+    expect(RELATIONSHIP_RULES.map((r) => r.key)).toEqual(["assignee", "creator", "union", "assigning", "admin", "owner", "linked", "inherit", "trash", "agent"]);
     expect(WORKSPACE_ROLES.map((r) => r.role)).toEqual(["Owner", "Admin", "Member", "Agent"]);
     for (const r of [...RELATIONSHIP_RULES.flatMap((x) => [x.who, x.gets]), ...WORKSPACE_ROLES.map((x) => x.summary)]) {
       expect(r).not.toMatch(/—|--/);

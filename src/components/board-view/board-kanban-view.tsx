@@ -42,7 +42,9 @@ import {
   linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
+  rowFieldsEditable,
   statusPickerFor,
+  watchOnlyPatch,
   writeContext,
   type AssigneeEdit,
   type RowPatchReport,
@@ -390,9 +392,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     const card = itemsRef.current.find((r) => r.id === id);
     // A card shown here through a link is edited only as far as the viewer's
     // role on the TASK goes; a card assigned to someone who cannot add to the
-    // List is theirs to change (rule 9), never theirs to arrange.
-    const mayChange = card ? (canEdit && linkedRowEditable(card, canEdit)) || (!canEdit && assignedRowEditable(card, assigneeEdit)) : canEdit;
-    if (!mayChange) return false;
+    // List is theirs to change (rule 9), never theirs to arrange
+    // (list-link-rows.ts rowFieldsEditable, the rule the card is drawn by).
+    // Watching is personal, so any reader's watch goes through.
+    const mayChange = card ? rowFieldsEditable(card, canEdit, assigneeEdit) : canEdit;
+    if (!mayChange && !watchOnlyPatch(apiBody)) return false;
     const linked = card ? linkedRowKind(card, boardId) !== "home" : false;
     const optimisticFor = (r: BoardItemRow): BoardItemRow => {
       const next: BoardItemRow = { ...r, ...localPatch };
@@ -648,24 +652,6 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     reportRemoved(id);
   }, [reportRemoved]);
 
-  const archiveCard = useCallback(async (id: string) => {
-    if (!canEdit) return;
-    if (!(await confirm({ title: "Archive card", description: "Archive this card? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
-    setItems((prev) => prev.filter((r) => r.id !== id));
-    reportRemoved(id);
-    try {
-      const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        // The card reappearing with no message reads as a glitch. Say why.
-        const d = await res.json().catch(() => ({}));
-        setError(accessMessage(d, "Couldn't archive that card."));
-        await refetch();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't archive that card.");
-      await refetch();
-    }
-  }, [canEdit, confirm, refetch, reportRemoved]);
 
   // The card being dragged, read by each column to say whether it may go there.
   const dragCard = useMemo(() => (dragId ? items.find((r) => r.id === dragId) ?? null : null), [dragId, items]);
@@ -792,7 +778,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   // fields also open to the viewer it is assigned to.
                   const cardCanArrange = linkedRowEditable(card, canEdit);
                   const assignedHere = !canEdit && assignedRowEditable(card, assigneeEdit);
-                  const cardCanEdit = cardCanArrange || assignedHere;
+                  const cardCanEdit = rowFieldsEditable(card, canEdit, assigneeEdit);
                   const flags = linkedMenuFlags(card, boardId, canEdit, currentUserId ?? null, { personalList });
                   // A linked card drags only when its home set is known here:
                   // the columns it can go in are then the ones its home maps.
@@ -831,6 +817,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                         : card.listLink?.homeStatuses ?? (card.listLink?.homeStatus ? [card.listLink.homeStatus] : statuses)
                     }
                     canEdit={cardCanEdit}
+                    canArrange={cardCanArrange}
                     draggableCard={draggable}
                     menuRole={kind === "home" ? undefined : flags.role}
                     menuIsCreator={kind === "home" ? undefined : flags.isCreator}
@@ -843,7 +830,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     canDelete={
                       kind !== "home" || canDeleteTasks === undefined
                         ? undefined
-                        : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId)
+                        // The creator deletes their own task (rule 5), except at
+                        // Can comment held as their whole access here, which
+                        // withholds rule 5 too.
+                        : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId && (assigneeEdit?.lift ?? true))
                     }
                     onDragStart={() => setDragId(card.id)}
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); setDropAt(null); }}
@@ -855,7 +845,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onToggleComplete={() => toggleComplete(card)}
                     onAddSubtask={(title) => addSubtask(card.id, card.status, title)}
                     onDuplicate={() => duplicateCard(card)}
-                    onArchive={() => archiveCard(card.id)}
+                    // The card menu has already asked and archived it on the
+                    // server (item-more-menu.tsx "archive"): the card only
+                    // leaves the board here. Asking and archiving again put a
+                    // second dialog in front of every List editor.
+                    onArchive={() => removeLocal(card.id)}
                     onDeleted={() => removeLocal(card.id)}
                     autoEdit={autoEditId === card.id}
                     onAutoEditHandled={() => setAutoEditId(null)}
@@ -923,6 +917,7 @@ function KanbanCard({
   subtaskCount,
   statuses,
   canEdit,
+  canArrange,
   draggableCard,
   menuRole,
   menuIsCreator,
@@ -957,6 +952,12 @@ function KanbanCard({
   subtaskCount: number;
   statuses: StatusOption[];
   canEdit: boolean;
+  /**
+   * May the viewer arrange this card in the List: select it for the bulk bar
+   * or add a subtask under it (Can edit on the List). A card open to them only
+   * because it is assigned to them is edited in place and has neither.
+   */
+  canArrange: boolean;
   /** Phase 5b: a linked card drags only when its home set is known. */
   draggableCard: boolean;
   /** The TASK role for a card shown here through a link; undefined keeps the List's. */
@@ -1064,7 +1065,7 @@ function KanbanCard({
     >
       {/* Title + action rail */}
       <div className="flex items-start gap-1.5">
-        {canEdit ? (
+        {canArrange ? (
           <button
             type="button"
             role="checkbox"
@@ -1127,7 +1128,7 @@ function KanbanCard({
               <CheckCircle2 className="w-3.5 h-3.5" />
             </button>
           ) : null}
-          {canEdit ? (
+          {canArrange ? (
             <button
               type="button"
               onClick={(e) => { stop(e); setSubtaskOpen(true); setSubtaskError(null); requestAnimationFrame(() => subtaskRef.current?.focus()); }}

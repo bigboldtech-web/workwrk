@@ -24,6 +24,7 @@ function row(over: Partial<MyWorkRow> & { id: string }): MyWorkRow {
     board: null,
     space: null,
     listReadable: false,
+    canEdit: true,
     assignees: [{ id: "me", firstName: "Me", lastName: null, avatar: null }],
     ...over,
   };

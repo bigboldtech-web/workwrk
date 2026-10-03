@@ -41,16 +41,19 @@ export const ORG_ROLE_BLURB: Record<OrgRole, string> = {
  * calls "ASSIGNED". It exists on Lists only.
  */
 export const ASSIGNED_ROLE_LABEL = "Can edit assigned tasks";
-export const ASSIGNED_ROLE_BLURB = "Read and discuss every task, change only the tasks assigned to them.";
+export const ASSIGNED_ROLE_BLURB = "Read and discuss every task, change only tasks assigned to them or that they made.";
 
 /**
- * The three lower rungs on a List, where assignment matters: rule 9 lets an
- * assignee change their task at Can view and at Can edit assigned tasks,
- * never at Can comment (src/lib/item-role.ts assigneeLift).
+ * The three lower rungs on a List, where assignment matters: rules 9 and 5
+ * let an assignee and a creator change their task at Can view and at Can edit
+ * assigned tasks, never at Can comment held as the person's whole access to
+ * the List (src/lib/item-role.ts taskSideOfListRole; with Can view from
+ * anywhere else, node-rules listCommentUnion reads it as Can edit assigned
+ * tasks, because a share only adds).
  */
 export const LIST_ROLE_BLURB = {
-  COMMENT: "Read and discuss every task, never change one, even one assigned to them.",
-  VIEW: "Read only, except a task assigned to them, which they can change.",
+  COMMENT: "Read and discuss every task, change none, not even their own, unless they can open the List another way.",
+  VIEW: "Read only, except tasks assigned to them or that they made, which they can change.",
 } as const;
 
 /** The order every role picker renders, widest first. */
