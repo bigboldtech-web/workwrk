@@ -1,6 +1,6 @@
 "use client";
 
-// The Folder's two pills: Contents · Tasks.
+// The Folder's pills: Contents · Tasks · Bird's eye.
 //
 // Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2, `/folders/[id]`,
 // Views row: "two text-tab pills, Contents · Tasks, following `?tab=` (default
@@ -19,7 +19,7 @@ export function FolderTabs({
   folderId,
   taskCount,
 }: {
-  tab: "contents" | "tasks";
+  tab: "contents" | "tasks" | "birdseye";
   folderId: string;
   /** Lists in this folder and below; 0 still renders the pill, with an empty body. */
   taskCount: number;
@@ -36,6 +36,12 @@ export function FolderTabs({
         active={tab === "tasks"}
         href={`/folders/${folderId}?tab=tasks`}
       />
+      {/* The Space's Bird's eye, cut to this Folder and the Folders below it. */}
+      <ViewTab
+        label="Bird's eye"
+        active={tab === "birdseye"}
+        href={`/folders/${folderId}?tab=birdseye`}
+      />
       {taskCount === 0 && tab === "tasks" ? (
         <span className="ms-2 self-center text-xs text-ink-3">
           No lists on this shelf yet
@@ -45,4 +51,4 @@ export function FolderTabs({
   );
 }
 
-export const FOLDER_TABS = ["contents", "tasks"] as const;
+export const FOLDER_TABS = ["contents", "tasks", "birdseye"] as const;

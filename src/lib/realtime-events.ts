@@ -74,6 +74,8 @@ export type ItemChangedEvent = {
   listIds?: string[];
   /** Phase 5b: Lists the task has just left (a link removed), so they drop the row. */
   leftListIds?: string[];
+  /** Lists the task has just come into (a move, a new link), so a paged view knows it is new there. */
+  enteredListIds?: string[];
 };
 
 /**

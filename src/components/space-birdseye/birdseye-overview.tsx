@@ -23,13 +23,17 @@ import { AddTaskRow } from "./add-task-row";
 import { BirdseyeCard } from "./birdseye-card";
 import { BirdseyeGrid, type GridColumn } from "./birdseye-grid";
 import { BirdseyeStatusStrip } from "./birdseye-status-strip";
-import type { ColumnState, LoadMoreTarget, SubtaskEntry } from "./use-birdseye";
+import { LinkedCappedNote } from "./linked-capped-note";
+import { copyKey, type ColumnState, type LoadMoreTarget, type SubtaskEntry } from "./use-birdseye";
+import type { StatusPick } from "@/lib/work/birdseye-linked";
 
 export interface CardActions {
   now: Date;
-  onOpen: (id: string) => void;
-  onChangeStatus: (card: Card, next: string) => void;
-  onLoadSubtasks: (id: string) => void;
+  /** `listId`: the List a linked card is shown in, so the task opens there. */
+  onOpen: (id: string, listId?: string) => void;
+  onChangeStatus: (card: Card, next: string, pick?: StatusPick) => void;
+  /** One copy's subtasks: the List the card is shown in, and the task. */
+  onLoadSubtasks: (listId: string, id: string) => void;
 }
 
 function ListMenu({ list, onFocus }: { list: BirdseyeList; onFocus: (id: string) => void }) {
@@ -176,7 +180,7 @@ export const BirdseyeOverview = forwardRef<
               key={card.id}
               card={card}
               list={list}
-              subtasks={subtasks[card.id]}
+              subtasks={subtasks[copyKey(card.boardId, card.id)]}
               now={actions.now}
               onOpen={actions.onOpen}
               onChangeStatus={actions.onChangeStatus}
@@ -192,6 +196,7 @@ export const BirdseyeOverview = forwardRef<
             onClick={() => onLoadMore({ kind: "list", boardId: list.id })}
           />
         ) : null}
+        <LinkedCappedNote list={list} />
       </>
     );
     return { key: list.id, label: list.name, header, body };

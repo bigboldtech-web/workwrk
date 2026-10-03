@@ -431,7 +431,9 @@ export async function listBoardItems(
       boardId,
       ...(opts.includeArchived ? {} : { archivedAt: null }),
     },
-    orderBy: { position: "asc" },
+    // Position, then id: the one order every view and the renumber share
+    // (src/lib/work/reorder.ts byPosition), so tied tasks never trade places.
+    orderBy: [{ position: "asc" }, { id: "asc" }],
   });
   const board = await prisma.board.findUnique({
     where: { id: boardId },
@@ -467,10 +469,40 @@ export async function listBoardItems(
   const enriched = await enrichItemRows(merged, { subtaskCountByParent, spaceIdByItem });
   const viewed = await viewRows(enriched, { viewer: opts.view?.viewer ?? null, context: board, linked: linkedInfo });
   if (linkedInfo.size === 0) return viewed;
-  return viewed
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => a.r.position - b.r.position || a.i - b.i)
-    .map((x) => x.r);
+  return viewed.sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * The tasks linked INTO one List, roots only, projected exactly as the List's
+ * own read (listBoardItems with includeLinked) projects them for `viewer`:
+ * the link's position, the home status and, when the viewer reads the home,
+ * the home set and List, and the task role. For a surface that draws the
+ * List's HOME rows itself and needs the linked ones beside them (Bird's eye),
+ * so the two never decide a linked row differently. A root's subtask count is
+ * its same-home children, as on the List.
+ */
+export async function listLinkedRootRows(boardId: string, viewer: LinkViewer): Promise<BoardItemRow[]> {
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, slug: true, name: true, spaceId: true, schema: true, organizationId: true },
+  });
+  if (!board || board.organizationId !== viewer.organizationId) return [];
+  const linked = await linkedRowsForList(board, { includeArchived: false });
+  if (linked.rows.length === 0) return [];
+  const subtaskCountByParent = new Map<string, number>();
+  for (const r of linked.rows) {
+    if (r.parentItemId) subtaskCountByParent.set(r.parentItemId, (subtaskCountByParent.get(r.parentItemId) ?? 0) + 1);
+  }
+  const roots = linked.rows.filter((r) => linked.info.get(r.id)?.position != null);
+  const info = new Map<string, LinkedRowInfo>();
+  const spaceIdByItem = new Map<string, string | null>();
+  for (const r of roots) {
+    const li = linked.info.get(r.id);
+    if (li) info.set(r.id, li);
+    spaceIdByItem.set(r.id, board.spaceId ?? null);
+  }
+  const enriched = await enrichItemRows(roots, { subtaskCountByParent, spaceIdByItem });
+  return viewRows(enriched, { viewer, context: board, linked: info });
 }
 
 /**

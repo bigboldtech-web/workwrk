@@ -14,11 +14,13 @@
 //      pages use the SAME bucket fragment, so a column's later pages return
 //      exactly the rows its total counts;
 //   4. the subtask count is the subtasks route's own scope;
-//   5. it reads home rows only, and the day linked rows go live on the List
-//      canvas this fails until the union is added here.
+//   5. linked rows (Phase 5b) reach it only as cards handed in, built from
+//      the List's own projection (listLinkedRootRows), so Bird's eye and the
+//      Board can never decide a linked row differently, and the loader still
+//      names no link table.
 
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BIRDSEYE_PAGE } from "./birdseye";
 
@@ -131,17 +133,93 @@ describe("counts", () => {
   });
 });
 
-describe("home rows only, a recorded decision (2026-09-26)", () => {
-  it("reads home rows only while linked rows are live on the List canvas, until the union ships on its own", () => {
-    // Decided on the worst case. Linked rows went live with Phase 5b's
-    // screens, and Bird's eye still draws each List's own tasks only. The
-    // worst case of that: a task linked in from ANOTHER Space's List is
-    // missing from this column, while its home column and every List view
-    // still show it. The worst case of a rushed union across the loader's
-    // keyset paging, counts and focus buckets: a card moved here writes a
-    // wrong status onto another List's task, or counts what a viewer
-    // cannot read. So the union is its own reviewed change, and this test
-    // fails if part of one lands here by accident.
-    expect(LOADER).not.toMatch(/ItemListLink/);
+describe("linked rows, through the List's own projection only (2026-10-03)", () => {
+  // The union shipped as its own reviewed change, replacing the recorded
+  // decision of 2026-09-26 (home rows only). Its worst cases are what these
+  // pin: a card moved here writing a wrong status onto another List's task,
+  // or a count including what a viewer cannot read.
+  const LINKED_SERVER = code(read("src/lib/work/birdseye-linked.server.ts"));
+  const LINKED = code(read("src/lib/work/birdseye-linked.ts"));
+  const ROUTE = code(read("src/app/api/spaces/[id]/birdseye/route.ts"));
+  const FOLDER_ROUTE = code(read("src/app/api/folders/[id]/birdseye/route.ts"));
+  const ANSWER = code(read("src/lib/work/birdseye-answer.server.ts"));
+  const ROWS = code(read("src/lib/board-items.ts"));
+
+  it("keeps the loader free of the link table: it merges cards handed in", () => {
+    expect(LOADER).not.toMatch(/ItemListLink|itemListLink/);
+    expect(LOADER).toMatch(/export interface ExtraCard extends BirdseyeCard/);
+    for (const name of ["countLists", "loadOverview", "loadListPage", "loadFocus", "loadFocusPage"]) {
+      expect(fn(name), name).toMatch(/extra\??: /);
+    }
+    expect(LOADER.match(/mergeCardPage\(/g)?.length).toBe(4);
+  });
+
+  it("builds every linked card from the List's own projection and reads no access itself", () => {
+    expect(LINKED_SERVER).toMatch(/listLinkedRootRows\(list\.id, viewer\)/);
+    // The one direct touch of the link table is the count that skips Lists
+    // with nothing linked in, behind the same missing-table guard.
+    expect(LINKED_SERVER.match(/prisma\.itemListLink\./g)).toEqual(["prisma.itemListLink."]);
+    expect(LINKED_SERVER).toMatch(/withListLinks\(\s*\(\) => prisma\.itemListLink\.groupBy/);
+    for (const forbidden of [/getBoardForReader/, /canContributeBoard/, /canEditBoard/, /getSpaceForReader/, /isOrgAdmin/, /prisma\.item\./, /\$queryRaw/]) {
+      expect(LINKED_SERVER).not.toMatch(forbidden);
+      expect(LINKED).not.toMatch(forbidden);
+    }
+    // listLinkedRootRows is the Board's union read, roots only, projected by viewRows.
+    const start = ROWS.indexOf("export async function listLinkedRootRows(");
+    expect(start).toBeGreaterThan(-1);
+    const body = ROWS.slice(start, ROWS.indexOf("\nexport ", start + 1));
+    expect(body).toMatch(/linkedRowsForList\(board, \{ includeArchived: false \}\)/);
+    expect(body).toMatch(/board\.organizationId !== viewer\.organizationId/);
+    expect(body).toMatch(/viewRows\(enriched, \{ viewer, context: board, linked: info \}\)/);
+  });
+
+  it("places, drags and explains a linked card by the Board's own rules", () => {
+    expect(LINKED).toMatch(/const placed = boardStatusFor\(row, list\.id, list\.statuses\)/);
+    expect(LINKED).toMatch(/canDrag: linkedRowEditable\(row, list\.canContribute\) && statusPickerFor\(row, list\.id, list\.statuses\)\.editable/);
+    expect(LINKED).toMatch(/position: Number\(link\.position\)/);
+    expect(LINKED).toMatch(/link\.boardId !== list\.id \|\| link\.position == null/);
+  });
+
+  it("hands the loader linked cards for exactly the readable Lists it reads", () => {
+    expect(ROUTE).toMatch(/const \{ lists: rows \} = await readableListsInSpace\(space\.id, c,/);
+    expect(FOLDER_ROUTE).toMatch(/const \{ lists: rows \} = await readableListsInFolder\(folder, c,/);
+    expect(ANSWER).toMatch(/const loaderLists: LoaderList\[\] = rows\.map\(/);
+    expect(ANSWER).toMatch(/const linkedLists: LinkedList\[\] = rows\.map\(\(r\) => \(\{ id: r\.id, statuses: [^]*?canContribute: r\.canContribute \}\)\)/);
+    expect(ANSWER.match(/linkedFor\(/g)?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("writes a linked card's status in its home set, through the List it is shown in", () => {
+    const hook = code(read("src/components/space-birdseye/use-birdseye.ts"));
+    // A column maps to the home value the Board would write, or is refused.
+    expect(hook).toMatch(/const t = homeStatusTarget\(linkedRowOf\(card\), next, statusesHere\);/);
+    expect(hook).toMatch(/toast\(linkedStatusRefusal\(linkedRowOf\(card\), label, t\.reason\)/);
+    expect(hook).toMatch(/homeValue = t\.status;/);
+    // A home status picked from its own set lands where the Board places it.
+    expect(hook).toMatch(/column = columnForHomeValue\(card, list, next\)/);
+    // Either way the write names the List it is made in.
+    expect(hook).toMatch(/homeValue !== null \? \{ status: homeValue, contextBoardId: card\.boardId \} : \{ status: next \}/);
+    // The pill offers the home set only where the Board's pill does.
+    const cardSrc = code(read("src/components/space-birdseye/birdseye-card.tsx"));
+    expect(cardSrc).toMatch(/const homePicker = linkedRow \? statusPickerFor\(linkedRow, card\.boardId, list\.statuses\) : null;/);
+    expect(cardSrc).toMatch(/const homePick = !!homePicker\?\.editable;/);
   });
 });
+
+describe("a move or a new link says which List the task entered", () => {
+  // A paged view cannot tell a task that just arrived from one past its
+  // loaded pages; only this field lets it count the arrival.
+  it("is published by the move, the link move and a new link", () => {
+    expect(code(read("src/lib/notify-realtime.ts"))).toMatch(/enteredListIds: Array\.from\(new Set\(args\.enteredListIds\)\)/);
+    expect(code(read("src/app/api/items/[id]/route.ts"))).toMatch(/boardId: target\.id,[\s\S]{0,120}enteredListIds: \[target\.id\]/);
+    expect(code(read("src/app/api/boards/[id]/links/[itemId]/route.ts"))).toMatch(/outcome\.kind === "moved" \? \{ enteredListIds: \[targetId\] \} : \{\}/);
+    expect(code(read("src/app/api/boards/[id]/links/route.ts"))).toMatch(/enteredListIds: \[id\]/);
+  });
+
+  it("is what Bird's eye counts an arrival by, beside a card it placed", () => {
+    const hook = code(read("src/components/space-birdseye/use-birdseye.ts"));
+    expect(hook).toMatch(/const entered = new Set\(detail\.enteredListIds \?\? \[\]\);/);
+    expect(hook).toMatch(/for \(const \[listId, known\] of arriving\) void arriveIn\(listId, id, known\);/);
+    expect(hook).toMatch(/void arriveIn\(home, id, r\.data\.context\?\.kind !== "linked"\);/);
+  });
+});
+
