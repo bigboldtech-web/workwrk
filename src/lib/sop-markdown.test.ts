@@ -1,0 +1,104 @@
+// An SOP as Markdown, one test per kind, from content shapes saved on the
+// local database (2026-10-04).
+
+import { describe, expect, it } from "vitest";
+import { sopToMarkdown } from "./sop-markdown";
+
+describe("sopToMarkdown", () => {
+  it("heads every SOP with its title and facts", () => {
+    const md = sopToMarkdown({ title: "Leave approval", status: "PUBLISHED", version: 3, category: "HR", sopType: "WRITTEN", content: { type: "steps", steps: [] }, description: "<p>How a manager approves leave.</p>" });
+    expect(md.startsWith("# Leave approval\n\nPublished · Version 3 · Step-by-step · Category: HR\n\nHow a manager approves leave.\n")).toBe(true);
+  });
+
+  it("writes a step-by-step SOP as numbered steps with owners, text and images", () => {
+    const md = sopToMarkdown({
+      title: "Open the app",
+      sopType: "WRITTEN",
+      content: {
+        type: "steps",
+        layout: "list",
+        steps: [
+          { id: "s1", title: "Open the app", body: "Go to workwrk" },
+          { id: "s2", title: "Sign in", description: "<p>Use <b>SSO</b>.</p>", jobTitle: { title: "Onboarding lead", roleId: "r1" }, image: "data:image/png;base64,iVBORw0KGgo=" },
+        ],
+      },
+    });
+    expect(md).toContain("## Steps");
+    expect(md).toContain("1. **Open the app**\n   Go to workwrk");
+    expect(md).toContain("2. **Sign in**\n   Owner: Onboarding lead\n   Use SSO.");
+    expect(md).toContain("   ![Step 2](data:image/png;base64,iVBORw0KGgo=)");
+  });
+
+  it("writes a flow's decisions and where each branch goes", () => {
+    const md = sopToMarkdown({
+      title: "Triage",
+      sopType: "WRITTEN",
+      content: {
+        type: "process_flow",
+        steps: [
+          { id: "a", title: "Read the ticket" },
+          { id: "b", title: "Is it urgent?" },
+          { id: "c", title: "Page the on-call" },
+        ],
+        flow: {
+          type: "process_flow",
+          steps: [
+            { id: "a", type: "action", title: "Read the ticket", actor: "Support", durationMinutes: 5 },
+            { id: "b", type: "decision", title: "Is it urgent?", branches: [{ label: "Yes", nextStepId: "c" }, { label: "No", nextStepId: null }] },
+            { id: "c", type: "action", title: "Page the on-call" },
+          ],
+        },
+      },
+    });
+    expect(md).toContain("1. **Read the ticket**\n   Who: Support · About 5 min");
+    expect(md).toContain("2. Decision: **Is it urgent?**\n   - Yes: go to step 3\n   - No: go to the end");
+  });
+
+  it("writes a checklist's sections as boxes with what each step asks for", () => {
+    const md = sopToMarkdown({
+      title: "Closing checklist",
+      sopType: "CHECKLIST",
+      content: {
+        type: "CHECKLIST",
+        sections: [
+          { id: "s", title: "Before you leave", steps: [{ id: "1", title: "Lock the door", description: "", inputs: [{ type: "file_upload", label: "" }, { type: "short_text", label: "Who locked it" }] }] },
+        ],
+      },
+    });
+    expect(md).toContain("## Before you leave\n\n- [ ] Lock the door\n  Asks for: File, Who locked it");
+  });
+
+  it("writes a recording's actions in their recorded order, with the page", () => {
+    const md = sopToMarkdown({
+      title: "Submit an invoice",
+      sopType: "RECORDED",
+      content: {
+        type: "recorded",
+        steps: [
+          { url: "https://example.com/form", order: 2, action: "type", description: "Type the invoice number" },
+          { url: "https://example.com/form", order: 1, action: "click", description: "Click the Submit button" },
+        ],
+      },
+    });
+    expect(md).toContain("## Recorded steps\n\n1. Click the Submit button\n   On <https://example.com/form>\n\n2. Type the invoice number");
+  });
+
+  it("writes a written SOP from BlockNote, the first block editor, or stored HTML", () => {
+    const bn = sopToMarkdown({
+      title: "Written",
+      sopType: "WRITTEN",
+      content: { type: "blocks", bnDoc: [{ id: "x", type: "heading", props: { level: 2 }, content: [{ type: "text", text: "Scope", styles: {} }], children: [] }] },
+    });
+    expect(bn).toContain("## Scope");
+    const legacy = sopToMarkdown({ title: "Old", sopType: "WRITTEN", content: { type: "blocks", blocks: [{ kind: "bullet", text: "First" }] } });
+    expect(legacy).toContain("- First");
+    const html = sopToMarkdown({ title: "Rich", sopType: "WRITTEN", content: { type: "WRITTEN", body: "<p>Keep it <b>short</b>.</p>" } });
+    expect(html).toContain("Keep it short.");
+  });
+
+  it("escapes Markdown's own characters in text people typed", () => {
+    const md = sopToMarkdown({ title: "Use *only* [approved] tools", sopType: "WRITTEN", content: { type: "steps", steps: [{ id: "1", title: "Run `deploy`" }] } });
+    expect(md).toContain("# Use \\*only\\* \\[approved\\] tools");
+    expect(md).toContain("1. **Run \\`deploy\\`**");
+  });
+});

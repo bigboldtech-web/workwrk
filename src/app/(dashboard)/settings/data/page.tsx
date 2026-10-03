@@ -65,7 +65,7 @@ type ExportRow = {
 };
 
 const EXPORTS: ExportRow[] = [
-  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "One CSV each for people, Spaces, Folders, Lists, tasks, Docs, Tables, Goals, reviews and SOPs: ids, titles, owners, statuses and dates. Doc text, task descriptions, comments, custom field values, table rows and files are not in it yet." },
+  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "Everything in the workspace: people, Spaces, Folders, Lists, every task with its description, checklist, tags, custom fields and comments, Docs and SOPs as Markdown, Tables as CSV, Goals and reviews. Comments name their files; the files themselves are not inside. Personal notes stay their owner's." },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
   { key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)", desc: "The activity log: who acted (a person, your identity provider or WorkwrK staff), what, when, the target and the IP. The newest 50,000 events." },
