@@ -44,12 +44,22 @@ export async function kudosAftermath(input: {
   kudos: { id: string; message: string; companyValue: string | null; giverId: string; receiverId: string; createdAt: Date };
   giver: Person;
   receiver: Person & { email: string | null };
+  /** Already known by the caller (giveKudos checked it): saves a second look. */
+  receiverReachable?: boolean;
 }): Promise<void> {
   const { organizationId: orgId, kudos, giver, receiver } = input;
   const giverName = nameOf(giver) || "Someone";
   // Told and emailed only when they can open the wall the link leads to: a
-  // Member who can sign in. A Guest, or someone deactivated, is not.
-  const reachable = await canReadTheWall(orgId, receiver.id);
+  // Member who can sign in. A Guest, or someone deactivated, is not. A failed
+  // check tells no one, and everything below still runs.
+  let reachable = input.receiverReachable ?? false;
+  if (input.receiverReachable === undefined) {
+    try {
+      reachable = await canReadTheWall(orgId, receiver.id);
+    } catch (err) {
+      console.error("[Kudos] Could not check the receiver:", err);
+    }
+  }
   try {
     if (reachable && (await shouldNotify(receiver.id, "kudos"))) {
       await prisma.notification.create({
@@ -180,6 +190,6 @@ export async function giveKudos(input: {
   if (dupe) return { ok: true, duplicate: true, kudos: dupe };
 
   const kudos = await createWithPeople({ organizationId: orgId, giverId: input.giverId, receiverId: receiver.id, message, companyValue });
-  await kudosAftermath({ organizationId: orgId, kudos, giver: kudos.giver, receiver: { ...kudos.receiver, email: receiver.email } });
+  await kudosAftermath({ organizationId: orgId, kudos, giver: kudos.giver, receiver: { ...kudos.receiver, email: receiver.email }, receiverReachable: true });
   return { ok: true, duplicate: false, kudos };
 }

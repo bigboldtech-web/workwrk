@@ -30,7 +30,7 @@ export async function listVersions(orgId: string, workflowId: string, publishedV
   });
   const userIds = [...new Set(rows.map((r) => r.createdById).filter((v): v is string => !!v))];
   const users = userIds.length
-    ? await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true } })
+    ? await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true } })
     : [];
   const nameById = new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
   return rows.map((r) => {

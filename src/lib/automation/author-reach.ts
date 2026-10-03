@@ -17,8 +17,9 @@
 //
 // Owners and Admins reach everything, as they do in the product. A workflow
 // with no creator on record (seeded before creators were stored) keeps the
-// behaviour it always had; a creator no longer in the workspace reaches no
-// List at all. When someone other than the creator published the live
+// behaviour it always had; a creator no longer in the workspace, removed
+// included (their row stays for the record), reaches no List at all, and the
+// builder says so. When someone other than the creator published the live
 // version, the run reaches only where BOTH could (narrowerAuthor).
 
 import { legacyReachOf, type LegacyReach } from "@/lib/access/legacy-reach";

@@ -15,7 +15,8 @@
 //      can open come from version n. A version that ran Everywhere restores
 //      as Everywhere, unless the draft keeps places the restorer cannot
 //      open: that would drop them unseen, so it is refused and they can
-//      choose Everywhere in Where it runs themselves.
+//      choose Everywhere in Where it runs themselves. "On a schedule" keeps
+//      the draft's places exactly as they are (its scope is moot).
 //
 // Both writes happen in one transaction, reading the draft under the row
 // lock. Body {}. Returns { ok: true, draftUpdated: true, keptVersion: number | null }.
@@ -77,8 +78,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const { hidden } = splitScope(stored, opens);
     if (!placeless && isEverywhere(fromVersion) && !isEverywhere(hidden)) return { refused: { error: EVERYWHERE_OVER_HIDDEN, code: "scope_everywhere_over_hidden" } };
     const { shown } = splitScope(fromVersion, opens);
-    const scope = restoreHiddenScope({ stored, submitted: shown, hidden, readable: opens, everywhere: isEverywhere(fromVersion) && isEverywhere(hidden) });
-    if (!scope.ok) return { refused: { error: SCOPE_REFUSAL[scope.error], code: scope.error } };
+    const merged = restoreHiddenScope({ stored, submitted: shown, hidden, readable: opens, everywhere: isEverywhere(fromVersion) && isEverywhere(hidden) });
+    if (!merged.ok) return { refused: { error: SCOPE_REFUSAL[merged.error], code: merged.error } };
+    // A schedule keeps the draft's places exactly as they are: moot while it
+    // runs on a schedule, and never Everywhere by accident if the trigger is
+    // later changed to a task event.
+    const scope = placeless ? { ok: true as const, scope: stored } : merged;
     // A version that ran in chosen places never comes back as Everywhere: when
     // every one of its places is out of the restorer's sight and the draft
     // keeps none, nothing would be left to name.

@@ -496,6 +496,7 @@ export default function AutomationBuilderPage() {
     setDraft(d);
     setBaseline(draftSnapshot(d));
     setProblems(null);
+    saveRefused.current.clear();
     setListsMode(false);
   }, []);
 
@@ -805,6 +806,8 @@ export default function AutomationBuilderPage() {
   const publish = useCallback(async () => {
     if (!draft || !wf) return;
     const p = publishProblems(draft, catalog);
+    // Publish sets the marks from here on: none is a save's refusal any more.
+    saveRefused.current.clear();
     if (hasProblems(p)) {
       setProblems(p);
       toast("Not published. Fix what is marked.", { tone: "danger" });
@@ -994,9 +997,9 @@ export default function AutomationBuilderPage() {
   const cappedNote = !published || archived
     ? null
     : wf.creatorGone
-      ? "Its creator is no longer in the workspace, so it no longer runs on tasks in any List. Make a copy to run it as yours."
+      ? `Its creator is no longer in the workspace, so it no longer runs on tasks in any List.${canCreate ? " Make a copy to run it as yours." : " Someone who can create automations can make a copy to run it again."}`
       : publisher?.gone
-        ? "Its live version was published by someone no longer in the workspace, so it no longer runs on tasks in any List. Republish it to run it again."
+        ? `Its live version was published by someone no longer in the workspace, so it no longer runs on tasks in any List.${canEdit ? " Republish it to run it again." : " Someone who can edit it can republish it to run it again."}`
         : publisher && !wf.createdById
           ? `Published by ${publisher.name}, so it runs only where ${publisher.name} can open and change things.`
           : publisher && publisher.id !== wf.createdById
@@ -1627,7 +1630,7 @@ export default function AutomationBuilderPage() {
               ) : null}
               {whereMode === "lists" && keptHidden && (wf.scopeKept?.cannotOpen ?? true) ? (
                 <p className="m-0 mt-2 text-sm text-ink-2">
-                  {shownEmpty && !wf.scopeKept?.gone
+                  {shownEmpty
                     ? readOnly ? "It runs only in places you can't open." : "It runs only in places you can't open. They are kept."
                     : readOnly ? "It also runs in places you can't open." : "Some places you can't open are kept."}
                 </p>

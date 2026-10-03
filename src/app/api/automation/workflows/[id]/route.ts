@@ -76,7 +76,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         })
       : null,
     workflow.createdById
-      ? prisma.user.findFirst({ where: { id: workflow.createdById, organizationId: ctx.orgId }, select: { firstName: true, lastName: true } })
+      ? prisma.user.findFirst({ where: { id: workflow.createdById, organizationId: ctx.orgId, deletedAt: null }, select: { firstName: true, lastName: true } })
       : null,
   ]);
   const trigger = draftTrigger(workflow.definition, workflow.triggerEvent);
