@@ -19,6 +19,7 @@ import { refuseWorkflowWrite, requireAutomation, triggerProblem, workflowRights 
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
 import { SCOPE_REFUSAL, draftDiffersFromLive, draftTrigger, readScope, restoreHiddenScope, splitScope } from "@/lib/automation/definition";
 import { definitionForViewer } from "@/lib/automation/definition-view";
+import { draftRevision } from "@/lib/automation/draft-revision";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
 
@@ -28,6 +29,13 @@ const updateSchema = z.object({
   triggerEvent: z.string().trim().min(1).max(200).nullish(),
   severity: z.enum(["CRITICAL", "MAJOR", "MINOR"]).optional(),
   definition: definitionSchema.optional(),
+  /**
+   * The draft revision the editor's page was loaded at (draftRevision). When
+   * given, a save over a draft someone else changed since is refused (409,
+   * stale_draft) instead of silently replacing their work; left out (saving
+   * over theirs, chosen in the builder, or an older client) it is not checked.
+   */
+  baseRevision: z.string().trim().min(1).max(64).optional(),
 });
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -85,6 +93,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ...workflow,
         definition: forViewer.definition,
         scopeHidden: forViewer.scopeHidden,
+        revision: draftRevision(workflow),
         // The draft trigger the builder edits; `liveTrigger` is what runs.
         triggerEvent: trigger,
         liveTrigger,
@@ -117,9 +126,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const existing = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true },
+    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true, name: true, description: true, severity: true },
   });
   if (!existing) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+  if (parsed.data.baseRevision && draftRevision(existing) !== parsed.data.baseRevision) return staleDraft();
   if (existing.status === "ARCHIVED") {
     return NextResponse.json({ error: "Archived workflows cannot be edited" }, { status: 400 });
   }
@@ -169,10 +179,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!published) data.triggerEvent = trigger;
   }
 
-  const workflow = await prisma.automationWorkflow.update({ where: { id }, data });
+  // With a base revision the check is made again under a row lock, so two
+  // saves from two tabs at the same moment cannot both pass it.
+  const baseRevision = parsed.data.baseRevision;
+  const workflow = baseRevision
+    ? await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${id} FOR UPDATE`;
+        const now = await tx.automationWorkflow.findUnique({ where: { id }, select: { name: true, description: true, severity: true, definition: true } });
+        if (!now || draftRevision(now) !== baseRevision) return null;
+        return tx.automationWorkflow.update({ where: { id }, data });
+      })
+    : await prisma.automationWorkflow.update({ where: { id }, data });
+  if (!workflow) return staleDraft();
   // Answered as the builder reads it, so the hidden places never reach the page.
   const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
-  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent) } });
+  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
+}
+
+/** Someone else saved the draft after this editor loaded it: nothing is written. */
+function staleDraft() {
+  return NextResponse.json(
+    { error: "Someone else saved this automation after you opened it. Your changes are not saved yet.", code: "stale_draft" },
+    { status: 409 },
+  );
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -123,6 +123,8 @@ interface ApiWorkflow {
   definition: unknown;
   /** Places this viewer cannot open are kept in the scope (never which or how many). */
   scopeHidden?: boolean;
+  /** The draft's fingerprint when it was read; a save sends it back so it never replaces someone else's newer save unasked. */
+  revision?: string;
   versions: ApiVersion[];
   runs: ApiRun[];
   can: { edit: boolean; archive: boolean };
@@ -596,8 +598,29 @@ export default function AutomationBuilderPage() {
       return false;
     }
     setSaving(true);
-    const body = toSaveBody(draft, numericParams);
-    const r = await apiFetch<{ workflow: Partial<ApiWorkflow> }>(`/api/automation/workflows/${wf.id}`, { method: "PUT", json: body });
+    const put = (overwrite: boolean) => apiFetch<{ workflow: Partial<ApiWorkflow> }>(`/api/automation/workflows/${wf.id}`, {
+      method: "PUT",
+      json: { ...toSaveBody(draft, numericParams), ...(wf.revision && !overwrite ? { baseRevision: wf.revision } : {}) },
+    });
+    let r = await put(false);
+    // Someone else saved it after this page loaded: their work is never
+    // replaced silently. The person chooses to save theirs over it, or keeps
+    // editing and reloads to see the newer version.
+    if (!r.ok && r.status === 409 && r.code === "stale_draft") {
+      setSaving(false);
+      const over = await confirm({
+        title: "Someone else saved this automation",
+        description: "They saved it after you opened it. Save yours over theirs, or keep editing and reload to see their version (your changes here would be lost).",
+        confirmLabel: "Save mine over theirs",
+        destructive: true,
+      });
+      if (!over) {
+        toast("Not saved. Reload to see their version.", { tone: "danger", action: { label: "Reload", onClick: () => void load() } });
+        return false;
+      }
+      setSaving(true);
+      r = await put(true);
+    }
     setSaving(false);
     if (!r.ok) {
       // The form stays dirty and the guard stays armed. A refusal the server
@@ -621,11 +644,12 @@ export default function AutomationBuilderPage() {
     setProblems((p) => (p?.where ? { ...p, where: undefined } : p));
     setBaseline(draftSnapshot(draft));
     // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
-    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: r.data.workflow?.scopeHidden ?? prev.scopeHidden } : prev));
+    const saved = r.data.workflow;
+    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: saved?.scopeHidden ?? prev.scopeHidden, revision: saved?.revision ?? prev.revision } : prev));
     notifyAiChatsChanged();
     if (!opts.quiet) toast("Draft saved");
     return true;
-  }, [draft, wf, numericParams, toast]);
+  }, [draft, wf, numericParams, toast, confirm, load]);
 
   // "Try again" on a failed save calls the latest save through a ref.
   useEffect(() => {
