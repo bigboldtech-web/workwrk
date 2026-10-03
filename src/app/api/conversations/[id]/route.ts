@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { logActivity } from "@/lib/activity";
 import { conversationNotFound, loadConversationRole, needFullAccess, talkGate } from "@/lib/talk-gate";
 import {
+  canAdminArchive,
   canEditTopic,
   canLeave,
   canRename,
@@ -147,10 +149,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
 
   const ctx = await loadConversationRole(id, gate);
-  if (!ctx || ctx.role === "none") return conversationNotFound();
+  if (!ctx) return conversationNotFound();
   const c = ctx.conversation;
 
   const body = await req.json().catch(() => null);
+
+  // An Owner or Admin archiving or restoring a channel from Browse channels ›
+  // All channels, private ones included (spec-talk section 1): the one write
+  // that needs no read. Only `archived` is taken, nothing about the channel
+  // is sent back, and it is audited as the spec's org.archive_channel.
+  const onlyArchived = body && typeof body === "object" && Object.keys(body).length === 1 && typeof body.archived === "boolean";
+  if (onlyArchived && ctx.role !== "full" && canAdminArchive(c, gate.orgRole)) {
+    const archivedAt = body.archived ? new Date() : null;
+    await prisma.conversation.update({ where: { id }, data: { archivedAt } });
+    void logActivity({
+      type: body.archived ? "org.archive_channel" : "org.restore_channel",
+      actorId: gate.userId,
+      organizationId: gate.organizationId,
+      description: `${body.archived ? "Archived" : "Restored"} #${c.name ?? "channel"}${c.restricted ? " (private)" : ""} from Browse channels`,
+      targetId: id,
+      targetType: "conversation",
+    });
+    return jsonSuccess({ ok: true, archived: body.archived });
+  }
+  if (ctx.role === "none") return conversationNotFound();
 
   // VALIDATE EVERYTHING FIRST: nothing may apply if any part 400s or 403s.
   // (A member's `hidden` used to commit before a rename was rejected.)

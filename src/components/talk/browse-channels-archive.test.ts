@@ -1,12 +1,11 @@
 // Who gets an Archive button in Browse channels -> "All channels".
 //
-// WHY THIS TEST EXISTS. The tab drew Archive on every row it listed, and the
-// one row it exists for was the one row it could not act on: a private channel
-// an Owner did not create resolves to "none" on the server (access rule 3, no
-// admin read-around), so the click answered "Conversation not found" and
-// nothing was archived. This pins the predicate to the server's own ladder in
-// src/lib/talk-access.ts, so the button is drawn where it works and the reason
-// is shown where it does not.
+// WHY THIS TEST EXISTS. The tab drew Archive on every row, and on a private
+// channel an Owner did not create the click answered "Conversation not found"
+// (access rule 3, no admin read-around). The server now answers that one
+// write through canAdminArchive() in src/lib/talk-access.ts (spec-talk
+// section 1, org.archive_channel, audited, never a read), so the button is
+// drawn on every row but #general, and the reason is shown there.
 
 import { describe, expect, it } from "vitest";
 import { archiveRight } from "./browse-channels-dialog";
@@ -27,15 +26,15 @@ describe("archiveRight", () => {
     expect(archiveRight(row({ joined: true })).can).toBe(true);
   });
 
-  it("does NOT offer Archive on a private channel the viewer did not create", () => {
-    // The 404 case: an Owner who is not in it at all.
-    const away = archiveRight(row({ restricted: true }));
-    expect(away.can).toBe(false);
-    expect(away.can === false && away.label).toBe("Creator only");
-    // The 403 case: an Owner who is in it but did not create it holds "edit".
-    expect(archiveRight(row({ restricted: true, joined: true })).can).toBe(false);
-    // And the creator who has since left holds nothing either.
-    expect(archiveRight(row({ restricted: true, isOwner: true })).can).toBe(false);
+  it("offers Archive on a private channel too: the one write an Owner or Admin makes without reading it", () => {
+    // spec-talk section 1: Owners and Admins "may Archive it
+    // (org.archive_channel, audited), never read it". The server answers a
+    // PATCH { archived } alone through canAdminArchive(), whatever their role
+    // in the channel: not in it, in it without having created it, or a
+    // channel whose creator has left.
+    expect(archiveRight(row({ restricted: true })).can).toBe(true);
+    expect(archiveRight(row({ restricted: true, joined: true })).can).toBe(true);
+    expect(archiveRight(row({ restricted: true, isOwner: true })).can).toBe(true);
   });
 
   it("offers Archive on a private channel to its creator while they are in it", () => {

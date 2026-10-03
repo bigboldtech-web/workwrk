@@ -34,10 +34,14 @@ export async function POST(req: NextRequest) {
   if (chat) {
     const conversation = await prisma.conversation.findUnique({
       where: { id: chat.conversationId },
-      select: { id: true, organizationId: true, callEpoch: true },
+      select: { id: true, organizationId: true, callEpoch: true, archivedAt: true },
     });
     // Epoch mismatch = the link was rotated away (a member left). Dead.
     if (!conversation || conversation.callEpoch !== chat.epoch) return jsonError("This link is no longer valid", 404);
+    // An archived conversation takes no calls (nobody inside it may start
+    // one), so its guest link joins none either: real, and over, like an
+    // expired one.
+    if (conversation.archivedAt) return jsonError("This conversation was archived, so its call link no longer works", 410);
     // Past its own expiry is 410, not 404: the link was real and it is over,
     // which is a different thing from a tampered or rotated code. Chat guest
     // links live 24h from the moment a member copied one.

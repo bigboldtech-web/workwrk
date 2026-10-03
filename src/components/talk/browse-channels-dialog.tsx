@@ -58,17 +58,15 @@ type BrowseRow = {
  *
  *   * Public channel: an Owner or Admin holds Full whether or not they joined,
  *     so Archive and Restore both work. This is the common row.
- *   * Private channel: access rule 3 gives an Owner no read-around at all, so
- *     a non-member resolves to "none" and the PATCH answers "Conversation not
- *     found"; a member who did not create it holds "edit" and the archive
- *     branch answers "You need Full access". Full belongs to the creator while
- *     they are still in it, and to nobody else.
+ *   * Private channel: access rule 3 gives an Owner no read-around at all,
+ *     so talkRole() resolves to "none" (or "edit" for a member who did not
+ *     create it), and reading it stays a 404. Archive and Restore are the one
+ *     write that needs no read: PATCH { archived } alone is answered through
+ *     canAdminArchive() for an Owner or Admin, audited as
+ *     org.archive_channel, and sends nothing about the channel back. That is
+ *     how an abandoned private channel (its creator gone) is put away.
  *   * #general is the company channel and the route refuses to archive it at
  *     all, for anyone.
- *
- * Nothing is taken away by this: the right was never the viewer's to exercise
- * on those rows. What replaces the button is the reason, so the tab says who
- * can archive an abandoned private channel instead of failing at the click.
  */
 export function archiveRight(
   row: Pick<BrowseRow, "name" | "restricted" | "joined" | "isOwner">,
@@ -80,13 +78,9 @@ export function archiveRight(
       why: "#general is the company channel. It can't be archived.",
     };
   }
-  if (row.restricted && !(row.isOwner && row.joined)) {
-    return {
-      can: false,
-      label: "Creator only",
-      why: "A private channel can only be archived by the person who created it, from inside the channel. An Owner can see that it exists and how many people are in it, and nothing else.",
-    };
-  }
+  // Every other channel, private ones included: an Owner or Admin archives
+  // and restores it from here without reading it (spec-talk section 1,
+  // org.archive_channel). This tab is theirs alone.
   return { can: true };
 }
 

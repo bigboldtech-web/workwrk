@@ -158,6 +158,12 @@ const SQL_MANIFEST = [
   // new release writes both on signup, join and reset. Later Phase 8 stages
   // append guarded statements to the same file.
   "2026-09-30-phase8-settings-access.sql",
+  // Batch 3 (Talk): "ConversationMessage"."clientId" (nullable) and a
+  // partial unique index on (conversationId, authorId, clientId) where it is
+  // set. ADD COLUMN IF NOT EXISTS and CREATE UNIQUE INDEX IF NOT EXISTS
+  // only. Applied before the reload because the new release writes the
+  // column on every send.
+  "2026-10-03-message-client-id.sql",
 ];
 
 /**

@@ -1,23 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  atLeast,
-  canAddPeople,
-  canArchive,
-  canCall,
-  canLeave,
-  canManageMembers,
-  canPost,
-  canReact,
-  canRename,
-  canResetGuestLink,
-  canSelfJoin,
-  isArchived,
-  isGeneralChannel,
-  readOnlyReason,
-  talkRole,
-  type TalkConversationFacts,
-  type TalkViewerFacts,
-} from "./talk-access";
+import { atLeast, canAddPeople, canArchive, canCall, canLeave, canManageMembers, canPost, canReact, canRename, canResetGuestLink, canSelfJoin, isArchived, isGeneralChannel, readOnlyReason, talkRole, type TalkConversationFacts, type TalkViewerFacts, canAdminArchive } from "./talk-access";
 
 const ME = "u-me";
 const OTHER = "u-other";
@@ -172,5 +154,22 @@ describe("isArchived", () => {
     expect(isArchived({ archivedAt: null })).toBe(false);
     expect(isArchived({ archivedAt: new Date() })).toBe(true);
     expect(isArchived({ archivedAt: "2026-09-01T00:00:00.000Z" })).toBe(true);
+  });
+});
+
+
+describe("canAdminArchive: the one write an Owner or Admin makes on a channel without reading it", () => {
+  const ch = (over: Partial<{ type: "DM" | "GROUP" | "CHANNEL"; name: string | null }> = {}) => ({ type: "CHANNEL" as const, name: "sales", ...over });
+  it("lets an Owner or Admin archive any channel but #general, private ones included", () => {
+    expect(canAdminArchive(ch(), "OWNER")).toBe(true);
+    expect(canAdminArchive(ch(), "ADMIN")).toBe(true);
+    expect(canAdminArchive(ch({ name: "General" }), "OWNER")).toBe(false);
+  });
+  it("never for a DM or a group, and never for a Member, Guest or agent", () => {
+    expect(canAdminArchive(ch({ type: "DM", name: null }), "OWNER")).toBe(false);
+    expect(canAdminArchive(ch({ type: "GROUP" }), "ADMIN")).toBe(false);
+    expect(canAdminArchive(ch(), "MEMBER")).toBe(false);
+    expect(canAdminArchive(ch(), "GUEST")).toBe(false);
+    expect(canAdminArchive(ch(), "AGENT")).toBe(false);
   });
 });

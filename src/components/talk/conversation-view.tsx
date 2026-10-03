@@ -641,7 +641,10 @@ export function ConversationView({
       const res = await fetch(`/api/conversations/${id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        // The optimistic row's id is the message's key: a Retry (or a
+        // keepalive send that landed while this tab thought it had failed)
+        // is answered with the first send's message, never a second copy.
+        body: JSON.stringify({ ...payload, clientId: tempId }),
         // keepalive so a send survives the tab being closed mid-flight: a
         // message typed and sent is never lost to a navigation.
         keepalive: true,

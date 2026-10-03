@@ -31,6 +31,20 @@ const MAX_ATTACHMENTS = 10;
 
 const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, avatar: true } as const;
 
+/** The composer's key for one message: its optimistic row's id ("temp-<ms>-<rand>"). */
+const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
+
+/** The message this author already sent here with this key, shaped as a send answers it, or null. */
+async function alreadySent(conversationId: string, authorId: string, clientId: string) {
+  const row = await prisma.conversationMessage.findFirst({
+    where: { conversationId, authorId, clientId },
+    include: { author: { select: AUTHOR_SELECT } },
+  });
+  if (!row) return null;
+  const replyCount = await prisma.conversationMessage.count({ where: { parentId: row.id, deletedAt: null } });
+  return { ...row, replyCount };
+}
+
 /** Outbound shaping for every read path:
  *  - "removed" messages must not leak their content through the API:
  *    body and metadata are blanked server-side, not just hidden in UI;
@@ -272,6 +286,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!text && !isCallCard && attachments.length === 0) return jsonError("Message can't be empty", 400);
   if (text.length > MAX_BODY) return jsonError("Message is too long", 400);
 
+  // The sender's key for this one composed message. Retry, or a keepalive
+  // send that landed while the tab thought it had failed, sends it again:
+  // the answer is the message the first send made, never a second copy and
+  // never a second ring for everyone in the conversation.
+  const clientId = typeof payload?.clientId === "string" && CLIENT_ID.test(payload.clientId) ? payload.clientId : null;
+  if (clientId) {
+    const sent = await alreadySent(id, userId, clientId);
+    if (sent) return jsonSuccess({ message: sent, duplicate: true }, 200);
+  }
+
   // Mentions: only people who are actually in this conversation count.
   let mentions: string[] = [];
   if (Array.isArray(payload?.metadata?.mentions) && payload.metadata.mentions.length > 0) {
@@ -302,7 +326,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (mentions.length > 0) metadata.mentions = mentions;
 
   const now = new Date();
-  const [message] = await prisma.$transaction([
+  let sentTx;
+  try {
+    sentTx = await prisma.$transaction([
     prisma.conversationMessage.create({
       data: {
         conversationId: id,
@@ -310,6 +336,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         body: text || (isCallCard ? "Started a call" : ""),
         parentId,
         metadata: Object.keys(metadata).length > 0 ? (metadata as Prisma.InputJsonValue) : undefined,
+        clientId,
       },
       include: { author: { select: AUTHOR_SELECT } },
     }),
@@ -328,6 +355,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: { hidden: false },
     }),
   ]);
+  } catch (err) {
+    // Two sends with one key at once: the second insert loses on the unique
+    // index and is answered with the first one's message.
+    if (clientId && (err as { code?: string })?.code === "P2002") {
+      const sent = await alreadySent(id, userId, clientId);
+      if (sent) return jsonSuccess({ message: sent, duplicate: true }, 200);
+    }
+    throw err;
+  }
+  const [message] = sentTx;
 
   // Real-time: nudge every member's open SSE stream to refetch this thread
   // (trigger-only; the body is re-fetched through the redaction path).
