@@ -369,8 +369,7 @@ export default async function SpacePage(props: {
       <div className="flex h-full min-h-0 flex-col bg-app">
         {header}
         <SpaceBirdseye
-          spaceId={space.id}
-          spaceSlug={space.slug}
+          scope={{ kind: "space", id: space.id, slug: space.slug }}
           overviewHref={spaceTabHref(space.slug, "birdseye", defaultSpaceView(pinnedView, hiddenViews))}
           initialFocusId={sp.focus ?? null}
           canCreateList={spaceCanCreate}

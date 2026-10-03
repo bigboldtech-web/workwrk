@@ -47,6 +47,12 @@ export async function publishItemChanged(args: {
   listIds?: string[];
   /** Lists the task just left. */
   leftListIds?: string[];
+  /**
+   * Lists the task just came into (moved there, linked there). An event also
+   * names every List a task is in, which a view holding only some pages
+   * cannot tell apart from a task that was always there; this says so.
+   */
+  enteredListIds?: string[];
 }): Promise<void> {
   try {
     const item = await prisma.item.findUnique({
@@ -97,6 +103,7 @@ export async function publishItemChanged(args: {
       boardId: args.boardId ?? item.boardId ?? null,
       listIds: Array.from(new Set(listIds)),
       ...(args.leftListIds?.length ? { leftListIds: Array.from(new Set(args.leftListIds)) } : {}),
+      ...(args.enteredListIds?.length ? { enteredListIds: Array.from(new Set(args.enteredListIds)) } : {}),
     };
     for (const userId of ids) publishToUser(userId, event);
   } catch {

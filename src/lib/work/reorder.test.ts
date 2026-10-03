@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MIN_GAP, POSITION_STEP, byPosition, dropSide, indexAtPointer, indexFor, moveInOrder, planDrop, renumberedPositions, type Ordered } from "./reorder";
+import { MIN_GAP, POSITION_STEP, byPosition, dropSide, indexAtPointer, indexFor, moveInOrder, placeInOrder, planDrop, renumberedPositions, type Ordered } from "./reorder";
 
 const t = (id: string, position: number): Ordered => ({ id, position });
 
@@ -61,6 +61,23 @@ describe("moveInOrder: the server's renumber over the WHOLE List", () => {
   it("refuses when the task or both neighbours are no longer in the List", () => {
     expect(moveInOrder([t("a", 0), t("b", 0)], "gone", "a", "b")).toBeNull();
     expect(moveInOrder([t("a", 0), t("b", 0), t("c", 0)], "c", "x", "y")).toBeNull();
+  });
+});
+
+describe("placeInOrder: the server's one write between the true neighbours", () => {
+  const pos = new Map([["a", 1024], ["b", 2048], ["c", 2048], ["u", 5000]]);
+  it("splits the real gap, including neighbours the view never loaded", () => {
+    // The view thought the bottom was after b; the List also holds u at 5000.
+    expect(placeInOrder(["a", "b", "x", "u"], pos, "x")).toBe(3524);
+  });
+  it("steps past an end, and is the first number in an empty List", () => {
+    expect(placeInOrder(["x", "a"], pos, "x")).toBe(1024 - POSITION_STEP);
+    expect(placeInOrder(["a", "x"], pos, "x")).toBe(1024 + POSITION_STEP);
+    expect(placeInOrder(["x"], pos, "x")).toBe(POSITION_STEP);
+  });
+  it("asks for a renumber when the neighbours have no room", () => {
+    expect(placeInOrder(["b", "x", "c"], pos, "x")).toBeNull();
+    expect(placeInOrder(["a", "b"], pos, "gone")).toBeNull();
   });
 });
 

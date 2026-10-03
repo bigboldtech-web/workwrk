@@ -94,27 +94,84 @@ describe("the one Space.settings writer", () => {
 });
 
 describe("the routes Bird's eye added never read the legacy signal", () => {
-  for (const rel of ["src/app/api/spaces/[id]/birdseye/route.ts", "src/app/api/spaces/[id]/default-view/route.ts"]) {
+  const SPACE_BIRDSEYE = "src/app/api/spaces/[id]/birdseye/route.ts";
+  const FOLDER_BIRDSEYE = "src/app/api/folders/[id]/birdseye/route.ts";
+  const ANSWER = "src/lib/work/birdseye-answer.server.ts";
+
+  for (const rel of [SPACE_BIRDSEYE, FOLDER_BIRDSEYE, "src/app/api/spaces/[id]/default-view/route.ts"]) {
     it(rel, () => {
       const src = code(rel);
       expect(src).not.toMatch(/accessLevel/);
       expect(src).not.toMatch(/getServerSession/);
       expect(src).not.toMatch(/prisma\./);
       expect(src).toMatch(/await itemCtx\(\)/);
-      expect(src).toMatch(/spaceForViewer\(c, id\)/);
     });
   }
+
+  it("the Space doors gate on the Space, the Folder door on the Folder page's own gate", () => {
+    expect(code(SPACE_BIRDSEYE)).toMatch(/spaceForViewer\(c, id\)/);
+    expect(code("src/app/api/spaces/[id]/default-view/route.ts")).toMatch(/spaceForViewer\(c, id\)/);
+    const folder = code(FOLDER_BIRDSEYE);
+    expect(folder).toMatch(/const folder = await folderForViewer\(c, id\);\s*if \(!folder\) return answer\(\{ error: "Not found" \}, 404\);/);
+  });
+
+  it("the shared answer reads no session, no legacy signal and no table of its own", () => {
+    const src = code(ANSWER);
+    expect(src).not.toMatch(/accessLevel/);
+    expect(src).not.toMatch(/getServerSession/);
+    expect(src).not.toMatch(/prisma\./);
+    expect(src).not.toMatch(/itemCtx\(\)/);
+  });
 
   it("the pin gates read, then the contribute ladder", () => {
     const src = code("src/app/api/spaces/[id]/default-view/route.ts");
     expect(src.indexOf("spaceForViewer(c, id)")).toBeLessThan(src.indexOf("canContributeSpaceFor(c, space.id)"));
   });
 
-  it("Bird's eye answers list_not_found for any List outside the readable set", () => {
-    const src = code("src/app/api/spaces/[id]/birdseye/route.ts");
-    expect(src).toMatch(/readableListsInSpace\(space\.id, c, \{ includeSettings: true \}\)/);
-    expect(src).toMatch(/if \(!list\) return answer\(\{ error: "list_not_found" \}, 404\);/);
-    expect(src).toMatch(/"Cache-Control": "no-store"/);
+  it("Bird's eye answers list_not_found for any List outside the readable set, from either door", () => {
+    expect(code(SPACE_BIRDSEYE)).toMatch(/readableListsInSpace\(space\.id, c, \{ includeSettings: true \}\)/);
+    expect(code(FOLDER_BIRDSEYE)).toMatch(/readableListsInFolder\(folder, c, \{ includeSettings: true \}\)/);
+    for (const door of [SPACE_BIRDSEYE, FOLDER_BIRDSEYE]) expect(code(door)).toMatch(/return await answerBirdseye\(query, c, rows\);/);
+    const answer = code(ANSWER);
+    expect(answer).toMatch(/const list = byId\.get\(query\.boardId\);\s*if \(!list\) return birdseyeAnswer\(\{ error: "list_not_found" \}, 404\);/);
+    expect(answer).toMatch(/"Cache-Control": "no-store"/);
+  });
+});
+
+describe("one Folder's Lists are the Folder page's own, for every tab", () => {
+  const readFn = between(SPACE, "export async function readableFolderLists", "\nexport ");
+  const asSpaceRows = between(SPACE, "export async function readableListsInFolder", "\nexport ");
+  const gateFn = between(SPACE, "export async function folderForViewer", "\nexport ");
+  const page = code("src/app/(dashboard)/folders/[id]/page.tsx");
+
+  it("reads the live Folders and Lists below the Folder, then decides every List over one world", () => {
+    expect(readFn).toMatch(/prisma\.folder\.findMany\(\{\s*where: \{ spaceId: folder\.spaceId, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(readFn).toMatch(/const order = folderShelfOrder\(folders, folder\.id\);/);
+    expect(readFn).toMatch(/prisma\.board\.findMany\(\{\s*where: \{ folderId: \{ in: order \}, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(readFn).toMatch(/const roles = await nodeRoleMap\(ctx, "list", boards\.map\(\(b\) => b\.id\)\);/);
+    // The database's name order inside a shelf, as the page always listed it;
+    // the stable sort after it moves Lists only by shelf.
+    expect(readFn).toMatch(/orderBy: \{ name: "asc" \}/);
+    expect(readFn).toMatch(/rows\.sort\(\(a, b\) => \(rank\.get\(a\.folderId\) \?\? 0\) - \(rank\.get\(b\.folderId\) \?\? 0\)\);/);
+    expect(readFn).toMatch(/!roleAtLeast\(role, "VIEW"\)\) continue;/);
+    expect(readFn).not.toMatch(/spaceTree\(/);
+  });
+
+  it("is what the Folder page's tabs and its Bird's eye both read", () => {
+    expect(page).toMatch(/readableFolderLists\(\{ id: folder\.id, spaceId: folder\.spaceId \}, \{ userId: u\.id, organizationId: u\.organizationId, accessLevel: u\.accessLevel \}\)/);
+    // No second List read of its own on the page (its one other board read
+    // is the home statuses of tasks linked in, by id).
+    expect(page).not.toMatch(/prisma\.board\.findMany\(\{\s*where: \{ folderId/);
+    expect(page).not.toMatch(/descendantIds/);
+    expect(asSpaceRows).toMatch(/const rows = await readableFolderLists\(folder, viewer, opts\);/);
+    expect(asSpaceRows).toMatch(/canContribute: roleAtLeast\(r\.role, "EDIT"\)/);
+  });
+
+  it("gates as the Folder page does: the org's live Folder, Can view or higher by nodeRole", () => {
+    expect(gateFn).toMatch(/where: \{ id: folderId, organizationId: viewer\.organizationId, archivedAt: null \}/);
+    expect(gateFn).toMatch(/const decision = await nodeRole\(ctx, \{ kind: "folder", id: folder\.id \}\);/);
+    expect(gateFn).toMatch(/roleAtLeast\(decision\.role, "VIEW"\)/);
+    expect(page).toMatch(/if \(!roleAtLeast\(decision\.role, "VIEW"\)\) \{/);
   });
 });
 

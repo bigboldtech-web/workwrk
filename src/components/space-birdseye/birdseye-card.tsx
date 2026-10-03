@@ -35,6 +35,9 @@ import {
 } from "@/lib/work/birdseye";
 import { StatusPicker } from "./status-picker";
 import type { SubtaskEntry } from "./use-birdseye";
+import { LinkedRowIndicator } from "@/components/board-view/linked-row-indicator";
+import { statusPickerFor } from "@/lib/list-link-rows";
+import { linkedRowOf, type StatusPick } from "@/lib/work/birdseye-linked";
 
 /** The drag payload type, so a drop only ever accepts a Bird's eye card. */
 export const CARD_DRAG_TYPE = "application/x-workwrk-birdseye-card";
@@ -54,18 +57,25 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   draggable = false,
   onDragStart,
   onDragEnd,
+  place,
+  dropLine = null,
 }: {
   card: Card;
   list: BirdseyeList;
   subtasks?: SubtaskEntry;
   now: Date;
-  onOpen: (id: string) => void;
-  onChangeStatus: (card: Card, next: string) => void;
-  onLoadSubtasks: (id: string) => void;
+  /** `listId`: the List a linked card is shown in, so the task opens there. */
+  onOpen: (id: string, listId?: string) => void;
+  onChangeStatus: (card: Card, next: string, pick?: StatusPick) => void;
+  onLoadSubtasks: (listId: string, id: string) => void;
   /** Focus mode, for someone who may write: the card drags between status columns. */
   draggable?: boolean;
   onDragStart?: (card: Card) => void;
   onDragEnd?: () => void;
+  /** Focus: its place among its column's cards (a card added this visit has none). */
+  place?: number;
+  /** Focus: a card being dragged would land above or below this one. */
+  dropLine?: "top" | "bottom" | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const option = resolveCardStatus(list.statuses, card.status);
@@ -75,30 +85,46 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   const extraPeople = Math.max(0, card.assigneeCount - people.length);
   const hasMeta = card.hasDescription || !!due || people.length > 0;
 
+  // A card shown here through a link (its home is another List): it opens,
+  // drags and changes status in THIS List, by the Board's own rules.
+  const linkedRow = card.linked ? linkedRowOf(card) : null;
+  // Its status pill offers the task's own home statuses, the Board's pill,
+  // when they are known here; a drop between columns maps instead.
+  const homePicker = linkedRow ? statusPickerFor(linkedRow, card.boardId, list.statuses) : null;
+  const homePick = !!homePicker?.editable;
+  const listId = card.linked ? card.boardId : undefined;
+  const canWriteCard = list.canContribute && (!card.linked || card.linked.canDrag);
+  const dragOn = draggable && (!card.linked || card.linked.canDrag);
   const openCard = (e: MouseEvent) => {
     if (isInteractive(e.target)) return;
-    onOpen(card.id);
+    onOpen(card.id, listId);
   };
   const toggleSubtasks = (e: MouseEvent) => {
     e.stopPropagation();
     const next = !expanded;
     setExpanded(next);
-    if (next && (!subtasks || subtasks.state === "error")) onLoadSubtasks(card.id);
+    if (next && (!subtasks || subtasks.state === "error")) onLoadSubtasks(card.boardId, card.id);
   };
 
   return (
-    <li className="[content-visibility:auto] [contain-intrinsic-size:auto_96px]">
+    <li className="relative [content-visibility:auto] [contain-intrinsic-size:auto_96px]" data-place={place}>
+      {dropLine ? (
+        <span
+          aria-hidden
+          className={cn("pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-[var(--os-brand)]", dropLine === "top" ? "-top-[5px]" : "-bottom-[5px]")}
+        />
+      ) : null}
       <div
         className={cn(
           "group/card relative flex flex-col gap-1.5 rounded-lg border px-2.5 py-2 transition-colors",
           CARD_TINT_CLASS,
-          draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+          dragOn ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         )}
         style={{ ...tintVars(option.color), backgroundColor: TINT_BG, borderColor: TINT_LINE }}
         onClick={openCard}
-        draggable={draggable || undefined}
+        draggable={dragOn || undefined}
         onDragStart={
-          draggable
+          dragOn
             ? (e: DragEvent) => {
                 e.dataTransfer.setData(CARD_DRAG_TYPE, card.id);
                 e.dataTransfer.effectAllowed = "move";
@@ -106,31 +132,35 @@ export const BirdseyeCard = memo(function BirdseyeCard({
               }
             : undefined
         }
-        onDragEnd={draggable ? () => onDragEnd?.() : undefined}
+        onDragEnd={dragOn ? () => onDragEnd?.() : undefined}
       >
         <div className="flex items-start gap-2">
           <StatusPicker
-            option={option}
-            statuses={list.statuses}
-            canChange={list.canContribute}
-            onPick={(value) => onChangeStatus(card, value)}
+            option={homePick && homePicker ? resolveCardStatus(homePicker.options, card.linked?.homeValue) : option}
+            statuses={homePick && homePicker ? homePicker.options : list.statuses}
+            canChange={canWriteCard}
+            onPick={(value) => onChangeStatus(card, value, homePick ? { home: true } : undefined)}
             className="mt-px"
           />
           <a
-            href={`/item/${card.id}`}
+            href={listId ? `/item/${card.id}?list=${encodeURIComponent(listId)}` : `/item/${card.id}`}
             draggable={false}
             onClick={(e) => {
               if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
               e.preventDefault();
               e.stopPropagation();
-              onOpen(card.id);
+              onOpen(card.id, listId);
             }}
             className="min-w-0 flex-1 break-words text-base leading-5 text-ink line-clamp-3 hover:underline underline-offset-2"
-            title={card.title}
+            title={card.linked?.note ?? card.title}
           >
             {card.title}
           </a>
+          {linkedRow ? <LinkedRowIndicator row={linkedRow} boardId={card.boardId} /> : null}
         </div>
+        {card.linked?.short ? (
+          <span className="block text-xs leading-snug text-ink-2" title={card.linked.note ?? undefined}>{card.linked.short}</span>
+        ) : null}
 
         {hasMeta ? (
           <div className="flex min-w-0 items-center gap-2 ps-7 text-xs text-ink-2">
@@ -182,7 +212,7 @@ export const BirdseyeCard = memo(function BirdseyeCard({
         ) : null}
 
         {expanded && card.subtaskCount > 0 ? (
-          <SubtaskList entry={subtasks} list={list} onOpen={onOpen} onRetry={() => onLoadSubtasks(card.id)} />
+          <SubtaskList entry={subtasks} list={list} onOpen={(id) => onOpen(id, listId)} onRetry={() => onLoadSubtasks(card.boardId, card.id)} />
         ) : null}
       </div>
     </li>

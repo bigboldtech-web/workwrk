@@ -693,6 +693,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       boardId: target.id,
       organizationId: c.organizationId,
       actorId: c.userId,
+      enteredListIds: [target.id],
     });
     void publishItemChanged({
       itemId: id,

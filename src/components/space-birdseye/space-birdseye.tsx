@@ -2,7 +2,9 @@
 
 // Bird's eye: every List of a Space the viewer can read, side by side, as
 // columns of status-tinted cards, and Focus, one List's statuses as columns.
-// /spaces/<slug>?view=birdseye, and &focus=<boardId> for focus mode.
+// /spaces/<slug>?view=birdseye, and &focus=<boardId> for focus mode. A
+// Folder has its own, its Lists and its sub-folders': /folders/<id>?tab=birdseye
+// (the `scope` prop; birdseyeScopePaths gives each its page and route).
 //
 // FOCUS IS LATCHED STATE (review #13). It starts from the page's focus param
 // and changes only through enterFocus, switchFocus, exitFocus, a popstate on
@@ -23,7 +25,7 @@
 // expanded subtasks and its remembered card heights survive, and its scroll
 // offsets are put back the moment focus clears (review #19).
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/ui/error-state";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -37,12 +39,13 @@ import {
 } from "@/components/layout/os/top-bar/nav-history";
 import { openTask } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
-import type { BirdseyeCard } from "@/lib/work/birdseye";
+import { birdseyeScopePaths, type BirdseyeCard, type BirdseyeScope } from "@/lib/work/birdseye";
 import { BirdseyeToolbar } from "./birdseye-toolbar";
 import { BirdseyeOverview, type CardActions } from "./birdseye-overview";
 import { BirdseyeFocus } from "./birdseye-focus";
 import { BirdseyeSkeleton } from "./birdseye-skeleton";
 import { useBirdseye, type ItemCreatedDetail, type ItemEventDetail } from "./use-birdseye";
+import type { StatusPick } from "@/lib/work/birdseye-linked";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -105,14 +108,12 @@ function historyFocusFrom(): string | null {
 }
 
 export function SpaceBirdseye({
-  spaceId,
-  spaceSlug,
+  scope,
   overviewHref,
   initialFocusId,
   canCreateList,
 }: {
-  spaceId: string;
-  spaceSlug: string;
+  scope: BirdseyeScope;
   /** Bird's eye's own URL without a focus: the bare Space URL when it is the pinned default. */
   overviewHref: string;
   initialFocusId: string | null;
@@ -122,7 +123,12 @@ export function SpaceBirdseye({
   const pathname = usePathname();
   const { toast } = useOsToast();
   const { openCreateList } = useOsShell();
-  const basePath = `/spaces/${encodeURIComponent(spaceSlug)}`;
+  // The prop keeps its identity across this view's own renders, so the
+  // paths (and the focus link built from them) stay stable.
+  const paths = useMemo(() => birdseyeScopePaths(scope), [scope]);
+  const { basePath, endpoint } = paths;
+  const spaceId = scope.kind === "space" ? scope.id : scope.spaceId;
+  const folderId = scope.kind === "folder" ? scope.id : null;
 
   // ── Focus, latched ────────────────────────────────────────────────
   const searchParams = useSearchParams();
@@ -162,8 +168,8 @@ export function SpaceBirdseye({
   }, [queryInput]);
 
   const focusHref = useCallback(
-    (id: string) => `${basePath}?view=birdseye&focus=${encodeURIComponent(id)}`,
-    [basePath],
+    (id: string) => paths.focusHref(id),
+    [paths],
   );
 
   // A focus the server will not show (never readable, or no longer): back to
@@ -188,7 +194,7 @@ export function SpaceBirdseye({
     [focusHref],
   );
 
-  const data = useBirdseye({ spaceId, focusId, q, hideClosed, onFocusMissing, onOverviewLoaded });
+  const data = useBirdseye({ endpoint, focusId, q, hideClosed, onFocusMissing, onOverviewLoaded });
   const [now] = useState(() => new Date());
 
   // ── Overview scroll, kept across focus ────────────────────────────
@@ -254,7 +260,7 @@ export function SpaceBirdseye({
   // with its subtasks, so whatever changed in the drawer shows at once.
   const lastOpened = useRef<string | null>(null);
   const wasAway = useRef(false);
-  const { refreshCard, loadSubtasks } = data;
+  const { refreshTask, loadSubtasks, loadSubtasksOf } = data;
   useEffect(() => {
     if (pathname !== basePath) {
       if (lastOpened.current) wasAway.current = true;
@@ -264,14 +270,16 @@ export function SpaceBirdseye({
     const id = lastOpened.current;
     wasAway.current = false;
     lastOpened.current = null;
-    void refreshCard(id);
-    void loadSubtasks(id);
-  }, [pathname, basePath, refreshCard, loadSubtasks]);
+    // Every copy of it on screen (it may show in two Lists), each in its own List.
+    void refreshTask(id);
+    loadSubtasksOf(id);
+  }, [pathname, basePath, refreshTask, loadSubtasksOf]);
 
   const onOpen = useCallback(
-    (id: string) => {
+    (id: string, listId?: string) => {
       lastOpened.current = id;
-      openTask(router, id);
+      // A linked task opens in the List it is shown in.
+      openTask(router, id, listId ? { listId } : undefined);
     },
     [router],
   );
@@ -290,8 +298,12 @@ export function SpaceBirdseye({
   }, [applyItemEvent, applyItemCreated]);
 
   const { changeStatus } = data;
-  const onChangeStatus = useCallback((card: BirdseyeCard, next: string) => void changeStatus(card, next), [changeStatus]);
-  const actions: CardActions = { now, onOpen, onChangeStatus, onLoadSubtasks: loadSubtasks };
+  const onChangeStatus = useCallback(
+    (card: BirdseyeCard, next: string, pick?: StatusPick) => void changeStatus(card, next, pick),
+    [changeStatus],
+  );
+  const onLoadSubtasks = useCallback((listId: string, id: string) => void loadSubtasks(listId, id), [loadSubtasks]);
+  const actions: CardActions = { now, onOpen, onChangeStatus, onLoadSubtasks };
 
   // ── Render ────────────────────────────────────────────────────────
   const toolbar = (
@@ -314,8 +326,8 @@ export function SpaceBirdseye({
         <OsEmptyView
           context="board"
           title="No Lists to show here yet"
-          hint="Lists you can open in this Space show up here."
-          action={canCreateList ? { label: "New List", onClick: () => openCreateList({ spaceId }) } : undefined}
+          hint={folderId ? "Lists you can open in this Folder and its sub-folders show up here." : "Lists you can open in this Space show up here."}
+          action={canCreateList ? { label: "New List", onClick: () => openCreateList(folderId ? { spaceId, folderId } : { spaceId }) } : undefined}
         />
       ) : (
         <>
@@ -354,6 +366,7 @@ export function SpaceBirdseye({
               onLoadMore={data.loadMore}
               onCreate={data.createTask}
               onRetry={data.reload}
+              onReorder={data.reorderCard}
             />
           ) : null}
         </>
