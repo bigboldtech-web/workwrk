@@ -91,9 +91,9 @@ async function loadKras(): Promise<KraLite[]> {
 // a USER or PEOPLE field still offered one candidate, and, worse, in READ-ONLY
 // mode a colleague outside the viewer's report tree could not be DISPLAYED at
 // all: UserValue renders a permanent "Loading" and PeopleValue drops the
-// avatar. With a board in scope the roster comes from that List. The org-wide
-// fallback stays for the surfaces that have no List (it is what every one of
-// them used before), under its own cache key.
+// avatar. With a board in scope the roster comes from that List. Surfaces
+// with no List read the whole workspace (/api/people/pick, everyone who can
+// sign in), under its own cache key.
 const ORG_SCOPE = "__org__";
 const _usersCache = new Map<string, { items: PersonRef[]; loadedAt: number }>();
 const _usersPromise = new Map<string, Promise<PersonRef[]>>();
@@ -107,11 +107,12 @@ async function loadUsers(boardId: string | null): Promise<PersonRef[]> {
   const run = (async () => {
     const url = boardId
       ? `/api/boards/${encodeURIComponent(boardId)}/assignable?limit=200`
-      : "/api/users?scope=all&limit=200";
+      : "/api/people/pick?includeSelf=1&reach=signin&limit=50";
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return [];
     const data = await res.json();
-    const items: PersonRef[] = Array.isArray(data?.data) ? data.data : [];
+    // The List roster answers { data }, the workspace picker { people }.
+    const items: PersonRef[] = Array.isArray(data?.data) ? data.data : Array.isArray(data?.people) ? data.people : [];
     _usersCache.set(key, { items, loadedAt: Date.now() });
     return items;
   })();

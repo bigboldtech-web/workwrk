@@ -1109,23 +1109,27 @@ function GroupBulkAdd({ kind, roleLabel, grantOne }: BulkAddProps & { kind: "dep
     return () => { alive = false; clearTimeout(t); };
   }, [kind, reload]);
 
-  // Only people who can sign in are added: an inactive account would stop the
-  // run on a person who could never open the Space anyway.
+  // The whole group, from the directory (scope=directory: every Member reads
+  // the whole workspace, filtered by department or office on the server, 100
+  // a page), never /api/users?scope=all, whose team scope answered a Space
+  // admin below org-wide levels with only their own reports in the group,
+  // and stopped at 200. Only people who can sign in are added (the
+  // directory leaves deactivated people out): an inactive account would stop
+  // the run on a person who could never open the Space anyway.
   const membersOf = async (g: GroupRow): Promise<BulkPerson[]> => {
-    const url = kind === "department"
-      ? `/api/users?scope=all&departmentId=${encodeURIComponent(g.id)}&limit=200`
-      : "/api/users?scope=all&limit=200";
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    const rows: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string; officeId?: string | null; office?: { id?: string } | null }> =
-      Array.isArray(data?.data) ? data.data : [];
-    return rows
-      .filter((u) => u.status !== "INACTIVE")
-      // /api/users filters by department on the server; an office is matched
-      // here, from whichever office field the payload carries.
-      .filter((u) => kind === "department" || (u.officeId ?? u.office?.id ?? null) === g.id)
-      .map((u) => ({ id: u.id, name: personLabelOf(u) }));
+    const out: BulkPerson[] = [];
+    for (let page = 1; page <= 1000; page++) {
+      const qs = new URLSearchParams({ scope: "directory", size: "100", page: String(page) });
+      qs.set(kind === "department" ? "dept" : "office", g.id);
+      const res = await fetch(`/api/users?${qs}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      const rows: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string }> =
+        Array.isArray(data?.data) ? data.data : [];
+      for (const u of rows) if (u.status !== "INACTIVE") out.push({ id: u.id, name: personLabelOf(u) });
+      if (!data?.pagination?.hasMore) break;
+    }
+    return out;
   };
 
   const drain = async (start: BulkRun) => {

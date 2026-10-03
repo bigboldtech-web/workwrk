@@ -11,14 +11,11 @@
 // what it is, when, how long, who is in it and what it is about, and the
 // navigation is a client push.
 //
-// THE PEOPLE PICKER reads GET /api/users?scope=all, the same endpoint every
-// other people picker in this product reads (the share dialogs, the create
-// task modal, the mention typeahead). spec-planner names a future
-// GET /api/people/pick; it does not exist, and inventing a second directory
-// endpoint for one modal is how two directories that disagree get built.
-// The endpoint narrows to the caller's team for a non org-wide caller,
-// which is its own rule and is the same narrowing every other picker here
-// already has.
+// THE PEOPLE PICKER reads GET /api/people/pick (usePeoplePicker), the read
+// spec-planner names: active people in the whole workspace, searched as the
+// person types. It used to read /api/users?scope=all, which answers anybody
+// below an org-wide level with their own report tree, so an Employee could
+// invite nobody but themselves to a meeting.
 //
 // A FAILED CREATE KEEPS THE MODAL OPEN with everything typed and a Retry.
 // Losing a filled-in form to a toast that fades is the exact save-path
@@ -36,7 +33,7 @@ import {
 import { Picker, type PickerOption } from "@/components/ui/picker";
 import { DateTimeField } from "@/components/ui/date-time-field";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
+import { apiFetchWithRetry } from "@/lib/api-fetch";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { zonedInputToIso, zonedInputValue } from "@/lib/zoned-input";
 import {
@@ -45,6 +42,8 @@ import {
   type MeetingTypeWord,
 } from "@/lib/meeting-type";
 import { MEETING_LENGTHS } from "@/lib/meeting-list";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 
 type UserLite = { id: string; firstName?: string | null; lastName?: string | null; email?: string | null };
 
@@ -85,7 +84,6 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
   const [customLength, setCustomLength] = useState("");
   const [agenda, setAgenda] = useState("");
   const [people, setPeople] = useState<string[]>([]);
-  const [users, setUsers] = useState<UserLite[] | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -109,27 +107,17 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
     return () => clearTimeout(t);
   }, [open, initialStart, tz]);
 
-  useEffect(() => {
-    if (!open || users !== null) return;
-    let alive = true;
-    void (async () => {
-      const r = await apiFetch<{ data?: UserLite[] } | UserLite[]>("/api/users?scope=all&limit=200");
-      if (!alive) return;
-      const raw = r.ok ? (r.data as Record<string, unknown>) : {};
-      const list = (Array.isArray(raw) ? raw : (raw.data as UserLite[] | undefined)) ?? [];
-      setUsers(list);
-    })();
-    return () => { alive = false; };
-  }, [open, users]);
-
+  // You are always in your own meeting, so the picker never offers you.
+  // Read while the Attendees picker is open, from an empty search each time.
+  const picker = usePeoplePicker({ enabled: open && peopleOpen, reach: "active", includeSelf: false, named: people });
   const peopleOptions = useMemo<PickerOption[]>(
-    () => (users ?? []).map((u) => ({
+    () => picker.people.map((u) => ({
       value: u.id,
       label: fullName(u),
       description: u.email ?? undefined,
       keywords: u.email ?? undefined,
     })),
-    [users],
+    [picker.people],
   );
 
   const minutes = length === -1 ? Number(customLength) : length;
@@ -176,9 +164,7 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
     onCreated(made.id);
   }
 
-  const chosenNames = people
-    .map((id) => peopleOptions.find((o) => o.value === id)?.label)
-    .filter(Boolean) as string[];
+  const chosenNames = people.map((id) => picker.nameOf(id));
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v && !saving) onClose(); }}>
@@ -279,9 +265,13 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
             ariaLabel="Attendees"
             searchPlaceholder="Search people"
             selected={people}
+            alwaysSearch
+            onSearchChange={picker.setQuery}
+            loading={picker.loading && peopleOptions.length === 0}
             sections={[{ options: peopleOptions }]}
             onSelect={(v) => setPeople((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
-            emptyLabel={users === null ? "Loading people" : "Nobody to add"}
+            emptyLabel={peopleEmptyLabel(picker, "Nobody to add")}
+            footer={peopleFailedFooter(picker)}
           />
           <span className="text-sm text-ink-3">
             You are always in your own meeting. A video room is created with it.

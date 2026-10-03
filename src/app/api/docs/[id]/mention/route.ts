@@ -20,6 +20,7 @@ import { usersWhoCanRead } from "@/lib/access/node-access";
 import { addressHref } from "@/lib/nav/object-href";
 
 const bodySchema = z.object({ userId: z.string().min(1) });
+const MENTION_REPEAT_MS = 5 * 60 * 1000;
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
@@ -56,6 +57,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const wanted = await filterNotifyUsers([target.id], "mentions");
   if (wanted.size === 0) return NextResponse.json({ ok: true, skipped: "muted" });
+
+  // One notice per person and doc a few minutes apart: a writer who mentions
+  // them twice in a row, or the editor trying again after a lost answer,
+  // never tells them twice.
+  const recent = await prisma.notification.findFirst({
+    where: {
+      userId: target.id,
+      type: "mention",
+      link: addressHref("doc", doc.id, { scope: "work" }),
+      createdAt: { gte: new Date(Date.now() - MENTION_REPEAT_MS) },
+    },
+    select: { id: true },
+  });
+  if (recent) return NextResponse.json({ ok: true, skipped: "recent" });
 
   const author = await prisma.user.findUnique({
     where: { id: ctx.userId },

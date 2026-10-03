@@ -43,6 +43,7 @@ import { SplitPrimary } from "@/components/ui/split-primary";
 import { StatusChip } from "@/components/ui/chip";
 import { DateField } from "@/components/ui/date-field";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { SopKindChooser, sopKinds } from "@/components/sops/sop-kind-chooser";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { useRole } from "@/lib/access/use-legacy-permissions";
@@ -173,22 +174,19 @@ export default function SopsPage() {
   const [displayOpen, setDisplayOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [folders, setFolders] = useState<FolderNode[] | null>(null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   const [tagList, setTagList] = useState<Array<{ name: string; count: number }>>([]);
   const [kras, setKras] = useState<Array<{ id: string; name: string }>>([]);
   useEffect(() => {
     if (!filterOpen || folders !== null) return;
     let live = true;
     void (async () => {
-      const [f, p, t, k] = await Promise.all([
+      const [f, t, k] = await Promise.all([
         apiFetch<FolderNode[] | { data?: FolderNode[] }>("/api/sop-folders", { cache: "no-store" }),
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=200", { cache: "no-store" }),
         apiFetch<Array<{ name: string; count: number }> | { data?: Array<{ name: string; count: number }> }>("/api/sop-tags", { cache: "no-store" }),
         apiFetch<{ data?: Array<{ id: string; name: string }> } | Array<{ id: string; name: string }>>("/api/kras?limit=200", { cache: "no-store" }),
       ]);
       if (!live) return;
       setFolders(f.ok ? (Array.isArray(f.data) ? f.data : f.data?.data ?? []) : []);
-      setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []);
       setTagList(t.ok ? (Array.isArray(t.data) ? t.data : t.data?.data ?? []) : []);
       setKras(k.ok ? (Array.isArray(k.data) ? k.data : k.data?.data ?? []) : []);
     })();
@@ -457,14 +455,8 @@ export default function SopsPage() {
             </FilterGroup>
           ) : null}
           <FilterGroup label="Owner">
-            <FilterRow label="Filter by owner" checked={!!query.ownerId} onCheckedChange={(on) => { if (!on) setParams({ ownerId: null }); else setOwnerOpen(true); }}>
-              <span className="relative block">
-                <button type="button" onClick={() => setOwnerOpen((o) => !o)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
-                  {query.ownerId ? personName(people.find((p) => p.id === query.ownerId)) || "1 person" : <span className="text-ink-3">Choose a person</span>}
-                </button>
-                <Picker open={ownerOpen} onClose={() => setOwnerOpen(false)} ariaLabel="Owner" searchPlaceholder="Find a person" selected={query.ownerId} onSelect={(v) => { setParams({ ownerId: v }); setOwnerOpen(false); }}
-                  sections={[{ options: people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })) }]} />
-              </span>
+            <FilterRow label="Filter by owner" checked={!!query.ownerId || ownerOpen} onCheckedChange={(on) => { if (!on) { setParams({ ownerId: null }); setOwnerOpen(false); } else setOwnerOpen(true); }}>
+              <PersonFilterPick ariaLabel="Owner" value={query.ownerId ?? null} onChange={(v) => setParams({ ownerId: v })} open={ownerOpen} setOpen={setOwnerOpen} />
             </FilterRow>
           </FilterGroup>
           {kras.length > 0 ? (

@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManage
 import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
+import { employedAmong } from "@/lib/people/employed.server";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { sopId, userIds, departmentId, dueDate, mandatory } = body;
+  const { sopId, userIds, departmentId, all, dueDate, mandatory } = body;
 
   if (!sopId) return jsonError("sopId is required");
 
@@ -110,19 +111,36 @@ export async function POST(req: NextRequest) {
     stepsTotal = sections.reduce((sum, s) => sum + (s?.steps?.length || 0), 0);
   }
 
-  // Resolve user IDs — either from userIds array or from departmentId
-  let resolvedUserIds: string[] = userIds || [];
+  // Resolve user IDs — either from userIds array or from departmentId. The
+  // people named are kept only while they can still be given work here:
+  // never someone deactivated or removed, never an id from another workspace.
+  let resolvedUserIds: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
 
   if (departmentId) {
     const deptUsers = await prisma.user.findMany({
-      where: { departmentId, organizationId: orgId, status: "ACTIVE" },
+      // Everyone in it who can sign in (on leave or on probation included), never someone removed.
+      where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null },
       select: { id: true },
     });
     resolvedUserIds = [...new Set([...resolvedUserIds, ...deptUsers.map((u) => u.id)])];
   }
 
+  // Everyone, resolved here rather than by the dialog, so it is never cut at
+  // the dialog's page of people (the governance rule below still narrows a
+  // manager to their reports).
+  if (all === true) {
+    const everyone = await prisma.user.findMany({
+      where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null },
+      select: { id: true },
+    });
+    resolvedUserIds = [...new Set([...resolvedUserIds, ...everyone.map((u) => u.id)])];
+  }
+
   if (resolvedUserIds.length === 0) {
-    return jsonError("No users specified. Provide userIds[] or departmentId");
+    if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {
+      return jsonError("No one you chose can be given work here: they were deactivated or are not in this workspace.");
+    }
+    return jsonError("No users specified. Provide userIds[], departmentId or all:true");
   }
 
   // Governance: managers may only assign SOPs to people in their own
@@ -137,6 +155,14 @@ export async function POST(req: NextRequest) {
       return jsonError("You can only assign SOPs to people who report to you.", 403);
     }
   }
+
+  // People who already hold this SOP keep their assignment as it is and are
+  // not told again.
+  const already = new Set(
+    (await prisma.sOPAssignment.findMany({ where: { sopId, userId: { in: resolvedUserIds } }, select: { userId: true } })).map((a) => a.userId),
+  );
+  resolvedUserIds = resolvedUserIds.filter((uid) => !already.has(uid));
+  if (resolvedUserIds.length === 0) return jsonSuccess({ message: "Everyone chosen already has this SOP", count: 0 }, 200);
 
   const assignerId = getUserId(session);
   const data = resolvedUserIds.map((uid: string) => ({

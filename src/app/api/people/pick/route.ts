@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { orgRoleOf } from "@/lib/access/org-role";
+import { viewerForUser } from "@/lib/access/viewer";
 
 // GET /api/people/pick?q=, "who can I pick", for every people picker that
 // needs the WHOLE company rather than a management tree.
@@ -33,8 +34,19 @@ import { orgRoleOf } from "@/lib/access/org-role";
 // in, so a person on leave, on probation, on a PIP or serving notice can
 // still be given access (only INACTIVE people cannot sign in). Without it the
 // picker lists ACTIVE people, as every other picker always has.
+//
+// ?reach=all is a filter's picker ("Owner" on a hub): for the Owner, an Admin
+// and the People team it also lists deactivated people, as the directory's
+// Deactivated filter does for them, so they can still find what someone who
+// left owns. For everyone else it is reach=signin.
 
 const LIMIT = 20;
+
+/** The directory's privileged readers (Owner, Admin, the People team), who may see deactivated people. */
+async function seesDeactivated(orgId: string, userId: string): Promise<boolean> {
+  const viewer = await viewerForUser(orgId, userId);
+  return !!viewer && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
+}
 const MAX_WORDS = 6;
 
 export async function GET(req: NextRequest) {
@@ -51,7 +63,9 @@ export async function GET(req: NextRequest) {
   // A picker that already holds somebody does not want to offer them again.
   const exclude = (searchParams.get("exclude") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const includeSelf = searchParams.get("includeSelf") === "1";
-  const signIn = searchParams.get("reach") === "signin";
+  const reachParam = searchParams.get("reach");
+  const signIn = reachParam === "signin" || reachParam === "all";
+  const deactivatedToo = reachParam === "all" && (await seesDeactivated(orgId, userId));
   // ?managers=1 is the Reports to and dotted-line picker: an Agent can never
   // be anyone's manager (access 2.4), so they are not offered.
   const managersOnly = searchParams.get("managers") === "1";
@@ -72,15 +86,16 @@ export async function GET(req: NextRequest) {
   // first page of people, and a colleague further down must still read by
   // name, never as gone. Everyone who can sign in, as reach=signin offers; a
   // person who can no longer sign in is not returned, so the picker says
-  // they are no longer here. A Guest still reads only the people they share
-  // a conversation with.
+  // they are no longer here, unless reach=all asks for deactivated people
+  // too and the caller may see them (a filter or a cell naming someone who
+  // left). A Guest still reads only the people they share a conversation with.
   const ids = [...new Set((searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 50);
   if (ids.length > 0) {
     const named = await prisma.user.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
-        status: { not: "INACTIVE" as const },
+        ...(deactivatedToo ? {} : { status: { not: "INACTIVE" as const } }),
         AND: [{ id: { in: ids } }, ...(visibleIds ? [{ id: { in: visibleIds } }] : [])],
       },
       take: ids.length,
@@ -120,7 +135,7 @@ export async function GET(req: NextRequest) {
     where: {
       organizationId: orgId,
       deletedAt: null,
-      ...(signIn ? { status: { not: "INACTIVE" as const } } : { status: "ACTIVE" as const }),
+      ...(deactivatedToo ? {} : signIn ? { status: { not: "INACTIVE" as const } } : { status: "ACTIVE" as const }),
       ...(idRules.length > 0 ? { AND: idRules } : {}),
     },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],

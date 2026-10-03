@@ -2,12 +2,12 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
-import { getTeamUserIds } from "@/lib/team";
 import { logActivity } from "@/lib/activity";
-import { canManageRun } from "@/lib/process-run-access";
+import { canManageRun, mayGiveRunTo, runTeamIds } from "@/lib/process-run-access";
 import crypto from "crypto";
 import { allowedRunsViews, effectiveRunStatus, isRunStatus, parseRunsSort, type RunsView } from "@/lib/process-runs";
 import { runProgress } from "@/lib/sop-kind";
+import { employedAmong } from "@/lib/people/employed.server";
 
 const ORG_WIDE = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
@@ -45,7 +45,12 @@ export async function GET(req: NextRequest) {
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
   const sp = new URL(req.url).searchParams;
-  const { viewer } = viewerOf(session as { user: { accessLevel?: string } });
+  const { orgWide, viewer: byLevel } = viewerOf(session as { user: { accessLevel?: string } });
+  // Team runs is for anyone with reports, solid or dotted, whatever their
+  // level (canManageRun reads the same tree), so a lead below manager level
+  // sees the runs they started for their reports.
+  const team = orgWide ? null : await runTeamIds(orgId, callerId);
+  const viewer = byLevel.hasReports || !team ? byLevel : { ...byLevel, hasReports: team.length > 1 };
   const allowed = allowedRunsViews(viewer);
 
   const requestedRaw = sp.get("scope");
@@ -81,7 +86,7 @@ export async function GET(req: NextRequest) {
   if (started) where.startedAt = started;
 
   if (scope !== "all") {
-    const userIds = scope === "team" ? await getTeamUserIds(orgId, callerId) : [callerId];
+    const userIds = scope === "team" ? team ?? (await runTeamIds(orgId, callerId)) : [callerId];
     // An explicit ?assigneeId= narrows INSIDE the scope; someone outside the
     // viewer's report tree yields no rows rather than widening the scope.
     where.assigneeId = assigneeId && scope === "team" ? { in: userIds.includes(assigneeId) ? [assigneeId] : [] } : { in: userIds };
@@ -180,6 +185,16 @@ export async function POST(req: NextRequest) {
   // The picker returns null for "Anyone with the link"; the retired "none"
   // sentinel is still folded to null so an older client cannot write it.
   const assignee = typeof assigneeId === "string" && assigneeId && assigneeId !== "none" ? assigneeId : null;
+  // A run goes only to someone in this workspace who can still be given work:
+  // never an id from elsewhere, never a colleague who was deactivated.
+  if (assignee && (await employedAmong(orgId, [assignee])).length === 0) {
+    return jsonError("That person can't be given a run. Choose someone else.", 400);
+  }
+  // ...and only to yourself or someone in your report tree, unless you are
+  // org-wide: the people Start run offers.
+  if (assignee && !(await mayGiveRunTo(session as { user: { accessLevel?: string } }, orgId, getUserId(session), assignee))) {
+    return jsonError("You can start a run only for yourself or someone who reports to you.", 403);
+  }
 
   const run = await prisma.processRun.create({
     data: {

@@ -9,7 +9,7 @@
 // Posts to POST /api/spaces with the assembled payload. On success it
 // calls onCreated(space) so the caller can refresh the sidebar tree.
 
-import { useEffect, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
 import { SpaceWizardStep2, type Step2SubScreen, type UserOption } from "./space-wizard-step2";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
 import { workflowFromPreset } from "./space-wizard-presets";
 import type { WorkflowConfig } from "./space-wizard-types";
 import type { Visibility } from "@/generated/prisma";
@@ -72,27 +73,14 @@ export function NewSpaceDialog({
   const [state, setState] = useState<WizardState>(INITIAL);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserOption[]>([]);
-  // Loading flag defaults to true so the very first paint of Step 2
-  // shows the loading state without a synchronous setState in the effect.
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const fetchedRef = useRef(false);
-
-  useEffect(() => {
-    if (state.step !== 2 || fetchedRef.current) return;
-    fetchedRef.current = true;
-    let active = true;
-    fetch("/api/users?scope=all&limit=200")
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return;
-        const rows: UserOption[] = Array.isArray(data?.data) ? data.data : [];
-        setUsers(rows);
-      })
-      .catch(() => { if (active) setUsers([]); })
-      .finally(() => { if (active) setLoadingUsers(false); });
-    return () => { active = false; };
-  }, [state.step]);
+  // The Space owner can be anyone in the workspace who can sign in, searched
+  // as the person types (usePeoplePicker), never only the creator's own
+  // report tree, which is what /api/users answered below org-wide levels.
+  const ownerPicker = usePeoplePicker({ enabled: state.step === 2 && state.subScreen === "owner", reach: "signin", named: state.workflow.ownerId ? [state.workflow.ownerId] : [] });
+  const users = useMemo<UserOption[]>(
+    () => ownerPicker.people.map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email ?? "", avatar: p.avatar, role: p.role ?? null })),
+    [ownerPicker.people],
+  );
 
   const set = <K extends keyof WizardState>(key: K, value: WizardState[K]) =>
     setState((s) => ({ ...s, [key]: value }));
@@ -101,9 +89,6 @@ export function NewSpaceDialog({
     setState(INITIAL);
     setError(null);
     setSubmitting(false);
-    setLoadingUsers(true);
-    setUsers([]);
-    fetchedRef.current = false;
   };
 
   const handleOpen = (next: boolean) => {
@@ -186,7 +171,11 @@ export function NewSpaceDialog({
             error={error}
             submitting={submitting}
             users={users}
-            loadingUsers={loadingUsers}
+            loadingUsers={ownerPicker.loading && users.length === 0}
+            onSearchUsers={ownerPicker.setQuery}
+            usersFailed={ownerPicker.failed}
+            onRetryUsers={ownerPicker.retry}
+            ownerName={state.workflow.ownerId ? ownerPicker.nameOf(state.workflow.ownerId, "Selected") : null}
             onChange={(w) => set("workflow", w)}
             onSubScreen={(s) => set("subScreen", s)}
             onBack={() => set("step", 1)}

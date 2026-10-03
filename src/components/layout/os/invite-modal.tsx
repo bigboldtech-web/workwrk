@@ -29,6 +29,7 @@ import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { useOsToast } from "./toast";
 import { useViewerRole } from "./boot-context";
 import { Dots } from "@/components/ui/dots";
+import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 
 interface DeptOption {
   id: string;
@@ -38,18 +39,6 @@ interface DeptOption {
 interface RoleOption {
   id: string;
   title: string;
-}
-
-interface PersonOption {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  email: string;
-}
-
-function personLabel(p: PersonOption): string {
-  const name = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
-  return name || p.email;
 }
 
 interface Props {
@@ -186,7 +175,7 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
   // accept-invite seed KRA weightage from the role's weights.
   const [depts, setDepts] = useState<DeptOption[] | null>(null);
   const [roles, setRoles] = useState<RoleOption[] | null>(null);
-  const [people, setPeople] = useState<PersonOption[] | null>(null);
+  const [managerCard, setManagerCard] = useState<PickPerson | null>(null);
   const [departmentId, setDepartmentId] = useState("");
   const [roleId, setRoleId] = useState("");
   const [managerId, setManagerId] = useState("");
@@ -204,10 +193,6 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setRoles(Array.isArray(d) ? (d as RoleOption[]) : []))
       .catch(() => setRoles([]));
-    fetch("/api/users?scope=all&limit=200")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setPeople((d?.data as PersonOption[]) ?? []))
-      .catch(() => setPeople([]));
   }, [open]);
 
 
@@ -221,6 +206,7 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
     setDepartmentId("");
     setRoleId("");
     setManagerId("");
+    setManagerCard(null);
     setSending(false);
   }, []);
 
@@ -452,18 +438,17 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
           <label className="mb-1 block text-sm font-medium text-zinc-500">
             Reporting manager <span className="font-normal normal-case text-zinc-400">(optional)</span>
           </label>
-          <select
-            value={managerId}
-            onChange={(e) => setManagerId(e.target.value)}
-            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-base text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
-          >
-            <option value="">No manager</option>
-            {(people ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {personLabel(p)}
-              </option>
-            ))}
-          </select>
+          {/* Anyone in the workspace who can be a manager, searched as the
+              person types (/api/people/pick?managers=1), never a list of the
+              inviter's own reports stopped at 200. */}
+          <PeoplePickerField
+            ariaLabel="Reporting manager"
+            placeholder="No manager"
+            managersOnly
+            value={managerId ? [managerId] : []}
+            people={managerCard ? [managerCard] : []}
+            onChange={(ids, picked) => { setManagerId(ids[0] ?? ""); setManagerCard(picked[0] ?? null); }}
+          />
         </div>
 
         <p className="text-xs text-zinc-500">

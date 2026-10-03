@@ -17,6 +17,7 @@ import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-p
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 
 type Audience = "everyone" | "department" | "people";
 type Dept = { id: string; name: string; _count?: { members?: number } };
@@ -56,23 +57,54 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     if (open) { setAudience("people"); setSelected([]); setDeptId(null); setDueDate(defaults?.dueDate?.slice(0, 10) ?? ""); setMandatory(defaults?.mandatory ?? true); }
   }
 
+  // The people an assigner may reach, as the APIs decide it (/api/users
+  // answers a manager with their reports and an org-wide assigner with
+  // everyone): a first page, grown by a search on the server as the person
+  // types, so a large workspace is never cut at one page.
+  const [peopleQuery, setPeopleQuery] = useState("");
+  // A failed read says so with Try again: an empty list never stands in for "no one".
+  const [peopleFailed, setPeopleFailed] = useState(false);
+  const [peopleAttempt, setPeopleAttempt] = useState(0);
+  const mergePeople = (got: PersonRef[]) => setPeople((prev) => {
+    const byId = new Map(prev.map((p) => [p.id, p]));
+    for (const p of got) byId.set(p.id, p);
+    return [...byId.values()];
+  });
   useEffect(() => {
     if (!open) return;
     let live = true;
     void (async () => {
+      // ?employed=1: never someone deactivated (the server keeps to the same rule).
       const [p, d] = await Promise.all([
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=500", { cache: "no-store" }),
+        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&employed=1&limit=100", { cache: "no-store" }),
         apiFetch<Dept[] | { data?: Dept[] }>("/api/departments", { cache: "no-store" }),
       ]);
       if (!live) return;
-      setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []);
+      if (p.ok) mergePeople(Array.isArray(p.data) ? p.data : p.data?.data ?? []);
+      setPeopleFailed(!p.ok);
       setDepts(d.ok ? (Array.isArray(d.data) ? d.data : d.data?.data ?? []) : []);
     })();
     return () => { live = false; };
-  }, [open]);
+  }, [open, peopleAttempt]);
+  useEffect(() => {
+    const q = peopleQuery.trim();
+    if (!open || !q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ data?: PersonRef[] } | PersonRef[]>(`/api/users?scope=all&employed=1&limit=50&search=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok) mergePeople(Array.isArray(r.data) ? r.data : r.data?.data ?? []);
+        setPeopleFailed(!r.ok);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, peopleQuery, peopleAttempt]);
+  const matchesQuery = (p: PersonRef) => {
+    const words = peopleQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const fields = [p.firstName ?? "", p.lastName ?? "", p.email ?? ""].map((f) => f.toLowerCase());
+    return words.every((w) => fields.some((f) => f.includes(w)));
+  };
 
   const already = useMemo(() => new Set(alreadyAssigned), [alreadyAssigned]);
-  const options: PickerOption[] = people.map((p) => ({
+  const options: PickerOption[] = people.filter(matchesQuery).map((p) => ({
     value: p.id,
     label: personName(p),
     description: already.has(p.id) ? "Already assigned" : p.email ?? undefined,
@@ -91,12 +123,13 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     const url = isSop ? "/api/sop-assignments" : `/api/policies/${object.id}/assignments`;
     const body: Record<string, unknown> = { dueDate: dueDate || undefined, mandatory };
     if (isSop) body.sopId = object.id;
+    // Everyone and a Department are resolved by the API (and narrowed to a
+    // manager's reports there), never from the people this dialog loaded,
+    // which stopped at one page in a large workspace.
     if (audience === "everyone") {
-      if (isSop) body.userIds = people.filter((p) => !already.has(p.id)).map((p) => p.id);
-      else body.all = true;
+      body.all = true;
     } else if (audience === "department") {
-      if (isSop) body.departmentId = deptId;
-      else body.userIds = people.filter((p) => (p as { department?: { id?: string } }).department?.id === deptId && !already.has(p.id)).map((p) => p.id);
+      body.departmentId = deptId;
     } else {
       body.userIds = selected;
     }
@@ -104,7 +137,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     setBusy(false);
     if (!r.ok) { toast(r.error || "Couldn't assign", { tone: "danger" }); return; }
     const count = r.data?.count ?? r.data?.data?.count ?? (audience === "people" ? selected.length : 0);
-    toast(count ? `Assigned to ${count} ${count === 1 ? "person" : "people"}` : "Assigned");
+    toast(count ? `Assigned to ${count} ${count === 1 ? "person" : "people"}` : "Everyone chosen already has it. Nothing new was assigned.");
     onAssigned?.(count);
     onClose();
   }
@@ -141,7 +174,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
             <div className="flex flex-col gap-1">
               <span className={LABEL}>People</span>
               <span className="relative block">
-                <button type="button" onClick={() => setPickOpen((o) => !o)} className={`${FIELD} flex min-h-9 h-auto flex-wrap items-center gap-1.5 py-1 text-start`}>
+                <button type="button" onClick={() => { setPeopleQuery(""); setPickOpen((o) => !o); }} className={`${FIELD} flex min-h-9 h-auto flex-wrap items-center gap-1.5 py-1 text-start`}>
                   {chosen.length === 0 ? <span className="text-ink-3">Choose people</span> : chosen.map((p) => (
                     <span key={p.id} className="inline-flex h-6 items-center gap-1 rounded-md bg-active px-1.5 text-xs font-medium text-ink">
                       <PersonAvatar person={p} size={16} />{personName(p)}
@@ -149,7 +182,8 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
                     </span>
                   ))}
                 </button>
-                <Picker open={pickOpen} onClose={() => setPickOpen(false)} ariaLabel="People" searchPlaceholder="Find a person" multi selected={selected}
+                <Picker open={pickOpen} onClose={() => setPickOpen(false)} ariaLabel="People" searchPlaceholder="Find a person" multi alwaysSearch onSearchChange={setPeopleQuery} selected={selected}
+                  emptyLabel={peopleEmptyLabel({ failed: peopleFailed, query: peopleQuery })} footer={peopleFailedFooter({ failed: peopleFailed, retry: () => setPeopleAttempt((v) => v + 1) })}
                   onSelect={(v) => setSelected((s) => (s.includes(v) ? s.filter((id) => id !== v) : [...s, v]))} sections={[{ options }]} width={320} />
               </span>
             </div>

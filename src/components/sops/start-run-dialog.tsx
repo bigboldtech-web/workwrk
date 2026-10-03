@@ -14,6 +14,8 @@ import { Picker, type PickerOption } from "@/components/ui/picker";
 import { DateField } from "@/components/ui/date-field";
 import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
+import { peopleEmptyLabel, peopleFailedFooter } from "@/components/people/people-picker-feedback";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
@@ -51,8 +53,12 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
   const [sopOpen, setSopOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<string | null>(defaultAssigneeId ?? null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  // Assign to someone the run will stay visible to: a run is read by its
+  // assignee, their manager chain and org-wide roles, so the list is the
+  // starter's report tree (everyone for an org-wide level), searched on the
+  // server as the person types, from an empty search each time it opens.
+  const picker = usePeoplePicker({ enabled: open && peopleOpen, source: "team", named: assigneeId ? [assigneeId] : [] });
   const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -73,10 +79,6 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
     if (!open) return;
     let live = true;
     void (async () => {
-      const p = await apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=200", { cache: "no-store" });
-      if (!live) return;
-      const list = p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : [];
-      setPeople(list);
       if (!sop) {
         const s = await apiFetch<{ data: Array<{ id: string; title: string }> }>("/api/sops?view=published&kind=checklist&pageSize=100", { cache: "no-store" });
         if (!live) return;
@@ -87,10 +89,11 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
   }, [open, sop]);
 
   const placeholder = useMemo(() => (sopTitle ? `${sopTitle} · ${fmt.date(new Date(), "date")}` : ""), [sopTitle, fmt]);
-  const assignee = people.find((p) => p.id === assigneeId) ?? null;
+  const assignee = assigneeId ? picker.person(assigneeId) ?? null : null;
+  const q = picker.query.trim().toLowerCase();
   const peopleOptions: PickerOption[] = [
-    { value: "__anyone__", label: "Anyone with the link", description: "No assignee; whoever opens the link runs it" },
-    ...people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })),
+    ...(!q || "anyone with the link".includes(q) ? [{ value: "__anyone__", label: "Anyone with the link", description: "No assignee; whoever opens the link runs it" }] : []),
+    ...picker.people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })),
   ];
 
   async function start() {
@@ -135,9 +138,10 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
             <span className={LABEL}>Assign to</span>
             <span className="relative block">
               <button type="button" onClick={() => setPeopleOpen((o) => !o)} className={`${FIELD} flex items-center gap-2 text-start`}>
-                {assignee ? <><PersonAvatar person={assignee} size={20} />{personName(assignee)}</> : <span className="text-ink-2">Anyone with the link</span>}
+                {assignee ? <><PersonAvatar person={assignee} size={20} />{personName(assignee)}</> : assigneeId ? <span className="text-ink-2">{picker.nameOf(assigneeId)}</span> : <span className="text-ink-2">Anyone with the link</span>}
               </button>
-              <Picker open={peopleOpen} onClose={() => setPeopleOpen(false)} ariaLabel="Assign to" searchPlaceholder="Find a person" selected={assigneeId ?? "__anyone__"}
+              <Picker open={peopleOpen} onClose={() => setPeopleOpen(false)} ariaLabel="Assign to" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && picker.people.length === 0} selected={assigneeId ?? "__anyone__"}
+                emptyLabel={peopleEmptyLabel(picker)} footer={peopleFailedFooter(picker)}
                 onSelect={(v) => { setAssigneeId(v === "__anyone__" ? null : v); setPeopleOpen(false); }} sections={[{ options: peopleOptions }]} width={320} />
             </span>
           </label>

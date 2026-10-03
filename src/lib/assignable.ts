@@ -52,10 +52,16 @@ export interface AssignableUser {
 }
 
 export interface AssignableQuery {
-  /** Free-text match on first / last / email. */
+  /** Free-text match on first / last / email, word by word. */
   search?: string;
   /** Hard cap on rows returned. */
   limit?: number;
+  /**
+   * Only these people: which of them are on the roster. A roster of a List
+   * open to a whole large workspace is answered a page at a time, so "is
+   * this person on it" is asked by id, never read from the first page.
+   */
+  ids?: readonly string[];
   /**
    * Include the email address on each row.
    *
@@ -161,8 +167,12 @@ export async function listAssignableUsersForBoard(
   query: AssignableQuery = {},
   viewer: NodeCtx | null = null,
 ): Promise<AssignableUser[]> {
-  const limit = Math.min(Math.max(query.limit ?? 100, 1), 200);
-  const search = query.search?.trim() ?? "";
+  const ids = query.ids ? [...new Set(query.ids.filter((x) => typeof x === "string" && x.length > 0 && x.length <= 64))].slice(0, 200) : null;
+  if (ids && ids.length === 0) return [];
+  const limit = ids ? ids.length : Math.min(Math.max(query.limit ?? 100, 1), 200);
+  // Word by word, as /api/people/pick matches: "Zoe Young" lives in two
+  // columns, and one `contains` over the whole text matched neither.
+  const words = (query.search ?? "").split(/\s+/).filter(Boolean).slice(0, 6);
 
   const board = await prisma.board.findUnique({
     where: { id: boardId },
@@ -170,7 +180,9 @@ export async function listAssignableUsersForBoard(
   });
   if (!board || board.organizationId !== organizationId) return [];
 
-  const idFilter = await rosterIds(board, organizationId, viewer);
+  const roster = await rosterIds(board, organizationId, viewer);
+  const onRoster = roster ? new Set(roster) : null;
+  const idFilter = ids ? (onRoster ? ids.filter((id) => onRoster.has(id)) : ids) : roster;
   if (idFilter && idFilter.length === 0) return [];
 
   return prisma.user.findMany({
@@ -182,13 +194,15 @@ export async function listAssignableUsersForBoard(
       // to. Only INACTIVE (offboarded) drops out.
       status: { not: "INACTIVE" },
       ...(idFilter ? { id: { in: idFilter } } : {}),
-      ...(search
+      ...(words.length > 0
         ? {
-            OR: [
-              { firstName: { contains: search, mode: "insensitive" as const } },
-              { lastName: { contains: search, mode: "insensitive" as const } },
-              { email: { contains: search, mode: "insensitive" as const } },
-            ],
+            AND: words.map((word) => ({
+              OR: [
+                { firstName: { contains: word, mode: "insensitive" as const } },
+                { lastName: { contains: word, mode: "insensitive" as const } },
+                { email: { contains: word, mode: "insensitive" as const } },
+              ],
+            })),
           }
         : {}),
     },

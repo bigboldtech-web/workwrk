@@ -2,9 +2,10 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { canManageRun } from "@/lib/process-run-access";
+import { canManageRun, mayGiveRunTo } from "@/lib/process-run-access";
 import { effectiveRunStatus } from "@/lib/process-runs";
 import { runProgress } from "@/lib/sop-kind";
+import { employedAmong } from "@/lib/people/employed.server";
 
 /**
  * /api/process-runs/[id] (spec-process section 2 `/process-runs` Data):
@@ -85,9 +86,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (action === "reassign") {
     const next = typeof body.assigneeId === "string" && body.assigneeId && body.assigneeId !== "none" ? body.assigneeId : null;
-    if (next) {
-      const person = await prisma.user.findFirst({ where: { id: next, organizationId: orgId }, select: { id: true } });
-      if (!person) return jsonError("Person not found", 404);
+    // Never to someone who was deactivated or removed: they cannot sign in.
+    if (next && (await employedAmong(orgId, [next])).length === 0) {
+      return jsonError("That person can't be given a run. Choose someone else.", 400);
+    }
+    // And only within the reassigner's report tree unless they are
+    // org-wide: the people Reassign offers.
+    if (next && !(await mayGiveRunTo(session as { user: { accessLevel?: string } }, orgId, callerId, next))) {
+      return jsonError("You can reassign a run only to yourself or someone who reports to you.", 403);
     }
     await prisma.processRun.update({ where: { id }, data: { assigneeId: next } });
     if (next && next !== callerId) {

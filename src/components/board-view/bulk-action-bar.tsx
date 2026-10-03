@@ -189,10 +189,11 @@ function BulkOwner({ onSet, busy, boardId }: { onSet: (ownerId: string | null) =
     let active = true;
     const url = boardId
       ? `/api/boards/${encodeURIComponent(boardId)}/assignable?limit=100`
-      : "/api/users?scope=all&limit=100";
+      : "/api/people/pick?includeSelf=1&limit=50";
     fetch(url, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { data: [] }))
-      .then((d) => { if (active) setUsers(Array.isArray(d?.data) ? d.data : []); })
+      // The List roster answers { data }, the workspace picker { people }.
+      .then((d) => { if (active) setUsers(Array.isArray(d?.data) ? d.data : Array.isArray(d?.people) ? d.people : []); })
       .catch(() => { if (active) setUsers([]); });
     return () => { active = false; };
   }, [open, users, boardId]);

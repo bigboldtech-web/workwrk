@@ -51,9 +51,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const search = url.searchParams.get("search") ?? undefined;
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+  // ?ids=a,b: which of these people are on the roster (the create modal asks
+  // this for people picked elsewhere, when the roster is longer than a page).
+  const idsRaw = url.searchParams.get("ids");
+  const ids = idsRaw != null ? idsRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
 
   const includeEmail = roleAtLeast(role, "EDIT");
   // The viewer's own context: the roster names only the people they may see.
-  const data = await listAssignableUsersForBoard(id, orgId, { search, limit, includeEmail }, nodeCtxFromLevel(userId, orgId, level));
+  const data = await listAssignableUsersForBoard(id, orgId, { search, limit, includeEmail, ids }, nodeCtxFromLevel(userId, orgId, level));
   return jsonSuccess({ data, total: data.length }, 200, { "Cache-Control": "no-store" });
 }

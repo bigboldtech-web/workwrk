@@ -56,6 +56,8 @@ import { BlockDragMenu, BlockDragMenuProvider } from "./blocknote-blocks/block-d
 import { currentOpenObject, useWorkPlacement } from "@/components/layout/os/work-placement";
 import { editorLinkHref } from "@/lib/nav/object-href";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
+import { pickUrl } from "@/lib/people-pick";
+import { useOsToast } from "@/components/layout/os/toast";
 
 // Schema = BlockNote defaults + our workspace-specific custom blocks +
 // custom inline content (mentions). Adding a new custom block is a two-line
@@ -225,9 +227,11 @@ function askAiSlashItem(onAskAI: () => void): DefaultReactSuggestionItem {
 
 // ───────── @-mention suggestion items ─────────
 //
-// Fetches people (/api/users) and pages (/api/docs) matching the query and
-// returns insert handlers that drop a `mention` inline-content pill at the
-// cursor. Both lists are capped so the menu stays snappy.
+// Fetches people matching the query from the whole workspace (/api/people/pick,
+// not /api/users, whose team scope let an Employee mention only themselves)
+// and returns insert handlers that drop a `mention` inline-content pill at
+// the cursor. The mention route tells a person only when they can open the
+// doc, so offering everyone names nothing to someone it is hidden from.
 type MentionRow = { id: string; label: string; href: string; mkind: "user" | "doc" };
 
 // "@" is for PEOPLE only — linking a page has its own docs-only flow (the
@@ -235,13 +239,13 @@ type MentionRow = { id: string; label: string; href: string; mkind: "user" | "do
 // it was asking for a name/email.
 async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   const q = query.trim();
-  const users = await fetch(`/api/users?scope=all&limit=8${q ? `&search=${encodeURIComponent(q)}` : ""}`)
+  const users = await fetch(pickUrl({ q, limit: 8 }))
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 
   const out: MentionRow[] = [];
-  const userList: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string }> =
-    users?.data ?? users?.users ?? [];
+  const userList: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null }> =
+    Array.isArray(users?.people) ? users.people : [];
   for (const u of userList.slice(0, 8)) {
     const name = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown";
     out.push({ id: u.id, label: name, href: `/people/${u.id}`, mkind: "user" });
@@ -249,7 +253,15 @@ async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   return out;
 }
 
-function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string): DefaultReactSuggestionItem[] {
+/**
+ * Why a person mentioned was not told: they cannot open the doc, the notice
+ * did not go out (with a way to send it again when trying again can help),
+ * the doc refused it (it is gone, or you can no longer write in it), or the
+ * person is not in this workspace.
+ */
+type NotTold = (name: string, why: "no_access" | "failed" | "refused" | "unknown", retry?: () => void) => void;
+
+function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string, onNotTold?: NotTold): DefaultReactSuggestionItem[] {
   return rows.map((row) => ({
     title: row.label,
     subtext: row.mkind === "user" ? "Person" : "Page",
@@ -258,8 +270,10 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
     onItemClick: () => {
       // Cast the insert: our custom `mention` inline type isn't in the
       // editor's default inline-content union as TS infers it, though it is
-      // registered in the runtime schema.
-      const insertInline = editor.insertInlineContent as (content: unknown) => void;
+      // registered in the runtime schema. Called ON the editor: the method
+      // reads `this`, and a detached copy threw on every pick, so no mention
+      // was ever inserted and nobody was told.
+      const insertInline = (content: unknown) => (editor.insertInlineContent as (c: unknown) => void).call(editor, content);
       insertInline([
         { type: "mention", props: { mkind: row.mkind, refId: row.id, label: row.label, href: row.href } },
         " ", // trailing space so the caret lands after the pill
@@ -267,11 +281,32 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
       // Mentioning a person drops them an Inbox notification (server honors
       // their "Mentions" toggle). Best-effort — the pill already inserted.
       if (row.mkind === "user" && docId) {
-        void fetch(`/api/docs/${docId}/mention`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: row.id }),
-        }).catch(() => {});
+        // Someone who cannot open the doc is not told (the route says so),
+        // and a notice that did not go out is not sent: either way the writer
+        // hears it, so a mention never looks sent when it was not.
+        // A network failure or a server error can pass on a second try (the
+        // route sends one notice per person and doc a few minutes apart, so
+        // a retry after a lost answer never tells them twice); a refusal
+        // cannot.
+        const tell = () => {
+          void fetch(`/api/docs/${docId}/mention`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: row.id }),
+          })
+            .then(async (r) => {
+              if (!r.ok) {
+                if (r.status >= 500) onNotTold?.(row.label, "failed", tell);
+                else onNotTold?.(row.label, r.status === 400 ? "unknown" : "refused");
+                return;
+              }
+              const d = await r.json().catch(() => null);
+              if (!d) onNotTold?.(row.label, "failed", tell);
+              else if (d.skipped === "no_access") onNotTold?.(row.label, "no_access");
+            })
+            .catch(() => onNotTold?.(row.label, "failed", tell));
+        };
+        tell();
       }
     },
   }));
@@ -347,6 +382,7 @@ function useAppTheme(): "dark" | "light" {
 }
 
 export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI, entity, initialHtml, onHtmlChange }: Props) {
+  const { toast } = useOsToast();
   const appTheme = useAppTheme();
   const router = useRouter();
   // Resolve the entity. Notes (no `entity`) behave exactly as before.
@@ -564,7 +600,13 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
             notification via /api/docs/[id]/mention (pref-gated server-side). */}
         <SuggestionMenuController
           triggerCharacter="@"
-          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId)}
+          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId, (name, why, retry) => (why === "no_access"
+            ? toast(`${name} can't open this doc, so they were not told.`)
+            : why === "refused"
+              ? toast(`Couldn't tell ${name} about the mention: this doc no longer takes changes from you.`, { tone: "danger" })
+              : why === "unknown"
+                ? toast(`Couldn't tell ${name} about the mention: they are not in this workspace.`, { tone: "danger" })
+                : toast(`Couldn't tell ${name} about the mention.`, { tone: "danger", action: retry ? { label: "Try again", onClick: retry } : undefined })))}
         />
         {/* Custom drag-handle: + add-block button and our Notion block menu.
             The provider feeds live docId/callbacks to the menu through

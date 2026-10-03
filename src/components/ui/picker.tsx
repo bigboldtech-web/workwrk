@@ -22,7 +22,7 @@
 // a portalled popover inside the task drawer escapes the drawer's focus trap
 // and lands behind the scrim of whatever opens next.
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Search } from "lucide-react";
 import { useLayer } from "@/components/layout/os/shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
@@ -311,6 +311,17 @@ export function Picker({
     else if (eb.bottom > lb.bottom) list.scrollTop += eb.bottom - lb.bottom;
   }, [activeIdx, open]);
 
+  // A pinned popover is kept on screen by its REAL height, measured before
+  // paint: clamped as if it were always 360px tall, a short one near the foot
+  // of the screen jumped up over the very control that opened it.
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pinnedH, setPinnedH] = useState(PINNED_MAX_HEIGHT);
+  useLayoutEffect(() => {
+    if (!open || !anchorPoint || !popRef.current) return;
+    const h = Math.ceil(popRef.current.getBoundingClientRect().height);
+    if (h > 0 && h !== pinnedH) setPinnedH(h);
+  });
+
   if (!open) return null;
 
   let idx = -1;
@@ -321,6 +332,7 @@ export function Picker({
           the control underneath on its way out. */}
       {backdrop ? <div className="fixed inset-0 z-[60]" onMouseDown={onClose} aria-hidden="true" /> : null}
       <div
+        ref={popRef}
         className={
           anchorPoint
             ? `fixed z-[61] rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop)] ${className}`
@@ -334,7 +346,7 @@ export function Picker({
                 width,
                 maxWidth: "calc(100vw - 32px)",
                 left: clampToViewport(anchorPoint.left, width, "x"),
-                top: clampToViewport(anchorPoint.top, PINNED_MAX_HEIGHT, "y"),
+                top: clampToViewport(anchorPoint.top, pinnedH, "y"),
               }
             : { width, maxWidth: "calc(100vw - 32px)" }
         }

@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { policyAssignedTemplate } from "@/lib/email-templates";
 import { inScope, personScope } from "@/lib/process-scope";
 import { parseProcessSettings, defaultAckDueDate } from "@/lib/process-settings";
+import { employedAmong } from "@/lib/people/employed.server";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -70,16 +71,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   ]);
   if (!policy) return jsonError("Policy not found", 404);
 
-  let resolved: string[] = Array.isArray(userIds) ? userIds.filter((x): x is string => typeof x === "string") : [];
+  // The people named are kept only while they can still be given work here:
+  // never someone deactivated or removed, never an id from another workspace.
+  let resolved: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
   if (typeof departmentId === "string" && departmentId) {
-    const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: "ACTIVE" }, select: { id: true } });
+    // Everyone in it who can sign in (on leave or on probation included), never someone removed.
+    const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
     resolved = [...new Set([...resolved, ...deptUsers.map((u) => u.id)])];
   }
   if (all === true) {
-    const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: "ACTIVE" }, select: { id: true } });
+    const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
     resolved = [...new Set([...resolved, ...allUsers.map((u) => u.id)])];
   }
-  if (resolved.length === 0) return jsonError("No recipients. Provide userIds[], departmentId, or all:true");
+  if (resolved.length === 0) {
+    if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {
+      return jsonError("No one you chose can be given work here: they were deactivated or are not in this workspace.");
+    }
+    return jsonError("No recipients. Provide userIds[], departmentId, or all:true");
+  }
 
   const scope = await personScope(session);
   if (!scope.orgWide) {
@@ -90,6 +99,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const settings = (org?.settings as SettingsBlob | null) || {};
   const defaults = parseProcessSettings(settings.process).value;
   const due = typeof dueDate === "string" && dueDate ? new Date(dueDate) : (() => { const d = defaultAckDueDate(defaults.ackDueDays); return d ? new Date(d) : null; })();
+
+  // People who already hold this policy keep their row as it is and are not
+  // told again (assigning a department or everyone a second time is no nudge).
+  const held = new Set(
+    (await prisma.policyAssignment.findMany({ where: { policyId: id, userId: { in: resolved } }, select: { userId: true } })).map((a) => a.userId),
+  );
 
   const assignerId = getUserId(session);
   const result = await prisma.policyAssignment.createMany({
@@ -104,7 +119,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.policyAssignment.updateMany({ where: { policyId: id, userId: { in: alreadyAcked.map((a) => a.userId) }, status: { not: "COMPLETED" } }, data: { status: "COMPLETED", completedAt: new Date() } });
   }
   const ackedIds = new Set(alreadyAcked.map((a) => a.userId));
-  const toNotify = resolved.filter((uid) => !ackedIds.has(uid));
+  const toNotify = resolved.filter((uid) => !ackedIds.has(uid) && !held.has(uid));
 
   if (toNotify.length) await prisma.notification.createMany({
     data: toNotify.map((uid) => ({

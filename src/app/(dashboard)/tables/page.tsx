@@ -37,12 +37,13 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
-import { Picker, type PickerOption } from "@/components/ui/picker";
+import { Picker } from "@/components/ui/picker";
 import { MenuItem } from "@/components/ui/menu";
 import { BulkAction, RowMoreButton, TableCard, type TableColumn } from "@/components/ui/table-card";
 import { SplitPrimary } from "@/components/ui/split-primary";
 import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { TableRowMenuHost, useTableRowMenu, type TableMenuTarget } from "@/components/tables/table-row-menu";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { notifyTablesChanged } from "@/components/layout/os/sidebar-refresh";
@@ -225,19 +226,14 @@ export default function TablesPage() {
   const [sortOpen, setSortOpen] = useState(false);
   const [ownerPickOpen, setOwnerPickOpen] = useState(false);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   useEffect(() => {
     if ((!filterOpen && !bulkMoveOpen) || spaces !== null) return;
     let live = true;
     void (async () => {
-      const [s, p] = await Promise.all([
-        apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }),
-        apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" }),
-      ]);
+      const s = await apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" });
       if (!live) return;
       setSpaces(s.ok ? s.data.spaces ?? [] : []);
-      setPeople(p.ok && Array.isArray(p.data?.data) ? p.data.data : []);
     })();
     return () => { live = false; };
   }, [filterOpen, bulkMoveOpen, spaces]);
@@ -521,8 +517,8 @@ export default function TablesPage() {
           ) : null}
           {"owner".includes(filterSearch.toLowerCase()) ? (
             <FilterGroup label="Owner">
-              <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerPickOpen(true); }}>
-                <OwnerPick people={people} value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
+              <FilterRow label="Filter by owner" checked={!!owner || ownerPickOpen} onCheckedChange={(on) => { if (!on) { setParams({ owner: null }); setOwnerPickOpen(false); } else setOwnerPickOpen(true); }}>
+                <PersonFilterPick ariaLabel="Owner" value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
               </FilterRow>
             </FilterGroup>
           ) : null}
@@ -625,15 +621,3 @@ function RowMenuTrigger({ onOpen, open }: { onOpen: (ref: React.RefObject<HTMLBu
   return <RowMoreButton buttonRef={ref} open={open} onClick={() => onOpen(ref)} label="Table actions" />;
 }
 
-function OwnerPick({ people, value, onChange, open, setOpen }: { people: PersonRef[]; value: string | null; onChange: (id: string) => void; open: boolean; setOpen: (v: boolean) => void }) {
-  const current = people.find((p) => p.id === value) ?? null;
-  const options: PickerOption[] = people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }));
-  return (
-    <span className="relative block">
-      <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
-        {current ? <><PersonAvatar person={current} size={20} />{personName(current)}</> : <span className="text-ink-3">Choose a person</span>}
-      </button>
-      <Picker open={open} onClose={() => setOpen(false)} ariaLabel="Owner" searchPlaceholder="Find a person" selected={value} onSelect={(v) => { onChange(v); setOpen(false); }} sections={[{ options }]} />
-    </span>
-  );
-}

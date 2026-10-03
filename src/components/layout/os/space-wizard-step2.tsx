@@ -40,6 +40,13 @@ interface Step2Props {
   submitting: boolean;
   users: UserOption[];
   loadingUsers: boolean;
+  /** The owner search reaches the server too: the list grows with what it finds. */
+  onSearchUsers?: (q: string) => void;
+  /** The people read failed: the owner list says so and offers Try again. */
+  usersFailed?: boolean;
+  onRetryUsers?: () => void;
+  /** The chosen owner's name, looked up by id (they may not be in the list). */
+  ownerName?: string | null;
   onChange: (next: WorkflowConfig) => void;
   onSubScreen: (next: Step2SubScreen) => void;
   onBack: () => void;
@@ -55,6 +62,9 @@ export function SpaceWizardStep2(props: Step2Props) {
         accent={props.accent}
         users={props.users}
         loading={props.loadingUsers}
+        onSearch={props.onSearchUsers}
+        failed={props.usersFailed ?? false}
+        onRetry={props.onRetryUsers}
         ownerId={workflow.ownerId}
         onChange={(id) => props.onChange({ ...workflow, ownerId: id })}
         onClose={() => props.onSubScreen(null)}
@@ -115,6 +125,7 @@ function Step2Main({
   error,
   submitting,
   users,
+  ownerName,
   onChange,
   onSubScreen,
   onBack,
@@ -134,9 +145,9 @@ function Step2Main({
   const ownerLabel = useMemo(() => {
     if (!workflow.ownerId) return "Creator (you)";
     const u = users.find((x) => x.id === workflow.ownerId);
-    if (!u) return "Selected";
+    if (!u) return ownerName || "Selected";
     return userDisplayName(u);
-  }, [workflow.ownerId, users]);
+  }, [workflow.ownerId, users, ownerName]);
 
   const statusPreview = useMemo(() => workflow.statuses.slice(0, 3), [workflow.statuses]);
   const moduleCount = workflow.modules.length;
@@ -293,6 +304,9 @@ function OwnerSubScreen({
   accent,
   users,
   loading,
+  onSearch,
+  failed,
+  onRetry,
   ownerId,
   onChange,
   onClose,
@@ -300,6 +314,9 @@ function OwnerSubScreen({
   accent: string;
   users: UserOption[];
   loading: boolean;
+  onSearch?: (q: string) => void;
+  failed: boolean;
+  onRetry?: () => void;
   ownerId: string | null;
   onChange: (id: string | null) => void;
   onClose: () => void;
@@ -328,7 +345,10 @@ function OwnerSubScreen({
             type="text"
             placeholder="Search people…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              onSearch?.(e.target.value);
+            }}
             className="w-full h-9 ps-8 pe-2 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
             autoFocus
           />
@@ -348,12 +368,20 @@ function OwnerSubScreen({
           {ownerId === null ? <Check className="h-4 w-4" style={{ color: accent }} /> : null}
         </button>
 
+        {failed ? (
+          <div className="text-sm text-muted py-3 text-center">
+            Couldn&apos;t load people.{" "}
+            {onRetry ? <button type="button" onClick={onRetry} className="font-medium text-brand-deep hover:underline">Try again</button> : null}
+          </div>
+        ) : null}
         {loading ? (
           <div className="text-sm text-muted py-6 text-center">Loading people…</div>
         ) : filtered.length === 0 ? (
-          <div className="text-sm text-muted py-6 text-center">
-            {query ? `No match for "${query}"` : "No people available"}
-          </div>
+          failed ? null : (
+            <div className="text-sm text-muted py-6 text-center">
+              {query ? `No match for "${query}"` : "No people available"}
+            </div>
+          )
         ) : (
           <div className="rounded-lg border border-border divide-y divide-border">
             {filtered.map((u) => {
