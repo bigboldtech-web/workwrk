@@ -83,6 +83,21 @@ async function readableRefs(viewer: Viewer, refs: NodeRef[]): Promise<Set<string
   return out;
 }
 
+/**
+ * Can this viewer open each place the scopes name (Can view, the bar the
+ * picker, the chips, the summary and the save all share)? One read.
+ */
+export async function scopeReadable(viewer: Viewer, scopes: AutomationScope[]): Promise<(kind: "list" | "folder" | "space", id: string) => boolean> {
+  const refs: NodeRef[] = [];
+  for (const sc of scopes) {
+    sc.listIds.forEach((id) => refs.push({ kind: "list", id }));
+    sc.folderIds.forEach((id) => refs.push({ kind: "folder", id }));
+    sc.spaceIds.forEach((id) => refs.push({ kind: "space", id }));
+  }
+  const readable = await readableRefs(viewer, refs);
+  return (kind, id) => readable.has(refKey({ kind, id }));
+}
+
 export interface ScopeSummary {
   /** "Everywhere", or the readable names, in the order the scope lists them. */
   names: string[];
@@ -128,10 +143,9 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
 
 /**
  * A saved scope with every id that is not a Space, Folder or List of THIS
- * workspace dropped: a junk id, or one from another organization, would
- * otherwise be stored and then read back as "1 more you cannot see", a
- * place that does not exist. Ids the viewer cannot read are kept as they
- * are (they are real, and counted, never named).
+ * workspace dropped: a junk id, or one from another organization, is never
+ * stored. Ids the viewer cannot read are kept as they are (they are real,
+ * and kept on the server: never listed, named or counted to that viewer).
  */
 export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise<AutomationScope> {
   const [lists, folders, spaces] = await Promise.all([

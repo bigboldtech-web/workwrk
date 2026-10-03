@@ -91,6 +91,80 @@ export function scopeMatches(scope: AutomationScope, place: ScopePlace | null): 
   return false;
 }
 
+export type ScopeKind = "list" | "folder" | "space";
+const KIND_KEYS: ReadonlyArray<[ScopeKind, keyof AutomationScope]> = [["list", "listIds"], ["folder", "folderIds"], ["space", "spaceIds"]];
+
+/**
+ * A stored scope as one editor sees it: the places they can open (`shown`)
+ * and the ones they cannot (`hidden`), each in stored order. The builder is
+ * sent `shown` only, and the server keeps `hidden` on save
+ * (restoreHiddenScope), so a place is never listed, named, counted or
+ * removed by someone who cannot open it.
+ */
+export function splitScope(stored: AutomationScope, readable: (kind: ScopeKind, id: string) => boolean): { shown: AutomationScope; hidden: AutomationScope } {
+  const shown: AutomationScope = { listIds: [], folderIds: [], spaceIds: [] };
+  const hidden: AutomationScope = { listIds: [], folderIds: [], spaceIds: [] };
+  for (const [kind, key] of KIND_KEYS) {
+    for (const id of stored[key]) (readable(kind, id) ? shown : hidden)[key].push(id);
+  }
+  return { shown, hidden };
+}
+
+export type ScopeRestore =
+  | { ok: true; scope: AutomationScope }
+  | { ok: false; error: "scope_locked" | "scope_ambiguous" | "too_many_places" };
+
+/**
+ * The scope to store when an editor saves, the stored hidden places kept. In
+ * order:
+ * - `everywhere: true` is Everywhere: it covers every hidden place, so no
+ *   reach is lost and nothing is hidden.
+ * - A submitted place must be one the editor can open, or one already
+ *   stored: a crafted save never points an automation at a place they
+ *   cannot see (scope_locked).
+ * - With no choice stated (`everywhere` missing: an older tab during a
+ *   deploy) an empty submitted scope over hidden places is refused
+ *   (scope_ambiguous): it may have meant Everywhere or "keep them", and a
+ *   guess either widens the automation or narrows it silently.
+ * - Otherwise the submitted places, then the hidden ones, per kind; past the
+ *   cap the save is refused (too_many_places), never cut silently.
+ */
+export function restoreHiddenScope(o: {
+  stored: AutomationScope;
+  submitted: AutomationScope;
+  hidden: AutomationScope;
+  readable: (kind: ScopeKind, id: string) => boolean;
+  everywhere: boolean | undefined;
+}): ScopeRestore {
+  if (o.everywhere === true) return { ok: true, scope: { listIds: [], folderIds: [], spaceIds: [] } };
+  for (const [kind, key] of KIND_KEYS) {
+    for (const id of o.submitted[key]) if (!o.readable(kind, id) && !o.stored[key].includes(id)) return { ok: false, error: "scope_locked" };
+  }
+  if (o.everywhere === undefined && isEverywhere(o.submitted) && !isEverywhere(o.hidden)) return { ok: false, error: "scope_ambiguous" };
+  const scope: AutomationScope = { listIds: [], folderIds: [], spaceIds: [] };
+  for (const [, key] of KIND_KEYS) {
+    const ids = [...o.submitted[key]];
+    for (const id of o.hidden[key]) if (!ids.includes(id)) ids.push(id);
+    if (ids.length > MAX_SCOPE_IDS) return { ok: false, error: "too_many_places" };
+    scope[key] = ids;
+  }
+  return { ok: true, scope };
+}
+
+/** The sentence each refused scope save answers with (section "where"). */
+export const SCOPE_REFUSAL: Record<"scope_locked" | "scope_ambiguous" | "too_many_places", string> = {
+  scope_locked: "You can only add places you can open.",
+  scope_ambiguous: "Choose Everywhere or the places it runs in, then save again.",
+  too_many_places: `An automation can run in at most ${MAX_SCOPE_IDS} places of each kind.`,
+};
+
+/** A definition with its scope replaced (absent when Everywhere), every other key kept. */
+export function definitionWithScope(definition: unknown, scope: AutomationScope): Record<string, unknown> {
+  const out = { ...asRecord(definition) };
+  delete out.scope;
+  return isEverywhere(scope) ? out : { ...out, scope };
+}
+
 /** The scope to store: deduped, bounded, and absent when it is Everywhere. */
 export function scopeForSave(raw: unknown): AutomationScope | undefined {
   const s = readScope({ scope: raw });

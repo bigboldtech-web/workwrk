@@ -16,7 +16,9 @@
 //      Returns { workflows, total, nextCursor, container, creators, paused,
 //      rights }. Every row carries `can` (edit, archive) and `where` (the
 //      readable names of the places it runs in; a place the viewer cannot
-//      read is counted, never named).
+//      read is kept, never listed, named or counted). A ?where= place the
+//      viewer cannot open matches nothing, as an unknown id does, so the
+//      filter never tells which automations run in a private List.
 // POST create a DRAFT (manager or above until the access engine flips).
 //      Body { name, description?, triggerEvent?, severity?, definition? },
 //      where definition may carry the scope a container prefilled.
@@ -27,9 +29,9 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { forbidden, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
-import { readScope } from "@/lib/automation/definition";
+import { SCOPE_REFUSAL, readScope, restoreHiddenScope } from "@/lib/automation/definition";
 import { readAutomationSettings } from "@/lib/automation/settings";
-import { containerContents, definitionWithScopeInOrg, scopeNamer } from "@/lib/automation/places-server";
+import { containerContents, definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
 import {
   TERMINAL_RUN_STATUSES,
   VIEW_STATUS,
@@ -195,7 +197,16 @@ export async function GET(req: NextRequest) {
     createdBy: list(sp, "createdBy"),
     triggers: list(sp, "trigger"),
     severities: list(sp, "severity").map((s) => s.toUpperCase()),
-    where: list(sp, "where"),
+    where: await (async () => {
+      const ids = list(sp, "where");
+      const places = ids.filter((x) => x !== "everywhere");
+      if (places.length === 0) return ids;
+      const readable = await scopeReadable(ctx.viewer, [{ listIds: places, folderIds: places, spaceIds: places }]);
+      const open = (x: string) => readable("list", x) || readable("folder", x) || readable("space", x);
+      // Asked for, but none the viewer may name: nothing matches, as for an unknown id.
+      const kept = ids.filter((x) => x === "everywhere" || open(x));
+      return kept.length ? kept : ["__none__"];
+    })(),
     container,
   };
   const filtered = archivedOnly
@@ -246,8 +257,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // The scope is pruned to this workspace: a junk or foreign id is never stored.
-  const definition = await definitionWithScopeInOrg(ctx.orgId, definitionForSave(parsed.data.definition ?? {}));
+  // A new automation names only places its creator can open (nothing is
+  // stored yet, so nothing hidden is kept); then the scope is pruned to this
+  // workspace: a junk or foreign id is never stored.
+  const submitted = readScope({ scope: parsed.data.definition?.scope });
+  const none = { listIds: [], folderIds: [], spaceIds: [] };
+  const restored = restoreHiddenScope({ stored: none, submitted, hidden: none, readable: await scopeReadable(ctx.viewer, [submitted]), everywhere: parsed.data.definition?.everywhere ?? false });
+  if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where" }, { status: 400 });
+  const definition = await definitionWithScopeInOrg(ctx.orgId, definitionForSave({ ...(parsed.data.definition ?? {}), scope: restored.scope }));
   const triggerEvent = parsed.data.triggerEvent ?? (typeof definition.trigger === "string" ? definition.trigger : null);
   if (triggerEvent) {
     const problem = await triggerProblem(ctx, triggerEvent);

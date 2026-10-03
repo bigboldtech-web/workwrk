@@ -35,7 +35,22 @@ describe("readDraft / toSaveBody", () => {
       trigger: "task.field_changed",
       when: { field: "priority" },
       scope: { listIds: ["l1"], folderIds: [], spaceIds: [] },
+      everywhere: false,
     });
+  });
+
+  it("a scope whose places are all hidden from this editor stays 'only in chosen places', never Everywhere", () => {
+    const d = readDraft({ ...wf({ actions: [] }), scopeHidden: true });
+    expect(d.everywhere).toBe(false);
+    const def = toSaveBody(d).definition as Record<string, unknown>;
+    expect(def.everywhere).toBe(false);
+    expect("scope" in def).toBe(false);
+  });
+
+  it("an Everywhere automation states Everywhere on save", () => {
+    const d = readDraft(wf({ actions: [] }));
+    expect(d.everywhere).toBe(true);
+    expect((toSaveBody(d).definition as Record<string, unknown>).everywhere).toBe(true);
   });
 
   it("keeps an API-authored nested condition group verbatim, never dropping it", () => {

@@ -23,6 +23,13 @@ export const definitionSchema = z.object({
   trigger: z.string().trim().min(1).max(200).nullable().optional(),
   when: whenSchema.optional(),
   scope: z.unknown().optional(),
+  /**
+   * The editor's choice, stated: true for Everywhere, false for "only in the
+   * chosen places" (the places they cannot open are then kept on the
+   * server). Never stored; missing means an older client, see
+   * restoreHiddenScope.
+   */
+  everywhere: z.boolean().optional(),
 });
 
 export type DefinitionInput = z.infer<typeof definitionSchema>;

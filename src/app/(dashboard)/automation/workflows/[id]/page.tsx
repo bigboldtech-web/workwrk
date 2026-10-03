@@ -120,6 +120,8 @@ interface ApiWorkflow {
   createdById: string | null;
   createdByName: string | null;
   definition: unknown;
+  /** Places this viewer cannot open are kept in the scope (never which or how many). */
+  scopeHidden?: boolean;
   versions: ApiVersion[];
   runs: ApiRun[];
   can: { edit: boolean; archive: boolean };
@@ -553,7 +555,8 @@ export default function AutomationBuilderPage() {
       return false;
     }
     setBaseline(draftSnapshot(draft));
-    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId) } : prev));
+    // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
+    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: r.data.workflow?.scopeHidden ?? prev.scopeHidden } : prev));
     notifyAiChatsChanged();
     if (!opts.quiet) toast("Draft saved");
     return true;
@@ -1025,7 +1028,10 @@ export default function AutomationBuilderPage() {
   };
 
   /* Where */
-  const everywhere = draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0;
+  // Places this editor cannot open stay in the scope unless they choose
+  // Everywhere; they are never listed, named, counted or removable here.
+  const keptHidden = Boolean(wf?.scopeHidden) && !draft.everywhere;
+  const everywhere = draft.everywhere || (draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0 && !keptHidden);
   const whereMode: "everywhere" | "lists" = everywhere && !listsMode ? "everywhere" : "lists";
 
   const header = (
@@ -1369,8 +1375,12 @@ export default function AutomationBuilderPage() {
                   onChange={(v) => {
                     if (v === "everywhere") {
                       setListsMode(false);
-                      update({ scope: { listIds: [], folderIds: [], spaceIds: [] } });
-                    } else setListsMode(true);
+                      update({ everywhere: true, scope: { listIds: [], folderIds: [], spaceIds: [] } });
+                    } else {
+                      setListsMode(true);
+                      // With places this editor cannot open, "only in chosen" keeps them.
+                      if (wf?.scopeHidden) update({ everywhere: false });
+                    }
                   }}
                 />
               )}
@@ -1397,10 +1407,11 @@ export default function AutomationBuilderPage() {
                   {!readOnly ? (
                     <Token label="Add Lists" placeholder="Add Lists" ariaLabel="Choose Lists" readOnly={false} multi width={300}
                       sections={[{ options: listOptions }]} selected={draft.scope.listIds}
-                      onSelect={(v) => update((d) => ({ ...d, scope: { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] } }))} />
+                      onSelect={(v) => update((d) => ({ ...d, everywhere: false, scope: { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] } }))} />
                   ) : null}
                 </div>
               ) : null}
+              {whereMode === "lists" && keptHidden ? <p className="m-0 mt-2 text-sm text-ink-2">Some places you can&apos;t open are kept.</p> : null}
               <p className="m-0 mt-2 text-sm text-ink-2">
                 {everywhere && listsMode
                   ? "Pick at least one List. With none picked, it runs everywhere."

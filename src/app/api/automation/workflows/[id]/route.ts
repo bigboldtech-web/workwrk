@@ -17,9 +17,22 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
-import { draftDiffersFromLive, draftTrigger, readScope } from "@/lib/automation/definition";
+import { SCOPE_REFUSAL, definitionWithScope, draftDiffersFromLive, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope } from "@/lib/automation/definition";
 import { listVersions } from "@/lib/automation/versions-server";
-import { definitionWithScopeInOrg, scopeNamer } from "@/lib/automation/places-server";
+import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
+import type { Viewer } from "@/lib/access/types";
+
+/**
+ * The definition as this viewer may see it: its scope cut to the places they
+ * can open, and whether others are kept (never which, never how many). The
+ * builder edits only the shown part; the save keeps the rest on the server.
+ */
+async function definitionForViewer(viewer: Viewer, definition: unknown): Promise<{ definition: Record<string, unknown>; scopeHidden: boolean }> {
+  const stored = readScope(definition);
+  if (isEverywhere(stored)) return { definition: definitionWithScope(definition, stored), scopeHidden: false };
+  const { shown, hidden } = splitScope(stored, await scopeReadable(viewer, [stored]));
+  return { definition: definitionWithScope(definition, shown), scopeHidden: !isEverywhere(hidden) };
+}
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -74,11 +87,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const liveTrigger = workflow.publishedVersionId ? workflow.triggerEvent : null;
   const namer = await scopeNamer(ctx.viewer, ctx.orgId, [readScope(workflow.definition)]);
   const rights = workflowRights(ctx, workflow.createdById);
+  // The places the viewer cannot open are kept, never listed, named or
+  // counted: the builder gets the rest and one "some are kept" flag.
+  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
 
   return NextResponse.json(
     {
       workflow: {
         ...workflow,
+        definition: forViewer.definition,
+        scopeHidden: forViewer.scopeHidden,
         // The draft trigger the builder edits; `liveTrigger` is what runs.
         triggerEvent: trigger,
         liveTrigger,
@@ -139,11 +157,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const published = Boolean(existing.publishedVersionId);
   if (parsed.data.definition !== undefined || bodyTrigger !== undefined) {
-    // The scope is pruned to this workspace: a junk or foreign id is never stored.
-    const next =
-      parsed.data.definition !== undefined
-        ? await definitionWithScopeInOrg(ctx.orgId, definitionForSave(parsed.data.definition))
-        : { ...((existing.definition as Record<string, unknown> | null) ?? {}) };
+    let next: Record<string, unknown>;
+    if (parsed.data.definition !== undefined) {
+      // The places the editor cannot open are kept from the STORED row, never
+      // from the body (it never carried them), and the body may add only
+      // places the editor can open (restoreHiddenScope). Then the scope is
+      // pruned to this workspace: a junk or foreign id is never stored.
+      const stored = readScope(existing.definition);
+      const submitted = readScope({ scope: parsed.data.definition.scope });
+      const readable = await scopeReadable(ctx.viewer, [stored, submitted]);
+      const { hidden } = splitScope(stored, readable);
+      const restored = restoreHiddenScope({ stored, submitted, hidden, readable, everywhere: parsed.data.definition.everywhere });
+      if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where" }, { status: 400 });
+      next = await definitionWithScopeInOrg(ctx.orgId, definitionForSave({ ...parsed.data.definition, scope: restored.scope }));
+    } else {
+      next = { ...((existing.definition as Record<string, unknown> | null) ?? {}) };
+    }
     const trigger = bodyTrigger !== undefined ? bodyTrigger : draftTrigger(existing.definition, existing.triggerEvent);
     next.trigger = trigger;
     data.definition = next as Prisma.InputJsonValue;
@@ -153,7 +182,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const workflow = await prisma.automationWorkflow.update({ where: { id }, data });
-  return NextResponse.json({ workflow: { ...workflow, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent) } });
+  // Answered as the builder reads it, so the hidden places never reach the page.
+  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
+  return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent) } });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
