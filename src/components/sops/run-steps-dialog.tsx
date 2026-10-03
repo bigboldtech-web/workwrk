@@ -11,7 +11,7 @@
 // same id and the server finishes the run without doubling it. A failure
 // keeps the dialog open with the server's sentence and a Try again.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Play } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -38,17 +38,23 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
   const { toast } = useOsToast();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [listGroups, setListGroups] = useState<ListGroup[]>([]);
-  // The Lists read can fail on its own: then the dialog says so with a Retry,
-  // instead of telling the person to ask for access they may already hold.
-  const [listsFailed, setListsFailed] = useState(false);
-  const [listsTruncated, setListsTruncated] = useState(false);
+  // The Lists are their own read, with their own Retry and search: a failure
+  // says so (instead of telling the person to ask for access they may already
+  // hold), a Retry shows it is working and never refetches the steps, and
+  // when the server could not check every List the search reaches the rest.
+  const [listsRes, setListsRes] = useState<ReadableListsResponse | null>(null);
+  const [listsState, setListsState] = useState<"loading" | "ready" | "failed">("loading");
+  const [listsAttempt, setListsAttempt] = useState(0);
+  const [q, setQ] = useState("");
   const [boardId, setBoardId] = useState<string>("");
+  // Read by the Lists request only (inside its timer, after effects ran).
+  const boardIdRef = useRef(boardId);
+  useEffect(() => { boardIdRef.current = boardId; }, [boardId]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ board: { slug: string; name: string }; tasks: RunTask[] } | null>(null);
   const [runId, setRunId] = useState(newRunId);
-  const [attempt, setAttempt] = useState(0);
+  const [planAttempt, setPlanAttempt] = useState(0);
 
   // Reset per open (adopt during render, never in an effect).
   const [seenOpen, setSeenOpen] = useState(open);
@@ -60,6 +66,9 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
       setError(null);
       setResult(null);
       setRunId(newRunId());
+      setQ("");
+      setListsRes(null);
+      setListsState("loading");
     }
   }
 
@@ -67,30 +76,47 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
     if (!open) return;
     let live = true;
     void (async () => {
-      const [p, l] = await Promise.all([
-        apiFetch<Plan>(`/api/sops/${sop.id}/run-steps`, { cache: "no-store" }),
-        apiFetch<ReadableListsResponse>(readableListsUrl({ targets: true, writable: true, limit: 100 }), { cache: "no-store" }),
-      ]);
+      const p = await apiFetch<Plan>(`/api/sops/${sop.id}/run-steps`, { cache: "no-store" });
       if (!live) return;
       if (!p.ok) { setPlanError(p.error || "Couldn't read the steps."); return; }
       setPlan(p.data);
-      // Grouped under their Spaces (groupReadableLists, the same sections the
-      // other List pickers use): a template applied for a second team makes a
-      // second "Onboarding" List, and a bare name cannot say which team's List
-      // the tasks land on. The SOP's own List leads in its own section when it
-      // is not among the Lists the viewer may add to (the server still decides).
-      const res: ReadableListsResponse = l.ok && Array.isArray(l.data?.boards)
-        ? { boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], truncated: !!l.data.truncated }
-        : { boards: [], spaces: [], truncated: false };
-      const groups: ListGroup[] = groupReadableLists(res).map((g) => ({ key: g.key, label: g.label, lists: g.lists.map((b) => ({ id: b.id, name: b.name })) }));
-      setListsFailed(!l.ok);
-      setListsTruncated(res.truncated);
-      const def = p.data.defaultBoard;
-      setListGroups(def && !res.boards.some((r) => r.id === def.id) ? [{ key: "sop-default", label: "This SOP's List", lists: [def] }, ...groups] : groups);
       setBoardId((cur) => cur || p.data.defaultBoard?.id || "");
     })();
     return () => { live = false; };
-  }, [open, sop.id, attempt]);
+  }, [open, sop.id, planAttempt]);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    // A search waits for a pause in typing; the first read goes at once.
+    const t = setTimeout(() => {
+      setListsState("loading");
+      // The chosen List is always asked for by id, so a search never drops
+      // the one the tasks are about to land on (the SOP's own List has its
+      // own section when the answer leaves it out).
+      const ids = boardIdRef.current ? [boardIdRef.current] : [];
+      void apiFetch<ReadableListsResponse>(readableListsUrl({ q, ids, targets: true, writable: true, limit: 100 }), { cache: "no-store" }).then((l) => {
+        if (!live) return;
+        if (!l.ok || !Array.isArray(l.data?.boards)) { setListsState("failed"); return; }
+        setListsRes({ boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], truncated: !!l.data.truncated });
+        setListsState("ready");
+      });
+    }, q ? 250 : 0);
+    return () => { live = false; clearTimeout(t); };
+  }, [open, q, listsAttempt]);
+
+  // Grouped under their Spaces (groupReadableLists, the same sections the
+  // other List pickers use): a template applied for a second team makes a
+  // second "Onboarding" List, and a bare name cannot say which team's List
+  // the tasks land on. The SOP's own List leads in its own section when it
+  // is not among the Lists the viewer may add to (the server still decides).
+  const listGroups = useMemo<ListGroup[]>(() => {
+    const res = listsRes ?? { boards: [], spaces: [], truncated: false };
+    const groups: ListGroup[] = groupReadableLists(res).map((g) => ({ key: g.key, label: g.label, lists: g.lists.map((b) => ({ id: b.id, name: b.name })) }));
+    const def = plan?.defaultBoard ?? null;
+    return def && !res.boards.some((r) => r.id === def.id) ? [{ key: "sop-default", label: "This SOP's List", lists: [def] }, ...groups] : groups;
+  }, [listsRes, plan]);
+  const listsTruncated = !!listsRes?.truncated;
 
   const spawning = useMemo(() => (plan?.steps ?? []).filter((s) => s.createsTask), [plan]);
   // A closed select shows only the List's name, so the chosen List's Space is
@@ -119,7 +145,7 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
         {planError ? (
           <div className="mt-3 flex items-center gap-3 text-sm text-ink-2">
             {planError}
-            <button type="button" onClick={() => { setPlanError(null); setAttempt((a) => a + 1); }} className="font-medium text-ink underline">Retry</button>
+            <button type="button" onClick={() => { setPlanError(null); setPlanAttempt((a) => a + 1); }} className="font-medium text-ink underline">Retry</button>
           </div>
         ) : !plan ? (
           <div className="mt-4"><Dots variant="pending" label="Reading the steps" /></div>
@@ -166,6 +192,16 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
             <p className="text-xs text-ink-3">{plan.rule}</p>
             <label className="flex flex-col gap-1">
               <span className="text-sm font-medium text-ink-2">List</span>
+              {listsTruncated || q ? (
+                <input
+                  type="search"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Find a List"
+                  aria-label="Find a List"
+                  className={FIELD}
+                />
+              ) : null}
               <select value={boardId} onChange={(e) => setBoardId(e.target.value)} className={FIELD} aria-label="List the tasks go on">
                 <option value="">Choose a List</option>
                 {listGroups.map((g) => (
@@ -175,15 +211,17 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
                 ))}
               </select>
               {chosenWhere ? <span className="text-xs text-ink-2">{chosenWhere}</span> : null}
-              {listsFailed ? (
+              {listsState === "loading" ? (
+                <span className="text-xs text-ink-3">Loading your Lists…</span>
+              ) : listsState === "failed" ? (
                 <span className="text-xs text-ink-2">
                   {"Couldn't load your Lists. "}
-                  <button type="button" onClick={() => setAttempt((a) => a + 1)} className="font-medium text-ink underline">Retry</button>
+                  <button type="button" onClick={() => setListsAttempt((a) => a + 1)} className="font-medium text-ink underline">Retry</button>
                 </span>
               ) : listGroups.length === 0 ? (
-                <span className="text-xs text-ink-2">There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP.</span>
+                <span className="text-xs text-ink-2">{q ? "No List you can add tasks to matches that." : "There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP."}</span>
               ) : null}
-              {listsTruncated ? <span className="text-xs text-ink-3">Showing the first 100 Lists you can add tasks to.</span> : null}
+              {listsState === "ready" && listsTruncated ? <span className="text-xs text-ink-3">Not every List is shown. Search to find yours.</span> : null}
             </label>
             {error ? (
               <p className="text-sm text-danger-text" role="alert">{error}</p>
