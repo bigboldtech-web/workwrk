@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: async (args: { where: { email?: unknown } }) => (args.where.email ? { id: "u-lea", firstName: "Lea", lastName: "Alpha" } : level ? legacyLevelRow(level) : null),
       findMany: async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) => {
         employeeWhere = args.where;
-        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", accessLevel: "EMPLOYEE", department: null, role: null }];
+        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", ...legacyLevelRow("EMPLOYEE"), department: null, role: null }];
       },
     },
     conversationMember: { findMany: async () => [{ userId: "u-lea" }] },
@@ -136,11 +136,11 @@ describe("search_contracts and update_contract", () => {
 describe("search_employees", () => {
   it("a Member finds colleagues without their access level; an admin sees it", async () => {
     const member = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
-    expect(member.employees[0]).not.toHaveProperty("accessLevel");
+    expect(legacyLevelOf({ user: member.employees[0] as { accessLevel?: string } })).toBe("");
     expect(employeeWhere).toMatchObject({ organizationId: "org-1", status: "ACTIVE", deletedAt: null });
     engineRole = "ADMIN";
     const admin = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
-    expect(admin.employees[0]).toHaveProperty("accessLevel", "EMPLOYEE");
+    expect(legacyLevelOf({ user: admin.employees[0] as { accessLevel?: string } })).toBe("EMPLOYEE");
   });
 
   it("a Guest finds only the people they share a conversation with", async () => {
