@@ -14,6 +14,7 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { readableItemsVia } from "@/lib/list-links-server";
+import { sopVisibilityWhere } from "@/lib/sop-access";
 
 type Kind = "doc" | "sop";
 
@@ -45,6 +46,19 @@ export async function GET(req: NextRequest) {
   const id = url.searchParams.get("id");
   if (!kind || !id || (kind !== "doc" && kind !== "sop")) {
     return NextResponse.json({ error: "kind=doc|sop and id required" }, { status: 400 });
+  }
+
+  // The SOP read rule (the SOP list's and the SOP page's), for the target
+  // and for every SOP that links to it.
+  const sopVisible = await sopVisibilityWhere({ user: { id: ctx.userId, accessLevel: ctx.accessLevel } });
+
+  // Only for a doc or SOP the person can open: the panel of one they cannot
+  // is not theirs to read, and it would confirm the id and count its sources.
+  if (kind === "doc") {
+    const role = (await nodeRoleMap(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), "doc", [id])).get(id) ?? "none";
+    if (!roleAtLeast(role, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  } else if ((await prisma.sOP.count({ where: { AND: [{ id, organizationId: ctx.orgId }, sopVisible] } })) === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   // All EntityLink rows that point AT this entity.
@@ -83,7 +97,9 @@ export async function GET(req: NextRequest) {
       : Promise.resolve([] as Array<{ id: string; title: string; excerpt: string | null; content: unknown; updatedAt: Date; entityType: string | null; entityId: string | null }>),
     sopIds.length > 0
       ? prisma.sOP.findMany({
-          where: { id: { in: sopIds }, organizationId: ctx.orgId, status: { not: "ARCHIVED" } },
+          // A SOP source is named only to someone who can open it: a draft, or
+          // a SOP in a folder they hold no grant on, is a 404 on its own page.
+          where: { AND: [{ id: { in: sopIds }, organizationId: ctx.orgId, status: { not: "ARCHIVED" } }, sopVisible] },
           select: { id: true, title: true, updatedAt: true },
         })
       : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date }>),
