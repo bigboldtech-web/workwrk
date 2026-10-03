@@ -20,7 +20,8 @@ import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import type { ToolName } from "./tool-names";
-import { hasPermission } from "@/lib/api-helpers";
+import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
+import { sopVisibilityWhere } from "@/lib/sop-access";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { goalVisibilityOr } from "@/lib/goal-audience";
@@ -426,6 +427,13 @@ const searchMeetings: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
+    // Only meetings the person could open on the meeting page (meetingRole:
+    // its creator, an attendee or an org admin), never a deleted one. This
+    // returned every meeting in the workspace, other people's one to ones
+    // with their agenda and attendees included. The level is read fresh.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, meetings: [] };
+    const admin = isOrgAdmin(session);
     const limit = Math.min(50, Number(input.limit ?? 20));
     const now = new Date();
     const windowMs = input.withinDays ? Number(input.withinDays) * 86400000 : null;
@@ -442,6 +450,8 @@ const searchMeetings: ToolDefinition = {
     const meetings = await prisma.meeting.findMany({
       where: {
         organizationId: ctx.orgId,
+        deletedAt: null,
+        ...(admin ? {} : { OR: [{ createdById: ctx.userId }, { attendees: { some: { userId: ctx.userId } } }] }),
         ...(input.type ? { type: input.type as "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC" } : {}),
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
         ...(input.attendedByMe ? { attendees: { some: { userId: ctx.userId } } } : {}),
@@ -541,10 +551,17 @@ const searchSops: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
+    // Only SOPs the person could open (sopVisibilityWhere, the SOP list's and
+    // the SOP page's rule): this listed every SOP in the workspace, drafts and
+    // restricted folders included. The level is read fresh.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, sops: [] };
+    const visible = await sopVisibilityWhere(session);
     const limit = Math.min(30, Number(input.limit ?? 15));
     const q = input.query as string | undefined;
     const sops = await prisma.sOP.findMany({
       where: {
+        AND: [visible],
         organizationId: ctx.orgId,
         ...(input.category ? { category: input.category as string } : {}),
         ...(input.status ? { status: input.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" } : {}),
