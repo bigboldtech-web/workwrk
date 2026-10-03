@@ -177,34 +177,38 @@ export function SopReadView({ sop, mode = "app", emptyAction }: {
  * never shows owners.
  */
 export function FlowStepOwners({ steps, action }: { steps: ReadonlyArray<{ id?: string; title?: string }>; action?: React.ReactNode }) {
-  const owned = steps
-    .map((s, i) => ({ key: s.id ?? String(i), n: i + 1, title: s.title || `Step ${i + 1}`, jobTitle: stepJobTitle(s), createsTask: stepCreatesTask(s) }))
-    .filter((s) => s.jobTitle || s.createsTask);
-  if (owned.length === 0 && !action) return null;
+  if (!steps.some((s) => stepJobTitle(s) || stepCreatesTask(s)) && !action) return null;
   return (
     <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
       <div className="flex h-11 items-center gap-3 px-3">
         <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
         {action}
       </div>
-      {owned.length === 0 ? (
-        <p className="px-3 pb-3 text-sm text-ink-3">No step has an owner or creates a task yet.</p>
-      ) : (
-        <ol className="flex flex-col divide-y divide-line border-t border-line">
-          {owned.map((s) => (
-            <li key={s.key} className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{s.n}</span>
-              <span className="min-w-[8rem] flex-1 truncate text-row text-ink">{s.title}</span>
-              {/* A label, not a control (Chip as span: full contrast, no tab stop). A
-                  long job title is cut to half the row and named in full on hover,
-                  so the step's own title never disappears on a phone. */}
-              {s.jobTitle ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={s.jobTitle.title}><span className="truncate">{s.jobTitle.title}</span></Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
-              {s.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
-            </li>
-          ))}
-        </ol>
-      )}
+      <FlowStepOwnerRows steps={steps} />
     </section>
+  );
+}
+
+/** The summary's rows alone: the steps that have an owner or create a task, else one quiet line. */
+export function FlowStepOwnerRows({ steps }: { steps: ReadonlyArray<{ id?: string; title?: string }> }) {
+  const owned = steps
+    .map((s, i) => ({ key: s.id ?? String(i), n: i + 1, title: s.title || `Step ${i + 1}`, jobTitle: stepJobTitle(s), createsTask: stepCreatesTask(s) }))
+    .filter((s) => s.jobTitle || s.createsTask);
+  if (owned.length === 0) return <p className="px-3 pb-3 text-sm text-ink-3">No step has an owner or creates a task yet.</p>;
+  return (
+    <ol className="flex flex-col divide-y divide-line border-t border-line">
+      {owned.map((s) => (
+        <li key={s.key} className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{s.n}</span>
+          <span className="min-w-[8rem] flex-1 truncate text-row text-ink">{s.title}</span>
+          {/* A label, not a control (Chip as span: full contrast, no tab stop). A
+              long job title is cut to half the row and named in full on hover,
+              so the step's own title never disappears on a phone. */}
+          {s.jobTitle ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={s.jobTitle.title}><span className="truncate">{s.jobTitle.title}</span></Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
+          {s.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
+        </li>
+      ))}
+    </ol>
   );
 }
 
