@@ -485,6 +485,24 @@ export function decodeBucketCursor(raw: string | null | undefined): BucketCursor
   return position === null ? null : { position, id };
 }
 
+// ── Where a Bird's eye lives ────────────────────────────────────────
+
+/** A Space's Bird's eye, or one Folder's (its Lists and its sub-folders'). */
+export type BirdseyeScope = { kind: "space"; id: string; slug: string } | { kind: "folder"; id: string; spaceId: string };
+
+/**
+ * The page a Bird's eye lives on, the route it reads, and its focus link.
+ * A Space keeps its tab in `?view=`, a Folder in `?tab=`, each its page's
+ * own parameter.
+ */
+export function birdseyeScopePaths(scope: BirdseyeScope): { basePath: string; endpoint: string; focusHref: (listId: string) => string } {
+  const id = encodeURIComponent(scope.id);
+  const basePath = scope.kind === "space" ? `/spaces/${encodeURIComponent(scope.slug)}` : `/folders/${id}`;
+  const endpoint = scope.kind === "space" ? `/api/spaces/${id}/birdseye` : `/api/folders/${id}/birdseye`;
+  const tab = scope.kind === "space" ? "view" : "tab";
+  return { basePath, endpoint, focusHref: (listId) => `${basePath}?${tab}=birdseye&focus=${encodeURIComponent(listId)}` };
+}
+
 export type BirdseyeQuery =
   | { mode: "overview"; q: string; hideClosed: boolean; boardId: null; status: null; cursor: null }
   | { mode: "focus"; q: string; hideClosed: boolean; boardId: string; status: null; cursor: null }

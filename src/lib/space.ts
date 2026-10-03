@@ -15,7 +15,7 @@ import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { type ContainerRole } from "@/lib/work/container-menu";
 import { withArchivedBy } from "@/lib/archived-by";
 import { decide, emptyGrants, emptyRows, nodeCtxFromLevel, roleAtLeast, spaceNestVerdict, type MemberRole, type NodeRole, type NodeVisibility, type TreeRole } from "@/lib/access/node-rules";
-import { listVisibleSpaces, spaceTree } from "@/lib/access/node-access";
+import { listVisibleSpaces, nodeRole, spaceTree } from "@/lib/access/node-access";
 import { renderedCounts, type FolderNode, type ListNode, type SpaceTreeResult } from "@/lib/access/node-tree";
 import { mergeSpaceSettings, spaceModulesPatch } from "@/lib/work/space-default-view";
 
@@ -432,6 +432,62 @@ export async function readableListsInSpace(
     });
   }
   return { lists, folderCount };
+}
+
+// ── The Lists of one Folder this viewer can read ────────────────────
+
+/**
+ * One Folder of a viewer's Space tree, at any depth, as a tree of its own:
+ * that Folder alone at the root and nothing else, so readableListsInSpace
+ * walks exactly its shelf and every shelf below it, in the sidebar's order.
+ * Null when the tree does not carry it (a Folder the viewer cannot reach).
+ */
+export function folderSubtree(tree: SpaceTreeResult, folderId: string): SpaceTreeResult | null {
+  const find = (folders: FolderNode[]): FolderNode | null => {
+    for (const f of folders) {
+      if (f.id === folderId) return f;
+      const hit = find(f.childFolders);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const node = find(tree.folders);
+  return node ? { ...tree, folders: [node], boards: [], tables: [], docs: [], whiteboards: [] } : null;
+}
+
+/**
+ * A Folder this viewer may open, Can view or higher, or null: the Folder
+ * page's own gate (nodeRole, with the PRIVATE cut). A viewer who only passes
+ * through it on the way to something below gets null here, as the page shows
+ * them its path view and no tabs.
+ */
+export async function folderForViewer(viewer: SpaceViewer, folderId: string): Promise<{ id: string; spaceId: string; name: string } | null> {
+  const folder = await prisma.folder.findFirst({
+    where: { id: folderId, organizationId: viewer.organizationId, archivedAt: null },
+    select: { id: true, spaceId: true, name: true },
+  });
+  if (!folder) return null;
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel);
+  const decision = await nodeRole(ctx, { kind: "folder", id: folder.id });
+  return roleAtLeast(decision.role, "VIEW") ? folder : null;
+}
+
+/**
+ * The Lists of one Folder and of every Folder below it that this viewer can
+ * read, exactly as readableListsInSpace answers a Space's: the one
+ * resolver's tree, cut to the Folder, and the same row read.
+ */
+export async function readableListsInFolder(
+  folder: { id: string; spaceId: string },
+  viewer: SpaceViewer,
+  opts: { includeSchema?: boolean; includeSettings?: boolean } = {},
+): Promise<{ lists: SpaceListRow[] }> {
+  const ctx = nodeCtxFromLevel(viewer.userId, viewer.organizationId, viewer.accessLevel);
+  const tree = await spaceTree(ctx, folder.spaceId);
+  const sub = tree ? folderSubtree(tree, folder.id) : null;
+  if (!sub) return { lists: [] };
+  const { lists } = await readableListsInSpace(folder.spaceId, viewer, { ...opts, tree: sub });
+  return { lists };
 }
 
 // ── The one Space.settings writer ───────────────────────────────────

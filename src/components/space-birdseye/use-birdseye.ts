@@ -3,7 +3,8 @@
 // useBirdseye: every read and write Bird's eye makes, and the state that
 // holds their answers.
 //
-// Reads go through apiFetch to GET /api/spaces/[id]/birdseye. EVERY read
+// Reads go through apiFetch to GET /api/spaces/[id]/birdseye, or a Folder's
+// GET /api/folders/[id]/birdseye (the same answer). EVERY read
 // carries a generation: the overview's is bumped by the search, Hide closed
 // and a reload, the focus's by those and by the focused List, and an answer
 // from an older generation is dropped on arrival (review #9). A superseded
@@ -163,14 +164,15 @@ function focusColumnOf(focus: FocusState | null, id: string): string | null {
 }
 
 export function useBirdseye({
-  spaceId,
+  endpoint,
   focusId,
   q,
   hideClosed,
   onFocusMissing,
   onOverviewLoaded,
 }: {
-  spaceId: string;
+  /** The Bird's eye route of this scope (birdseyeScopePaths). */
+  endpoint: string;
   focusId: string | null;
   q: string;
   hideClosed: boolean;
@@ -245,9 +247,9 @@ export function useBirdseye({
       if (hideClosed) sp.set("closed", "hide");
       for (const [k, v] of Object.entries(extra)) sp.set(k, v);
       const s = sp.toString();
-      return `/api/spaces/${encodeURIComponent(spaceId)}/birdseye${s ? `?${s}` : ""}`;
+      return `${endpoint}${s ? `?${s}` : ""}`;
     },
-    [spaceId, q, hideClosed],
+    [endpoint, q, hideClosed],
   );
 
   const listById = useCallback((id: string): BirdseyeList | undefined => {

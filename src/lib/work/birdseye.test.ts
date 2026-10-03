@@ -7,6 +7,7 @@ import {
   TINT_MIX,
   applyStatusMove,
   bucketFor,
+  birdseyeScopePaths,
   bucketRank,
   cardFromRow,
   cardMatchesFilters,
@@ -414,3 +415,20 @@ describe("cardFromRow", () => {
     expect(descriptionPresent({ description: "x" })).toBe(true);
   });
 });
+
+describe("birdseyeScopePaths", () => {
+  it("lives on the Space page in ?view= and reads the Space route", () => {
+    const p = birdseyeScopePaths({ kind: "space", id: "sp1", slug: "ops team" });
+    expect(p.basePath).toBe("/spaces/ops%20team");
+    expect(p.endpoint).toBe("/api/spaces/sp1/birdseye");
+    expect(p.focusHref("l 1")).toBe("/spaces/ops%20team?view=birdseye&focus=l%201");
+  });
+
+  it("lives on the Folder page in ?tab= and reads the Folder route", () => {
+    const p = birdseyeScopePaths({ kind: "folder", id: "f1", spaceId: "sp1" });
+    expect(p.basePath).toBe("/folders/f1");
+    expect(p.endpoint).toBe("/api/folders/f1/birdseye");
+    expect(p.focusHref("l1")).toBe("/folders/f1?tab=birdseye&focus=l1");
+  });
+});
+

@@ -141,6 +141,8 @@ describe("linked rows, through the List's own projection only (2026-10-03)", () 
   const LINKED_SERVER = code(read("src/lib/work/birdseye-linked.server.ts"));
   const LINKED = code(read("src/lib/work/birdseye-linked.ts"));
   const ROUTE = code(read("src/app/api/spaces/[id]/birdseye/route.ts"));
+  const FOLDER_ROUTE = code(read("src/app/api/folders/[id]/birdseye/route.ts"));
+  const ANSWER = code(read("src/lib/work/birdseye-answer.server.ts"));
   const ROWS = code(read("src/lib/board-items.ts"));
 
   it("keeps the loader free of the link table: it merges cards handed in", () => {
@@ -180,9 +182,10 @@ describe("linked rows, through the List's own projection only (2026-10-03)", () 
 
   it("hands the loader linked cards for exactly the readable Lists it reads", () => {
     expect(ROUTE).toMatch(/const \{ lists: rows \} = await readableListsInSpace\(space\.id, c,/);
-    expect(ROUTE).toMatch(/const loaderLists: LoaderList\[\] = rows\.map\(/);
-    expect(ROUTE).toMatch(/const linkedLists: LinkedList\[\] = rows\.map\(\(r\) => \(\{ id: r\.id, statuses: [^]*?canContribute: r\.canContribute \}\)\)/);
-    expect(ROUTE.match(/linkedFor\(/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(FOLDER_ROUTE).toMatch(/const \{ lists: rows \} = await readableListsInFolder\(folder, c,/);
+    expect(ANSWER).toMatch(/const loaderLists: LoaderList\[\] = rows\.map\(/);
+    expect(ANSWER).toMatch(/const linkedLists: LinkedList\[\] = rows\.map\(\(r\) => \(\{ id: r\.id, statuses: [^]*?canContribute: r\.canContribute \}\)\)/);
+    expect(ANSWER.match(/linkedFor\(/g)?.length).toBeGreaterThanOrEqual(4);
   });
 
   it("writes a linked card's status in its home set, through the List it is shown in", () => {

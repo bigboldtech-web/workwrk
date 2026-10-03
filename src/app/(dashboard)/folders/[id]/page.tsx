@@ -19,9 +19,11 @@
 //     that List does not have;
 //   * an Owner column with an owner in it (audit Medium #11).
 //
-// The two tabs are `?tab=contents|tasks`. The old `?view=overview|list` still
-// resolves (it is one release of back-compat, not a redirect chain), so a
-// bookmark and a Favorites link both land where they always did.
+// The tabs are `?tab=contents|tasks|birdseye`. The old `?view=overview|list`
+// still resolves (it is one release of back-compat, not a redirect chain), so
+// a bookmark and a Favorites link both land where they always did. Bird's eye
+// is the Space's own view cut to this Folder: its Lists and its sub-folders',
+// side by side (GET /api/folders/[id]/birdseye), `&focus=<listId>` for Focus.
 
 import { notFound, redirect } from "next/navigation";
 import { FolderFilesCard } from "@/components/spaces/folder-files-card";
@@ -44,6 +46,7 @@ import { ShareButton } from "@/components/access/share-button";
 import { FolderTabs } from "./folder-tabs";
 import { NewListGhostRow, NewFolderGhostRow } from "./new-in-folder";
 import { SpaceListItemsTable } from "../../spaces/[slug]/space-list-items";
+import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 // A Folder page is Work, so what is on the shelf opens at its Work address
 // (src/lib/nav/object-href.ts), with the Work tree beside it.
@@ -53,18 +56,18 @@ import { linkedTreeCountGroups } from "@/lib/list-links-server";
 
 export const dynamic = "force-dynamic";
 
-type FolderTab = "contents" | "tasks";
+type FolderTab = "contents" | "tasks" | "birdseye";
 
 export default async function FolderPage(props: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; view?: string }>;
+  searchParams: Promise<{ tab?: string; view?: string; focus?: string }>;
 }) {
   const { id } = await props.params;
   const sp = await props.searchParams;
   // `?view=list` was the Tasks tab and `?view=overview` was Contents. Both keep
   // working for one release rather than 404ing a bookmark.
   const tab: FolderTab =
-    sp.tab === "tasks" || sp.view === "list" ? "tasks" : "contents";
+    sp.tab === "birdseye" ? "birdseye" : sp.tab === "tasks" || sp.view === "list" ? "tasks" : "contents";
 
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
@@ -199,7 +202,9 @@ export default async function FolderPage(props: {
   const fallbackStatuses: StatusOption[] = getBoardStatuses(null);
 
   const [statusCounts, docs, canvases, ownerRows, listItems] = await Promise.all([
-    boardIds.length
+    // Bird's eye loads its own data from the client; the per-List counts are
+    // the Contents tab's.
+    boardIds.length && tab !== "birdseye"
       ? prisma.item.groupBy({
           by: ["boardId", "status"],
           where: { boardId: { in: boardIds }, archivedAt: null },
@@ -266,7 +271,7 @@ export default async function FolderPage(props: {
   // open by their HOME status set. Data only; nothing on the page changes
   // until a task is actually shared into one of these Lists.
   // Grouped in Postgres, so the count is exact however many tasks are shared.
-  const linkRows = await linkedTreeCountGroups(boardIds, { organizationId: u.organizationId });
+  const linkRows = tab === "birdseye" ? [] : await linkedTreeCountGroups(boardIds, { organizationId: u.organizationId });
   const homeStatuses = new Map(boards.map((b) => [b.id, getBoardStatuses(b)] as const));
   const otherHomes = [...new Set(linkRows.map((r) => r.homeBoardId))].filter((h) => !homeStatuses.has(h));
   if (otherHomes.length) {
@@ -336,48 +341,72 @@ export default async function FolderPage(props: {
 
       <FolderTabs tab={tab} folderId={folder.id} taskCount={boardIds.length} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-        {tab === "tasks" ? (
-          boards.length === 0 ? (
-            <p className="text-base text-ink-2 py-8 text-center">
-              Nothing to show until this folder has a list.
-            </p>
-          ) : (
-            <div className="rounded-xl border border-line bg-raised overflow-hidden">
-              <SpaceListItemsTable
-                items={listItems}
-                statuses={fallbackStatuses}
-                statusesByList={statusesByList}
-              />
-              {listItems.length === 200 ? (
-                <div className="px-3 py-2 text-xs text-ink-3 bg-subtle border-t border-line-soft">
-                  Showing the 200 most recently updated tasks. Open a List for the full set.
-                </div>
-              ) : null}
-            </div>
-          )
-        ) : (
-          <div className="space-y-6 max-w-5xl">
-            {/* Contents: one table, every kind, in the spec's order. */}
-            <section className="rounded-xl border border-line bg-raised overflow-hidden">
-              <div className="grid grid-cols-[1fr_90px_180px_150px_44px] items-center px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
-                <span>Name</span>
-                <span>Type</span>
-                <span>Tasks</span>
-                <span>Owner</span>
-                <span className="sr-only">Actions</span>
+      {tab === "birdseye" ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <SpaceBirdseye
+            scope={{ kind: "folder", id: folder.id, spaceId: folder.spaceId }}
+            overviewHref={`/folders/${encodeURIComponent(folder.id)}?tab=birdseye`}
+            initialFocusId={sp.focus ?? null}
+            canCreateList={canCreateInFolder}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+          {tab === "tasks" ? (
+            boards.length === 0 ? (
+              <p className="text-base text-ink-2 py-8 text-center">
+                Nothing to show until this folder has a list.
+              </p>
+            ) : (
+              <div className="rounded-xl border border-line bg-raised overflow-hidden">
+                <SpaceListItemsTable
+                  items={listItems}
+                  statuses={fallbackStatuses}
+                  statusesByList={statusesByList}
+                />
+                {listItems.length === 200 ? (
+                  <div className="px-3 py-2 text-xs text-ink-3 bg-subtle border-t border-line-soft">
+                    Showing the 200 most recently updated tasks. Open a List for the full set.
+                  </div>
+                ) : null}
               </div>
-              {rowCount === 0 ? (
-                <p className="px-3 py-4 text-base text-ink-2">
-                  Nothing here yet{canCreateInFolder ? " · Create a list below." : "."}
-                </p>
-              ) : (
-                <ul>
-                  {visibleChildFolders.map((f) => {
-                    // A sub-folder the viewer only passes through (a path) is
-                    // named and opens its path view: no count, no owner, no menu.
-                    const role = toContainerRole(childRole(f.id));
-                    if (!role) {
+            )
+          ) : (
+            <div className="space-y-6 max-w-5xl">
+              {/* Contents: one table, every kind, in the spec's order. */}
+              <section className="rounded-xl border border-line bg-raised overflow-hidden">
+                <div className="grid grid-cols-[1fr_90px_180px_150px_44px] items-center px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
+                  <span>Name</span>
+                  <span>Type</span>
+                  <span>Tasks</span>
+                  <span>Owner</span>
+                  <span className="sr-only">Actions</span>
+                </div>
+                {rowCount === 0 ? (
+                  <p className="px-3 py-4 text-base text-ink-2">
+                    Nothing here yet{canCreateInFolder ? " · Create a list below." : "."}
+                  </p>
+                ) : (
+                  <ul>
+                    {visibleChildFolders.map((f) => {
+                      // A sub-folder the viewer only passes through (a path) is
+                      // named and opens its path view: no count, no owner, no menu.
+                      const role = toContainerRole(childRole(f.id));
+                      if (!role) {
+                        return (
+                          <ContentsRow
+                            key={f.id}
+                            href={`/folders/${f.id}`}
+                            glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
+                            name={f.name}
+                            type="Folder"
+                            tasks=""
+                            owner={null}
+                            ownerHidden
+                          />
+                        );
+                      }
+                      const lists = readableListsIn.get(f.id) ?? 0;
                       return (
                         <ContentsRow
                           key={f.id}
@@ -385,112 +414,99 @@ export default async function FolderPage(props: {
                           glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
                           name={f.name}
                           type="Folder"
-                          tasks=""
-                          owner={null}
-                          ownerHidden
+                          tasks={`${lists} list${lists === 1 ? "" : "s"}`}
+                          owner={f.ownerId ? ownerById.get(f.ownerId) ?? null : null}
+                          menu={
+                            <ContainerMenuTrigger
+                              container={{
+                                kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
+                                visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                                spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                              }}
+                              role={role}
+                            />
+                          }
                         />
                       );
-                    }
-                    const lists = readableListsIn.get(f.id) ?? 0;
-                    return (
+                    })}
+                    {directBoards.map((b) => {
+                      const t = tasksByList.get(b.id) ?? { open: 0, done: 0 };
+                      return (
+                        <ContentsRow
+                          key={b.id}
+                          href={`/boards/${b.slug}`}
+                          glyph={<EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} fallback="list" />}
+                          name={b.name}
+                          type="List"
+                          tasks={t.open === 0 && t.done === 0 ? "No tasks" : `${t.open} open · ${t.done} done`}
+                          owner={b.ownerId ? ownerById.get(b.ownerId) ?? null : null}
+                          menu={
+                            <ContainerMenuTrigger
+                              container={{
+                                kind: "list", id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color,
+                                visibility: b.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                                spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                                folderId: folder.id, folderName: folder.name,
+                              }}
+                              role={toContainerRole(listRoles.get(b.id) ?? "none") ?? "view"}
+                            />
+                          }
+                        />
+                      );
+                    })}
+                    {docs.map((d) => (
                       <ContentsRow
-                        key={f.id}
-                        href={`/folders/${f.id}`}
-                        glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
-                        name={f.name}
-                        type="Folder"
-                        tasks={`${lists} list${lists === 1 ? "" : "s"}`}
-                        owner={f.ownerId ? ownerById.get(f.ownerId) ?? null : null}
-                        menu={
-                          <ContainerMenuTrigger
-                            container={{
-                              kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
-                              visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
-                              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
-                            }}
-                            role={role}
-                          />
-                        }
+                        key={d.id}
+                        href={objectHref("doc", d.id, "home", space.slug)}
+                        glyph={<FileText className="w-4 h-4 text-ink-2 shrink-0" />}
+                        name={d.title || "Untitled"}
+                        type="Doc"
+                        tasks=""
+                        owner={d.createdById ? ownerById.get(d.createdById) ?? null : null}
                       />
-                    );
-                  })}
-                  {directBoards.map((b) => {
-                    const t = tasksByList.get(b.id) ?? { open: 0, done: 0 };
-                    return (
+                    ))}
+                    {canvases.map((c) => (
                       <ContentsRow
-                        key={b.id}
-                        href={`/boards/${b.slug}`}
-                        glyph={<EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} fallback="list" />}
-                        name={b.name}
-                        type="List"
-                        tasks={t.open === 0 && t.done === 0 ? "No tasks" : `${t.open} open · ${t.done} done`}
-                        owner={b.ownerId ? ownerById.get(b.ownerId) ?? null : null}
-                        menu={
-                          <ContainerMenuTrigger
-                            container={{
-                              kind: "list", id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color,
-                              visibility: b.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
-                              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
-                              folderId: folder.id, folderName: folder.name,
-                            }}
-                            role={toContainerRole(listRoles.get(b.id) ?? "none") ?? "view"}
-                          />
-                        }
+                        key={c.id}
+                        href={objectHref("canvas", c.id, "home", c.spaceId === folder.spaceId ? space.slug : null)}
+                        glyph={<Brush className="w-4 h-4 text-ink-2 shrink-0" />}
+                        name={c.name || "Untitled canvas"}
+                        type="Canvas"
+                        tasks=""
+                        owner={c.ownerId ? ownerById.get(c.ownerId) ?? null : null}
                       />
-                    );
-                  })}
-                  {docs.map((d) => (
-                    <ContentsRow
-                      key={d.id}
-                      href={objectHref("doc", d.id, "home", space.slug)}
-                      glyph={<FileText className="w-4 h-4 text-ink-2 shrink-0" />}
-                      name={d.title || "Untitled"}
-                      type="Doc"
-                      tasks=""
-                      owner={d.createdById ? ownerById.get(d.createdById) ?? null : null}
-                    />
-                  ))}
-                  {canvases.map((c) => (
-                    <ContentsRow
-                      key={c.id}
-                      href={objectHref("canvas", c.id, "home", c.spaceId === folder.spaceId ? space.slug : null)}
-                      glyph={<Brush className="w-4 h-4 text-ink-2 shrink-0" />}
-                      name={c.name || "Untitled canvas"}
-                      type="Canvas"
-                      tasks=""
-                      owner={c.ownerId ? ownerById.get(c.ownerId) ?? null : null}
-                    />
-                  ))}
-                </ul>
-              )}
-              {canCreateInFolder ? (
-                // Ghost rows with words, not two bare "+" glyphs: a person
-                // reading an empty shelf should be told what they can put on it.
-                <div className="flex items-center gap-1 px-2 py-1.5 border-t border-line-soft">
-                  <NewListGhostRow spaceId={space.id} folderId={folder.id} />
-                  <NewFolderGhostRow spaceId={space.id} parentFolderId={folder.id} />
-                </div>
-              ) : null}
-              {boardIds.length > 0 ? (
-                <div className="px-3 py-2 border-t border-line-soft">
-                  <Link href={`/folders/${folder.id}?tab=tasks`} className="text-base text-brand-deep hover:underline">
-                    All tasks in this folder
-                  </Link>
-                </div>
-              ) : null}
-            </section>
+                    ))}
+                  </ul>
+                )}
+                {canCreateInFolder ? (
+                  // Ghost rows with words, not two bare "+" glyphs: a person
+                  // reading an empty shelf should be told what they can put on it.
+                  <div className="flex items-center gap-1 px-2 py-1.5 border-t border-line-soft">
+                    <NewListGhostRow spaceId={space.id} folderId={folder.id} />
+                    <NewFolderGhostRow spaceId={space.id} parentFolderId={folder.id} />
+                  </div>
+                ) : null}
+                {boardIds.length > 0 ? (
+                  <div className="px-3 py-2 border-t border-line-soft">
+                    <Link href={`/folders/${folder.id}?tab=tasks`} className="text-base text-brand-deep hover:underline">
+                      All tasks in this folder
+                    </Link>
+                  </div>
+                ) : null}
+              </section>
 
-            {/* Files, with the drop zone INSIDE the card. It used to sit above
-                the whole page on every tab (audit section 3, the oddity). */}
-            <section className="space-y-3">
-              {canEdit ? (
-                <FileDropZone spaceFolderId={folder.id} disabled={false} label={`"${folder.name}"`} />
-              ) : null}
-              <FolderFilesCard folderId={folder.id} canEdit={canEdit} />
-            </section>
-          </div>
-        )}
-      </div>
+              {/* Files, with the drop zone INSIDE the card. It used to sit above
+                  the whole page on every tab (audit section 3, the oddity). */}
+              <section className="space-y-3">
+                {canEdit ? (
+                  <FileDropZone spaceFolderId={folder.id} disabled={false} label={`"${folder.name}"`} />
+                ) : null}
+                <FolderFilesCard folderId={folder.id} canEdit={canEdit} />
+              </section>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
