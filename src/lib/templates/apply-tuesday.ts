@@ -41,6 +41,7 @@ import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { TUESDAY_TEMPLATE_KEY, TUESDAY_TEMPLATE_ROW, tuesdayPayload, type TuesdayPayload } from "@/lib/templates/tuesday-template";
+import { archiveRowId } from "@/lib/trash-view";
 
 export interface TuesdayApplied {
   spaceId: string;
@@ -68,8 +69,109 @@ export interface ApplyTuesdayCtx {
   visibility?: "PRIVATE" | "WORKSPACE" | "ORG";
   /** A Space this template already made (a retry): reuse it rather than make a second. */
   resumeSpaceId?: string | null;
+  /**
+   * The person chose to make a new List (or doc) beside the one in Trash: that
+   * piece is left there and a new one is made. Only that piece: another in
+   * Trash still stops to ask.
+   */
+  freshKind?: "list" | "doc" | null;
   /** Called once the Space exists, so a caller can record it before anything else can fail. */
   onSpace?: (space: { id: string; slug: string }) => Promise<void>;
+}
+
+/**
+ * A piece a retry would finish in is in Trash: the Space, its Onboarding
+ * List or its playbook doc. A retry used to pass it by and build a second
+ * one; restoring the first later left two. The caller restores it or starts
+ * fresh, never a silent second.
+ */
+export class SpaceInTrashError extends Error {
+  constructor(readonly trashRowId: string, readonly spaceName: string, readonly kind: TrashedPieceKind = "space") {
+    super(`${kind}_in_trash`);
+  }
+}
+
+export type TrashedPieceKind = "space" | "list" | "doc";
+
+/** The Trash row holding this Space (archived in place, or deleted to a snapshot), or null. */
+export async function spaceInTrash(orgId: string, spaceId: string): Promise<{ rowId: string; name: string } | null> {
+  const archived = await prisma.space.findFirst({ where: { id: spaceId, organizationId: orgId, archivedAt: { not: null } }, select: { name: true } });
+  if (archived) return { rowId: archiveRowId("space", spaceId), name: archived.name };
+  const snap = await prisma.trashItem.findFirst({
+    where: { organizationId: orgId, entityType: "space", entityId: spaceId },
+    orderBy: { deletedAt: "desc" },
+    select: { id: true, label: true },
+  });
+  return snap ? { rowId: snap.id, name: snap.label } : null;
+}
+
+/**
+ * The piece of an unfinished signup template that is in Trash, or null: its
+ * Space first (archived or deleted), else the List or doc the last attempt
+ * stopped on, read again (it may have been restored since).
+ */
+export async function trashedPieceOf(orgId: string, marker: SignupTemplateMarker | null): Promise<{ rowId: string; name: string; kind: TrashedPieceKind } | null> {
+  if (!marker || marker.status === "applied" || !marker.spaceId) return null;
+  const space = await spaceInTrash(orgId, marker.spaceId);
+  if (space) return { ...space, kind: "space" };
+  if (marker.status !== "failed" || !marker.trash) return null;
+  const kind = marker.trash.kind ?? "space";
+  const listDef = tuesdayPayload().lists[0];
+  const piece = kind === "list" ? await listInTrash(orgId, marker.spaceId, listDef.name)
+    : kind === "doc" ? await docInTrash(orgId, marker.spaceId, tuesdayPayload().bundle.doc.title)
+    : null;
+  return piece ? { ...piece, kind } : null;
+}
+
+/** This template's Onboarding List in Trash in this Space (archived in place, or deleted to a snapshot), or null. */
+async function listInTrash(orgId: string, spaceId: string, name: string): Promise<{ rowId: string; name: string } | null> {
+  const archived = await prisma.board.findFirst({ where: { organizationId: orgId, spaceId, name, archivedAt: { not: null } }, select: { id: true } });
+  if (archived) return { rowId: archiveRowId("board", archived.id), name };
+  const snap = await prisma.trashItem.findFirst({
+    where: { organizationId: orgId, entityType: "board", label: name, snapshot: { path: ["row", "spaceId"], equals: spaceId } },
+    orderBy: { deletedAt: "desc" },
+    select: { id: true },
+  });
+  return snap ? { rowId: snap.id, name } : null;
+}
+
+/** This template's playbook doc in Trash in this Space, or null. */
+async function docInTrash(orgId: string, spaceId: string, title: string): Promise<{ rowId: string; name: string } | null> {
+  const archived = await prisma.doc.findFirst({ where: { organizationId: orgId, entityType: "SPACE", entityId: spaceId, title, archivedAt: { not: null } }, select: { id: true } });
+  if (archived) return { rowId: archiveRowId("doc", archived.id), name: title };
+  const snap = await prisma.trashItem.findFirst({
+    where: { organizationId: orgId, entityType: "note", label: title, snapshot: { path: ["row", "entityId"], equals: spaceId } },
+    orderBy: { deletedAt: "desc" },
+    select: { id: true },
+  });
+  return snap ? { rowId: snap.id, name: title } : null;
+}
+
+/**
+ * A reused SOP whose task-making steps point at a List that is no longer
+ * there (gone, in Trash, or in a Space in Trash) points them at `boardId`.
+ * One that points at a live List is left as it is: someone chose it.
+ */
+async function repointSopSpawn(orgId: string, sop: { id: string; content: unknown }, boardId: string): Promise<void> {
+  const content = sop.content as { spawn?: { boardId?: unknown } } | null;
+  const current = typeof content?.spawn?.boardId === "string" ? content.spawn.boardId : null;
+  if (!content || !current || current === boardId) return;
+  // Live: not in Trash, and neither its Space nor its Folder is (a List may
+  // have neither).
+  const live = await prisma.board.findFirst({
+    where: {
+      id: current, organizationId: orgId, archivedAt: null,
+      AND: [
+        { OR: [{ spaceId: null }, { space: { archivedAt: null } }] },
+        { OR: [{ folderId: null }, { folder: { archivedAt: null } }] },
+      ],
+    },
+    select: { id: true },
+  });
+  if (live) return;
+  // Only the one key, and only while it still names the List read above: an
+  // edit to the SOP made meanwhile is never written over.
+  await prisma.$executeRaw`UPDATE "SOP" SET content = jsonb_set(content, '{spawn,boardId}', to_jsonb(${boardId}::text)) WHERE id = ${sop.id} AND "organizationId" = ${orgId} AND content->'spawn'->>'boardId' = ${current}`;
 }
 
 /** The doc's line when some pieces were not made: a non-admin apply, or the plan's SOP cap. Pure. */
@@ -116,12 +218,20 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
   let space = ctx.resumeSpaceId
     ? await prisma.space.findFirst({ where: { id: ctx.resumeSpaceId, organizationId: orgId, archivedAt: null }, select: { id: true, slug: true } })
     : null;
+  if (!space && ctx.resumeSpaceId) {
+    const trashed = await spaceInTrash(orgId, ctx.resumeSpaceId);
+    if (trashed) throw new SpaceInTrashError(trashed.rowId, trashed.name);
+  }
   if (!space) {
     const made = await applySpaceTemplate({ ...payload, lists: [] }, { organizationId: orgId, userId, name: ctx.name, visibility: ctx.visibility });
     space = { id: made.spaceId, slug: made.slug };
   }
   if (ctx.onSpace) await ctx.onSpace(space);
   let board = await prisma.board.findFirst({ where: { organizationId: orgId, spaceId: space.id, name: listDef.name, archivedAt: null }, select: { id: true, slug: true } });
+  if (!board && ctx.resumeSpaceId && ctx.freshKind !== "list") {
+    const trashed = await listInTrash(orgId, space.id, listDef.name);
+    if (trashed) throw new SpaceInTrashError(trashed.rowId, trashed.name, "list");
+  }
   if (!board) {
     const made = await applyListTemplate({ ...listDef, items: [] }, { organizationId: orgId, userId, spaceId: space.id, name: listDef.name });
     board = { id: made.boardId, slug: made.slug };
@@ -174,7 +284,11 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
       };
     });
     const content = { type: "steps", layout: "list", steps, flow: { type: "process_flow", steps: steps.map((s) => ({ ...s, type: "action" })) }, spawn: { boardId: board.id } };
-    const existingSop = await prisma.sOP.findFirst({ where: { organizationId: orgId, title: b.sop.title, kraId }, select: { id: true } });
+    const existingSop = await prisma.sOP.findFirst({ where: { organizationId: orgId, title: b.sop.title, kraId }, select: { id: true, content: true } });
+    // A reused SOP keeps whatever was made of it, except a task-making step
+    // that points at a List no longer there (a Start fresh over a Space in
+    // Trash): that one now makes its task on this List, never in Trash.
+    if (existingSop) await repointSopSpawn(orgId, existingSop, board.id);
     const now = new Date();
     // The plan's SOP cap holds for a template exactly as for New SOP: at the
     // cap the SOP is left out and the result says so, never created past it.
@@ -205,8 +319,12 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
     await link(orgId, userId, { sourceType: "SPACE", sourceId: space.id, targetType: "KRA", targetId: kraId });
   }
 
-  // 3. The playbook doc, in the Space.
-  const existingDoc = await prisma.doc.findFirst({ where: { organizationId: orgId, entityType: "SPACE", entityId: space.id, title: b.doc.title }, select: { id: true } });
+  // 3. The playbook doc, in the Space (never one in Trash: that one stops to ask, as the List does).
+  const existingDoc = await prisma.doc.findFirst({ where: { organizationId: orgId, entityType: "SPACE", entityId: space.id, title: b.doc.title, archivedAt: null }, select: { id: true } });
+  if (!existingDoc && ctx.resumeSpaceId && ctx.freshKind !== "doc") {
+    const trashed = await docInTrash(orgId, space.id, b.doc.title);
+    if (trashed) throw new SpaceInTrashError(trashed.rowId, trashed.name, "doc");
+  }
   // A block that describes a piece this apply did not make is left out, so
   // the doc never points at an SOP, KRA, KPI or goal that is not there.
   const pieces = { sop: !!sopId, governance: !!(kraId && goalId) };
@@ -248,7 +366,7 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
 
 export type SignupTemplateMarker =
   | { key: string; status: "applying"; startedAt: string; spaceId?: string | null }
-  | { key: string; status: "failed"; failedAt: string; error: string; spaceId?: string | null }
+  | { key: string; status: "failed"; failedAt: string; error: string; spaceId?: string | null; trash?: { rowId: string; name: string; kind?: TrashedPieceKind } }
   | ({ key: string; status: "applied"; appliedAt: string } & Omit<TuesdayApplied, "governance" | "skipped"> & { skipped?: string[] });
 
 /** The marker as stored, or null. Tolerates any JSON. */
@@ -296,11 +414,11 @@ async function isBrandNew(orgId: string, now: Date): Promise<boolean> {
   return people === 1;
 }
 
-async function runAndRecord(orgId: string, userId: string, key: string, resumeSpaceId: string | null): Promise<SignupTemplateMarker> {
+async function runAndRecord(orgId: string, userId: string, key: string, resumeSpaceId: string | null, freshKind: "list" | "doc" | null = null): Promise<SignupTemplateMarker> {
   let spaceId: string | null = resumeSpaceId;
   try {
     const res = await applyTuesdayBundle(tuesdayPayload(), {
-      organizationId: orgId, userId, name: "Operations", governance: true, visibility: "ORG", resumeSpaceId,
+      organizationId: orgId, userId, name: "Operations", governance: true, visibility: "ORG", resumeSpaceId, freshKind,
       onSpace: async (s) => {
         if (s.id === spaceId) return;
         spaceId = s.id;
@@ -316,6 +434,12 @@ async function runAndRecord(orgId: string, userId: string, key: string, resumeSp
     await prisma.template.updateMany({ where: { key, builtIn: true }, data: { usedCount: { increment: 1 } } }).catch(() => undefined);
     return marker;
   } catch (err) {
+    if (err instanceof SpaceInTrashError) {
+      // Not a fault: the person chooses (restore it, or start fresh).
+      const marker: SignupTemplateMarker = { key, status: "failed", failedAt: new Date().toISOString(), error: `${err.kind}_in_trash`, spaceId, trash: { rowId: err.trashRowId, name: err.spaceName, kind: err.kind } };
+      await writeOrgSettingsKeys(orgId, { signupTemplate: marker }).catch(() => undefined);
+      return marker;
+    }
     console.error("[signup-template] apply failed", err);
     const marker: SignupTemplateMarker = { key, status: "failed", failedAt: new Date().toISOString(), error: err instanceof Error ? err.message.slice(0, 200) : "Unknown error", spaceId };
     await writeOrgSettingsKeys(orgId, { signupTemplate: marker }).catch(() => undefined);
@@ -338,15 +462,32 @@ export async function applySignupTemplate(input: { organizationId: string; userI
   return runAndRecord(input.organizationId, input.userId, input.key, null);
 }
 
-/** Finish a signup template that failed (or died) part way. Null when there is nothing to retry. */
-export async function retrySignupTemplate(input: { organizationId: string; userId: string }): Promise<SignupTemplateMarker | null> {
+/**
+ * Finish a signup template that failed (or died) part way. Null when there is
+ * nothing to retry. `fresh`: the piece in Trash stays there and a new one is
+ * made (a new Space for the Space, a new List or doc beside the one in Trash).
+ * Without it, a piece still in Trash is not passed by: null, and the wizard
+ * asks. `kind` is the piece the person was shown: a choice made over another
+ * piece than the one in Trash now (a stale tab) is not run: null, and the
+ * wizard asks again.
+ */
+export async function retrySignupTemplate(input: { organizationId: string; userId: string; fresh?: boolean; kind?: TrashedPieceKind | null }): Promise<SignupTemplateMarker | null> {
   const org = await prisma.organization.findUnique({ where: { id: input.organizationId }, select: { settings: true } });
   const marker = readSignupMarker(org?.settings);
   if (!marker || marker.status === "applied" || marker.key !== TUESDAY_TEMPLATE_KEY) return null;
+  // Start fresh is a new Space only while the one it was building is still
+  // in Trash; a Space restored meanwhile (another tab, the Trash page) is
+  // resumed, never doubled. Over a List or doc in Trash it keeps the Space
+  // and makes a new piece beside the one in Trash.
+  const trashed = await trashedPieceOf(input.organizationId, marker);
+  if (trashed && !input.fresh) return null;
+  if (input.fresh && input.kind && trashed && trashed.kind !== input.kind) return null;
+  const resumeSpaceId = trashed?.kind === "space" ? null : marker.spaceId ?? null;
+  const freshKind = input.fresh && trashed && trashed.kind !== "space" ? trashed.kind : null;
   const startedAt = new Date().toISOString();
-  const won = await claimMarker(input.organizationId, { key: marker.key, status: "applying", startedAt, spaceId: marker.spaceId ?? null }, marker.status === "failed" ? "failed" : "stale");
+  const won = await claimMarker(input.organizationId, { key: marker.key, status: "applying", startedAt, spaceId: resumeSpaceId }, marker.status === "failed" ? "failed" : "stale");
   if (!won) return null;
-  return runAndRecord(input.organizationId, input.userId, marker.key, marker.spaceId ?? null);
+  return runAndRecord(input.organizationId, input.userId, marker.key, resumeSpaceId, freshKind);
 }
 
 // ── the Template Center row ────────────────────────────────────────

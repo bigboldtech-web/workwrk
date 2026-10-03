@@ -41,11 +41,12 @@ export function RequestAccessButton({
   useEffect(() => {
     let alive = true;
     void apiFetch<{ outgoing?: { objectType: string; objectId: string; status: string; createdAt: string; decidedAt: string | null }[] }>(
-      "/api/access-requests?scope=outgoing",
+      `/api/access-requests?scope=outgoing&objectType=${encodeURIComponent(objectType)}&objectId=${encodeURIComponent(objectId)}`,
       { cache: "no-store" },
     ).then((r) => {
       if (!alive || !r.ok) return;
-      const mine = (r.data.outgoing ?? []).find((o) => o.objectType === objectType && o.objectId === objectId);
+      // The server answered for this object only (under any spelling of its kind), newest first.
+      const mine = (r.data.outgoing ?? []).find((o) => o.objectId === objectId);
       if (mine) setLast({ status: mine.status, createdAt: mine.createdAt, decidedAt: mine.decidedAt });
     });
     return () => { alive = false; };

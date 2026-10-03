@@ -94,7 +94,7 @@ export function TimerPill() {
         <Link href="/clock" className="inline-flex items-center gap-2" title="Open Clock in/out">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand os-live-dot" aria-hidden />
           <span className="text-xs font-medium tabular-nums text-chrome-field-fg">{elapsed(punch.since, now)}</span>
-          <span className="max-w-[120px] truncate text-xs text-chrome-fg-2" title={punchLabel}>{punchLabel}</span>
+          <span className="max-w-[120px] truncate text-xs text-chrome-fg-2 max-sm:hidden" title={punchLabel}>{punchLabel}</span>
         </Link>
         <button
           type="button"
@@ -123,7 +123,8 @@ export function TimerPill() {
     <>
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand os-live-dot" aria-hidden />
       <span className="text-xs font-medium tabular-nums text-chrome-field-fg">{elapsed(timer.startedAt, now)}</span>
-      <span className="max-w-[120px] truncate text-xs text-chrome-fg-2" title={label}>{label}</span>
+      {/* On a phone the bar holds the dot, the time and Stop; the name is in the link's title. */}
+      <span className="max-w-[120px] truncate text-xs text-chrome-fg-2 max-sm:hidden" title={label}>{label}</span>
     </>
   );
   const shell = "inline-flex h-8 items-center gap-2 rounded-md bg-chrome-field ps-3 pe-1";

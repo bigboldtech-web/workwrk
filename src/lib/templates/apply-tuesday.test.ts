@@ -17,9 +17,10 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
   if (!where) return true;
   return Object.entries(where).every(([k, v]) => {
     if (v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)) {
-      const o = v as { equals?: unknown; mode?: string; in?: unknown[] };
+      const o = v as { equals?: unknown; mode?: string; in?: unknown[]; not?: unknown };
       if ("equals" in o) return String(row[k]).toLowerCase() === String(o.equals).toLowerCase();
       if ("in" in o) return (o.in ?? []).includes(row[k]);
+      if ("not" in o) return (row[k] ?? null) !== o.not;
       return true;
     }
     return row[k] === v;
@@ -46,6 +47,12 @@ function table(name: string) {
       return row;
     },
     updateMany: async () => ({ count: 0 }),
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = db[name].find((r) => r.id === where.id);
+      if (!row) throw new Error(`no ${name} ${where.id}`);
+      Object.assign(row, data);
+      return row;
+    },
   };
 }
 
@@ -56,6 +63,15 @@ vi.mock("@/lib/prisma", () => ({
       // The conditional marker claims (apply-tuesday.ts claimMarker).
       $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         const sql = strings.join("?");
+        // repointSopSpawn: one key, only while it still names the old List.
+        if (sql.includes("jsonb_set(content, '{spawn,boardId}'")) {
+          const [boardId, sopId, , current] = values as string[];
+          const row = (db.sOP ?? []).find((r) => r.id === sopId && (r.content as { spawn?: { boardId?: string } })?.spawn?.boardId === current);
+          if (!row) return 0;
+          const c = row.content as { spawn: Record<string, unknown> };
+          row.content = { ...c, spawn: { ...c.spawn, boardId } };
+          return 1;
+        }
         const next = JSON.parse(String(values[0])) as { signupTemplate: Record<string, unknown> };
         const cur = settings.signupTemplate as { status?: string; startedAt?: string } | undefined;
         if (sql.includes("? 'signupTemplate'")) {
@@ -101,13 +117,14 @@ vi.mock("@/lib/template-center", () => ({
 }));
 vi.mock("@/lib/board-items", () => ({
   createBoardItem: async (input: { boardId: string; title: string; organizationId: string; metadata?: Record<string, unknown> }) => {
+    if (failOn === "item") throw new Error("boom in item");
     const row = { id: nid("item"), boardId: input.boardId, title: input.title, organizationId: input.organizationId, metadata: input.metadata ?? {} };
     (db.item ??= []).push(row);
     return row;
   },
 }));
 
-import { applySignupTemplate, applyTuesdayBundle, retrySignupTemplate, readSignupMarker } from "./apply-tuesday";
+import { applySignupTemplate, applyTuesdayBundle, retrySignupTemplate, readSignupMarker, SpaceInTrashError } from "./apply-tuesday";
 import { TUESDAY_TEMPLATE_KEY, signupTemplateKey, tuesdayPayload } from "./tuesday-template";
 
 const ORG = "org_1";
@@ -204,6 +221,117 @@ describe("applySignupTemplate", () => {
     expect([count("space"), count("board"), count("role"), count("kRA"), count("kPI"), count("sOP"), count("oKR"), count("doc"), count("item")]).toEqual([1, 1, 2, 1, 1, 1, 1, 1, 1]);
     // Nothing left to retry once applied.
     expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+  });
+
+  describe("when the Space it was building is in Trash", () => {
+    // The first attempt fails after making the Space; the owner then deletes
+    // that Space (Trash keeps a snapshot, the row is gone).
+    async function failThenTrash() {
+      failOn = "doc";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      const space = db.space[0];
+      // Deleted to a snapshot: the Space row and, by cascade, its Lists go.
+      const boards = db.board.filter((b) => b.spaceId === space.id);
+      db.space = [];
+      db.board = db.board.filter((b) => b.spaceId !== space.id);
+      db.trashItem = [{ id: "trash_1", organizationId: ORG, entityType: "space", entityId: space.id, label: "Operations" }];
+      return Object.assign(space, { boards });
+    }
+
+    it("a plain Try again builds no second Space and leaves the choice to the person", async () => {
+      await failThenTrash();
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+      expect(count("space")).toBe(0);
+      expect(readSignupMarker(settings)?.status).toBe("failed");
+    });
+
+    it("Start fresh makes one new Space and leaves the one in Trash where it is", async () => {
+      const old = await failThenTrash();
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(done?.status).toBe("applied");
+      expect(count("space")).toBe(1);
+      expect(db.space[0].id).not.toBe(old.id);
+      expect(count("trashItem")).toBe(1);
+    });
+
+    it("Start fresh points the reused SOP's task step at the new List, never the one in Trash", async () => {
+      const old = await failThenTrash();
+      const oldBoardId = (old as unknown as { boards: Array<{ id: string }> }).boards[0].id;
+      expect((db.sOP[0].content as { spawn: { boardId: string } }).spawn.boardId).toBe(oldBoardId);
+      await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(count("sOP")).toBe(1);
+      expect((db.sOP[0].content as { spawn: { boardId: string } }).spawn.boardId).toBe(db.board[0].id);
+      expect(db.board[0].id).not.toBe(oldBoardId);
+    });
+
+    it("a stale Start fresh, after the Space was restored elsewhere, finishes in it rather than doubling it", async () => {
+      const old = await failThenTrash();
+      db.space = [old];
+      db.board = [...(old as unknown as { boards: Row[] }).boards];
+      db.trashItem = [];
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(done?.status).toBe("applied");
+      expect(db.space.map((x) => x.id)).toEqual([old.id]);
+      expect(count("board")).toBe(1);
+    });
+
+    it("a List in Trash stops with the choice; Make a new List leaves it there", async () => {
+      failOn = "doc";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      db.board[0].archivedAt = new Date();
+      const stopped = await retrySignupTemplate({ organizationId: ORG, userId: USER });
+      expect(stopped?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ status: "failed", error: "list_in_trash", trash: { kind: "list", name: "Onboarding" } });
+      expect(count("board")).toBe(1);
+      // A plain Try again now asks rather than running.
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER })).toBeNull();
+      const fresh = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true });
+      expect(fresh?.status).toBe("applied");
+      expect(count("space")).toBe(1);
+      expect(count("board")).toBe(2);
+    });
+
+    it("Make a new List leaves the List in Trash, and a doc in Trash too still stops to ask", async () => {
+      failOn = "item";
+      await applySignupTemplate({ organizationId: ORG, userId: USER, key: TUESDAY_TEMPLATE_KEY });
+      failOn = null;
+      db.board[0].archivedAt = new Date();
+      db.doc[0].archivedAt = new Date();
+      expect((await retrySignupTemplate({ organizationId: ORG, userId: USER }))?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ error: "list_in_trash" });
+      const next = await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true, kind: "list" });
+      expect(next?.status).toBe("failed");
+      expect(readSignupMarker(settings)).toMatchObject({ error: "doc_in_trash", trash: { kind: "doc" } });
+      expect(count("board")).toBe(2);
+      expect(count("doc")).toBe(1);
+    });
+
+    it("a stale Make a new List, when the whole Space is in Trash now, is asked again rather than run", async () => {
+      await failThenTrash();
+      expect(await retrySignupTemplate({ organizationId: ORG, userId: USER, fresh: true, kind: "list" })).toBeNull();
+      expect(count("space")).toBe(0);
+    });
+
+    it("once restored, Try again finishes in that same Space", async () => {
+      const old = await failThenTrash();
+      db.space = [old];
+      db.board = [...(old as unknown as { boards: Row[] }).boards];
+      db.trashItem = [];
+      const done = await retrySignupTemplate({ organizationId: ORG, userId: USER });
+      expect(done?.status).toBe("applied");
+      expect(db.space.map((s) => s.id)).toEqual([old.id]);
+    });
+
+    it("a resume that finds it in Trash stops with the Trash row to restore", async () => {
+      const old = await failThenTrash();
+      await expect(applyTuesdayBundle(tuesdayPayload(), { organizationId: ORG, userId: USER, name: "Operations", governance: true, resumeSpaceId: old.id }))
+        .rejects.toBeInstanceOf(SpaceInTrashError);
+      await expect(applyTuesdayBundle(tuesdayPayload(), { organizationId: ORG, userId: USER, name: "Operations", governance: true, resumeSpaceId: old.id }))
+        .rejects.toMatchObject({ trashRowId: "trash_1", spaceName: "Operations" });
+      expect(count("space")).toBe(0);
+    });
   });
 
   it("does not let a retry run while a fresh apply is still in flight", async () => {

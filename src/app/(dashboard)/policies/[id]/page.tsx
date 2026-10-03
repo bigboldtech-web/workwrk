@@ -409,10 +409,13 @@ export default function PolicyDetailPage() {
               <h1 className="min-w-0 flex-1 truncate text-title font-semibold text-ink">{headerTitle}</h1>
             )}
             <StatusChip color={POLICY_STATUS_COLOR[status]} label={POLICY_STATUS_LABEL[status]} disabled />
-            <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{policy.version}</span>
+            {/* On a phone the title keeps the room (the version is on History). */}
+            <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2 max-sm:hidden">v{policy.version}</span>
           </>
         }
-        autosave={editing ? <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? "Auto-saves as you type" : undefined }} /> : undefined}
+        // On a phone the idle "Auto-saves as you type" gives way (the edit bar
+        // at the foot says it); saving, saved and Not saved always show.
+        autosave={editing ? <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? "Auto-saves as you type" : undefined }} className={saveState.status === "idle" ? "max-sm:hidden" : undefined} /> : undefined}
         actions={
           <>
             {/* ONE control, one door. A policy carries no object grants, so
@@ -420,7 +423,7 @@ export default function PolicyDetailPage() {
                 /policies/[id]: "read-only for everyone"). A role chip beside it
                 would be a second affordance opening the same 360 panel. */}
             <button ref={audienceBtn} type="button" onClick={() => setAudienceOpen((o) => !o)} aria-pressed={audienceOpen} aria-haspopup="dialog" title="Audience" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
-              <Users className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Audience
+              <Users className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="max-sm:sr-only">Audience</span>
             </button>
             {primary ? (
               <button type="button" onClick={primary.onClick} className="ms-1 inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover">
@@ -529,13 +532,13 @@ export default function PolicyDetailPage() {
 
       {/* The sticky save bar */}
       {editing && saveState.showSaveBar ? (
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] max-lg:start-[var(--os-rail-w)] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-base text-ink">{failed ? "Not saved" : "Unsaved changes"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
           <button type="button" onClick={() => void flush()} disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">{saving ? <Dots variant="pending" /> : null} Save</button>
         </div>
       ) : editing ? (
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] max-lg:start-[var(--os-rail-w)] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{autosaves ? "Editing · drafts save as you type" : "Editing · changes are saved when you press Save"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base font-medium text-ink hover:bg-hover"><Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Done</button>
         </div>

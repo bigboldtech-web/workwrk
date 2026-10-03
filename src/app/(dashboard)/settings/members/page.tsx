@@ -203,13 +203,17 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
     return p.toString();
   }, [sort, page, debounced, role, noManager, peopleTeam, inactive30, dept, office, title, status]);
 
+  // The search text the list on screen was read for (the ?open= lookup waits for its own).
+  const [loadedQ, setLoadedQ] = useState<string | null>(null);
   const load = useCallback(async () => {
     setError(null);
+    const askedQ = debounced;
     const r = await apiFetch<ListBody>(`/api/settings/members?${qs}`, { cache: "no-store" });
     if (!r.ok) { setError(r.error); return; }
     setData(r.data);
+    setLoadedQ(askedQ);
     onList(r.data);
-  }, [qs, onList]);
+  }, [qs, onList, debounced]);
   useEffect(() => {
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
@@ -220,17 +224,35 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
     return () => clearTimeout(t);
   }, [debounced, role, noManager, peopleTeam, inactive30, dept, office, title, status, sort]);
 
-  // ?open=<id>: that person's drawer, found by their id on the first load.
+  // ?open=<id>: that person's drawer. On the first page it opens at once;
+  // past it, the list is searched by their email and the drawer opens when
+  // that search brings them in (it used to search and never open). Someone
+  // this list cannot show (outside your team, or removed) is said so.
+  const [pendingOpen, setPendingOpen] = useState<{ id: string; q: string } | null>(null);
   useEffect(() => {
     if (!openId || !data) return;
     const hit = data.rows.find((r) => r.id === openId);
     const t = setTimeout(() => {
       setOpenId(null);
       if (hit) { setOpenRow(hit); return; }
-      void apiFetch<{ email?: string }>(`/api/users/${openId}`, { cache: "no-store" }).then((r) => { if (r.ok && r.data.email) setQ(r.data.email); });
+      void apiFetch<{ email?: string }>(`/api/users/${openId}`, { cache: "no-store" }).then((r) => {
+        if (r.ok && r.data.email) { setPendingOpen({ id: openId, q: r.data.email }); setQ(r.data.email); }
+        else toast("Couldn't find that person in this list.", { tone: "danger" });
+      });
     }, 0);
     return () => clearTimeout(t);
-  }, [openId, data]);
+  }, [openId, data, toast]);
+  // The search for them has answered: their drawer, or a word that they are not here.
+  useEffect(() => {
+    if (!pendingOpen || !data || loadedQ !== pendingOpen.q) return;
+    const hit = data.rows.find((r) => r.id === pendingOpen.id);
+    const t = setTimeout(() => {
+      setPendingOpen(null);
+      if (hit) setOpenRow(hit);
+      else toast("Couldn't find that person in this list.", { tone: "danger" });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [pendingOpen, data, loadedQ, toast]);
 
   const canEdit = !!data?.viewer.canEdit;
   const canEditPeople = !!data?.viewer.canEditPeopleFields;

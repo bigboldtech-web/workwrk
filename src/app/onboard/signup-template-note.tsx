@@ -25,6 +25,8 @@ interface TemplateView {
   jobTitles?: number;
   skipped?: string[];
   retryable?: boolean;
+  /** A piece it was building (the Space, its List or its doc) is in Trash: restore it, or start fresh (never a silent second). */
+  spaceInTrash?: { name: string; kind?: "space" | "list" | "doc" } | null;
 }
 
 /**
@@ -58,6 +60,8 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
   const [tpl, setTpl] = useState<TemplateView | null>(null);
   const [busy, setBusy] = useState(false);
   const [retryFailed, setRetryFailed] = useState(false);
+  // Why a Restore or Start fresh did not go through (the server's own sentence).
+  const [choiceError, setChoiceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -69,14 +73,27 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
     return () => { live = false; };
   }, [enabled]);
 
-  async function retry() {
+  async function retry(choice?: "restore" | "fresh") {
     setBusy(true);
     setRetryFailed(false);
+    setChoiceError(null);
     try {
-      const r = await fetch("/api/onboard/template", { method: "POST" });
-      const d = (await r.json().catch(() => null)) as { template?: TemplateView | null } | null;
+      const r = await fetch("/api/onboard/template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // The piece the person was shown travels with the choice: one made
+        // in a stale tab over another piece is asked again, never run.
+        body: JSON.stringify(choice ? { choice, kind: tpl?.spaceInTrash?.kind ?? null } : {}),
+      });
+      const d = (await r.json().catch(() => null)) as { template?: TemplateView | null; error?: string } | null;
       if (d?.template) setTpl(d.template);
-      if (!r.ok && d?.template?.status !== "applied") setRetryFailed(true);
+      if (!r.ok && d?.template?.status !== "applied") {
+        // A refusal says why. Being asked about a piece in Trash (the same
+        // one in a fresh tab, or the next one after a restore that worked)
+        // is a question, not a failure. Anything else did not finish.
+        if (d?.error) setChoiceError(d.error);
+        else if (!d?.template?.spaceInTrash) setRetryFailed(true);
+      }
     } catch {
       setRetryFailed(true);
     } finally {
@@ -106,10 +123,32 @@ export function SignupTemplateNote({ enabled, problemsOnly = false }: { enabled:
       </AuthBanner>
     );
   }
+  if (tpl.spaceInTrash) {
+    const kind = tpl.spaceInTrash.kind ?? "space";
+    const what = kind === "space" ? `the ${tpl.spaceInTrash.name} Space it was building` : `its ${tpl.spaceInTrash.name} ${kind === "list" ? "List" : "doc"}`;
+    const fresh = kind === "space" ? "Start fresh in a new Space" : kind === "list" ? "Make a new List" : "Make a new doc";
+    return (
+      <AuthBanner tone="warning">
+        <p>
+          {tpl.name} did not finish setting up, and {what} is in Trash.{" "}
+          {choiceError ? <>{choiceError.replace(/\.?$/, ".")}{" "}</> : null}
+          {busy ? <Dots variant="pending" label="Working" /> : (
+            <>
+              <button type="button" className="wa-link" onClick={() => void retry("restore")}>Restore it and finish</button>
+              {" or "}
+              <button type="button" className="wa-link" onClick={() => void retry("fresh")}>{fresh}</button>
+              {" "}(the one in Trash stays there).
+            </>
+          )}
+        </p>
+      </AuthBanner>
+    );
+  }
   return (
     <AuthBanner tone="warning">
       <p>
         {tpl.name} did not finish setting up{retryFailed ? ", and the retry did not finish either" : ""}. Nothing it added is lost.{" "}
+        {choiceError ? <>{choiceError.replace(/\.?$/, ".")}{" "}</> : null}
         <button type="button" className="wa-link" onClick={() => void retry()} disabled={busy}>
           {busy ? <Dots variant="pending" label="Trying again" /> : "Try again"}
         </button>

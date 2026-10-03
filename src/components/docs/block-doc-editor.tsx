@@ -361,7 +361,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     setAskSend("idle");
     if (!readOnlyRole || pane === "peek") return;
     let alive = true;
-    void apiFetch<{ outgoing?: OutgoingAccessRow[] }>("/api/access-requests?scope=outgoing", { cache: "no-store" }).then((r) => {
+    void apiFetch<{ outgoing?: OutgoingAccessRow[] }>(`/api/access-requests?scope=outgoing&objectType=doc&objectId=${encodeURIComponent(docId)}`, { cache: "no-store" }).then((r) => {
       // A failed read leaves the plain Request link: asking again is safe,
       // the server keeps one open request per person per doc.
       if (alive && r.ok) setAccessAsk(docAccessAsk(r.data.outgoing, docId, readOnlyRole));
@@ -823,7 +823,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // only. Unlocking also clears the legacy content flag so a doc locked the
   // old way opens again for everyone the server allows.
   async function toggleLock() {
-    const next = !lock;
+    // A page locked the old way (meta.locked, no lock row) reads as locked,
+    // so the first press unlocks it, as the checked row says it will.
+    const next = !(lock || meta.locked);
     const r = await apiFetch<{ lockedById: string | null; lockedAt: string | null }>(`/api/docs/${docId}/lock`, { method: "POST", json: { locked: next } });
     if (!r.ok) { toast(r.error || "Couldn't change the lock", { tone: "danger" }); return; }
     setLock(next ? { byId: r.data.lockedById ?? (me?.id ?? ""), byName: me ? [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || null : null, at: r.data.lockedAt } : null);
@@ -1087,6 +1089,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   }
 
   const hasCover = !!(meta.coverUrl || meta.coverGradient);
+  // Who changes the doc: its body, title, icon and cover all read this one flag.
+  const chromeEditable = myRole === "edit" && !readingMode && !meta.locked && !lostAccess;
   const coverStyle: React.CSSProperties = meta.coverUrl
     ? { backgroundImage: `url(${meta.coverUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
     : { background: gradientCSS(meta.coverGradient) };
@@ -1127,7 +1131,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             Comments and the bordered "..." at the right. Peek panes keep the
             indicator only; DocSplitView owns their header. */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} /> : null}
+          {/* On a phone the Back label gives way (arrow only), as every page
+              header's does: it ran under Ask AI at 390. */}
+          {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} compactOnPhone /> : null}
           {/* After a final refusal there is no retry in hand, and the default
               error word would read "Not saved, retrying": it is not. */}
           <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} labels={lostAccess ? { error: "Not saved" } : undefined} />
@@ -1142,7 +1148,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               aria-pressed={panel?.kind === "ask"}
               className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
             >
-              <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Ask AI
+              <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="max-sm:sr-only">Ask AI</span>
             </button>
           ) : null}
           {pane !== "peek" ? (
@@ -1209,14 +1215,21 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                   <MenuItem icon={ListTree} label="Show outline" selected={outlineOpen} onClick={() => { setOutlineOpen(!outlineOpen); }} />
                   <MenuItem icon={BookOpen} label="Reading mode" selected={readingMode} onClick={() => { setMoreOpen(false); setReadingMode((r) => !r); }} />
                   <MenuSeparator />
-                  {myRole === "edit" ? (
+                  {/* The appearance rows write the doc, so they follow the one
+                      flag the body reads; Lock page stays for whoever can
+                      manage it, so a locked page can always be unlocked. */}
+                  {myRole === "edit" && (chromeEditable || canManage) ? (
                     <MenuSubmenu icon={TypeIcon} label="Page options" width={220}>
-                      <MenuItem label="System" leading={<span className="w-4 text-center text-xs font-medium text-ink-2">Aa</span>} selected={(meta.font ?? "default") === "default"} onClick={() => void saveMeta({ font: "default" })} />
-                      <MenuItem label="Serif" leading={<span className="w-4 text-center font-serif text-xs font-medium text-ink-2">Ss</span>} selected={meta.font === "serif"} onClick={() => void saveMeta({ font: "serif" })} />
-                      <MenuItem label="Mono" leading={<span className="w-4 text-center font-mono text-xs font-medium text-ink-2">00</span>} selected={meta.font === "mono"} onClick={() => void saveMeta({ font: "mono" })} />
-                      <MenuSeparator />
-                      <MenuItem icon={TypeIcon} label="Small text" selected={!!meta.smallText} onClick={() => void saveMeta({ smallText: !meta.smallText })} />
-                      <MenuItem icon={MoveHorizontal} label="Full width" selected={!!meta.fullWidth} onClick={() => void saveMeta({ fullWidth: !meta.fullWidth })} />
+                      {chromeEditable ? (
+                        <>
+                          <MenuItem label="System" leading={<span className="w-4 text-center text-xs font-medium text-ink-2">Aa</span>} selected={(meta.font ?? "default") === "default"} onClick={() => void saveMeta({ font: "default" })} />
+                          <MenuItem label="Serif" leading={<span className="w-4 text-center font-serif text-xs font-medium text-ink-2">Ss</span>} selected={meta.font === "serif"} onClick={() => void saveMeta({ font: "serif" })} />
+                          <MenuItem label="Mono" leading={<span className="w-4 text-center font-mono text-xs font-medium text-ink-2">00</span>} selected={meta.font === "mono"} onClick={() => void saveMeta({ font: "mono" })} />
+                          <MenuSeparator />
+                          <MenuItem icon={TypeIcon} label="Small text" selected={!!meta.smallText} onClick={() => void saveMeta({ smallText: !meta.smallText })} />
+                          <MenuItem icon={MoveHorizontal} label="Full width" selected={!!meta.fullWidth} onClick={() => void saveMeta({ fullWidth: !meta.fullWidth })} />
+                        </>
+                      ) : null}
                       {canManage ? <MenuItem icon={Lock} label="Lock page" selected={!!lock || !!meta.locked} onClick={() => { setMoreOpen(false); void toggleLock(); }} /> : null}
                     </MenuSubmenu>
                   ) : null}
@@ -1341,6 +1354,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       <div className="flex items-start">
       <div className="flex-1 min-w-0" ref={contentColRef}>
 
+      {/* The doc's icon, cover and title change only for someone who can edit
+          it, as the body does: a Can comment or Can view grantee, a reading
+          mode or a locked doc sees them, never the controls that change them
+          (which the save would only refuse). */}
       {/* Cover. The picker is a SIBLING of the clipped cover (not a child):
           .bdoc__cover has overflow:hidden + a fixed height, so a picker inside
           it gets clipped and stuck behind the image. The wrapper is the
@@ -1348,15 +1365,17 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       {hasCover && (
         <div className="bdoc__cover-wrap">
           <div className="bdoc__cover" style={coverStyle}>
-            <button
-              type="button"
-              className="bdoc__cover-edit"
-              onClick={() => setCoverOpen((s) => !s)}
-            >
-              <ImagePlus /> Change cover
-            </button>
+            {chromeEditable ? (
+              <button
+                type="button"
+                className="bdoc__cover-edit"
+                onClick={() => setCoverOpen((s) => !s)}
+              >
+                <ImagePlus /> Change cover
+              </button>
+            ) : null}
           </div>
-          {coverOpen && (
+          {chromeEditable && coverOpen && (
             <>
               <div className="bdoc__cover-scrim" onClick={() => setCoverOpen(false)} aria-hidden="true" />
               <div className="bdoc__cover-pop-anchor">
@@ -1375,21 +1394,25 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {/* Emoji + add-cover-row */}
         <div className="bdoc__chrome">
           {meta.icon ? (
-            <button
-              type="button"
-              className="bdoc__emoji"
-              onClick={() => setEmojiOpen((s) => !s)}
-              aria-label="Change icon"
-            >
-              {renderNoteIcon(meta.icon)}
-            </button>
-          ) : (
+            chromeEditable ? (
+              <button
+                type="button"
+                className="bdoc__emoji"
+                onClick={() => setEmojiOpen((s) => !s)}
+                aria-label="Change icon"
+              >
+                {renderNoteIcon(meta.icon)}
+              </button>
+            ) : (
+              <span className="bdoc__emoji" aria-hidden="true">{renderNoteIcon(meta.icon)}</span>
+            )
+          ) : chromeEditable ? (
             <button type="button" className="bdoc__add-emoji" onClick={() => setEmojiOpen((s) => !s)}>
               <Smile /> Add icon
             </button>
-          )}
+          ) : null}
 
-          {!hasCover && (
+          {!hasCover && chromeEditable && (
             <button type="button" className="bdoc__add-cover" onClick={() => setCoverOpen((s) => !s)}>
               <ImagePlus /> Add cover
             </button>
@@ -1402,7 +1425,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           ) : null}
         </div>
 
-        {emojiOpen && (
+        {chromeEditable && emojiOpen && (
           <NoteIconPicker
             current={meta.icon}
             onPick={(value) => { void saveMeta({ icon: value }); setEmojiOpen(false); }}
@@ -1410,7 +1433,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           />
         )}
 
-        {!hasCover && coverOpen && (
+        {chromeEditable && !hasCover && coverOpen && (
           <CoverPicker
             meta={meta}
             onPick={(patch) => { void saveMeta(patch); setCoverOpen(false); }}
@@ -1425,7 +1448,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled doc"
-          readOnly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
+          readOnly={!chromeEditable}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
@@ -1446,7 +1469,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <div className="bdoc__legacy-banner">
               <Sparkles />
               <span>This doc is in the old rich-text format.</span>
-              <button type="button" onClick={convertLegacy}>Convert to blocks</button>
+              {/* Converting rewrites the doc: never offered to someone whose save would be refused. */}
+              {chromeEditable ? <button type="button" onClick={convertLegacy}>Convert to blocks</button> : null}
             </div>
             <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
           </div>
@@ -1464,7 +1488,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               // lostAccess is left out of the key on purpose: BlockNote takes
               // `editable` live, and a remount could drop the last debounced
               // keystrokes from the screen the person is about to copy.
-              readonly={readingMode || !!meta.locked || myRole !== "edit" || !!lostAccess}
+              readonly={!chromeEditable}
               onChange={handleEditorChange}
               docId={docId}
               // No comment action for a Can view grant: the canvas hides the
@@ -1538,6 +1562,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <VersionHistoryPanel
           docId={docId}
           onClose={() => setPanel(null)}
+          restoreBlocked={chromeEditable ? null
+            : lostAccess ? "You can no longer change this doc."
+            : meta.locked ? (canManage ? "Unlock the page to restore a version." : "This page is locked. Ask someone with Full access to unlock it.")
+            : readingMode ? "Leave reading mode to restore a version."
+            : "You can no longer change this doc."}
           onRestore={(restoredBlocks, restoredMeta, restoredTitle) => {
             // Restoring an old version: drop the live BN doc and let the
             // canvas re-convert from the legacy blocks. restoreNonce bump
@@ -2269,10 +2298,12 @@ type VersionMeta = {
   authorName?: string | null;
 };
 
-function VersionHistoryPanel({ docId, onClose, onRestore }: {
+function VersionHistoryPanel({ docId, onClose, onRestore, restoreBlocked = null }: {
   docId: string;
   onClose: () => void;
   onRestore: (blocks: Block[], meta: DocMeta, title: string) => void;
+  /** Why a version cannot be restored now (a locked page, reading mode), in place of the button. */
+  restoreBlocked?: string | null;
 }) {
   const { toast } = useOsToast();
   const fmt = useFormat();
@@ -2388,10 +2419,14 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
                 <BlockNoteCanvas initialBnDoc={null} legacyBlocks={preview.blocks} readonly onChange={() => {}} />
               </div>
               <footer className="bdoc__hist-foot">
-                <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
-                  {restoring ? <Dots variant="pending" /> : <RotateCcw />}
-                  Restore this version
-                </button>
+                {restoreBlocked ? (
+                  <span className="text-sm text-ink-2">{restoreBlocked}</span>
+                ) : (
+                  <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
+                    {restoring ? <Dots variant="pending" /> : <RotateCcw />}
+                    Restore this version
+                  </button>
+                )}
               </footer>
             </>
           ) : (
