@@ -30,6 +30,7 @@ import { roleAtLeast, type NodeKind, type NodeRef } from "@/lib/access/node-rule
 import { readableFileIds } from "@/lib/file-access";
 import { gateItem } from "@/lib/item-gate";
 import { LINK_NODE_KIND, LINK_TASK_TYPES, linkWriteVerdict, type LinkWriteFacts } from "@/lib/entity-link-ends";
+import { loadReadableLinkEnds } from "@/lib/access/link-end-readable";
 
 /** A session shape sufficient for the alignment-scope helpers. */
 type SessionLike = { user?: { id?: string; organizationId?: string; accessLevel?: string } };
@@ -81,9 +82,14 @@ export async function linkWriteRefusalFor(
   ];
   const fileIds = [...new Set(ends.filter((e) => e.type === "FILE").map((e) => e.id))];
   const ctx = nodeCtxFromLevel(viewer.userId, org, viewer.accessLevel);
-  const [decisions, readable] = await Promise.all([
+  // A SOP, a goal, a key result, a KRA or a KPI end follows its own read rule
+  // here too: a link never plants one the person cannot open, a guessed id or
+  // another workspace's is not found, and nobody adds or removes links on one
+  // they cannot read.
+  const [decisions, readable, readableEnds] = await Promise.all([
     nodeRefs.length ? nodeRoles(ctx, nodeRefs) : Promise.resolve(new Map<string, { role: string }>()),
     fileIds.length ? readableFileIds({ ids: fileIds, viewer }) : Promise.resolve([] as string[]),
+    loadReadableLinkEnds({ user: { id: viewer.userId, organizationId: org, accessLevel: viewer.accessLevel } }, org, ends),
   ]);
   const editableTasks = new Set<string>();
   if (LINK_TASK_TYPES.has(link.sourceType) && tasks.some((t) => t.id === link.sourceId)) {
@@ -101,6 +107,7 @@ export async function linkWriteRefusalFor(
     nodeOpens: (kind, id) => roleAtLeast(roleOf(kind, id), "VIEW"),
     nodeEdits: (kind, id) => roleAtLeast(roleOf(kind, id), "EDIT"),
     readableFiles: new Set(readable),
+    ...readableEnds,
     tasks: new Map(tasks.map((t) => [t.id, t])),
     editableTasks,
     editableFiles,

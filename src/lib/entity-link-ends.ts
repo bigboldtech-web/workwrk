@@ -5,13 +5,13 @@
 // as the target, and the anchor a lookup is made by is itself an end of
 // every row it returns. Node ends (a doc, a canvas, a Folder, a List, a
 // Space, a table, a form) are decided by the one resolver; a task follows
-// its List or its assignment; a file follows the file read rule; a SOP
-// follows the SOP read rule (sopVisibilityWhere: a SOP filed in a folder the
-// viewer holds no grant on is not theirs to see) when the caller hands in
-// the readable ones. Other ends that are not nodes (a KRA, an OKR, a person)
-// pass, as before.
+// its List or its assignment; a file follows the file read rule; a SOP, a
+// goal, a key result, a KRA and a KPI follow their own read rules (the
+// readable sets, src/lib/access/link-end-readable.ts) when the caller hands
+// them in, as the link list, adding a link and removing one all do. Other
+// ends that are not nodes (a person, a review) pass, as before.
 //
-// Pure: the route loads the decisions and hands them in.
+// Pure: the routes load the decisions and hand them in.
 
 import type { NodeKind } from "./access/node-rules";
 
@@ -35,16 +35,25 @@ export interface LinkEndFacts {
   readableFiles: ReadonlySet<string>;
   /**
    * The SOP ends the viewer may read (the SOP read rule). When given, a link
-   * to any other SOP is dropped whole: no title, no count, no context line.
-   * Left out (the write checks), a SOP end passes as before.
+   * to any other SOP is dropped whole: no title, no count, no context line,
+   * and adding or removing one answers not found. Left out, a SOP end passes.
    */
   readableSops?: ReadonlySet<string>;
+  /** The goal (OKR) ends the viewer may read (the Goals list's rule), the same way. */
+  readableGoals?: ReadonlySet<string>;
+  /** The key result ends the viewer may read (each follows its goal), the same way. */
+  readableKeyResults?: ReadonlySet<string>;
+  /** The KRA and KPI ends the viewer may read, keyed "KRA:<id>" and "KPI:<id>" (Members only), the same way. */
+  readableKras?: ReadonlySet<string>;
   tasks: ReadonlyMap<string, { boardId: string; ownerId: string | null; assigneeIds: readonly string[] }>;
 }
 
 export function linkEndVisible(type: string, id: string, f: LinkEndFacts): boolean {
   if (type === "FILE") return f.readableFiles.has(id);
   if (type === "SOP" && f.readableSops) return f.readableSops.has(id);
+  if (type === "OKR" && f.readableGoals) return f.readableGoals.has(id);
+  if (type === "KEY_RESULT" && f.readableKeyResults) return f.readableKeyResults.has(id);
+  if ((type === "KRA" || type === "KPI") && f.readableKras) return f.readableKras.has(`${type}:${id}`);
   if (LINK_TASK_TYPES.has(type)) {
     const t = f.tasks.get(id);
     // A TASK id that is no task (a legacy row) is not a node: no node gate.
@@ -98,7 +107,9 @@ const NOT_FOUND: LinkWriteVerdict = { ok: false, status: 404, error: "Not found"
  * node they cannot see where other people read it, and never becomes the
  * door to a file they could not open. A source or a target out of sight
  * reads as not found, so a guessed id confirms nothing. Sources that are not
- * nodes (a SOP, a KRA, a goal, a person) keep their own gates.
+ * nodes keep their own edit gates (a goal's in canMutateLinkFromSource); a SOP,
+ * a goal, a key result, a KRA or a KPI end the viewer cannot read is not
+ * found, as a hidden node is.
  */
 export function linkWriteVerdict(
   link: { sourceType: string; sourceId: string; targetType: string; targetId: string },
