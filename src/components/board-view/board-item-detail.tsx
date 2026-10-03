@@ -851,13 +851,15 @@ function usePeople(open: boolean, boardId: string | null, query: string) {
       const params = new URLSearchParams({ limit: "200" });
       const q = query.trim();
       if (q) params.set("search", q);
-      if (!boardId) params.set("scope", "all");
+      // No List: the whole workspace (/api/people/pick, 50 at a time), never
+      // only the caller's report tree.
+      if (!boardId) { params.set("includeSelf", "1"); params.set("limit", "50"); }
       const url = boardId
         ? `/api/boards/${encodeURIComponent(boardId)}/assignable?${params}`
-        : `/api/users?${params}`;
+        : `/api/people/pick?${params}`;
       fetch(url, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { data: [] }))
-        .then((d) => { if (active) setPeople(Array.isArray(d?.data) ? d.data : []); })
+        .then((d) => { if (active) setPeople(Array.isArray(d?.data) ? d.data : Array.isArray(d?.people) ? d.people : []); })
         .catch(() => { if (active) setPeople([]); });
     }, query.trim() ? 250 : 0);
     return () => { active = false; clearTimeout(t); };

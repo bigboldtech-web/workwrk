@@ -78,14 +78,17 @@ function usePeopleQuery(open: boolean, query: string, meId: string | null, board
       if (boardId) {
         url = `/api/boards/${encodeURIComponent(boardId)}/assignable?${params}`;
       } else {
-        params.set("scope", "all");
-        url = `/api/users?${params}`;
+        // No List: the whole workspace (/api/people/pick), never only the
+        // caller's report tree, which is all /api/users answered.
+        params.set("includeSelf", "1");
+        url = `/api/people/pick?${params}`;
       }
       fetch(url, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { data: [] }))
         .then((d) => {
           if (!active) return;
-          const rows: PersonRef[] = Array.isArray(d?.data) ? d.data : [];
+          // The List roster answers { data }, the workspace picker { people }.
+          const rows: PersonRef[] = Array.isArray(d?.data) ? d.data : Array.isArray(d?.people) ? d.people : [];
           // Pin "Me" first when present.
           rows.sort((a, b) => Number(b.id === meId) - Number(a.id === meId));
           setPeople(rows);
