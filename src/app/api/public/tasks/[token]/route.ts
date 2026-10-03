@@ -8,10 +8,10 @@
 // List in Trash, or the workspace's public links switched off (toggle 10).
 //
 // THE PAYLOAD IS FIXED AND SMALL, and nothing else ever rides along: the
-// title, status, priority, dates, the description as PLAIN TEXT (never HTML:
-// this page is on the app's own domain, see src/lib/html-text.ts), the
-// checklist, its subtasks' titles and statuses, and the assignees' first
-// names. Never comments, attachments, activity, custom fields, connected
+// title, status, priority, dates, the description as its Markdown text (an
+// older HTML one reduced to plain text: never HTML, this page is on the
+// app's own domain, see src/lib/html-text.ts), the checklist, its subtasks'
+// titles and statuses, and the assignees' first names. Never comments, attachments, activity, custom fields, connected
 // tasks, the List or Space it is in, ids of people, or any email.
 //
 // GET only, so any write is 405. Opening the link is recorded, sampled
@@ -20,7 +20,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { publicSecretMatches } from "@/lib/doc-sharing";
-import { orgPublicLinksAllowed } from "@/lib/public-links";
+import { orgPublicLinksTurnedOn } from "@/lib/public-links";
 import { auditPublicLinkUse } from "@/lib/public-link-audit";
 import { PRIORITY_OPTIONS, getBoardStatuses, isDoneStatus, makeStatusLookup } from "@/lib/board-items-shared";
 import { htmlToText } from "@/lib/html-text";
@@ -62,7 +62,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     },
   });
   if (!item || item.archivedAt || item.board?.archivedAt) return NOT_FOUND();
-  if (!orgPublicLinksAllowed(item.organization?.settings)) return NOT_FOUND();
+  if (!orgPublicLinksTurnedOn(item.organization?.settings)) return NOT_FOUND();
   const link = await readTaskLink(item.id);
   if (!link || !publicSecretMatches(link.secret, parsed.secret)) return NOT_FOUND();
 
@@ -98,7 +98,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       priority: priority ? { label: priority.label, color: priority.color } : null,
       startAt: item.startAt ? item.startAt.toISOString() : null,
       dueAt: item.dueAt ? item.dueAt.toISOString() : null,
-      description: htmlToText((item.metadata as Record<string, unknown> | null)?.description),
+      description: htmlToText((item.metadata as Record<string, unknown> | null)?.description).slice(0, 50_000),
       checklist: checklistOf(item.metadata),
       subtasks: subtasks.map((s) => ({ title: s.title, status: statusOf(s.status) })),
       assignees: firstNames,

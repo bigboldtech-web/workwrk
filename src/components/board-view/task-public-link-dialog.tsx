@@ -131,6 +131,11 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
         {state?.on && !address && !state.canManage ? (
           <p className="mt-3 text-xs text-ink-2">A public link to this task is on. Someone who can share it can copy the address or turn it off.</p>
         ) : null}
+        {state?.on && state.archived ? (
+          <p className="mt-3 text-xs text-ink-2">This task is in Trash, so its link shows nothing until the task is restored.</p>
+        ) : state?.on && !state.allowed ? (
+          <p className="mt-3 text-xs text-ink-2">Public links are turned off for this workspace, so this link shows nothing until a workspace admin turns them on in Settings, Access.</p>
+        ) : null}
         {state?.on ? (
           <p className="mt-2 text-xs text-ink-3">Turning it off stops this address for good. Turning it on again makes a new one.</p>
         ) : null}

@@ -127,12 +127,17 @@ describe("list-tasks.csv", () => {
     expect(at("parentId")).toBe("p1");
     expect(at("statusLabel")).toBe("To do");
     expect(at("tags")).toBe("Q4; Ops");
-    expect(at("description")).toContain("Hello team");
-    expect(at("description")).toContain("one");
-    expect(at("description")).not.toContain("<");
+    // Exactly as stored, an older HTML description included.
+    expect(at("description")).toBe("<p>Hello <b>team</b></p><ul><li>one</li></ul>");
     expect(at("checklist")).toBe("[x] Draft\n[ ] Send");
     expect(JSON.parse(at("fields"))).toEqual({ Points: 3 });
     expect(at("updatedAt")).toBe("2026-10-02T09:00:00.000Z");
+  });
+
+  it("keeps a Markdown description exactly as written, tag-like text included", () => {
+    const md = "Welcome **team** on Monday.\n\n- Laptops\n- Badges\n\nUse the <div> element. @Lea Alpha owns it: [plan](https://example.com/plan) &amp; more";
+    const row = cells(taskCsvLine({ ...task, metadata: { description: md } }, { statusLabel: "", tags: [], fields: [] }));
+    expect(row[TASK_COLUMNS.indexOf("description")]).toBe(md);
   });
 
   it("writes an empty fields cell when the task has no values", () => {
@@ -154,12 +159,12 @@ describe("list-links.csv and task-comments.csv", () => {
     expect(row).toEqual(["t1", "b2", "1024", JSON.stringify({ Points: 7 }), "2026-10-03T00:00:00.000Z"]);
   });
 
-  it("writes a comment as plain text with its files", () => {
+  it("writes a comment exactly as stored, with its files", () => {
     const row = cells(commentCsvLine(
       { id: "c1", entityId: "t1", authorId: "u1", body: "<p>Looks <i>good</i> to me</p>", createdAt: new Date("2026-10-03T00:00:00Z"), updatedAt: new Date("2026-10-03T00:00:00Z") },
       "Mona Mech",
       ["brief.pdf", "photo.png"],
     ));
-    expect(row.slice(0, 6)).toEqual(["c1", "t1", "u1", "Mona Mech", "Looks good to me", "brief.pdf; photo.png"]);
+    expect(row.slice(0, 6)).toEqual(["c1", "t1", "u1", "Mona Mech", "<p>Looks <i>good</i> to me</p>", "brief.pdf; photo.png"]);
   });
 });

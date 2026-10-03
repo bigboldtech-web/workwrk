@@ -1,13 +1,15 @@
-// Stored rich text (a task description, a comment: TipTap HTML) as plain
-// text that keeps its shape: paragraphs apart, list items as bullets or
-// numbers, a link as its words then its address, entities decoded.
+// Stored text that may be HTML (an older task description or comment was
+// TipTap HTML; today's are Markdown, src/lib/markdown-lite.ts, which passes
+// through unchanged) as plain text that keeps its shape: paragraphs apart,
+// list items as bullets or numbers, a link as its words then its address,
+// entities decoded.
 //
 // WHY PLAIN TEXT. The public task page is opened by anyone with the link,
 // on the app's own domain, where a signed-in visitor's session lives. Any
 // HTML passed through a denylist (src/components/sops/sop-read-view.tsx
 // safeHtml) is one missed pattern away from running there. Text cannot run:
-// React escapes it, so the page is safe by construction. The workspace
-// export uses the same text for its CSV cells.
+// React escapes it, so the page is safe by construction. SOP steps exported
+// as Markdown read their rich text through it too.
 //
 // Pure: a small tag scanner, no DOM, so it runs on the server and in tests.
 

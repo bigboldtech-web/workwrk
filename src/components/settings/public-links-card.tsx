@@ -2,7 +2,7 @@
 
 // PublicLinksCard: access toggle 10 (access-model-spec section 8, "Public
 // links") as one settings row on the Access page. Off = no new public link
-// can be minted for a SOP or a doc and existing links stop answering; View
+// can be minted for a SOP, a task or a doc and existing links stop answering; View
 // only = anyone holding a link reads the object without signing in.
 //
 // It exists because the share dialogs refuse a new public link while the
@@ -15,7 +15,7 @@
 //
 // The stored key can also be ABSENT (an org that never saved this page). The
 // public docs, tables and forms routes treat absent as "keep what is live"
-// (lib/public-links.ts), while a SOP link needs an explicit View only, so an
+// (lib/public-links.ts), while a SOP or task link needs an explicit View only, so an
 // absent key is shown as its own honest line under the switch instead of a
 // flat "Off" that the live links would contradict. Either choice then stores
 // an explicit value and every reader agrees.
@@ -82,11 +82,11 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
       </header>
       <div className="flex min-h-14 items-center gap-4 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <p className="text-base text-ink">Let people share SOPs, docs, tables and forms with a link that works without signing in</p>
+          <p className="text-base text-ink">Let people share SOPs, docs, tasks, tables and forms with a link that works without signing in</p>
           <p className="text-sm text-ink-2">Off turns every existing public link off as well. Signing links and run links are separate and always work.</p>
           {unset ? (
             <p className="mt-1 text-sm text-ink-2">
-              Not chosen yet: docs, tables and forms already made public keep working, and new SOP links stay off until you choose.
+              Not chosen yet: docs, tables and forms already made public keep working, and new SOP and task links stay off until you choose.
             </p>
           ) : null}
         </div>

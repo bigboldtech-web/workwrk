@@ -1,7 +1,8 @@
 // What the whole-workspace export writes (GET /api/export/all), as pure
 // functions the route and the tests share: the file names, which Docs are
 // notes, a task's row with its description, checklist, tags and field
-// values, and a comment's row.
+// values, and a comment's row. Text people wrote goes out exactly as stored
+// (Markdown today, HTML for older rows): an export is a copy.
 //
 // WHAT IS IN IT is what an org Owner or Admin can open in the app, because
 // only they may run it (settingsWriteGate "data"): everything in the
@@ -12,7 +13,6 @@
 // Pure: no database, no network.
 
 import { CSV_BOM, csvLine, type CsvCell } from "@/lib/csv";
-import { htmlToText } from "@/lib/html-text";
 import type { FieldDef } from "@/lib/field-catalog";
 
 type Obj = Record<string, unknown>;
@@ -160,13 +160,21 @@ export function taskCsvHeader(): string {
   return CSV_BOM + csvLine([...TASK_COLUMNS]);
 }
 
-/** One task's line: its description as plain text, its home List's field values as one JSON object. */
+/** Stored text exactly as stored: an export is a copy, and a copy loses nothing. */
+function asStored(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/**
+ * One task's line: its description exactly as stored (Markdown, or HTML for
+ * an older one), its home List's field values as one JSON object.
+ */
 export function taskCsvLine(t: TaskForExport, ctx: { statusLabel: string; tags: readonly string[]; fields: readonly FieldDef[] }): string {
   const meta = obj(t.metadata) ?? {};
   const cells: CsvCell[] = [
     t.id, t.boardId, t.title, t.status ?? "", t.priority ?? "", t.ownerId ?? "", t.assigneeIds.join(" "),
     iso(t.startAt), iso(t.dueAt), iso(t.archivedAt), iso(t.createdAt),
-    t.parentItemId ?? "", ctx.statusLabel, ctx.tags.join("; "), htmlToText(meta.description), checklistText(meta),
+    t.parentItemId ?? "", ctx.statusLabel, ctx.tags.join("; "), asStored(meta.description), checklistText(meta),
     json(fieldValues(ctx.fields, meta)), iso(t.updatedAt),
   ];
   return csvLine(cells);
@@ -207,5 +215,5 @@ export function commentCsvLine(
   author: string,
   files: readonly string[],
 ): string {
-  return csvLine([c.id, c.entityId, c.authorId ?? "", author, htmlToText(c.body), files.join("; "), iso(c.createdAt), iso(c.updatedAt)]);
+  return csvLine([c.id, c.entityId, c.authorId ?? "", author, asStored(c.body), files.join("; "), iso(c.createdAt), iso(c.updatedAt)]);
 }

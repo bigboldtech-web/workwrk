@@ -8,8 +8,10 @@
  *
  * What it shows is what the route sends and nothing more
  * (src/app/api/public/tasks/[token]): the title, status, priority, dates,
- * assignees by first name, the description as plain text, the checklist and
- * the subtasks' titles and statuses. Every non-ok answer, an unknown token
+ * assignees by first name, the description, the checklist and the subtasks'
+ * titles and statuses. The description renders as the task page renders it
+ * (MarkdownLite: bold, italic, lists, http and mailto links, every node a
+ * React element), so no HTML is ever inserted. Every non-ok answer, an unknown token
  * included, is the one sentence "This link is invalid or has been turned
  * off." This page never writes.
  */
@@ -21,6 +23,7 @@ import { useParams } from "next/navigation";
 import "@/app/(dashboard)/tokens.css";
 import "@/app/(dashboard)/os.css";
 import { DotsArt } from "@/components/ui/dots-art";
+import { MarkdownLite } from "@/components/ui/markdown-lite";
 import { LogoMark } from "@/components/brand/logo";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
 
@@ -142,7 +145,7 @@ export default function PublicTaskPage() {
             {data.description ? (
               <section className="mt-7">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Description</h2>
-                <p className="whitespace-pre-wrap text-base leading-relaxed text-ink [overflow-wrap:anywhere]">{data.description}</p>
+                <MarkdownLite source={data.description} className="text-base leading-relaxed text-ink [overflow-wrap:anywhere]" />
               </section>
             ) : null}
 

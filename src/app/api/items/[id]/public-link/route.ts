@@ -15,7 +15,7 @@
 import { NextResponse } from "next/server";
 import { gateItem, itemCtx, itemServerError } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
-import { orgPublicLinksAllowed } from "@/lib/public-links";
+import { orgPublicLinksTurnedOn } from "@/lib/public-links";
 import { BOARD_ITEM_ENTITY_TYPE } from "@/lib/item-thread";
 import { TASK_SHARE_PATH, mayShareTaskPublicly, readTaskLink, taskLinkToken, turnOffTaskLink, turnOnTaskLink } from "@/lib/task-public-link";
 
@@ -28,7 +28,7 @@ async function standing(id: string, c: Ctx) {
   if ("error" in gate) return { error: gate.error } as const;
   const item = gate.item;
   const org = await prisma.organization.findUnique({ where: { id: c.organizationId }, select: { settings: true } });
-  const allowed = orgPublicLinksAllowed(org?.settings);
+  const allowed = orgPublicLinksTurnedOn(org?.settings);
   const canManage = await mayShareTaskPublicly(c, { boardId: item.boardId, organizationId: item.organizationId });
   return { item, allowed, canManage } as const;
 }
@@ -79,13 +79,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     if (s.item.archivedAt) {
       return NextResponse.json({ error: "item_archived", message: "This task is in Trash, so it can't be shared." }, { status: 409, headers: NO_STORE });
     }
-    const { secret, created } = await turnOnTaskLink(s.item.id, c.organizationId, c.userId);
+    const { secret, createdAt, created } = await turnOnTaskLink(s.item.id, c.organizationId, c.userId);
     if (created) {
       await prisma.itemActivity.create({
         data: { organizationId: c.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: s.item.id, actorId: c.userId, action: "PUBLIC_LINK_ON", meta: {} },
       });
     }
-    return answer(true, s.allowed, true, false, { secret, createdAt: new Date() }, s.item.id);
+    return answer(true, s.allowed, true, false, { secret, createdAt }, s.item.id);
   } catch (err) {
     return itemServerError(err, `POST /api/items/${id}/public-link`);
   }

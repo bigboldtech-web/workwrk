@@ -6,10 +6,10 @@
 // the workspace, not a people-and-HR slice):
 //   the people and HR tables, as before
 //   spaces, folders, lists, list-fields (each List's fields), goals, tables
-//   list-tasks.csv   every task with its description as plain text, its
-//                    checklist, tags and its home List's field values
+//   list-tasks.csv   every task with its description exactly as stored,
+//                    its checklist, tags and its home List's field values
 //   list-links.csv   each task shown in another List, with that List's values
-//   task-comments.csv every live comment on a task, as plain text
+//   task-comments.csv every live comment on a task, exactly as stored
 //   docs/*.md        every live Doc as Markdown, sub-pages linked by file
 //   tables/*.csv     every table's rows, the values the grid shows
 //   sops/*.md        every SOP as Markdown
@@ -44,8 +44,16 @@ import {
   type DocTreeRow,
 } from "@/lib/export/workspace-format";
 
-/** Rows read per query for the large files. */
-const PAGE = 2000;
+/**
+ * Rows read per query for the large files, and the most text one piece of a
+ * file holds before it is handed on, so a page's rows are garbage before the
+ * next is read. Measured on a dev server exporting 60,000 tasks with long
+ * descriptions (79 MB of CSV): 2,000-row pages grew it by about 780 MB,
+ * 500-row pages with 256 KB pieces by about 280 MB, and it never grew again
+ * on later runs.
+ */
+const PAGE = 500;
+const PIECE_CHARS = 256 * 1024;
 /** Docs and SOPs carry their whole content, so they are read fewer at a time. */
 const CONTENT_PAGE = 100;
 export const EXPORT_LIMITS = {
@@ -295,8 +303,12 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
           for (const t of page) {
             const label = t.status ? statusOf.get(t.boardId)?.[t.status]?.label ?? t.status : "";
             chunk += taskCsvLine(t, { statusLabel: label, tags: tags.get(t.id) ?? [], fields: fieldsOf.get(t.boardId) ?? [] });
+            if (chunk.length >= PIECE_CHARS) {
+              yield chunk;
+              chunk = "";
+            }
           }
-          yield chunk;
+          if (chunk) yield chunk;
           sent += page.length;
           cursor = page[page.length - 1].id;
           if (page.length < PAGE) break;
@@ -319,8 +331,14 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
           });
           if (page.length === 0) break;
           let chunk = "";
-          for (const l of page) chunk += linkCsvLine(l, l.item.metadata, fieldsOf.get(l.boardId) ?? []);
-          yield chunk;
+          for (const l of page) {
+            chunk += linkCsvLine(l, l.item.metadata, fieldsOf.get(l.boardId) ?? []);
+            if (chunk.length >= PIECE_CHARS) {
+              yield chunk;
+              chunk = "";
+            }
+          }
+          if (chunk) yield chunk;
           sent += page.length;
           after = { itemId: page[page.length - 1].itemId, boardId: page[page.length - 1].boardId };
           if (page.length < PAGE) break;
@@ -355,6 +373,10 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
             if (!liveIds.has(c.entityId)) continue;
             const names = c.attachments.map((a) => fileName.get(a.fileId)).filter((n): n is string => !!n);
             chunk += commentCsvLine(c, personName(c.authorId ? userById.get(c.authorId) : undefined), names);
+            if (chunk.length >= PIECE_CHARS) {
+              yield chunk;
+              chunk = "";
+            }
           }
           if (chunk) yield chunk;
           sent += page.length;
@@ -454,9 +476,9 @@ export async function prepareWorkspaceExport(orgId: string, exportedAt: Date, do
         limits,
         notes: [
           "WorkwrK workspace export. Spreadsheet files are UTF-8 CSV; Docs and SOPs are Markdown.",
-          "list-tasks.csv holds every task on every List: its description as plain text, its checklist, its tags, and its home List's field values as one JSON object keyed by field name (people and connected tasks as ids, which people.csv and list-tasks.csv resolve). list-fields.csv names each List's fields.",
+          "list-tasks.csv holds every task on every List: its description exactly as stored (Markdown; older ones may be HTML), its checklist, its tags, and its home List's field values as one JSON object keyed by field name (people and connected tasks as ids, which people.csv and list-tasks.csv resolve). list-fields.csv names each List's fields.",
           "list-links.csv holds each task shown in a List other than its home, with that List's own field values.",
-          "task-comments.csv holds every comment on a task as plain text, with the names of the files it carries. The files themselves are not inside this archive.",
+          "task-comments.csv holds every comment on a task exactly as stored, with the names of the files it carries. The files themselves are not inside this archive.",
           "docs/ holds every Doc as Markdown; a sub-page links to its own file. Docs in Trash are listed in docs.csv without a page. Personal notes are their owner's alone and are not in this export.",
           "tables/ holds each table's rows as the grid shows them. sops/ holds each SOP as Markdown.",
           "tasks.csv is the older task table. activity.csv is the 500 most recent rows; the full audit log is its own export.",

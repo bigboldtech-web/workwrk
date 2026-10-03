@@ -17,3 +17,17 @@ export function orgPublicLinksAllowed(orgSettings: unknown): boolean {
   if (!access || typeof access !== "object") return true;
   return (access as { publicLinks?: unknown }).publicLinks !== "off";
 }
+
+/**
+ * For a KIND of public link that did not exist before the toggle (a task's,
+ * src/lib/task-public-link.ts): only an explicit "view" opens it. No live
+ * link of that kind has to keep working, and Settings shows an unset switch
+ * as "Public links: off" (api/settings/overview), so reading unset as on
+ * would publish what an admin was told is off.
+ */
+export function orgPublicLinksTurnedOn(orgSettings: unknown): boolean {
+  if (!orgSettings || typeof orgSettings !== "object") return false;
+  const access = (orgSettings as { access?: unknown }).access;
+  if (!access || typeof access !== "object") return false;
+  return (access as { publicLinks?: unknown }).publicLinks === "view";
+}

@@ -59,18 +59,22 @@ export async function readTaskLink(itemId: string): Promise<{ secret: string; cr
   }
 }
 
-/** On: the existing secret when it is already on, else a new one. */
-export async function turnOnTaskLink(itemId: string, organizationId: string, userId: string): Promise<{ secret: string; created: boolean }> {
+/** On: the existing link when it is already on, else a new one. */
+export async function turnOnTaskLink(
+  itemId: string,
+  organizationId: string,
+  userId: string,
+): Promise<{ secret: string; createdAt: Date; created: boolean }> {
   const existing = await readTaskLink(itemId);
-  if (existing) return { secret: existing.secret, created: false };
+  if (existing) return { ...existing, created: false };
   const secret = newPublicSecret();
   try {
-    await prisma.itemPublicLink.create({ data: { itemId, organizationId, secret, createdById: userId } });
-    return { secret, created: true };
+    const row = await prisma.itemPublicLink.create({ data: { itemId, organizationId, secret, createdById: userId }, select: { secret: true, createdAt: true } });
+    return { ...row, created: true };
   } catch (err) {
     // Two people turned it on at once: the first one's link stands.
     const again = await readTaskLink(itemId);
-    if (again) return { secret: again.secret, created: false };
+    if (again) return { ...again, created: false };
     throw err;
   }
 }
