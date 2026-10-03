@@ -164,6 +164,12 @@ const SQL_MANIFEST = [
   // only. Applied before the reload because the new release writes the
   // column on every send.
   "2026-10-03-message-client-id.sql",
+  // Batch 5: "ItemPublicLink", one public view-only link per task (access
+  // toggle 10). One new table: CREATE TABLE / INDEX IF NOT EXISTS and
+  // catalogue-guarded foreign keys only, no existing column touched. Read
+  // only by the task share routes and the public task page, which treat a
+  // missing table as "no link" until it is applied.
+  "2026-10-04-item-public-link.sql",
 ];
 
 /**

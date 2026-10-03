@@ -214,3 +214,26 @@ describe("Ask AI about this task", () => {
     expect(buildItemMenu(ctx({ role: "none", askAi: true }))).toEqual([]);
   });
 });
+
+describe("the Public link row", () => {
+  it("is offered right after Share to someone who can edit the task", () => {
+    const got = keys(ctx({ role: "EDIT" }));
+    expect(got).toContain("public-link");
+    expect(got.indexOf("public-link")).toBe(got.indexOf("share") + 1);
+    expect(keys(ctx({ role: "FULL" }))).toContain("public-link");
+  });
+
+  it("is absent for viewers, guests, assignee-only access and Personal Lists", () => {
+    for (const role of ["VIEW", "COMMENT"] as const) expect(keys(ctx({ role }))).not.toContain("public-link");
+    expect(keys(ctx({ isGuest: true }))).not.toContain("public-link");
+    expect(keys(ctx({ assigneeOnly: true }))).not.toContain("public-link");
+    expect(keys(ctx({ personalList: true }))).not.toContain("public-link");
+  });
+
+  it("in a List the task is only shown in, follows the home's share rule", () => {
+    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, canAddToList: false }))).not.toContain("public-link");
+    expect(keys(ctx({ role: "EDIT", inSecondaryList: true }))).not.toContain("public-link");
+    expect(keys(ctx({ role: "EDIT", inSecondaryList: true, canAddToList: true }))).toContain("public-link");
+  });
+});
+

@@ -182,6 +182,10 @@ export function describeItemActivity(
       return "archived this task";
     case "RESTORED":
       return "restored this task";
+    case "PUBLIC_LINK_ON":
+      return "turned on a public link to this task";
+    case "PUBLIC_LINK_OFF":
+      return "turned off the public link to this task";
     default:
       // Not reachable for anything this product writes (the completeness test
       // holds that), but a row from an older release or an automation must

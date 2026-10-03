@@ -46,6 +46,7 @@ export const ITEM_MENU_KEYS = [
   "watch",
   "save-template",
   "share",
+  "public-link",
   "remove-from-list",
   "archive",
   "delete",
@@ -165,6 +166,13 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   if (canEdit && !ctx.isGuest) rows.push({ key: "save-template", label: "Save as template" });
   if (!ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest) {
     rows.push({ key: "share", label: isFull || canEdit ? "Share" : "Who has access" });
+  }
+  // A public, view-only link to this one task (access toggle 10). The dialog
+  // asks the server who may turn it on, and says why when it cannot be. In a
+  // List the task is only shown in, it is the home's to share, the same
+  // home rule as adding it to another List, so the row follows that flag.
+  if (canEdit && !ctx.personalList && !ctx.assigneeOnly && !ctx.isGuest && (!ctx.inSecondaryList || ctx.canAddToList)) {
+    rows.push({ key: "public-link", label: "Public link" });
   }
 
   const tail: ItemMenuRow[] = [];

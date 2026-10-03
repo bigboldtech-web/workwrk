@@ -33,6 +33,7 @@ import { groupReadableLists, readableListsUrl, type ReadableListsResponse } from
 import { useItemTypes } from "./use-item-types";
 import { OsShellContext } from "@/components/layout/os/shell-context";
 import { AddToListPicker } from "./add-to-list-picker";
+import { TaskPublicLinkDialog } from "./task-public-link-dialog";
 import { distinctSectionLabels } from "@/lib/list-link-rows";
 
 export interface ItemMoreMenuItem {
@@ -156,6 +157,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   const [movePicker, setMovePicker] = useState(false);
   const [linkMovePicker, setLinkMovePicker] = useState(false);
   const [addPicker, setAddPicker] = useState(false);
+  const [publicLink, setPublicLink] = useState(false);
   const [lists, setLists] = useState<{ id: string; name: string; spaceName: string | null }[]>([]);
   // Three states, not two. "Still loading" and "the request failed" both used
   // to render as an empty list under the sentence "No other list you can write
@@ -439,6 +441,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
           close();
           onShare?.();
           return;
+        case "public-link":
+          close();
+          setPublicLink(true);
+          return;
         case "archive": {
           close();
           const ok = await confirm({
@@ -663,6 +669,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
           onMoved={(targetId) => onMoved?.(targetId)}
         />
       ) : null}
+      {publicLink ? <TaskPublicLinkDialog itemId={item.id} open onClose={() => setPublicLink(false)} /> : null}
       {listContext?.canAddToList ? (
         <AddToListPicker
           open={addPicker}
