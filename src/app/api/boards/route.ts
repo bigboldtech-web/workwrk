@@ -299,11 +299,23 @@ async function readableLists(
     }
   }
   const truncated = overflow || searchRows.length >= READABLE_TAKE;
+  const returned = [...idResults, ...found];
+
+  // A Space the viewer only passes through (a Folder or List grant) LABELS
+  // its Lists in a picker, by name only, and only when a List returned here
+  // sits in it: it is never a source (`spaces` keeps the full-read Spaces,
+  // the only ones a dashboard card may take as "A Space"). Without it a
+  // Folder grantee saw their own Space's Lists under "Shared with you".
+  const usedSpaceIds = new Set(returned.map((b) => b.spaceId).filter((id): id is string => !!id));
+  const pathSpaces = spaces
+    .filter((s) => s.access === "path" && usedSpaceIds.has(s.id))
+    .map((s) => ({ id: s.id, name: s.name }));
 
   return NextResponse.json(
     {
-      boards: [...idResults, ...found].map(toRow),
+      boards: returned.map(toRow),
       spaces: readSpaces.map((s) => ({ id: s.id, name: s.name, icon: s.icon ?? null, color: s.color ?? null })),
+      pathSpaces,
       truncated,
     },
     { headers: { "Cache-Control": "private, no-store" } },

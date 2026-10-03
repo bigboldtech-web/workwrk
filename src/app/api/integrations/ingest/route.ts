@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import { createPersonalTask } from "@/lib/work/personal-task";
+import { kudosAftermath } from "@/lib/kudos-give";
 
 /**
  * Generic webhook ingest — /api/integrations/ingest
@@ -196,7 +197,15 @@ async function handleKudosGive(orgId: string, data: Record<string, unknown>) {
   if (!giverId || !receiverId || !message) {
     return Response.json({ error: "giverId, receiverId, message required" }, { status: 400 });
   }
-  const kudos = await prisma.kudos.create({
+  if (giverId === receiverId) return Response.json({ error: "Cannot give kudos to yourself" }, { status: 400 });
+  // Both people must be in this workspace and not removed from it: an id
+  // from another workspace never lands on this one's kudos wall.
+  const [giver, receiver] = await Promise.all([
+    prisma.user.findFirst({ where: { id: giverId, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true } }),
+    prisma.user.findFirst({ where: { id: receiverId, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true, email: true } }),
+  ]);
+  if (!giver || !receiver) return Response.json({ error: "User not found" }, { status: 404 });
+  const created = await prisma.kudos.create({
     data: {
       giverId,
       receiverId,
@@ -204,9 +213,10 @@ async function handleKudosGive(orgId: string, data: Record<string, unknown>) {
       message: message.slice(0, 500),
       companyValue: companyValue?.slice(0, 40) ?? null,
     },
-    select: { id: true, message: true, createdAt: true },
+    select: { id: true, message: true, companyValue: true, giverId: true, receiverId: true, createdAt: true },
   });
-  triggerRecalculation(receiverId, orgId);
-  dispatchEvent({ organizationId: orgId, event: "kudos.created", payload: kudos }).catch(() => {});
+  // Everything a kudos does (told, emailed, logged, scored, Slack, "kudos.created").
+  void kudosAftermath({ organizationId: orgId, kudos: created, giver, receiver }).catch(() => {});
+  const kudos = { id: created.id, message: created.message, createdAt: created.createdAt };
   return Response.json({ ok: true, kudos }, { status: 201 });
 }

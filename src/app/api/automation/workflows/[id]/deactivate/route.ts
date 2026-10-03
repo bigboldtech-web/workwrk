@@ -7,6 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
+import { workflowForViewer } from "@/lib/automation/definition-view";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -28,5 +29,5 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     where: { id },
     data: { status: "INACTIVE", updatedById: ctx.userId },
   });
-  return NextResponse.json({ workflow: updated });
+  return NextResponse.json({ workflow: await workflowForViewer(ctx.viewer, updated) });
 }

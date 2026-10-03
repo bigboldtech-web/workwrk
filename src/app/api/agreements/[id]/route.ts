@@ -39,7 +39,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!agreement) return jsonError("Not found", 404);
 
   const me = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-  const myParty = agreement.parties.find((p) => p.userId === userId || (!!me?.email && p.email.trim().toLowerCase() === me.email.toLowerCase())) ?? null;
+  // The same match the link list and the task trail read (agreementReadWhere):
+  // the account email and the party email, each trimmed, compared without case.
+  const myEmail = me?.email?.trim().toLowerCase() ?? "";
+  const myParty = agreement.parties.find((p) => p.userId === userId || (!!myEmail && p.email.trim().toLowerCase() === myEmail)) ?? null;
   if (!full && !myParty) return jsonError("Not found", 404);
 
   const creator = agreement.createdById ? await prisma.user.findUnique({ where: { id: agreement.createdById }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true } }) : null;

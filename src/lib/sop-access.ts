@@ -37,7 +37,9 @@ async function expandAccessibleFolderIds(seedIds: string[]): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-type SessionLike = { user?: { id?: string; accessLevel?: string } };
+// organizationId: hasPermission reads the workspace's own permission matrix
+// by it; a session without one falls back to the built-in defaults.
+type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } };
 
 export async function sopVisibilityWhere(
   session: SessionLike,

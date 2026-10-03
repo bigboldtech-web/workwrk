@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  definitionWithScope,
+  restoreHiddenScope,
+  splitScope,
+  MAX_SCOPE_IDS,
   draftDiffersFromLive,
   draftTrigger,
   isEverywhere,
@@ -132,5 +136,57 @@ describe("snapshot notes", () => {
 describe("stableJson", () => {
   it("sorts keys and drops undefined", () => {
     expect(stableJson({ b: 1, a: { d: undefined, c: 2 } })).toBe('{"a":{"c":2},"b":1}');
+  });
+});
+
+describe("hidden scope", () => {
+  // The editor can open L1, F1 and S1; L-admin and S-hr are an Admin's.
+  const canOpen = new Set(["list:L1", "list:L2", "folder:F1", "space:S1"]);
+  const readable = (kind: string, id: string) => canOpen.has(`${kind}:${id}`);
+  const stored = { listIds: ["L1", "L-admin"], folderIds: ["F1"], spaceIds: ["S-hr"] };
+  const { shown, hidden } = splitScope(stored, readable);
+
+  it("splits a stored scope into what the editor can open and the rest, in order", () => {
+    expect(shown).toEqual({ listIds: ["L1"], folderIds: ["F1"], spaceIds: [] });
+    expect(hidden).toEqual({ listIds: ["L-admin"], folderIds: [], spaceIds: ["S-hr"] });
+  });
+
+  it("keeps the hidden places when a manager edits an Admin's automation", () => {
+    const r = restoreHiddenScope({ stored, submitted: { listIds: ["L1", "L2"], folderIds: [], spaceIds: [] }, hidden, readable, everywhere: false });
+    expect(r).toEqual({ ok: true, scope: { listIds: ["L1", "L2", "L-admin"], folderIds: [], spaceIds: ["S-hr"] } });
+  });
+
+  it("an all-hidden scope saved unchanged keeps its places, never widens to Everywhere", () => {
+    const allHidden = { listIds: ["L-admin"], folderIds: [], spaceIds: [] };
+    const split = splitScope(allHidden, readable);
+    expect(split.shown).toEqual({ listIds: [], folderIds: [], spaceIds: [] });
+    const r = restoreHiddenScope({ stored: allHidden, submitted: split.shown, hidden: split.hidden, readable, everywhere: false });
+    expect(r).toEqual({ ok: true, scope: allHidden });
+  });
+
+  it("an older tab that states no choice over hidden places is refused, not guessed", () => {
+    expect(restoreHiddenScope({ stored, submitted: { listIds: [], folderIds: [], spaceIds: [] }, hidden, readable, everywhere: undefined })).toEqual({ ok: false, error: "scope_ambiguous" });
+  });
+
+  it("Everywhere is honoured, it covers every hidden place", () => {
+    expect(restoreHiddenScope({ stored, submitted: { listIds: [], folderIds: [], spaceIds: [] }, hidden, readable, everywhere: true })).toEqual({ ok: true, scope: { listIds: [], folderIds: [], spaceIds: [] } });
+  });
+
+  it("a place the editor cannot open is refused unless it was already stored", () => {
+    expect(restoreHiddenScope({ stored, submitted: { listIds: ["L-secret"], folderIds: [], spaceIds: [] }, hidden, readable, everywhere: false })).toEqual({ ok: false, error: "scope_locked" });
+    expect(restoreHiddenScope({ stored, submitted: { listIds: ["L-admin"], folderIds: [], spaceIds: [] }, hidden, readable, everywhere: false })).toEqual({ ok: true, scope: { listIds: ["L-admin"], folderIds: [], spaceIds: ["S-hr"] } });
+  });
+
+  it("past the cap the save is refused, never cut", () => {
+    const many = Array.from({ length: MAX_SCOPE_IDS }, (_, i) => `M${i}`);
+    const wide = (kind: string, id: string) => kind === "list" && id.startsWith("M");
+    const r = restoreHiddenScope({ stored: { listIds: ["L-admin"], folderIds: [], spaceIds: [] }, submitted: { listIds: many, folderIds: [], spaceIds: [] }, hidden: { listIds: ["L-admin"], folderIds: [], spaceIds: [] }, readable: wide, everywhere: false });
+    expect(r).toEqual({ ok: false, error: "too_many_places" });
+  });
+
+  it("definitionWithScope replaces only the scope and drops it for Everywhere", () => {
+    const def = { actions: [{ key: "notify" }], scope: stored, when: { field: "status" } };
+    expect(definitionWithScope(def, shown)).toEqual({ actions: [{ key: "notify" }], when: { field: "status" }, scope: shown });
+    expect(definitionWithScope(def, { listIds: [], folderIds: [], spaceIds: [] })).toEqual({ actions: [{ key: "notify" }], when: { field: "status" } });
   });
 });

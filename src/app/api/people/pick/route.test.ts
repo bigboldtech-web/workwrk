@@ -130,3 +130,18 @@ describe("GET /api/people/pick search text", () => {
     expect(await pick("reach=signin")).toEqual(["u-bot", "u-ann"]);
   });
 });
+
+describe("GET /api/people/pick?ids= label lookup", () => {
+  it("names the people a saved choice holds, self included, whoever can still sign in", async () => {
+    expect(await pick("ids=u-bot,u-ann,u-me")).toEqual(["u-me", "u-bot", "u-ann"]);
+  });
+
+  it("never a person who can no longer sign in, nor one from another workspace", async () => {
+    expect(await pick("ids=u-gone,u-other")).toEqual([]);
+  });
+
+  it("keeps a Guest to the people they share a conversation with", async () => {
+    orgRole = "GUEST";
+    expect(await pick("ids=u-bot,u-ann")).toEqual(["u-bot"]);
+  });
+});

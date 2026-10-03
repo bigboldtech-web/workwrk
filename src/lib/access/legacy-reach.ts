@@ -29,7 +29,9 @@ export interface LegacyReach {
 /** The person's reach, or null when they are not in this workspace at all. */
 export async function legacyReachOf(organizationId: string, userId: string): Promise<LegacyReach | null> {
   const user = await prisma.user
-    .findFirst({ where: { id: userId, organizationId }, select: { id: true, accessLevel: true } })
+    // A person removed from the workspace reaches no List: their row and
+    // their old level stay for the record, never their reach.
+    .findFirst({ where: { id: userId, organizationId, deletedAt: null }, select: { id: true, accessLevel: true } })
     .catch(() => null);
   if (!user) return null;
   const level = typeof user.accessLevel === "string" ? user.accessLevel : null;

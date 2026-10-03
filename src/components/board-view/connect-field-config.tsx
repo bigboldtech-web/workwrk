@@ -165,7 +165,7 @@ export function ConnectFieldConfig({
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((d: ReadableListsResponse) => {
           if (!alive) return;
-          const res = { boards: Array.isArray(d?.boards) ? d.boards : [], spaces: Array.isArray(d?.spaces) ? d.spaces : [], truncated: !!d?.truncated };
+          const res = { boards: Array.isArray(d?.boards) ? d.boards : [], spaces: Array.isArray(d?.spaces) ? d.spaces : [], pathSpaces: Array.isArray(d?.pathSpaces) ? d.pathSpaces : [], truncated: !!d?.truncated };
           setLists(res);
           setSeen((prev) => { const next = new Map(prev); for (const b of res.boards) next.set(b.id, b); return next; });
           setListsState("ready");

@@ -35,6 +35,8 @@ export interface ActionContext {
   workflowCreatorId?: string | null;
   /** The creator's reach, when the engine already loaded it (author-reach.ts). */
   author?: AutomationAuthor | null;
+  /** A person clicked Retry: their reach caps the steps too, and a refusal names them. */
+  manualRetry?: boolean;
   /** This step's order in the run, so a delivery id is unique per step. */
   stepOrder?: number;
 }
@@ -131,15 +133,21 @@ async function resolveItem(ctx: ActionContext, params: Record<string, unknown>) 
 }
 
 /**
- * An automation never writes further than its creator can (author-reach.ts):
- * the step fails with a sentence the run drawer shows. A workflow with no
- * creator on record keeps the behaviour it always had.
+ * An automation never writes further than its creator can, nor further than
+ * the person who published the version that runs, nor, on a manual Retry,
+ * further than the person who clicked it (author-reach.ts, runReach): the
+ * step fails with a sentence the run drawer shows. A workflow with nobody on
+ * record at all keeps the behaviour it always had.
  */
 async function assertCanWrite(ctx: ActionContext, boardId: string): Promise<void> {
-  if (!ctx.workflowCreatorId) return;
-  const author = ctx.author !== undefined ? ctx.author : await loadAuthor(ctx.organizationId, ctx.workflowCreatorId);
+  if (ctx.author === undefined && !ctx.workflowCreatorId) return;
+  const author = ctx.author !== undefined ? ctx.author : await loadAuthor(ctx.organizationId, ctx.workflowCreatorId as string);
   if (!(await authorCanWrite(author, boardId))) {
-    throw new Error("The person who made this automation cannot make changes in that List, so it was left alone");
+    throw new Error(
+      ctx.manualRetry
+        ? "Whoever made, published or retried this automation cannot make changes in that List, so it was left alone"
+        : "Whoever made or published this automation cannot make changes in that List, so it was left alone",
+    );
   }
 }
 

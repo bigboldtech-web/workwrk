@@ -2062,11 +2062,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       <div className="wbcanvas__tools" style={toolbarStyle}>
         {TOOLS.map(({ tool: t, Icon, label, key, num }) => {
           const active = tool === t;
-          // Both the letter and the number select the tool; the letter is the
-          // one people know from every canvas, so it is the one shown.
-          const hint = key ?? num;
+          // Both the number and the letter select the tool. The number is the
+          // one shown (1 to 9, as the canvas always showed it, the fast keys
+          // for drawing a flow); the tooltip names both.
+          const hint = num ?? key;
+          const keys = [num, key].filter(Boolean).join(" or ");
           return (
-            <button key={t} type="button" title={`${label}${key ? ` (${key})` : num ? ` (${num})` : ""}`} onClick={() => setTool(t)}
+            <button key={t} type="button" title={keys ? `${label} (${keys})` : label} onClick={() => setTool(t)}
               style={{ ...toolBtn(active), position: "relative" }}>
               <Icon style={{ width: 17, height: 17 }} />
               {hint ? (

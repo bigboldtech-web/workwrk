@@ -41,7 +41,15 @@ export interface Draft {
   logic: "AND" | "OR";
   conditions: CondRow[];
   actions: ActionRow[];
+  /** The places the editor can open (the server keeps the rest). */
   scope: DraftScope;
+  /**
+   * The editor's choice, stated on every save: Everywhere, or only the chosen
+   * places (with the ones they cannot open kept on the server). It is not
+   * read off an empty scope: a scope whose places are all hidden from this
+   * editor arrives empty and is still "only in chosen places".
+   */
+  everywhere: boolean;
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -58,7 +66,7 @@ export function rowId(): string {
   return `r${seq}`;
 }
 
-export function readDraft(wf: { name: string; description: string | null; severity: string; triggerEvent: string | null; definition: unknown }): Draft {
+export function readDraft(wf: { name: string; description: string | null; severity: string; triggerEvent: string | null; definition: unknown; scopeHidden?: boolean }): Draft {
   const def = asRecord(wf.definition);
   const cond = asRecord(def.conditions);
   const conditions: CondRow[] = [];
@@ -97,6 +105,7 @@ export function readDraft(wf: { name: string; description: string | null; severi
     conditions,
     actions,
     scope: { listIds: ids(scope.listIds), folderIds: ids(scope.folderIds), spaceIds: ids(scope.spaceIds) },
+    everywhere: ids(scope.listIds).length + ids(scope.folderIds).length + ids(scope.spaceIds).length === 0 && !wf.scopeHidden,
   };
 }
 
@@ -159,6 +168,7 @@ export function toSaveBody(d: Draft, numericParams: (actionKey: string) => Set<s
       trigger: d.trigger,
       ...(Object.keys(when).length ? { when } : {}),
       ...(scope ? { scope } : {}),
+      everywhere: d.everywhere,
     },
   };
 }
@@ -209,6 +219,8 @@ export function operatorsFor(fieldType: string | undefined): string[] {
 export interface PublishProblems {
   when?: string;
   then?: string;
+  /** A save the server refused for where it runs (too many places, a place the editor cannot open). */
+  where?: string;
   /** Keyed by CondRow id: a condition whose operator needs a value and has none. */
   conditions: Record<string, string>;
   actions: Record<string, string>;

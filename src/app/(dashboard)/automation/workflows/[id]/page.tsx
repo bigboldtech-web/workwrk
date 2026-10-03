@@ -27,7 +27,7 @@
  * draft changes nothing until Republish.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, ChevronDown, Copy, GripVertical, History, Plus, ScrollText, Trash2, X } from "lucide-react";
@@ -77,6 +77,7 @@ import {
   type ActionRow,
   type CondRow,
   type Draft,
+  type DraftScope,
   type PublishProblems,
 } from "@/lib/automation/builder-state";
 import { dateArrivesWords, scheduleWords } from "@/lib/automation/schedule";
@@ -99,7 +100,7 @@ interface ApiRun {
 interface ApiVersion {
   number: number;
   publishedAt: string;
-  publishedBy: { id: string; name: string } | null;
+  publishedBy: { id: string; name: string; gone?: boolean } | null;
   isLive: boolean;
   kind: "published" | "kept";
   restoredFrom: number | null;
@@ -119,7 +120,15 @@ interface ApiWorkflow {
   lastRunAt: string | null;
   createdById: string | null;
   createdByName: string | null;
+  /** The creator is no longer in the workspace. */
+  creatorGone?: boolean;
   definition: unknown;
+  /** Places this viewer cannot open are kept in the scope (never which or how many). */
+  scopeHidden?: boolean;
+  /** Why: some exist and this viewer cannot open them, some are in Trash or deleted. */
+  scopeKept?: { cannotOpen: boolean; gone: boolean };
+  /** The draft's fingerprint when it was read; a save sends it back so it never replaces someone else's newer save unasked. */
+  revision?: string;
   versions: ApiVersion[];
   runs: ApiRun[];
   can: { edit: boolean; archive: boolean };
@@ -430,8 +439,35 @@ export default function AutomationBuilderPage() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [baseline, setBaseline] = useState<string>("");
-  const [people, setPeople] = useState<PersonRef[]>([]);
-  const [peopleQuery, setPeopleQuery] = useState("");
+  // Two lists to choose from, and the people the draft already names. A
+  // recipient (a notification, an email, an assignee) must be ACTIVE: the
+  // engine delivers to nobody else (registry-actions resolveUser), so the
+  // action pickers offer only them. A condition's person can be anyone who
+  // can sign in: a task can be assigned to someone on leave or on probation.
+  const [recipients, setRecipients] = useState<PersonRef[]>([]);
+  const [signIn, setSignIn] = useState<PersonRef[]>([]);
+  const [named, setNamed] = useState<PersonRef[]>([]);
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [conditionQuery, setConditionQuery] = useState("");
+  // Each list grows from its first page and its searches, merged by id and
+  // kept in name order.
+  const mergeInto = useCallback((set: Dispatch<SetStateAction<PersonRef[]>>) => (got: PersonRef[]) => {
+    set((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      for (const p of got) byId.set(p.id, p);
+      return [...byId.values()].sort((a, b) => personName(a).localeCompare(personName(b)));
+    });
+  }, []);
+  // Every person read, for names on chips and pickers.
+  const people = useMemo(() => {
+    const byId = new Map<string, PersonRef>();
+    for (const p of [...signIn, ...recipients, ...named]) byId.set(p.id, p);
+    return [...byId.values()];
+  }, [signIn, recipients, named]);
+  // Ids whose lookup has not answered yet, and ids whose lookup failed: their
+  // chips say so, never that the person is gone.
+  const [peopleLoading, setPeopleLoading] = useState<ReadonlySet<string>>(() => new Set());
+  const [peopleFailed, setPeopleFailed] = useState<ReadonlySet<string>>(() => new Set());
   const [places, setPlaces] = useState<Places | null>(null);
   const [canCreate, setCanCreate] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -448,6 +484,8 @@ export default function AutomationBuilderPage() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const nameAtFocus = useRef("");
   const saveAgain = useRef<() => void>(() => {});
+  // The sections a save refusal marked, so the next save that lands clears only those.
+  const saveRefused = useRef(new Set<"when" | "where">());
   // "Only in chosen Lists" picked with no List yet: the scope is still
   // Everywhere until one is chosen, and the section says so.
   const [listsMode, setListsMode] = useState(false);
@@ -458,6 +496,7 @@ export default function AutomationBuilderPage() {
     setDraft(d);
     setBaseline(draftSnapshot(d));
     setProblems(null);
+    saveRefused.current.clear();
     setListsMode(false);
   }, []);
 
@@ -479,8 +518,15 @@ export default function AutomationBuilderPage() {
   // Picker sources, non-blocking.
   useEffect(() => {
     let alive = true;
-    void apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=100", { cache: "no-store" }).then((r) => {
-      if (alive && r.ok && Array.isArray(r.data.data)) setPeople(r.data.data);
+    // The whole company, as every people picker reads it (/api/people/pick),
+    // not /api/users, which answers anybody below an org-wide level with their
+    // own report tree: a Member could pick only themselves as a recipient, and
+    // every colleague already chosen read as "Someone no longer here".
+    void apiFetch<{ people: PersonRef[] }>("/api/people/pick?includeSelf=1&limit=50", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok && Array.isArray(r.data.people)) mergeInto(setRecipients)(r.data.people);
+    });
+    void apiFetch<{ people: PersonRef[] }>("/api/people/pick?includeSelf=1&limit=50&reach=signin", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok && Array.isArray(r.data.people)) mergeInto(setSignIn)(r.data.people);
     });
     void apiFetch<Places>("/api/automation/places", { cache: "no-store" }).then((r) => {
       if (alive && r.ok) setPlaces(r.data);
@@ -493,7 +539,7 @@ export default function AutomationBuilderPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [mergeInto]);
 
   // This page never autosaves, so the shell's offline strip must not say it will.
   useEffect(() => {
@@ -526,6 +572,108 @@ export default function AutomationBuilderPage() {
   const actionByKey = useMemo(() => new Map(catalog.actions.map((a) => [a.key, a])), [catalog.actions]);
   const trigger: CatalogTrigger | undefined = draft?.trigger ? triggerByKey.get(draft.trigger) : undefined;
 
+  // The people the draft already names (a recipient, a condition's person),
+  // looked up by id once each, so one outside the first page reads by name.
+  // An id the lookup does not return is someone no longer here.
+  const chosenPeopleKey = useMemo(() => {
+    if (!draft) return "";
+    const ids = new Set<string>();
+    const isPerson = (v: unknown): v is string => typeof v === "string" && v.length > 0 && !v.includes("@") && !USER_SPECIALS.some((x) => x.value === v);
+    for (const a of draft.actions) {
+      for (const p of (a.key ? actionByKey.get(a.key)?.params : undefined) ?? []) if (p.type === "user" && isPerson(a.params[p.key])) ids.add(a.params[p.key] as string);
+    }
+    for (const c of draft.conditions) {
+      const f = (trigger?.fields ?? []).find((x) => x.key === c.field);
+      if (valueKindFor(f?.type, c.operator) === "user" && isPerson(c.value)) ids.add(c.value);
+    }
+    return [...ids].sort().join(",");
+  }, [draft, actionByKey, trigger]);
+  // Looked up in chunks of 50. An id is done once a lookup answered (found
+  // or not); a failed lookup is tried again, up to three times, a little
+  // later each time.
+  const [peopleAnswered, setPeopleAnswered] = useState<ReadonlySet<string>>(() => new Set());
+  const peopleInFlight = useRef(new Set<string>());
+  const peopleTries = useRef(new Map<string, number>());
+  const [peopleRetry, setPeopleRetry] = useState(0);
+  useEffect(() => {
+    const missing = chosenPeopleKey.split(",").filter((x) => x && !peopleAnswered.has(x) && !peopleInFlight.current.has(x) && (peopleTries.current.get(x) ?? 0) < 3);
+    if (missing.length === 0) return;
+    // Marked in flight only when the lookup really starts: a cancelled
+    // timer leaves nothing marked, so the next pass asks again.
+    const t = setTimeout(() => {
+      for (const x of missing) peopleInFlight.current.add(x);
+      setPeopleLoading((prev) => new Set([...prev, ...missing]));
+      for (let i = 0; i < missing.length; i += 50) {
+        const chunk = missing.slice(i, i + 50);
+        void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?ids=${chunk.map(encodeURIComponent).join(",")}`, { cache: "no-store" }).then((r) => {
+          for (const x of chunk) peopleInFlight.current.delete(x);
+          const ok = r.ok && Array.isArray(r.data.people);
+          if (ok) {
+            setPeopleAnswered((prev) => new Set([...prev, ...chunk]));
+            setNamed((prev) => [...prev.filter((p) => !chunk.includes(p.id)), ...r.data.people]);
+          } else {
+            let wait = 0;
+            for (const x of chunk) {
+              const n = (peopleTries.current.get(x) ?? 0) + 1;
+              peopleTries.current.set(x, n);
+              wait = Math.max(wait, n * 2000);
+            }
+            setTimeout(() => setPeopleRetry((v) => v + 1), wait);
+          }
+          setPeopleLoading((prev) => new Set([...prev].filter((x) => !chunk.includes(x))));
+          setPeopleFailed((prev) => (ok ? new Set([...prev].filter((x) => !chunk.includes(x))) : new Set([...prev, ...chunk])));
+        });
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [chosenPeopleKey, peopleRetry, peopleAnswered]);
+  // A lookup that gave up is asked again when the window comes back or the
+  // connection returns, never left failed until a reload.
+  useEffect(() => {
+    const again = () => {
+      peopleTries.current.clear();
+      setPeopleRetry((v) => v + 1);
+    };
+    window.addEventListener("online", again);
+    window.addEventListener("focus", again);
+    return () => {
+      window.removeEventListener("online", again);
+      window.removeEventListener("focus", again);
+    };
+  }, []);
+
+  // Typing in a person picker searches the whole company, not only the
+  // first page already loaded: everyone who can sign in for a condition,
+  // the people a run can deliver to for an action.
+  useEffect(() => {
+    const q = recipientQuery.trim();
+    if (!q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?includeSelf=1&limit=20&q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok && Array.isArray(r.data.people)) mergeInto(setRecipients)(r.data.people);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [recipientQuery, mergeInto]);
+  useEffect(() => {
+    const q = conditionQuery.trim();
+    if (!q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ people: PersonRef[] }>(`/api/people/pick?includeSelf=1&limit=20&reach=signin&q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok && Array.isArray(r.data.people)) mergeInto(setSignIn)(r.data.people);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [conditionQuery, mergeInto]);
+  // A colleague is named, still Loading, or Couldn't load; "Someone no longer
+  // here" only once a lookup answered without them.
+  const personLabel = (value: string): string | null => {
+    if (!value || value.includes("@") || USER_SPECIALS.some((x) => x.value === value) || people.some((p) => p.id === value)) return userLabel(value, people);
+    if (peopleFailed.has(value) && !peopleLoading.has(value)) return "Couldn't load this name";
+    if (peopleAnswered.has(value)) return userLabel(value, people);
+    return "Loading";
+  };
+
   const update = useCallback((patch: Partial<Draft> | ((d: Draft) => Draft)) => {
     setDraft((d) => (d ? (typeof patch === "function" ? patch(d) : { ...d, ...patch }) : d));
   }, []);
@@ -541,23 +689,65 @@ export default function AutomationBuilderPage() {
       return false;
     }
     setSaving(true);
-    const body = toSaveBody(draft, numericParams);
-    const r = await apiFetch<{ workflow: Partial<ApiWorkflow> }>(`/api/automation/workflows/${wf.id}`, { method: "PUT", json: body });
+    const put = (overwrite: boolean) => apiFetch<{ workflow: Partial<ApiWorkflow> }>(`/api/automation/workflows/${wf.id}`, {
+      method: "PUT",
+      json: { ...toSaveBody(draft, numericParams), ...(wf.revision && !overwrite ? { baseRevision: wf.revision } : {}) },
+    });
+    let r = await put(false);
+    // Someone else saved it after this page loaded: their work is never
+    // replaced silently. The person chooses to save theirs over it, or keeps
+    // editing and reloads to see the newer version.
+    if (!r.ok && r.status === 409 && r.code === "stale_draft") {
+      setSaving(false);
+      const over = await confirm({
+        title: "Someone else saved this automation",
+        description: "They saved it after you opened it. Save yours over theirs, or keep editing and reload to see their version (your changes here would be lost).",
+        confirmLabel: "Save mine over theirs",
+        destructive: true,
+      });
+      if (!over) {
+        toast("Not saved. Reload to see their version.", { tone: "danger", action: { label: "Reload", onClick: () => void load() } });
+        return false;
+      }
+      setSaving(true);
+      r = await put(true);
+    }
     setSaving(false);
     if (!r.ok) {
-      // The form stays dirty and the guard stays armed.
-      toast(r.status === 401 ? "Not saved. Sign in again; your changes are still here." : "Not saved", {
+      // The form stays dirty and the guard stays armed. A refusal the server
+      // explains for one section (where it runs, what starts it) is shown in
+      // that section; repeating the same save would be refused again, so it
+      // offers no Try again. Neither does any other refusal with a reason; a
+      // dropped connection, a timeout or a server error does.
+      const section = r.issues && typeof r.issues === "object" ? (r.issues as { section?: unknown }).section : undefined;
+      if (r.status === 400 && (section === "where" || section === "when")) {
+        saveRefused.current.add(section);
+        setProblems((p) => ({ conditions: {}, actions: {}, ...(p ?? {}), [section]: r.error }));
+        toast("Not saved. See what is marked.", { tone: "danger" });
+        return false;
+      }
+      const retryable = r.status === 0 || r.status === 401 || r.status === 408 || r.status === 429 || r.status >= 500;
+      toast(r.status === 401 ? "Not saved. Sign in again; your changes are still here." : retryable ? "Not saved" : `Not saved. ${r.error}`, {
         tone: "danger",
-        action: { label: "Try again", onClick: () => saveAgain.current() },
+        ...(retryable ? { action: { label: "Try again", onClick: () => saveAgain.current() } } : {}),
       });
       return false;
     }
+    // A refusal an earlier save showed no longer holds once a save lands; a
+    // publish check's own marks stay until the next publish.
+    if (saveRefused.current.size) {
+      const cleared = new Set(saveRefused.current);
+      saveRefused.current.clear();
+      setProblems((p) => (p ? { ...p, ...(cleared.has("where") ? { where: undefined } : {}), ...(cleared.has("when") ? { when: undefined } : {}) } : p));
+    }
     setBaseline(draftSnapshot(draft));
-    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId) } : prev));
+    // scopeHidden follows the save (choosing Everywhere lets the hidden places go).
+    const saved = r.data.workflow;
+    setWf((prev) => (prev ? { ...prev, name: draft.name.trim(), description: draft.description.trim() || null, severity: draft.severity, unpublishedChanges: Boolean(prev.publishedVersionId), scopeHidden: saved?.scopeHidden ?? prev.scopeHidden, scopeKept: saved?.scopeKept ?? prev.scopeKept, revision: saved?.revision ?? prev.revision } : prev));
     notifyAiChatsChanged();
     if (!opts.quiet) toast("Draft saved");
     return true;
-  }, [draft, wf, numericParams, toast]);
+  }, [draft, wf, numericParams, toast, confirm, load]);
 
   // "Try again" on a failed save calls the latest save through a ref.
   useEffect(() => {
@@ -616,6 +806,8 @@ export default function AutomationBuilderPage() {
   const publish = useCallback(async () => {
     if (!draft || !wf) return;
     const p = publishProblems(draft, catalog);
+    // Publish sets the marks from here on: none is a save's refusal any more.
+    saveRefused.current.clear();
     if (hasProblems(p)) {
       setProblems(p);
       toast("Not published. Fix what is marked.", { tone: "danger" });
@@ -795,6 +987,24 @@ export default function AutomationBuilderPage() {
 
   const published = Boolean(wf.publishedVersionId);
   const archived = wf.status === "ARCHIVED";
+  // The live version's publisher caps where it runs (author-reach.ts,
+  // runReach): said here, or an automation an Admin made and a manager
+  // republished just stops running in the Admin's private Lists with
+  // nothing to show why.
+  const liveVersion = wf.versions.find((v) => v.isLive);
+  const publisher = liveVersion?.publishedBy ?? null;
+  const creatorName = wf.createdByName || "its creator";
+  const cappedNote = !published || archived
+    ? null
+    : wf.creatorGone
+      ? `Its creator is no longer in the workspace, so it no longer runs on tasks in any List.${canCreate ? " Make a copy to run it as yours." : " Someone who can create automations can make a copy to run it again."}`
+      : publisher?.gone
+        ? `Its live version was published by someone no longer in the workspace, so it no longer runs on tasks in any List.${canEdit ? " Republish it to run it again." : " Someone who can edit it can republish it to run it again."}`
+        : publisher && !wf.createdById
+          ? `Published by ${publisher.name}, so it runs only where ${publisher.name} can open and change things.`
+          : publisher && publisher.id !== wf.createdById
+            ? `Published by ${publisher.name}, so it runs only where both ${publisher.name} and ${creatorName} can open and change things. When ${creatorName} republishes it, it runs with their own reach.`
+            : null;
   const busy = saving || publishing;
   const offlineTitle = offline ? "You're offline. Save and Publish wait for the network." : undefined;
 
@@ -918,7 +1128,7 @@ export default function AutomationBuilderPage() {
     if (kind === "none") return null;
     if (readOnly) {
       const shown =
-        kind === "user" ? userLabel(row.value, people)
+        kind === "user" ? personLabel(row.value)
         : kind === "status" ? statusOptions.find((o) => o.value === row.value)?.label ?? row.value
         : kind === "priority" ? PRIORITY_OPTIONS.find((o) => o.value === row.value)?.label ?? row.value
         : kind === "list" ? listLabel(row.value) ?? "A List you can't open"
@@ -926,8 +1136,8 @@ export default function AutomationBuilderPage() {
       return <NeutralChip className="h-8 px-2 text-sm">{shown || "Nothing"}</NeutralChip>;
     }
     if (kind === "user") {
-      return <Token label={userLabel(row.value, people)} placeholder="Pick a person" ariaLabel="Condition person" readOnly={false} alwaysSearch onSearchChange={setPeopleQuery}
-        sections={peopleSections(people, peopleQuery, false, false, false)} selected={row.value} onSelect={set} invalid={invalid} />;
+      return <Token label={personLabel(row.value)} placeholder="Pick a person" ariaLabel="Condition person" readOnly={false} alwaysSearch onSearchChange={setConditionQuery}
+        sections={peopleSections(signIn, conditionQuery, false, false, false)} selected={row.value} onSelect={set} invalid={invalid} />;
     }
     if (kind === "status") {
       return <StatusToken value={row.value} options={statusOptions} ariaLabel="Condition status" onChange={set} invalid={invalid} />;
@@ -974,7 +1184,7 @@ export default function AutomationBuilderPage() {
     if (p.key === "itemId") return null; // The triggering task: the builder never asks for an id.
     if (readOnly) {
       const shown =
-        p.type === "user" ? userLabel(value, people)
+        p.type === "user" ? personLabel(value)
         : p.type === "board" ? (value ? listLabel(value) ?? "A List you can't open" : null)
         : p.type === "status" ? statusOptions.find((o) => o.value === value)?.label ?? value
         : p.type === "field" ? (value === "priority" ? "Priority" : listFieldOptions.find((o) => o.value === value)?.label ?? value)
@@ -984,8 +1194,8 @@ export default function AutomationBuilderPage() {
     }
     if (p.type === "user") {
       const allowAdmins = action.key === "create_notification" && p.key === "userId";
-      return <Token label={userLabel(value, people)} placeholder="Pick a person" ariaLabel={p.label} readOnly={false} alwaysSearch onSearchChange={setPeopleQuery}
-        sections={peopleSections(people, peopleQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
+      return <Token label={personLabel(value)} placeholder="Pick a person" ariaLabel={p.label} readOnly={false} alwaysSearch onSearchChange={setRecipientQuery}
+        sections={peopleSections(recipients, recipientQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
     }
     if (p.type === "board") {
       return <Token label={value ? listLabel(value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel={p.label} readOnly={false}
@@ -1025,8 +1235,20 @@ export default function AutomationBuilderPage() {
   };
 
   /* Where */
-  const everywhere = draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0;
+  // Places this editor cannot open stay in the scope unless they choose
+  // Everywhere; they are never listed, named, counted or removable here.
+  const keptHidden = Boolean(wf?.scopeHidden) && !draft.everywhere;
+  const shownEmpty = draft.scope.listIds.length + draft.scope.folderIds.length + draft.scope.spaceIds.length === 0;
+  const everywhere = draft.everywhere || (shownEmpty && !keptHidden);
   const whereMode: "everywhere" | "lists" = everywhere && !listsMode ? "everywhere" : "lists";
+  // A place added or removed restates the choice to match what the section
+  // shows: with every place gone and none kept that this editor cannot open,
+  // it is Everywhere (so undoing an edit by hand leaves nothing unsaved).
+  const withScope = (d: Draft, scope: DraftScope): Draft => ({
+    ...d,
+    scope,
+    everywhere: scope.listIds.length + scope.folderIds.length + scope.spaceIds.length === 0 ? !wf?.scopeHidden : false,
+  });
 
   const header = (
     <OsPageHeader
@@ -1124,6 +1346,7 @@ export default function AutomationBuilderPage() {
         ) : (
           <p className="m-0 text-base text-ink-2">{wf.status === "ACTIVE" ? "On" : "Paused"}</p>
         )}
+        {cappedNote ? <p className="m-0 text-sm text-ink-2">{cappedNote}</p> : null}
       </div>
       <dl className="m-0 flex flex-col">
         <div className="flex h-9 items-center justify-between text-sm">
@@ -1352,7 +1575,7 @@ export default function AutomationBuilderPage() {
               ) : draft.actions.length === 0 ? <p className="m-0 text-sm text-ink-2">No actions yet.</p> : null}
             </Section>
 
-            <Section title="Where it runs" id="sec-where">
+            <Section title="Where it runs" id="sec-where" error={problems?.where}>
               {draft.trigger === "schedule.every" ? (
                 // A schedule fires for the workspace, not for a task, so it
                 // has no List to match: offering the choice would let someone
@@ -1369,8 +1592,12 @@ export default function AutomationBuilderPage() {
                   onChange={(v) => {
                     if (v === "everywhere") {
                       setListsMode(false);
-                      update({ scope: { listIds: [], folderIds: [], spaceIds: [] } });
-                    } else setListsMode(true);
+                      update({ everywhere: true, scope: { listIds: [], folderIds: [], spaceIds: [] } });
+                    } else {
+                      setListsMode(true);
+                      // With places this editor cannot open, "only in chosen" keeps them.
+                      if (wf?.scopeHidden) update({ everywhere: false });
+                    }
                   }}
                 />
               )}
@@ -1379,34 +1606,46 @@ export default function AutomationBuilderPage() {
                   {draft.scope.spaceIds.map((sid) => (
                     <NeutralChip key={sid} className="h-8 px-2 text-sm">
                       Space: {places?.spaces.find((s) => s.id === sid)?.name ?? "one you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this Space" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, spaceIds: d.scope.spaceIds.filter((x) => x !== sid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this Space" onClick={() => update((d) => withScope(d, { ...d.scope, spaceIds: d.scope.spaceIds.filter((x) => x !== sid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {draft.scope.folderIds.map((fid) => (
                     <NeutralChip key={fid} className="h-8 px-2 text-sm">
                       Folder: {places?.folders.find((f) => f.id === fid)?.name ?? "one you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this Folder" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, folderIds: d.scope.folderIds.filter((x) => x !== fid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this Folder" onClick={() => update((d) => withScope(d, { ...d.scope, folderIds: d.scope.folderIds.filter((x) => x !== fid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {draft.scope.listIds.map((lid) => (
                     <NeutralChip key={lid} className="h-8 px-2 text-sm">
                       {listLabel(lid) ?? "A List you can't open"}
-                      {!readOnly ? <button type="button" aria-label="Remove this List" onClick={() => update((d) => ({ ...d, scope: { ...d.scope, listIds: d.scope.listIds.filter((x) => x !== lid) } }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
+                      {!readOnly ? <button type="button" aria-label="Remove this List" onClick={() => update((d) => withScope(d, { ...d.scope, listIds: d.scope.listIds.filter((x) => x !== lid) }))} className="inline-flex size-5 items-center justify-center rounded hover:bg-hover"><X className="size-3.5" /></button> : null}
                     </NeutralChip>
                   ))}
                   {!readOnly ? (
                     <Token label="Add Lists" placeholder="Add Lists" ariaLabel="Choose Lists" readOnly={false} multi width={300}
                       sections={[{ options: listOptions }]} selected={draft.scope.listIds}
-                      onSelect={(v) => update((d) => ({ ...d, scope: { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] } }))} />
+                      onSelect={(v) => update((d) => withScope(d, { ...d.scope, listIds: d.scope.listIds.includes(v) ? d.scope.listIds.filter((x) => x !== v) : [...d.scope.listIds, v] }))} />
                   ) : null}
                 </div>
+              ) : null}
+              {whereMode === "lists" && keptHidden && (wf.scopeKept?.cannotOpen ?? true) ? (
+                <p className="m-0 mt-2 text-sm text-ink-2">
+                  {shownEmpty
+                    ? readOnly ? "It runs only in places you can't open." : "It runs only in places you can't open. They are kept."
+                    : readOnly ? "It also runs in places you can't open." : "Some places you can't open are kept."}
+                </p>
+              ) : null}
+              {whereMode === "lists" && keptHidden && wf.scopeKept?.gone ? (
+                <p className="m-0 mt-2 text-sm text-ink-2">Some places it runs in are in Trash or were deleted, so it does not run there now.</p>
               ) : null}
               <p className="m-0 mt-2 text-sm text-ink-2">
                 {everywhere && listsMode
                   ? "Pick at least one List. With none picked, it runs everywhere."
                   : everywhere
                     ? "It runs for every task in the workspace that matches."
-                    : "It runs only for tasks in these places. Events with no List, like a KPI reading, never run it."}
+                    : shownEmpty
+                      ? "Events with no List, like a KPI reading, never run it."
+                      : "It runs only for tasks in these places. Events with no List, like a KPI reading, never run it."}
               </p>
               </>)}
             </Section>

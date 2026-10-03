@@ -1,13 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { logActivity } from "@/lib/activity";
-import { triggerRecalculation } from "@/services/performanceScoreService";
-import { sendEmail } from "@/lib/email";
-import { kudosTemplate } from "@/lib/email-templates";
-import { notifyKudosPosted } from "@/services/slackNotifier";
-import { shouldNotify, shouldEmail } from "@/lib/notify-prefs";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { giveKudos } from "@/lib/kudos-give";
 import { toCsv } from "@/lib/people/people-csv";
 import type { Prisma } from "@/generated/prisma";
 
@@ -235,112 +230,11 @@ export async function POST(req: NextRequest) {
   if (!receiverId || typeof message !== "string" || !message.trim()) {
     return jsonError("Choose who to thank and write a message");
   }
-  if (message.trim().length > 500) return jsonError("A kudos message is up to 500 characters");
 
-  if (receiverId === giverId) {
-    return jsonError("You cannot give kudos to yourself");
-  }
-
-  // Verify receiver belongs to same org
-  const receiver = await prisma.user.findFirst({
-    where: { id: receiverId, organizationId: orgId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, email: true },
-  });
-  if (!receiver) return jsonError("User not found", 404);
-
-  // A resend of the SAME kudos (a retry after a response was lost: the
-  // first request may already have created it) answers with the one that
-  // exists, and never thanks, emails or posts to Slack twice. Same giver,
-  // receiver, message and value inside two minutes is that resend; a person
-  // meaning to say the same words twice waits two minutes.
-  const dupe = await prisma.kudos.findFirst({
-    where: {
-      organizationId: orgId, giverId, receiverId, message: message.trim(), companyValue,
-      createdAt: { gte: new Date(Date.now() - 2 * 60_000) },
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      receiver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-    },
-  });
-  if (dupe) return jsonSuccess({ ...dupe, duplicate: true }, 200);
-
-  const kudos = await prisma.kudos.create({
-    data: {
-      message: message.trim(),
-      companyValue,
-      giverId,
-      receiverId,
-      organizationId: orgId,
-    },
-    include: {
-      giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      receiver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-    },
-  });
-
-  // Notify the receiver (honors the "Kudos & recognition" inbox toggle)
-  if (await shouldNotify(receiverId, "kudos")) await prisma.notification.create({
-    data: {
-      // spec-teams-performance /kudos: "{name} thanked you".
-      title: `${`${kudos.giver.firstName ?? ""} ${kudos.giver.lastName ?? ""}`.trim() || "Someone"} thanked you`,
-      message: `"${message.trim().slice(0, 80)}"`,
-      type: "kudos_received",
-      // Their Received view (spec-teams-performance /kudos Realtime).
-      link: "/kudos?view=received",
-      userId: receiverId,
-    },
-  });
-
-  // Send kudos email
-  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const { subject, html } = kudosTemplate({
-    senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,
-    message: message.trim(),
-    dashboardLink: `${baseUrl}/kudos?view=received`,
-  });
-
-  // Gated by both the /settings/notifications email toggle and the legacy
-  // EmailPreference kudos category (checked inside sendEmail).
-  if (receiver.email && await shouldEmail(receiverId, "kudos")) {
-    try {
-      await sendEmail({
-        to: receiver.email,
-        subject,
-        html,
-        template: "kudos",
-        variables: { senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`, message: message.trim() },
-        organizationId: orgId,
-        userId: receiverId,
-        category: "kudos",
-      });
-    } catch (emailErr) {
-      console.error("[Kudos] Email send failed:", emailErr);
-    }
-  }
-
-  logActivity({
-    type: "kudos_given",
-    actorId: giverId,
-    organizationId: orgId,
-    description: `Gave kudos to ${receiver.firstName} ${receiver.lastName}${companyValue ? ` for ${companyValue}` : ""}`,
-    targetId: receiverId,
-    targetType: "user",
-  });
-
-  // Recalculate receiver's performance score (kudos bonus)
-  triggerRecalculation(receiverId, orgId);
-
-  // Fan out to Slack if the org has a webhook configured. Non-blocking
-  // on failure, Slack hiccups never break the kudos flow.
-  notifyKudosPosted({
-    organizationId: orgId,
-    giverName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,
-    receiverName: `${kudos.receiver.firstName} ${kudos.receiver.lastName}`,
-    value: companyValue,
-    message: message.trim(),
-  }).catch(() => {});
-
-  return jsonSuccess(kudos, 201);
+  // The rules and everything that follows a kudos live in one place
+  // (src/lib/kudos-give.ts), shared with Ask AI and the public API.
+  const given = await giveKudos({ organizationId: orgId, giverId, receiverId, message, companyValue });
+  if (!given.ok) return jsonError(given.error, given.status);
+  if (given.duplicate) return jsonSuccess({ ...given.kudos, duplicate: true }, 200);
+  return jsonSuccess(given.kudos, 201);
 }

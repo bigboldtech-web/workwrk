@@ -67,7 +67,7 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   update_contract: { concept: "contract", done: "Updated contract", failed: "Couldn't update the contract" },
 };
 
-const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "email", "receiverEmail"] as const;
+const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail"] as const;
 
 /** The subject a sentence names, from the call's own input. */
 export function toolSubject(input: Record<string, unknown> | null | undefined): string | null {
@@ -112,6 +112,8 @@ export interface ToolOutcome {
   href: string | null;
   /** How many rows a search or list call found. */
   count: number | null;
+  /** A search cut short at its cap: how many of the newest candidates it read (null when it read them all). */
+  searched: number | null;
 }
 
 const COUNT_NOUN: Partial<Record<ToolName, [string, string]>> = {
@@ -147,7 +149,7 @@ export function toolOutcome(name: string, result: unknown, errorText?: string | 
   const r = asRecord(result);
   const resultErr = typeof r?.error === "string" && r.error.trim() ? r.error.trim() : null;
   const message = (errorText && errorText.trim()) || resultErr;
-  if (message) return { failed: true, message: message.slice(0, 240), href: null, count: null };
+  if (message) return { failed: true, message: message.slice(0, 240), href: null, count: null, searched: null };
   let count: number | null = null;
   if (r && (name as ToolName) in COUNT_NOUN) {
     if (typeof r.count === "number") count = r.count;
@@ -159,7 +161,8 @@ export function toolOutcome(name: string, result: unknown, errorText?: string | 
   const created = CREATED[name as ToolName];
   const obj = created && r ? asRecord(r[created.key]) : null;
   const id = obj && typeof obj.id === "string" ? obj.id : null;
-  return { failed: false, message: null, href: created && id ? created.href(id) : null, count };
+  const searched = count !== null && r?.partial === true && typeof r.searched === "number" ? r.searched : null;
+  return { failed: false, message: null, href: created && id ? created.href(id) : null, count, searched };
 }
 
 /** The sentence once the outcome is known: a counted search reads "Searched 42 tasks". */
@@ -173,5 +176,9 @@ export function toolOutcomeSentence(name: string, input: Record<string, unknown>
   // "Looked up your SOPs" keeps its "your": "Looked up 3 of your SOPs".
   if (words.includes("your")) return { concept: base.concept, text: `${words.slice(0, words.indexOf("your")).join(" ")} ${outcome.count} of your ${outcome.count === 1 ? noun[0] : noun[1]}` };
   const phrase = words.length > 2 && words[1] === "up" ? `${lead} up` : lead;
+  // A search cut short says so, so a capped "0" never reads as "none":
+  // "Searched the 1,000 most recently updated tasks, found 0" (the tools
+  // read in order of the last change, not of creation).
+  if (outcome.searched) return { concept: base.concept, text: `${phrase} the ${outcome.searched.toLocaleString("en-US")} most recently updated ${noun[1]}, found ${outcome.count}` };
   return { concept: base.concept, text: `${phrase} ${outcome.count} ${outcome.count === 1 ? noun[0] : noun[1]}` };
 }

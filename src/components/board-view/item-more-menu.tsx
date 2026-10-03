@@ -740,7 +740,7 @@ function LinkMovePicker({
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((d: ReadableListsResponse) => {
           if (!alive) return;
-          setRes({ boards: Array.isArray(d?.boards) ? d.boards : [], spaces: Array.isArray(d?.spaces) ? d.spaces : [], truncated: !!d?.truncated });
+          setRes({ boards: Array.isArray(d?.boards) ? d.boards : [], spaces: Array.isArray(d?.spaces) ? d.spaces : [], pathSpaces: Array.isArray(d?.pathSpaces) ? d.pathSpaces : [], truncated: !!d?.truncated });
           setState("ready");
         })
         .catch(() => { if (alive) setState("failed"); });

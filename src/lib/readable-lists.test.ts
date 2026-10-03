@@ -66,4 +66,24 @@ describe("groupReadableLists", () => {
     expect(groups.map((g) => g.key)).toEqual(["space:S2"]);
     expect(groupReadableLists({ boards: [], spaces: res.spaces, truncated: true })).toEqual([]);
   });
+  it("labels a passed-through Space's Lists by its name, after the full-read Spaces, never as a source", () => {
+    const groups = groupReadableLists({
+      ...res,
+      boards: [...res.boards, row("grant1", { spaceId: "S-path" })],
+      pathSpaces: [{ id: "S-path", name: "Marketing" }, { id: "S-path-empty", name: "Nothing here" }],
+    });
+    expect(groups.map((g) => [g.key, g.label, g.spaceId, g.lists.map((l) => l.id)])).toEqual([
+      ["personal", "My work", null, ["personal"]],
+      ["space:S1", "Design", "S1", ["b1", "b3"]],
+      ["space:S2", "Ops", "S2", ["b2"]],
+      ["path:S-path", "Marketing", null, ["grant1"]],
+      ["shared", "Shared with you", null, ["shared1", "loose"]],
+    ]);
+  });
+  it("a path label that repeats a full-read Space is ignored, and a List in neither stays shared", () => {
+    const groups = groupReadableLists({ ...res, pathSpaces: [{ id: "S1", name: "Design (path)" }] });
+    expect(groups.find((g) => g.key === "space:S1")?.lists.map((l) => l.id)).toEqual(["b1", "b3"]);
+    expect(groups.some((g) => g.key === "path:S1")).toBe(false);
+    expect(groups.find((g) => g.key === "shared")?.lists.map((l) => l.id)).toEqual(["shared1", "loose"]);
+  });
 });

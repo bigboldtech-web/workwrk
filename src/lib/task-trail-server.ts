@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { sopVisibilityWhere } from "@/lib/sop-access";
 import { goalVisibilityOr } from "@/lib/goal-audience";
+import { agreementReadWhere } from "@/lib/access/agreement-read";
 import { readableFileIds } from "@/lib/file-access";
 import { idsWithRole, type NodeCtx } from "@/lib/access/node-access";
 import type { Viewer } from "@/lib/access/types";
@@ -61,7 +62,6 @@ const NODE_OF: Partial<Record<string, { kind: TrailKind; node: "doc" | "canvas" 
 export async function loadTaskTrail(reader: TrailReader, task: TrailTask): Promise<TaskTrail> {
   const { session, viewer } = reader;
   const orgId = task.organizationId;
-  const userId = viewer.userId;
   const member = viewer.orgRole !== "GUEST";
   const meta = (task.metadata && typeof task.metadata === "object" ? task.metadata : {}) as Record<string, unknown>;
   // The stored origin is only a pointer: the step must still be a step of
@@ -188,17 +188,14 @@ export async function loadTaskTrail(reader: TrailReader, task: TrailTask): Promi
     }
   }
 
-  // Contracts (Agreement): the Owner, an Admin or the People team (the
-  // Agreement rule's FULL tier), or a party to it.
+  // Contracts (Agreement): the contract page's own rule (agreementReadWhere),
+  // the manager tier or a party to it, so the trail never names one its page
+  // refuses. An archived contract is left off the trail.
   const contractIds = of("CONTRACT");
   if (contractIds.length) {
-    const full = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
-    const me = full ? null : await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const vis = await agreementReadWhere(session);
     const rows = await prisma.agreement.findMany({
-      where: {
-        id: { in: contractIds }, organizationId: orgId, archivedAt: null,
-        ...(full ? {} : { parties: { some: { OR: [{ userId }, ...(me?.email ? [{ email: { equals: me.email, mode: "insensitive" as const } }] : [])] } } }),
-      },
+      where: { AND: [{ id: { in: contractIds }, organizationId: orgId, archivedAt: null }, vis] },
       select: { id: true, title: true },
     });
     for (const a of rows) { allow("contract", a.id); cands.push({ kind: "contract", id: a.id, title: a.title, href: `/agreements/${a.id}` }); }

@@ -19,8 +19,14 @@ import { nodeCtxForUser, nodeRoles } from "@/lib/access/node-access";
 import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
+import { listReader, readableItemsVia } from "@/lib/list-links-server";
+import { clampLimit, collectReadable, olderThan } from "./collect-readable";
+import { legacyContractWhere } from "@/lib/access/agreement-read";
+import { viewerForUser } from "@/lib/access/viewer";
+import { giveKudos } from "@/lib/kudos-give";
 import type { ToolName } from "./tool-names";
-import { hasPermission } from "@/lib/api-helpers";
+import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
+import { sopVisibilityWhere } from "@/lib/sop-access";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { goalVisibilityOr } from "@/lib/goal-audience";
@@ -166,37 +172,48 @@ const searchTasks: ToolDefinition = {
   // single task the product has shown anybody since the migration, including
   // the ones create_task above had just written.
   handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
-    // Only the tasks the caller could open: a List they can read, or a task
-    // they own or are assigned to. Before this the tool read every Item in
-    // the org, so a chat could list tasks from a private Space. Phase 7 did
-    // this with the older id sets inside the query; the merge keeps the one
-    // node resolver's filter below, which is the answer /api/search gives.
-    const candidates = await prisma.item.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        archivedAt: null,
-        ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
-        ...(input.assignedToMe
-          ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
-          : {}),
-        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+    const limit = clampLimit(input.limit, 20, 50);
+    // Only the tasks the caller could open, by the task page's own ladder
+    // (readableItemsVia: an org admin, the home List, the owner or an
+    // assignee, the creator, a linked List). The candidates are read in
+    // pages until `limit` readable ones are found (collectReadable): one
+    // over-fetched batch filtered afterwards could leave a narrow reader in a
+    // big workspace with nothing while readable tasks existed further down.
+    // A denied or departed person reads nothing; the level is read fresh.
+    const nodeCtx = await nodeCtxForUser(ctx.userId, ctx.orgId);
+    if (nodeCtx.denied) return { count: 0, tasks: [] };
+    const level = await callerLevel(ctx);
+    if (!level) return { count: 0, tasks: [] };
+    const viewer = { userId: ctx.userId, organizationId: ctx.orgId, accessLevel: level };
+    const reader = listReader(viewer);
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.item.findMany({
+        where: {
+          organizationId: ctx.orgId,
+          archivedAt: null,
+          ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
+          ...(input.assignedToMe
+            ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
+            : {}),
+          ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+          AND: [olderThan(after)],
+        },
+        select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true, organizationId: true, parentItemId: true, updatedAt: true },
+        // A stable order (updatedAt, then id), paged by keyset, so the pages neither skip nor repeat.
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take,
+      });
+    const { rows: filtered, capped, scanned } = await collectReadable({
+      limit,
+      batch: Math.min(200, Math.max(limit * 4, 50)),
+      maxScan: 1000,
+      page,
+      // "done" is a status-name rule, not a column, so it is applied here.
+      keep: async (batch: Awaited<ReturnType<typeof page>>) => {
+        const access = await readableItemsVia(viewer, batch, reader);
+        return batch.filter((r) => access.get(r.id)?.readable && (input.done === undefined || isDoneStatusName(r.status) === Boolean(input.done)));
       },
-      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true },
-      orderBy: { updatedAt: "desc" },
-      // Over-fetched: the access filter and the done filter both run after
-      // the read ("done" is a status-name rule, not a column).
-      take: limit * 4,
     });
-    // A task answers only for a reader of its List, or the person it is
-    // assigned to or owned by, exactly as /api/search and the task page do.
-    const readable = await readableIds(ctx, candidates.map((r) => ({ kind: "list" as const, id: r.boardId })));
-    const rows = candidates.filter((r) => readable.has(refKey({ kind: "list", id: r.boardId })) || r.ownerId === ctx.userId || r.assigneeIds.includes(ctx.userId));
-    const filtered =
-      input.done === undefined
-        ? rows
-        : rows.filter((r) => isDoneStatusName(r.status) === Boolean(input.done));
-    const tasks = filtered.slice(0, limit).map((r) => ({
+    const tasks = filtered.map((r) => ({
       id: r.id,
       title: r.title,
       status: r.status,
@@ -204,7 +221,11 @@ const searchTasks: ToolDefinition = {
       date: r.dueAt,
       assigneeId: r.ownerId,
     }));
-    return { count: tasks.length, tasks };
+    return {
+      count: tasks.length,
+      tasks,
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 1,000 most recently updated tasks were searched. Add a title or a status to narrow the search." } : {}),
+    };
   },
 };
 
@@ -222,23 +243,32 @@ const sendKudos: ToolDefinition = {
     required: ["receiverEmail", "message"],
   },
   handler: async (ctx, input) => {
-    const receiver = await prisma.user.findFirst({
-      where: { email: input.receiverEmail as string, organizationId: ctx.orgId },
-      select: { id: true, firstName: true, lastName: true },
-    });
+    const email = typeof input.receiverEmail === "string" ? input.receiverEmail.trim() : "";
+    const receiver = email
+      ? await prisma.user.findFirst({
+          where: { email: { equals: email, mode: "insensitive" }, organizationId: ctx.orgId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : null;
     if (!receiver) return { error: `No user with email '${input.receiverEmail}' in this organization.` };
 
-    const kudos = await prisma.kudos.create({
-      data: {
-        organizationId: ctx.orgId,
-        giverId: ctx.userId,
-        receiverId: receiver.id,
-        message: input.message as string,
-        companyValue: (input.companyValue as string) ?? null,
-      },
-      select: { id: true, message: true, companyValue: true },
+    // The kudos wall's own way (src/lib/kudos-give.ts): its rules (never a
+    // Guest, never yourself, up to 500 characters, a resend answered once)
+    // and everything that follows, so the person thanked is told.
+    const given = await giveKudos({
+      organizationId: ctx.orgId,
+      giverId: ctx.userId,
+      receiverId: receiver.id,
+      message: typeof input.message === "string" ? input.message : "",
+      companyValue: typeof input.companyValue === "string" ? input.companyValue : null,
     });
-    return { ok: true, kudos, receiver: `${receiver.firstName ?? ""} ${receiver.lastName ?? ""}`.trim() };
+    if (!given.ok) return { error: given.error === "Not found" ? "You can't give kudos in this workspace." : given.error };
+    return {
+      ok: true,
+      kudos: { id: given.kudos.id, message: given.kudos.message, companyValue: given.kudos.companyValue },
+      receiver: `${receiver.firstName ?? ""} ${receiver.lastName ?? ""}`.trim(),
+      ...(given.duplicate ? { duplicate: true } : {}),
+    };
   },
 };
 
@@ -331,13 +361,19 @@ const searchContracts: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
-    const limit = Math.min(50, Number(input.limit ?? 20));
+    const limit = clampLimit(input.limit, 20, 50);
     const expWindow = input.expiringWithinDays as number | undefined;
     const expiresBefore = expWindow != null ? new Date(Date.now() + expWindow * 86400000) : null;
+    // The contract tiers (legacyContractWhere): the manager tier reads every
+    // contract, anyone else only the ones they own. Read fresh; a person no
+    // longer in the workspace reads nothing.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, contracts: [] };
 
     const contracts = await prisma.contract.findMany({
       where: {
         organizationId: ctx.orgId,
+        AND: [legacyContractWhere(session)],
         ...(input.counterpartyContains ? { counterparty: { contains: input.counterpartyContains as string, mode: "insensitive" } } : {}),
         ...(input.status ? { status: input.status as "DRAFT" | "IN_REVIEW" | "IN_NEGOTIATION" | "AWAITING_SIGNATURE" | "SIGNED" | "ACTIVE" | "EXPIRED" | "RENEWED" | "TERMINATED" | "CANCELLED" } : {}),
         ...(expiresBefore ? { expiresAt: { lte: expiresBefore, gte: new Date() } } : {}),
@@ -366,12 +402,31 @@ const searchEmployees: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
-    const limit = Math.min(30, Number(input.limit ?? 10));
-    const q = input.query as string | undefined;
+    const limit = clampLimit(input.limit, 10, 30);
+    const q = typeof input.query === "string" && input.query.trim() ? input.query.trim() : undefined;
+    // The directory's rules, read fresh: a Guest finds only the people they
+    // already share a conversation with (the people picker's rule), and only
+    // an admin or the People team sees anyone's access level (the directory
+    // card leaves it out for everyone else).
+    const viewer = await viewerForUser(ctx.orgId, ctx.userId);
+    if (!viewer) return { count: 0, employees: [] };
+    let visibleIds: string[] | null = null;
+    if (viewer.orgRole === "GUEST") {
+      const shared = await prisma.conversationMember.findMany({
+        where: { conversation: { organizationId: ctx.orgId, members: { some: { userId: ctx.userId } } } },
+        select: { userId: true },
+        take: 500,
+      });
+      visibleIds = [...new Set(shared.map((r) => r.userId))];
+      if (visibleIds.length === 0) return { count: 0, employees: [] };
+    }
+    const seesLevels = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
     const employees = await prisma.user.findMany({
       where: {
         organizationId: ctx.orgId,
         status: "ACTIVE",
+        deletedAt: null,
+        ...(visibleIds ? { id: { in: visibleIds } } : {}),
         ...(input.department ? { department: { name: { equals: input.department as string, mode: "insensitive" } } } : {}),
         ...(q ? {
           OR: [
@@ -397,7 +452,7 @@ const searchEmployees: ToolDefinition = {
         email: e.email,
         department: e.department?.name ?? null,
         role: e.role?.title ?? null,
-        accessLevel: e.accessLevel,
+        ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
       })),
     };
   },
@@ -426,6 +481,13 @@ const searchMeetings: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
+    // Only meetings the person could open on the meeting page (meetingRole:
+    // its creator, an attendee or an org admin), never a deleted one. This
+    // returned every meeting in the workspace, other people's one to ones
+    // with their agenda and attendees included. The level is read fresh.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, meetings: [] };
+    const admin = isOrgAdmin(session);
     const limit = Math.min(50, Number(input.limit ?? 20));
     const now = new Date();
     const windowMs = input.withinDays ? Number(input.withinDays) * 86400000 : null;
@@ -442,6 +504,8 @@ const searchMeetings: ToolDefinition = {
     const meetings = await prisma.meeting.findMany({
       where: {
         organizationId: ctx.orgId,
+        deletedAt: null,
+        ...(admin ? {} : { OR: [{ createdById: ctx.userId }, { attendees: { some: { userId: ctx.userId } } }] }),
         ...(input.type ? { type: input.type as "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC" } : {}),
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
         ...(input.attendedByMe ? { attendees: { some: { userId: ctx.userId } } } : {}),
@@ -541,10 +605,17 @@ const searchSops: ToolDefinition = {
     },
   },
   handler: async (ctx, input) => {
+    // Only SOPs the person could open (sopVisibilityWhere, the SOP list's and
+    // the SOP page's rule): this listed every SOP in the workspace, drafts and
+    // restricted folders included. The level is read fresh.
+    const session = await callerSession(ctx);
+    if (!session) return { count: 0, sops: [] };
+    const visible = await sopVisibilityWhere(session);
     const limit = Math.min(30, Number(input.limit ?? 15));
     const q = input.query as string | undefined;
     const sops = await prisma.sOP.findMany({
       where: {
+        AND: [visible],
         organizationId: ctx.orgId,
         ...(input.category ? { category: input.category as string } : {}),
         ...(input.status ? { status: input.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" } : {}),
@@ -593,9 +664,14 @@ const updateContract: ToolDefinition = {
     required: ["contractId"],
   },
   handler: async (ctx, input) => {
-    const existing = await prisma.contract.findFirst({
-      where: { id: input.contractId as string, organizationId: ctx.orgId },
-    });
+    // Only a contract the person may change (the manager tier, or its owner);
+    // any other reads as not found, so a guessed id confirms nothing.
+    const session = await callerSession(ctx);
+    const existing = session
+      ? await prisma.contract.findFirst({
+          where: { id: input.contractId as string, organizationId: ctx.orgId, AND: [legacyContractWhere(session)] },
+        })
+      : null;
     if (!existing) return { error: "Contract not found in this org" };
 
     const now = new Date();
@@ -1146,18 +1222,35 @@ async function readableIds(ctx: ToolContext, refs: NodeRef[]): Promise<Set<strin
 
 const listForms: ToolDefinition = {
   name: "list_forms",
-  description: "List Forms in the user's org with submission counts. Use this when the user asks about existing forms or wants to find one.",
-  input_schema: { type: "object", properties: {} },
-  handler: async (ctx) => {
-    const candidates = await prisma.formDefinition.findMany({
-      where: { organizationId: ctx.orgId },
-      orderBy: { updatedAt: "desc" },
-      take: 200,
-      select: { id: true, name: true, isPublic: true, _count: { select: { submissions: true } } },
+  description: "List Forms in the user's org with submission counts, optionally by part of a name. Use this when the user asks about existing forms or wants to find one.",
+  input_schema: {
+    type: "object",
+    properties: { nameContains: { type: "string", description: "Case-insensitive part of the form's name" } },
+  },
+  handler: async (ctx, input) => {
+    // Paged until 50 readable forms are found: the newest 200 filtered once
+    // left a reader whose forms are older with an empty list.
+    const name = typeof input.nameContains === "string" && input.nameContains.trim() ? input.nameContains.trim() : null;
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.formDefinition.findMany({
+      where: { organizationId: ctx.orgId, ...(name ? { name: { contains: name, mode: "insensitive" as const } } : {}), AND: [olderThan(after)] },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take,
+      select: { id: true, name: true, isPublic: true, updatedAt: true, _count: { select: { submissions: true } } },
     });
-    const readable = await readableIds(ctx, candidates.map((f) => ({ kind: "form" as const, id: f.id })));
-    const forms = candidates.filter((f) => readable.has(refKey({ kind: "form", id: f.id }))).slice(0, 50);
-    return { forms: forms.map((f: typeof forms[number]) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })) };
+    const { rows: forms, capped, scanned } = await collectReadable({
+      limit: 50,
+      batch: 200,
+      maxScan: 2000,
+      page,
+      keep: async (batch: Awaited<ReturnType<typeof page>>) => {
+        const readable = await readableIds(ctx, batch.map((f) => ({ kind: "form" as const, id: f.id })));
+        return batch.filter((f) => readable.has(refKey({ kind: "form", id: f.id })));
+      },
+    });
+    return {
+      forms: forms.map((f) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })),
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 2,000 most recently updated forms were searched. Add part of the form's name to narrow the search." } : {}),
+    };
   },
 };
 
@@ -1216,19 +1309,36 @@ const createDataTable: ToolDefinition = {
 
 const listDataTables: ToolDefinition = {
   name: "list_data_tables",
-  description: "List the Tables in the user's org with row counts.",
-  input_schema: { type: "object", properties: {} },
-  handler: async (ctx) => {
-    const candidates = await prisma.dataTable.findMany({
-      where: { organizationId: ctx.orgId },
-      orderBy: { updatedAt: "desc" },
-      take: 200,
-      select: { id: true, name: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
+  description: "List the Tables in the user's org with row counts, optionally by part of a name.",
+  input_schema: {
+    type: "object",
+    properties: { nameContains: { type: "string", description: "Case-insensitive part of the table's name" } },
+  },
+  handler: async (ctx, input) => {
+    // Only the tables this person can open (their Space, their own, a grant),
+    // paged until 50 are found: the newest 200 filtered once could leave a
+    // reader whose tables are older with an empty list.
+    const name = typeof input.nameContains === "string" && input.nameContains.trim() ? input.nameContains.trim() : null;
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.dataTable.findMany({
+      where: { organizationId: ctx.orgId, ...(name ? { name: { contains: name, mode: "insensitive" as const } } : {}), AND: [olderThan(after)] },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take,
+      select: { id: true, name: true, updatedAt: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
     });
-    // Only the tables this person can open (their Space, their own, a grant).
-    const readable = await readableIds(ctx, candidates.map((t) => ({ kind: "table" as const, id: t.id })));
-    const tables = candidates.filter((t) => readable.has(refKey({ kind: "table", id: t.id }))).slice(0, 50);
-    return { tables: tables.map((t: typeof tables[number]) => ({ id: t.id, name: t.name, rowCount: t._count.rows })) };
+    const { rows: tables, capped, scanned } = await collectReadable({
+      limit: 50,
+      batch: 200,
+      maxScan: 2000,
+      page,
+      keep: async (batch: Awaited<ReturnType<typeof page>>) => {
+        const readable = await readableIds(ctx, batch.map((t) => ({ kind: "table" as const, id: t.id })));
+        return batch.filter((t) => readable.has(refKey({ kind: "table", id: t.id })));
+      },
+    });
+    return {
+      tables: tables.map((t) => ({ id: t.id, name: t.name, rowCount: t._count.rows })),
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 2,000 most recently updated tables were searched. Add part of the table's name to narrow the search." } : {}),
+    };
   },
 };
 

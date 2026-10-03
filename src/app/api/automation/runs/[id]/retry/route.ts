@@ -10,6 +10,13 @@
 // On full recovery the run flips SUCCESS and its cron retry state is
 // cleared; a still-failing run keeps its payload (and any pending cron
 // schedule) untouched.
+//
+// Reach: the steps run capped as the run was (the creator and whoever
+// published the version that ran) and by the person clicking Retry, whose
+// click makes the writes (runReach). The answer carries no run detail: the
+// drawer reads the run again through GET /api/automation/runs/[id], which
+// withholds a run's payload and step data from a viewer who cannot open
+// the task it is about.
 
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
@@ -17,6 +24,7 @@ import { prisma } from "@/lib/prisma";
 import { notYours, requireAutomation, workflowRights } from "@/lib/automation/gate";
 import { getAction, type ActionContext } from "@/lib/automation/registry-actions";
 import { recordUsage } from "@/lib/automation/usage";
+import { loadAuthor, runReach } from "@/lib/automation/author-reach";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -27,7 +35,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     where: { id, organizationId: ctx.orgId },
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { id: true, status: true, createdById: true } },
+      workflow: { select: { id: true, status: true, createdById: true, updatedById: true } },
+      workflowVersion: { select: { createdById: true } },
     },
   });
   if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
@@ -75,6 +84,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     runId: run.id,
     depth,
     workflowCreatorId: run.workflow.createdById,
+    author: await runReach((uid) => loadAuthor(run.organizationId, uid), {
+      creatorId: run.workflow.createdById,
+      publisherId: run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById,
+      retrierId: ctx.userId,
+    }),
+    manualRetry: true,
   };
 
   let stillFailing = 0;
@@ -153,14 +168,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     });
   }
 
-  const refreshed = await prisma.automationRun.findUnique({
-    where: { id: run.id },
-    include: { steps: { orderBy: { order: "asc" } } },
-  });
+  const after = await prisma.automationRun.findUnique({ where: { id: run.id }, select: { status: true } });
 
   return NextResponse.json({
     retried: failedSteps.length,
     recovered: stillFailing === 0,
-    run: refreshed,
+    status: after?.status ?? null,
   });
 }

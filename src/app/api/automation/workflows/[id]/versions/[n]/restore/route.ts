@@ -8,16 +8,28 @@
 //      from every existing version), that draft is first kept as a NEW
 //      AutomationWorkflowVersion row, marked kept-before-restore, so the
 //      work is never lost and can itself be restored.
-//   2. The draft becomes version n's definition, trigger included.
+//   2. The draft becomes version n's definition, trigger included. Where it
+//      runs follows the save rule: the places the restorer cannot open stay
+//      exactly as the draft has them now (version n's own hidden places are
+//      not brought back, the draft's are not dropped), and the places they
+//      can open come from version n. A version that ran Everywhere restores
+//      as Everywhere, unless the draft keeps places the restorer cannot
+//      open: that would drop them unseen, so it is refused and they can
+//      choose Everywhere in Where it runs themselves. "On a schedule" keeps
+//      the draft's places exactly as they are (its scope is moot).
 //
-// Both writes happen in one transaction. Body {}. Returns
-// { ok: true, draftUpdated: true, keptVersion: number | null }.
+// Both writes happen in one transaction, reading the draft under the row
+// lock. Body {}. Returns { ok: true, draftUpdated: true, keptVersion: number | null }.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
-import { draftTrigger, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
+import { SCOPE_REFUSAL, definitionWithScope, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
+import { livePlaces, scopeReadable } from "@/lib/automation/places-server";
+
+const EVERYWHERE_OVER_HIDDEN = "That version runs everywhere, and this draft also runs in places you can't open. Restoring it would drop them, so choose Everywhere in Where it runs yourself, or ask someone who can open them to restore it.";
+const HIDDEN_VERSION = "That version runs only in places you can't open, so it can't be restored here without making it run everywhere. Someone who can open them can restore it.";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; n: string }> }) {
   const ctx = await requireAutomation();
@@ -37,10 +49,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   // The workflow row is locked for the transaction (as publish does), so a
   // restore and a publish at the same moment number their versions in turn.
-  let result: { notFound: true } | { notFound: false; keptVersion: number | null };
+  let result: { notFound: true } | { refused: { error: string; code: string } } | { notFound: false; keptVersion: number | null };
   try {
     result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${wf.id} FOR UPDATE`;
+    // The draft as it is now, under the lock: a save that landed after the
+    // read above is the draft that is kept, never lost.
+    const current = await tx.automationWorkflow.findUnique({ where: { id: wf.id }, select: { definition: true, triggerEvent: true } });
+    if (current) { wf.definition = current.definition; wf.triggerEvent = current.triggerEvent; }
     const versions = await tx.automationWorkflowVersion.findMany({
       where: { workflowId: wf.id, organizationId: ctx.orgId },
       select: { versionNumber: true, definitionJson: true },
@@ -48,6 +64,30 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     });
     const target = versions.find((v) => v.versionNumber === number);
     if (!target) return { notFound: true as const };
+
+    // Where it runs, by the save rule (see the header). Out of the
+    // restorer's sight means a place that exists and they cannot open; one in
+    // Trash, or deleted, exists for nobody and follows the version like any
+    // place they can open. "On a schedule" fires for the workspace, not for a
+    // place, so its scope is moot: no refusal, the draft's hidden places kept.
+    const stored = readScope(wf.definition);
+    const fromVersion = readScope(target.definitionJson);
+    const placeless = draftTrigger(withoutSnapshotNote(target.definitionJson), wf.triggerEvent) === "schedule.every";
+    const [readable, exists] = await Promise.all([scopeReadable(ctx.viewer, [stored, fromVersion]), livePlaces(ctx.orgId, [stored, fromVersion])]);
+    const opens = (kind: "list" | "folder" | "space", placeId: string) => readable(kind, placeId) || !exists(kind, placeId);
+    const { hidden } = splitScope(stored, opens);
+    if (!placeless && isEverywhere(fromVersion) && !isEverywhere(hidden)) return { refused: { error: EVERYWHERE_OVER_HIDDEN, code: "scope_everywhere_over_hidden" } };
+    const { shown } = splitScope(fromVersion, opens);
+    const merged = restoreHiddenScope({ stored, submitted: shown, hidden, readable: opens, everywhere: isEverywhere(fromVersion) && isEverywhere(hidden) });
+    if (!merged.ok) return { refused: { error: SCOPE_REFUSAL[merged.error], code: merged.error } };
+    // A schedule keeps the draft's places exactly as they are: moot while it
+    // runs on a schedule, and never Everywhere by accident if the trigger is
+    // later changed to a task event.
+    const scope = placeless ? { ok: true as const, scope: stored } : merged;
+    // A version that ran in chosen places never comes back as Everywhere: when
+    // every one of its places is out of the restorer's sight and the draft
+    // keeps none, nothing would be left to name.
+    if (!placeless && !isEverywhere(fromVersion) && isEverywhere(scope.scope)) return { refused: { error: HIDDEN_VERSION, code: "scope_hidden_version" } };
 
     const trigger = draftTrigger(wf.definition, wf.triggerEvent);
     const draftNow = stableJson({ ...withoutSnapshotNote(wf.definition), trigger });
@@ -80,7 +120,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     await tx.automationWorkflow.update({
       where: { id: wf.id },
       data: {
-        definition: { ...restored, trigger: restoredTrigger } as Prisma.InputJsonValue,
+        definition: definitionWithScope({ ...restored, trigger: restoredTrigger }, scope.scope) as Prisma.InputJsonValue,
         // Before any publish nothing runs, so the column follows the draft.
         ...(wf.publishedVersionId ? {} : { triggerEvent: restoredTrigger }),
         updatedById: ctx.userId,
@@ -95,6 +135,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     throw err;
   }
 
+  if ("refused" in result) return NextResponse.json({ ...result.refused, section: "where", issues: { section: "where" } }, { status: 400 });
   if (result.notFound) return NextResponse.json({ error: "Version not found" }, { status: 404 });
   return NextResponse.json({ ok: true, draftUpdated: true, keptVersion: result.keptVersion });
 }

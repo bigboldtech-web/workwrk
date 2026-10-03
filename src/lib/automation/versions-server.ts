@@ -12,7 +12,8 @@ export interface VersionRow {
   number: number;
   /** When it was published, or kept. */
   publishedAt: string;
-  publishedBy: { id: string; name: string } | null;
+  /** gone: no longer in the workspace (the engine then reaches no List with this version, author-reach.ts). */
+  publishedBy: { id: string; name: string; gone: boolean } | null;
   /** The version the automation runs right now. */
   isLive: boolean;
   /** "published", or "kept" for a draft saved before a restore replaced it. */
@@ -29,7 +30,7 @@ export async function listVersions(orgId: string, workflowId: string, publishedV
   });
   const userIds = [...new Set(rows.map((r) => r.createdById).filter((v): v is string => !!v))];
   const users = userIds.length
-    ? await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true } })
+    ? await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true } })
     : [];
   const nameById = new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
   return rows.map((r) => {
@@ -37,7 +38,7 @@ export async function listVersions(orgId: string, workflowId: string, publishedV
     return {
       number: r.versionNumber,
       publishedAt: r.createdAt.toISOString(),
-      publishedBy: r.createdById ? { id: r.createdById, name: nameById.get(r.createdById) ?? "Former member" } : null,
+      publishedBy: r.createdById ? { id: r.createdById, name: nameById.get(r.createdById) ?? "Former member", gone: !nameById.has(r.createdById) } : null,
       isLive: r.id === publishedVersionId,
       kind: note ? "kept" : "published",
       restoredFrom: note?.restoredFrom ?? null,

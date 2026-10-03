@@ -83,6 +83,44 @@ async function readableRefs(viewer: Viewer, refs: NodeRef[]): Promise<Set<string
   return out;
 }
 
+/**
+ * Can this viewer open each place the scopes name (Can view, the bar the
+ * picker, the chips, the summary and the save all share)? One read.
+ */
+export async function scopeReadable(viewer: Viewer, scopes: AutomationScope[]): Promise<(kind: "list" | "folder" | "space", id: string) => boolean> {
+  const refs: NodeRef[] = [];
+  for (const sc of scopes) {
+    sc.listIds.forEach((id) => refs.push({ kind: "list", id }));
+    sc.folderIds.forEach((id) => refs.push({ kind: "folder", id }));
+    sc.spaceIds.forEach((id) => refs.push({ kind: "space", id }));
+  }
+  const readable = await readableRefs(viewer, refs);
+  return (kind, id) => readable.has(refKey({ kind, id }));
+}
+
+/**
+ * Which of these places exist now: a live Space, Folder or List of this
+ * workspace. One in Trash, or deleted, exists for nobody: no viewer, an
+ * Owner included, can open it, so it is never "a place you can't open".
+ */
+export async function livePlaces(orgId: string, scopes: AutomationScope[]): Promise<(kind: "list" | "folder" | "space", id: string) => boolean> {
+  const lists = new Set<string>();
+  const folders = new Set<string>();
+  const spaces = new Set<string>();
+  for (const sc of scopes) {
+    sc.listIds.forEach((id) => lists.add(id));
+    sc.folderIds.forEach((id) => folders.add(id));
+    sc.spaceIds.forEach((id) => spaces.add(id));
+  }
+  const [l, f, sp] = await Promise.all([
+    lists.size ? prisma.board.findMany({ where: { id: { in: [...lists] }, organizationId: orgId }, select: { id: true } }) : [],
+    folders.size ? prisma.folder.findMany({ where: { id: { in: [...folders] }, organizationId: orgId }, select: { id: true } }) : [],
+    spaces.size ? prisma.space.findMany({ where: { id: { in: [...spaces] }, organizationId: orgId }, select: { id: true } }) : [],
+  ]);
+  const live = new Set([...l.map((r) => `list:${r.id}`), ...f.map((r) => `folder:${r.id}`), ...sp.map((r) => `space:${r.id}`)]);
+  return (kind, id) => live.has(`${kind}:${id}`);
+}
+
 export interface ScopeSummary {
   /** "Everywhere", or the readable names, in the order the scope lists them. */
   names: string[];
@@ -128,29 +166,64 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
 
 /**
  * A saved scope with every id that is not a Space, Folder or List of THIS
- * workspace dropped: a junk id, or one from another organization, would
- * otherwise be stored and then read back as "1 more you cannot see", a
- * place that does not exist. Ids the viewer cannot read are kept as they
- * are (they are real, and counted, never named).
+ * workspace dropped: a junk id, or one from another organization, is never
+ * stored. Ids the viewer cannot read are kept as they are (they are real,
+ * and kept on the server: never listed, named or counted to that viewer).
  */
 export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise<AutomationScope> {
-  const [lists, folders, spaces] = await Promise.all([
+  const all = [...scope.listIds, ...scope.folderIds, ...scope.spaceIds];
+  const [lists, folders, spaces, trashed] = await Promise.all([
     scope.listIds.length ? prisma.board.findMany({ where: { id: { in: scope.listIds }, organizationId: orgId }, select: { id: true } }) : [],
     scope.folderIds.length ? prisma.folder.findMany({ where: { id: { in: scope.folderIds }, organizationId: orgId }, select: { id: true } }) : [],
     scope.spaceIds.length ? prisma.space.findMany({ where: { id: { in: scope.spaceIds }, organizationId: orgId }, select: { id: true } }) : [],
+    // A place moved to this workspace's Trash keeps its id there, and a
+    // restore brings back the same id: it stays in the scope (matching
+    // nothing meanwhile) so restoring the List brings it back into the
+    // automation, and the automation never loses the place for good.
+    all.length
+      ? prisma.trashItem.findMany({ where: { organizationId: orgId, entityType: { in: ["board", "folder", "space"] }, entityId: { in: all } }, select: { entityId: true } })
+      : [],
   ]);
+  const inTrash = new Set(trashed.map((t) => t.entityId));
+  // A List or Folder moved to Trash WITH its Folder or Space has no Trash
+  // row of its own: it travels inside the parent's snapshot, and restoring
+  // the parent brings it back with the same id. It stays in the scope too.
+  const live = new Set([...lists, ...folders, ...spaces].map((r) => r.id));
+  const missing = all.filter((id) => !live.has(id) && !inTrash.has(id));
+  const insideTrash = missing.length ? await idsInTrashedContainers(orgId, missing) : new Set<string>();
   const keep = (rows: Array<{ id: string }>, ids: string[]) => {
     const ok = new Set(rows.map((r) => r.id));
-    return ids.filter((id) => ok.has(id));
+    return ids.filter((id) => ok.has(id) || inTrash.has(id) || insideTrash.has(id));
   };
-  return { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
+  const pruned = { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
+  // Never wider than asked: pruning a scope that named places down to
+  // nothing would read as Everywhere and run the automation on every task
+  // in the workspace. Such a scope (places gone with a whole Space, say) is
+  // kept as it was and simply matches nothing.
+  return isEverywhere(pruned) && !isEverywhere(scope) ? scope : pruned;
+}
+
+/** Which of these ids sit inside a Folder or Space in this workspace's Trash (its Lists, Folders and child Spaces). */
+async function idsInTrashedContainers(orgId: string, ids: string[]): Promise<Set<string>> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT DISTINCT child->>'id' AS id
+    FROM "TrashItem" t,
+      jsonb_array_elements(
+        COALESCE(t."snapshot"->'children'->'boards', '[]'::jsonb)
+        || COALESCE(t."snapshot"->'children'->'folders', '[]'::jsonb)
+        || COALESCE(t."snapshot"->'children'->'childSpaces', '[]'::jsonb)
+      ) AS child
+    WHERE t."organizationId" = ${orgId}
+      AND t."entityType" IN ('folder', 'space')
+      AND child->>'id' = ANY(${ids})`;
+  return new Set(rows.map((r) => r.id));
 }
 
 /**
  * The definition as it will be stored, with its scope pruned to this
- * workspace (scopeInOrg). Everywhere stays Everywhere; a scope that names
- * only places outside the workspace becomes Everywhere too, which is what
- * the engine would have run anyway (nothing ever matched the foreign id).
+ * workspace (scopeInOrg). Everywhere stays Everywhere, and a scope that named
+ * places never becomes Everywhere: scopeMatches never matches a place that
+ * is gone, while Everywhere matches every task.
  */
 export async function definitionWithScopeInOrg(orgId: string, definition: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!("scope" in definition)) return definition;
