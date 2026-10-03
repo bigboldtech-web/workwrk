@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { isModuleActive } from "@/lib/entitlements";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
@@ -74,11 +74,13 @@ export async function GET(req: NextRequest) {
   // and tables they made or were given: the resolver's answer below.
   const tablesOn = await isModuleActive(orgId, "workwrk-tables").catch(() => false);
 
-  // SOPs and goals carry their own read rules, the SOP list's
-  // (sopVisibilityWhere) and the Goals list's (goalVisibilityOr), so a title
-  // the viewer could not open on its own page is never named here. Before,
-  // search matched every SOP (drafts and restricted folders included) and
-  // every goal in the workspace.
+  // SOPs, goals, meetings and policies carry their own read rules, so a title
+  // the viewer could not open on its own page is never named here: the SOP
+  // list's (sopVisibilityWhere), the Goals list's (goalVisibilityOr), the
+  // meeting page's (meetingRole: its creator, an attendee or an org admin,
+  // and never a deleted meeting) and the policy page's (a manager, else a
+  // PUBLISHED policy or one assigned to the viewer). Before, search matched
+  // every one of them in the workspace, drafts and one to ones included.
   const [sopVisible, goalVisible] = await Promise.all([sopVisibilityWhere(session), goalVisibilityOr(session)]);
 
   const [
@@ -165,7 +167,7 @@ export async function GET(req: NextRequest) {
       take: 3,
     }),
     prisma.meeting.findMany({
-      where: { organizationId: orgId, title: ci },
+      where: { organizationId: orgId, title: ci, deletedAt: null, ...(admin ? {} : { OR: [{ createdById: me }, { attendees: { some: { userId: me } } }] }) },
       select: { id: true, title: true, type: true, scheduledAt: true },
       take: 3,
     }),
@@ -182,7 +184,7 @@ export async function GET(req: NextRequest) {
       take,
     }),
     prisma.policy.findMany({
-      where: { organizationId: orgId, OR: [{ title: ci }, { content: ci }] },
+      where: { organizationId: orgId, OR: [{ title: ci }, { content: ci }], ...(isManager(session) ? {} : { AND: [{ OR: [{ status: "PUBLISHED" }, { assignments: { some: { userId: me } } }] }] }) },
       select: { id: true, title: true, category: true, status: true },
       orderBy: { updatedAt: "desc" },
       take,
@@ -355,7 +357,7 @@ export async function GET(req: NextRequest) {
       type: "okr" as const,
       id: o.id,
       title: o.title,
-      subtitle: `${o.level} · ${o.quarter ?? "—"} · ${o.status}`,
+      subtitle: [o.level, o.quarter, o.status].filter(Boolean).join(" · "),
       href: `/okrs/${o.id}`,
     })),
     ...meetings.map((m) => ({
@@ -383,7 +385,7 @@ export async function GET(req: NextRequest) {
       type: "policy" as const,
       id: p.id,
       title: p.title,
-      subtitle: `${p.category ?? "—"} · ${p.status}`,
+      subtitle: [p.category, p.status].filter(Boolean).join(" · "),
       href: `/policies#${p.id}`,
     })),
     ...readableAnnouncements.map((a) => ({
