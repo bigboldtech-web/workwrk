@@ -19,6 +19,7 @@ import { Picker, type PickerOption } from "@/components/ui/picker";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
@@ -42,8 +43,10 @@ export function SopFolderShareDialog({ open, onClose, folder, onSaved }: {
   const { toast } = useOsToast();
   const { boot } = useBoot();
   const [rows, setRows] = useState<AccessRow[] | null>(null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   const [addOpen, setAddOpen] = useState(false);
+  // Anyone who can sign in can be given a folder, searched as the person
+  // types across the whole workspace (never a list stopped at 500).
+  const picker = usePeoplePicker({ enabled: addOpen, reach: "signin" });
   const [roleFor, setRoleFor] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -55,22 +58,18 @@ export function SopFolderShareDialog({ open, onClose, folder, onSaved }: {
     if (!open || !folder) return;
     let live = true;
     void (async () => {
-      const [a, p] = await Promise.all([
-        apiFetch<AccessRow[] | { data?: AccessRow[] }>(`/api/sop-folders/${folder.id}/access`, { cache: "no-store" }),
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=500", { cache: "no-store" }),
-      ]);
+      const a = await apiFetch<AccessRow[] | { data?: AccessRow[] }>(`/api/sop-folders/${folder.id}/access`, { cache: "no-store" });
       if (!live) return;
       setRows(a.ok ? (Array.isArray(a.data) ? a.data : a.data?.data ?? []) : []);
-      setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []);
     })();
     return () => { live = false; };
   }, [open, folder]);
 
   const granted = useMemo(() => new Set((rows ?? []).map((r) => r.user.id)), [rows]);
-  const options: PickerOption[] = people.filter((p) => !granted.has(p.id)).map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }));
+  const options: PickerOption[] = picker.people.filter((p) => !granted.has(p.id)).map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }));
 
   const add = (id: string) => {
-    const p = people.find((x) => x.id === id);
+    const p = picker.person(id);
     if (!p) return;
     setRows((r) => [...(r ?? []), { user: p, role: "EDITOR" }]);
     setDirty(true);
@@ -121,7 +120,7 @@ export function SopFolderShareDialog({ open, onClose, folder, onSaved }: {
           )}
           <span className="relative mt-2 block">
             <button type="button" onClick={() => setAddOpen((o) => !o)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-brand-deep hover:bg-hover"><UserPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add people</button>
-            <Picker open={addOpen} onClose={() => setAddOpen(false)} ariaLabel="Add people" searchPlaceholder="Find a person" onSelect={add} sections={[{ options }]} width={320} />
+            <Picker open={addOpen} onClose={() => setAddOpen(false)} ariaLabel="Add people" searchPlaceholder="Find a person" alwaysSearch onSearchChange={picker.setQuery} loading={picker.loading && options.length === 0} onSelect={add} sections={[{ options }]} width={320} />
           </span>
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
