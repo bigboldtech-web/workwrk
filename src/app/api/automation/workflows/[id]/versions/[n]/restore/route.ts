@@ -13,7 +13,9 @@
 //      exactly as the draft has them now (version n's own hidden places are
 //      not brought back, the draft's are not dropped), and the places they
 //      can open come from version n. A version that ran Everywhere restores
-//      as Everywhere, the choice an editor may always make.
+//      as Everywhere, unless the draft keeps places the restorer cannot
+//      open: that would drop them unseen, so it is refused and they can
+//      choose Everywhere in Where it runs themselves.
 //
 // Both writes happen in one transaction, reading the draft under the row
 // lock. Body {}. Returns { ok: true, draftUpdated: true, keptVersion: number | null }.
@@ -25,6 +27,7 @@ import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { SCOPE_REFUSAL, definitionWithScope, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
 import { scopeReadable } from "@/lib/automation/places-server";
 
+const EVERYWHERE_OVER_HIDDEN = "That version runs everywhere, and this draft also runs in places you can't open. Restoring it would drop them, so choose Everywhere in Where it runs yourself, or ask someone who can open them to restore it.";
 const HIDDEN_VERSION = "That version runs only in places you can't open, so it can't be restored here without making it run everywhere. Someone who can open them can restore it.";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; n: string }> }) {
@@ -66,6 +69,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const fromVersion = readScope(target.definitionJson);
     const readable = await scopeReadable(ctx.viewer, [stored, fromVersion]);
     const { hidden } = splitScope(stored, readable);
+    if (isEverywhere(fromVersion) && !isEverywhere(hidden)) return { refused: { error: EVERYWHERE_OVER_HIDDEN, code: "scope_everywhere_over_hidden" } };
     const { shown } = splitScope(fromVersion, readable);
     const scope = restoreHiddenScope({ stored, submitted: shown, hidden, readable, everywhere: isEverywhere(fromVersion) });
     if (!scope.ok) return { refused: { error: SCOPE_REFUSAL[scope.error], code: scope.error } };
