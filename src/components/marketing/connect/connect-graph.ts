@@ -232,7 +232,7 @@ export const CONNECT_EDGES: ConnectEdge[] = [
     b: "task",
     label: "A task links the SOP that governs it, as required reading, and the link is visible from both ends.",
     stop: 2,
-    stopLabel: "a step of the SOP creates the task, with the owner resolved from the role",
+    stopLabel: "a step of the SOP creates the task, owned by whoever holds the step's job title",
   },
   { a: "task", b: "doc", label: "A task links a doc, a file, a canvas or a table, and the doc shows the task back." },
   {

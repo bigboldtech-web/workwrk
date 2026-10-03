@@ -599,6 +599,12 @@ export interface CreateBoardItemOptions {
   trustedMetadata?: boolean;
   /** Connect keys whose values the route validated; they are marked so every projection reduces them. */
   validatedConnectKeys?: readonly string[];
+  /**
+   * Where the task came from, recorded on its CREATED activity row as
+   * meta.source (an SOP step run, src/lib/sop-spawn.ts). Additive: rows
+   * without it read exactly as before.
+   */
+  activitySource?: Record<string, unknown>;
 }
 
 /**
@@ -751,7 +757,7 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
     itemId: created.id,
     actorId: input.actorId ?? null,
     action: "CREATED",
-    meta: { title: trimmed, status: created.status },
+    meta: { title: trimmed, status: created.status, ...(opts.activitySource ? { source: opts.activitySource } : {}) },
   });
 
   // A subtask is an event on its PARENT too, and the parent's Activity tab is

@@ -41,17 +41,17 @@ describe("the work receipt", () => {
     expect(model.totals[0].emphasis).toBe(true);
   });
 
-  it("does not name a workspace template that does not exist", () => {
-    // Both footers used to print the Tuesday workspace template, and
-    // flags.tuesdayTemplateAtSignup is false: the deep link already refuses
-    // to add ?template=tuesday, and both spine sentences already swap. The
-    // two receipt footers were the only consumers of that flag that were
-    // not reading it, on the artefact that travels furthest.
-    expect(flags.tuesdayTemplateAtSignup).toBe(false);
-    expect(workReceiptModel().footer).not.toContain("template");
-    expect(workReceiptModel({ share: true }).footer).not.toContain("workspace");
-    expect(workReceiptModel().footer).toBe(workReceiptFooter(false));
-    expect(workReceiptModel({ share: true }).footer).toBe(workReceiptFooter(true));
+  it("names the Tuesday template only while it exists, and always says it is a storyboard", () => {
+    // The footer follows flags.tuesdayTemplateAtSignup like every other
+    // consumer of it. Whatever it says, the receipt is still drawn from the
+    // fixture, so the storyboard disclaimer travels on the page AND on the
+    // shared card (/tuesday's og:image), which needs it most.
+    for (const share of [false, true]) {
+      const footer = workReceiptModel({ share }).footer;
+      expect(footer).toBe(workReceiptFooter(share));
+      expect(footer).toContain("A storyboard, not a customer.");
+      if (!flags.tuesdayTemplateAtSignup) expect(footer).not.toContain("template");
+    }
   });
 
   it("carries no money and no strike-through: it is what you get, not what you keep", () => {

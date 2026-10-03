@@ -13,33 +13,166 @@
 // and rich description, attach an image by upload or URL, reorder by drag
 // or by the menu, duplicate, delete.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GripVertical, Plus } from "lucide-react";
 import { RichEditor } from "@/components/ui/rich-editor";
 import { RowMoreButton } from "@/components/ui/table-card";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { usePrompt } from "@/components/ui/dialog-provider";
-import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
+import { ProcessFlowBuilder, type ProcessFlow, type ProcessFlowStep } from "@/components/process-flow-builder";
+import { FlowStepOwnerRows } from "@/components/sops/sop-read-view";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+import { ownerFields, type LayoutStep } from "@/lib/sop-step-layout";
 
-export interface EditStep {
-  id: string;
-  title: string;
-  description?: string;
-  image?: string;
-}
+/** A step as the editor holds it (src/lib/sop-step-layout.ts owns the shape). */
+export type EditStep = LayoutStep;
+
+/**
+ * The conversions between the two layouts live in src/lib/sop-step-layout.ts
+ * (pure and tested): the image, the job title and "Creates a task" ride along
+ * both ways, so switching the layout or saving in flow mode never drops one.
+ */
+export { flowFromSteps, stepsFromFlow } from "@/lib/sop-step-layout";
 
 export function newStepId(): string {
   return `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** The lossy conversions between the two layouts (branches do not survive the list). */
-export function flowFromSteps(steps: EditStep[]): ProcessFlow {
-  return { type: "process_flow", steps: steps.map((s) => ({ id: s.id, title: s.title || "Untitled", description: s.description, type: "action" as const })) };
+type JobTitleOption = { id: string; title: string };
+
+/** The workspace's job titles, read once per editor (GET /api/roles). */
+function useJobTitles(): { titles: JobTitleOption[]; loaded: boolean; failed: boolean; retry: () => void } {
+  const [titles, setTitles] = useState<JobTitleOption[]>([]);
+  // Until the first answer, "none yet" is not known: the hint says it is
+  // loading rather than asking for job titles that may already exist.
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/roles", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: unknown) => {
+        if (!live) return;
+        const rows = Array.isArray(d) ? d : Array.isArray((d as { data?: unknown })?.data) ? (d as { data: unknown[] }).data : [];
+        setTitles(rows.map((r) => r as { id?: unknown; title?: unknown }).filter((r) => typeof r.id === "string" && typeof r.title === "string").map((r) => ({ id: r.id as string, title: r.title as string })));
+        setFailed(false);
+        setLoaded(true);
+      })
+      .catch(() => { if (live) { setFailed(true); setLoaded(true); } });
+    return () => { live = false; };
+  }, [attempt]);
+  return { titles, loaded, failed, retry: () => setAttempt((a) => a + 1) };
 }
-export function stepsFromFlow(flow: ProcessFlow | null | undefined): EditStep[] {
-  return (flow?.steps ?? []).map((s) => ({ id: s.id, title: s.title, description: s.description }));
+
+/** The job titles' load state, said once where a row of controls sits under it. */
+function JobTitlesHint({ titles, loaded = true, failed, retry }: { titles: JobTitleOption[]; loaded?: boolean; failed: boolean; retry: () => void }) {
+  if (!loaded) return <span className="text-xs text-ink-3">Loading job titles…</span>;
+  if (failed) {
+    return (
+      <span className="text-xs text-ink-3">
+        Job titles did not load. <button type="button" onClick={retry} className="font-medium text-ink-2 underline">Retry</button>
+      </span>
+    );
+  }
+  return titles.length === 0 ? <span className="text-xs text-ink-3">Add job titles in People to give steps an owner.</span> : null;
+}
+
+function StepOwnerRow({ step, titles, loaded = true, failed, retry, onChange, hint = true }: {
+  step: EditStep;
+  titles: JobTitleOption[];
+  loaded?: boolean;
+  failed: boolean;
+  retry: () => void;
+  onChange: (patch: Partial<EditStep>) => void;
+  /** Off where the caller says the job titles' state once for many rows. */
+  hint?: boolean;
+}) {
+  const current = step.jobTitle ?? null;
+  // A title that was renamed or deleted since the step was saved still shows
+  // what the step holds, so the select never silently reads as "No owner".
+  const known = current ? titles.some((t) => t.id === current.roleId) : true;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+        Owner by job title
+        <select
+          value={current?.roleId ?? ""}
+          onChange={(e) => {
+            const id = e.target.value;
+            const t = titles.find((x) => x.id === id);
+            onChange({ jobTitle: t ? { roleId: t.id, title: t.title } : null });
+          }}
+          className="h-7 rounded-md border border-line bg-raised px-2 text-sm text-ink"
+        >
+          <option value="">No owner</option>
+          {!known && current ? <option value={current.roleId}>{current.title}</option> : null}
+          {titles.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+        </select>
+      </label>
+      {hint ? <JobTitlesHint titles={titles} loaded={loaded} failed={failed} retry={retry} /> : null}
+      <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+        <Switch checked={step.createsTask === true} onChange={(v) => onChange({ createsTask: v })} aria-label="Creates a task when the SOP is run" />
+        Creates a task when the SOP is run
+      </label>
+    </div>
+  );
+}
+
+/** The flow layout's owners: the read summary at rest, the same per-step controls as the list behind "Edit owners". */
+function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
+  flow: ProcessFlow;
+  onFlowChange: (next: ProcessFlow) => void;
+  jobTitles: { titles: JobTitleOption[]; loaded: boolean; failed: boolean; retry: () => void };
+}) {
+  const [editing, setEditing] = useState(false);
+  // An empty flow has its own empty state below; owners of no steps say nothing.
+  if (flow.steps.length === 0) return null;
+  // By position, not id: a flow step stored without an id would otherwise
+  // match every other id-less step and take the same owner.
+  const patch = (index: number, p: Partial<EditStep>) =>
+    onFlowChange({ ...flow, steps: flow.steps.map((s, j) => (j === index ? ({ ...s, ...p } as ProcessFlowStep) : s)) });
+  // One section in both states, with the SAME toggle button, so keyboard
+  // focus stays on it and aria-expanded is heard; only the rows below swap.
+  // "Done" here only folds the owner controls (the sticky bar's Done leaves
+  // edit mode), so it is named for what it closes.
+  return (
+    <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
+      <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
+        <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} aria-label={editing ? "Done editing owners" : undefined} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+          {editing ? "Done" : "Edit owners"}
+        </button>
+        {/* Once for every step, not once per row. */}
+        {editing ? <span className="basis-full empty:hidden"><JobTitlesHint titles={jobTitles.titles} loaded={jobTitles.loaded} failed={jobTitles.failed} retry={jobTitles.retry} /></span> : null}
+      </div>
+      {editing ? (
+        <ol className="flex flex-col divide-y divide-line border-t border-line">
+          {flow.steps.map((s, i) => (
+            <li key={s.id ?? i} className="flex flex-col gap-2 px-3 py-2">
+              <span className="flex items-center gap-3">
+                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
+                <span className="min-w-0 flex-1 truncate text-row text-ink">{s.title || `Step ${i + 1}`}</span>
+              </span>
+              <StepOwnerRow
+                step={{ id: s.id, title: s.title, ...ownerFields(s as { jobTitle?: unknown; createsTask?: unknown }) }}
+                titles={jobTitles.titles}
+                loaded={jobTitles.loaded}
+                failed={jobTitles.failed}
+                retry={jobTitles.retry}
+                onChange={(p) => patch(i, p)}
+                hint={false}
+              />
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <FlowStepOwnerRows steps={flow.steps} />
+      )}
+    </section>
+  );
 }
 
 function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: string) => void }) {
@@ -92,9 +225,19 @@ export function SopStepsEditor({ layout, steps, flow, onStepsChange, onFlowChang
   const [menu, setMenu] = useState<{ id: string; anchor: React.RefObject<HTMLButtonElement | null> } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const jobTitles = useJobTitles();
 
   if (layout === "flow") {
-    return <ProcessFlowBuilder flow={flow} onChange={onFlowChange} editing />;
+    // The flow canvas has no owner controls, so a step's owner by job title
+    // and "Creates a task" are listed, and edited with the list layout's own
+    // StepOwnerRow, above it (FlowOwnersEditor). Saving in flow mode writes
+    // the steps from the flow, owner fields included (sop-editor-page).
+    return (
+      <div className="flex flex-col gap-3">
+        <FlowOwnersEditor flow={flow} onFlowChange={onFlowChange} jobTitles={jobTitles} />
+        <ProcessFlowBuilder flow={flow} onChange={onFlowChange} editing />
+      </div>
+    );
   }
 
   const update = (id: string, patch: Partial<EditStep>) => onStepsChange(steps.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -165,11 +308,18 @@ export function SopStepsEditor({ layout, steps, flow, onStepsChange, onFlowChang
                   minHeight="80px"
                 />
                 <StepImageEditor image={step.image} onChange={(img) => update(step.id, { image: img })} />
+                <StepOwnerRow step={step} titles={jobTitles.titles} loaded={jobTitles.loaded} failed={jobTitles.failed} retry={jobTitles.retry} onChange={(patch) => update(step.id, patch)} />
               </div>
-            ) : step.description || step.image ? (
+            ) : step.description || step.image || step.jobTitle || step.createsTask ? (
               <button type="button" onClick={() => setOpenId(step.id)} className="block w-full px-4 pb-3 ps-12 text-start">
                 {step.description ? <span className="line-clamp-2 text-sm text-ink-2">{step.description.replace(/<[^>]+>/g, " ").trim()}</span> : null}
                 {step.image ? <span className="block text-xs text-ink-3">Has an image</span> : null}
+                {step.jobTitle || step.createsTask ? (
+                  <span className="block text-xs text-ink-3">
+                    {step.jobTitle ? `Owner: ${step.jobTitle.title}` : "No owner"}
+                    {step.createsTask ? ". Creates a task when run" : ""}
+                  </span>
+                ) : null}
               </button>
             ) : null}
           </div>

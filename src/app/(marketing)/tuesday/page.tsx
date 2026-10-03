@@ -67,7 +67,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: TITLE,
     description: DESCRIPTION,
-    images: [{ url: "/api/og/receipt" }],
+    images: [{ url: "/api/og/receipt", alt: "The Tuesday work receipt" }],
   },
 };
 
@@ -82,7 +82,7 @@ export default function TuesdayPage() {
         </Sub>
         <Note>
           {tuesday.workspace.sidebarLabel}. Cast: {tuesday.cast.map((c) => `${c.name}, ${c.jobTitle}`).join(". ")}.{" "}
-          {tuesday.client.name} is the new client. The cast and the client are a template, not a customer.
+          {tuesday.client.name} is the new client. The cast and the client are a storyboard, not a customer.
         </Note>
       </Band>
 
@@ -90,7 +90,7 @@ export default function TuesdayPage() {
           replay and not a link to where the visitor already is. */}
       <Spine shareHref={null} intro={false} labelledBy="tue-h1" />
 
-      <Close headline="Run your own Tuesday." placement="tuesday-close" />
+      <Close headline="Run your own Tuesday." placement="tuesday-close" template />
     </Page>
   );
 }

@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
+import { readableItemsVia } from "@/lib/list-links-server";
 
 type Kind = "doc" | "sop";
 
@@ -53,8 +54,13 @@ export async function GET(req: NextRequest) {
       targetType: kind === "doc" ? "DOC" : "SOP",
       targetId: id,
       // Both EMBEDDED (sop_card etc.) and REFERENCES (inline @-mention)
-      // count as "linked from" for the panel.
-      relationKind: { in: ["EMBEDDED", "REFERENCES"] },
+      // count as "linked from" for the panel. A task an SOP step created
+      // links back as REQUIRED_READING (src/lib/sop-spawn.ts), so tasks
+      // count with that relation too; only tasks, which are gated below.
+      OR: [
+        { relationKind: { in: ["EMBEDDED", "REFERENCES"] } },
+        { relationKind: "REQUIRED_READING", sourceType: "BOARD_ITEM" },
+      ],
     },
     select: { sourceType: true, sourceId: true, relationKind: true },
     take: 1000,
@@ -63,7 +69,7 @@ export async function GET(req: NextRequest) {
   // Bucket by source type so we can do one batched fetch per kind.
   const docIds = links.filter((l) => l.sourceType === "DOC").map((l) => l.sourceId);
   const sopIds = links.filter((l) => l.sourceType === "SOP").map((l) => l.sourceId);
-  const itemIds = links.filter((l) => l.sourceType === "BOARD_ITEM").map((l) => l.sourceId);
+  const itemIds = [...new Set(links.filter((l) => l.sourceType === "BOARD_ITEM").map((l) => l.sourceId))];
 
   const [docs, sops, items] = await Promise.all([
     docIds.length > 0
@@ -84,9 +90,9 @@ export async function GET(req: NextRequest) {
     itemIds.length > 0
       ? prisma.item.findMany({
           where: { id: { in: itemIds }, organizationId: ctx.orgId, archivedAt: null },
-          select: { id: true, title: true, updatedAt: true },
+          select: { id: true, title: true, updatedAt: true, boardId: true, organizationId: true, ownerId: true, assigneeIds: true, parentItemId: true, itemType: true },
         })
-      : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date }>),
+      : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date; boardId: string; organizationId: string; ownerId: string | null; assigneeIds: string[]; parentItemId: string | null; itemType: string }>),
   ]);
 
   // Doc hits, filtered by the viewer's role on each doc in ONE world (private
@@ -121,8 +127,12 @@ export async function GET(req: NextRequest) {
     }));
 
   // Board items that embed/reference this entity ("this SOP backs task
-  // X"). Additive — `docs` and `sops` keep their existing shape.
-  const itemHits: ItemHit[] = items.map((it) => ({
+  // X"). Additive: `docs` and `sops` keep their existing shape. Only the
+  // tasks this viewer may read are named (the item gate's ladder, batched).
+  const itemAccess = items.length
+    ? await readableItemsVia({ userId: ctx.userId, accessLevel: ctx.accessLevel, organizationId: ctx.orgId }, items)
+    : new Map<string, { readable: boolean }>();
+  const itemHits: ItemHit[] = items.filter((it) => itemAccess.get(it.id)?.readable === true).map((it) => ({
     sourceType: "BOARD_ITEM" as const,
     sourceId: it.id,
     title: it.title || "Untitled task",

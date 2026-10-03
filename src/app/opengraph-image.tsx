@@ -38,9 +38,11 @@ import { ImageResponse } from "next/og";
 import { DOT_HEX, tuesday } from "@/components/marketing/data/tuesday";
 import { heroHeadline } from "@/components/marketing/headline";
 import { workReceiptModel } from "@/components/marketing/receipt/receipt-model";
+import { OG_DEFAULT_ALT } from "@/components/marketing/og";
 
 export const runtime = "nodejs";
-export const alt = "WorkwrK: the work platform your whole company runs on.";
+// The alt describes the card itself (og.ts), not the site's tagline.
+export const alt = OG_DEFAULT_ALT;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -269,10 +271,12 @@ export default async function OgImage() {
                 categories of tool it stands in for", which is true and is
                 nowhere on the site: a share card and the page it opens said
                 different things directly under the same H1. `headline.sub`
-                is `headlineSub()`, the one gated positioning sentence that
-                the hero, the meta description, the og:description and both
-                JSON-LD descriptions already render, so the card now moves
-                with the gate instead of beside it. */}
+                is the one sentence headline.ts holds beside the six word
+                claim (a literal there, not positioning.ts headlineSub()), so
+                the card and the module that owns the claim cannot drift. The
+                rebuilt home page's H1 is a different sentence: a known
+                difference between the card and the page, left for the
+                founder to settle rather than rewritten here. */}
             <div style={{ display: "flex", fontSize: 21, color: T.ink2, lineHeight: 1.4 }}>{headline.sub}</div>
           </div>
 

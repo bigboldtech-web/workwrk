@@ -35,6 +35,7 @@ const BlockNoteCanvas = dynamic(
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { Chip } from "@/components/ui/chip";
 import { checklistAsksFor, getSopKind, getSopLayout, type SopKind } from "@/lib/sop-kind";
+import { stepCreatesTask, stepJobTitle } from "@/lib/sop-step-owner";
 import { cn } from "@/lib/utils";
 
 export interface ReadStep {
@@ -42,6 +43,8 @@ export interface ReadStep {
   title?: string;
   description?: string;
   image?: string;
+  jobTitle?: { roleId: string; title: string } | null;
+  createsTask?: boolean;
 }
 export interface ReadRecordedStep {
   order?: number;
@@ -155,20 +158,78 @@ export function SopReadView({ sop, mode = "app", emptyAction }: {
   if (kind === "recording") return <RecordingRead steps={(c.steps ?? []) as ReadRecordedStep[]} />;
 
   if (getSopLayout(c) === "flow" && c.flow) {
-    return <ProcessFlowBuilder flow={c.flow} onChange={() => { /* read-only */ }} editing={false} />;
+    return (
+      <div className="flex flex-col gap-3">
+        {mode === "app" ? <FlowStepOwners steps={c.flow.steps ?? []} /> : null}
+        <ProcessFlowBuilder flow={c.flow} onChange={() => { /* read-only */ }} editing={false} />
+      </div>
+    );
   }
-  return <StepsRead steps={(c.steps ?? []) as ReadStep[]} />;
+  return <StepsRead steps={(c.steps ?? []) as ReadStep[]} showOwners={mode === "app"} />;
 }
 
-export function StepsRead({ steps }: { steps: ReadStep[] }) {
+/**
+ * The flow layout draws only the flow's cards, so the steps' owners by job
+ * title and "Creates a task" are listed above it: a step that hands out work
+ * when the SOP is run never looks like a plain card. Numbered as the run
+ * dialog numbers them. Renders nothing when no step has either, unless the
+ * editor passes its "Edit owners" action. App pages only: the public page
+ * never shows owners.
+ */
+export function FlowStepOwners({ steps, action }: { steps: ReadonlyArray<{ id?: string; title?: string }>; action?: React.ReactNode }) {
+  if (!steps.some((s) => stepJobTitle(s) || stepCreatesTask(s)) && !action) return null;
+  return (
+    <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
+      <div className="flex h-11 items-center gap-3 px-3">
+        <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
+        {action}
+      </div>
+      <FlowStepOwnerRows steps={steps} />
+    </section>
+  );
+}
+
+/** The summary's rows alone: the steps that have an owner or create a task, else one quiet line. */
+export function FlowStepOwnerRows({ steps }: { steps: ReadonlyArray<{ id?: string; title?: string }> }) {
+  const owned = steps
+    .map((s, i) => ({ key: s.id ?? String(i), n: i + 1, title: s.title || `Step ${i + 1}`, jobTitle: stepJobTitle(s), createsTask: stepCreatesTask(s) }))
+    .filter((s) => s.jobTitle || s.createsTask);
+  if (owned.length === 0) return <p className="px-3 pb-3 text-sm text-ink-3">No step has an owner or creates a task yet.</p>;
+  return (
+    <ol className="flex flex-col divide-y divide-line border-t border-line">
+      {owned.map((s) => (
+        <li key={s.key} className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{s.n}</span>
+          <span className="min-w-[8rem] flex-1 truncate text-row text-ink">{s.title}</span>
+          {/* A label, not a control (Chip as span: full contrast, no tab stop). A
+              long job title is cut to half the row and named in full on hover,
+              so the step's own title never disappears on a phone. */}
+          {s.jobTitle ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={s.jobTitle.title}><span className="truncate">{s.jobTitle.title}</span></Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
+          {s.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * `showOwners` shows each step's job title and "Creates a task". Off on the
+ * public share page: job titles are the workspace's internal names, and a
+ * visitor cannot run the SOP.
+ */
+export function StepsRead({ steps, showOwners = true }: { steps: ReadStep[]; showOwners?: boolean }) {
   if (steps.length === 0) return <SopReadEmpty />;
   return (
     <ol className="flex flex-col gap-3">
       {steps.map((step, i) => (
         <li key={step.id ?? i} className="rounded-lg border border-line bg-raised">
-          <div className="flex h-11 items-center gap-3 px-3">
+          {/* Wraps only when a job title and "Creates a task" leave the step's
+              title less than 8rem (a phone); on a wide screen it is one 44px row. */}
+          <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
             <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
-            <span className="min-w-0 flex-1 truncate text-row font-medium text-ink">{step.title || `Step ${i + 1}`}</span>
+            <span className="min-w-[8rem] flex-1 truncate text-row font-medium text-ink">{step.title || `Step ${i + 1}`}</span>
+            {showOwners && step.jobTitle?.title ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={step.jobTitle.title}><span className="truncate">{step.jobTitle.title}</span></Chip> : null}
+            {showOwners && step.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
           </div>
           {step.description || step.image ? (
             <div className="flex flex-col gap-2 px-4 pb-4 ps-12">

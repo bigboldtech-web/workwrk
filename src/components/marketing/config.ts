@@ -114,10 +114,11 @@ export function primaryCta(placement: string, options?: { template?: boolean; la
     const dataCta = `${placement}-primary-demo`;
     return { label: options?.label ?? BOOK_A_DEMO, href: withPlacement(routes.demo, dataCta), dataCta };
   }
-  // `template` is a REQUEST for the deep link, not a grant of it. Signup does
-  // not apply the Tuesday template yet, so asking for it would send a visitor
-  // to a query string the trial ignores: the button would promise a seeded
-  // workspace and open an empty one. The flag is the grant.
+  // `template` is a REQUEST for the deep link, not a grant of it. The flag is
+  // the grant: it was turned on only once signup applied the Tuesday template
+  // end to end (src/lib/templates/apply-tuesday.ts). Ask for it only where the
+  // copy beside the button says the visitor gets the template; /signup offers
+  // no way to decline it.
   const wantsTemplate = options?.template === true && flags.tuesdayTemplateAtSignup;
   const href = wantsTemplate ? routes.signupWithTemplate : routes.signup;
   const dataCta = `${placement}-primary-trial`;
@@ -213,7 +214,11 @@ export const realQuote = {
   name: "Mohsin S.",
   title: "COO · 280-person services firm",
   initials: "MS",
-  source: "src/app/(auth)/layout.tsx",
+  // The login page carried this quote until Phase 8 (commit 4398af0a took it
+  // off src/app/(auth)/layout.tsx), and nothing on the site renders it now.
+  // It is kept here, attribution verbatim, so that if it ever returns it
+  // returns exactly as the customer said it; it is not shown anywhere.
+  source: "src/app/(auth)/layout.tsx, until 4398af0a; rendered nowhere since",
 } as const;
 
 /**

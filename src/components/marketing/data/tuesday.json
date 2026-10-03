@@ -5,9 +5,9 @@
     "sidebarLabel": "Sample workspace: Northwind Ops",
     "templateName": "Tuesday: client onboarding",
     "templateDeepLink": "/signup?template=tuesday",
-    "notice": "The Tuesday workspace is a template. It's yours on day one.",
-    "receiptFooterSite": "Tuesday workspace template",
-    "receiptFooterShare": "The Tuesday workspace"
+    "notice": "The Tuesday workspace is a template. Its Space, List, SOP, job titles, KRA, KPI, goal, doc and sample task are yours on day one; the people and the client are a storyboard.",
+    "receiptFooterSite": "The Tuesday workspace template. A storyboard, not a customer.",
+    "receiptFooterShare": "Tuesday template. A storyboard, not a customer."
   },
   "cast": [
     {
@@ -22,7 +22,7 @@
       "name": "Sam Okafor",
       "initials": "SO",
       "jobTitle": "Onboarding lead",
-      "note": "Task owner, resolved from the role."
+      "note": "Task owner, by job title."
     },
     {
       "id": "priya",
@@ -343,7 +343,7 @@
         "label": "Onboarding lead"
       }
     ],
-    "snapCaption": "Created by SOP: Client onboarding, step 3. Owner by role: Onboarding lead. Moves: Onboarding cycle time.",
+    "snapCaption": "Created by SOP: Client onboarding, step 3. Owner by job title: Onboarding lead. Moves: Onboarding cycle time.",
     "snapCaptionFallback": "Linked to SOP: Client onboarding, step 3. Held by Sam Okafor, who holds the Onboarding lead role. Moves: Onboarding cycle time.",
     "snapCaptionStop": 2
   },
@@ -671,11 +671,11 @@
       "wireLabel": "Step 3 to the list",
       "wireLabelFallback": "Step 3, linked to the task",
       "dot": "blue",
-      "trail": "9:04 Born from SOP step 3, owner by role to Sam",
+      "trail": "9:04 Born from SOP step 3, owner by job title to Sam",
       "truthGate": {
-        "mechanism": "The SOP step spawns the task with the owner resolved from the role",
-        "shipped": false,
-        "status": "SOP run execution deferred, RoleInstance migration pending, no SOP surface calls createBoardItem",
+        "mechanism": "Running the SOP turns step 3 into the task, owned by whoever holds the step's job title",
+        "shipped": true,
+        "status": "Shipped: a step of a step-by-step SOP names a job title, and running the SOP creates the step's task for the soonest available holder, linked back to the step",
         "fallbackNarration": "Sam creates the task on the onboarding list and links it to step 3 of the SOP and to the KPI it moves. The links are what every other block reads."
       },
       "trailFallback": "9:04 On the Onboarding board and in Sam's Today, linked to SOP step 3"
@@ -784,10 +784,10 @@
       "dot": "all",
       "trail": "6:02 Kudos \"Own it\" to review evidence",
       "truthGate": {
-        "mechanism": "A Sidekick answer with four source chips, kudos landing as review evidence, the task connection trail",
+        "mechanism": "A Sidekick answer with four source chips, and kudos landing as review evidence",
         "shipped": false,
-        "status": "Kudos with values shipped. The connection trail is a new product feature and the receipt renders from this fixture until it lands",
-        "fallbackNarration": "Ask reads the workspace it is in. Naming the records behind an answer is in build, and so is filing a kudos as review evidence. The receipt is the Tuesday workspace template's own trail."
+        "status": "Kudos with company values and the connection trail on every task have shipped. Source chips on an answer and kudos as review evidence are in build.",
+        "fallbackNarration": "Ask reads the workspace it is in. Naming the records behind an answer is in build, and so is filing a kudos as review evidence. Every task carries its own connection trail."
       },
       "trailFallback": "6:02 Kudos \"Own it\" recorded for Sam"
     }
@@ -824,7 +824,7 @@
         "work"
       ],
       "headline": "Every process becomes work.",
-      "narration": "Step 3 becomes the task, with Sam on it because Sam holds the role.",
+      "narration": "Step 3 becomes the task, with Sam on it because Sam holds the job title.",
       "stop": 2,
       "fallbackNarration": "Sam applies the onboarding template. The SOP and the KPI come with it."
     },

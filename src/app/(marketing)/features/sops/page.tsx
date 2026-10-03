@@ -46,7 +46,7 @@ export default function SopsFeaturePage() {
           body: "An SOP points at the KRA it serves, so the process and the result area are the same conversation. Today the owner shown on the doc is the person who created it.",
         },
         { title: "Steps, with owners",
-          body: "A checklist SOP carries its steps with an owner on each one, and a task can link back to the step it came from.",
+          body: "A step names the job title that owns it. Run the SOP and each step marked to create a task becomes a task for the person holding that title, linked back to the step.",
         },
         { title: "Policies and contracts beside them",
           body: "The same block holds policies with their own acknowledgement ledger, and contracts with their clauses, so the paperwork is not a separate product.",
@@ -59,7 +59,7 @@ export default function SopsFeaturePage() {
       faq={[
         {
           q: "Does an SOP step create the task by itself?",
-          a: "Not yet. Today you create the task and link it to the step, and the link is what the rest of the system reads. The step spawning the task with the owner resolved from the role is in build, and the site says so wherever the story reaches that moment.",
+          a: "When you run the SOP, yes. Give a step of a step-by-step SOP a job title and mark it to create a task. Running the SOP creates the task for the person holding that title who is available soonest, and when nobody holds it the task is created unassigned with a note saying so, never guessed.",
         },
         {
           q: "Can I see who has not read the current version?",

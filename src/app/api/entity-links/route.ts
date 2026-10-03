@@ -27,6 +27,7 @@ import { logActivity } from "@/lib/item-thread";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeKind } from "@/lib/access/node-rules";
 import { readableFileIds } from "@/lib/file-access";
+import { sopVisibilityWhere } from "@/lib/sop-access";
 import { LINK_NODE_KIND, LINK_TASK_TYPES, linkVisible, type LinkEndFacts } from "@/lib/entity-link-ends";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 import { filledRowCounts } from "@/lib/table-counts";
@@ -61,7 +62,25 @@ async function ctx() {
   if (!u.id || !u.organizationId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+  return { session, userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
+}
+
+type SessionLike = Parameters<typeof sopVisibilityWhere>[0];
+
+/**
+ * The SOP ids among `ids` the viewer may read, by the one SOP read rule (the
+ * list's and the SOP page's: sopVisibilityWhere). A SOP filed in a folder the
+ * viewer holds no grant on answers 404 on its own page, so a link to it must
+ * not name it, count it or carry its step text either.
+ */
+async function readableSopIds(session: SessionLike, orgId: string, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const where = await sopVisibilityWhere(session);
+  const rows = await prisma.sOP.findMany({
+    where: { AND: [{ organizationId: orgId, id: { in: ids } }, where] },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
 }
 
 interface HydratedLink {
@@ -82,7 +101,17 @@ async function hydrate(
   orgId: string,
   userId: string,
   accessLevel: string | null | undefined,
+  session: SessionLike,
 ): Promise<HydratedLink[]> {
+  // Every SOP end, source or target, read once under the SOP read rule: the
+  // titles below are hydrated only for these, and the filter at the end drops
+  // every link with any other SOP end.
+  const sopEndIds = [...new Set(rows.flatMap((r) => [
+    ...(r.sourceType === "SOP" ? [r.sourceId] : []),
+    ...(r.targetType === "SOP" ? [r.targetId] : []),
+  ]))];
+  const readableSops = await readableSopIds(session, orgId, sopEndIds);
+
   const byType = new Map<string, string[]>();
   for (const r of rows) {
     const list = byType.get(r.targetType) ?? [];
@@ -111,8 +140,9 @@ async function hydrate(
           titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/canvas/${w.id}` });
         }
       } else if (type === "SOP") {
-        const sops = await prisma.sOP.findMany({
-          where: { organizationId: orgId, id: { in: ids } },
+        const readable = ids.filter((id) => readableSops.has(id));
+        const sops = readable.length === 0 ? [] : await prisma.sOP.findMany({
+          where: { organizationId: orgId, id: { in: readable } },
           select: { id: true, title: true, category: true, status: true },
         });
         for (const s of sops) {
@@ -208,8 +238,10 @@ async function hydrate(
   // One world from the one resolver for every node end (a doc with its parent
   // pages and restriction, a canvas with its Folder, a Folder, a List, a
   // Space, a table, a form), tasks through their List or their assignment,
-  // and the file read rule for files. Ends of other kinds (a SOP, a KRA, an
-  // OKR, a person) are not nodes and pass through, as before.
+  // the file read rule for files, and the SOP read rule for SOPs (a task an
+  // SOP run made links back to its SOP, and that SOP may sit in a folder the
+  // task's reader has no grant on). Ends of other kinds (a KRA, an OKR, a
+  // person) are not nodes and pass through, as before.
   const ends = rows.flatMap((r) => [{ type: r.sourceType as string, id: r.sourceId }, { type: r.targetType as string, id: r.targetId }]);
   const taskIds = [...new Set(ends.filter((e) => LINK_TASK_TYPES.has(e.type)).map((e) => e.id))];
   const tasks = taskIds.length
@@ -228,6 +260,7 @@ async function hydrate(
     userId,
     nodeOpens: (kind, id) => roleAtLeast(decisions.get(`${kind}:${id}`)?.role ?? "none", "VIEW"),
     readableFiles: new Set(readableFiles),
+    readableSops,
     tasks: new Map(tasks.map((t) => [t.id, t])),
   };
 
@@ -269,7 +302,7 @@ export async function GET(req: Request) {
       relationKind,
       targetType: filterTargetType && ENTITY_TYPES.includes(filterTargetType) ? filterTargetType : undefined,
     });
-    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel);
+    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel, c.session);
     return NextResponse.json({ links: hydrated });
   }
 
@@ -280,7 +313,7 @@ export async function GET(req: Request) {
       relationKind,
       sourceType: filterSourceType && ENTITY_TYPES.includes(filterSourceType) ? filterSourceType : undefined,
     });
-    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel);
+    const hydrated = await hydrate(links, c.organizationId, c.userId, c.accessLevel, c.session);
     return NextResponse.json({ links: hydrated });
   }
 

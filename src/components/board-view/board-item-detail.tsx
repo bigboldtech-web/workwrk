@@ -32,7 +32,7 @@
 // through `metadataPatch` (a server-side merge over what is stored) rather
 // than resending a cached copy of the whole blob.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import {
   Ban, CalendarDays, CalendarPlus, Check, ClipboardList, Clock, Eye, Flag, GitBranch,
   Hourglass, Link2, Paperclip, Play, Plus, Search, Square, Tag, Target, UserPlus,
@@ -69,6 +69,7 @@ import { CommentThread } from "@/components/comments/comment-thread";
 import { useItemFields } from "@/hooks/use-item-fields";
 import { FieldValue } from "./field-value";
 import { TagPicker } from "./tag-picker";
+import { TaskTrail } from "@/components/board-view/task-trail";
 import { LinkedAttachments } from "./linked-attachments";
 import { TimeTracker } from "./time-tracker";
 import { ItemTypePicker } from "./item-type-picker";
@@ -182,6 +183,39 @@ export function listFieldCarriesValue(
   return (item.connections?.[key]?.length ?? 0) > 0;
 }
 
+/** Who holds the task, as one string: the resolved assignees, else the ids, else the owner. */
+export function trailAssigneeSignature(item: Pick<BoardItemRow, "assignees" | "assigneeIds" | "ownerId">): string {
+  if (item.assignees?.length) return item.assignees.map((a) => a.id).join(",");
+  if (item.assigneeIds?.length) return item.assigneeIds.join(",");
+  return item.ownerId ?? "";
+}
+
+/**
+ * When the Connection trail must read again because the assignees changed.
+ *
+ * The trail's "nobody held the job title, so this task is unassigned" notice
+ * is decided by the server from the STORED assignees. Assigning someone used
+ * to leave it on screen until a reload, because the trail never read again.
+ * Reading again the moment the picker changes is not enough either: that
+ * render is the optimistic one, the PATCH is still in flight, and a trail read
+ * that wins the race answers with the old assignees. So an assignee change
+ * with the same `updatedAt` (the optimistic render) only marks the trail
+ * pending, and the next `updatedAt` (the save's answer merged in) is what
+ * bumps `n`. A change that arrives WITH a new `updatedAt` (a reload, another
+ * person's edit over realtime) is already the server's word and bumps at
+ * once, as does a host that never carries `updatedAt`. A refused save
+ * reloads the old assignees, so the trail it already shows stays right.
+ */
+export interface TrailAssigneeStamp { sig: string; at: string; pending: boolean; n: number }
+export function settleTrailAssignees(prev: TrailAssigneeStamp, sig: string, at: string): TrailAssigneeStamp {
+  if (sig !== prev.sig) {
+    if (at !== prev.at || !at) return { sig, at, pending: false, n: prev.n + 1 };
+    return { sig, at, pending: true, n: prev.n };
+  }
+  if (at !== prev.at) return prev.pending ? { sig, at, pending: false, n: prev.n + 1 } : { ...prev, at };
+  return prev;
+}
+
 /**
  * One key of `metadata`, changed without touching the rest of it.
  *
@@ -279,6 +313,13 @@ export function BoardItemDetail({
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [subtaskCount, setSubtaskCount] = useState<number | null>(null);
   const [attachCount, setAttachCount] = useState<number | null>(null);
+  // The trail reads again once an assignee change has SAVED (settleTrailAssignees).
+  // Derived during render, React's pattern for state that follows a prop.
+  const trailSig = trailAssigneeSignature(item);
+  const trailAt = item.updatedAt ? String(item.updatedAt) : "";
+  const [trailStamp, setTrailStamp] = useState<TrailAssigneeStamp>(() => ({ sig: trailSig, at: trailAt, pending: false, n: 0 }));
+  const nextTrailStamp = settleTrailAssignees(trailStamp, trailSig, trailAt);
+  if (nextTrailStamp !== trailStamp) setTrailStamp(nextTrailStamp);
   const reveal = (s: string) => setRevealed((prev) => new Set(prev).add(s));
 
   const checklistItems = Array.isArray(item.metadata?.checklist) ? (item.metadata!.checklist as unknown[]) : [];
@@ -475,6 +516,9 @@ export function BoardItemDetail({
           onCountChange={setAttachCount}
         />
       </div>
+
+      {/* The connection trail: read only, rendered only when it has entries. */}
+      <TaskTrail itemId={item.id} refreshKey={`${String(item.metadata?.kraId ?? "")}:${String(item.metadata?.kpiId ?? "")}:${attachCount}:${nextTrailStamp.n}`} />
 
       {/* 9, "Add to task" (e) */}
       {canEdit && addRows.length > 0 ? (
@@ -1317,6 +1361,42 @@ function TitleField({
   });
   useEffect(() => () => { if (editingRef.current) commitRef.current(); }, []);
 
+  // While editing, the box grows with the title, so a long name reads in full
+  // on as many lines as it shows at rest. It was a one-row textarea, so a
+  // title that wraps at rest collapsed to its first line the moment it was
+  // clicked, the rest scrolled out of sight. It re-fits when the host's width
+  // changes (the drawer resized, the page column narrowed).
+  const titleBoxRef = useRef<HTMLTextAreaElement | null>(null);
+  // Where the person clicked becomes the caret (the end when the title was
+  // opened from the keyboard), not the start of the title.
+  const caretAtRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = titleBoxRef.current;
+    if (!editing || !el) return;
+    const at = Math.min(caretAtRef.current ?? el.value.length, el.value.length);
+    el.setSelectionRange(at, at);
+    caretAtRef.current = null;
+  }, [editing]);
+  useLayoutEffect(() => {
+    const el = titleBoxRef.current;
+    if (!editing || !el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    let width = el.clientWidth;
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          if (el.clientWidth === width) return;
+          width = el.clientWidth;
+          fit();
+        })
+      : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [editing, value]);
+
   if (!canEdit) {
     return <h1 className="cursor-default text-xl font-semibold leading-snug text-ink">{item.title}</h1>;
   }
@@ -1325,7 +1405,20 @@ function TitleField({
       <button
         type="button"
         data-task-title
-        onClick={() => setEditing(true)}
+        onClick={(e) => {
+          // A keyboard press (detail 0) has no point to read; a click does.
+          const doc = document as Document & {
+            caretPositionFromPoint?: (x: number, y: number) => { offset: number } | null;
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+          };
+          let at: number | null = null;
+          if (e.detail > 0) {
+            const pos = doc.caretPositionFromPoint?.(e.clientX, e.clientY) ?? null;
+            at = pos ? pos.offset : doc.caretRangeFromPoint?.(e.clientX, e.clientY)?.startOffset ?? null;
+          }
+          caretAtRef.current = at;
+          setEditing(true);
+        }}
         className="w-full text-start text-xl font-semibold leading-snug text-ink"
       >
         {value || item.title}
@@ -1334,6 +1427,7 @@ function TitleField({
   }
   return (
     <textarea
+      ref={titleBoxRef}
       autoFocus
       rows={1}
       value={value}
@@ -1356,7 +1450,7 @@ function TitleField({
           setEditing(false);
         }
       }}
-      className="w-full resize-none border-b border-brand bg-transparent text-xl font-semibold leading-snug text-ink outline-none"
+      className="w-full resize-none overflow-hidden border-b border-brand bg-transparent text-xl font-semibold leading-snug text-ink outline-none"
     />
   );
 }

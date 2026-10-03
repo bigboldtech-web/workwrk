@@ -3,7 +3,7 @@
 // This file was the home page until 2026-09-22. It argues in the quiet
 // register the founder rejected twice (six word headlines at 80px, one
 // object per section, no card grids, almost no colour); the register he
-// asked for is the one ClickUp, Asana and monday.com share, and stack.tsx
+// asked for is the one the category's biggest work platforms share, and stack.tsx
 // is that page.
 //
 // It is still on disk for one reason: `home.test.ts` imports `COPY` and

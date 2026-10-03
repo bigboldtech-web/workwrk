@@ -81,6 +81,7 @@ import { SopVersionsTab } from "@/components/sops/sop-versions-tab";
 import { SopShareDialog } from "@/components/sops/sop-share-dialog";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
 import { StartRunDialog } from "@/components/sops/start-run-dialog";
+import { RunStepsDialog } from "@/components/sops/run-steps-dialog";
 import { AssignDialog } from "@/components/process/assign-dialog";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
@@ -88,6 +89,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { getSopKind, getSopLayout, SOP_KIND_LABEL, SOP_STATUS_COLOR, SOP_STATUS_LABEL, sopTypeForKind, type SopKind, type SopLayout, type SopStatus } from "@/lib/sop-kind";
 import { deriveSopSaveState, isMeaningfulFirstChange, nextRetryDelay } from "@/lib/sop-save-state";
+import { runnableSteps } from "@/lib/sop-step-owner";
 import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-placement";
 import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
 
@@ -121,6 +123,8 @@ interface SopPayload {
 }
 
 type Snapshot = { title: string; description: string; content: Record<string, unknown> };
+/** What one save is asked to do beyond writing the content. */
+type FlushOpts = { keepalive?: boolean; publish?: { reacknowledge: boolean } };
 
 const AUTOSAVE_MS = 700;
 const KEEPALIVE_LIMIT = 60_000;
@@ -290,7 +294,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       case "recording":
         return { ...original, type: original.type === "RECORDED" ? "RECORDED" : "recorded", steps: recSteps };
       default:
-        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps) };
+        return { ...original, type: layout === "flow" ? "process_flow" : "steps", layout, steps: layout === "flow" ? stepsFromFlow(flow, steps) : steps, flow: layout === "flow" ? flow : flowFromSteps(steps, flow) };
     }
   }, [sop?.content, kind, bnDoc, blocks, sections, recSteps, layout, steps, flow]);
 
@@ -314,7 +318,9 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       case "written": return blocks.some((b) => (b as { text?: string }).text?.trim());
       case "checklist": return sections.some((s) => s.steps.length > 0 || s.title.trim());
       case "recording": return recSteps.length > 0;
-      default: return layout === "flow" ? flow.steps.length > 0 : steps.some((s) => s.title.trim() || s.description);
+      // A step with only an image or an owner is content too: on the create
+      // route nothing else saves it, and leaving would drop it unasked.
+      default: return layout === "flow" ? flow.steps.length > 0 : steps.some((s) => s.title.trim() || s.description || s.image || s.jobTitle || s.createsTask === true);
     }
   }, [kind, blocks, sections, recSteps, layout, flow, steps]);
 
@@ -324,7 +330,16 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const [retrying, setRetrying] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const inFlightRef = useRef(false);
-  const queuedRef = useRef(false);
+  // A save asked for while one is in flight waits for the NEXT save's real
+  // result, with its options carried (Publish included). It used to answer
+  // true at once and run later as a plain save, so Publish could say
+  // "Published" over a Draft and Done could discard the local backup of
+  // words still on their way.
+  const queuedRef = useRef<{ opts: FlushOpts; waiters: Array<(ok: boolean) => void> } | null>(null);
+  // One number per edit session. Leaving or discarding starts a new one, and
+  // a retry, a queued save or a toast's Retry from an ended session sends
+  // nothing: a discarded edit is never written by a retry fired afterwards.
+  const sessionRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
@@ -347,9 +362,17 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const mountedAtRef = useRef(Date.now());
   const draftFromEarlier = !!draft.pending && Date.parse(draft.pending.at) < mountedAtRef.current;
 
-  const flush = useCallback(async (opts: { keepalive?: boolean; publish?: { reacknowledge: boolean } } = {}): Promise<boolean> => {
+  const flush = useCallback(async (opts: FlushOpts = {}): Promise<boolean> => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    if (inFlightRef.current) { queuedRef.current = true; return true; }
+    if (inFlightRef.current) {
+      return new Promise<boolean>((resolve) => {
+        const q = queuedRef.current ?? { opts: {}, waiters: [] };
+        q.opts = { keepalive: q.opts.keepalive || opts.keepalive, publish: opts.publish ?? q.opts.publish };
+        q.waiters.push(resolve);
+        queuedRef.current = q;
+      });
+    }
+    const gen = sessionRef.current;
     const snap = snapshotRef.current;
     const sent = serialRef.current;
     const id = sopIdRef.current;
@@ -404,20 +427,38 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       attemptRef.current += 1;
       if (delay !== null) {
         setRetrying(true);
-        retryRef.current = setTimeout(() => { retryRef.current = null; void flush(); }, delay);
+        retryRef.current = setTimeout(() => { retryRef.current = null; if (gen === sessionRef.current) void flush(); }, delay);
       } else {
         setRetrying(false);
         attemptRef.current = 0;
         const reason = fatal && e instanceof Error ? e.message : "Couldn't save. Check your connection and keep this tab open.";
-        toast(id ? reason : `Couldn't create the SOP. ${reason}`, { tone: "danger", action: { label: "Retry", onClick: () => void flush() } });
+        toast(id ? reason : `Couldn't create the SOP. ${reason}`, { tone: "danger", action: { label: "Retry", onClick: () => { if (gen === sessionRef.current) void flush(); } } });
       }
       return false;
     } finally {
       inFlightRef.current = false;
       setSaving(false);
-      if (queuedRef.current) { queuedRef.current = false; void flush(); }
+      const q = queuedRef.current;
+      if (q) {
+        queuedRef.current = null;
+        if (gen === sessionRef.current) void flush(q.opts).then((ok) => q.waiters.forEach((w) => w(ok)));
+        else q.waiters.forEach((w) => w(false));
+      }
     }
   }, [kind, draft, toast, bumpRowVersion]);
+
+  /** Ends the edit session: nothing it scheduled may send, and no failure carries into the next one. */
+  const endSaveSession = useCallback(() => {
+    sessionRef.current += 1;
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (retryRef.current) { clearTimeout(retryRef.current); retryRef.current = null; }
+    const q = queuedRef.current;
+    queuedRef.current = null;
+    q?.waiters.forEach((w) => w(false));
+    attemptRef.current = 0;
+    setFailed(false);
+    setRetrying(false);
+  }, []);
 
   /** Every change in edit mode: mirror to the local draft and, on a draft, queue the autosave. */
   const queueSave = useCallback(() => {
@@ -480,11 +521,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   /* ── actions ── */
   const enterEdit = useCallback(() => {
     if (!canEdit || !sop) return;
+    endSaveSession();
     baselinePendingRef.current = true;
     hydrate(sop);
     setEditing(true);
     router.replace(`${workSelf ?? `/sops/${sop.id}`}?edit=1`);
-  }, [canEdit, sop, hydrate, router, workSelf]);
+  }, [canEdit, sop, hydrate, router, workSelf, endSaveSession]);
 
   const leaveEdit = useCallback(async (opts: { discard?: boolean } = {}) => {
     if (!sop) {
@@ -506,13 +548,13 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
         if (!ok) return;
       }
     }
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    endSaveSession();
     draft.discard();
     setEditing(false);
     const fresh = await load();
     if (fresh) { baselinePendingRef.current = true; hydrate(fresh); }
     router.replace(workSelf ?? `/sops/${sop.id}`);
-  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething, workSelf]);
+  }, [sop, dirty, autosaves, flush, confirm, draft, load, hydrate, router, title, description, contentHasSomething, workSelf, endSaveSession]);
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [reack, setReack] = useState(false);
@@ -594,6 +636,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   };
 
   const [runOpen, setRunOpen] = useState(false);
+  const [stepsRunOpen, setStepsRunOpen] = useState(false);
   const [requestState, setRequestState] = useState<"idle" | "busy" | "sent">("idle");
   const requestAccess = async () => {
     if (!sop || requestState !== "idle") return;
@@ -632,11 +675,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       // Esc closes only the topmost overlay: a Picker, panel or dialog on
       // the shell's layer stack takes it, and only a bare edit mode leaves.
       const overlayOpen = layerCount > 0 || e.defaultPrevented || !!document.querySelector('[role="listbox"], [role="dialog"], [data-radix-popper-content-wrapper]');
-      if (e.key === "Escape" && editing && !typing && !overlayOpen && !presentOpen && !runOpen && !assignOpen && !shareOpen && !publishOpen) { void leaveEdit(); }
+      if (e.key === "Escape" && editing && !typing && !overlayOpen && !presentOpen && !runOpen && !stepsRunOpen && !assignOpen && !shareOpen && !publishOpen) { void leaveEdit(); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editing, canEdit, enterEdit, leaveEdit, flush, copyLink, presentOpen, runOpen, assignOpen, shareOpen, publishOpen, layerCount]);
+  }, [editing, canEdit, enterEdit, leaveEdit, flush, copyLink, presentOpen, runOpen, stepsRunOpen, assignOpen, shareOpen, publishOpen, layerCount]);
 
   /* ── details strip collapsed state ── */
   const detailsCollapsed = prefs.home.ui?.sopDetailsCollapsed === true;
@@ -685,6 +728,11 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   const displayTitle = (editing ? title : sop?.title ?? title) || (creating ? "" : "Untitled SOP");
   const headerTitle = displayTitle || `New ${SOP_KIND_LABEL[kind].toLowerCase()} SOP`;
 
+  // A published step-by-step SOP with a step marked "Creates a task" runs:
+  // each such step becomes a task owned by its job title (run-steps-dialog).
+  // The same steps the run reads (the list layout, else the flow's).
+  const runsSteps = kind === "steps" && status === "PUBLISHED" && runnableSteps(sop?.content).some((st) => st.createsTask);
+
   /* the one blue button */
   let primary: PrimaryAction | undefined;
   if (!editing && openAssignment && !isChecklist) {
@@ -695,6 +743,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       : { label: "Start run", icon: Play, onClick: () => setRunOpen(true) };
   } else if (!creating && canEdit && (status === "DRAFT" || status === "APPROVED") && !openAssignment) {
     primary = { label: "Publish", icon: Send, onClick: () => setPublishOpen(true) };
+  } else if (!editing && !creating && runsSteps) {
+    primary = { label: "Run steps", icon: Play, onClick: () => setStepsRunOpen(true) };
   }
   const PrimaryIcon = primary?.icon ?? null;
 
@@ -703,6 +753,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   if (!creating && canEdit && !editing) more.push({ label: "Edit", icon: Edit3, onClick: enterEdit });
   if (!creating && (kind === "steps" || kind === "recording")) more.push({ label: "Present", icon: Play, onClick: () => setPresentOpen(true) });
   if (!creating && canEdit) more.push({ label: "Assign…", icon: UserPlus, onClick: () => setAssignOpen(true) });
+  if (!creating && !editing && runsSteps && primary?.label !== "Run steps") more.push({ label: "Run steps as tasks…", icon: Play, onClick: () => setStepsRunOpen(true) });
   if (!creating && isChecklist && status === "PUBLISHED" && canEdit && primary?.label !== "Start run") more.push({ label: "Start run", icon: Play, onClick: () => setRunOpen(true) });
   if (!creating && canEdit && status === "DRAFT") more.push({ label: "Submit for review", icon: Send, onClick: () => void transition("IN_REVIEW", "Submitted for review") });
   if (!creating && canEdit && status === "IN_REVIEW") {
@@ -718,6 +769,19 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   if (!creating && role === "FULL") { if (status !== "PUBLISHED") more.push({ separator: true }); more.push({ label: "Delete", icon: Trash2, destructive: true, onClick: () => void remove() }); }
 
   const crumbs = [{ label: "SOPs", href: "/sops" }, ...(sop?.folder ? [{ label: sop.folder.name, href: `/sops?folderId=${sop.folder.id}` }] : []), { label: headerTitle }];
+
+  /* The status, kind and version chips. They do not shrink, so on a phone the
+     title row has no room for them beside Share and the one blue: the title
+     collapsed to nothing and the chips slid under the buttons. Below sm they
+     leave the title row and sit on their own line at the top of the page, so
+     a person still reads which kind and version they are about to run. */
+  const metaChips = (
+    <>
+      <StatusChip color={SOP_STATUS_COLOR[status]} label={SOP_STATUS_LABEL[status]} disabled />
+      <Chip size="default" className="h-6 px-2 text-xs" disabled>{SOP_KIND_LABEL[kind]}</Chip>
+      {!creating ? <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{sop?.version ?? 1}</span> : null}
+    </>
+  );
 
   return (
     <>
@@ -738,26 +802,42 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
                 placeholder="Untitled SOP"
                 aria-label="SOP title"
                 autoFocus={creating}
-                className="h-9 min-w-0 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none"
+                /* On a phone the input keeps a readable start of the title, and
+                   gives way only while a save has failed (its retries included:
+                   a retry reads as "saving"), so "Not saved" and Retry are never
+                   drawn under it and the row does not flick on each retry. The
+                   indicator's other states are quiet on a phone (below), so the
+                   row does not jump on every autosave either. */
+                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${failed || saveState.status === "error" ? "min-w-0" : "min-w-[4rem]"}`}
               />
             ) : (
-              <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{headerTitle}</h1>
+              /* min-w keeps a readable start of the title on a phone; the full
+                 name stays in the top bar and the breadcrumb. */
+              <h1 className="min-w-[4rem] flex-1 truncate text-xl font-semibold text-ink" title={headerTitle}>{headerTitle}</h1>
             )}
-            <StatusChip color={SOP_STATUS_COLOR[status]} label={SOP_STATUS_LABEL[status]} disabled />
-            <Chip size="default" className="h-6 px-2 text-xs" disabled>{SOP_KIND_LABEL[kind]}</Chip>
-            {!creating ? <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">v{sop?.version ?? 1}</span> : null}
+            <div className="flex shrink-0 items-center gap-2 max-sm:hidden">{metaChips}</div>
           </>
         }
         autosave={editing ? (
-          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} />
+          /* On a phone the title row has no room for a word beside the title,
+             the Share chip and the blue. Below sm every state but a failure goes
+             quiet (screen readers still hear it). A published SOP's unsaved
+             changes are on the sticky save bar ("Not saved" with Save); a draft
+             saves itself within a second; and a failure (Not saved, Retry)
+             still draws here, through its retries, with the title giving way
+             to it, and brings the save bar up too. */
+          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={failed || saveState.status === "error" ? undefined : "max-sm:[&>span]:sr-only"} />
         ) : undefined}
         actions={
           <>
             {!creating ? <ShareOrRoleChip role={role} onOpen={(mode) => setShareOpen(mode)} /> : null}
             {primary && primary.onClick ? (
-              <button type="button" onClick={primary.onClick} disabled={primary.busy} className="ms-1 inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">
+              /* On a phone the label gives way (icon only, like the Back button)
+                 so the title keeps the room; it stays the button's accessible
+                 name through sr-only, and the tooltip. */
+              <button type="button" onClick={primary.onClick} disabled={primary.busy} title={primary.label} className="ms-1 inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4 max-md:gap-0">
                 {primary.busy ? <Dots variant="pending" /> : PrimaryIcon ? <PrimaryIcon className="h-4 w-4" strokeWidth={1.5} aria-hidden /> : null}
-                {primary.label}
+                <span className="max-md:sr-only">{primary.label}</span>
               </button>
             ) : null}
           </>
@@ -766,6 +846,8 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       />
 
       <div className="os-chrome mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pb-32 pt-2 sm:px-6">
+        {/* The phone home of the header's status, kind and version chips. */}
+        <div className="-mb-3 flex flex-wrap items-center gap-2 sm:hidden">{metaChips}</div>
         {readOnly && !creating ? (
           <ReadOnlyBanner
             variant="inline"
@@ -871,7 +953,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
           <div className="flex flex-col gap-3">
             {editing && kind === "steps" ? (
               <div className="flex items-center justify-end">
-                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+                <button type="button" onClick={() => { if (layout === "list") { setFlow(flowFromSteps(steps, flow)); setLayout("flow"); } else { setSteps(stepsFromFlow(flow, steps)); setLayout("list"); } }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
                   <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {layout === "list" ? "Show as flow" : "Show as list"}
                 </button>
               </div>
@@ -929,9 +1011,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
         )}
       </div>
 
-      {/* The sticky save bar: unsaved changes on a published SOP, or a failed save. */}
+      {/* The sticky save bar: unsaved changes on a published SOP, or a failed save.
+          Below lg the hub sidebar is hidden (os-shell), so the bar starts at
+          the rail alone; offset by the sidebar's 264px too, it began past a
+          phone's edge and Save and Done were drawn off screen. */}
       {editing && saveState.showSaveBar ? (
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 max-lg:start-[var(--os-rail-w)] flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-base text-ink">{failed ? "Not saved" : "Unsaved changes"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
           <button type="button" onClick={() => void flush()} disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">
@@ -941,7 +1026,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       ) : editing && !creating ? (
         /* Nothing dirty: one way out for a mouse user on drafts AND on
            published SOPs (Esc is the keyboard's). */
-        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
+        <div className="fixed bottom-0 end-0 start-[calc(var(--os-rail-w)+var(--os-side-w,0px))] z-30 max-lg:start-[var(--os-rail-w)] flex h-14 items-center gap-2 border-t border-line bg-raised px-6">
           <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{autosaves ? "Editing · drafts save as you type" : "Editing · changes are saved when you press Save"}</span>
           <button type="button" onClick={() => void leaveEdit()} className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-raised px-3 text-base font-medium text-ink hover:bg-hover">
             <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Done
@@ -972,6 +1057,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
       {sop ? (
         <>
           <StartRunDialog open={runOpen} onClose={() => setRunOpen(false)} sop={{ id: sop.id, title: sop.title }} defaultAssigneeId={openAssignment ? boot.viewer.id : null} onStarted={(run) => { setPeopleKey((k) => k + 1); if (run.shareToken) window.open(`/run/${run.shareToken}`, "_blank", "noopener"); void load(); }} />
+          {kind === "steps" ? <RunStepsDialog open={stepsRunOpen} onClose={() => setStepsRunOpen(false)} sop={{ id: sop.id, title: sop.title }} /> : null}
           <AssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} object={{ type: "sop", id: sop.id, title: sop.title }} onAssigned={() => { setPeopleKey((k) => k + 1); setTab("people"); }} />
           <SopShareDialog
             open={shareOpen !== null}

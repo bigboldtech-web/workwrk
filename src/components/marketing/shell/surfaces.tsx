@@ -1249,19 +1249,18 @@ export function InviteModalSurface() {
  * ═══════════════════════════════════════════════════════════════════ */
 
 /**
- * The tiles Template Center really has, plus the Tuesday one behind its own
- * flag. Drawing a blue-bordered "Tuesday: client onboarding" tile as the
- * first thing in the product is the same promise the prose makes, made in a
- * picture; nothing in src/lib/templates or the Template Center seeds carries
- * that template today.
+ * Tiles Template Center really has (the built-in rows in
+ * prisma/seed-templates.ts), plus the Tuesday one behind its own flag. The
+ * Tuesday tile is the template src/lib/templates/tuesday-template.ts seeds
+ * and /signup?template=tuesday applies, so it shows only with that flag on.
  */
 const TEMPLATE_TILES: Array<{ name: string; note: string; primary?: boolean }> = [
   ...(flags.tuesdayTemplateAtSignup
     ? [{ name: tuesday.workspace.templateName, note: "SOP, board, goal and roles", primary: true }]
     : []),
-  { name: "Weekly operations review", note: "Agenda, KPI pack, actions" },
-  { name: "Supplier onboarding", note: "SOP and checklist" },
-  { name: "Quarterly planning", note: "OKRs and a planning board" },
+  { name: "Operations", note: "A Space with its lists and statuses" },
+  { name: "Weekly review", note: "Wins, numbers and next week's plan" },
+  { name: "Decision log", note: "What was decided, by whom and why" },
 ];
 
 export function TemplateCenterSurface() {

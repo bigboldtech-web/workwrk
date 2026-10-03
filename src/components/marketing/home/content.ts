@@ -171,7 +171,7 @@ export function tuesdayCtaHeadline(): string {
 
 export function tuesdayCtaLede(): string {
   return flags.tuesdayTemplateAtSignup
-    ? "The Tuesday workspace, the SOP, the board, the goal and the roles, is a template on your first screen."
+    ? "The workspace this button starts comes with the Tuesday template: the Space and its Onboarding List, the SOP, the Onboarding lead and Finance job titles, the KRA and KPI, the goal, the playbook doc and a sample task on the List. The people and the client in the story are not part of it."
     : "The SOP, the board, the goal and the roles are all things you build on day one. The Tuesday workspace as a one click template is in build, so the button below opens an empty workspace and not a seeded one.";
 }
 

@@ -4,7 +4,7 @@
  * set of rules borrowed from consumer hardware marketing: six word
  * headlines at 80px, one object per section, almost no colour, no card
  * grids. The founder rejected it twice and named the register he wants
- * instead: ClickUp, Asana, monday.com. Those sites are denser, warmer and
+ * instead: the category's three biggest work platforms. Those sites are denser, warmer and
  * far more product forward, and they solve a problem the quiet register
  * cannot: a buyer evaluating a work platform is shopping for BREADTH, and
  * breadth has to be shown rather than implied.
@@ -35,7 +35,7 @@
  * Grounds stay light. `Section`'s own note records the site wide decision
  * (concept 10): the navy chrome inside a product frame is the only dark
  * element anywhere on the public site. That is not a conflict with the
- * brief, because ClickUp's current site is white rather than the purple
+ * brief, because the category leader's current site is white rather than the purple
  * gradient it used to be, and white plus one accent is exactly where the
  * category has landed. Colour arrives through the module tiles and the
  * status chips inside the frames, which is where the rivals put it too.
@@ -46,7 +46,7 @@
 .mk-stack {
   /* The one accent, stated once so nothing below reaches for a literal. */
   --stack-accent: var(--os-brand);
-  --stack-navy: var(--os-chrome-bg, #1b2537);
+  --stack-navy: var(--os-chrome-bg);
 }
 
 /* A tint band. Alternating white and tint is the category's page rhythm:
@@ -251,7 +251,7 @@
 .mk-tab[aria-selected="true"] {
   border-color: var(--stack-accent);
   background: var(--stack-accent);
-  color: #fff;
+  color: var(--os-ink-inv);
 }
 
 .mk-tab svg {
@@ -351,7 +351,7 @@
   text-align: center;
 }
 
-.mk-head--left {
+.mk-head[data-align="left"] {
   margin-left: 0;
   text-align: left;
 }
@@ -398,7 +398,7 @@
 
 /* The picture leads on every other row. `order` and not a second grid,
    so the DOM order stays "words then picture" for a screen reader. */
-.mk-row--flip .mk-row__art {
+.mk-row[data-flip] .mk-row__art {
   order: -1;
 }
 
@@ -463,7 +463,7 @@
 
   /* On one column the picture goes back under the words on every row, so
      the flip does not strand a screenshot above the text explaining it. */
-  .mk-row--flip .mk-row__art {
+  .mk-row[data-flip] .mk-row__art {
     order: 0;
   }
 
@@ -560,7 +560,7 @@
 }
 
 /* The highlighted middle, which every rival in the category has. */
-.mk-plan--featured {
+.mk-plan[data-featured] {
   border-color: var(--stack-accent);
   box-shadow: 0 10px 30px -12px rgb(0 115 234 / 0.28);
 }

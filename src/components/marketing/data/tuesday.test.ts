@@ -173,17 +173,22 @@ describe("the storyboard", () => {
   });
 
   it("prints the fallback narration for an unshipped mechanism, and only then", () => {
-    const stop2 = stopByNumber(2)!;
-    expect(stop2.truthGate.shipped).toBe(false);
-    expect(narrationFor(stop2)).toBe(stop2.truthGate.fallbackNarration);
-    expect(narrationFor(stop2)).not.toBe(stop2.narration);
+    // Stop 4 (an automation resolving a role to its holder on a status
+    // change) is closed.
+    const stop4 = stopByNumber(4)!;
+    expect(stop4.truthGate.shipped).toBe(false);
+    expect(narrationFor(stop4)).toBe(stop4.truthGate.fallbackNarration);
+    expect(narrationFor(stop4)).not.toBe(stop4.narration);
 
-    // And the other half of the gate, on a stop that really has shipped.
-    // Every stop in the fixture is closed today, so the shipped branch is
-    // exercised against a stop object rather than against the file, which
-    // is what keeps this test honest whichever way a flag moves later.
-    const shipped: Stop = { ...stop2, truthGate: { ...stop2.truthGate, shipped: true } };
-    expect(narrationFor(shipped)).toBe(shipped.narration);
+    // And the other half of the gate, on the stop that really has shipped:
+    // stop 2, an SOP step creating the task for the holder of its job title
+    // (Phase 10 Stage E, src/lib/sop-spawn.ts).
+    const stop2 = stopByNumber(2)!;
+    expect(stop2.truthGate.shipped).toBe(true);
+    expect(narrationFor(stop2)).toBe(stop2.narration);
+    // Both branches, against a stop object, whichever way the file moves later.
+    const closed: Stop = { ...stop2, truthGate: { ...stop2.truthGate, shipped: false } };
+    expect(narrationFor(closed)).toBe(stop2.truthGate.fallbackNarration);
   });
 
   it("does not claim a task completion writes a KPI record", () => {
@@ -254,10 +259,13 @@ describe("the storyboard", () => {
         expect(printed).toBe(b.narration);
       }
     }
+    // Beat 3 is stop 2's beat, which shipped: it prints its claim, and the
+    // claim names the rule that shipped (the job title), not "the role".
     const beat3 = beatByNumber(3)!;
     expect(beat3.stop).toBe(2);
-    expect(beatIsShipped(beat3)).toBe(false);
-    expect(narrationForBeat(beat3)).toBe(beat3.fallbackNarration);
+    expect(beatIsShipped(beat3)).toBe(true);
+    expect(narrationForBeat(beat3)).toBe(beat3.narration);
+    expect(narrationForBeat(beat3)).toContain("job title");
     expect(narrationForBeat(beat3)).not.toContain("because Sam holds the role");
 
     // Beat 7 is the 4:45 beat, under stop 5. Its stop is closed, so it
@@ -275,14 +283,20 @@ describe("the storyboard", () => {
     // stop 2's mechanism, which is shipped:false, so the picture may not say
     // it while the words may not either.
     const t = tuesday.task;
-    expect(stopByNumber(t.snapCaptionStop)!.truthGate.shipped).toBe(false);
-    expect(taskCaption()).toBe(t.snapCaptionFallback);
-    expect(taskCaption()).not.toBe(t.snapCaption);
-    expect(taskCaption()).not.toMatch(/created by/i);
-    // And the fallback still says everything that IS true: the links exist.
+    const shipped = stopByNumber(t.snapCaptionStop)!.truthGate.shipped;
+    // Stop 2 shipped, so the picture may say "Created by SOP"; the caption
+    // names the job title, the rule that shipped, never "Owner by role".
+    expect(shipped).toBe(true);
+    expect(taskCaption()).toBe(t.snapCaption);
+    expect(taskCaption()).toMatch(/created by sop/i);
+    expect(taskCaption()).toContain("Owner by job title");
+    expect(taskCaption()).not.toMatch(/owner by role/i);
+    // And the fallback, for the day the gate closes, still says everything
+    // that IS true without the claim: the links exist.
+    expect(t.snapCaptionFallback).not.toMatch(/created by/i);
     for (const link of t.links) {
       const head = link.label.split(",")[0].split(" v")[0];
-      expect(`${taskCaption()} ${t.links.map((l) => l.label).join(" ")}`).toContain(head.split(" ")[0]);
+      expect(`${t.snapCaptionFallback} ${t.links.map((l) => l.label).join(" ")}`).toContain(head.split(" ")[0]);
     }
   });
 
@@ -378,13 +392,19 @@ describe("the module tour's one line per block", () => {
     }
   });
 
-  it("prints the fallback while the stop is unshipped, and never the claim", () => {
+  it("prints the fallback while the stop is unshipped, and the claim only once it ships", () => {
     for (const [id] of Object.entries(GATED)) {
       const block = hub(id)!;
-      expect(stopByNumber(block.tourLineStop!)!.truthGate.shipped, id).toBe(false);
-      expect(tourLineFor(block), id).toBe(block.tourLineFallback);
-      expect(tourLineFor(block), id).not.toBe(block.tourLine);
+      if (stopByNumber(block.tourLineStop!)!.truthGate.shipped) {
+        expect(tourLineFor(block), id).toBe(block.tourLine);
+      } else {
+        expect(tourLineFor(block), id).toBe(block.tourLineFallback);
+        expect(tourLineFor(block), id).not.toBe(block.tourLine);
+      }
     }
+    // Stop 2 shipped (Work and Docs); the rest stay closed.
+    expect(["work", "docs"].every((id) => tourLineFor(hub(id)!) === hub(id)!.tourLine)).toBe(true);
+    expect(["teams", "talk", "goals", "ai"].every((id) => tourLineFor(hub(id)!) === hub(id)!.tourLineFallback)).toBe(true);
   });
 
   it("leaves a block describing something shipped with its own line", () => {

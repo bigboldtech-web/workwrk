@@ -107,6 +107,19 @@
   --os-presence:      #15803D;
   --os-attention:     #D92D20;
 
+  /* ── Module tiles. The home page's hub grid, as the founder approved
+     it on 2026-09-22. These are NOT the semantic trio above and must not
+     be swapped for it: the trio is status inside a surface and draws a
+     pale yellow and brown, a mint and a pinker red, while the approved
+     grid is an orange, a green and a red tint. Marketing only, so the
+     drift test skips them (the product has no tile tokens). Teams draws
+     its glyph in --os-danger-text, which is already the approved red. ── */
+  --mk-tile-orange-bg: #FFF4E5;
+  --mk-tile-orange-fg: #B25E02;
+  --mk-tile-green-bg:  #E8F8EF;
+  --mk-tile-green-fg:  #12734A;
+  --mk-tile-red-bg:    #FFEFEF;
+
   /* ── Chrome: the navy frame. The only dark element on the whole
      public site. Blue never sits on it. ────────────────────────── */
   --os-chrome-bg:        #1B2537;
@@ -135,6 +148,8 @@
   /* ── Type. The nine product sizes, unchanged, so a surface drawn
      here is the size it is in the product. ─────────────────────── */
   --os-font:   var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Mirrored from the product, and read by nothing on the site: Inter only
+     (.mk-mono and code set Inter with tabular figures, marketing.css). */
   --os-f-mono: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --os-t-rail:       10px; --os-t-rail-lh:       12px;
@@ -329,15 +344,16 @@
 }
 
 /* Tabular figures: the clock, the counter, both receipts and the 14 to 1
-   mark (spec 13.7). JetBrains Mono is already loaded; the fallback is the
-   grotesk's own tabular set. */
+   mark (spec 13.7). Inter only: the figures come from Inter's own tabular
+   set, never from a second family. */
 .mk-figures {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 .mk-mono {
-  font-family: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--os-font);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 /* ═════════════════════════════════════════════════════════════════

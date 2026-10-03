@@ -35,6 +35,7 @@
 
 import type { Prisma, PrismaClient } from "../src/generated/prisma";
 import { scriptPrisma } from "../scripts/lib/script-prisma";
+import { TUESDAY_TEMPLATE_ROW, tuesdayPayload } from "../src/lib/templates/tuesday-template";
 
 let client: PrismaClient | null = null;
 /** Lazy, so importing SEED_TEMPLATES in a test never needs a database. */
@@ -624,6 +625,12 @@ export const SEED_TEMPLATES: SeedRow[] = [
   // of the retired src/components/docs/note-templates.tsx, handed over as
   // built-in DOC template definitions). "Blank" is not here: New doc is blank.
   ...DOC_TEMPLATES,
+
+  // "Tuesday: client onboarding": the template the marketing site's Tuesday
+  // story is about and /signup?template=tuesday applies. Built from the
+  // site's fixture in one place (src/lib/templates/tuesday-template.ts), which
+  // GET /api/template-center also uses to create the row when it is missing.
+  { ...TUESDAY_TEMPLATE_ROW, payload: tuesdayPayload() as unknown as Prisma.InputJsonValue },
 ];
 
 /* ───────────────────────────── the run ───────────────────────────── */

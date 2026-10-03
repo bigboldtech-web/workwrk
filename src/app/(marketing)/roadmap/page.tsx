@@ -22,6 +22,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { mailboxes } from "@/components/marketing/config";
+import { flags } from "@/components/marketing/flags";
 import "@/components/marketing/home/home.css";
 import { Band, Claim, Close, Eyebrow, Headline, Line, Note, Page, Sub } from "@/components/marketing/iconic/iconic";
 import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketing/og";
@@ -99,13 +100,19 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
   { col: "done", area: "platform", title: "One token layer and one page frame", body: "Colour, type, spacing and radius decided once, and the navy rail, top bar, sidebar and page header shared by every page." },
   { col: "done", area: "platform", title: "Eight hubs on the rail", body: "About twenty five icons folded into eight, with every link kept." },
   { col: "done", area: "platform", title: "Template Center", body: "Save and apply task, list, space, folder, doc, view and whiteboard templates." },
+  { col: "done", area: "docs", title: "An SOP step that creates the task", body: "A step names a job title. Run the SOP and the step's task goes to the person holding that title who is available soonest, linked back to the step." },
+  ...(flags.connectionTrailFeature
+    ? [{ col: "done" as const, area: "work" as const, title: "The connection trail on a task", body: "The SOP step, KRA, goal, docs and time behind a task, on the task, showing only what the reader may open." }]
+    : []),
+  ...(flags.tuesdayTemplateAtSignup
+    ? [{ col: "done" as const, area: "platform" as const, title: "Self-serve signup, with the Tuesday template", body: "Start a workspace without talking to anybody, and start it from the Tuesday client onboarding template if you like." }]
+    : []),
   { col: "done", area: "platform", title: "Notifications and reminders", body: "A live bell, persistent reminders and an email path." },
   { col: "done", area: "platform", title: "A v1 REST API", body: "People, tasks, processes, result areas, KPIs, readings and recognitions, with an OpenAPI document." },
 
   // ── In progress ───────────────────────────────────────────────────────
   { col: "progress", area: "platform", title: "The interface refresh, phase by phase", body: "The frame, Work and Knowledge have landed. The remaining surfaces follow." },
   { col: "progress", area: "platform", title: "The new access model", body: "Four roles and one resolver, running inert beside the current ladder while a parity job compares every answer." },
-  { col: "progress", area: "docs", title: "An SOP step that creates the task", body: "With the owner resolved from the role that owns the process. This is the mechanism the Tuesday story marks as unbuilt." },
   { col: "progress", area: "tables", title: "More of the spreadsheet function set", body: "Closing the gap with what people expect a sheet to do." },
 
   // ── Next up ───────────────────────────────────────────────────────────
@@ -113,7 +120,9 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
   { col: "next", area: "ai", title: "Source chips on an answer", body: "The records the Ask actually read, shown beside the answer." },
   { col: "next", area: "ai", title: "Per person scoping on the Ask", body: "Retrieval is filtered by organisation today. It needs to be filtered by the person asking." },
   { col: "next", area: "teams", title: "Kudos as review evidence", body: "Recognition landing on the cycle rather than being read alongside it." },
-  { col: "next", area: "work", title: "The connection trail on a task", body: "Everything a task touched, in order, as a product surface rather than a story." },
+  ...(flags.connectionTrailFeature
+    ? []
+    : [{ col: "next" as const, area: "work" as const, title: "The connection trail on a task", body: "Everything a task touched, in order, as a product surface rather than a story." }]),
   { col: "next", area: "platform", title: "Guided first run", body: "Mission, values, the first goals and the first invitations, in one pass." },
   // THE ONE ITEM ON THIS BOARD THE REST OF THE SITE ARGUES WITH, so it says
   // how the argument is settled rather than leaving a reader to find it.
@@ -129,13 +138,21 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
   // free on the site into Book a demo, in one place, with no copy edit.
   // Concept 7.1 puts it exactly this way: "if self-serve signup is not live
   // at launch, Start free and Book a demo swap roles everywhere".
-  {
-    col: "next",
-    area: "platform",
-    title: "Self-serve signup",
-    body:
-      "Starting a workspace without talking to anybody. It is the launch gate for this site: every Start free points at it, and until it answers, one setting turns all eleven of them into Book a demo.",
-  },
+  //
+  // Self-serve signup now answers (/signup, proved end to end with the
+  // Tuesday template applied), so with the template flag on this card moves
+  // to Done above and this one is not shown.
+  ...(flags.tuesdayTemplateAtSignup
+    ? []
+    : [
+      {
+        col: "next" as const,
+        area: "platform" as const,
+        title: "Self-serve signup",
+        body:
+          "Starting a workspace without talking to anybody. It is the launch gate for this site: every Start free points at it, and until it answers, one setting turns all eleven of them into Book a demo.",
+      },
+      ]),
 
   // ── Backlog ───────────────────────────────────────────────────────────
   { col: "backlog", area: "platform", title: "The automation hub", body: "Event driven workflows, once enough of the product emits events worth reacting to." },

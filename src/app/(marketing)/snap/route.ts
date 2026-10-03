@@ -15,9 +15,16 @@
 // GET only. There is nothing to POST to a share URL, and 301 is the code
 // whose method-rewriting behaviour is the reason 308 exists; with no other
 // method handled, that distinction cannot bite.
+//
+// A RELATIVE Location. Behind nginx, request.url is the upstream address the
+// proxy called (http://localhost:3002/snap), so an absolute URL built from it
+// sent every shared workwrk.com/snap link to localhost, which does not load.
+// "/tuesday" is resolved by the browser against the address it asked for, so
+// it is right on the marketing host, the app host and a local server alike.
+// NextResponse.redirect() only takes an absolute URL, hence the plain response.
 
 import { NextResponse } from "next/server";
 
-export function GET(request: Request): NextResponse {
-  return NextResponse.redirect(new URL("/tuesday", request.url), 301);
+export function GET(): NextResponse {
+  return new NextResponse(null, { status: 301, headers: { Location: "/tuesday" } });
 }

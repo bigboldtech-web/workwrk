@@ -3,8 +3,8 @@
 // The tab strip over the product frame.
 //
 // This is the category's answer to breadth, and the survey found all four
-// rivals solving the same problem the same way: monday, ClickUp, Jira and
-// Notion each need to show a dozen capabilities without a dozen sections,
+// rivals solving the same problem the same way: the four biggest work and
+// knowledge platforms each need to show a dozen capabilities without a dozen sections,
 // and each of them uses a horizontal row of selectable chips over one
 // picture that changes. A visitor learns the product is wide by operating
 // the page rather than by reading a list that says so.

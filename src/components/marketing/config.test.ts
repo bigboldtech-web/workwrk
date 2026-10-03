@@ -21,15 +21,22 @@ describe("the CTA contract", () => {
     expect(["Sign up", "Register", "Create account"]).not.toContain(cta.label);
   });
 
-  it("asks for the Tuesday template but does not link to it until the flag grants it", () => {
-    // `template` is a request. The flag is the grant. Signup does not apply
-    // the template yet, so the deep link would promise a seeded workspace
-    // and open an empty one.
-    expect(flags.tuesdayTemplateAtSignup).toBe(false);
-    expect(primaryCta("spine", { template: true }).href.split("?")[0]).toBe(routes.signup);
-    expect(primaryCta("spine", { template: true }).href).not.toContain("template=");
-    // And the deep link the flag WILL unlock is the fixture's, not a
-    // second string typed into the config.
+  it("links to the Tuesday template only while the flag grants it", () => {
+    // `template` is a request. The flag is the grant: signup applies the
+    // Tuesday template (src/lib/templates/apply-tuesday.ts, proved end to
+    // end on the local server before the flag went on), so the deep link
+    // opens a seeded workspace. Off, it degrades to a bare /signup.
+    const href = primaryCta("spine", { template: true }).href;
+    if (flags.tuesdayTemplateAtSignup) {
+      expect(href.startsWith(routes.signupWithTemplate)).toBe(true);
+    } else {
+      expect(href.split("?")[0]).toBe(routes.signup);
+      expect(href).not.toContain("template=");
+    }
+    // A placement that does not ask for the template never gets it.
+    expect(primaryCta("hero").href).not.toContain("template=");
+    // And the deep link is the fixture's, not a second string typed into
+    // the config.
     expect(routes.signupWithTemplate).toBe(tuesday.workspace.templateDeepLink);
     expect(routes.signupWithTemplate).toBe("/signup?template=tuesday");
   });
@@ -108,12 +115,17 @@ describe("the claim flags", () => {
     expect(flags.watchTuesdayVideo).toBe(false);
   });
 
-  it("records that the stop 2 mechanism and the trail have not shipped", () => {
-    expect(flags.connectionTrailFeature).toBe(false);
-    expect(flags.tuesdayTemplateAtSignup).toBe(false);
-    // And the fixture agrees, which is what keeps the narration honest.
-    expect(tuesday.stops[1].truthGate.shipped).toBe(false);
+  it("records what Stage E shipped, and keeps what it did not off", () => {
+    // Shipped and proved locally (Phase 10 Stage E): the template at
+    // signup, the connection trail on a task, and stop 2 (an SOP step that
+    // creates the task for the holder of its job title).
+    expect(flags.connectionTrailFeature).toBe(true);
+    expect(flags.tuesdayTemplateAtSignup).toBe(true);
+    expect(tuesday.stops[1].truthGate.shipped).toBe(true);
+    // Stop 6 still bundles source chips and kudos as review evidence, and
+    // neither ships; the trail was taken out of its mechanism.
     expect(tuesday.stops[5].truthGate.shipped).toBe(false);
+    expect(tuesday.stops[5].truthGate.mechanism).not.toMatch(/trail/i);
   });
 });
 
