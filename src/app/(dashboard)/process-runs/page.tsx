@@ -39,6 +39,8 @@ import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
 import { DueDateDialog } from "@/components/process/due-date-dialog";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
+import { usePeoplePicker } from "@/components/people/use-people-picker";
 import { StartRunDialog } from "@/components/sops/start-run-dialog";
 import { RunDrawer } from "@/components/process/run-drawer";
 import { apiFetch } from "@/lib/api-fetch";
@@ -147,18 +149,13 @@ export default function ProcessRunsPage() {
   const [sopOpen, setSopOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [sops, setSops] = useState<Array<{ id: string; title: string }> | null>(null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   useEffect(() => {
     if (!filterOpen || sops !== null) return;
     let live = true;
     void (async () => {
-      const [s, p] = await Promise.all([
-        apiFetch<{ data: Array<{ id: string; title: string }> }>("/api/sops?kind=checklist&pageSize=100", { cache: "no-store" }),
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=200", { cache: "no-store" }),
-      ]);
+      const s = await apiFetch<{ data: Array<{ id: string; title: string }> }>("/api/sops?kind=checklist&pageSize=100", { cache: "no-store" });
       if (!live) return;
       setSops(s.ok ? s.data.data : []);
-      setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []);
     })();
     return () => { live = false; };
   }, [filterOpen, sops]);
@@ -229,10 +226,10 @@ export default function ProcessRunsPage() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = "runs.csv"; a.click(); URL.revokeObjectURL(url);
   };
-  useEffect(() => {
-    if (!reassignFor || people.length) return;
-    void apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=200", { cache: "no-store" }).then((p) => setPeople(p.ok ? (Array.isArray(p.data) ? p.data : p.data?.data ?? []) : []));
-  }, [reassignFor, people.length]);
+  // Reassign to anyone in the workspace who can do the run (the server takes
+  // any colleague), searched as the person types: the whole company, never
+  // only the reassigner's own report tree.
+  const reassignPicker = usePeoplePicker({ enabled: !!reassignFor, reach: "active", named: reassignFor?.row.assigneeId ? [reassignFor.row.assigneeId] : [] });
 
   const rows = payload?.data ?? null;
   const total = payload?.pagination.total ?? 0;
@@ -260,7 +257,11 @@ export default function ProcessRunsPage() {
     : null;
   const showQuietEmpty = rows !== null && rows.length === 0 && !filteredEmpty;
 
-  const peopleOptions: PickerOption[] = [{ value: "__anyone__", label: "Anyone with the link" }, ...people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }))];
+  const reassignQuery = reassignPicker.query.trim().toLowerCase();
+  const peopleOptions: PickerOption[] = [
+    ...(!reassignQuery || "anyone with the link".includes(reassignQuery) ? [{ value: "__anyone__", label: "Anyone with the link" }] : []),
+    ...reassignPicker.people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })),
+  ];
 
   return (
     <>
@@ -302,10 +303,7 @@ export default function ProcessRunsPage() {
           {view !== "mine" ? (
             <FilterGroup label="Assignee">
               <FilterRow label="Filter by assignee" checked={!!assigneeId} onCheckedChange={(on) => { if (!on) setParams({ assigneeId: null }); else setAssigneeOpen(true); }}>
-                <span className="relative block">
-                  <button type="button" onClick={() => setAssigneeOpen((o) => !o)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">{assigneeId ? personName(people.find((p) => p.id === assigneeId)) || "1 person" : <span className="text-ink-3">Choose a person</span>}</button>
-                  <Picker open={assigneeOpen} onClose={() => setAssigneeOpen(false)} ariaLabel="Assignee" searchPlaceholder="Find a person" selected={assigneeId} onSelect={(v) => { setParams({ assigneeId: v }); setAssigneeOpen(false); }} sections={[{ options: people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })) }]} />
-                </span>
+                <PersonFilterPick ariaLabel="Assignee" value={assigneeId} onChange={(v) => setParams({ assigneeId: v })} open={assigneeOpen} setOpen={setAssigneeOpen} />
               </FilterRow>
             </FilterGroup>
           ) : null}
@@ -361,7 +359,7 @@ export default function ProcessRunsPage() {
       {reassignFor ? (
         /* Pinned under the row's "…" (or at the right-click point) so the
            picker stays attached to the row it changes. */
-        <Picker open onClose={() => setReassignFor(null)} ariaLabel="Reassign" searchPlaceholder="Find a person" anchorPoint={reassignFor.point ?? { top: 80, left: 80 }} selected={reassignFor.row.assigneeId ?? "__anyone__"} onSelect={(v) => void reassign(reassignFor.row, v === "__anyone__" ? null : v)} sections={[{ options: peopleOptions }]} width={300} />
+        <Picker open onClose={() => setReassignFor(null)} ariaLabel="Reassign" searchPlaceholder="Find a person" alwaysSearch onSearchChange={reassignPicker.setQuery} loading={reassignPicker.loading && reassignPicker.people.length === 0} anchorPoint={reassignFor.point ?? { top: 80, left: 80 }} selected={reassignFor.row.assigneeId ?? "__anyone__"} onSelect={(v) => void reassign(reassignFor.row, v === "__anyone__" ? null : v)} sections={[{ options: peopleOptions }]} width={300} />
       ) : null}
       {dueFor ? (
         <DueDateDialog open value={dueFor.dueDate} description={`${dueFor.title}${dueFor.assignee ? ` · ${personName(dueFor.assignee)}` : ""}`} onClose={() => setDueFor(null)} onSave={(next) => saveDue(dueFor, next)} />

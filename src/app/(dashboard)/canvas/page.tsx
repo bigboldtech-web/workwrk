@@ -36,6 +36,7 @@ import { SplitPrimary } from "@/components/ui/split-primary";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { EntityCard } from "@/components/ui/entity-card";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { CanvasRowMenuHost, useCanvasRowMenu, dispatchCanvasesChanged, type CanvasMenuTarget } from "@/components/canvas/canvas-row-menu";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -156,20 +157,15 @@ export default function CanvasesPage() {
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
-  const [people, setPeople] = useState<PersonRef[]>([]);
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   useEffect(() => {
     if (!(filterOpen || bulkMoveOpen) || spaces !== null) return;
     let live = true;
     void (async () => {
-      const [s, p] = await Promise.all([
-        apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }),
-        apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" }),
-      ]);
+      const s = await apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" });
       if (!live) return;
       setSpaces(s.ok ? s.data.spaces ?? [] : []);
-      setPeople(p.ok && Array.isArray(p.data?.data) ? p.data.data : []);
     })();
     return () => { live = false; };
   }, [filterOpen, bulkMoveOpen, spaces]);
@@ -326,12 +322,7 @@ export default function CanvasesPage() {
           </FilterGroup>
           <FilterGroup label="Owner">
             <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerOpen(true); }}>
-              <span className="relative block">
-                <button type="button" onClick={() => setOwnerOpen((o) => !o)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
-                  {owner && people.find((p) => p.id === owner) ? personName(people.find((p) => p.id === owner)) : <span className="text-ink-3">Choose a person</span>}
-                </button>
-                <Picker open={ownerOpen} onClose={() => setOwnerOpen(false)} ariaLabel="Owner" searchPlaceholder="Find a person" selected={owner} onSelect={(v) => { setParams({ owner: v }); setOwnerOpen(false); }} sections={[{ options: people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })) }]} />
-              </span>
+              <PersonFilterPick ariaLabel="Owner" value={owner} onChange={(v) => setParams({ owner: v })} open={ownerOpen} setOpen={setOwnerOpen} />
             </FilterRow>
           </FilterGroup>
           <FilterGroup label="Last edited">

@@ -43,6 +43,7 @@ import { EntityTile, NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Dots } from "@/components/ui/dots";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { FormRowMenuHost, dispatchFormsChanged, useFormRowMenu, type FormMenuTarget } from "@/components/forms/form-row-menu";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -212,7 +213,6 @@ export default function FormsPage() {
   const [sortOpen, setSortOpen] = useState(false);
   const [ownerPickOpen, setOwnerPickOpen] = useState(false);
   const [goesToOpen, setGoesToOpen] = useState(false);
-  const [people, setPeople] = useState<PersonRef[] | null>(null);
   const [lists, setLists] = useState<ListPick[] | null>(null);
   const [tables, setTables] = useState<{ id: string; name: string }[]>([]);
   const [fromListOpen, setFromListOpen] = useState(false);
@@ -220,15 +220,13 @@ export default function FormsPage() {
     if ((!filterOpen && !fromListOpen) || lists !== null) return;
     let live = true;
     void (async () => {
-      const [l, t, p] = await Promise.all([
+      const [l, t] = await Promise.all([
         apiFetch<{ data: ListPick[] }>("/api/lists/pick?limit=100", { cache: "no-store" }),
         tablesOn ? apiFetch<{ id: string; name: string }[]>("/api/tables", { cache: "no-store" }) : Promise.resolve(null),
-        apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" }),
       ]);
       if (!live) return;
       setLists(l.ok ? l.data.data ?? [] : []);
       setTables(t && t.ok && Array.isArray(t.data) ? t.data.map((x) => ({ id: x.id, name: x.name })) : []);
-      setPeople(p.ok && Array.isArray(p.data?.data) ? p.data.data : []);
     })();
     return () => { live = false; };
   }, [filterOpen, fromListOpen, lists, tablesOn]);
@@ -562,7 +560,7 @@ export default function FormsPage() {
           {"owner".includes(filterSearch.toLowerCase()) ? (
             <FilterGroup label="Owner">
               <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerPickOpen(true); }}>
-                <OwnerPick people={people ?? []} value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
+                <PersonFilterPick ariaLabel="Owner" value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
               </FilterRow>
             </FilterGroup>
           ) : null}
@@ -693,15 +691,3 @@ function RowMenuTrigger({ onOpen, open }: { onOpen: (ref: React.RefObject<HTMLBu
   return <RowMoreButton buttonRef={ref} open={open} onClick={() => onOpen(ref)} label="Form actions" />;
 }
 
-function OwnerPick({ people, value, onChange, open, setOpen }: { people: PersonRef[]; value: string | null; onChange: (id: string) => void; open: boolean; setOpen: (v: boolean) => void }) {
-  const current = people.find((p) => p.id === value) ?? null;
-  const options: PickerOption[] = people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }));
-  return (
-    <span className="relative block">
-      <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
-        {current ? <><PersonAvatar person={current} size={20} />{personName(current)}</> : <span className="text-ink-3">Choose a person</span>}
-      </button>
-      <Picker open={open} onClose={() => setOpen(false)} ariaLabel="Owner" searchPlaceholder="Find a person" selected={value} onSelect={(v) => { onChange(v); setOpen(false); }} sections={[{ options }]} />
-    </span>
-  );
-}

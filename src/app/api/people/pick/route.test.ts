@@ -34,6 +34,11 @@ vi.mock("@/lib/api-helpers", () => ({
 vi.mock("@/lib/access/org-role", () => ({
   orgRoleOf: () => orgRole,
 }));
+// The engine's view of the caller, for reach=all (deactivated people for the directory's privileged readers).
+let privileged = false;
+vi.mock("@/lib/access/viewer", () => ({
+  viewerForUser: async () => ({ userId: "u-me", orgRole: privileged ? "ADMIN" : orgRole, peopleTeam: false }),
+}));
 
 import { GET } from "./route";
 
@@ -85,6 +90,7 @@ async function pick(query: string): Promise<string[]> {
 }
 
 beforeEach(() => {
+  privileged = false;
   orgRole = "MEMBER";
   findMany.mockReset();
   findMany.mockResolvedValue([]);
@@ -143,5 +149,16 @@ describe("GET /api/people/pick?ids= label lookup", () => {
   it("keeps a Guest to the people they share a conversation with", async () => {
     orgRole = "GUEST";
     expect(await pick("ids=u-bot,u-ann")).toEqual(["u-bot"]);
+  });
+});
+
+describe("GET /api/people/pick?reach=all (a filter's picker)", () => {
+  it("an Admin also finds a deactivated person, to find what they owned", async () => {
+    privileged = true;
+    expect(await pick("q=Verify%20Bot&reach=all")).toEqual(["u-bot", "u-gone"]);
+  });
+
+  it("anyone else gets everyone who can sign in, never a deactivated person", async () => {
+    expect(await pick("q=Verify%20Bot&reach=all")).toEqual(["u-bot"]);
   });
 });

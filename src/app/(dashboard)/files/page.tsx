@@ -45,6 +45,7 @@ import { BulkAction, RowMoreButton, TableCard, type TableColumn } from "@/compon
 import { SplitPrimary } from "@/components/ui/split-primary";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonFilterPick } from "@/components/people/person-filter-pick";
 import { FileRowMenuHost, useFileRowMenu, dispatchFilesChanged, isSummarizable, type FileMenuTarget } from "@/components/files/file-row-menu";
 import { FilePreviewDrawer, type PreviewFile } from "@/components/files/file-preview-drawer";
 import { MoveFileDialog } from "@/components/files/move-file-dialog";
@@ -340,13 +341,6 @@ export default function FilesPage() {
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [uploaderOpen, setUploaderOpen] = useState(false);
-  const [people, setPeople] = useState<PersonRef[]>([]);
-  useEffect(() => {
-    if (!filterOpen || people.length > 0) return;
-    let live = true;
-    void (async () => { const p = await apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" }); if (live && p.ok && Array.isArray(p.data?.data)) setPeople(p.data.data); })();
-    return () => { live = false; };
-  }, [filterOpen, people.length]);
 
   /* ── rows: folders first (root and folder views), then files ── */
   const items = useMemo<RowItem[] | null>(() => {
@@ -468,12 +462,7 @@ export default function FilesPage() {
           </FilterGroup>
           <FilterGroup label="Uploaded by">
             <FilterRow label="Filter by person" checked={!!uploadedBy} onCheckedChange={(on) => { if (!on) setParams({ uploadedBy: null }); else setUploaderOpen(true); }}>
-              <span className="relative block">
-                <button type="button" onClick={() => setUploaderOpen((o) => !o)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
-                  {uploadedBy && people.find((p) => p.id === uploadedBy) ? personName(people.find((p) => p.id === uploadedBy)) : <span className="text-ink-3">Choose a person</span>}
-                </button>
-                <Picker open={uploaderOpen} onClose={() => setUploaderOpen(false)} ariaLabel="Uploaded by" searchPlaceholder="Find a person" selected={uploadedBy} onSelect={(v) => { setParams({ uploadedBy: v }); setUploaderOpen(false); }} sections={[{ options: people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> })) }]} />
-              </span>
+              <PersonFilterPick ariaLabel="Uploaded by" value={uploadedBy} onChange={(v) => setParams({ uploadedBy: v })} open={uploaderOpen} setOpen={setUploaderOpen} />
             </FilterRow>
           </FilterGroup>
           <FilterGroup label="Uploaded">
