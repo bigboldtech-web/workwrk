@@ -90,16 +90,28 @@ export interface MatrixRule {
   gets: string;
 }
 
-/** Rules that add to (or cap) what a List share gives, as the gates apply them. */
+/**
+ * Rules that add to (or cap) what a List share gives, as the gates apply them.
+ * The page is for a customer's security review, so the words name what
+ * people see; the rule each one is stays here.
+ */
 export const RELATIONSHIP_RULES: readonly MatrixRule[] = [
-  { key: "assignee", who: "Someone a task is assigned to", gets: "Can edit on that task, at every level except Can comment (item-role rule 9)." },
-  { key: "creator", who: "The person who made a task", gets: "Full access on that task (rule 5)." },
-  { key: "admin", who: "Workspace Owners and Admins", gets: "Full access on every Space, Folder, List, task, Doc and table, never on someone's personal notes (node-rules R1 and R6a)." },
-  { key: "owner", who: "The owner of a Folder or List", gets: "Full access on it (node-rules R3 and R4)." },
-  { key: "linked", who: "Readers of a List a task is added to", gets: "Can view on that task. Changing it is still decided by its home List (Phase 5b)." },
-  { key: "inherit", who: "Members of a Space or Folder", gets: "The same level on the Lists inside it, unless a List is Private (node-rules R4)." },
-  { key: "trash", who: "Anyone on a task in Trash", gets: "Can view at most, unless they hold Full access; Can edit may still restore it (rule 12)." },
-  { key: "agent", who: "An AI agent", gets: "Never deletes a task, whatever its level (rule 12)." },
+  // item-role rule 9, cut by taskSideOfListRole on Can comment.
+  { key: "assignee", who: "Someone a task is assigned to", gets: "Can edit on that task, at every level except Can comment." },
+  // item-role rule 5.
+  { key: "creator", who: "The person who made a task", gets: "Full access on that task." },
+  // node-rules R1 and R6a.
+  { key: "admin", who: "Workspace Owners and Admins", gets: "Full access on every Space, Folder, List, task, Doc and table, never on someone's personal notes." },
+  // node-rules R3 and R4: the owner rule reaches through the parent unless the node is Private.
+  { key: "owner", who: "The owner of a Folder or List", gets: "Full access on it while they can open the Space or Folder it sits in, and always on a Private one." },
+  // List links (Phase 5b): a linked reader gets view; the home List decides changes.
+  { key: "linked", who: "Readers of another List a task is added to", gets: "Can view on that task. Whether they can change it is decided by the List it lives in." },
+  // node-rules R4.
+  { key: "inherit", who: "Members of a Space or Folder", gets: "The same level on the Lists inside it, unless a List is Private." },
+  // item-role rule 12.
+  { key: "trash", who: "Anyone on a task in Trash", gets: "Can view at most, unless they hold Full access. Someone with Can edit may still restore it." },
+  // item-role rule 12.
+  { key: "agent", who: "An AI agent", gets: "Never deletes a task, whatever its level." },
 ];
 
 /** The workspace roles, as the workspace-level gates read them. */

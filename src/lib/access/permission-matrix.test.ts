@@ -37,8 +37,10 @@ describe("listMatrix", () => {
   it("names every relationship rule and workspace role in plain words", () => {
     expect(RELATIONSHIP_RULES.map((r) => r.key)).toEqual(["assignee", "creator", "admin", "owner", "linked", "inherit", "trash", "agent"]);
     expect(WORKSPACE_ROLES.map((r) => r.role)).toEqual(["Owner", "Admin", "Member", "Agent"]);
-    for (const r of [...RELATIONSHIP_RULES.map((x) => x.gets), ...WORKSPACE_ROLES.map((x) => x.summary)]) {
+    for (const r of [...RELATIONSHIP_RULES.flatMap((x) => [x.who, x.gets]), ...WORKSPACE_ROLES.map((x) => x.summary)]) {
       expect(r).not.toMatch(/—|--/);
+      // A customer's security reviewer reads this page: no rule numbers or project phases.
+      expect(r, r).not.toMatch(/\brule \d|\bR\d|\bPhase\b|node-rules|item-role/i);
     }
   });
 });

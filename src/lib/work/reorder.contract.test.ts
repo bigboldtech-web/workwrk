@@ -78,7 +78,10 @@ describe("the Board drops a card at a place", () => {
 describe("the List view drags inside groups", () => {
   it("is off only while sorted, never because the rows are grouped", () => {
     expect(TABLE).toMatch(/const sortingRows = sortCol !== null \|\| sortKey !== "none";/);
-    expect(TABLE).toMatch(/dragEnabled=\{rowCanEdit && !sortingRows && indent === 0 && !row\.parentItemId && kind !== "linked-subtask"\}/);
+    expect(TABLE).toMatch(/dragEnabled=\{rowCanArrange && !sortingRows && indent === 0 && !row\.parentItemId && kind !== "linked-subtask"\}/);
+    // Arranging is a List write (Can edit on the List): a row opened only
+    // because it is assigned to the viewer is edited in place, never dragged.
+    expect(TABLE).toMatch(/const rowCanArrange = linkedRowEditable\(row, canEdit\);/);
     expect(TABLE).not.toMatch(/Drag disabled while grouped/);
   });
 

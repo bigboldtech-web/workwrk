@@ -10,7 +10,11 @@
 //   rows      a List view opens a row to the viewer it is assigned to only
 //             where the lift applies (list-link-rows assignedRowEditable)
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// node-world loads rows from the database; only its pure copy is used here.
+vi.mock("../prisma", () => ({ prisma: {} }));
+
 import {
   NodeEvaluator,
   boardMemberToRole,
@@ -28,6 +32,8 @@ import {
 } from "./node-rules";
 import { PANEL_ROLE_RANK, ROLES_BY_KIND, panelRoleBlurb, panelRoleLabel } from "./access-panel";
 import { planGrant, storedRoleFor } from "./grant-plan";
+import { accessEntries } from "./node-tree";
+import { grantsWithViewer } from "./node-world";
 import { allowsItemAction, decideItem, taskSideOfListRole } from "../item-role";
 import { assignedRowEditable } from "../list-link-rows";
 import type { BoardItemRow } from "../board-items-shared";
@@ -122,6 +128,41 @@ describe("the List ladder: how the resolver reads a row", () => {
       expect(listRole("GUEST", null, at), `view at ${at}`).toBe("VIEW");
       expect(listRole("MEMBER", null, at), `edit at ${at}`).toBe("EDIT");
     }
+  });
+});
+
+describe("the List ladder: a rung survives every copy of a person's rows", () => {
+  // The share panel and the reader fan-outs load everyone's rows at once
+  // (loadAllGrants) and copy each person's into a ViewerGrants. A copy that
+  // left the rung behind showed a Can edit assigned tasks member as Can view.
+  const loaded = (): Omit<ViewerGrants, "viewer"> => ({
+    space: new Map(),
+    folder: new Map(),
+    list: new Map([["l", "GUEST"]]),
+    listRung: new Map([["l", "ASSIGNED"]]),
+    object: new Map(),
+    since: new Map([["list:l", CUTOFF + 1]]),
+  });
+
+  it("keeps the rung in the person's grants", () => {
+    const { rows } = world();
+    const g = grantsWithViewer(viewer(), loaded());
+    expect(g.viewer.userId).toBe(ME);
+    expect(new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" }).role).toBe("ASSIGNED");
+    expect(grantsWithViewer(viewer(), undefined).list.size).toBe(0);
+  });
+
+  it("names the rung on the share panel, as a row the List's owner may change", () => {
+    const { rows } = world();
+    const eve = { person: { id: ME, name: "Eve", email: "eve@acme.test", avatar: null, active: true }, grants: grantsWithViewer(viewer(), loaded()) };
+    // The List's owner, a member of its Space (the owner rule reaches through the Space).
+    const owner = {
+      person: { id: OTHER, name: "Mona", email: "mona@acme.test", avatar: null, active: true },
+      grants: emptyGrants({ userId: OTHER, orgAdmin: false, orgGuest: false, isAgent: false, denied: false }),
+    };
+    owner.grants.space.set("s", "MEMBER");
+    const out = accessEntries({ rows, ref: { kind: "list", id: "l" }, people: [eve, owner], viewer: owner.grants, orgName: "Acme", hrefOf: () => null });
+    expect(out.direct.find((d) => d.person.id === ME)).toMatchObject({ role: "ASSIGNED", source: "BoardMember", editable: true, removable: true });
   });
 });
 

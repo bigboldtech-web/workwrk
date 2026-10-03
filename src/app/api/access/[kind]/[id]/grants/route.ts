@@ -25,7 +25,9 @@ import { GrantError, removeNodeGrant, setNodeGrant } from "@/lib/access/grants";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
-const ROLE = z.enum(["OWNER", "FULL", "EDIT", "COMMENT", "VIEW"]);
+// "ASSIGNED" is the List ladder's Can edit assigned tasks (founder decision 3);
+// planGrant refuses it, like every role, on a kind that does not offer it.
+const ROLE = z.enum(["OWNER", "FULL", "EDIT", "ASSIGNED", "COMMENT", "VIEW"]);
 
 const postSchema = z.object({
   userId: z.string().min(1).max(64),

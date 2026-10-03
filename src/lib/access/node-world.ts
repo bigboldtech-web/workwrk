@@ -393,6 +393,15 @@ export async function loadAllGrants(rows: NodeRows): Promise<Map<string, Omit<Vi
   return out;
 }
 
+/**
+ * One person's rows from loadAllGrants as their ViewerGrants. Every field is
+ * carried, the List rung included: a copy that names the fields one by one
+ * drops any it does not name, and a Can comment row then reads as Can view.
+ */
+export function grantsWithViewer(viewer: NodeViewer, g: Omit<ViewerGrants, "viewer"> | undefined): ViewerGrants {
+  return g ? { ...g, viewer } : emptyGrants(viewer);
+}
+
 /** Everyone listed on the world's docs, and every owner or creator of its nodes. */
 export function peopleNamedByRows(rows: NodeRows): string[] {
   const ids = new Set<string>();
