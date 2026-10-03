@@ -763,11 +763,12 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
                 aria-label="SOP title"
                 autoFocus={creating}
                 /* On a phone the input keeps a readable start of the title, and
-                   gives way only to a failed save, so "Not saved" and Retry are
-                   never drawn under it (a failure must stay readable). The
+                   gives way only while a save has failed (its retries included:
+                   a retry reads as "saving"), so "Not saved" and Retry are never
+                   drawn under it and the row does not flick on each retry. The
                    indicator's other states are quiet on a phone (below), so the
-                   row does not jump on every autosave. */
-                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${saveState.status === "error" ? "min-w-0" : "min-w-[4rem]"}`}
+                   row does not jump on every autosave either. */
+                className={`h-9 flex-1 rounded-md bg-transparent px-1 text-xl font-semibold text-ink placeholder:text-ink-3 focus:bg-subtle focus:outline-none ${failed || saveState.status === "error" ? "min-w-0" : "min-w-[4rem]"}`}
               />
             ) : (
               /* min-w keeps a readable start of the title on a phone; the full
@@ -783,9 +784,9 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
              quiet (screen readers still hear it). A published SOP's unsaved
              changes are on the sticky save bar ("Not saved" with Save); a draft
              saves itself within a second; and a failure (Not saved, Retry)
-             still draws here, with the title giving way to it, and brings the
-             save bar up too. */
-          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={saveState.status === "error" ? undefined : "max-sm:[&>span]:sr-only"} />
+             still draws here, through its retries, with the title giving way
+             to it, and brings the save bar up too. */
+          <AutosaveIndicator status={saveState.status} lastSavedAt={lastSaved} onRetry={saveState.showRetry ? () => void flush() : undefined} labels={{ idle: autosaves ? (creating ? "Nothing saved yet" : "Auto-saves as you type") : undefined }} className={failed || saveState.status === "error" ? undefined : "max-sm:[&>span]:sr-only"} />
         ) : undefined}
         actions={
           <>
