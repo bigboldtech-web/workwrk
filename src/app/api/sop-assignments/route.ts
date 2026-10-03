@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { sopId, userIds, departmentId, dueDate, mandatory } = body;
+  const { sopId, userIds, departmentId, all, dueDate, mandatory } = body;
 
   if (!sopId) return jsonError("sopId is required");
 
@@ -121,8 +121,19 @@ export async function POST(req: NextRequest) {
     resolvedUserIds = [...new Set([...resolvedUserIds, ...deptUsers.map((u) => u.id)])];
   }
 
+  // Everyone, resolved here rather than by the dialog, so it is never cut at
+  // the dialog's page of people (the governance rule below still narrows a
+  // manager to their reports).
+  if (all === true) {
+    const everyone = await prisma.user.findMany({
+      where: { organizationId: orgId, status: "ACTIVE", deletedAt: null },
+      select: { id: true },
+    });
+    resolvedUserIds = [...new Set([...resolvedUserIds, ...everyone.map((u) => u.id)])];
+  }
+
   if (resolvedUserIds.length === 0) {
-    return jsonError("No users specified. Provide userIds[] or departmentId");
+    return jsonError("No users specified. Provide userIds[], departmentId or all:true");
   }
 
   // Governance: managers may only assign SOPs to people in their own
@@ -137,6 +148,14 @@ export async function POST(req: NextRequest) {
       return jsonError("You can only assign SOPs to people who report to you.", 403);
     }
   }
+
+  // People who already hold this SOP keep their assignment as it is and are
+  // not told again.
+  const already = new Set(
+    (await prisma.sOPAssignment.findMany({ where: { sopId, userId: { in: resolvedUserIds } }, select: { userId: true } })).map((a) => a.userId),
+  );
+  resolvedUserIds = resolvedUserIds.filter((uid) => !already.has(uid));
+  if (resolvedUserIds.length === 0) return jsonSuccess({ message: "Everyone chosen already has this SOP", count: 0 }, 200);
 
   const assignerId = getUserId(session);
   const data = resolvedUserIds.map((uid: string) => ({

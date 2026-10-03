@@ -56,12 +56,22 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     if (open) { setAudience("people"); setSelected([]); setDeptId(null); setDueDate(defaults?.dueDate?.slice(0, 10) ?? ""); setMandatory(defaults?.mandatory ?? true); }
   }
 
+  // The people an assigner may reach, as the APIs decide it (/api/users
+  // answers a manager with their reports and an org-wide assigner with
+  // everyone): a first page, grown by a search on the server as the person
+  // types, so a large workspace is never cut at one page.
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const mergePeople = (got: PersonRef[]) => setPeople((prev) => {
+    const byId = new Map(prev.map((p) => [p.id, p]));
+    for (const p of got) byId.set(p.id, p);
+    return [...byId.values()];
+  });
   useEffect(() => {
     if (!open) return;
     let live = true;
     void (async () => {
       const [p, d] = await Promise.all([
-        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=500", { cache: "no-store" }),
+        apiFetch<{ data?: PersonRef[] } | PersonRef[]>("/api/users?scope=all&limit=100", { cache: "no-store" }),
         apiFetch<Dept[] | { data?: Dept[] }>("/api/departments", { cache: "no-store" }),
       ]);
       if (!live) return;
@@ -70,9 +80,24 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     })();
     return () => { live = false; };
   }, [open]);
+  useEffect(() => {
+    const q = peopleQuery.trim();
+    if (!open || !q) return;
+    const t = setTimeout(() => {
+      void apiFetch<{ data?: PersonRef[] } | PersonRef[]>(`/api/users?scope=all&limit=50&search=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => {
+        if (r.ok) mergePeople(Array.isArray(r.data) ? r.data : r.data?.data ?? []);
+      });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, peopleQuery]);
+  const matchesQuery = (p: PersonRef) => {
+    const words = peopleQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const fields = [p.firstName ?? "", p.lastName ?? "", p.email ?? ""].map((f) => f.toLowerCase());
+    return words.every((w) => fields.some((f) => f.includes(w)));
+  };
 
   const already = useMemo(() => new Set(alreadyAssigned), [alreadyAssigned]);
-  const options: PickerOption[] = people.map((p) => ({
+  const options: PickerOption[] = people.filter(matchesQuery).map((p) => ({
     value: p.id,
     label: personName(p),
     description: already.has(p.id) ? "Already assigned" : p.email ?? undefined,
@@ -91,12 +116,13 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     const url = isSop ? "/api/sop-assignments" : `/api/policies/${object.id}/assignments`;
     const body: Record<string, unknown> = { dueDate: dueDate || undefined, mandatory };
     if (isSop) body.sopId = object.id;
+    // Everyone and a Department are resolved by the API (and narrowed to a
+    // manager's reports there), never from the people this dialog loaded,
+    // which stopped at one page in a large workspace.
     if (audience === "everyone") {
-      if (isSop) body.userIds = people.filter((p) => !already.has(p.id)).map((p) => p.id);
-      else body.all = true;
+      body.all = true;
     } else if (audience === "department") {
-      if (isSop) body.departmentId = deptId;
-      else body.userIds = people.filter((p) => (p as { department?: { id?: string } }).department?.id === deptId && !already.has(p.id)).map((p) => p.id);
+      body.departmentId = deptId;
     } else {
       body.userIds = selected;
     }
@@ -141,7 +167,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
             <div className="flex flex-col gap-1">
               <span className={LABEL}>People</span>
               <span className="relative block">
-                <button type="button" onClick={() => setPickOpen((o) => !o)} className={`${FIELD} flex min-h-9 h-auto flex-wrap items-center gap-1.5 py-1 text-start`}>
+                <button type="button" onClick={() => { setPeopleQuery(""); setPickOpen((o) => !o); }} className={`${FIELD} flex min-h-9 h-auto flex-wrap items-center gap-1.5 py-1 text-start`}>
                   {chosen.length === 0 ? <span className="text-ink-3">Choose people</span> : chosen.map((p) => (
                     <span key={p.id} className="inline-flex h-6 items-center gap-1 rounded-md bg-active px-1.5 text-xs font-medium text-ink">
                       <PersonAvatar person={p} size={16} />{personName(p)}
@@ -149,7 +175,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
                     </span>
                   ))}
                 </button>
-                <Picker open={pickOpen} onClose={() => setPickOpen(false)} ariaLabel="People" searchPlaceholder="Find a person" multi selected={selected}
+                <Picker open={pickOpen} onClose={() => setPickOpen(false)} ariaLabel="People" searchPlaceholder="Find a person" multi alwaysSearch onSearchChange={setPeopleQuery} selected={selected}
                   onSelect={(v) => setSelected((s) => (s.includes(v) ? s.filter((id) => id !== v) : [...s, v]))} sections={[{ options }]} width={320} />
               </span>
             </div>
