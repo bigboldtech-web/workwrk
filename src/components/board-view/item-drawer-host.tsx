@@ -208,7 +208,8 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
         canLinkMove: Boolean(entry?.canRemove) && canShare,
         canAddToList: canShare,
         linkedSubtask: Boolean(parentItemId),
-        canShareHome: lists ? canShare : undefined,
+        canShareHome: lists ? Boolean(lists.canSharePublicly ?? canShare) : undefined,
+        publicLinkOn: Boolean(lists?.publicLinkOn),
       };
     }
     // At home: Add to another List when its home may share it, never for a
@@ -218,7 +219,8 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
       boardId: context.boardId,
       kind: "home",
       canAddToList: Boolean(lists?.canShare && board?.spaceId && !parentItemId),
-      canShareHome: lists ? Boolean(lists.canShare) : undefined,
+      canShareHome: lists ? Boolean(lists.canSharePublicly ?? lists.canShare) : undefined,
+      publicLinkOn: Boolean(lists?.publicLinkOn),
     };
   };
 

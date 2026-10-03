@@ -243,14 +243,16 @@ export default function ItemDetailPage() {
         canLinkMove: Boolean(entry?.canRemove) && canShare,
         canAddToList: canShare,
         linkedSubtask: Boolean(item.parentItemId),
-        canShareHome: lists ? canShare : undefined,
+        canShareHome: lists ? Boolean(lists.canSharePublicly ?? canShare) : undefined,
+        publicLinkOn: Boolean(lists?.publicLinkOn),
       };
     }
     return {
       boardId: context.boardId,
       kind: "home",
       canAddToList: Boolean(lists?.canShare && board?.spaceId && !item.parentItemId),
-      canShareHome: lists ? Boolean(lists.canShare) : undefined,
+      canShareHome: lists ? Boolean(lists.canSharePublicly ?? lists.canShare) : undefined,
+      publicLinkOn: Boolean(lists?.publicLinkOn),
     };
   })();
 

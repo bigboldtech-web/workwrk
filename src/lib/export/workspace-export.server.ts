@@ -47,7 +47,7 @@ import { tableCsv } from "@/lib/table-csv";
 import { isModuleActive } from "@/lib/entitlements";
 import { CSV_BOM, csvLine, toCsv, type CsvCell } from "@/lib/csv";
 import type { ZipStreamEntry } from "@/lib/zip-stream";
-import type { Prisma } from "@/generated/prisma";
+import type { Item, Prisma } from "@/generated/prisma";
 import {
   COMMENT_COLUMNS,
   FIELD_COLUMNS,
@@ -138,11 +138,8 @@ function personName(u: { firstName: string | null; lastName: string | null } | u
   return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() : "";
 }
 
-const TASK_SELECT = {
-  id: true, boardId: true, parentItemId: true, title: true, status: true, priority: true, ownerId: true, assigneeIds: true,
-  startAt: true, dueAt: true, archivedAt: true, createdAt: true, updatedAt: true, position: true, itemTypeId: true, metadata: true,
-} as const;
-type TaskRow = Prisma.ItemGetPayload<{ select: typeof TASK_SELECT }>;
+/** Every column of the task, read without a select so a column added later is never left out of the copy. */
+type TaskRow = Item;
 
 const COMMENT_SELECT = {
   id: true, entityId: true, authorId: true, body: true, createdAt: true, updatedAt: true, attachments: { select: { fileId: true } },
@@ -152,13 +149,14 @@ type CommentRow = Prisma.ItemUpdateGetPayload<{ select: typeof COMMENT_SELECT }>
 /**
  * Everything small read now, so a failure is an ordinary error answer, and
  * the counts for the audit row; the large files read as the archive is
- * written. `finish` runs once when the entries end, however they end:
- * "completed" after the manifest was handed on, "stopped" otherwise.
+ * written. `summarize` runs once when the entries end, however they end,
+ * with what was written; whether the archive itself completed is the
+ * stream's to say (zip-stream onDone).
  */
 export async function prepareWorkspaceExport(
   orgId: string,
   exportedAt: Date,
-  finish: (outcome: "completed" | "stopped", summary: ExportSummary) => void,
+  summarize: (summary: ExportSummary) => void,
 ): Promise<PreparedExport> {
   const [users, departments, legacyTasks, sops, reviews, meetings, kras, activity] = await Promise.all([
     prisma.user.findMany({
@@ -285,7 +283,6 @@ export async function prepareWorkspaceExport(
       const take = Math.min(PAGE, EXPORT_LIMITS.tasks - sent);
       const page: TaskRow[] = await prisma.item.findMany({
         where: { organizationId: orgId, ...(after ? { id: { gt: after } } : {}) },
-        select: TASK_SELECT,
         orderBy: { id: "asc" },
         take,
       });
@@ -348,7 +345,6 @@ export async function prepareWorkspaceExport(
     const files: Sized[] = [];
     const folderSizes: Record<string, { files: number; bytes: number }> = {};
     const rowsOf: Record<string, number> = {};
-    let completed = false;
     const whole = (name: string, data: string): ZipStreamEntry => {
       files.push({ name, bytes: Buffer.byteLength(data) });
       return { name, data };
@@ -569,7 +565,7 @@ export async function prepareWorkspaceExport(
           "WorkwrK workspace export. Spreadsheet files are UTF-8 CSV starting with a byte order mark, so Excel reads accents (Python: encoding='utf-8-sig'). Docs and SOPs are Markdown.",
           "In the CSV files a text cell that starts with =, +, -, @, a tab or a return has one apostrophe added in front, so a spreadsheet does not run it as a formula. list-tasks.jsonl and task-comments.jsonl hold the same text exactly as stored.",
           "list-tasks.csv holds every task on every List: its description, checklist, tags, status name and its home List's field values as one JSON object keyed by field name (choices by their label, people and connected tasks as ids, which people.csv and list-tasks.csv resolve). list-fields.csv names each List's fields; a field it marks stored=no (formula, rollup, mirror, automatic progress, button) is worked out when shown and has no values here.",
-          "list-tasks.jsonl holds every task exactly as stored: its columns, tags, the other Lists it is in, and its whole metadata, every List's field values included (under $lists for the Lists it is linked into).",
+          "list-tasks.jsonl holds every task exactly as stored: every column of the task (its repeat rule and group included), its tags, the other Lists it is in, and its whole metadata, every List's field values included (under $lists for the Lists it is linked into). listId and parentId repeat boardId and parentItemId under the names the CSV uses.",
           "list-links.csv holds each task shown in a List other than its home, with that List's own field values.",
           "task-comments.csv holds every live comment on a task, with the names of the files it carries. The files themselves are not inside this archive.",
           "docs/ holds every Doc as Markdown; a sub-page links to its own file. Docs in Trash are listed in docs.csv without a file. Personal notes are their owner's alone and are not in this export.",
@@ -587,9 +583,8 @@ export async function prepareWorkspaceExport(
         ],
       };
       yield whole("manifest.json", JSON.stringify(manifest, null, 2));
-      completed = true;
     } finally {
-      finish(completed ? "completed" : "stopped", { rows: { ...rowsOf }, files: files.length + Object.values(folderSizes).reduce((a, f) => a + f.files, 0) });
+      summarize({ rows: { ...rowsOf }, files: files.length + Object.values(folderSizes).reduce((a, f) => a + f.files, 0) });
     }
   }
 

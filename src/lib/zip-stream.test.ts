@@ -205,6 +205,42 @@ describe("zipStream", () => {
   });
 });
 
+describe("zipStream onDone", () => {
+  it("says completed only after the whole archive, directory included, and before the stream ends", async () => {
+    const events: string[] = [];
+    const stream = zipStream([{ name: "a.txt", data: "a" }], {
+      onDone: async (o) => {
+        events.push(`done:${o}`);
+      },
+    });
+    const reader = stream.getReader();
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        events.push("end");
+        break;
+      }
+      bytes += value.length;
+    }
+    expect(events).toEqual(["done:completed", "end"]);
+    expect(bytes).toBeGreaterThan(22);
+  });
+
+  it("says stopped when an entry fails or the reader walks away, once", async () => {
+    const seen: string[] = [];
+    async function* bad(): AsyncGenerator<ZipStreamEntry> {
+      yield { name: "a.txt", data: "a" };
+      throw new Error("read failed");
+    }
+    await expect(collect(zipStream(bad(), { onDone: (o) => void seen.push(o) }))).rejects.toThrow("read failed");
+    const reader = zipStream([{ name: "a.txt", data: "a" }, { name: "b.txt", data: "b" }], { onDone: (o) => void seen.push(o) }).getReader();
+    await reader.read();
+    await reader.cancel();
+    expect(seen).toEqual(["stopped", "stopped"]);
+  });
+});
+
 describe("zipDirectory past 4 GB", () => {
   it("moves a far offset into a ZIP64 extra field and writes the ZIP64 end records", () => {
     const name = text("far.csv");

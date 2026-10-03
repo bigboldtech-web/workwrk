@@ -56,7 +56,6 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copy, setCopy] = useState<"idle" | "copied" | "manual">("idle");
-  const [lastDays, setLastDays] = useState<number | null | undefined>(undefined);
   const addressRef = useRef<HTMLInputElement>(null);
   const base = `/api/items/${encodeURIComponent(itemId)}/public-link`;
 
@@ -143,7 +142,7 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
       : state.inTrash === "place"
         ? "This task's List, Folder or Space is in Trash, so its link shows nothing until it is restored."
         : !state.allowed
-          ? "Public links are turned off for this workspace, so this link shows nothing until a workspace admin turns them on in Settings, Access."
+          ? "public_links_off"
           : state.expired
             ? "This link has ended. Choose how long it lasts to turn the same address back on."
             : null;
@@ -162,8 +161,8 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
           Public link
         </DialogTitle>
         <p className="mt-2 text-sm leading-relaxed text-ink-2">
-          Anyone with the link can see this task&rsquo;s title, status, priority, dates, description, checklist and subtasks, and your
-          workspace&rsquo;s name and logo, without signing in. They can&rsquo;t change anything, and they never see files or emails.
+          Anyone with the link can see this task&rsquo;s title, status, priority, dates, description (as written), checklist and subtasks, and
+          your workspace&rsquo;s name and logo, without signing in. They can&rsquo;t change anything, and they never see files or emails.
         </p>
 
         {loadError ? (
@@ -249,17 +248,16 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="How long the link lasts">
                     {EXPIRY_CHOICES.map((c) => {
-                      const current = c.days === null ? !state.expiresAt : lastDays === c.days && !!state.expiresAt && !state.expired;
+                      // Only "No end date" is a state the server can state; a
+                      // length is an action, and the line above says when it ends.
+                      const current = c.days === null && !state.expiresAt;
                       return (
                         <button
                           key={c.label}
                           type="button"
                           disabled={busy}
-                          aria-pressed={current}
-                          onClick={() => {
-                            setLastDays(c.days);
-                            void send("PATCH", { expiresInDays: c.days }, "Couldn't change how long the link lasts.");
-                          }}
+                          {...(c.days === null ? { "aria-pressed": current } : {})}
+                          onClick={() => void send("PATCH", { expiresInDays: c.days }, "Couldn't change how long the link lasts.")}
                           className={`h-7 rounded-md border px-2.5 text-xs font-medium ${current ? "border-[var(--os-brand)] bg-brand-soft text-brand-deep" : "border-line text-ink hover:bg-hover"}`}
                         >
                           {c.days === null ? c.label : `${c.label} from now`}
@@ -272,7 +270,9 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
                 <div className="mt-4 flex items-start justify-between gap-3">
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-ink">Show assignees and comments</span>
-                    <span className="block text-xs text-ink-2">Adds the assignees&rsquo; first names and every comment. Files stay hidden.</span>
+                    <span className="block text-xs text-ink-2">
+                      Adds the assignees&rsquo; first names and the latest 200 comments, as written, with the names they mention. Files stay hidden.
+                    </span>
                   </span>
                   <Switch
                     checked={state.showPeople}
@@ -284,7 +284,20 @@ export function TaskPublicLinkDialog({ itemId, open, onClose }: { itemId: string
               </>
             ) : null}
 
-            {deadNote ? <p className="mt-3 text-xs text-ink-2">{deadNote}</p> : null}
+            {deadNote === "public_links_off" ? (
+              <p className="mt-3 text-xs text-ink-2">
+                Public links are turned off for this workspace, so this link shows nothing until they are turned back on.{" "}
+                {isAdmin ? (
+                  <Link href="/settings/access" className="font-medium text-brand-deep underline-offset-2 hover:underline">
+                    Turn them on in Settings, Access
+                  </Link>
+                ) : (
+                  "A workspace admin can turn them on in Settings, Access."
+                )}
+              </p>
+            ) : deadNote ? (
+              <p className="mt-3 text-xs text-ink-2">{deadNote}</p>
+            ) : null}
             {state.on ? (
               <p className="mt-2 text-xs text-ink-3">Turning it off stops this address for good. Turning it on again makes a new one.</p>
             ) : null}

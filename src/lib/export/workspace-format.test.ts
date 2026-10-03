@@ -180,7 +180,10 @@ describe("the exact copies (JSON Lines) and list-fields.csv", () => {
   };
 
   it("writes a task exactly as stored, where the CSV guards it for spreadsheets", () => {
-    const line = taskJsonLine({ ...task, position: 2048, itemTypeId: null }, { statusLabel: "To do", tags: ["Q4"], otherLists: [{ listId: "b2", position: 1024, addedAt: "2026-10-02T00:00:00.000Z" }] });
+    const line = taskJsonLine(
+      { ...task, position: 2048, itemTypeId: null, groupKey: "g1", recurRule: { freq: "WEEKLY" }, recurNextAt: new Date("2026-10-08T00:00:00Z"), workType: null },
+      { statusLabel: "To do", tags: ["Q4"], otherLists: [{ listId: "b2", position: 1024, addedAt: "2026-10-02T00:00:00.000Z" }] },
+    );
     expect(line.endsWith("\n")).toBe(true);
     const o = JSON.parse(line);
     expect(o.title).toBe("=SUM(A1)");
@@ -188,6 +191,8 @@ describe("the exact copies (JSON Lines) and list-fields.csv", () => {
     expect(o.metadata.$lists).toEqual({ b2: { rank: 3 } });
     expect(o.otherLists[0].listId).toBe("b2");
     expect(o.tags).toEqual(["Q4"]);
+    // Every column passes through, the ones the export never names included.
+    expect(o).toMatchObject({ groupKey: "g1", recurRule: { freq: "WEEKLY" }, recurNextAt: "2026-10-08T00:00:00.000Z", workType: null, position: 2048, boardId: "b1", listId: "b1" });
     // The spreadsheet copy carries the guard instead.
     const csvRow = cells(taskCsvLine(task, { statusLabel: "", tags: [], fields: [] }));
     expect(csvRow[TASK_COLUMNS.indexOf("title")]).toBe("'=SUM(A1)");

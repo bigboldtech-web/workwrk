@@ -71,6 +71,8 @@ export interface ItemMenuListContext {
    * Public link row follows it. Absent: the host does not know.
    */
   canShareHome?: boolean;
+  /** The task has a public link on, so its sharer can always reach it to turn it off. */
+  publicLinkOn?: boolean;
 }
 
 export interface ItemMoreMenuProps {
@@ -161,11 +163,12 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
   const askAi = Boolean(shell?.askAiVisible);
   // "Public link" is offered to someone who may share the task, while the
   // workspace allows task links; an Owner or Admin always gets it, since they
-  // can turn the switch on (the dialog says how).
+  // can turn the switch on (the dialog says how), and so does the sharer of a
+  // task whose link is on, so it can always be turned off.
   const bootState = useContext(BootContext);
   const orgAdmin = bootState?.boot.viewer.orgRole === "OWNER" || bootState?.boot.viewer.orgRole === "ADMIN";
   const taskLinksOn = Boolean(bootState?.boot.org.taskPublicLinks);
-  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin);
+  const canSharePublicly = (listContext?.canShareHome ?? true) && (taskLinksOn || orgAdmin || Boolean(listContext?.publicLinkOn));
   const openSidekick = shell?.openSidekick;
   const [open, setOpen] = useState(false);
   const [movePicker, setMovePicker] = useState(false);

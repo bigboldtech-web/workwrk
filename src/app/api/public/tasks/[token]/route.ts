@@ -30,10 +30,11 @@ import { PRIORITY_OPTIONS, getBoardStatuses, isDoneStatus, makeStatusLookup } fr
 import { markdownOrText } from "@/lib/html-text";
 import { BOARD_ITEM_ENTITY_TYPE } from "@/lib/item-thread";
 import { parseTaskLinkToken, readTaskLink, taskLinkExpired, taskLinkPlace } from "@/lib/task-public-link";
+import { localeSettingsOf } from "@/lib/settings/org-policy";
 
 const NOT_FOUND = () => NextResponse.json({ error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
 
-/** The most comments one page carries, oldest first. */
+/** The most comments one page carries: the latest ones, shown oldest first. */
 const COMMENT_CAP = 200;
 
 function checklistOf(metadata: unknown): Array<{ text: string; done: boolean }> {
@@ -82,7 +83,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     const s = lookup[value];
     return { label: s?.label ?? value, color: s?.color ?? "#98A2B3", done: isDoneStatus(statuses, value) };
   };
-  const [subtasks, comments] = await Promise.all([
+  const commentWhere = { organizationId: item.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: item.id, archivedAt: null };
+  const [subtasks, latest, commentsTotal] = await Promise.all([
     prisma.item.findMany({
       where: { parentItemId: item.id, boardId: item.boardId, organizationId: item.organizationId, archivedAt: null },
       orderBy: [{ position: "asc" }, { id: "asc" }],
@@ -91,13 +93,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     }),
     link.showPeople
       ? prisma.itemUpdate.findMany({
-          where: { organizationId: item.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: item.id, archivedAt: null },
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          where: commentWhere,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: { authorId: true, body: true, createdAt: true },
           take: COMMENT_CAP,
         })
       : Promise.resolve([] as Array<{ authorId: string | null; body: string; createdAt: Date }>),
+    link.showPeople ? prisma.itemUpdate.count({ where: commentWhere }) : Promise.resolve(0),
   ]);
+  const comments = latest.slice().reverse();
   // First names only, and only with the sharer's say-so.
   const personIds = link.showPeople ? [...new Set([...item.assigneeIds, ...comments.map((c) => c.authorId).filter((v): v is string => !!v)])] : [];
   const people = personIds.length
@@ -123,7 +127,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       comments: comments
         .map((c) => ({ author: (c.authorId && firstName.get(c.authorId)) || "Someone", text: markdownOrText(c.body).slice(0, 10_000), at: c.createdAt.toISOString() }))
         .filter((c) => c.text),
+      // How many there are, so the page can say when it shows only the latest.
+      commentsTotal,
       updatedAt: item.updatedAt.toISOString(),
+      // Dates read as the workspace reads them: its time zone and formats.
+      locale: (() => {
+        const l = localeSettingsOf(item.organization?.settings);
+        return { timezone: l.timezone, dateFormat: l.dateFormat, timeFormat: l.timeFormat };
+      })(),
       org: { name: item.organization?.name ?? "", logo: item.organization?.logo ?? null },
     },
     { headers: { "Cache-Control": "no-store" } },

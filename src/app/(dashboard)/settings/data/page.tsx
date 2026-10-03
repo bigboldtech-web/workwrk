@@ -65,7 +65,7 @@ type ExportRow = {
 };
 
 const EXPORTS: ExportRow[] = [
-  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles. Not included: files and attachments, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's. A large workspace can take a few minutes: keep this page open." },
+  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles. Not included: files and attachments, images inside Docs, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's. A large workspace can take a few minutes: keep this page open." },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
   { key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)", desc: "The activity log: who acted (a person, your identity provider or WorkwrK staff), what, when, the target and the IP. The newest 50,000 events." },
@@ -150,6 +150,7 @@ export default function DataSettingsPage() {
         }
       } catch {
         toast("The export stopped before it finished, so nothing was saved. Try again.");
+        void loadSummary();
         return;
       }
       if (blob.size === 0) { toast("Nothing to export yet: this is empty."); return; }
@@ -218,7 +219,7 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
               label={row.title}
               helper={<>{row.desc}{last ? (
                 <span className="block">
-                  {last.status === "started" || last.status === "stopped" ? `The last export by ${last.who} did not finish, ` : `Last exported by ${last.who}, `}
+                  {exportLine(last)}
                   <DateText value={last.when} style="relative" />
                 </span>
               ) : null}</>}
@@ -797,6 +798,15 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+/** A started export is running for the 30 minutes the server holds its slot; after that it did not finish. */
+const RUNNING_FOR_MS = 30 * 60_000;
+
+function exportLine(last: { who: string; when: string; status?: string | null }): string {
+  if (last.status === "started" && Date.now() - new Date(last.when).getTime() < RUNNING_FOR_MS) return `An export by ${last.who} is running, started `;
+  if (last.status === "started" || last.status === "stopped") return `The last export by ${last.who} did not finish, `;
+  return `Last exported by ${last.who}, `;
+}
+
 function ExportButton({
   row, busy, progress, onRun,
 }: {
@@ -808,7 +818,13 @@ function ExportButton({
 }) {
   const isBusy = busy === row.key;
   return (
-    <button type="button" onClick={() => onRun(row)} disabled={busy !== null} className={btn.secondary} aria-label={row.title ? `Download ${row.title}` : "Download"}>
+    <button
+      type="button"
+      onClick={() => onRun(row)}
+      disabled={busy !== null}
+      className={btn.secondary}
+      aria-label={isBusy && progress ? `Downloading ${row.title || "the export"}: ${progress} so far` : row.title ? `Download ${row.title}` : "Download"}
+    >
       {isBusy ? <Pending label={progress ? `Downloading ${progress}` : "Preparing"} /> : <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
       {isBusy && progress ? progress : "Download"}
     </button>

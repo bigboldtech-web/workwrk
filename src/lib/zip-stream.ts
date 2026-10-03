@@ -38,6 +38,13 @@ export interface ZipStreamOptions {
   modified?: Date;
   /** Deflate level, 1 (fastest) to 9 (smallest). Defaults to 6. */
   level?: number;
+  /**
+   * Called once when the archive ends: "completed" after the central
+   * directory is handed on and before the stream closes (awaited, so the
+   * reader sees the end only after this has run), "stopped" when an entry
+   * failed or the reader went away.
+   */
+  onDone?: (outcome: "completed" | "stopped") => void | Promise<void>;
 }
 
 const SIG_LOCAL = 0x04034b50;
@@ -73,18 +80,35 @@ export function zipStream(
   const level = opts.level ?? 6;
   const stamp = dosDateTime(opts.modified ?? new Date());
   const bytes = archive(entries, level, stamp);
+  let ended = false;
+  const done = async (outcome: "completed" | "stopped") => {
+    if (ended) return;
+    ended = true;
+    try {
+      await opts.onDone?.(outcome);
+    } catch {
+      // The archive's outcome is the caller's to record; a failure there
+      // never changes what the reader receives.
+    }
+  };
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const next = await bytes.next();
-        if (next.done) controller.close();
-        else controller.enqueue(next.value);
+        if (next.done) {
+          await done("completed");
+          controller.close();
+        } else {
+          controller.enqueue(next.value);
+        }
       } catch (err) {
+        void done("stopped");
         controller.error(err);
       }
     },
     async cancel() {
       await bytes.return(undefined);
+      await done("stopped");
     },
   });
 }

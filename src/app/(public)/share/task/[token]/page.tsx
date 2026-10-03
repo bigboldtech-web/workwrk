@@ -42,7 +42,9 @@ type ShareData = {
   subtasks: Array<{ title: string; status: StatusView }>;
   assignees: string[];
   comments?: Array<{ author: string; text: string; at: string }>;
+  commentsTotal?: number;
   updatedAt: string;
+  locale?: { timezone: string; dateFormat: string; timeFormat: string } | null;
   org?: { name: string; logo: string | null } | null;
 };
 
@@ -59,9 +61,15 @@ function StatusPill({ status }: { status: StatusView }) {
   );
 }
 
-/** A start or due date as the task page writes it: the day, and the time only when one was set. */
-function TaskDate({ value }: { value: string }) {
-  return <span title={formatDateTitle(value)}>{formatTaskDate(value, null, { withTime: hasTimeOfDay(value, null) })}</span>;
+type PageLocale = { timezone?: string; dateFormat?: string; timeFormat?: string } | null | undefined;
+
+/**
+ * A start or due date as the task page writes it, in the workspace's time
+ * zone: the day, and the time only when one was set there.
+ */
+function TaskDate({ value, locale }: { value: string; locale: PageLocale }) {
+  const prefs = (locale ?? null) as Parameters<typeof formatTaskDate>[1];
+  return <span title={formatDateTitle(value, prefs)}>{formatTaskDate(value, prefs, { withTime: hasTimeOfDay(value, prefs) })}</span>;
 }
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -140,12 +148,12 @@ export default function PublicTaskPage() {
               ) : null}
               {data.startAt ? (
                 <Fact label="Start">
-                  <TaskDate value={data.startAt} />
+                  <TaskDate value={data.startAt} locale={data.locale} />
                 </Fact>
               ) : null}
               {data.dueAt ? (
                 <Fact label="Due">
-                  <TaskDate value={data.dueAt} />
+                  <TaskDate value={data.dueAt} locale={data.locale} />
                 </Fact>
               ) : null}
             </dl>
@@ -198,6 +206,11 @@ export default function PublicTaskPage() {
             {data.comments && data.comments.length > 0 ? (
               <section className="mt-7">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Comments</h2>
+                {data.commentsTotal && data.commentsTotal > data.comments.length ? (
+                  <p className="mb-3 text-xs text-ink-2">
+                    Showing the latest {data.comments.length} of {data.commentsTotal} comments.
+                  </p>
+                ) : null}
                 <ol className="flex flex-col gap-4">
                   {data.comments.map((c, i) => (
                     <li key={i} className="min-w-0">

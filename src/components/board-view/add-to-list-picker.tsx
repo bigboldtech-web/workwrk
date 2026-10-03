@@ -32,6 +32,10 @@ export interface TaskListsAnswer {
   viaParentId: string | null;
   canShare: boolean;
   canUnshareAll: boolean;
+  /** May the viewer share this task publicly (src/lib/task-public-link.ts). Absent from an older server. */
+  canSharePublicly?: boolean;
+  /** It has a public link on (only told to someone who may share it). */
+  publicLinkOn?: boolean;
 }
 
 // `retryable` is true when sending the same request again can succeed (the

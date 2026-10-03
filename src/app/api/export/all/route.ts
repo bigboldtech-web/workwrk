@@ -61,11 +61,15 @@ export async function GET(req: Request) {
   const exportedAt = new Date();
   let auditId: string | null = null;
   let startMeta: Record<string, unknown> = {};
-  const finish = (outcome: "completed" | "stopped", summary: ExportSummary) => {
+  let summary: ExportSummary = { rows: {}, files: 0 };
+  // The archive's end, from the stream itself: "completed" once the last of
+  // it (the central directory) is handed on, before the reader sees the
+  // end; "stopped" when it failed or the reader went away.
+  const recordOutcome = async (outcome: "completed" | "stopped") => {
     release();
     if (!auditId) return;
     const rows = Object.values(summary.rows).reduce((a, b) => a + b, 0);
-    void prisma.activityLog
+    await prisma.activityLog
       .update({
         where: { id: auditId },
         data:
@@ -84,7 +88,9 @@ export async function GET(req: Request) {
 
   let prepared: Awaited<ReturnType<typeof prepareWorkspaceExport>>;
   try {
-    prepared = await prepareWorkspaceExport(orgId, exportedAt, finish);
+    prepared = await prepareWorkspaceExport(orgId, exportedAt, (s) => {
+      summary = s;
+    });
   } catch (err) {
     release();
     console.error("[GET /api/export/all]", err);
@@ -120,7 +126,7 @@ export async function GET(req: Request) {
   }
 
   const dateStr = exportedAt.toISOString().split("T")[0];
-  return new Response(zipStream(prepared.entries, { modified: exportedAt }), {
+  return new Response(zipStream(prepared.entries, { modified: exportedAt, onDone: recordOutcome }), {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="workwrk-export-${dateStr}.zip"`,

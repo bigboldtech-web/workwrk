@@ -183,36 +183,28 @@ export function taskCsvLine(t: TaskForExport, ctx: { statusLabel: string; tags: 
 // ── list-tasks.jsonl ─────────────────────────────────────────────────
 
 /**
- * One task exactly as stored, one JSON object a line: the columns, its tags,
- * the other Lists it is in, and its whole metadata (the description and
- * checklist as written, every List's field values by key). The CSV is for a
- * spreadsheet; this is the copy that loses nothing.
+ * One task exactly as stored, one JSON object a line: EVERY column of its row
+ * as it came (dates as ISO strings), so a column added later is never left
+ * out, plus its tags, the other Lists it is in and its status name; listId
+ * and parentId repeat boardId and parentItemId under the CSV's names. Its
+ * metadata rides whole: the description and checklist as written and every
+ * List's field values by key. The CSV is for a spreadsheet; this is the copy
+ * that loses nothing.
  */
 export function taskJsonLine(
-  t: TaskForExport & { position?: number; itemTypeId?: string | null },
+  t: TaskForExport & Record<string, unknown>,
   ctx: { statusLabel: string; tags: readonly string[]; otherLists: ReadonlyArray<{ listId: string; position: number; addedAt: string }> },
 ): string {
+  const row: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(t)) row[k] = v instanceof Date ? v.toISOString() : v;
   return (
     JSON.stringify({
-      id: t.id,
+      ...row,
       listId: t.boardId,
       parentId: t.parentItemId,
-      title: t.title,
-      status: t.status,
       statusLabel: ctx.statusLabel || null,
-      priority: t.priority,
-      ownerId: t.ownerId,
-      assigneeIds: t.assigneeIds,
-      startAt: t.startAt ? t.startAt.toISOString() : null,
-      dueAt: t.dueAt ? t.dueAt.toISOString() : null,
-      archivedAt: t.archivedAt ? t.archivedAt.toISOString() : null,
-      createdAt: t.createdAt.toISOString(),
-      updatedAt: t.updatedAt.toISOString(),
-      position: t.position ?? null,
-      itemTypeId: t.itemTypeId ?? null,
       tags: ctx.tags,
       otherLists: ctx.otherLists,
-      metadata: t.metadata ?? {},
     }) + "\n"
   );
 }
