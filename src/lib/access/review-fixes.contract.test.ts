@@ -44,11 +44,17 @@ describe("the canvas routes (findings 2 and 9)", () => {
 
 describe("the Ask AI tools (finding 3)", () => {
   const tools = read("src/lib/agents/tools.ts");
-  it("search_tasks and list_data_tables filter through the resolver", () => {
+  it("search_tasks and list_data_tables filter every page they read through the resolver", () => {
+    // search_tasks pages through candidates (collectReadable) and keeps a
+    // task only by the task page's own ladder (readableItemsVia, built on the
+    // node resolver); list_data_tables keeps a table only by the resolver.
     const search = block(tools, "const searchTasks: ToolDefinition");
-    expect(search).toMatch(/readableIds\(ctx, candidates\.map\(\(r\) => \(\{ kind: "list" as const, id: r\.boardId \}\)\)\)/);
+    expect(search).toMatch(/collectReadable\(/);
+    expect(search).toMatch(/readableItemsVia\(viewer, batch, reader\)/);
+    expect(search).toMatch(/if \(nodeCtx\.denied\) return \{ count: 0, tasks: \[\] \}/);
     const tables = block(tools, "const listDataTables: ToolDefinition");
-    expect(tables).toMatch(/readableIds\(ctx, candidates\.map\(\(t\) => \(\{ kind: "table" as const, id: t\.id \}\)\)\)/);
+    expect(tables).toMatch(/collectReadable\(/);
+    expect(tables).toMatch(/readableIds\(ctx, batch\.map\(\(t\) => \(\{ kind: "table" as const, id: t\.id \}\)\)\)/);
   });
 });
 
