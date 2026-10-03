@@ -30,6 +30,21 @@ export function viaSentence(role: string, via: NodeVia, nameOf: (r: NodeRef) => 
     return "No access. Nothing shares this with them, and nothing above it does.";
   }
   const label = panelRoleLabel(role as PanelRole);
+  // A List's union answer (node-rules listCommentUnion): their own Can comment
+  // row plus Can view another way, which together are Can edit assigned tasks.
+  if (via.plusOwnComment && role === "ASSIGNED") {
+    const other =
+      via.type === "inherited"
+        ? `Can view from ${NODE_NOUN[via.node.kind]} ${nameOf(via.node)}`
+        : via.type === "everyone"
+          ? via.node
+            ? `Can view because ${NODE_NOUN[via.node.kind]} ${nameOf(via.node)} is open to everyone in ${orgName}`
+            : `Can view as everyone in ${orgName}`
+          : via.type === "floor"
+            ? "the Can view they kept from before the Private rule changed"
+            : "Can view another way";
+    return `${label}. Can comment is shared with them directly, plus ${other}.`;
+  }
   switch (via.type) {
     case "org_admin":
       return `${label}. They are an Owner or Admin of ${orgName}.`;

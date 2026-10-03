@@ -319,7 +319,10 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
             statuses={statuses}
             watcherIds={watcherIds}
             personalList={!board?.spaceId}
-            assigneeOnly={decision.via === "assignee"}
+            // Rule 9 or rule 5 alone (the task's assignee, or its maker, below
+            // Can edit on its List): the menu offers no List writes (Duplicate,
+            // Move, Share, Public link), which the List would refuse.
+            assigneeOnly={decision.via === "assignee" || (decision.via === "creator" && task.canAddToList === false)}
             isCreator={Boolean(currentUserId && createdById === currentUserId)}
             isAgent={boot.viewer.isAgent}
             isGuest={boot.viewer.orgRole === "GUEST"}

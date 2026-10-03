@@ -237,7 +237,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     // router.replace below re-renders before the param clears.
     if (refusedPanelRef.current === panelParam) return;
     refusedPanelRef.current = panelParam;
-    toast(`${panelParam === "fields" ? "Custom fields" : "Task statuses"} need Can edit on this List. Ask a List or Space admin to change your access.`);
+    toast(`${panelParam === "fields" ? "Custom fields" : "Task statuses"} need Full access on this List. Ask a List or Space admin to change your access.`);
     stripPanel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelParam, mayManage]);

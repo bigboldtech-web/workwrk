@@ -45,7 +45,7 @@ import { parseWorkScope, type MyWorkRow, type WorkGroupKey, type WorkSortKey } f
 import { delegatedWhere } from "@/lib/delegated-items";
 import type { Prisma } from "@/generated/prisma";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
-import { liftWithheldListIds } from "@/lib/assignee-lift";
+import { listSidesFor } from "@/lib/assignee-lift";
 
 export const dynamic = "force-dynamic";
 
@@ -283,11 +283,26 @@ export async function GET(req: Request) {
     u.organizationId,
     Array.from(new Set(page.map((r) => r.boardId))),
   );
-  // The Lists where being assigned does not let this viewer change a task.
-  const readOnlyBoardIds = await liftWithheldListIds(
+  // What each List lets this viewer do with a task in it (assignee-lift.ts).
+  const sides = await listSidesFor(
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel },
     page.map((r) => r.boardId),
   );
+  // "Assigned by me" rows are assigned to someone else, so rule 9 does not
+  // reach them: the viewer changes one with Can edit on its List, or because
+  // they made it (rule 5, read from the CREATED row as the gate reads it).
+  const madeByViewer = scope === "delegated" && page.length > 0
+    ? new Set(
+        (await prisma.itemActivity.findMany({
+          where: { organizationId: u.organizationId, entityType: "BOARD_ITEM", entityId: { in: page.map((r) => r.id) }, action: "CREATED", actorId: u.id },
+          select: { entityId: true },
+        })).map((r) => r.entityId),
+      )
+    : new Set<string>();
+  const canEditRow = (it: { id: string; boardId: string }): boolean =>
+    scope === "delegated"
+      ? sides.addable.has(it.boardId) || (madeByViewer.has(it.id) && !sides.withheld.has(it.boardId))
+      : !sides.withheld.has(it.boardId);
 
   const now = new Date();
   // One status lookup per List, not per row.
@@ -329,7 +344,8 @@ export async function GET(req: Request) {
       : null,
     space: it.board?.spaceId ? spaceById.get(it.board.spaceId) ?? null : null,
     listReadable: readableBoardIds.has(it.boardId),
-    canEdit: !readOnlyBoardIds.has(it.boardId),
+    canEdit: canEditRow(it),
+    canAddToList: sides.addable.has(it.boardId),
   }));
 
   // The legacy shape the planner side panel still reads. Same rows, five

@@ -94,10 +94,17 @@ export interface ItemMoreMenuProps {
   onPatch: (body: Record<string, unknown>) => void;
   onOpen?: () => void;
   onRenameRequested?: () => void;
+  /**
+   * After the menu's OWN archive, delete, move or duplicate: the menu has
+   * already asked and written it. The host only shows the result (takes the
+   * row away, adds the copy); it never asks or writes a second time, which
+   * once made every Duplicate two copies and every Archive two dialogs.
+   */
   onArchived?: () => void;
   onDeleted?: () => void;
   onMoved?: (boardId: string) => void;
-  onDuplicated?: (itemId: string) => void;
+  /** The copy as POST /api/items/[id]/duplicate returns it. */
+  onDuplicated?: (itemId: string, copy: unknown) => void;
   /** Absent means no Share row: a Personal List task has nothing to share. */
   onShare?: () => void;
   /** Archive's Undo restored the task: the host re-reads it. */
@@ -320,7 +327,12 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     canRemoveFromList: linked ? Boolean(listContext?.canRemoveFromList) : undefined,
     linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
     canSharePublicly,
-  }).filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0));
+  })
+    .filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0))
+    // Share / Who has access opens the host's share dialog: a host that
+    // passes none (the List views' row, card and right-click menus) gets no
+    // row, rather than one that closes the menu and opens nothing.
+    .filter((row) => !(row.key === "share" && !onShare));
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -376,7 +388,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
             return;
           }
           toast("Task duplicated");
-          if (data.item?.id) onDuplicated?.(data.item.id);
+          if (data.item?.id) onDuplicated?.(data.item.id, data.item);
           return;
         }
         case "move":

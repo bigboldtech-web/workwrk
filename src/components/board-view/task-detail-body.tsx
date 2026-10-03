@@ -310,6 +310,7 @@ export function TaskDetailBody({
         item={item}
         role={decision.role}
         canAddSubtasks={canAddSubtasks}
+        canManageList={task.canManageList}
         currentUserId={currentUserId}
         customFields={board?.fields ?? []}
         statusOptions={statuses}

@@ -65,27 +65,44 @@ function Legend({ rows }: { rows: readonly MyWorkRow[] }) {
   );
 }
 
+/**
+ * Each row says what the viewer may do with it (the server works it out per
+ * row, src/lib/assignee-lift.ts), so one task in a List where Can comment is
+ * all they hold never stops them rescheduling every other one.
+ */
+function useRowRules(rows: readonly MyWorkRow[]) {
+  return useMemo(() => {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return {
+      editableRow: (row: { id: string }) => byId.get(row.id)?.canEdit ?? false,
+      // Open only through being assigned (or having made it), below Can edit
+      // on its List: the menu offers no List writes for it.
+      relationOnly: (row: { id: string }) => byId.get(row.id)?.canAddToList === false,
+    };
+  }, [rows]);
+}
+
 export function MyWorkGantt({
   rows,
-  canEdit = true,
   onChanged,
 }: {
   rows: readonly MyWorkRow[];
-  /** False when any row on the page is read-only (Everything at Can view). */
-  canEdit?: boolean;
   /** After a drag or a date write: the page re-reads its rows. */
   onChanged: () => void;
 }) {
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
+  const { editableRow, relationOnly } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
       <BoardGanttView
         initialItems={items}
         statuses={statuses}
-        canEdit={canEdit}
+        canEdit
+        editableRow={editableRow}
+        relationOnly={relationOnly}
         onOpenItem={(id) => openTask(router, id)}
         onItemChanged={onChanged}
         onItemRemoved={onChanged}
@@ -97,23 +114,24 @@ export function MyWorkGantt({
 
 export function MyWorkTimeline({
   rows,
-  canEdit = true,
   onChanged,
 }: {
   rows: readonly MyWorkRow[];
-  canEdit?: boolean;
   onChanged: () => void;
 }) {
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
+  const { editableRow, relationOnly } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
       <BoardTimelineView
         initialItems={items}
         statuses={statuses}
-        canEdit={canEdit}
+        canEdit
+        editableRow={editableRow}
+        relationOnly={relationOnly}
         onOpenItem={(id) => openTask(router, id)}
         onItemCreated={onChanged}
         onItemRemoved={onChanged}

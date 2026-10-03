@@ -309,6 +309,7 @@ async function readItem(id: string, c: Ctx, requestedList: string | null) {
     // Adding a subtask adds to the List: Can edit on it (founder decision 3,
     // Can edit assigned tasks changes the viewer's tasks, never adds one).
     canAddToList: gate.canAddToList,
+    canManageList: gate.canManageList,
   });
 }
 

@@ -216,14 +216,24 @@ export function writtenBeforeCutoff(rows: NodeRows, at: number | null | undefine
  * The viewer's rows as today's code would have seen them: every Space,
  * Folder and List row written at or after the cutoff removed. The same object
  * when nothing is dropped.
+ *
+ * A List row that carries a rung (Can comment, Can edit assigned tasks) is
+ * dropped whatever its date: the rungs exist only on this release's ladder,
+ * so a row holding one is this release's grant even when the grant writer set
+ * it in place on an older row (which keeps that row's createdAt). Today's code
+ * never saw it, and reading it back as an older row would hand its holder
+ * "every reader edits an unrestricted doc" (A8) on the List's docs and its
+ * tasks' docs, which is exactly what Can comment says they do not get.
  */
 export function legacyGrantsOf(rows: NodeRows, grants: ViewerGrants): ViewerGrants {
   const since = grants.since;
-  if (rows.legacyBefore === null || !since || since.size === 0) return grants;
+  const rung = grants.listRung && grants.listRung.size > 0 ? grants.listRung : null;
+  if (!rung && (rows.legacyBefore === null || !since || since.size === 0)) return grants;
   const keep = (kind: "space" | "folder" | "list", m: ViewerGrants["space"]) => {
     let out: ViewerGrants["space"] | null = null;
     for (const id of m.keys()) {
-      if (writtenBeforeCutoff(rows, since.get(`${kind}:${id}`))) continue;
+      const rungRow = kind === "list" && !!rung && rung.has(id);
+      if (!rungRow && writtenBeforeCutoff(rows, since?.get(`${kind}:${id}`))) continue;
       out ??= new Map(m);
       out.delete(id);
     }

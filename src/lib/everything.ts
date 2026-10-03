@@ -401,6 +401,18 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     weekStart: prefs?.home?.locale?.weekStart ?? null,
   };
 
+  // Rule 5: a task the viewer made is theirs (Full access) wherever the List's
+  // lift applies, as the task gate and the List views read it. The creator is
+  // the CREATED row's actor, read the way the gate reads it.
+  const madeByViewer = page.length > 0
+    ? new Set(
+        (await prisma.itemActivity.findMany({
+          where: { organizationId: orgId, entityType: "BOARD_ITEM", entityId: { in: page.map((it) => it.id) }, action: "CREATED", actorId: viewer.userId },
+          select: { entityId: true },
+        })).map((r) => r.entityId),
+      )
+    : new Set<string>();
+
   const rows: EverythingRow[] = page.map((it) => {
     const label = labelOf.get(it.id);
     const shown = boardFor(it);
@@ -412,7 +424,11 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     // gate says, except where they hold Can comment (founder decision 3).
     const listRole = linkedLabel ? "VIEW" : roles.get(it.boardId) ?? "VIEW";
     const mine = it.ownerId === viewer.userId || (it.assigneeIds ?? []).includes(viewer.userId);
-    const role: ObjectRole = !linkedLabel && mine && !noLift.has(it.boardId) && !atLeast(listRole, "EDIT") ? "EDIT" : listRole;
+    const lifts = !linkedLabel && !noLift.has(it.boardId);
+    const role: ObjectRole =
+      lifts && madeByViewer.has(it.id) ? "FULL"
+        : lifts && mine && !atLeast(listRole, "EDIT") ? "EDIT"
+          : listRole;
     return {
       id: it.id,
       title: it.title,
@@ -441,6 +457,8 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
       listReadable: true,
       role,
       canEdit: atLeast(role, "EDIT"),
+      // The List's own role, before any lift: what adding to it needs.
+      canAddToList: atLeast(listRole, "EDIT"),
     };
   });
 

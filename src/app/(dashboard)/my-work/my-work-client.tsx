@@ -884,9 +884,9 @@ export function MyWorkClient({
           ) : view === "calendar" ? (
             <MyWorkCalendar rows={rows ?? []} locale={locale} onCreate={() => openCreateTask()} mode={calMode} />
           ) : view === "gantt" ? (
-            <MyWorkGantt rows={rows ?? []} canEdit={(rows ?? []).every((r) => r.canEdit)} onChanged={() => void load()} />
+            <MyWorkGantt rows={rows ?? []} onChanged={() => void load()} />
           ) : view === "timeline" ? (
-            <MyWorkTimeline rows={rows ?? []} canEdit={(rows ?? []).every((r) => r.canEdit)} onChanged={() => void load()} />
+            <MyWorkTimeline rows={rows ?? []} onChanged={() => void load()} />
           ) : view === "sprint" ? (
             <MyWorkSprint rows={rows ?? []} now={now} locale={locale} onChanged={() => void load()} />
           ) : (

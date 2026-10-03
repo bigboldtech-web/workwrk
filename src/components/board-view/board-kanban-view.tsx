@@ -621,31 +621,19 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate).
   // The body this used to send dropped the assignees, the tags, both dates and
   // the priority.
-  const duplicateCard = useCallback(async (card: BoardItemRow) => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch(`/api/items/${card.id}/duplicate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      // A copy of a card shown here through a link lives in its HOME, and is
-      // here only if it was linked here too: the board is re-read.
-      if (res.ok && linkedRowKind(card, boardId) !== "home") {
-        await refetch();
-        return;
-      }
-      if (res.ok && data?.item) {
-        setItems((prev) => [...prev, data.item as BoardItemRow]);
-        reportCreated(data.item as BoardItemRow);
-        return;
-      }
-      // There was no else branch and the catch was empty, so a refused
-      // Duplicate produced nothing at all and the row looked like a dead
-      // button. Every refusal gets a sentence, the same way the List view's
-      // Duplicate already does.
-      setError(accessMessage(data, "Couldn't duplicate this task."));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
+  // The card menu has already made the copy (item-more-menu.tsx
+  // "duplicate"): this only shows it. Making it here again was a second copy
+  // on every Duplicate.
+  const cardDuplicated = useCallback(async (card: BoardItemRow, copy: BoardItemRow | null) => {
+    // A copy of a card shown here through a link lives in its HOME, and is
+    // here only if it was linked here too: the board is re-read.
+    if (linkedRowKind(card, boardId) !== "home" || !copy) {
+      await refetch();
+      return;
     }
-  }, [canEdit, reportCreated, boardId, refetch]);
+    setItems((prev) => (prev.some((r) => r.id === copy.id) ? prev : [...prev, copy]));
+    reportCreated(copy);
+  }, [reportCreated, boardId, refetch]);
 
   const removeLocal = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
@@ -844,7 +832,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onPatch={patchCard}
                     onToggleComplete={() => toggleComplete(card)}
                     onAddSubtask={(title) => addSubtask(card.id, card.status, title)}
-                    onDuplicate={() => duplicateCard(card)}
+                    onDuplicated={(copy) => void cardDuplicated(card, copy)}
                     // The card menu has already asked and archived it on the
                     // server (item-more-menu.tsx "archive"): the card only
                     // leaves the board here. Asking and archiving again put a
@@ -937,7 +925,7 @@ function KanbanCard({
   onPatch,
   onToggleComplete,
   onAddSubtask,
-  onDuplicate,
+  onDuplicated,
   onArchive,
   onDeleted,
   autoEdit = false,
@@ -989,7 +977,8 @@ function KanbanCard({
   onToggleComplete: () => void;
   /** Type-first: the card's inline input hands over the title the user typed. */
   onAddSubtask: (title: string) => Promise<{ ok: boolean; error?: string }>;
-  onDuplicate: () => void;
+  /** After the card menu made a copy: show it (the menu already wrote it). */
+  onDuplicated: (copy: BoardItemRow | null) => void;
   onArchive: () => void;
   onDeleted: () => void;
   autoEdit?: boolean;
@@ -1166,7 +1155,7 @@ function KanbanCard({
             onPatch={(body) => onPatch(card.id, body as Partial<BoardItemRow>, body as Partial<BoardItemRow>)}
             onOpen={onOpen}
             onRenameRequested={startEdit}
-            onDuplicated={onDuplicate}
+            onDuplicated={(_id, copy) => onDuplicated((copy as BoardItemRow | undefined) ?? null)}
             onArchived={onArchive}
             onDeleted={onDeleted}
             // A moved task belongs to the destination List now, so its card

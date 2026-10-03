@@ -613,7 +613,7 @@ export function accessEntries(input: AccessEntriesInput): AccessEntries {
       let alsoVia: AccessDirectEntry["alsoVia"] = null;
       if (rankP(d.role) > rankP(row.role) && d.role !== "none") {
         const v = toAccessVia(d.via);
-        alsoVia = { role: d.role, via: v === "path" ? { type: "hidden" } : v };
+        alsoVia = { role: d.role, via: v === "path" ? { type: "hidden" } : v, ...(d.via.plusOwnComment ? { plusOwnComment: true } : {}) };
       }
       direct.push({ person: p.person, role: row.role, owner: false, source: row.source, editable, removable: editable && !lastFull, lastFull, cap: row.cap, alsoVia });
       continue;

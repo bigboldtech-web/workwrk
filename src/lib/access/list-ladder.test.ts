@@ -37,6 +37,8 @@ import { grantsWithViewer } from "./node-world";
 import { allowsItemAction, decideItem, taskSideOfListRole } from "../item-role";
 import { assignedRowEditable, rowFieldsEditable, watchOnlyPatch } from "../list-link-rows";
 import { roleCoversRequest } from "./access-requests";
+import { viaSentence } from "./check-access";
+import { alsoViaText } from "../../components/access/manage-access-model";
 import type { BoardItemRow } from "../board-items-shared";
 
 const ORG = "org-1";
@@ -110,6 +112,24 @@ describe("the List ladder: what a share offers and stores", () => {
     expect(toAssigned.notify).toBe("upgraded");
     const same = planGrant({ ...base, current: "ASSIGNED", currentRow: "ASSIGNED", requested: "ASSIGNED" });
     expect(same.noChange).toBe(true);
+  });
+
+  it("a raise only adds: Can view and Can comment raised onto each other give both, Can edit assigned tasks", () => {
+    const base = { kind: "list" as const, actorMax: "FULL" as const, mode: "raise" as const };
+    for (const [current, requested] of [["VIEW", "COMMENT"], ["COMMENT", "VIEW"]] as const) {
+      const p = planGrant({ ...base, current, currentRow: current === "VIEW" ? "GUEST" : "COMMENT", requested });
+      expect(p.noChange, `${requested} onto ${current}`).toBe(false);
+      expect(p.writeRole).toBe("ASSIGNED");
+      expect(p.role).toBe("ASSIGNED");
+      expect(p.notify).toBe("upgraded");
+    }
+    // A raise that already holds as much changes nothing; a set writes what was chosen.
+    expect(planGrant({ ...base, current: "ASSIGNED", currentRow: "ASSIGNED", requested: "VIEW" }).noChange).toBe(true);
+    const set = planGrant({ kind: "list", actorMax: "FULL", current: "VIEW", currentRow: "GUEST", requested: "COMMENT" });
+    expect(set.writeRole).toBe("COMMENT");
+    expect(set.role).toBeUndefined();
+    // Only a List has the two rungs: a doc raise to Can view onto Can comment is no change.
+    expect(planGrant({ kind: "doc", actorMax: "FULL", mode: "raise", current: "COMMENT", currentRow: "COMMENT", requested: "VIEW" }).noChange).toBe(true);
   });
 });
 
@@ -300,6 +320,65 @@ describe("the List ladder: a share only adds (Can comment with Can view from els
     const row = out.direct.find((d) => d.person.id === ME)!;
     expect(row.role).toBe("COMMENT");
     expect(row.alsoVia?.role).toBe("ASSIGNED");
+    expect(row.alsoVia?.plusOwnComment).toBe(true);
+    // The second line says what the Space gives and what the two give together.
+    expect(alsoViaText(row.alsoVia!)).toBe("With Can view from s, they also change tasks assigned to them or that they made");
+  });
+
+  it("Check access names both halves of the union, never the other way alone", () => {
+    const nameOf = (r: NodeRef) => (r.kind === "space" ? "Marketing" : "Onboarding");
+    const space: NodeRef = { kind: "space", id: "s" };
+    expect(viaSentence("ASSIGNED", { type: "inherited", node: space, source: "SpaceMember", plusOwnComment: true }, nameOf, "Acme")).toBe(
+      "Can edit assigned tasks. Can comment is shared with them directly, plus Can view from Space Marketing.",
+    );
+    expect(viaSentence("ASSIGNED", { type: "everyone", node: space, plusOwnComment: true }, nameOf, "Acme")).toBe(
+      "Can edit assigned tasks. Can comment is shared with them directly, plus Can view because Space Marketing is open to everyone in Acme.",
+    );
+    expect(viaSentence("ASSIGNED", { type: "floor", node: { kind: "list", id: "l" }, plusOwnComment: true }, nameOf, "Acme")).toBe(
+      "Can edit assigned tasks. Can comment is shared with them directly, plus the Can view they kept from before the Private rule changed.",
+    );
+    // Without the mark, the sentence is the ordinary one.
+    expect(viaSentence("VIEW", { type: "everyone", node: space }, nameOf, "Acme")).toBe("Can view. Space Marketing is open to everyone in Acme.");
+  });
+
+  it("marks the union's via, and only the union's", () => {
+    const union = (() => {
+      const { rows, g } = world();
+      g.list.set("l", "GUEST");
+      (g.listRung ??= new Map()).set("l", "COMMENT");
+      g.space.set("s", "GUEST");
+      return new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" });
+    })();
+    expect(union.via.plusOwnComment).toBe(true);
+    const plain = (() => {
+      const { rows, g } = world();
+      g.space.set("s", "GUEST");
+      return new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" });
+    })();
+    expect(plain.role).toBe("VIEW");
+    expect(plain.via.plusOwnComment).toBeUndefined();
+  });
+
+  it("the older rule counts as another way in: Can view kept from before the cutoff plus Can comment is Can edit assigned tasks", () => {
+    // A List inside a Private Folder of Folder A. The strict rules give an
+    // admin of A nothing there; the older rule kept their reach (Can view).
+    const rows = emptyRows(ORG, "legacy");
+    rows.spaces.set("s", { id: "s", organizationId: ORG, name: "s", slug: "s", icon: null, color: null, visibility: "WORKSPACE", ownerId: OTHER });
+    const folder = (id: string, parent: string | null, visibility: "WORKSPACE" | "PRIVATE") => ({
+      id, organizationId: ORG, spaceId: "s", parentFolderId: parent, name: id, icon: null, color: null, visibility, ownerId: OTHER, position: 0,
+    });
+    rows.folders.set("A", folder("A", null, "WORKSPACE"));
+    rows.folders.set("AP", folder("AP", "A", "PRIVATE"));
+    rows.lists.set("l", { id: "l", organizationId: ORG, spaceId: "s", folderId: "AP", name: "l", slug: "l", icon: null, color: null, visibility: "WORKSPACE", ownerId: OTHER });
+    const g = emptyGrants(viewer());
+    g.folder.set("A", "ADMIN");
+    const before = new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" });
+    expect(before).toEqual({ role: "VIEW", via: { type: "floor", node: { kind: "list", id: "l" } } });
+    g.list.set("l", "GUEST");
+    (g.listRung ??= new Map()).set("l", "COMMENT");
+    const res = new NodeEvaluator(rows, g).effective({ kind: "list", id: "l" });
+    expect(res.role).toBe("ASSIGNED");
+    expect(res.via).toEqual({ type: "floor", node: { kind: "list", id: "l" }, plusOwnComment: true });
   });
 });
 
@@ -313,6 +392,38 @@ describe("the List ladder: what hangs off a List never reads a task-only rung", 
     // rather than the older rule's "every reach edits an unrestricted doc" (A8).
     g.since!.set("list:l", CUTOFF + 1);
     expect(new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role).toBe("COMMENT");
+  });
+
+  // An older row set to a rung in place keeps its createdAt, and a workspace
+  // may have no cutoff at all: neither may read the rung row as an older
+  // grant, or the older rule's "every reader edits an unrestricted doc" (A8)
+  // would hand a Can comment member the List's docs and its tasks' docs.
+  for (const privateRule of ["legacy", "strict"] as const) {
+    for (const cutoff of ["older row", "no cutoff"] as const) {
+      for (const anchor of ["BOARD", "BOARD_ITEM"] as const) {
+        it(`a ${anchor === "BOARD" ? "doc on the List" : "doc on one of its tasks"} reads either rung as Can comment (${cutoff}, ${privateRule} rule)`, () => {
+          for (const rung of ["COMMENT", "ASSIGNED"] as const) {
+            const { rows, g } = world();
+            rows.privateRule = privateRule;
+            if (cutoff === "no cutoff") rows.legacyBefore = null;
+            rows.items.set("t", { id: "t", organizationId: ORG, boardId: "l" });
+            rows.docs.set("d", { id: "d", organizationId: ORG, title: "d", entityType: anchor, entityId: anchor === "BOARD" ? "l" : "t", parentId: null, createdById: OTHER });
+            g.list.set("l", "GUEST");
+            (g.listRung ??= new Map()).set("l", rung);
+            g.since!.set("list:l", CUTOFF - 1);
+            expect(new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role, rung).toBe("COMMENT");
+          }
+        });
+      }
+    }
+  }
+
+  it("keeps the older rule for an older Can view row with no rung: its docs stay Can edit (A8)", () => {
+    const { rows, g } = world();
+    rows.docs.set("d", { id: "d", organizationId: ORG, title: "d", entityType: "BOARD", entityId: "l", parentId: null, createdById: OTHER });
+    g.list.set("l", "GUEST");
+    g.since!.set("list:l", CUTOFF - 1);
+    expect(new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role).toBe("EDIT");
   });
 
   it("a form that sends answers to the List opens read-only at either rung, as at Can view", () => {

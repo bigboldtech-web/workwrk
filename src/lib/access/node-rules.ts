@@ -443,7 +443,7 @@ export function readPrivateRule(settings: unknown): PrivateRule {
 
 // ── where a role comes from ──────────────────────────────────────────
 
-export type NodeVia =
+export type NodeVia = (
   | { type: "org_admin" }
   | { type: "own"; node: NodeRef; source: AccessGrantSource }
   | { type: "owner"; node: NodeRef }
@@ -452,7 +452,15 @@ export type NodeVia =
   | { type: "inherited"; node: NodeRef; source: AccessGrantSource | null }
   | { type: "everyone"; node: NodeRef | null }
   | { type: "floor"; node: NodeRef }
-  | { type: "none" };
+  | { type: "none" }
+) & {
+  /**
+   * Set only by a List's union answer (listCommentUnion): the role is Can edit
+   * assigned tasks because the person's own Can comment row and THIS way in
+   * give it together. The words that explain a role name both halves.
+   */
+  plusOwnComment?: true;
+};
 
 export interface NodeDecision {
   /** The effective role (R11): the strict role, or today's when that is higher under the legacy rule. */
@@ -873,7 +881,7 @@ export class NodeEvaluator {
     const listRung = new Map(this.grants.listRung);
     listRung.delete(ref.id);
     const without = new NodeEvaluator(this.rows, { ...this.grants, list, listRung }).effective(ref);
-    return roleAtLeast(without.role, "VIEW") ? { role: "ASSIGNED", via: without.via } : res;
+    return roleAtLeast(without.role, "VIEW") ? { role: "ASSIGNED", via: { ...without.via, plusOwnComment: true } } : res;
   }
 
   /**

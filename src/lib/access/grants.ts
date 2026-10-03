@@ -66,7 +66,7 @@ import {
   type PrivateRule,
   type ViewerGrants,
 } from "./node-rules";
-import { maxGrantFor, planGrant, planRemove, type StoredRole } from "./grant-plan";
+import { maxGrantFor, memberRouteKeepsRow, planGrant, planRemove, type StoredRole } from "./grant-plan";
 import { ACCESS_ACTIVITY_TYPES, ACTIVITY_TARGET_TYPE, accessActivityDescription, type AccessActivityType } from "./access-activity";
 import {
   accessGrantTableReady,
@@ -596,13 +596,9 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
     });
     if (plan.error) throw new GrantError(plan.error);
     const writeRole = stored ?? plan.writeRole;
-    // The member routes' vocabulary cannot name a List rung, so their GUEST
-    // onto a GUEST row that carries one ("COMMENT" or "ASSIGNED") is that
-    // same row: no change. Rewriting it would silently reset Can comment or
-    // Can edit assigned tasks to plain Can view; only the share dialog moves
-    // between them.
-    const rungRowKept = stored === "GUEST" && ref.kind === "list" && (cur.stored === "COMMENT" || cur.stored === "ASSIGNED");
-    const noChange = stored ? cur.stored === stored || rungRowKept : plan.noChange;
+    // The member routes' GUEST onto a List rung row is that same row
+    // (grant-plan.ts memberRouteKeepsRow).
+    const noChange = stored ? memberRouteKeepsRow(ref.kind, stored, cur.stored) : plan.noChange;
     if (noChange || !writeRole) return { previousRole: cur.role, role: cur.role, noChange: true, notify: "none" as const };
     await writeRow(tx, actor.organizationId, ref, userId, writeRole, actor.userId, cur);
     await activity(tx, actor, ref, cur.role ? T_CHANGED : T_GRANTED, {
@@ -612,11 +608,12 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
       store: plan.store,
       source,
     });
-    return { previousRole: cur.role, role: requested, noChange: false, notify: plan.notify };
+    // A raise that joined two List rungs gives the union (grant-plan.ts).
+    return { previousRole: cur.role, role: plan.role ?? requested, noChange: false, notify: plan.notify };
   });
 
   if (outcome.notify === "shared" || outcome.notify === "upgraded") {
-    await notifyGrantee(actor, ref, gate.rows, userId, requested, outcome.notify);
+    await notifyGrantee(actor, ref, gate.rows, userId, outcome.role ?? requested, outcome.notify);
   }
   // A grant answers the person's open Request access on this node (spec 5.6
   // item 2), whichever door made it: the dialog, a members route or the

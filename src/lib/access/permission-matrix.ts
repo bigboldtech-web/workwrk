@@ -74,8 +74,10 @@ export function listMatrix(): PermissionMatrix {
       row("read", "Open the List and read every task", (r) => taskCell(r, "view")),
       row("comment", "Comment and react on tasks", (r) => taskCell(r, "comment")),
       row("edit", "Change a task: title, status, dates, people, fields", (r) => taskCell(r, "edit")),
-      row("archive", "Move a task to Trash", (r) => taskCell(r, "archive")),
-      row("delete", "Delete a task for good", (r) => taskCell(r, "delete")),
+      // Archive hides a task and keeps it restorable; Delete moves it to Trash,
+      // which keeps it for the workspace's retention (src/lib/trash-view.ts).
+      row("archive", "Archive a task", (r) => taskCell(r, "archive")),
+      row("delete", "Delete a task (Trash keeps it, 60 days by default)", (r) => taskCell(r, "delete")),
       // Adding to the List, arranging it and saving its views are List-level
       // writes: Can edit on the List (canContributeBoard).
       row("add", "Add tasks and subtasks", (r) => yesNo(roleAtLeast(r, "EDIT"))),
@@ -120,8 +122,8 @@ export const RELATIONSHIP_RULES: readonly MatrixRule[] = [
   { key: "linked", who: "Readers of another List a task is added to", gets: "Can view on that task. Whether they can change it is decided by the List it lives in." },
   // node-rules R4.
   { key: "inherit", who: "Members of a Space or Folder", gets: "The same level on the Lists inside it, unless a List is Private." },
-  // item-role rule 12.
-  { key: "trash", who: "Anyone on a task in Trash", gets: "Can view at most, unless they hold Full access. Someone with Can edit may still restore it." },
+  // item-role rule 12 (an archived task, archivedAt; Trash is a deleted one).
+  { key: "archived", who: "Anyone on an archived task", gets: "Can view at most, unless they hold Full access. Someone with Can edit may still restore it." },
   // item-role rule 12.
   { key: "agent", who: "An AI agent", gets: "Never deletes a task, whatever its level." },
 ];

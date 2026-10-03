@@ -191,7 +191,7 @@ export default async function BoardPage(props: {
     self.role === "ASSIGNED"
       ? {
           label: "Can edit assigned tasks",
-          title: `You can read and discuss every task in ${board.name} and change the tasks assigned to you. Adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
+          title: `You can read and discuss every task in ${board.name} and change the tasks assigned to you or that you made. Adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
         }
       : self.role === "COMMENT"
         ? {
@@ -200,7 +200,7 @@ export default async function BoardPage(props: {
           }
         : {
             label: "View only",
-            title: `You have view access to ${board.name}: you can switch views, read tasks and change a task assigned to you, but adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
+            title: `You have view access to ${board.name}: you can switch views, read tasks and change the tasks assigned to you or that you made, but adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
           };
   const canDeleteTasks = canManage;
   // A connect column names only the Lists this viewer can read, a mirror only

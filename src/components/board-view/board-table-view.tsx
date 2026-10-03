@@ -739,30 +739,20 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (fresh?.items) reportRefreshed(fresh.items);
   }, [boardId, reportRefreshed]);
 
-  const handleDuplicate = useCallback(async (row: BoardItemRow) => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch(`/api/items/${row.id}/duplicate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(accessMessage(data, "Couldn't duplicate this task."));
-        return;
-      }
-      // A copy of a task shown here through a link lives in the original's
-      // HOME, and appears here only if the copy was linked here too, so the
-      // List is re-read rather than guessing.
-      if (linkedRowKind(row, boardId) !== "home") {
-        await refetchList();
-        return;
-      }
-      if (data?.item) {
-        setItems((prev) => [...prev, data.item]);
-        reportCreated(data.item as BoardItemRow);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
+  // The row menu has already made the copy (item-more-menu.tsx
+  // "duplicate"): this only shows it. Making it here again was a second copy
+  // on every Duplicate.
+  const handleDuplicated = useCallback(async (row: BoardItemRow, copy: BoardItemRow | null) => {
+    // A copy of a task shown here through a link lives in the original's
+    // HOME, and appears here only if the copy was linked here too, so the
+    // List is re-read rather than guessing.
+    if (linkedRowKind(row, boardId) !== "home" || !copy) {
+      await refetchList();
+      return;
     }
-  }, [canEdit, reportCreated, boardId, refetchList]);
+    setItems((prev) => (prev.some((r) => r.id === copy.id) ? prev : [...prev, copy]));
+    reportCreated(copy);
+  }, [reportCreated, boardId, refetchList]);
 
   // Type-first: the inline subtask row passes the title the user typed — no
   // "New subtask" placeholder to rename afterward. Returns {ok,error} so the
@@ -1803,7 +1793,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         timeTrackingEnabled={timeTrackingEnabled}
         titleSuffix={renderTitleSuffix?.(row)}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
-        onDuplicate={handleDuplicate}
+        onDuplicated={handleDuplicated}
         onAddSubtask={() => {
           // Expand the parent and focus its inline subtask input so the user
           // types the name directly (instead of getting a "New subtask" row).
@@ -2204,7 +2194,7 @@ function Row({
   timeTrackingEnabled = true,
   titleSuffix,
   onOpen,
-  onDuplicate,
+  onDuplicated,
   onAddSubtask,
   dragEnabled,
   isDragging,
@@ -2258,7 +2248,8 @@ function Row({
   /** Local removal after a hard delete (→ Trash) succeeds. */
   onDeleted: (id: string) => void;
   onOpen?: () => void;
-  onDuplicate?: (row: BoardItemRow) => void;
+  /** After the menu made a copy of this row: show it. */
+  onDuplicated?: (row: BoardItemRow, copy: BoardItemRow | null) => void;
   onAddSubtask?: () => void;
   /**
    * May the viewer arrange this row in the List: drag it, select it for the
@@ -2607,7 +2598,7 @@ function Row({
             onPatch={(body) => onUpdate(row.id, body as Partial<BoardItemRow>)}
             onOpen={onOpen}
             onRenameRequested={() => setEditToken((t) => t + 1)}
-            onDuplicated={onDuplicate ? () => onDuplicate(row) : undefined}
+            onDuplicated={onDuplicated ? (_id, copy) => onDuplicated(row, (copy as BoardItemRow | undefined) ?? null) : undefined}
             onArchived={() => onArchive(row.id)}
             onDeleted={() => onDeleted(row.id)}
             // Same rule as the Kanban card: a moved task leaves this List, so

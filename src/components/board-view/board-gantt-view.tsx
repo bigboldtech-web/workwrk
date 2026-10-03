@@ -79,6 +79,17 @@ interface BoardGanttViewProps {
    * they load the body is today's.
    */
   loadedSettings?: LoadedListSettings | null;
+  /**
+   * Which rows this viewer may change, when the host knows it per row (My
+   * work, Everything: a task assigned to them, except where Can comment is
+   * all they hold on its List). Absent: the List's own rule.
+   */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /**
+   * Rows open to the viewer only because they are assigned to them or made
+   * them, below Can edit on the List: their menu offers no List writes.
+   */
+  relationOnly?: (row: BoardItemRow) => boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -121,6 +132,8 @@ export function BoardGanttView({
   onItemRemoved,
   timeTrackingEnabled,
   loadedSettings = null,
+  editableRow,
+  relationOnly,
 }: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on a name row / bar / marker opens the shared item menu.
@@ -343,8 +356,8 @@ export function BoardGanttView({
   // List they write, and a task shown through a link only as far as its task
   // role goes.
   const editableIds = useMemo(
-    () => new Set(initialItems.filter((it) => linkedRowEditable(it, canEdit)).map((it) => it.id)),
-    [initialItems, canEdit],
+    () => new Set(initialItems.filter((it) => (editableRow ? canEdit && editableRow(it) : linkedRowEditable(it, canEdit))).map((it) => it.id)),
+    [initialItems, canEdit, editableRow],
   );
 
   const beginDrag = (e: React.PointerEvent, id: string, mode: DragMode) => {
@@ -362,7 +375,7 @@ export function BoardGanttView({
   const scheduleDate = useCallback(async (id: string, value: string) => {
     if (!value) return;
     const row = initialItems.find((it) => it.id === id);
-    if (row && !linkedRowEditable(row, canEdit)) return;
+    if (!editableIds.has(id)) return;
     setError(null);
     try {
       const res = await fetch(`/api/items/${id}`, {
@@ -376,7 +389,7 @@ export function BoardGanttView({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set date");
     }
-  }, [onItemChanged, initialItems, canEdit, boardId]);
+  }, [onItemChanged, initialItems, editableIds, boardId]);
 
   // The ref is the lock: Enter disables the input, the disable blurs it, and
   // the blur's own add ran in the same frame, so one Enter made two tasks.
@@ -899,6 +912,7 @@ export function BoardGanttView({
               overdue={overdueRows}
               statuses={statuses}
               canEdit={canEdit}
+              editableIds={editableIds}
               onOpenItem={onOpenItem}
               onScheduleToday={(id) => void scheduleDate(id, shiftToIso(startOfTodayD, 0).slice(0, 10))}
               onDragStart={setPanelDragId}
@@ -912,6 +926,8 @@ export function BoardGanttView({
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
+        rowCanEdit={(row) => editableIds.has(row.id)}
+        relationOnly={relationOnly}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

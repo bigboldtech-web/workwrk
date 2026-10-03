@@ -92,7 +92,12 @@ export interface AccessDirectEntry {
   lastFull: boolean;
   /** A doc listing made before this release: it limits the person to this role even where a container gives more, as it does today. */
   cap: boolean;
-  alsoVia: { role: PanelRole; via: AccessVia } | null;
+  /**
+   * The role they reach the node at another way, when it is higher than their
+   * own row. `plusOwnComment`: a List's union (their own Can comment row plus
+   * Can view this other way give Can edit assigned tasks together).
+   */
+  alsoVia: { role: PanelRole; via: AccessVia; plusOwnComment?: boolean } | null;
 }
 
 export interface AccessInheritedEntry { person: AccessPerson; role: PanelRole; via: AccessVia }

@@ -22,6 +22,8 @@ interface GanttBacklogPanelProps {
   overdue: Array<{ item: BoardItemRow; end: Date }>;
   statuses: StatusOption[];
   canEdit: boolean;
+  /** The rows this viewer may date (the chart's own set); absent: every row when canEdit. */
+  editableIds?: ReadonlySet<string>;
   onOpenItem?: (id: string) => void;
   /** One-click "Today" quick-schedule on an unscheduled row. */
   onScheduleToday: (id: string) => void;
@@ -44,6 +46,7 @@ export function GanttBacklogPanel({
   overdue,
   statuses,
   canEdit,
+  editableIds,
   onOpenItem,
   onScheduleToday,
   onDragStart,
@@ -94,10 +97,12 @@ export function GanttBacklogPanel({
           {rows.map((it) => {
             const end = endById.get(it.id);
             const daysLate = end ? Math.max(1, Math.floor((startOfToday - end.getTime()) / MS_PER_DAY)) : 0;
+            // Drag onto the chart and "Today" only for a row the viewer may date.
+            const mayDate = canEdit && (!editableIds || editableIds.has(it.id));
             return (
               <li key={it.id}>
                 <div
-                  draggable={canEdit && tab === "unscheduled"}
+                  draggable={mayDate && tab === "unscheduled"}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = "move";
                     try { e.dataTransfer.setData("text/plain", it.id); } catch {}
@@ -105,7 +110,7 @@ export function GanttBacklogPanel({
                   }}
                   onDragEnd={onDragEnd}
                   className={`group flex h-7 items-center gap-2 px-3 hover:bg-zinc-50 dark:hover:bg-white/5 ${
-                    canEdit && tab === "unscheduled" ? "cursor-grab active:cursor-grabbing" : ""
+                    mayDate && tab === "unscheduled" ? "cursor-grab active:cursor-grabbing" : ""
                   }`}
                 >
                   <StatusGlyph current={(it.status ? statusLookup[it.status] : null) ?? null} statuses={statuses} />
@@ -117,7 +122,7 @@ export function GanttBacklogPanel({
                   >
                     {it.title}
                   </button>
-                  {tab === "unscheduled" && canEdit ? (
+                  {tab === "unscheduled" && mayDate ? (
                     <button
                       type="button"
                       onClick={() => onScheduleToday(it.id)}

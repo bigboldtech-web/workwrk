@@ -115,7 +115,10 @@ export function viaText(via: AccessVia): string {
 }
 
 /** The second line of a direct row that also reaches the node another way. */
-export function alsoViaText(also: { role: PanelRole; via: AccessVia }): string {
+export function alsoViaText(also: { role: PanelRole; via: AccessVia; plusOwnComment?: boolean }): string {
+  // A List's union: the other way gives Can view, and with their own Can
+  // comment row that is Can edit assigned tasks. Say what each half gives.
+  if (also.plusOwnComment) return `With Can view ${viaText(also.via)}, they also change tasks assigned to them or that they made`;
   // An admin's reach is always Full access, whatever role rode along with it.
   const role = also.via.type === "org_admin" || also.via.type === "owner" ? "FULL" : also.role;
   return `Also ${panelRoleLabel(role)} ${viaText(also.via)}`;

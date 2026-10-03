@@ -180,6 +180,13 @@ export interface ItemGateOk {
    * resolved, so it costs nothing.
    */
   canAddToList: boolean;
+  /**
+   * May this viewer manage the task's home List (its statuses and custom
+   * fields: Full access on it, or an org admin)? A task role can be Full
+   * without it (the person who made the task, rule 5), and the List's own
+   * settings still are not theirs.
+   */
+  canManageList: boolean;
 }
 
 export type ItemGateResult = { error: NextResponse } | ItemGateOk;
@@ -292,10 +299,12 @@ export async function gateItem(
   let assigneeLift = true;
   let creatorLift = true;
   let canAddToList = orgAdmin;
+  let canManageList = orgAdmin;
   if (!orgAdmin) {
     const d = await nodeRole(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id: item.boardId });
     ({ listRole, assigneeLift, creatorLift } = taskSideOfListRole(d.role));
     canAddToList = roleAtLeast(d.role, "EDIT");
+    canManageList = roleAtLeast(d.role, "FULL");
   }
 
   // Rule 5, one indexed query. It is resolved on EVERY call rather than only
@@ -345,7 +354,7 @@ export async function gateItem(
   }
 
   const { watchers, unwatchers } = readWatchers(item.metadata);
-  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers, viaLinkedList, canAddToList };
+  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers, viaLinkedList, canAddToList, canManageList };
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────

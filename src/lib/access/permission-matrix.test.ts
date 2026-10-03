@@ -36,7 +36,7 @@ describe("listMatrix", () => {
   });
 
   it("names every relationship rule and workspace role in plain words", () => {
-    expect(RELATIONSHIP_RULES.map((r) => r.key)).toEqual(["assignee", "creator", "union", "assigning", "admin", "owner", "linked", "inherit", "trash", "agent"]);
+    expect(RELATIONSHIP_RULES.map((r) => r.key)).toEqual(["assignee", "creator", "union", "assigning", "admin", "owner", "linked", "inherit", "archived", "agent"]);
     expect(WORKSPACE_ROLES.map((r) => r.role)).toEqual(["Owner", "Admin", "Member", "Agent"]);
     for (const r of [...RELATIONSHIP_RULES.flatMap((x) => [x.who, x.gets]), ...WORKSPACE_ROLES.map((x) => x.summary)]) {
       expect(r).not.toMatch(/—|--/);
