@@ -63,12 +63,26 @@ function useJobTitles(): { titles: JobTitleOption[]; failed: boolean; retry: () 
   return { titles, failed, retry: () => setAttempt((a) => a + 1) };
 }
 
-function StepOwnerRow({ step, titles, failed, retry, onChange }: {
+/** The job titles' load state, said once where a row of controls sits under it. */
+function JobTitlesHint({ titles, failed, retry }: { titles: JobTitleOption[]; failed: boolean; retry: () => void }) {
+  if (failed) {
+    return (
+      <span className="text-xs text-ink-3">
+        Job titles did not load. <button type="button" onClick={retry} className="font-medium text-ink-2 underline">Retry</button>
+      </span>
+    );
+  }
+  return titles.length === 0 ? <span className="text-xs text-ink-3">Add job titles in People to give steps an owner.</span> : null;
+}
+
+function StepOwnerRow({ step, titles, failed, retry, onChange, hint = true }: {
   step: EditStep;
   titles: JobTitleOption[];
   failed: boolean;
   retry: () => void;
   onChange: (patch: Partial<EditStep>) => void;
+  /** Off where the caller says the job titles' state once for many rows. */
+  hint?: boolean;
 }) {
   const current = step.jobTitle ?? null;
   // A title that was renamed or deleted since the step was saved still shows
@@ -92,13 +106,7 @@ function StepOwnerRow({ step, titles, failed, retry, onChange }: {
           {titles.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
         </select>
       </label>
-      {failed ? (
-        <span className="text-xs text-ink-3">
-          Job titles did not load. <button type="button" onClick={retry} className="font-medium text-ink-2 underline">Retry</button>
-        </span>
-      ) : titles.length === 0 ? (
-        <span className="text-xs text-ink-3">Add job titles in People to give steps an owner.</span>
-      ) : null}
+      {hint ? <JobTitlesHint titles={titles} failed={failed} retry={retry} /> : null}
       <label className="inline-flex items-center gap-2 text-sm text-ink-2">
         <Switch checked={step.createsTask === true} onChange={(v) => onChange({ createsTask: v })} aria-label="Creates a task when the SOP is run" />
         Creates a task when the SOP is run
@@ -114,8 +122,12 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
   jobTitles: { titles: JobTitleOption[]; failed: boolean; retry: () => void };
 }) {
   const [editing, setEditing] = useState(false);
+  // An empty flow has its own empty state below; owners of no steps say nothing.
+  if (flow.steps.length === 0) return null;
+  // "Done" here only folds the owner controls; the sticky bar's Done leaves
+  // edit mode, so this one is named for what it closes.
   const toggle = (
-    <button type="button" onClick={() => setEditing((v) => !v)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+    <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} aria-label={editing ? "Done editing owners" : undefined} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
       {editing ? "Done" : "Edit owners"}
     </button>
   );
@@ -126,9 +138,11 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
     onFlowChange({ ...flow, steps: flow.steps.map((s, j) => (j === index ? ({ ...s, ...p } as ProcessFlowStep) : s)) });
   return (
     <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
-      <div className="flex h-11 items-center gap-3 px-3">
+      <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
         <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
         {toggle}
+        {/* Once for every step, not once per row. */}
+        <span className="basis-full empty:hidden"><JobTitlesHint titles={jobTitles.titles} failed={jobTitles.failed} retry={jobTitles.retry} /></span>
       </div>
       <ol className="flex flex-col divide-y divide-line border-t border-line">
         {flow.steps.map((s, i) => (
@@ -143,6 +157,7 @@ function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
               failed={jobTitles.failed}
               retry={jobTitles.retry}
               onChange={(p) => patch(i, p)}
+              hint={false}
             />
           </li>
         ))}
