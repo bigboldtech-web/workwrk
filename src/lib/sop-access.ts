@@ -59,7 +59,9 @@ export async function sopVisibilityWhere(
     hasPermission(session, "sops", "edit"),
   ]);
   // Folders the user can VIEW (any role) vs EDIT (EDITOR/OWNER). Within a
-  // folder, viewers see only PUBLISHED SOPs; editors/owners and the author
+  // folder, viewers see PUBLISHED and ARCHIVED SOPs (an archived SOP stays
+  // readable because it was readable when published, as an unfiled one does,
+  // and GET /api/sops/[id] opens it for them); editors/owners and the author
   // also see drafts.
   const viewFolderIds = await expandAccessibleFolderIds(grants.map((g) => g.folderId));
   const editFolderIds = await expandAccessibleFolderIds(
@@ -74,8 +76,11 @@ export async function sopVisibilityWhere(
       // Other people's unfiled DRAFTS are not everyone's to read.
       { folderId: null, status: { in: ["PUBLISHED", "ARCHIVED"] } },
       ...(canEditUnfiled ? [{ folderId: null }] : []),
-      // In folders the user can VIEW: published SOPs only.
-      ...(viewFolderIds.length > 0 ? [{ status: "PUBLISHED", folderId: { in: viewFolderIds } }] : []),
+      // In folders the user can VIEW: published SOPs, and archived ones,
+      // exactly what the SOP page opens for a Can view grant. Before, the
+      // page opened an archived SOP that the list, search, a task's links
+      // and the connection trail all hid.
+      ...(viewFolderIds.length > 0 ? [{ status: { in: ["PUBLISHED", "ARCHIVED"] }, folderId: { in: viewFolderIds } }] : []),
       // The user's own authored SOPs, any status, wherever they live.
       { createdById: userId },
       // In folders the user can EDIT (Editor/Owner): drafts included.
