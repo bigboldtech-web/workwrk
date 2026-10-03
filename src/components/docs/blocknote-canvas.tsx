@@ -253,8 +253,13 @@ async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   return out;
 }
 
-/** Why a person mentioned was not told: they cannot open the doc, or the notice did not go out (with a way to send it again). */
-type NotTold = (name: string, why: "no_access" | "failed", retry?: () => void) => void;
+/**
+ * Why a person mentioned was not told: they cannot open the doc, the notice
+ * did not go out (with a way to send it again when trying again can help),
+ * the doc refused it (it is gone, or you can no longer write in it), or the
+ * person is not in this workspace.
+ */
+type NotTold = (name: string, why: "no_access" | "failed" | "refused" | "unknown", retry?: () => void) => void;
 
 function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string, onNotTold?: NotTold): DefaultReactSuggestionItem[] {
   return rows.map((row) => ({
@@ -279,14 +284,23 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
         // Someone who cannot open the doc is not told (the route says so),
         // and a notice that did not go out is not sent: either way the writer
         // hears it, so a mention never looks sent when it was not.
+        // A network failure or a server error can pass on a second try (the
+        // route sends one notice per person and doc a few minutes apart, so
+        // a retry after a lost answer never tells them twice); a refusal
+        // cannot.
         const tell = () => {
           void fetch(`/api/docs/${docId}/mention`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ userId: row.id }),
           })
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => {
+            .then(async (r) => {
+              if (!r.ok) {
+                if (r.status >= 500) onNotTold?.(row.label, "failed", tell);
+                else onNotTold?.(row.label, r.status === 400 ? "unknown" : "refused");
+                return;
+              }
+              const d = await r.json().catch(() => null);
               if (!d) onNotTold?.(row.label, "failed", tell);
               else if (d.skipped === "no_access") onNotTold?.(row.label, "no_access");
             })
@@ -588,7 +602,11 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
           triggerCharacter="@"
           getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId, (name, why, retry) => (why === "no_access"
             ? toast(`${name} can't open this doc, so they were not told.`)
-            : toast(`Couldn't tell ${name} about the mention.`, { tone: "danger", action: retry ? { label: "Try again", onClick: retry } : undefined })))}
+            : why === "refused"
+              ? toast(`Couldn't tell ${name} about the mention: this doc no longer takes changes from you.`, { tone: "danger" })
+              : why === "unknown"
+                ? toast(`Couldn't tell ${name} about the mention: they are not in this workspace.`, { tone: "danger" })
+                : toast(`Couldn't tell ${name} about the mention.`, { tone: "danger", action: retry ? { label: "Try again", onClick: retry } : undefined })))}
         />
         {/* Custom drag-handle: + add-block button and our Notion block menu.
             The provider feeds live docId/callbacks to the menu through

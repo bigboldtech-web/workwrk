@@ -195,27 +195,45 @@ function PeoplePicker({
   selected: string[];
   onToggle: (id: string) => void;
   position?: "top" | "bottom";
-  /** The search reaches the server too, a moment after the typing stops: what it finds joins `people`. */
-  onSearch?: (q: string) => void;
+  /**
+   * The search reaches the server too, a moment after the typing stops: what
+   * it finds joins `people`. Resolves false when the search could not be made.
+   */
+  onSearch?: (q: string) => Promise<boolean>;
   /** The people could not be read: only you are offered, with Try again. */
   failed?: boolean;
   onRetry?: () => void;
 }) {
   const [q, setQ] = useState("");
+  // Where the server search for the words typed stands: an empty list while
+  // it is on its way, or after it failed, is never "No people found".
+  const [search, setSearch] = useState<{ term: string; state: "searching" | "done" | "failed" } | null>(null);
+  const runSearch = useCallback((term: string) => {
+    if (!onSearch) return;
+    setSearch({ term, state: "searching" });
+    void onSearch(term).then((ok) => setSearch((cur) => (cur?.term === term ? { term, state: ok ? "done" : "failed" } : cur)));
+  }, [onSearch]);
   useEffect(() => {
-    if (!q.trim() || !onSearch) return;
-    const t = setTimeout(() => onSearch(q), 180);
+    const term = q.trim();
+    if (!term || !onSearch) return;
+    const t = setTimeout(() => runSearch(term), 180);
     return () => clearTimeout(t);
-  }, [q, onSearch]);
+  }, [q, onSearch, runSearch]);
   const ordered = useMemo(() => {
     const seen = new Set<string>();
     const out: Person[] = [];
     if (me) { out.push(me); seen.add(me.id); }
     for (const p of failed ? [] : people) { if (!seen.has(p.id)) { out.push(p); seen.add(p.id); } }
-    const needle = q.trim().toLowerCase();
-    if (!needle) return out;
-    return out.filter((p) => personName(p).toLowerCase().includes(needle) || (p.email ?? "").toLowerCase().includes(needle));
+    // Word by word, as the server matches: "Young Zoe" finds Zoe Young.
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return out;
+    return out.filter((p) => {
+      const fields = [p.firstName ?? "", p.lastName ?? "", p.email ?? ""].map((f) => f.toLowerCase());
+      return words.every((w) => fields.some((f) => f.includes(w)));
+    });
   }, [people, me, q, failed]);
+  const term = q.trim();
+  const searchState = !term || !onSearch ? null : search?.term === term ? search.state : "searching";
   return (
     <div className={`absolute ${position === "top" ? "bottom-full mb-1" : "top-full mt-1"} start-0 w-[300px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] overflow-hidden`}>
       <div className="p-2 border-b border-zinc-100">
@@ -238,7 +256,15 @@ function PeoplePicker({
             {selected.includes(p.id) && <Check className="w-3.5 h-3.5 text-brand-deep" />}
           </button>
         ))}
-        {ordered.length === 0 && !failed && <div className="px-4 py-4 text-center text-base text-zinc-400">No people found.</div>}
+        {ordered.length === 0 && !failed && searchState !== "failed" ? (
+          <div className="px-4 py-4 text-center text-base text-zinc-400">{searchState === "searching" ? "Searching…" : "No people found."}</div>
+        ) : null}
+        {!failed && searchState === "failed" ? (
+          <div className="px-2.5 py-2 text-sm text-zinc-500">
+            Couldn&apos;t search this List&apos;s people.{" "}
+            <button type="button" onClick={() => runSearch(term)} className="font-medium text-brand-deep hover:underline">Try again</button>
+          </div>
+        ) : null}
         {failed ? (
           <div className="px-2.5 py-2 text-sm text-zinc-500">
             Couldn&apos;t load who can be given work here.{" "}
@@ -463,6 +489,16 @@ export function CreateTaskModal() {
   // Whether THIS List's roster was read, and so the people picked checked.
   const [roster, setRoster] = useState<{ listId: string; state: "loading" | "ok" | "failed" } | null>(null);
   const [rosterAttempt, setRosterAttempt] = useState(0);
+  // Every read of a List's roster, the first, a return to it or a reopen of
+  // the modal, starts as "loading", so an earlier "ok" for that List never
+  // lets Create through while it is read again (adjusted during render, so
+  // no frame shows the old answer).
+  const rosterKey = createTaskOpen && listId ? `${listId}#${rosterAttempt}` : null;
+  const [rosterKeySeen, setRosterKeySeen] = useState(rosterKey);
+  if (rosterKeySeen !== rosterKey) {
+    setRosterKeySeen(rosterKey);
+    if (rosterKey && listId) setRoster({ listId, state: "loading" });
+  }
   useEffect(() => {
     if (!createTaskOpen || !listId) return;
     let active = true;
@@ -510,29 +546,29 @@ export function CreateTaskModal() {
     return () => { active = false; };
   }, [createTaskOpen, listId, toast, rosterAttempt, setPeople, addPeople]);
   const rosterFailed = !!listId && roster?.listId === listId && roster.state === "failed";
-  // Asked again: "loading" until it answers (a roster for another List already reads as not checked).
-  const retryRoster = useCallback(() => {
-    setRoster((r) => (r ? { ...r, state: "loading" } : r));
-    setRosterAttempt((v) => v + 1);
-  }, []);
+  // Asked again: "loading" until it answers (the new attempt starts a new read).
+  const retryRoster = useCallback(() => setRosterAttempt((v) => v + 1), []);
   // A picker search reaches the server: the chosen List's roster, or the
   // whole workspace before one is chosen. An answer for another List is
   // thrown away.
-  const searchPeople = useCallback((q: string) => {
+  const searchPeople = useCallback(async (q: string): Promise<boolean> => {
     const term = q.trim();
-    if (!term) return;
+    if (!term) return true;
     const target = listIdRef.current;
     const url = target
       ? `/api/boards/${encodeURIComponent(target)}/assignable?limit=30&search=${encodeURIComponent(term)}`
       : pickUrl({ includeSelf: true, q: term, limit: 30 });
-    void fetch(url, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (listIdRef.current !== target) return;
-        const rows: Person[] | null = target ? (Array.isArray(d?.data) ? d.data : null) : Array.isArray(d?.people) ? d.people : null;
-        if (rows && rows.length > 0) addPeople(rows);
-      })
-      .catch(() => {});
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      const d = r.ok ? await r.json() : null;
+      const rows: Person[] | null = target ? (Array.isArray(d?.data) ? d.data : null) : Array.isArray(d?.people) ? d.people : null;
+      if (listIdRef.current !== target) return true;
+      if (!rows) return false;
+      if (rows.length > 0) addPeople(rows);
+      return true;
+    } catch {
+      return false;
+    }
   }, [addPeople]);
 
   // The chosen List's defaults. An answer that arrives after the person has
