@@ -431,7 +431,9 @@ export async function listBoardItems(
       boardId,
       ...(opts.includeArchived ? {} : { archivedAt: null }),
     },
-    orderBy: { position: "asc" },
+    // Position, then id: the one order every view and the renumber share
+    // (src/lib/work/reorder.ts byPosition), so tied tasks never trade places.
+    orderBy: [{ position: "asc" }, { id: "asc" }],
   });
   const board = await prisma.board.findUnique({
     where: { id: boardId },
@@ -467,10 +469,7 @@ export async function listBoardItems(
   const enriched = await enrichItemRows(merged, { subtaskCountByParent, spaceIdByItem });
   const viewed = await viewRows(enriched, { viewer: opts.view?.viewer ?? null, context: board, linked: linkedInfo });
   if (linkedInfo.size === 0) return viewed;
-  return viewed
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => a.r.position - b.r.position || a.i - b.i)
-    .map((x) => x.r);
+  return viewed.sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 /**

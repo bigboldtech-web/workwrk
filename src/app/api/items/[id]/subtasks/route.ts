@@ -38,7 +38,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       // was already relying on, written down where it is enforced.
       boardId: gate.item.boardId,
     },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    // Position, then id: the order a subtask renumber keeps
+    // (PUT /api/boards/[id]/order with parentId), so tied ones never swap.
+    orderBy: [{ position: "asc" }, { id: "asc" }],
   });
   // Phase 5b. A task's children are part of its share (a subtask belongs to
   // its parent), so a reader who can open a linked parent may list them. What

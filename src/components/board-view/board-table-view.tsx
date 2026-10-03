@@ -35,6 +35,7 @@ import {
   boardStatusFor,
   bulkStatusSkipMessage,
   computedCellValue,
+  homeStatusTarget,
   itemsUrl,
   linkedMenuFlags,
   linkedRowEditable,
@@ -43,6 +44,7 @@ import {
   mergeRefetchedRow,
   optimisticLinkedStatus,
   linkedStatusNote,
+  linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
   statusPickerFor,
@@ -50,6 +52,7 @@ import {
   type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { MAX_PINNED_COLUMNS, ROW_HEIGHTS, type RowColorRule, type RowHeight } from "@/lib/list-comfort";
+import { byPosition, dropSide, indexFor, planDrop } from "@/lib/work/reorder";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { ROW_COLOR_TINT, orderColumnsForPinning, rowHeightStyle, stickyOffsets } from "@/lib/table-comfort";
 import { viewConfigQueue } from "@/lib/view-config-queue";
@@ -562,10 +565,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Multi-select state for bulk actions (Phase 70).
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  // Drag-to-reorder state (Phase 71). Disabled while grouped — cross-
-  // group drag is ambiguous (would change the row's group value too).
+  // Drag-to-reorder state (Phase 71). Works inside a group too: within one
+  // group a drop only moves the row; across status groups it also takes that
+  // status; other groupings keep a row in its own group. Off only while the
+  // rows are sorted by a column or the toolbar sort, where an order of hand
+  // means nothing.
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: string; side: "before" | "after" } | null>(null);
   // Phase 73 — expanded subtask sets per parent. Closed by default.
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
   // Quick search (toolbar magnifier) — filters rows by title.
@@ -583,6 +589,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     return null;
   })();
   const [sortCol, setSortColState] = useState<{ key: string; dir: "asc" | "desc" } | null>(initialSortCol);
+  // Rows sorted by a column or the toolbar sort show that order, not the
+  // List's own, so dragging them into an order of hand is off meanwhile.
+  const sortingRows = sortCol !== null || sortKey !== "none";
   const setSortCol = useCallback((next: { key: string; dir: "asc" | "desc" } | null) => {
     setSortColState(next);
     persistView({ sortCol: next });
@@ -650,8 +659,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         top.push(it);
       }
     }
-    // Sort children by position so reorder within a parent works.
-    for (const arr of byParent.values()) arr.sort((a, b) => a.position - b.position);
+    // Sort children by position (then id, the order a renumber keeps) so
+    // reorder within a parent works.
+    for (const arr of byParent.values()) arr.sort(byPosition);
     // Quick search — keep a top-level row if its title matches or any of its
     // subtasks match.
     const q = query.trim().toLowerCase();
@@ -677,7 +687,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         // "No sorting" means board order, which is position order — the same
         // rule childrenByParent already follows. Relying on raw array order
         // here made a drag-reorder snap back whenever the parent re-synced.
-        ? [...topFiltered].sort((a, b) => a.position - b.position)
+        ? [...topFiltered].sort(byPosition)
         : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
   }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId, computedKeys]);
@@ -1028,61 +1038,6 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setBulkBusy(false);
   }, [selected, confirm, reportRemoved, items, linkedIdsOf, boardId]);
 
-  // Drag-to-reorder. Computes fractional midpoint position so we never
-  // renumber the whole list — Linear/Folder pattern. Optimistic local
-  // update + PATCH.
-  const reorder = useCallback(async (draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return;
-    const dragged = items.find((r) => r.id === draggedId);
-    const kind = dragged ? linkedRowKind(dragged, boardId) : "home";
-    // A subtask shown through its linked parent has no place of its own here.
-    if (kind === "linked-subtask") return;
-    const sorted = [...items].sort((a, b) => a.position - b.position);
-    const draggedIdx = sorted.findIndex((r) => r.id === draggedId);
-    const targetIdx = sorted.findIndex((r) => r.id === targetId);
-    if (draggedIdx === -1 || targetIdx === -1) return;
-    // Insert dragged BEFORE target. If dragging downward we land in the
-    // slot vacated by the source so the midpoint math stays the same.
-    const insertBefore = sorted[targetIdx];
-    const insertBeforeIdx = targetIdx;
-    let newPos: number;
-    if (insertBeforeIdx === 0) {
-      newPos = insertBefore.position - 1;
-    } else {
-      // The row physically before the target (in the current sort) — skip
-      // the dragged row itself if it's adjacent.
-      const candidates = sorted.slice(0, insertBeforeIdx).filter((r) => r.id !== draggedId);
-      const before = candidates[candidates.length - 1];
-      newPos = before ? (before.position + insertBefore.position) / 2 : insertBefore.position - 1;
-    }
-    // A task shown here through a link moves its LINK's place in this List
-    // (PATCH /api/boards/[id]/links/[itemId]); the task's own position is its
-    // home List's order and is never touched from here.
-    const linkPatch = kind === "linked-root" && dragged?.listLink ? { listLink: { ...dragged.listLink, position: newPos } } : {};
-    setItems((prev) =>
-      [...prev.map((r) => (r.id === draggedId ? { ...r, position: newPos, ...linkPatch } : r))]
-        .sort((a, b) => a.position - b.position),
-    );
-    onItemPatched?.(draggedId, { position: newPos, ...linkPatch });
-    // Revert (refetch the board) on ANY failure — a network throw OR a
-    // non-OK response (403/400). Without the res.ok check a server-rejected
-    // reorder stayed applied locally while the server kept the old order.
-    const revert = async () => {
-      const fresh = await fetch(itemsUrl(boardId)).then((r) => r.json()).catch(() => null);
-      if (fresh?.items) reportRefreshed(fresh.items);
-    };
-    try {
-      const res = await fetch(kind === "linked-root" ? `/api/boards/${boardId}/links/${draggedId}` : `/api/items/${draggedId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ position: newPos }),
-      });
-      if (!res.ok) await revert();
-    } catch {
-      await revert();
-    }
-  }, [items, boardId, onItemPatched, reportRefreshed]);
-
   // Shared bulk-PATCH runner: `body` goes to the API, `local` is the display
   // patch merged into rows whose request succeeded.
   //
@@ -1284,11 +1239,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [boardId, canEdit, firstStatus, reportCreated, loadedSettings]);
 
-  const handleUpdate = useCallback(async (id: string, patch: RowPatch) => {
+  /** Saves one row's change; true when the server took it. */
+  const handleUpdate = useCallback(async (id: string, patch: RowPatch): Promise<boolean> => {
     const row = itemsRef.current.find((r) => r.id === id);
     // A row shown here through a link is edited here only as far as the
     // viewer's role on the TASK goes (list-link-rows.ts linkedRowEditable).
-    if (!canEdit || (row && !linkedRowEditable(row, canEdit))) return;
+    if (!canEdit || (row && !linkedRowEditable(row, canEdit))) return false;
     const linked = row ? linkedRowKind(row, boardId) !== "home" : false;
     // Optimistic (zod on the API strips unknown keys like `owner`,
     // which only exists for the local optimistic row).
@@ -1330,7 +1286,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         setError(accessMessage(data, "Couldn't save that change."));
         // Refetch on failure to revert optimistic state.
         await refetchList();
-        return;
+        return false;
       }
       const data = await res.json().catch(() => null);
       const fresh = data?.item as BoardItemRow | undefined;
@@ -1344,13 +1300,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         } else {
           await refetchList();
         }
-        return;
+        return true;
       }
       // Recurring task completed → apply the server's rolled-forward row.
       if (data?.recurred && fresh) {
         setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...fresh } : r)));
         onItemPatched?.(id, fresh as Partial<BoardItemRow>);
-        return;
+        return true;
       }
       // A List with connect or mirror columns: their computed values move with
       // the write. A List without them gets no such keys and nothing changes.
@@ -1362,10 +1318,134 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...computed } : r)));
         onItemPatched?.(id, computed);
       }
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save change");
+      return false;
     }
   }, [boardId, canEdit, onItemPatched, refetchList]);
+
+  // Drag-to-reorder. The row lands at the midpoint of its new neighbours in
+  // the order shown (its group's, when grouped), so nothing else is
+  // renumbered; neighbours with no room between them (tasks that share a
+  // position) get the whole List renumbered first, in the order on screen
+  // (src/lib/work/reorder.ts). Optimistic, reverted by a re-read on any
+  // failure.
+  const reorder = useCallback(async (draggedId: string, targetId: string, side: "before" | "after") => {
+    if (draggedId === targetId) return;
+    const dragged = items.find((r) => r.id === draggedId);
+    if (!dragged) return;
+    const kind = linkedRowKind(dragged, boardId);
+    // A subtask shown through its linked parent has no place of its own here.
+    if (kind === "linked-subtask") return;
+    const fromBucket = buckets?.find((b) => b.rows.some((r) => r.id === draggedId)) ?? null;
+    const toBucket = buckets?.find((b) => b.rows.some((r) => r.id === targetId)) ?? null;
+    const crossing = !!fromBucket && !!toBucket && fromBucket.key !== toBucket.key;
+    // Across status groups the row takes that group's status; any other
+    // grouping keeps a row in its own group (its value changes from the row).
+    let status: string | null = null;
+    if (crossing && toBucket) {
+      const declared = statuses.find((st) => st.value === toBucket.key);
+      if (groupBy !== "status" || !declared) {
+        setError("Drag a task within its own group here. To move it to another group, change it on the task.");
+        return;
+      }
+      if (kind !== "home") {
+        const target = homeStatusTarget(dragged, declared.value, statuses);
+        if (!target.ok) {
+          setError(linkedStatusRefusal(dragged, declared.label, target.reason));
+          return;
+        }
+        status = target.status;
+      } else {
+        status = declared.value;
+      }
+    }
+    const group = toBucket ? toBucket.rows : topLevel;
+    const plan = planDrop(group, draggedId, indexFor(group, draggedId, targetId, side));
+    if (!crossing && plan.kind === "none") return;
+    const revert = async () => {
+      const fresh = await fetch(itemsUrl(boardId)).then((r) => r.json()).catch(() => null);
+      if (fresh?.items) reportRefreshed(fresh.items);
+    };
+    // The status first: one the server refuses leaves the row where it was,
+    // so nothing is half saved under a banner that says nothing was. A row
+    // homed here carries its new position in the same write. A task shown
+    // here through a link changes status in its home set through the row's
+    // own status write, and its place here is its LINK's place (PATCH
+    // /api/boards/[id]/links/[itemId]); its own position is its home List's
+    // order and is never touched from here.
+    if (kind === "linked-root") {
+      if (status && !(await handleUpdate(draggedId, { status }))) return;
+    } else {
+      const body: Record<string, unknown> = { ...(plan.kind === "position" ? { position: plan.position } : {}), ...(status ? { status } : {}) };
+      if (Object.keys(body).length > 0) {
+        setItems((prev) => [...prev.map((r) => (r.id === draggedId ? { ...r, ...body } : r))].sort(byPosition));
+        onItemPatched?.(draggedId, body as Partial<BoardItemRow>);
+        // Revert (refetch the board) on ANY failure: a network throw OR a
+        // non-OK response (403/400). Without the res.ok check a server-rejected
+        // reorder stayed applied locally while the server kept the old order.
+        try {
+          const res = await fetch(`/api/items/${draggedId}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            setError(accessMessage(d, "Couldn't save that change."));
+            await revert();
+            return;
+          }
+        } catch {
+          setError("Couldn't save that change. Check your connection and try again.");
+          await revert();
+          return;
+        }
+      }
+    }
+    // Then the place, where the status write did not carry it.
+    if (plan.kind === "renumber") {
+      try {
+        const res = await fetch(`/api/boards/${boardId}/order`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ movedId: draggedId, afterId: plan.afterId, beforeId: plan.beforeId }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setError(accessMessage(d, "Couldn't save the new order."));
+        }
+      } catch {
+        setError("Couldn't save the new order. Check your connection and try again.");
+      }
+      // Saved or not, every row's number may have moved: read the List back.
+      await revert();
+      return;
+    }
+    if (kind === "linked-root" && plan.kind === "position") {
+      const p = plan.position;
+      const linkPatch = dragged.listLink ? { listLink: { ...dragged.listLink, position: p } } : {};
+      setItems((prev) => [...prev.map((r) => (r.id === draggedId ? { ...r, position: p, ...linkPatch } : r))].sort(byPosition));
+      onItemPatched?.(draggedId, { position: p, ...linkPatch });
+      try {
+        const res = await fetch(`/api/boards/${boardId}/links/${draggedId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ position: p }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setError(accessMessage(d, "Couldn't save the new order."));
+          await revert();
+        }
+      } catch {
+        setError("Couldn't save the new order. Check your connection and try again.");
+        await revert();
+      }
+    }
+  }, [items, boardId, buckets, topLevel, groupBy, statuses, onItemPatched, reportRefreshed, handleUpdate]);
+
 
   // A Connect cell's commit (connect-field-value.tsx). Unlike every other
   // cell it answers its own caller: the cell keeps its selection and offers
@@ -1713,18 +1793,26 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           setExpandedParents((prev) => new Set(prev).add(row.id));
           setAutoFocusSubtaskFor(row.id);
         }}
-        // A linked subtask has no place of its own in this List to drag to.
-        dragEnabled={rowCanEdit && !buckets && indent === 0 && kind !== "linked-subtask"}
+        // A linked subtask has no place of its own in this List to drag to,
+        // and a sorted List has no order of hand to drag into.
+        dragEnabled={rowCanEdit && !sortingRows && indent === 0 && !row.parentItemId && kind !== "linked-subtask"}
+        dragHint={
+          sortingRows
+            ? "Turn off sorting to drag tasks into order"
+            : row.parentItemId
+              ? "Subtasks are reordered inside their task"
+              : "Drag to reorder"
+        }
         isDragging={dragId === row.id}
-        isDragOver={dragOverId === row.id && dragId !== null && dragId !== row.id}
+        dropSide={dragOver && dragOver.id === row.id && dragId !== null && dragId !== row.id ? dragOver.side : null}
         onDragStart={(id) => setDragId(id)}
-        onDragOver={(id) => setDragOverId(id)}
-        onDrop={(targetId) => {
-          if (dragId) reorder(dragId, targetId);
+        onDragOver={(id, side) => setDragOver((cur) => (cur && cur.id === id && cur.side === side ? cur : { id, side }))}
+        onDrop={(targetId, side) => {
+          if (dragId) void reorder(dragId, targetId, side);
           setDragId(null);
-          setDragOverId(null);
+          setDragOver(null);
         }}
-        onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+        onDragEnd={() => { setDragId(null); setDragOver(null); }}
         indent={indent}
         hasSubtasks={children.length > 0}
         expanded={expanded}
@@ -2101,7 +2189,8 @@ function Row({
   onAddSubtask,
   dragEnabled,
   isDragging,
-  isDragOver,
+  dropSide: dropAt,
+  dragHint,
   onDragStart,
   onDragOver,
   onDrop,
@@ -2152,11 +2241,14 @@ function Row({
   onDuplicate?: (row: BoardItemRow) => void;
   onAddSubtask?: () => void;
   dragEnabled: boolean;
+  /** What the drag handle says: how to reorder, or why it is off. */
+  dragHint: string;
   isDragging: boolean;
-  isDragOver: boolean;
+  /** A drag is over this row: the line shows above it ("before") or below it ("after"). */
+  dropSide: "before" | "after" | null;
   onDragStart: (id: string) => void;
-  onDragOver: (id: string) => void;
-  onDrop: (targetId: string) => void;
+  onDragOver: (id: string, side: "before" | "after") => void;
+  onDrop: (targetId: string, side: "before" | "after") => void;
   onDragEnd: () => void;
   indent?: number;
   hasSubtasks?: boolean;
@@ -2348,11 +2440,12 @@ function Row({
         if (!dragEnabled) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
-        onDragOver(row.id);
+        // The upper half of a row is before it, the lower half after.
+        onDragOver(row.id, dropSide(e.clientY, e.currentTarget.getBoundingClientRect()));
       }}
       onDrop={(e) => {
         e.preventDefault();
-        onDrop(row.id);
+        onDrop(row.id, dropSide(e.clientY, e.currentTarget.getBoundingClientRect()));
       }}
       onDragEnd={onDragEnd}
       // THE VIEWER'S DENSITY, NOT A HARDCODED 40. Rows measured 40px whatever
@@ -2375,7 +2468,13 @@ function Row({
               : "[--row-bg:var(--row-base)] hover:[--row-bg:color-mix(in_srgb,var(--os-ink)_5%,var(--row-base))]"}`
           : `hover:bg-zinc-50 ${selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""}`
       } ${isDragging ? "opacity-40" : ""} ${
-        isDragOver ? "outline outline-2 outline-[var(--os-brand)] outline-offset-[-2px]" : ""
+        // A line on the side the row would land, drawn on the cells (a row
+        // itself cannot carry a shadow in every browser).
+        dropAt === "before"
+          ? "[&>td]:shadow-[inset_0_2px_0_0_var(--os-brand)]"
+          : dropAt === "after"
+            ? "[&>td]:shadow-[inset_0_-2px_0_0_var(--os-brand)]"
+            : ""
       } ${
         // Compact trims the cells' own padding too: their content alone
         // (a 28px control plus its padding) held the row at 40px, so the
@@ -2388,7 +2487,7 @@ function Row({
           {canEdit ? (
             <span
               className={`w-3 shrink-0 inline-flex justify-center opacity-0 group-hover:opacity-100 transition-opacity ${dragEnabled ? "text-zinc-400 cursor-grab" : "text-zinc-300"}`}
-              title={dragEnabled ? "Drag to reorder" : "Drag disabled while grouped"}
+              title={dragHint}
               aria-hidden
             >
               <GripVertical className="w-3 h-3" />

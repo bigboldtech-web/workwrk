@@ -1,11 +1,13 @@
 "use client";
 
 // ItemChecklist, metadata-backed checklist (metadata.checklist = array of
-// { text, done }). Add / toggle / remove; each change persists the whole
-// array via onSave. Mirrors the create-task modal's checklist shape.
+// { text, done }). Add / toggle / remove / reorder; each change persists the
+// whole array via onSave. Mirrors the create-task modal's checklist shape.
+// An item is dragged up or down by its handle, or moved with Alt and the
+// arrow keys; the array order IS the checklist's order.
 
-import { useMemo, useState } from "react";
-import { Plus, X, CheckSquare, Square } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Plus, X, CheckSquare, Square, GripVertical } from "lucide-react";
 import type { BoardItemRow } from "@/lib/board-items-shared";
 
 type ChecklistItem = { text: string; done: boolean };
@@ -30,17 +32,83 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
   };
   const toggle = (idx: number) => onSave(items.map((i, n) => (n === idx ? { ...i, done: !i.done } : i)));
   const remove = (idx: number) => onSave(items.filter((_, n) => n !== idx));
+  // Move item `from` so it lands at `to` (an index in the list without it).
+  const move = (from: number, to: number) => {
+    if (from === to || from < 0 || from >= items.length) return;
+    const others = items.filter((_, n) => n !== from);
+    const at = Math.max(0, Math.min(to, others.length));
+    onSave([...others.slice(0, at), items[from], ...others.slice(at)]);
+  };
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [over, setOver] = useState<{ idx: number; side: "before" | "after" } | null>(null);
+  /** Where a drop on item `idx` lands, counted in the list without the dragged item. */
+  const landing = (from: number, idx: number, side: "before" | "after") => {
+    const target = side === "before" ? idx : idx + 1;
+    return from < target ? target - 1 : target;
+  };
 
   if (!canEdit && items.length === 0) return null;
 
   return (
-    <div>
+    <div ref={rootRef}>
       <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
         Checklist {items.length > 0 ? <span className="text-xs text-zinc-400 normal-case tracking-normal">{done}/{items.length}</span> : null}
       </h3>
       <div className="space-y-1">
         {items.map((it, idx) => (
-          <div key={idx} className="group flex items-center gap-2 text-xs">
+          <div
+            key={idx}
+            draggable={canEdit}
+            onDragStart={(e) => {
+              if (!canEdit) return;
+              e.dataTransfer.effectAllowed = "move";
+              try { e.dataTransfer.setData("text/plain", String(idx)); } catch { /* still drags */ }
+              setDragIdx(idx);
+            }}
+            onDragOver={(e) => {
+              if (!canEdit || dragIdx === null) return;
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              const side = e.clientY < r.top + r.height / 2 ? "before" : "after";
+              setOver((cur) => (cur && cur.idx === idx && cur.side === side ? cur : { idx, side }));
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIdx !== null && over) move(dragIdx, landing(dragIdx, over.idx, over.side));
+              setDragIdx(null);
+              setOver(null);
+            }}
+            onDragEnd={() => { setDragIdx(null); setOver(null); }}
+            className={`group flex items-center gap-2 text-xs ${dragIdx === idx ? "opacity-40" : ""} ${
+              over && over.idx === idx && dragIdx !== null && dragIdx !== idx
+                ? over.side === "before" ? "shadow-[inset_0_2px_0_0_var(--os-brand)]" : "shadow-[inset_0_-2px_0_0_var(--os-brand)]"
+                : ""
+            }`}
+          >
+            {canEdit ? (
+              <button
+                type="button"
+                className="-ml-1 text-ink-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-grab"
+                aria-label={`Move "${it.text}" (Alt with an arrow key moves it)`}
+                title="Drag to reorder"
+                data-grip-index={idx}
+                onKeyDown={(e) => {
+                  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+                  if (!e.altKey) return;
+                  e.preventDefault();
+                  const to = e.key === "ArrowUp" ? idx - 1 : idx + 1;
+                  if (to < 0 || to >= items.length) return;
+                  move(idx, to);
+                  // Rows are keyed by place, so focus follows the item it moved.
+                  requestAnimationFrame(() => {
+                    rootRef.current?.querySelector<HTMLButtonElement>(`[data-grip-index="${to}"]`)?.focus();
+                  });
+                }}
+              >
+                <GripVertical className="w-3 h-3" />
+              </button>
+            ) : null}
             <button type="button" onClick={() => canEdit && toggle(idx)} disabled={!canEdit} className="text-zinc-400 hover:text-[var(--os-brand)] disabled:hover:text-zinc-400">
               {it.done ? <CheckSquare className="w-4 h-4 text-[var(--os-brand)]" /> : <Square className="w-4 h-4" />}
             </button>
