@@ -81,6 +81,24 @@ export function moveInOrder(order: readonly Ordered[], movedId: string, afterId:
   return [...rest.slice(0, at).map((t) => t.id), movedId, ...rest.slice(at).map((t) => t.id)];
 }
 
+/**
+ * Where the server puts the moved task once it knows the List's true order
+ * (`order`, with the task moved) and every task's stored number: between its
+ * real neighbours when they have room (one write, nothing else moves), else
+ * null, and the List is renumbered. A view that holds only some pages, or
+ * numbers that are no longer current, never decides this.
+ */
+export function placeInOrder(order: readonly string[], positions: ReadonlyMap<string, number>, movedId: string): number | null {
+  const i = order.indexOf(movedId);
+  if (i === -1) return null;
+  const prev = i > 0 ? positions.get(order[i - 1]) ?? null : null;
+  const next = i < order.length - 1 ? positions.get(order[i + 1]) ?? null : null;
+  if (prev !== null && next !== null) return next - prev > MIN_GAP ? (prev + next) / 2 : null;
+  if (prev !== null) return prev + POSITION_STEP;
+  if (next !== null) return next - POSITION_STEP;
+  return POSITION_STEP;
+}
+
 /** The positions a renumber gives, by id. */
 export function renumberedPositions(order: readonly string[]): Map<string, number> {
   return new Map(order.map((id, i) => [id, (i + 1) * POSITION_STEP] as const));

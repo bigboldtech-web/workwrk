@@ -3,11 +3,13 @@
 // POSITION_STEP apart. With `parentId`, the same among that task's subtasks.
 //
 // WHY. A drag puts a task at the midpoint of its new neighbours
-// (src/lib/work/reorder.ts). When the neighbours share a position (tasks
-// some paths create all at 0) or repeated drops have used up the gap, there
-// is no midpoint, and the drop would look like it did nothing. The client
-// then names the task and the two neighbours it was dropped between, and
-// this renumbers the List with it there.
+// (src/lib/work/reorder.ts). A view sends it here when it cannot do that
+// itself: the neighbours share a position (tasks some paths create all at 0)
+// or repeated drops have used up the gap, or the view holds only some pages
+// (a drop below the last card it loaded). The client names the task and the
+// neighbours it was dropped between; this places it between its TRUE
+// neighbours, with one write when they have room (placeInOrder) and by
+// renumbering the List when they have none.
 //
 // THE WHOLE LIST, FROM THE DATABASE. The order is read here, never taken from
 // the client: a view with a filter on holds only some of the List, and a
@@ -29,7 +31,7 @@ import { itemCtx, itemServerError } from "@/lib/item-gate";
 import { boardForViewer, canContributeFor, listLinksAvailable, listOrderLock } from "@/lib/list-links-server";
 import { publishItemChanged } from "@/lib/notify-realtime";
 import { prisma } from "@/lib/prisma";
-import { moveInOrder, renumberedPositions } from "@/lib/work/reorder";
+import { moveInOrder, placeInOrder, renumberedPositions } from "@/lib/work/reorder";
 
 const id64 = z.string().trim().min(1).max(64);
 const bodySchema = z.object({
@@ -86,8 +88,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         beforeId,
       );
       if (!order) throw new OrderChanged();
-      const next = renumberedPositions(order);
       const linkIds = new Set(links.map((l) => l.id));
+      // The true neighbours have room: one write, the moved task alone.
+      const stored = new Map([...homes, ...links].map((r) => [r.id, Number(r.position)] as const));
+      const single = placeInOrder(order, stored, movedId);
+      if (single !== null) {
+        const now = new Date();
+        if (linkIds.has(movedId)) {
+          await tx.$executeRaw`UPDATE "ItemListLink" SET position = ${single} WHERE "itemId" = ${movedId} AND "boardId" = ${id}`;
+        } else {
+          await tx.$executeRaw`
+            UPDATE "Item" SET position = ${single}, "updatedAt" = ${now}
+            WHERE id = ${movedId} AND "boardId" = ${id} AND "organizationId" = ${c.organizationId}
+          `;
+        }
+        return new Map([[movedId, single]]);
+      }
+      const next = renumberedPositions(order);
       const homeRows = order.filter((x) => !linkIds.has(x)).map((x) => ({ id: x, p: next.get(x)! }));
       const linkRows = order.filter((x) => linkIds.has(x)).map((x) => ({ id: x, p: next.get(x)! }));
       if (homeRows.length > 0) {

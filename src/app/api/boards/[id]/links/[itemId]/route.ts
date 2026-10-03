@@ -167,7 +167,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (outcome.kind === "gone") return notFound();
     if (outcome.kind === "home") return NextResponse.json({ error: "already_home" }, { status: 409 });
     if (outcome.kind === "home_changed") return NextResponse.json({ error: "home_changed", retry: true }, { status: 409 });
-    void publishItemChanged({ itemId, organizationId: c.organizationId, actorId: c.userId, leftListIds: [id] });
+    void publishItemChanged({
+      itemId,
+      organizationId: c.organizationId,
+      actorId: c.userId,
+      leftListIds: [id],
+      ...(outcome.kind === "moved" ? { enteredListIds: [targetId] } : {}),
+    });
     if (outcome.kind === "already") return NextResponse.json({ ok: true, alreadyLinked: true });
     return NextResponse.json({ ok: true, position: outcome.position });
   } catch (err) {

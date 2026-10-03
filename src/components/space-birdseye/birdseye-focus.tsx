@@ -214,6 +214,24 @@ export function BirdseyeFocus({
   // among the column's other cards), and which card it is, for the line.
   const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // A drag that ends anywhere (on the strip, off the window, or after the
+  // dragged card re-rendered into another column and lost its own dragend)
+  // clears the drag, so no line or held card outlives it.
+  useEffect(() => {
+    if (!draggingId) return;
+    const end = () => {
+      dragging.current = null;
+      setDraggingId(null);
+      setOver(null);
+      setDropAt(null);
+    };
+    window.addEventListener("dragend", end);
+    window.addEventListener("drop", end);
+    return () => {
+      window.removeEventListener("dragend", end);
+      window.removeEventListener("drop", end);
+    };
+  }, [draggingId]);
 
   const strip = (
     <nav aria-label="Lists in this Space" className="flex h-11 min-w-0 shrink-0 items-center gap-2 border-b border-line-soft px-6">
@@ -285,6 +303,8 @@ export function BirdseyeFocus({
       if (e.currentTarget.contains(to)) return;
       if (to instanceof Element && to.closest("[data-drop-col]")?.getAttribute("data-drop-col") === value) return;
       setOver((cur) => (cur === value ? null : cur));
+      // Off the column: no line where letting go does nothing.
+      setDropAt((cur) => (cur && cur.status === value ? null : cur));
     },
     onDrop: (e: DragEvent<HTMLElement>) => {
       const card = dragging.current;

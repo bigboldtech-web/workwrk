@@ -204,3 +204,22 @@ describe("linked rows, through the List's own projection only (2026-10-03)", () 
     expect(cardSrc).toMatch(/const homePick = !!homePicker\?\.editable;/);
   });
 });
+
+describe("a move or a new link says which List the task entered", () => {
+  // A paged view cannot tell a task that just arrived from one past its
+  // loaded pages; only this field lets it count the arrival.
+  it("is published by the move, the link move and a new link", () => {
+    expect(code(read("src/lib/notify-realtime.ts"))).toMatch(/enteredListIds: Array\.from\(new Set\(args\.enteredListIds\)\)/);
+    expect(code(read("src/app/api/items/[id]/route.ts"))).toMatch(/boardId: target\.id,[\s\S]{0,120}enteredListIds: \[target\.id\]/);
+    expect(code(read("src/app/api/boards/[id]/links/[itemId]/route.ts"))).toMatch(/outcome\.kind === "moved" \? \{ enteredListIds: \[targetId\] \} : \{\}/);
+    expect(code(read("src/app/api/boards/[id]/links/route.ts"))).toMatch(/enteredListIds: \[id\]/);
+  });
+
+  it("is what Bird's eye counts an arrival by, beside a card it placed", () => {
+    const hook = code(read("src/components/space-birdseye/use-birdseye.ts"));
+    expect(hook).toMatch(/const entered = new Set\(detail\.enteredListIds \?\? \[\]\);/);
+    expect(hook).toMatch(/for \(const \[listId, known\] of arriving\) void arriveIn\(listId, id, known\);/);
+    expect(hook).toMatch(/void arriveIn\(home, id, r\.data\.context\?\.kind !== "linked"\);/);
+  });
+});
+

@@ -107,7 +107,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     for (const r of results) {
       if (r.ok && r.created) {
-        void publishItemChanged({ itemId: r.itemId, organizationId: c.organizationId, actorId: c.userId });
+        void publishItemChanged({ itemId: r.itemId, organizationId: c.organizationId, actorId: c.userId, enteredListIds: [id] });
       }
     }
     return NextResponse.json({ results });
