@@ -302,7 +302,7 @@ export default function ProcessRunsPage() {
           </FilterGroup>
           {view !== "mine" ? (
             <FilterGroup label="Assignee">
-              <FilterRow label="Filter by assignee" checked={!!assigneeId} onCheckedChange={(on) => { if (!on) setParams({ assigneeId: null }); else setAssigneeOpen(true); }}>
+              <FilterRow label="Filter by assignee" checked={!!assigneeId || assigneeOpen} onCheckedChange={(on) => { if (!on) { setParams({ assigneeId: null }); setAssigneeOpen(false); } else setAssigneeOpen(true); }}>
                 <PersonFilterPick ariaLabel="Assignee" value={assigneeId} onChange={(v) => setParams({ assigneeId: v })} open={assigneeOpen} setOpen={setAssigneeOpen} />
               </FilterRow>
             </FilterGroup>

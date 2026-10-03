@@ -321,7 +321,7 @@ export default function CanvasesPage() {
             {(spaces ?? []).map((s) => <FilterRow key={s.id} label={<span className="inline-flex items-center gap-2"><EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" />{s.name}</span>} checked={location === `SPACE:${s.id}`} onCheckedChange={(on) => setParams({ location: on ? `SPACE:${s.id}` : null })} />)}
           </FilterGroup>
           <FilterGroup label="Owner">
-            <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerOpen(true); }}>
+            <FilterRow label="Filter by owner" checked={!!owner || ownerOpen} onCheckedChange={(on) => { if (!on) { setParams({ owner: null }); setOwnerOpen(false); } else setOwnerOpen(true); }}>
               <PersonFilterPick ariaLabel="Owner" value={owner} onChange={(v) => setParams({ owner: v })} open={ownerOpen} setOpen={setOwnerOpen} />
             </FilterRow>
           </FilterGroup>

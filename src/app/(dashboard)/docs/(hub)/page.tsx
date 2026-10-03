@@ -485,7 +485,7 @@ export default function DocsPage() {
           ) : null}
           {"owner".includes(filterSearch.toLowerCase()) ? (
             <FilterGroup label="Owner">
-              <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerPickOpen(true); }}>
+              <FilterRow label="Filter by owner" checked={!!owner || ownerPickOpen} onCheckedChange={(on) => { if (!on) { setParams({ owner: null }); setOwnerPickOpen(false); } else setOwnerPickOpen(true); }}>
                 <PersonFilterPick ariaLabel="Owner" value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
               </FilterRow>
             </FilterGroup>

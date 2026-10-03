@@ -455,7 +455,7 @@ export default function SopsPage() {
             </FilterGroup>
           ) : null}
           <FilterGroup label="Owner">
-            <FilterRow label="Filter by owner" checked={!!query.ownerId} onCheckedChange={(on) => { if (!on) setParams({ ownerId: null }); else setOwnerOpen(true); }}>
+            <FilterRow label="Filter by owner" checked={!!query.ownerId || ownerOpen} onCheckedChange={(on) => { if (!on) { setParams({ ownerId: null }); setOwnerOpen(false); } else setOwnerOpen(true); }}>
               <PersonFilterPick ariaLabel="Owner" value={query.ownerId ?? null} onChange={(v) => setParams({ ownerId: v })} open={ownerOpen} setOpen={setOwnerOpen} />
             </FilterRow>
           </FilterGroup>

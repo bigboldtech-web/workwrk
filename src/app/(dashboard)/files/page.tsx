@@ -461,7 +461,7 @@ export default function FilesPage() {
             {FILE_TYPE_BUCKETS.map((t) => <FilterRow key={t.key} label={t.label} checked={type === t.key} onCheckedChange={(on) => setParams({ type: on ? t.key : null })} />)}
           </FilterGroup>
           <FilterGroup label="Uploaded by">
-            <FilterRow label="Filter by person" checked={!!uploadedBy} onCheckedChange={(on) => { if (!on) setParams({ uploadedBy: null }); else setUploaderOpen(true); }}>
+            <FilterRow label="Filter by person" checked={!!uploadedBy || uploaderOpen} onCheckedChange={(on) => { if (!on) { setParams({ uploadedBy: null }); setUploaderOpen(false); } else setUploaderOpen(true); }}>
               <PersonFilterPick ariaLabel="Uploaded by" value={uploadedBy} onChange={(v) => setParams({ uploadedBy: v })} open={uploaderOpen} setOpen={setUploaderOpen} />
             </FilterRow>
           </FilterGroup>
