@@ -20,7 +20,7 @@ import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
-import { clampLimit, collectReadable } from "./collect-readable";
+import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import type { ToolName } from "./tool-names";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
 import { sopVisibilityWhere } from "@/lib/sop-access";
@@ -183,7 +183,7 @@ const searchTasks: ToolDefinition = {
     if (!level) return { count: 0, tasks: [] };
     const viewer = { userId: ctx.userId, organizationId: ctx.orgId, accessLevel: level };
     const reader = listReader(viewer);
-    const page = (after: { id: string } | null, take: number) => prisma.item.findMany({
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.item.findMany({
         where: {
           organizationId: ctx.orgId,
           archivedAt: null,
@@ -192,14 +192,14 @@ const searchTasks: ToolDefinition = {
             ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
             : {}),
           ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
+          AND: [olderThan(after)],
         },
-        select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true, organizationId: true, parentItemId: true },
-        // A stable order (updatedAt, then id) so the pages neither skip nor repeat.
+        select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true, organizationId: true, parentItemId: true, updatedAt: true },
+        // A stable order (updatedAt, then id), paged by keyset, so the pages neither skip nor repeat.
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take,
-        ...(after ? { cursor: { id: after.id }, skip: 1 } : {}),
       });
-    const { rows: filtered, capped } = await collectReadable({
+    const { rows: filtered, capped, scanned } = await collectReadable({
       limit,
       batch: Math.min(200, Math.max(limit * 4, 50)),
       maxScan: 1000,
@@ -221,7 +221,7 @@ const searchTasks: ToolDefinition = {
     return {
       count: tasks.length,
       tasks,
-      ...(capped ? { partial: true, note: "Only the 1,000 most recently updated tasks were searched. Add a title or a status to narrow the search." } : {}),
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 1,000 most recently updated tasks were searched. Add a title or a status to narrow the search." } : {}),
     };
   },
 };
@@ -1180,19 +1180,22 @@ async function readableIds(ctx: ToolContext, refs: NodeRef[]): Promise<Set<strin
 
 const listForms: ToolDefinition = {
   name: "list_forms",
-  description: "List Forms in the user's org with submission counts. Use this when the user asks about existing forms or wants to find one.",
-  input_schema: { type: "object", properties: {} },
-  handler: async (ctx) => {
+  description: "List Forms in the user's org with submission counts, optionally by part of a name. Use this when the user asks about existing forms or wants to find one.",
+  input_schema: {
+    type: "object",
+    properties: { nameContains: { type: "string", description: "Case-insensitive part of the form's name" } },
+  },
+  handler: async (ctx, input) => {
     // Paged until 50 readable forms are found: the newest 200 filtered once
     // left a reader whose forms are older with an empty list.
-    const page = (after: { id: string } | null, take: number) => prisma.formDefinition.findMany({
-      where: { organizationId: ctx.orgId },
+    const name = typeof input.nameContains === "string" && input.nameContains.trim() ? input.nameContains.trim() : null;
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.formDefinition.findMany({
+      where: { organizationId: ctx.orgId, ...(name ? { name: { contains: name, mode: "insensitive" as const } } : {}), AND: [olderThan(after)] },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take,
-      ...(after ? { cursor: { id: after.id }, skip: 1 } : {}),
-      select: { id: true, name: true, isPublic: true, _count: { select: { submissions: true } } },
+      select: { id: true, name: true, isPublic: true, updatedAt: true, _count: { select: { submissions: true } } },
     });
-    const { rows: forms, capped } = await collectReadable({
+    const { rows: forms, capped, scanned } = await collectReadable({
       limit: 50,
       batch: 200,
       maxScan: 2000,
@@ -1204,7 +1207,7 @@ const listForms: ToolDefinition = {
     });
     return {
       forms: forms.map((f) => ({ id: f.id, name: f.name, isPublic: f.isPublic, submissionCount: f._count.submissions })),
-      ...(capped ? { partial: true, note: "Only the 2,000 most recently updated forms were searched." } : {}),
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 2,000 most recently updated forms were searched. Add part of the form's name to narrow the search." } : {}),
     };
   },
 };
@@ -1264,20 +1267,23 @@ const createDataTable: ToolDefinition = {
 
 const listDataTables: ToolDefinition = {
   name: "list_data_tables",
-  description: "List the Tables in the user's org with row counts.",
-  input_schema: { type: "object", properties: {} },
-  handler: async (ctx) => {
+  description: "List the Tables in the user's org with row counts, optionally by part of a name.",
+  input_schema: {
+    type: "object",
+    properties: { nameContains: { type: "string", description: "Case-insensitive part of the table's name" } },
+  },
+  handler: async (ctx, input) => {
     // Only the tables this person can open (their Space, their own, a grant),
     // paged until 50 are found: the newest 200 filtered once could leave a
     // reader whose tables are older with an empty list.
-    const page = (after: { id: string } | null, take: number) => prisma.dataTable.findMany({
-      where: { organizationId: ctx.orgId },
+    const name = typeof input.nameContains === "string" && input.nameContains.trim() ? input.nameContains.trim() : null;
+    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.dataTable.findMany({
+      where: { organizationId: ctx.orgId, ...(name ? { name: { contains: name, mode: "insensitive" as const } } : {}), AND: [olderThan(after)] },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take,
-      ...(after ? { cursor: { id: after.id }, skip: 1 } : {}),
-      select: { id: true, name: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
+      select: { id: true, name: true, updatedAt: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
     });
-    const { rows: tables, capped } = await collectReadable({
+    const { rows: tables, capped, scanned } = await collectReadable({
       limit: 50,
       batch: 200,
       maxScan: 2000,
@@ -1289,7 +1295,7 @@ const listDataTables: ToolDefinition = {
     });
     return {
       tables: tables.map((t) => ({ id: t.id, name: t.name, rowCount: t._count.rows })),
-      ...(capped ? { partial: true, note: "Only the 2,000 most recently updated tables were searched." } : {}),
+      ...(capped ? { partial: true, searched: scanned, note: "Only the 2,000 most recently updated tables were searched. Add part of the table's name to narrow the search." } : {}),
     };
   },
 };

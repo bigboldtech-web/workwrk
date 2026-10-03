@@ -5,7 +5,8 @@
 // in Lists they cannot open. collectReadable pages through the candidates in
 // batches until it has `limit` readable rows, the candidates run out, or a
 // hard cap is reached; at the cap it says so, so the assistant never answers
-// "none" for a search it cut short. Pure: the tools hand in the page reader
+// "none" for a search it cut short (and, when the candidates ended exactly
+// at the cap, it does not say so). Pure: the tools hand in the page reader
 // and the access filter.
 
 export async function collectReadable<T extends { id: string }>(o: {
@@ -40,7 +41,21 @@ export async function collectReadable<T extends { id: string }>(o: {
     if (got.length < take) return { rows: out, scanned, capped: false };
     after = got[got.length - 1];
   }
-  return { rows: out, scanned, capped: out.length < o.limit };
+  if (out.length >= o.limit) return { rows: out, scanned, capped: false };
+  // The cap was reached on a full page: one more row says whether any
+  // candidate was left unread, or the candidates ended right at the cap.
+  const more = after ? await o.page(after, 1) : [];
+  return { rows: out, scanned, capped: more.length > 0 };
+}
+
+/**
+ * The rows after `after` in the (updatedAt desc, id desc) order the tools
+ * page by. A keyset on the values already read, not a cursor on the last
+ * row's id: a row that changed, was archived or left mid-scan never makes
+ * the next page skip a row or come back empty.
+ */
+export function olderThan(after: { id: string; updatedAt: Date } | null) {
+  return after ? { OR: [{ updatedAt: { lt: after.updatedAt } }, { updatedAt: after.updatedAt, id: { lt: after.id } }] } : {};
 }
 
 /** A model-supplied row limit as a whole number in 1..max (the fallback when it is not a number). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampLimit, collectReadable } from "./collect-readable";
+import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 
 type Row = { id: string; n: number };
 const all: Row[] = Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, n: i }));
@@ -32,6 +32,12 @@ describe("collectReadable", () => {
     expect(r.scanned).toBe(400);
   });
 
+  it("candidates that end exactly at the cap are not called cut short", async () => {
+    const p = pager(all.slice(0, 400));
+    const r = await collectReadable({ limit: 20, batch: 80, maxScan: 400, page: p.page, keep: async () => [] });
+    expect(r).toMatchObject({ rows: [], scanned: 400, capped: false });
+  });
+
   it("an admin who reads everything costs one page", async () => {
     const p = pager(all);
     const r = await collectReadable({ limit: 20, batch: 80, maxScan: 1000, page: p.page, keep: async (rs) => rs });
@@ -52,6 +58,14 @@ describe("collectReadable", () => {
     const r = await collectReadable({ limit: 200, batch: 30, maxScan: 100, page: p.page, keep: async (rs) => rs });
     expect(new Set(r.rows.map((x) => x.id)).size).toBe(r.rows.length);
     expect(r.scanned).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("olderThan", () => {
+  it("reads the rows after the last one by its values, the id breaking a tie", () => {
+    const at = new Date("2026-01-01T00:00:00Z");
+    expect(olderThan(null)).toEqual({});
+    expect(olderThan({ id: "r5", updatedAt: at })).toEqual({ OR: [{ updatedAt: { lt: at } }, { updatedAt: at, id: { lt: "r5" } }] });
   });
 });
 
