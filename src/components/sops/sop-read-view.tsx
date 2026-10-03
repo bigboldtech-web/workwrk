@@ -192,10 +192,13 @@ export function FlowStepOwners({ steps, action }: { steps: ReadonlyArray<{ id?: 
       ) : (
         <ol className="flex flex-col divide-y divide-line border-t border-line">
           {owned.map((s) => (
-            <li key={s.key} className="flex h-10 items-center gap-3 px-3">
+            <li key={s.key} className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
               <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{s.n}</span>
-              <span className="min-w-0 flex-1 truncate text-row text-ink">{s.title}</span>
-              {s.jobTitle ? <Chip size="default" className="h-6 shrink-0 px-2 text-xs" disabled>{s.jobTitle.title}</Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
+              <span className="min-w-[8rem] flex-1 truncate text-row text-ink">{s.title}</span>
+              {/* A label, not a control (Chip as span: full contrast, no tab stop). A
+                  long job title is cut to half the row and named in full on hover,
+                  so the step's own title never disappears on a phone. */}
+              {s.jobTitle ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={s.jobTitle.title}><span className="truncate">{s.jobTitle.title}</span></Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
               {s.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
             </li>
           ))}
@@ -216,10 +219,12 @@ export function StepsRead({ steps, showOwners = true }: { steps: ReadStep[]; sho
     <ol className="flex flex-col gap-3">
       {steps.map((step, i) => (
         <li key={step.id ?? i} className="rounded-lg border border-line bg-raised">
-          <div className="flex h-11 items-center gap-3 px-3">
+          {/* Wraps only when a job title and "Creates a task" leave the step's
+              title less than 8rem (a phone); on a wide screen it is one 44px row. */}
+          <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
             <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
-            <span className="min-w-0 flex-1 truncate text-row font-medium text-ink">{step.title || `Step ${i + 1}`}</span>
-            {showOwners && step.jobTitle?.title ? <Chip size="default" className="h-6 shrink-0 px-2 text-xs" disabled>{step.jobTitle.title}</Chip> : null}
+            <span className="min-w-[8rem] flex-1 truncate text-row font-medium text-ink">{step.title || `Step ${i + 1}`}</span>
+            {showOwners && step.jobTitle?.title ? <Chip as="span" size="default" className="h-6 min-w-0 max-w-[50%] px-2 text-xs" title={step.jobTitle.title}><span className="truncate">{step.jobTitle.title}</span></Chip> : null}
             {showOwners && step.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
           </div>
           {step.description || step.image ? (
