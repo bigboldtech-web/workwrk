@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { getAction, type ActionContext } from "./registry-actions";
 import { recordUsage } from "./usage";
+import { loadAuthor, narrowerAuthor } from "./author-reach";
 
 /**
  * Retry queue: re-runs FAILED/PARTIAL runs whose failed steps are ALL
@@ -60,6 +61,8 @@ export async function processAutomationRetries(): Promise<{
     include: {
       steps: { orderBy: { order: "asc" } },
       workflow: { select: { status: true, createdById: true } },
+      // Who published the version that ran: a retry is capped like the run (narrowerAuthor).
+      workflowVersion: { select: { createdById: true } },
     },
   });
 
@@ -97,6 +100,9 @@ export async function processAutomationRetries(): Promise<{
         runId: run.id,
         depth,
         workflowCreatorId: run.workflow.createdById,
+        ...(run.workflow.createdById && run.workflowVersion?.createdById && run.workflowVersion.createdById !== run.workflow.createdById
+          ? { author: narrowerAuthor(await loadAuthor(run.organizationId, run.workflow.createdById), await loadAuthor(run.organizationId, run.workflowVersion.createdById)) }
+          : {}),
       };
 
       let stillFailing = 0;

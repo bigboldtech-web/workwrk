@@ -7,7 +7,7 @@ import { buildIdempotencyKey, extractEventTimestamp, extractRecordId, extractEve
 import { getAction, type ActionContext } from "./registry-actions";
 import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
 import { triggerDisplayName } from "./registry-triggers";
-import { authorCanRead, eventAllowedForAuthor, loadAuthor, type AutomationAuthor } from "./author-reach";
+import { authorCanRead, eventAllowedForAuthor, loadAuthor, narrowerAuthor, type AutomationAuthor } from "./author-reach";
 
 /**
  * Automation engine entry point: called by `dispatchEvent` in
@@ -175,7 +175,8 @@ async function runMatched(args: {
   const versions = versionIds.length
     ? await prisma.automationWorkflowVersion.findMany({
         where: { id: { in: versionIds }, organizationId },
-        select: { id: true, definitionJson: true },
+        // createdById: who published the version that runs (its reach caps the run).
+        select: { id: true, definitionJson: true, createdById: true },
       })
     : [];
   const versionById = new Map(versions.map((v) => [v.id, v]));
@@ -212,7 +213,9 @@ async function runMatched(args: {
     if (!placeless && !isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
     let author: AutomationAuthor | null = null;
     if (wf.createdById) {
-      author = await authorOf(wf.createdById);
+      const creator = await authorOf(wf.createdById);
+      const publisherId = wf.publishedVersionId ? versionById.get(wf.publishedVersionId)?.createdById ?? null : null;
+      author = publisherId && publisherId !== wf.createdById ? narrowerAuthor(creator, await authorOf(publisherId)) : creator;
       if (!eventAllowedForAuthor(event, payload, author)) continue;
       if (eventBoardId && !(await authorCanRead(author, eventBoardId))) continue;
     }

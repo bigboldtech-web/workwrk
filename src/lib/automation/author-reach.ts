@@ -18,7 +18,8 @@
 // Owners and Admins reach everything, as they do in the product. A workflow
 // with no creator on record (seeded before creators were stored) keeps the
 // behaviour it always had; a creator no longer in the workspace reaches no
-// List at all.
+// List at all. When someone other than the creator published the live
+// version, the run reaches only where BOTH could (narrowerAuthor).
 
 import { legacyReachOf, type LegacyReach } from "@/lib/access/legacy-reach";
 
@@ -44,6 +45,29 @@ export function eventAllowedForAuthor(
   if (LEGACY_PREFIXES.some((p) => event.startsWith(p))) return false;
   if (PERSON_EVENTS.has(event)) return !!author && payload.userId === author.userId;
   return true;
+}
+
+/**
+ * The reach a run has when someone other than the creator published what
+ * runs: the narrower of the two, so editing never borrows the creator's
+ * reach. A manager who republishes an Admin's automation (any manager may
+ * edit any automation) caps it at what the manager can open and change, so
+ * they cannot wire an Admin's automation to copy a private List's task
+ * titles to themself, or to move its tasks into their own List. Null when
+ * either person is no longer in the workspace: the run then reaches no List
+ * at all, as for a departed creator. The creator stays the run's person
+ * (the PEOPLE rule and comments act as them).
+ */
+export function narrowerAuthor(creator: AutomationAuthor | null, publisher: AutomationAuthor | null): AutomationAuthor | null {
+  if (!creator || !publisher) return null;
+  if (creator.userId === publisher.userId) return creator;
+  return {
+    userId: creator.userId,
+    admin: creator.admin && publisher.admin,
+    manager: creator.manager && publisher.manager,
+    canRead: async (boardId) => (await creator.canRead(boardId)) && (await publisher.canRead(boardId)),
+    canWrite: async (boardId) => (await creator.canWrite(boardId)) && (await publisher.canWrite(boardId)),
+  };
 }
 
 /** May the creator open this List. */
