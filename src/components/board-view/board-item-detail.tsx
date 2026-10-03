@@ -32,7 +32,7 @@
 // through `metadataPatch` (a server-side merge over what is stored) rather
 // than resending a cached copy of the whole blob.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import {
   Ban, CalendarDays, CalendarPlus, Check, ClipboardList, Clock, Eye, Flag, GitBranch,
   Hourglass, Link2, Paperclip, Play, Plus, Search, Square, Tag, Target, UserPlus,
@@ -1361,6 +1361,42 @@ function TitleField({
   });
   useEffect(() => () => { if (editingRef.current) commitRef.current(); }, []);
 
+  // While editing, the box grows with the title, so a long name reads in full
+  // on as many lines as it shows at rest. It was a one-row textarea, so a
+  // title that wraps at rest collapsed to its first line the moment it was
+  // clicked, the rest scrolled out of sight. It re-fits when the host's width
+  // changes (the drawer resized, the page column narrowed).
+  const titleBoxRef = useRef<HTMLTextAreaElement | null>(null);
+  // Where the person clicked becomes the caret (the end when the title was
+  // opened from the keyboard), not the start of the title.
+  const caretAtRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = titleBoxRef.current;
+    if (!editing || !el) return;
+    const at = Math.min(caretAtRef.current ?? el.value.length, el.value.length);
+    el.setSelectionRange(at, at);
+    caretAtRef.current = null;
+  }, [editing]);
+  useLayoutEffect(() => {
+    const el = titleBoxRef.current;
+    if (!editing || !el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    let width = el.clientWidth;
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          if (el.clientWidth === width) return;
+          width = el.clientWidth;
+          fit();
+        })
+      : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [editing, value]);
+
   if (!canEdit) {
     return <h1 className="cursor-default text-xl font-semibold leading-snug text-ink">{item.title}</h1>;
   }
@@ -1369,7 +1405,20 @@ function TitleField({
       <button
         type="button"
         data-task-title
-        onClick={() => setEditing(true)}
+        onClick={(e) => {
+          // A keyboard press (detail 0) has no point to read; a click does.
+          const doc = document as Document & {
+            caretPositionFromPoint?: (x: number, y: number) => { offset: number } | null;
+            caretRangeFromPoint?: (x: number, y: number) => Range | null;
+          };
+          let at: number | null = null;
+          if (e.detail > 0) {
+            const pos = doc.caretPositionFromPoint?.(e.clientX, e.clientY) ?? null;
+            at = pos ? pos.offset : doc.caretRangeFromPoint?.(e.clientX, e.clientY)?.startOffset ?? null;
+          }
+          caretAtRef.current = at;
+          setEditing(true);
+        }}
         className="w-full text-start text-xl font-semibold leading-snug text-ink"
       >
         {value || item.title}
@@ -1378,6 +1427,7 @@ function TitleField({
   }
   return (
     <textarea
+      ref={titleBoxRef}
       autoFocus
       rows={1}
       value={value}
@@ -1400,7 +1450,7 @@ function TitleField({
           setEditing(false);
         }
       }}
-      className="w-full resize-none border-b border-brand bg-transparent text-xl font-semibold leading-snug text-ink outline-none"
+      className="w-full resize-none overflow-hidden border-b border-brand bg-transparent text-xl font-semibold leading-snug text-ink outline-none"
     />
   );
 }
