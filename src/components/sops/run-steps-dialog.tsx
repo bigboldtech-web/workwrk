@@ -39,6 +39,10 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
+  // The Lists read can fail on its own: then the dialog says so with a Retry,
+  // instead of telling the person to ask for access they may already hold.
+  const [listsFailed, setListsFailed] = useState(false);
+  const [listsTruncated, setListsTruncated] = useState(false);
   const [boardId, setBoardId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +83,8 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
         ? { boards: l.data.boards, spaces: Array.isArray(l.data.spaces) ? l.data.spaces : [], truncated: !!l.data.truncated }
         : { boards: [], spaces: [], truncated: false };
       const groups: ListGroup[] = groupReadableLists(res).map((g) => ({ key: g.key, label: g.label, lists: g.lists.map((b) => ({ id: b.id, name: b.name })) }));
+      setListsFailed(!l.ok);
+      setListsTruncated(res.truncated);
       const def = p.data.defaultBoard;
       setListGroups(def && !res.boards.some((r) => r.id === def.id) ? [{ key: "sop-default", label: "This SOP's List", lists: [def] }, ...groups] : groups);
       setBoardId((cur) => cur || p.data.defaultBoard?.id || "");
@@ -90,7 +96,8 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
   // A closed select shows only the List's name, so the chosen List's Space is
   // said under it: two teams' "Onboarding" Lists read the same otherwise.
   const chosenGroup = listGroups.find((g) => g.lists.some((b) => b.id === boardId)) ?? null;
-  const chosenWhere = !chosenGroup || chosenGroup.key === "sop-default" ? null : chosenGroup.key.startsWith("space:") ? `In the ${chosenGroup.label} Space` : chosenGroup.label;
+  const inSpace = (name: string) => (/\bspace$/i.test(name.trim()) ? `In the ${name}` : `In the ${name} Space`);
+  const chosenWhere = !chosenGroup || chosenGroup.key === "sop-default" ? null : chosenGroup.key.startsWith("space:") ? inSpace(chosenGroup.label) : chosenGroup.label;
 
   async function run() {
     if (busy || !boardId || spawning.length === 0) return;
@@ -168,7 +175,15 @@ export function RunStepsDialog({ open, onClose, sop }: { open: boolean; onClose:
                 ))}
               </select>
               {chosenWhere ? <span className="text-xs text-ink-2">{chosenWhere}</span> : null}
-              {listGroups.length === 0 ? <span className="text-xs text-ink-2">There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP.</span> : null}
+              {listsFailed ? (
+                <span className="text-xs text-ink-2">
+                  {"Couldn't load your Lists. "}
+                  <button type="button" onClick={() => setAttempt((a) => a + 1)} className="font-medium text-ink underline">Retry</button>
+                </span>
+              ) : listGroups.length === 0 ? (
+                <span className="text-xs text-ink-2">There is no List you can add tasks to. Ask a List owner for Can edit, then run the SOP.</span>
+              ) : null}
+              {listsTruncated ? <span className="text-xs text-ink-3">Showing the first 100 Lists you can add tasks to.</span> : null}
             </label>
             {error ? (
               <p className="text-sm text-danger-text" role="alert">{error}</p>
