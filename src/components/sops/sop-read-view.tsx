@@ -35,6 +35,7 @@ const BlockNoteCanvas = dynamic(
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
 import { Chip } from "@/components/ui/chip";
 import { checklistAsksFor, getSopKind, getSopLayout, type SopKind } from "@/lib/sop-kind";
+import { stepCreatesTask, stepJobTitle } from "@/lib/sop-step-owner";
 import { cn } from "@/lib/utils";
 
 export interface ReadStep {
@@ -157,9 +158,51 @@ export function SopReadView({ sop, mode = "app", emptyAction }: {
   if (kind === "recording") return <RecordingRead steps={(c.steps ?? []) as ReadRecordedStep[]} />;
 
   if (getSopLayout(c) === "flow" && c.flow) {
-    return <ProcessFlowBuilder flow={c.flow} onChange={() => { /* read-only */ }} editing={false} />;
+    return (
+      <div className="flex flex-col gap-3">
+        {mode === "app" ? <FlowStepOwners steps={c.flow.steps ?? []} /> : null}
+        <ProcessFlowBuilder flow={c.flow} onChange={() => { /* read-only */ }} editing={false} />
+      </div>
+    );
   }
   return <StepsRead steps={(c.steps ?? []) as ReadStep[]} showOwners={mode === "app"} />;
+}
+
+/**
+ * The flow layout draws only the flow's cards, so the steps' owners by job
+ * title and "Creates a task" are listed above it: a step that hands out work
+ * when the SOP is run never looks like a plain card. Numbered as the run
+ * dialog numbers them. Renders nothing when no step has either, unless the
+ * editor passes its "Edit owners" action. App pages only: the public page
+ * never shows owners.
+ */
+export function FlowStepOwners({ steps, action }: { steps: ReadonlyArray<{ id?: string; title?: string }>; action?: React.ReactNode }) {
+  const owned = steps
+    .map((s, i) => ({ key: s.id ?? String(i), n: i + 1, title: s.title || `Step ${i + 1}`, jobTitle: stepJobTitle(s), createsTask: stepCreatesTask(s) }))
+    .filter((s) => s.jobTitle || s.createsTask);
+  if (owned.length === 0 && !action) return null;
+  return (
+    <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
+      <div className="flex h-11 items-center gap-3 px-3">
+        <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
+        {action}
+      </div>
+      {owned.length === 0 ? (
+        <p className="px-3 pb-3 text-sm text-ink-3">No step has an owner or creates a task yet.</p>
+      ) : (
+        <ol className="flex flex-col divide-y divide-line border-t border-line">
+          {owned.map((s) => (
+            <li key={s.key} className="flex h-10 items-center gap-3 px-3">
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{s.n}</span>
+              <span className="min-w-0 flex-1 truncate text-row text-ink">{s.title}</span>
+              {s.jobTitle ? <Chip size="default" className="h-6 shrink-0 px-2 text-xs" disabled>{s.jobTitle.title}</Chip> : <span className="shrink-0 text-xs text-ink-3">No owner</span>}
+              {s.createsTask ? <span className="shrink-0 text-xs text-ink-3">Creates a task</span> : null}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 /**

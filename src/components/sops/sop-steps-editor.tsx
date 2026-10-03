@@ -20,7 +20,8 @@ import { RowMoreButton } from "@/components/ui/table-card";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { usePrompt } from "@/components/ui/dialog-provider";
-import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
+import { ProcessFlowBuilder, type ProcessFlow, type ProcessFlowStep } from "@/components/process-flow-builder";
+import { FlowStepOwners } from "@/components/sops/sop-read-view";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { stepJobTitle, type StepJobTitle } from "@/lib/sop-step-owner";
@@ -125,6 +126,48 @@ function StepOwnerRow({ step, titles, failed, retry, onChange }: {
   );
 }
 
+/** The flow layout's owners: the read summary at rest, the same per-step controls as the list behind "Edit owners". */
+function FlowOwnersEditor({ flow, onFlowChange, jobTitles }: {
+  flow: ProcessFlow;
+  onFlowChange: (next: ProcessFlow) => void;
+  jobTitles: { titles: JobTitleOption[]; failed: boolean; retry: () => void };
+}) {
+  const [editing, setEditing] = useState(false);
+  const toggle = (
+    <button type="button" onClick={() => setEditing((v) => !v)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+      {editing ? "Done" : "Edit owners"}
+    </button>
+  );
+  if (!editing) return <FlowStepOwners steps={flow.steps} action={toggle} />;
+  const patch = (id: string, p: Partial<EditStep>) =>
+    onFlowChange({ ...flow, steps: flow.steps.map((s) => (s.id === id ? ({ ...s, ...p } as ProcessFlowStep) : s)) });
+  return (
+    <section aria-label="Owners by job title" className="rounded-lg border border-line bg-raised">
+      <div className="flex h-11 items-center gap-3 px-3">
+        <span className="min-w-0 flex-1 text-sm font-medium text-ink-2">Owners by job title</span>
+        {toggle}
+      </div>
+      <ol className="flex flex-col divide-y divide-line border-t border-line">
+        {flow.steps.map((s, i) => (
+          <li key={s.id} className="flex flex-col gap-2 px-3 py-2">
+            <span className="flex items-center gap-3">
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-active px-1.5 text-xs font-medium tabular-nums text-ink">{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-row text-ink">{s.title || `Step ${i + 1}`}</span>
+            </span>
+            <StepOwnerRow
+              step={{ id: s.id, title: s.title, ...ownerFields(s as { jobTitle?: unknown; createsTask?: unknown }) }}
+              titles={jobTitles.titles}
+              failed={jobTitles.failed}
+              retry={jobTitles.retry}
+              onChange={(p) => patch(s.id, p)}
+            />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: string) => void }) {
   const prompt = usePrompt();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -178,7 +221,16 @@ export function SopStepsEditor({ layout, steps, flow, onStepsChange, onFlowChang
   const jobTitles = useJobTitles();
 
   if (layout === "flow") {
-    return <ProcessFlowBuilder flow={flow} onChange={onFlowChange} editing />;
+    // The flow canvas has no owner controls, so a step's owner by job title
+    // and "Creates a task" are listed, and edited with the list layout's own
+    // StepOwnerRow, above it (FlowOwnersEditor). Saving in flow mode writes
+    // the steps from the flow, owner fields included (sop-editor-page).
+    return (
+      <div className="flex flex-col gap-3">
+        <FlowOwnersEditor flow={flow} onFlowChange={onFlowChange} jobTitles={jobTitles} />
+        <ProcessFlowBuilder flow={flow} onChange={onFlowChange} editing />
+      </div>
+    );
   }
 
   const update = (id: string, patch: Partial<EditStep>) => onStepsChange(steps.map((s) => (s.id === id ? { ...s, ...patch } : s)));
