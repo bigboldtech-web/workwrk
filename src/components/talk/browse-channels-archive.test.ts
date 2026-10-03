@@ -12,11 +12,10 @@ import { archiveRight } from "./browse-channels-dialog";
 
 type Row = Parameters<typeof archiveRight>[0];
 
-const row = (over: Partial<Row> = {}): Row => ({
+// The rule reads the name only; the other facts a row carries are spelled
+// out to show they change nothing.
+const row = (over: Partial<Row & { restricted: boolean; joined: boolean; isOwner: boolean }> = {}): Row => ({
   name: "sales",
-  restricted: false,
-  joined: false,
-  isOwner: false,
   ...over,
 });
 

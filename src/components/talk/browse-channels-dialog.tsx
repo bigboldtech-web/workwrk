@@ -20,10 +20,11 @@
 // server decides again: asking for scope=all without the role returns the
 // join list, so a stale tab shows the wrong list rather than the wrong data.
 //
-// The same rule 3 that withholds a private channel's topic also withholds the
-// right to archive it, so the Archive control on this tab is drawn only where
-// the viewer actually holds it. See archiveRight() below for who that is and
-// what the rows that do not get a button say instead.
+// Rule 3 withholds a private channel's topic, and any read of it, but not the
+// right to put it away: an Owner or Admin archives and restores any channel
+// here but #general, private ones included, through the one write that needs
+// no read (canAdminArchive in src/lib/talk-access.ts, audited). archiveRight()
+// below draws the control on every row but #general and says why there.
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -69,7 +70,7 @@ type BrowseRow = {
  *     all, for anyone.
  */
 export function archiveRight(
-  row: Pick<BrowseRow, "name" | "restricted" | "joined" | "isOwner">,
+  row: Pick<BrowseRow, "name">,
 ): { can: true } | { can: false; label: string; why: string } {
   if ((row.name ?? "").trim().toLowerCase() === "general") {
     return {

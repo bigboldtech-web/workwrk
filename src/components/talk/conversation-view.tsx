@@ -89,7 +89,7 @@ type ConversationMeta = PanelConversation & {
   role: TalkRole;
   joinable?: boolean;
   memberCount?: number;
-  owner?: { id: string; name: string } | null;
+  owner?: { id: string; name: string; canRestore?: boolean } | null;
   activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
 };
 
@@ -1249,7 +1249,8 @@ export function ConversationView({
   if (meta.role === "none") return null;
 
   const others = meta.members.filter((m) => m.userId !== meId);
-  const banner = readOnlyReason(meta, role, meta.owner?.name ?? null);
+  // The owner is named only while they can restore it (in a private channel, still in it; not gone).
+  const banner = readOnlyReason(meta, role, meta.owner && meta.owner.canRestore !== false ? meta.owner.name : null);
   // The other person's title and department, for the DM start-of-history
   // block. Either half may be missing; the line is dropped when both are.
   const dmOther = meta.type === "DM" ? others[0]?.user : undefined;

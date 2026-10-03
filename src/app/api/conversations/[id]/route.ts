@@ -106,14 +106,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // and the Details panel's Owner marker. The creator may have left the
   // conversation, so the member list is tried first and the user row second
   // rather than the line simply disappearing when they do.
-  let owner: { id: string; name: string } | null = null;
+  // canRestore: whether the archived banner may send members to them. A
+  // private channel's creator holds Full only while they are in it, and
+  // someone who left the workspace can restore nothing; then the banner
+  // names a workspace admin, who can, from Browse channels.
+  let owner: { id: string; name: string; canRestore: boolean } | null = null;
   if (ctx.conversation.createdById) {
     const inRoom = members.find((m) => m.userId === ctx.conversation.createdById)?.user;
     const u = inRoom ?? await prisma.user.findFirst({
       where: { id: ctx.conversation.createdById, organizationId: gate.organizationId },
       select: { id: true, firstName: true, lastName: true },
     });
-    if (u) owner = { id: u.id, name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone" };
+    if (u) {
+      const stillHere = await prisma.user.count({ where: { id: u.id, organizationId: gate.organizationId, deletedAt: null, status: { not: "INACTIVE" } } });
+      const canRestore = stillHere > 0 && ctx.conversation.type === "CHANNEL" && (!ctx.conversation.restricted || !!inRoom);
+      owner = { id: u.id, name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone", canRestore };
+    }
   }
 
   const base = process.env.NEXTAUTH_URL || "https://workwrk.com";
@@ -143,6 +151,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
 }
 
+/**
+ * The audit row for an archive or a restore. A PRIVATE channel is never
+ * named in it: the Activity feeds (the People team's Everyone, a manager's My
+ * team, and their CSV export) show descriptions to people who cannot know the
+ * channel exists. The id stays in targetId for whoever may open it.
+ */
+function auditArchive(
+  gate: { userId: string; organizationId: string },
+  c: { name: string | null; restricted: boolean },
+  id: string,
+  archived: boolean,
+  where: string,
+): void {
+  const what = c.restricted ? "a private channel" : `#${c.name ?? "channel"}`;
+  void logActivity({
+    type: archived ? "org.archive_channel" : "org.restore_channel",
+    actorId: gate.userId,
+    organizationId: gate.organizationId,
+    description: `${archived ? "Archived" : "Restored"} ${what}${where ? ` ${where}` : ""}`,
+    targetId: id,
+    targetType: "conversation",
+  });
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, gate } = await talkGate();
   if (error) return error;
@@ -162,14 +194,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (onlyArchived && ctx.role !== "full" && canAdminArchive(c, gate.orgRole)) {
     const archivedAt = body.archived ? new Date() : null;
     await prisma.conversation.update({ where: { id }, data: { archivedAt } });
-    void logActivity({
-      type: body.archived ? "org.archive_channel" : "org.restore_channel",
-      actorId: gate.userId,
-      organizationId: gate.organizationId,
-      description: `${body.archived ? "Archived" : "Restored"} #${c.name ?? "channel"}${c.restricted ? " (private)" : ""} from Browse channels`,
-      targetId: id,
-      targetType: "conversation",
-    });
+    auditArchive(gate, c, id, body.archived, "from Browse channels");
     return jsonSuccess({ ok: true, archived: body.archived });
   }
   if (ctx.role === "none") return conversationNotFound();
@@ -253,6 +278,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (validatedArchived !== undefined) conversationData.archivedAt = validatedArchived;
   if (Object.keys(conversationData).length > 0) {
     await prisma.conversation.update({ where: { id }, data: conversationData });
+  }
+  // Every archive and restore is audited, whoever holds the right.
+  if (validatedArchived !== undefined && (validatedArchived === null) !== (c.archivedAt == null)) {
+    auditArchive(gate, c, id, validatedArchived !== null, "");
   }
 
   return jsonSuccess({ ok: true });

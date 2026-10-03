@@ -34,7 +34,11 @@ const AUTHOR_SELECT = { id: true, firstName: true, lastName: true, avatar: true 
 /** The composer's key for one message: its optimistic row's id ("temp-<ms>-<rand>"). */
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
-/** The message this author already sent here with this key, shaped as a send answers it, or null. */
+/**
+ * The message this author already sent here with this key, served exactly as
+ * a read serves it (a removed one blanked, attachments freshly signed), or
+ * null when there is none.
+ */
 async function alreadySent(conversationId: string, authorId: string, clientId: string) {
   const row = await prisma.conversationMessage.findFirst({
     where: { conversationId, authorId, clientId },
@@ -42,7 +46,25 @@ async function alreadySent(conversationId: string, authorId: string, clientId: s
   });
   if (!row) return null;
   const replyCount = await prisma.conversationMessage.count({ where: { parentId: row.id, deletedAt: null } });
-  return { ...row, replyCount };
+  const [served] = await serveMessages([{ ...row, replyCount }]);
+  return served;
+}
+
+/**
+ * The answer to a send whose key already landed: the first send's message.
+ * A removed one is refused instead (the person's words stay in their
+ * "Not sent" row, never swapped for a blank). The cheap after-commit steps,
+ * the nudge to open panes and a reply's parent touch, run again: both are
+ * safe twice, and the first send may have died before reaching them. The
+ * Inbox fan-out runs once, on the first send.
+ */
+async function answerDuplicate(conversationId: string, sent: NonNullable<Awaited<ReturnType<typeof alreadySent>>>) {
+  if (sent.deletedAt) return jsonError("This message was removed after it was sent.", 409);
+  publishToConversation(conversationId, { type: "message", conversationId });
+  if (sent.parentId) {
+    await prisma.conversationMessage.update({ where: { id: sent.parentId }, data: { updatedAt: new Date() } }).catch(() => {});
+  }
+  return jsonSuccess({ message: sent, duplicate: true }, 200);
 }
 
 /** Outbound shaping for every read path:
@@ -293,7 +315,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const clientId = typeof payload?.clientId === "string" && CLIENT_ID.test(payload.clientId) ? payload.clientId : null;
   if (clientId) {
     const sent = await alreadySent(id, userId, clientId);
-    if (sent) return jsonSuccess({ message: sent, duplicate: true }, 200);
+    if (sent) return answerDuplicate(id, sent);
   }
 
   // Mentions: only people who are actually in this conversation count.
@@ -360,7 +382,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // index and is answered with the first one's message.
     if (clientId && (err as { code?: string })?.code === "P2002") {
       const sent = await alreadySent(id, userId, clientId);
-      if (sent) return jsonSuccess({ message: sent, duplicate: true }, 200);
+      if (sent) return answerDuplicate(id, sent);
     }
     throw err;
   }

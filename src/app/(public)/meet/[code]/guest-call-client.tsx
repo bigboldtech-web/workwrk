@@ -73,8 +73,10 @@ export function GuestCallClient({ code, title, orgName, scheduledAt, configured 
         body: JSON.stringify({ code, name: name.trim() }),
       });
       if (r.status === 503) { setNotConfigured(true); return; }
-      if (r.status === 410) { setError("This link has expired. Ask for a new one."); return; }
       const d = await r.json().catch(() => null);
+      // A 410 is a link that was real and is over: the server says why (it
+      // expired, or the conversation was archived), so its sentence is shown.
+      if (r.status === 410) { setError(typeof d?.error === "string" && d.error ? d.error : "This link has expired. Ask for a new one."); return; }
       if (!r.ok || !d?.token) throw new Error(d?.error ?? "Couldn't join the call");
       setGrant(d);
     } catch (e) {

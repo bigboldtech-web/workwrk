@@ -37,6 +37,22 @@ function callsConfigured(): boolean {
   return Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
 }
 
+/**
+ * The conversation was archived: nobody in it can start or join a call, so
+ * its link is over, and asking for a new one cannot help (no member can make
+ * one while it is archived). Said before the click, naming nothing.
+ */
+function Archived() {
+  return (
+    <GuestDoorFrame>
+      <GuestDoorMessage
+        title="This call link no longer works"
+        body="The conversation it belongs to was archived, so it takes no calls."
+      />
+    </GuestDoorFrame>
+  );
+}
+
 function Expired() {
   return (
     <GuestDoorFrame>
@@ -57,9 +73,10 @@ export default async function GuestMeetingPage({ params }: { params: Promise<{ c
     if (guestCodeExpired(chat.expiresAt)) return <Expired />;
     const conversation = await prisma.conversation.findUnique({
       where: { id: chat.conversationId },
-      select: { id: true, name: true, type: true, callEpoch: true, organization: { select: { name: true } } },
+      select: { id: true, name: true, type: true, callEpoch: true, archivedAt: true, organization: { select: { name: true } } },
     });
     if (!conversation || conversation.callEpoch !== chat.epoch) notFound();
+    if (conversation.archivedAt) return <Archived />;
     const title = conversation.type === "CHANNEL"
       // Naming canon (spec-talk section 1): a real-time voice or video session
       // is a "call". Never "huddle", which was Slack's word and was the only
