@@ -148,23 +148,37 @@ export async function scopeNamer(viewer: Viewer, orgId: string, scopes: Automati
  * and kept on the server: never listed, named or counted to that viewer).
  */
 export async function scopeInOrg(orgId: string, scope: AutomationScope): Promise<AutomationScope> {
-  const [lists, folders, spaces] = await Promise.all([
+  const all = [...scope.listIds, ...scope.folderIds, ...scope.spaceIds];
+  const [lists, folders, spaces, trashed] = await Promise.all([
     scope.listIds.length ? prisma.board.findMany({ where: { id: { in: scope.listIds }, organizationId: orgId }, select: { id: true } }) : [],
     scope.folderIds.length ? prisma.folder.findMany({ where: { id: { in: scope.folderIds }, organizationId: orgId }, select: { id: true } }) : [],
     scope.spaceIds.length ? prisma.space.findMany({ where: { id: { in: scope.spaceIds }, organizationId: orgId }, select: { id: true } }) : [],
+    // A place moved to this workspace's Trash keeps its id there, and a
+    // restore brings back the same id: it stays in the scope (matching
+    // nothing meanwhile) so restoring the List brings it back into the
+    // automation, and the automation never loses the place for good.
+    all.length
+      ? prisma.trashItem.findMany({ where: { organizationId: orgId, entityType: { in: ["board", "folder", "space"] }, entityId: { in: all } }, select: { entityId: true } })
+      : [],
   ]);
+  const inTrash = new Set(trashed.map((t) => t.entityId));
   const keep = (rows: Array<{ id: string }>, ids: string[]) => {
     const ok = new Set(rows.map((r) => r.id));
-    return ids.filter((id) => ok.has(id));
+    return ids.filter((id) => ok.has(id) || inTrash.has(id));
   };
-  return { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
+  const pruned = { listIds: keep(lists, scope.listIds), folderIds: keep(folders, scope.folderIds), spaceIds: keep(spaces, scope.spaceIds) };
+  // Never wider than asked: pruning a scope that named places down to
+  // nothing would read as Everywhere and run the automation on every task
+  // in the workspace. Such a scope (places gone with a whole Space, say) is
+  // kept as it was and simply matches nothing.
+  return isEverywhere(pruned) && !isEverywhere(scope) ? scope : pruned;
 }
 
 /**
  * The definition as it will be stored, with its scope pruned to this
- * workspace (scopeInOrg). Everywhere stays Everywhere; a scope that names
- * only places outside the workspace becomes Everywhere too, which is what
- * the engine would have run anyway (nothing ever matched the foreign id).
+ * workspace (scopeInOrg). Everywhere stays Everywhere, and a scope that named
+ * places never becomes Everywhere: scopeMatches never matches a place that
+ * is gone, while Everywhere matches every task.
  */
 export async function definitionWithScopeInOrg(orgId: string, definition: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!("scope" in definition)) return definition;
