@@ -364,7 +364,9 @@ export function CreateTaskModal() {
       // Lists the viewer may WRITE to. Offering one they cannot write to is a
       // control that 403s on the primary action (spec-task-detail, modal Data).
       fetch("/api/boards?editable=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { boards: [] })),
-      fetch("/api/users?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
+      // Before a List is chosen: the whole workspace (/api/people/pick), never
+      // only the caller's report tree; the List's roster replaces it below.
+      fetch("/api/people/pick?includeSelf=1&limit=50", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { people: [] })),
       fetch("/api/item-templates", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { templates: [] })),
       fetch("/api/item-types", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { types: [] })),
       fetch("/api/kras?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
@@ -373,7 +375,7 @@ export function CreateTaskModal() {
       .then(([s, b, u, t, it, kr, kp]) => {
         setSpaces(Array.isArray(s.spaces) ? s.spaces : []);
         setBoards(Array.isArray(b.boards) ? b.boards : []);
-        setPeople(Array.isArray(u.data) ? u.data : []);
+        setPeople(Array.isArray(u.people) ? u.people : []);
         setTemplates(Array.isArray(t.templates) ? t.templates : []);
         // /api/kras is paginated ({ data: [...] }); /api/kpis returns a raw array.
         setKras(Array.isArray(kr?.data) ? kr.data : Array.isArray(kr) ? kr : []);
@@ -390,7 +392,7 @@ export function CreateTaskModal() {
 
   // ── The assignable roster FOLLOWS THE DESTINATION LIST ──
   //
-  // The bulk load above asks /api/users?scope=all, and that endpoint pins any
+  // The bulk load above used to ask /api/users?scope=all, and that endpoint pins any
   // caller below ORG_WIDE_ALIGNMENT_LEVELS to their own report tree. A Space
   // Admin with no direct reports therefore opened the Assignee popover here
   // and saw exactly one row, "Me": the reported bug, still live on the screen
