@@ -5,6 +5,7 @@ import {
   isOutOfOfficeStatus,
   pickJobTitleHolder,
   planRunPicks,
+  publicSopContent,
   readSopStepOrigin,
   runnableSteps,
   stepCreatesTask,
@@ -210,5 +211,46 @@ describe("planRunPicks (one run, step by step)", () => {
     const plan = planRunPicks(steps, holders, titles, NOW);
     expect(plan[3].pick).toMatchObject({ kind: "nobody" });
     expect(plan[3].currentTitle).toBeNull();
+  });
+});
+
+describe("publicSopContent", () => {
+  const stored = {
+    version: 2,
+    spawn: { boardId: "board-internal" },
+    steps: [
+      { id: "s1", title: "Kick off", jobTitle: { roleId: "role-1", title: "Onboarding lead" }, createsTask: true },
+      { id: "s2", title: "Hand over" },
+    ],
+    flow: {
+      layout: "flow",
+      steps: [{ id: "s1", title: "Kick off", jobTitle: { roleId: "role-1", title: "Onboarding lead" }, createsTask: true }],
+    },
+  };
+
+  it("drops the run List and every step's job title and task flag, in both layouts", () => {
+    const out = publicSopContent(stored);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain("board-internal");
+    expect(text).not.toContain("role-1");
+    expect(text).not.toContain("Onboarding lead");
+    expect(text).not.toContain("createsTask");
+    expect(out.steps.map((s) => s.title)).toEqual(["Kick off", "Hand over"]);
+    expect(out.flow.steps[0]).toEqual({ id: "s1", title: "Kick off" });
+    expect(out.flow.layout).toBe("flow");
+    expect(out.version).toBe(2);
+  });
+
+  it("never changes the stored content", () => {
+    const before = JSON.stringify(stored);
+    publicSopContent(stored);
+    expect(JSON.stringify(stored)).toBe(before);
+  });
+
+  it("passes through content with nothing to strip, and non-objects", () => {
+    expect(publicSopContent({ blocks: [{ type: "p", text: "Hi" }] })).toEqual({ blocks: [{ type: "p", text: "Hi" }] });
+    expect(publicSopContent(null)).toBeNull();
+    expect(publicSopContent("text")).toBe("text");
+    expect(publicSopContent({ steps: "not a list" })).toEqual({ steps: "not a list" });
   });
 });

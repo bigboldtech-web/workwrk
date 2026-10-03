@@ -25,6 +25,7 @@ import { getSopKind, SOP_KIND_LABEL } from "@/lib/sop-kind";
 import { formatDate } from "@/lib/format/date";
 import { PublicPageFrame } from "@/components/process/public-page-frame";
 import { SopReadView, type SopReadContent } from "@/components/sops/sop-read-view";
+import { publicSopContent } from "@/lib/sop-step-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,12 @@ export default async function PublicSopPage({ params }: { params: Promise<{ toke
     content = enriched.content ?? content;
   } catch { /* fall back to raw content */ }
   try { content = await presignBlocksImagesAndFiles(content); } catch { /* fall back to prior content */ }
+  // Only what the page shows reaches the browser: SopReadView is a client
+  // component, so its whole content prop is serialized into the page. The
+  // steps' job titles, "Creates a task" and the run's List id are internal
+  // to the workspace (the read view hides them in public mode, but hiding is
+  // not withholding).
+  content = publicSopContent(content);
 
   const kind = getSopKind(sop.sopType, content);
   const org = { name: sop.organization.name, logo: sop.organization.logo };

@@ -59,6 +59,37 @@ export function stepCreatesTask(step: unknown): boolean {
   return (step as { createsTask?: unknown } | null)?.createsTask === true;
 }
 
+/**
+ * A copy of an SOP's content safe to send to a signed-out reader: no
+ * `spawn` (the id of the List a run fills), and no `jobTitle` or
+ * `createsTask` on any step of `steps` or `flow.steps`. Job titles are the
+ * workspace's internal names and the ids are internal; the public read view
+ * already hides them on screen, but a client component receives its whole
+ * prop, so anything left in the content is readable in the page source.
+ * Never mutates the stored content. Pure.
+ */
+export function publicSopContent<T>(content: T): T {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return content;
+  const strip = (steps: unknown): unknown =>
+    Array.isArray(steps)
+      ? steps.map((step) => {
+          if (!step || typeof step !== "object" || Array.isArray(step)) return step;
+          const rest: Record<string, unknown> = { ...(step as Record<string, unknown>) };
+          delete rest.jobTitle;
+          delete rest.createsTask;
+          return rest;
+        })
+      : steps;
+  const out: Record<string, unknown> = { ...(content as Record<string, unknown>) };
+  delete out.spawn;
+  if ("steps" in out) out.steps = strip(out.steps);
+  const flow = out.flow;
+  if (flow && typeof flow === "object" && !Array.isArray(flow) && "steps" in (flow as Record<string, unknown>)) {
+    out.flow = { ...(flow as Record<string, unknown>), steps: strip((flow as Record<string, unknown>).steps) };
+  }
+  return out as T;
+}
+
 /** The List a run defaults to, from content.spawn.boardId. */
 export function contentSpawnBoardId(content: unknown): string | null {
   const s = (content as { spawn?: { boardId?: unknown } } | null)?.spawn;
