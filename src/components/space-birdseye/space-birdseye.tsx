@@ -366,6 +366,7 @@ export function SpaceBirdseye({
               onLoadMore={data.loadMore}
               onCreate={data.createTask}
               onRetry={data.reload}
+              onReorder={data.reorderCard}
             />
           ) : null}
         </>

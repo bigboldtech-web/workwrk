@@ -27,6 +27,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { StatusGlyph } from "@/components/board-view/status-glyph";
 import { cn } from "@/lib/utils";
 import { bucketFor, isClosedStatus, type BirdseyeCard as Card, type BirdseyeList } from "@/lib/work/birdseye";
+import { indexAtPointer } from "@/lib/work/reorder";
 import { AddTaskRow } from "./add-task-row";
 import { BirdseyeCard, CARD_DRAG_TYPE } from "./birdseye-card";
 import { BirdseyeGrid, type GridColumn } from "./birdseye-grid";
@@ -188,6 +189,7 @@ export function BirdseyeFocus({
   onLoadMore,
   onCreate,
   onRetry,
+  onReorder,
 }: {
   lists: BirdseyeList[];
   focusedId: string;
@@ -202,10 +204,16 @@ export function BirdseyeFocus({
   onLoadMore: (target: LoadMoreTarget) => void;
   onCreate: (boardId: string, title: string, status: string, place: "top" | "bottom") => Promise<{ ok: true } | { ok: false; error: string }>;
   onRetry: () => void;
+  /** A card dragged up or down in its own column, to a place among the column's other cards. */
+  onReorder: (card: Card, index: number) => Promise<void>;
 }) {
   const list = lists.find((l) => l.id === focusedId) ?? null;
   const dragging = useRef<Card | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  // Up and down inside a column: where the dragged card would land (a place
+  // among the column's other cards), and which card it is, for the line.
+  const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const strip = (
     <nav aria-label="Lists in this Space" className="flex h-11 min-w-0 shrink-0 items-center gap-2 border-b border-line-soft px-6">
@@ -246,10 +254,31 @@ export function BirdseyeFocus({
     onDragOver: (e: DragEvent<HTMLElement>) => {
       const card = dragging.current;
       if (!card || !e.dataTransfer.types.includes(CARD_DRAG_TYPE)) return;
-      if (bucketFor(list.statuses, card.status) === value) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      if (over !== value) setOver(value);
+      if (bucketFor(list.statuses, card.status) !== value) {
+        // Another column: its status.
+        if (over !== value) setOver(value);
+        setDropAt(null);
+        return;
+      }
+      // Its own column: a place among the other cards, read from the
+      // pointer (the header is the top; a gap belongs to the card below it).
+      const host = e.currentTarget as HTMLElement;
+      const others = (focus?.columns[value]?.cards ?? []).filter((c) => c.id !== card.id);
+      const index =
+        host.tagName === "SECTION"
+          ? indexAtPointer(
+              e.clientY,
+              [...host.querySelectorAll<HTMLElement>("[data-place]")].map((el) => {
+                const r = el.getBoundingClientRect();
+                return { place: Number(el.dataset.place), top: r.top, height: r.height };
+              }),
+              others.length,
+            )
+          : 0;
+      setDropAt((cur) => (cur && cur.status === value && cur.index === index ? cur : { status: value, index }));
+      if (over !== null) setOver(null);
     },
     onDragLeave: (e: DragEvent<HTMLElement>) => {
       const to = e.relatedTarget as Element | null;
@@ -260,16 +289,26 @@ export function BirdseyeFocus({
     onDrop: (e: DragEvent<HTMLElement>) => {
       const card = dragging.current;
       setOver(null);
+      const place = dropAt && dropAt.status === value ? dropAt.index : null;
+      setDropAt(null);
       if (!card || e.dataTransfer.getData(CARD_DRAG_TYPE) !== card.id) return;
       e.preventDefault();
       dragging.current = null;
+      setDraggingId(null);
       if (bucketFor(list.statuses, card.status) !== value) actions.onChangeStatus(card, value);
+      else if (place !== null) void onReorder(card, place);
     },
   });
 
   const columns: GridColumn[] = statuses.map((s) => {
     const col = focus.columns[s.value] ?? { cards: [], justAdded: [], nextCursor: null, total: 0, loadingMore: false, moreError: false };
     const shown = [...col.justAdded, ...col.cards];
+    // The line: above the card at that place, or under the last one, never
+    // where the dragged card already sits.
+    const others = draggingId ? col.cards.filter((c) => c.id !== draggingId) : col.cards;
+    const placeOf = new Map(others.map((c, i) => [c.id, i] as const));
+    const wasAt = draggingId ? col.cards.findIndex((c) => c.id === draggingId) : -1;
+    const lineAt = dropAt && dropAt.status === s.value && !(wasAt !== -1 && wasAt === dropAt.index) ? dropAt.index : null;
     const header = (
       <div className="flex h-10 min-w-0 items-center gap-2" title={s.label}>
         <StatusGlyph current={s} statuses={list.statuses} />
@@ -305,11 +344,24 @@ export function BirdseyeFocus({
               draggable={canWrite}
               onDragStart={(c) => {
                 dragging.current = c;
+                setDraggingId(c.id);
               }}
               onDragEnd={() => {
                 dragging.current = null;
+                setDraggingId(null);
                 setOver(null);
+                setDropAt(null);
               }}
+              place={placeOf.get(card.id)}
+              dropLine={
+                lineAt === null || !placeOf.has(card.id)
+                  ? null
+                  : placeOf.get(card.id) === lineAt
+                    ? "top"
+                    : placeOf.get(card.id) === others.length - 1 && lineAt === others.length
+                      ? "bottom"
+                      : null
+              }
             />
           ))}
           {canWrite && shown.length > 0 && !col.nextCursor ? (

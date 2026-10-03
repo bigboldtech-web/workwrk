@@ -167,6 +167,15 @@ describe("refreshLinkedCopy: a re-read of a linked copy", () => {
     expect(refreshLinkedCopy(copy, {}, LIST_B).action).toBe("drop");
   });
 
+  it("names the home List only while the fresh answer lets the viewer read it", () => {
+    const named = refreshLinkedCopy(copy, body({ kind: "linked", boardId: B, homeReadable: true }), LIST_B);
+    expect(named.action === "merge" && named.card.linked?.listLink.homeList?.name).toBe("List A");
+    // Access to the home was taken away while the view was open.
+    const lost = refreshLinkedCopy(copy, body({ kind: "linked", boardId: B, homeReadable: false }), LIST_B);
+    expect(lost.action).toBe("merge");
+    if (lost.action === "merge") expect(lost.card.linked?.listLink.homeList).toBeUndefined();
+  });
+
   it("asks for the view to be re-read when the task is now homed in this very List", () => {
     expect(refreshLinkedCopy(copy, body({ kind: "home", boardId: B }), LIST_B).action).toBe("reload");
   });

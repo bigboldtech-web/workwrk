@@ -507,6 +507,9 @@ export async function readableFolderLists(
   const rank = new Map(order.map((id, i) => [id, i] as const));
   const boards = await prisma.board.findMany({
     where: { folderId: { in: order }, organizationId: viewer.organizationId, archivedAt: null },
+    // The database's name order, as the page always listed a shelf; the sort
+    // below is stable and moves Lists only by shelf.
+    orderBy: { name: "asc" },
     select: {
       id: true, slug: true, name: true, icon: true, color: true, visibility: true, ownerId: true, folderId: true, updatedAt: true, statuses: true,
       settings: opts.includeSettings === true,
@@ -521,7 +524,7 @@ export async function readableFolderLists(
     const { settings, ...rest } = b;
     rows.push({ ...rest, folderId: b.folderId, visibility: b.visibility as Visibility, role, ...(opts.includeSettings ? { settings: settings as Prisma.JsonValue } : {}) });
   }
-  rows.sort((a, b) => (rank.get(a.folderId) ?? 0) - (rank.get(b.folderId) ?? 0) || a.name.localeCompare(b.name));
+  rows.sort((a, b) => (rank.get(a.folderId) ?? 0) - (rank.get(b.folderId) ?? 0));
   return rows;
 }
 

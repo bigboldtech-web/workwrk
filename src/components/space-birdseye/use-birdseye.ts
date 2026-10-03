@@ -31,6 +31,7 @@ import { accessMessage } from "@/lib/access-message";
 import { boardStatusFor, homeStatusTarget, linkedStatusRefusal } from "@/lib/list-link-rows";
 import type { BoardItemRow } from "@/lib/board-items-shared";
 import { useOsToast } from "@/components/layout/os/toast";
+import { planDrop } from "@/lib/work/reorder";
 import {
   arrivalCard,
   copiesOf,
@@ -214,9 +215,9 @@ export function useBirdseye({
 
   // The latest state, for callbacks that must read it without re-binding.
   // Refreshed after every commit, before any handler can run against it.
-  const stateRef = useRef({ overview, focus, overviewLists, focusLists, q, hideClosed, focusId, subtasks });
+  const stateRef = useRef({ overview, focus, overviewLists, focusLists, q, hideClosed, focusId, subtasks, overviewStale });
   useLayoutEffect(() => {
-    stateRef.current = { overview, focus, overviewLists, focusLists, q, hideClosed, focusId, subtasks };
+    stateRef.current = { overview, focus, overviewLists, focusLists, q, hideClosed, focusId, subtasks, overviewStale };
   });
 
   const query = useCallback(
@@ -640,6 +641,81 @@ export function useBirdseye({
     resendRef.current = changeStatus;
   }, [changeStatus]);
 
+  // ── Order in a Focus column ───────────────────────────────────────
+
+  /**
+   * Move a card up or down in its Focus column, to `index` among the
+   * column's OTHER loaded cards (the ones in their own place; a card added
+   * this visit sits on top until the next read). The midpoint of its new
+   * neighbours, one write: a card homed here moves its task's position, a
+   * card shown here through a link its LINK's place in this List; neighbours
+   * with no room between them get the List renumbered on the server, over
+   * the whole List (src/lib/work/reorder.ts, PUT /api/boards/[id]/order).
+   * Optimistic; a failure says why and the column is read again.
+   */
+  const reorderCard = useCallback(
+    async (card: BirdseyeCard, index: number) => {
+      const f = stateRef.current.focus;
+      if (!f || f.boardId !== card.boardId) return;
+      const bucket = focusColumnOf(f, card.boardId, card.id);
+      const col = bucket ? f.columns[bucket] : null;
+      if (!bucket || !col) return;
+      const plan = planDrop(col.cards, card.id, index);
+      if (plan.kind === "none") return;
+      const others = col.cards.filter((c) => c.id !== card.id);
+      const at = Math.max(0, Math.min(index, others.length));
+      const moved: BirdseyeCard = plan.kind === "position" ? { ...card, position: plan.position } : card;
+      setFocus((prev) => {
+        if (!prev || prev.boardId !== card.boardId || !prev.columns[bucket]) return prev;
+        const c = prev.columns[bucket];
+        const rest = c.cards.filter((x) => x.id !== card.id);
+        const to = Math.max(0, Math.min(at, rest.length));
+        return {
+          ...prev,
+          columns: { ...prev.columns, [bucket]: { ...c, justAdded: c.justAdded.filter((x) => x.id !== card.id), cards: [...rest.slice(0, to), moved, ...rest.slice(to)] } },
+        };
+      });
+      if (plan.kind === "position") setOverview((prev) => mapOverviewCopy(prev, card.boardId, card.id, (c) => ({ ...c, position: plan.position })));
+      const failed = async (body: unknown) => {
+        toast(accessMessage(body, "Couldn't save the new order."), { tone: "danger" });
+        await retry.current.focus();
+      };
+      try {
+        const res =
+          plan.kind === "renumber"
+            ? await fetch(`/api/boards/${encodeURIComponent(card.boardId)}/order`, {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ movedId: card.id, afterId: plan.afterId, beforeId: plan.beforeId }),
+              })
+            : card.linked
+              ? await fetch(`/api/boards/${encodeURIComponent(card.boardId)}/links/${encodeURIComponent(card.id)}`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ position: plan.position }),
+                })
+              : await fetch(`/api/items/${encodeURIComponent(card.id)}`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ position: plan.position }),
+                });
+        if (!res.ok) {
+          await failed(await res.json().catch(() => null));
+          return;
+        }
+        // A renumber moved every card's number: the column is read back whole,
+        // and the overview with it the next time it shows.
+        if (plan.kind === "renumber") {
+          setOverviewStale(true);
+          await retry.current.focus();
+        }
+      } catch {
+        await failed(null);
+      }
+    },
+    [toast],
+  );
+
   // ── Create ────────────────────────────────────────────────────────
 
   const placeNew = useCallback(
@@ -807,6 +883,60 @@ export function useBirdseye({
   }, []);
 
   /**
+   * A task that has just come into List `listId` (linked there, moved there)
+   * while no copy of it is on screen there. It is read in that List and
+   * placed only where the loaded pages reach: a column with more pages to
+   * come gets it with Show more, in its own place, never twice.
+   *
+   * COUNTED ONLY WHEN PROVEN. An event names every List a task is in, so a
+   * task that was always in the List but sits past the loaded pages looks
+   * the same as one that just arrived; it is already in the counts. So the
+   * counts move only for a card that was placed (the loaded pages reach it:
+   * then it was not there before), or with `known` (this view saw it leave
+   * another List on screen), which also puts it at the top of its new column
+   * when the loaded pages do not reach it, as a task made here would be.
+   */
+  const arriveIn = useCallback(
+    async (listId: string, id: string, known = false) => {
+      const list = listById(listId);
+      if (!list || findCopy(stateRef.current.overview, stateRef.current.focus, listId, id)) return;
+      const r = await apiFetch<TaskBody>(`/api/items/${encodeURIComponent(id)}?list=${encodeURIComponent(listId)}`, { cache: "no-store" });
+      if (!mounted.current || !r.ok) return;
+      const s = stateRef.current;
+      if (findCopy(s.overview, s.focus, listId, id)) return;
+      const card = arrivalCard(r.data, list);
+      if (!card) return;
+      if (!cardMatchesFilters(card, s.q, false, list.statuses) || (s.hideClosed && cardClosedHere(card, list.statuses))) return;
+      let placed = false;
+      const col = s.overview[listId];
+      // A hidden overview under older filters reloads when it is shown again.
+      if (col && !s.overviewStale && reachesLoaded(card, col.cards, col.nextCursor)) {
+        placed = true;
+        setOverview((prev) => (prev[listId] ? { ...prev, [listId]: { ...prev[listId], cards: insertInOrder(prev[listId].cards, card) } } : prev));
+      }
+      if (s.focus && s.focus.boardId === listId) {
+        const bucket = bucketFor(list.statuses, card.status);
+        const fcol = s.focus.columns[bucket];
+        if (fcol && reachesLoaded(card, fcol.cards, fcol.nextCursor)) {
+          placed = true;
+          setFocus((prev) => {
+            if (!prev || prev.boardId !== listId || !prev.columns[bucket]) return prev;
+            const c = prev.columns[bucket];
+            return { ...prev, columns: { ...prev.columns, [bucket]: { ...c, cards: insertInOrder(c.cards, card), total: c.total + 1 } } };
+          });
+        }
+      }
+      if (placed) {
+        adjustLists(listId, (l) => countDelta(l, l.statuses, card.status, 1, s.hideClosed, cardClosedHere(card, l.statuses)));
+      } else if (known) {
+        // placeNew counts it once and shows it at the top of its column.
+        placeNew(card, "top");
+      }
+    },
+    [listById, adjustLists, placeNew],
+  );
+
+  /**
    * Re-read ONE copy in the List it is shown in. A linked copy is read with
    * ?list= and folded in by the Board's own merge (mergeRefetchedRow), then
    * rebuilt by the server's card builder, so its column, reason line and drag
@@ -870,9 +1000,10 @@ export function useBirdseye({
       if (item.archivedAt || !stillTop || home !== listId) {
         removeCopy(listId, id);
         if (!item.archivedAt && stillTop && home !== listId && shownRef.current.has(home)) {
-          // Moved between two Lists on screen: it arrives at the top of its new one.
-          const statuses = listById(home)?.statuses ?? [];
-          placeNew({ ...cardFromRow(item, onScreen), boardId: home, rank: bucketRank(statuses, item.status) }, "top");
+          // Moved between two Lists on screen: read in its new List (a
+          // reader who reaches it there only through a link gets that List's
+          // linked card, never a bare home card), at its place or the top.
+          void arriveIn(home, id, true);
         }
         return;
       }
@@ -884,49 +1015,11 @@ export function useBirdseye({
       setFocus((prev) => mapFocusCopy(prev, listId, id, merge));
       if (stateRef.current.subtasks[key]) void loadSubtasks(listId, id);
     },
-    [removeTask, removeCopy, loadSubtasks, listById, placeNew, moveEverywhere, reloadQuietly],
+    [removeTask, removeCopy, loadSubtasks, listById, moveEverywhere, reloadQuietly, arriveIn],
   );
   useEffect(() => {
     refreshCopyRef.current = refreshCopy;
   }, [refreshCopy]);
-
-  /**
-   * A task that has just come into List `listId` (linked there, moved there)
-   * while no copy of it is on screen there. It is read in that List and
-   * placed only where the loaded pages reach: a column with more pages to
-   * come gets it with Show more, in its own place, never twice.
-   */
-  const arriveIn = useCallback(
-    async (listId: string, id: string) => {
-      const list = listById(listId);
-      if (!list || findCopy(stateRef.current.overview, stateRef.current.focus, listId, id)) return;
-      const r = await apiFetch<TaskBody>(`/api/items/${encodeURIComponent(id)}?list=${encodeURIComponent(listId)}`, { cache: "no-store" });
-      if (!mounted.current || !r.ok) return;
-      const s = stateRef.current;
-      if (findCopy(s.overview, s.focus, listId, id)) return;
-      const card = arrivalCard(r.data, list);
-      if (!card) return;
-      if (!cardMatchesFilters(card, s.q, false, list.statuses) || (s.hideClosed && cardClosedHere(card, list.statuses))) return;
-      const col = s.overview[listId];
-      if (col && reachesLoaded(card, col.cards, col.nextCursor)) {
-        setOverview((prev) => (prev[listId] ? { ...prev, [listId]: { ...prev[listId], cards: insertInOrder(prev[listId].cards, card) } } : prev));
-      }
-      if (s.focus && s.focus.boardId === listId) {
-        const bucket = bucketFor(list.statuses, card.status);
-        const fcol = s.focus.columns[bucket];
-        if (fcol && reachesLoaded(card, fcol.cards, fcol.nextCursor)) {
-          setFocus((prev) => {
-            if (!prev || prev.boardId !== listId || !prev.columns[bucket]) return prev;
-            const c = prev.columns[bucket];
-            return { ...prev, columns: { ...prev.columns, [bucket]: { ...c, cards: insertInOrder(c.cards, card), total: c.total + 1 } } };
-          });
-        }
-      }
-      // The counts know it either way: it is in this List now.
-      adjustLists(listId, (l) => countDelta(l, l.statuses, card.status, 1, s.hideClosed, cardClosedHere(card, l.statuses)));
-    },
-    [listById, adjustLists],
-  );
 
   /**
    * Re-read every copy of a task on screen, each in its own List. A task
@@ -1039,6 +1132,7 @@ export function useBirdseye({
     loadSubtasks,
     loadSubtasksOf,
     refreshTask,
+    reorderCard,
     applyItemEvent,
     applyItemCreated,
   };

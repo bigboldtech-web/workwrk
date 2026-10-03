@@ -57,6 +57,8 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   draggable = false,
   onDragStart,
   onDragEnd,
+  place,
+  dropLine = null,
 }: {
   card: Card;
   list: BirdseyeList;
@@ -70,6 +72,10 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   draggable?: boolean;
   onDragStart?: (card: Card) => void;
   onDragEnd?: () => void;
+  /** Focus: its place among its column's cards (a card added this visit has none). */
+  place?: number;
+  /** Focus: a card being dragged would land above or below this one. */
+  dropLine?: "top" | "bottom" | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const option = resolveCardStatus(list.statuses, card.status);
@@ -101,7 +107,13 @@ export const BirdseyeCard = memo(function BirdseyeCard({
   };
 
   return (
-    <li className="[content-visibility:auto] [contain-intrinsic-size:auto_96px]">
+    <li className="relative [content-visibility:auto] [contain-intrinsic-size:auto_96px]" data-place={place}>
+      {dropLine ? (
+        <span
+          aria-hidden
+          className={cn("pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-[var(--os-brand)]", dropLine === "top" ? "-top-[5px]" : "-bottom-[5px]")}
+        />
+      ) : null}
       <div
         className={cn(
           "group/card relative flex flex-col gap-1.5 rounded-lg border px-2.5 py-2 transition-colors",

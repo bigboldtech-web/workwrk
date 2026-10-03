@@ -149,6 +149,10 @@ describe("one Folder's Lists are the Folder page's own, for every tab", () => {
     expect(readFn).toMatch(/const order = folderShelfOrder\(folders, folder\.id\);/);
     expect(readFn).toMatch(/prisma\.board\.findMany\(\{\s*where: \{ folderId: \{ in: order \}, organizationId: viewer\.organizationId, archivedAt: null \}/);
     expect(readFn).toMatch(/const roles = await nodeRoleMap\(ctx, "list", boards\.map\(\(b\) => b\.id\)\);/);
+    // The database's name order inside a shelf, as the page always listed it;
+    // the stable sort after it moves Lists only by shelf.
+    expect(readFn).toMatch(/orderBy: \{ name: "asc" \}/);
+    expect(readFn).toMatch(/rows\.sort\(\(a, b\) => \(rank\.get\(a\.folderId\) \?\? 0\) - \(rank\.get\(b\.folderId\) \?\? 0\)\);/);
     expect(readFn).toMatch(/!roleAtLeast\(role, "VIEW"\)\) continue;/);
     expect(readFn).not.toMatch(/spaceTree\(/);
   });

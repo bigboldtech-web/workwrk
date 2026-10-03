@@ -193,8 +193,23 @@ export function refreshLinkedCopy(copy: BirdseyeCard, body: TaskBody, list: Link
   const merged = mergeRefetchedRow(linkedRowOf(copy), body as RefetchedTask, list.id);
   if (merged.action !== "merge") return merged;
   if (item.archivedAt || item.parentItemId) return { action: "drop" };
-  const fresh = linkedCardFromRow(merged.row, list);
+  const fresh = linkedCardFromRow(withHomeFrom(merged.row, body), list);
   return fresh ? { action: "merge", card: cardOf(fresh) } : { action: "drop" };
+}
+
+/**
+ * The home List's name as the fresh answer allows it: named while the viewer
+ * may read the home, gone the moment they may not (the Board's merge keeps
+ * whatever the row had before, which would go on naming a List the viewer
+ * just lost).
+ */
+function withHomeFrom(row: BoardItemRow, body: TaskBody): BoardItemRow {
+  const home = body.context?.home;
+  if (!row.listLink || !home) return row;
+  const listLink = { ...row.listLink };
+  if (home.readable && home.id) listLink.homeList = { id: home.id, slug: home.slug ?? "", name: home.name ?? "" };
+  else delete listLink.homeList;
+  return { ...row, listLink };
 }
 
 /** The card for a task read in List `list` that has just come into it, or null when it does not belong there as a card. */
