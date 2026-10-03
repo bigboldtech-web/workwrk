@@ -267,8 +267,9 @@ export function seesUnownedGoals(actor: { manager: boolean }): boolean {
 /* ───────────────────────────── visibility ────────────────────────────── */
 
 /**
- * May the caller see this goal? True when they own it, are a resolved
- * member, or manage someone who is (report tree via getTeamUserIds).
+ * May the caller see this goal? True when they own it, are in its audience,
+ * or manage someone who is (report tree via getTeamUserIds, matched by the
+ * same teamAudienceVisibilityOr fragments the Goals list uses).
  * COMPANY-level goals are visible to everyone in the org (org scoping is
  * the caller's job, check organizationId before calling). The legacy
  * DEPARTMENT + departmentId match is kept so pre-audience goals stay
@@ -299,19 +300,22 @@ export async function canSeeGoal(
   });
   if (direct > 0) return true;
 
-  // Resolved at read time, dept/role audiences follow today's org chart.
-  const members = await resolveGoalMembers(okr.id);
-
   // A manager at any tier, or anyone with people reporting to them (Phase 6:
-  // "manager" is a fact about the org chart). The same rule GET /api/okrs
-  // lists by, so a Team goals row never opens onto a 404.
-  const teamIds = new Set(await getTeamUserIds(getOrgId(session), callerId));
-  if (isManager(session) || teamIds.size > 1) {
+  // "manager" is a fact about the org chart), through the exact fragments
+  // GET /api/okrs, search and Ask AI list by (teamAudienceVisibilityOr), so
+  // a row the list shows never opens onto a 404. This used the goal's ACTIVE
+  // members only, so a goal assigned to a report on leave, on notice or
+  // deactivated (directly, or by a tag only they hold) was listed and then
+  // refused. Dept and role audiences still follow today's org chart there.
+  const teamIds = await getTeamUserIds(getOrgId(session), callerId);
+  const tree = new Set(teamIds);
+  if (isManager(session) || tree.size > 1) {
     // Unowned objectives stay visible to the manager tier (who create
     // them), never to everyone with a report: the same rule GET lists by.
     if (!okr.ownerId && seesUnownedGoals({ manager: isManager(session) })) return true;
-    if (okr.ownerId && teamIds.has(okr.ownerId)) return true;
-    if (members.some((id) => teamIds.has(id))) return true;
+    if (okr.ownerId && tree.has(okr.ownerId)) return true;
+    const teamOr = await teamAudienceVisibilityOr(teamIds);
+    if (teamOr.length > 0 && (await prisma.oKR.count({ where: { id: okr.id, OR: teamOr } })) > 0) return true;
   }
   return false;
 }
