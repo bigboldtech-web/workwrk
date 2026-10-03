@@ -84,12 +84,13 @@ async function hydrate(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<HydratedLink[]> {
-  // Every SOP, goal, key result, KRA and KPI end, source or target, read once
-  // under its own read rule (src/lib/access/link-end-readable.ts, the same
-  // rules the task Connection trail reads): the titles below are hydrated
-  // only for these, and the filter at the end drops every link with any
-  // other such end. A SOP filed in a folder the viewer holds no grant on, a
-  // private goal, a KRA to a Guest: none is named, counted or quoted.
+  // Every SOP, goal, key result, KRA, KPI, contract and kudos end, source or
+  // target, read once under its own read rule
+  // (src/lib/access/link-end-readable.ts, the same rules the task Connection
+  // trail reads): the titles below are hydrated only for these, and the
+  // filter at the end drops every link with any other such end. A SOP filed
+  // in a folder the viewer holds no grant on, a private goal, a KRA to a
+  // Guest, a contract they are no party to: none is named, counted or quoted.
   const readableEnds = await loadReadableLinkEnds(
     { user: { id: userId, organizationId: orgId, accessLevel: accessLevel ?? "EMPLOYEE" } },
     orgId,
@@ -227,9 +228,10 @@ async function hydrate(
   // pages and restriction, a canvas with its Folder, a Folder, a List, a
   // Space, a table, a form), tasks through their List or their assignment,
   // the file read rule for files, and their own rules for SOPs, goals, key
-  // results, KRAs and KPIs (a task an SOP run made links back to its SOP, and
-  // that SOP may sit in a folder the task's reader has no grant on). Ends of
-  // other kinds (a person, a review) are not nodes and pass through.
+  // results, KRAs, KPIs, contracts and kudos (a task an SOP run made links
+  // back to its SOP, and that SOP may sit in a folder the task's reader has
+  // no grant on). Ends of other kinds (a person, a review) are not nodes and
+  // pass through.
   const ends = rows.flatMap((r) => [{ type: r.sourceType as string, id: r.sourceId }, { type: r.targetType as string, id: r.targetId }]);
   const taskIds = [...new Set(ends.filter((e) => LINK_TASK_TYPES.has(e.type)).map((e) => e.id))];
   const tasks = taskIds.length

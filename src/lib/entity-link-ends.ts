@@ -6,10 +6,10 @@
 // every row it returns. Node ends (a doc, a canvas, a Folder, a List, a
 // Space, a table, a form) are decided by the one resolver; a task follows
 // its List or its assignment; a file follows the file read rule; a SOP, a
-// goal, a key result, a KRA and a KPI follow their own read rules (the
-// readable sets, src/lib/access/link-end-readable.ts) when the caller hands
-// them in, as the link list, adding a link and removing one all do. Other
-// ends that are not nodes (a person, a review) pass, as before.
+// goal, a key result, a KRA, a KPI, a contract and a kudos follow their own
+// read rules (the readable sets, src/lib/access/link-end-readable.ts) when
+// the caller hands them in, as the link list, adding a link and removing one
+// all do. Other ends that are not nodes (a person, a review) pass, as before.
 //
 // Pure: the routes load the decisions and hand them in.
 
@@ -45,6 +45,10 @@ export interface LinkEndFacts {
   readableKeyResults?: ReadonlySet<string>;
   /** The KRA and KPI ends the viewer may read, keyed "KRA:<id>" and "KPI:<id>" (Members only), the same way. */
   readableKras?: ReadonlySet<string>;
+  /** The contract (Agreement) ends the viewer may open (its page's rule), the same way. */
+  readableContracts?: ReadonlySet<string>;
+  /** The kudos ends the viewer may read (Members only), the same way. */
+  readableKudos?: ReadonlySet<string>;
   tasks: ReadonlyMap<string, { boardId: string; ownerId: string | null; assigneeIds: readonly string[] }>;
 }
 
@@ -54,6 +58,8 @@ export function linkEndVisible(type: string, id: string, f: LinkEndFacts): boole
   if (type === "OKR" && f.readableGoals) return f.readableGoals.has(id);
   if (type === "KEY_RESULT" && f.readableKeyResults) return f.readableKeyResults.has(id);
   if ((type === "KRA" || type === "KPI") && f.readableKras) return f.readableKras.has(`${type}:${id}`);
+  if (type === "CONTRACT" && f.readableContracts) return f.readableContracts.has(id);
+  if (type === "KUDOS" && f.readableKudos) return f.readableKudos.has(id);
   if (LINK_TASK_TYPES.has(type)) {
     const t = f.tasks.get(id);
     // A TASK id that is no task (a legacy row) is not a node: no node gate.
@@ -108,8 +114,8 @@ const NOT_FOUND: LinkWriteVerdict = { ok: false, status: 404, error: "Not found"
  * door to a file they could not open. A source or a target out of sight
  * reads as not found, so a guessed id confirms nothing. Sources that are not
  * nodes keep their own edit gates (a goal's in canMutateLinkFromSource); a SOP,
- * a goal, a key result, a KRA or a KPI end the viewer cannot read is not
- * found, as a hidden node is.
+ * a goal, a key result, a KRA, a KPI, a contract or a kudos end the viewer
+ * cannot read is not found, as a hidden node is.
  */
 export function linkWriteVerdict(
   link: { sourceType: string; sourceId: string; targetType: string; targetId: string },

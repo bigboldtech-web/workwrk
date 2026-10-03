@@ -82,10 +82,10 @@ export async function linkWriteRefusalFor(
   ];
   const fileIds = [...new Set(ends.filter((e) => e.type === "FILE").map((e) => e.id))];
   const ctx = nodeCtxFromLevel(viewer.userId, org, viewer.accessLevel);
-  // A SOP, a goal, a key result, a KRA or a KPI end follows its own read rule
-  // here too: a link never plants one the person cannot open, a guessed id or
-  // another workspace's is not found, and nobody adds or removes links on one
-  // they cannot read.
+  // A SOP, a goal, a key result, a KRA, a KPI, a contract or a kudos end
+  // follows its own read rule here too: a link never plants one the person
+  // cannot open, a guessed id or another workspace's is not found, and nobody
+  // adds or removes links on one they cannot read.
   const [decisions, readable, readableEnds] = await Promise.all([
     nodeRefs.length ? nodeRoles(ctx, nodeRefs) : Promise.resolve(new Map<string, { role: string }>()),
     fileIds.length ? readableFileIds({ ids: fileIds, viewer }) : Promise.resolve([] as string[]),

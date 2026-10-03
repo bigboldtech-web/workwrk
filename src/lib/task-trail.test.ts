@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { assembleTrail, formatLogged, ownerNoticeFor, type TrailCandidate } from "./task-trail";
+import { legacyTestSession } from "./access/test-fixtures";
 
 describe("assembleTrail", () => {
   const c = (kind: TrailCandidate["kind"], id: string, title = `${kind} ${id}`): TrailCandidate => ({ kind, id, title, href: `/${kind}/${id}` });
@@ -45,8 +46,9 @@ const links = [
   { sourceType: "BOARD_ITEM", sourceId: "task", targetType: "CONTRACT", targetId: "agr-1", context: null },
 ];
 type OrgRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+// The session carries the level the contract page's manager tier reads.
 const reader = (orgRole: OrgRole) => ({
-  session: { user: { id: "u" } },
+  session: legacyTestSession("u", orgRole === "OWNER" || orgRole === "ADMIN" ? "COMPANY_ADMIN" : "EMPLOYEE"),
   viewer: { userId: "u", organizationId: "org", orgRole, isAgent: false, adminScopes: [] },
   nodeCtx: {} as never,
   fileViewer: { organizationId: "org", userId: "u" },
@@ -78,7 +80,7 @@ vi.mock("@/lib/prisma", () => ({
     fileEntry: { findMany: async () => [] },
     user: { findUnique: async () => ({ email: "e@x.com" }) },
     // An employee who is not a party: the party filter is in the where, and the fake finds no row.
-    agreement: { findMany: async ({ where }: { where: { parties?: unknown } }) => (where.parties ? [] : [{ id: "agr-1", title: "Services agreement" }]) },
+    agreement: { findMany: async ({ where }: { where: { AND: Array<{ parties?: unknown }> } }) => (where.AND.some((w) => w.parties) ? [] : [{ id: "agr-1", title: "Services agreement" }]) },
     kudos: { findMany: async () => [] },
     timerSession: { findMany: async () => [{ durationMs: 7_800_000, startedAt: new Date(), stoppedAt: new Date() }] },
   },

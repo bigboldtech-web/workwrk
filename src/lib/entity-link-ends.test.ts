@@ -43,12 +43,14 @@ describe("entity link ends", () => {
   });
 });
 
-describe("SOP, goal, key result, KRA and KPI ends follow their own read rules", () => {
+describe("SOP, goal, key result, KRA, KPI, contract and kudos ends follow their own read rules", () => {
   const sets: Partial<LinkEndFacts> = {
     readableSops: new Set(["sop-ok"]),
     readableGoals: new Set(["goal-ok"]),
     readableKeyResults: new Set(["kr-ok"]),
     readableKras: new Set(["KRA:kra-ok", "KPI:kpi-ok"]),
+    readableContracts: new Set(["agr-party"]),
+    readableKudos: new Set(["kudos-ok"]),
   };
   const f: LinkEndFacts = { ...facts(["list:L1"]), ...sets };
   it("shows a readable end and hides any other, a guessed or foreign id included", () => {
@@ -72,6 +74,13 @@ describe("SOP, goal, key result, KRA and KPI ends follow their own read rules", 
     expect(linkVisible({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "OKR", targetId: "goal-private" }, f)).toBe(false);
     expect(linkVisible({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "OKR", targetId: "goal-ok" }, f)).toBe(true);
   });
+  it("a contract shows only to who its page opens for, and a kudos only to a Member", () => {
+    expect(linkEndVisible("CONTRACT", "agr-party", f)).toBe(true);
+    expect(linkEndVisible("CONTRACT", "agr-not-a-party", f)).toBe(false);
+    expect(linkVisible({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "CONTRACT", targetId: "agr-not-a-party" }, f)).toBe(false);
+    expect(linkEndVisible("KUDOS", "kudos-ok", f)).toBe(true);
+    expect(linkEndVisible("KUDOS", "kudos-ok", { ...f, readableKudos: new Set() })).toBe(false);
+  });
   it("people and reviews still pass as before", () => {
     expect(linkEndVisible("USER", "anyone", f)).toBe(true);
     expect(linkEndVisible("REVIEW", "r1", f)).toBe(true);
@@ -87,6 +96,8 @@ describe("SOP, goal, key result, KRA and KPI ends follow their own read rules", 
     expect(linkWriteVerdict({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "SOP", targetId: "sop-hidden" }, w)).toEqual({ ok: false, status: 404, error: "Not found" });
     expect(linkWriteVerdict({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "OKR", targetId: "goal-private" }, w)).toEqual({ ok: false, status: 404, error: "Not found" });
     expect(linkWriteVerdict({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "SOP", targetId: "sop-ok" }, w)).toEqual({ ok: true });
+    expect(linkWriteVerdict({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "CONTRACT", targetId: "agr-not-a-party" }, w)).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(linkWriteVerdict({ sourceType: "BOARD_ITEM", sourceId: "t-open", targetType: "CONTRACT", targetId: "agr-party" }, w)).toEqual({ ok: true });
   });
   it("a SOP or KRA you cannot read is not a source you can add links to or remove them from", () => {
     expect(linkWriteVerdict({ sourceType: "SOP", sourceId: "sop-hidden", targetType: "BOARD_ITEM", targetId: "t-open" }, w)).toEqual({ ok: false, status: 404, error: "Not found" });
