@@ -38,6 +38,8 @@ export function pickUrl(o: PickQuery & { q?: string; limit?: number; ids?: reado
   const sp = new URLSearchParams();
   if (o.ids && o.ids.length) {
     sp.set("ids", o.ids.join(","));
+    // reach "all": a deactivated person is named too, for a caller who may see them.
+    if (o.reach === "all") sp.set("reach", "all");
     return `/api/people/pick?${sp}`;
   }
   if (o.includeSelf !== false) sp.set("includeSelf", "1");

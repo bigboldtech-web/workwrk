@@ -86,15 +86,16 @@ export async function GET(req: NextRequest) {
   // first page of people, and a colleague further down must still read by
   // name, never as gone. Everyone who can sign in, as reach=signin offers; a
   // person who can no longer sign in is not returned, so the picker says
-  // they are no longer here. A Guest still reads only the people they share
-  // a conversation with.
+  // they are no longer here, unless reach=all asks for deactivated people
+  // too and the caller may see them (a filter or a cell naming someone who
+  // left). A Guest still reads only the people they share a conversation with.
   const ids = [...new Set((searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 50);
   if (ids.length > 0) {
     const named = await prisma.user.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
-        status: { not: "INACTIVE" as const },
+        ...(deactivatedToo ? {} : { status: { not: "INACTIVE" as const } }),
         AND: [{ id: { in: ids } }, ...(visibleIds ? [{ id: { in: visibleIds } }] : [])],
       },
       take: ids.length,

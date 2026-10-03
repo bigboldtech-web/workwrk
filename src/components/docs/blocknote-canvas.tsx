@@ -57,6 +57,7 @@ import { currentOpenObject, useWorkPlacement } from "@/components/layout/os/work
 import { editorLinkHref } from "@/lib/nav/object-href";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
 import { pickUrl } from "@/lib/people-pick";
+import { useOsToast } from "@/components/layout/os/toast";
 
 // Schema = BlockNote defaults + our workspace-specific custom blocks +
 // custom inline content (mentions). Adding a new custom block is a two-line
@@ -252,7 +253,7 @@ async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   return out;
 }
 
-function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string): DefaultReactSuggestionItem[] {
+function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string, onNotTold?: (name: string) => void): DefaultReactSuggestionItem[] {
   return rows.map((row) => ({
     title: row.label,
     subtext: row.mkind === "user" ? "Person" : "Page",
@@ -270,11 +271,16 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string
       // Mentioning a person drops them an Inbox notification (server honors
       // their "Mentions" toggle). Best-effort — the pill already inserted.
       if (row.mkind === "user" && docId) {
+        // Someone who cannot open the doc is not told (the route says so):
+        // the writer hears it, so a mention never looks sent when it was not.
         void fetch(`/api/docs/${docId}/mention`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: row.id }),
-        }).catch(() => {});
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => { if (d?.skipped === "no_access") onNotTold?.(row.label); })
+          .catch(() => {});
       }
     },
   }));
@@ -350,6 +356,7 @@ function useAppTheme(): "dark" | "light" {
 }
 
 export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange, docId, onComment, onAskAI, entity, initialHtml, onHtmlChange }: Props) {
+  const { toast } = useOsToast();
   const appTheme = useAppTheme();
   const router = useRouter();
   // Resolve the entity. Notes (no `entity`) behave exactly as before.
@@ -567,7 +574,7 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
             notification via /api/docs/[id]/mention (pref-gated server-side). */}
         <SuggestionMenuController
           triggerCharacter="@"
-          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId)}
+          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId, (name) => toast(`${name} can't open this doc, so they were not told.`))}
         />
         {/* Custom drag-handle: + add-block button and our Notion block menu.
             The provider feeds live docId/callbacks to the menu through

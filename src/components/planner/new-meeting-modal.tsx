@@ -107,7 +107,8 @@ export function NewMeetingModal({ open, onClose, onCreated, initialStart }: NewM
   }, [open, initialStart, tz]);
 
   // You are always in your own meeting, so the picker never offers you.
-  const picker = usePeoplePicker({ enabled: open, reach: "active", includeSelf: false, named: people });
+  // Read while the Attendees picker is open, from an empty search each time.
+  const picker = usePeoplePicker({ enabled: open && peopleOpen, reach: "active", includeSelf: false, named: people });
   const peopleOptions = useMemo<PickerOption[]>(
     () => picker.people.map((u) => ({
       value: u.id,

@@ -1986,7 +1986,8 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     for (const chunk of chunkIds(missing)) {
       // A failed lookup is asked again the next time the cells change.
       const forget = () => { for (const x of chunk) peopleLookedUp.current.delete(x); };
-      void fetch(pickUrl({ ids: chunk }))
+      // reach "all": a deactivated person a cell holds is named for those who may see them.
+      void fetch(pickUrl({ ids: chunk, reach: "all" }))
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (Array.isArray(d?.people)) mergeOrgUsers(d.people); else forget(); })
         .catch(forget);
@@ -6870,19 +6871,22 @@ function PersonCell({ value, users, onSearch, onChange }: { value: unknown; user
     const t = setTimeout(() => onSearch(q), 200);
     return () => clearTimeout(t);
   }, [open, q, onSearch]);
-  const chosen = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is OrgUser => !!u);
+  // A stored person who cannot be named (still loading, or no longer here)
+  // stays a chip, so the cell never looks emptier than it is and they can
+  // still be removed.
+  const chosen = ids.map((id) => ({ id, user: users.find((u) => u.id === id) }));
   const candidates = q.trim() ? users.filter((u) => userName(u).toLowerCase().includes(q.trim().toLowerCase())) : users;
   const toggle = (id: string) => onChange(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
   return (
     <span className="relative inline-flex flex-wrap items-center gap-1">
-      {chosen.map((u) => (
-        <span key={u.id} className="inline-flex items-center gap-1 rounded-full bg-active py-px pl-0.5 pr-2 text-xs">
+      {chosen.map(({ id, user: u }) => (
+        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-active py-px pl-0.5 pr-2 text-xs">
           <span className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full bg-line text-rail font-semibold text-ink-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            {u.avatar ? <img src={u.avatar} alt="" className="h-full w-full object-cover" /> : userInitials(u)}
+            {u?.avatar ? <img src={u.avatar} alt="" className="h-full w-full object-cover" /> : userInitials(u)}
           </span>
           {userName(u)}
-          <button type="button" onClick={() => toggle(u.id)} className={CELL_CHIP_X} aria-label={`Remove ${userName(u)}`}>×</button>
+          <button type="button" onClick={() => toggle(id)} className={CELL_CHIP_X} aria-label={`Remove ${userName(u)}`}>×</button>
         </span>
       ))}
       <button type="button" onClick={() => setOpen((o) => !o)} className={`${CELL_ADD} rounded-full px-2`}>+ person</button>

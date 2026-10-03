@@ -130,7 +130,7 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     setBusy(false);
     if (!r.ok) { toast(r.error || "Couldn't assign", { tone: "danger" }); return; }
     const count = r.data?.count ?? r.data?.data?.count ?? (audience === "people" ? selected.length : 0);
-    toast(count ? `Assigned to ${count} ${count === 1 ? "person" : "people"}` : "Assigned");
+    toast(count ? `Assigned to ${count} ${count === 1 ? "person" : "people"}` : "Everyone chosen already has it. Nothing new was assigned.");
     onAssigned?.(count);
     onClose();
   }

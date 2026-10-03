@@ -51,6 +51,7 @@ import { useItemFields } from "@/hooks/use-item-fields";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
 import { PRIORITY_LOOKUP } from "@/lib/board-items-shared";
 import { ITEM_FIELD_LABELS, type ItemFieldKey } from "@/lib/item-fields";
+import { useOsToast } from "@/components/layout/os/toast";
 
 // ── Task types ─────────────────────────────────────────────────────
 // No `type` column on Item: the chosen type is persisted into
@@ -404,17 +405,36 @@ export function CreateTaskModal() {
   // rather than emptying the picker: a picker that goes blank is worse than a
   // picker that is one list out of date.
   const listId = selectedList?.id ?? null;
+  // The people already chosen, read when the roster arrives.
+  const chosenRef = useRef({ assigneeId, followers, meId: me?.id ?? null });
+  useEffect(() => { chosenRef.current = { assigneeId, followers, meId: me?.id ?? null }; }, [assigneeId, followers, me]);
+  const { toast } = useOsToast();
   useEffect(() => {
     if (!createTaskOpen || !listId) return;
     let active = true;
     fetch(`/api/boards/${encodeURIComponent(listId)}/assignable?limit=200`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (active && Array.isArray(d?.data) && d.data.length > 0) setPeople(d.data);
+        if (!active || !Array.isArray(d?.data) || d.data.length === 0) return;
+        const roster: Person[] = d.data;
+        setPeople(roster);
+        // Someone picked before this List was chosen who cannot be given work
+        // in it is let go, and the person is told: a task is never assigned,
+        // or followed, by someone out of sight. You always stay.
+        const on = new Set(roster.map((p) => p.id));
+        const { assigneeId: a, followers: f, meId } = chosenRef.current;
+        if (meId) on.add(meId);
+        const dropAssignee = !!a && !on.has(a);
+        const keptFollowers = f.filter((id) => on.has(id));
+        if (dropAssignee) setAssigneeId(null);
+        if (keptFollowers.length !== f.length) setFollowers(keptFollowers);
+        if (dropAssignee || keptFollowers.length !== f.length) {
+          toast("Someone you picked can't be given work in this List, so they were taken off. Choose from this List's people.", { tone: "danger" });
+        }
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [createTaskOpen, listId]);
+  }, [createTaskOpen, listId, toast]);
 
   // The chosen List's defaults. An answer that arrives after the person has
   // picked another List is thrown away, so a create is never shaped by the

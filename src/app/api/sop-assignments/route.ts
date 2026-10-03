@@ -115,7 +115,8 @@ export async function POST(req: NextRequest) {
 
   if (departmentId) {
     const deptUsers = await prisma.user.findMany({
-      where: { departmentId, organizationId: orgId, status: "ACTIVE" },
+      // Everyone in it who can sign in (on leave or on probation included), never someone removed.
+      where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null },
       select: { id: true },
     });
     resolvedUserIds = [...new Set([...resolvedUserIds, ...deptUsers.map((u) => u.id)])];
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
   // manager to their reports).
   if (all === true) {
     const everyone = await prisma.user.findMany({
-      where: { organizationId: orgId, status: "ACTIVE", deletedAt: null },
+      where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null },
       select: { id: true },
     });
     resolvedUserIds = [...new Set([...resolvedUserIds, ...everyone.map((u) => u.id)])];

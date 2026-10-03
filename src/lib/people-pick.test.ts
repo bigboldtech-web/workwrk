@@ -16,8 +16,9 @@ describe("pickUrl", () => {
   it("a filter's picker asks for reach=all", () => {
     expect(pickUrl({ reach: "all" })).toBe("/api/people/pick?includeSelf=1&reach=all&limit=50");
   });
-  it("a label lookup asks by id alone", () => {
+  it("a label lookup asks by id alone, and names deactivated people only when asked with reach all", () => {
     expect(pickUrl({ ids: ["a", "b"], reach: "signin", q: "x" })).toBe("/api/people/pick?ids=a%2Cb");
+    expect(pickUrl({ ids: ["a"], reach: "all" })).toBe("/api/people/pick?ids=a&reach=all");
   });
 });
 

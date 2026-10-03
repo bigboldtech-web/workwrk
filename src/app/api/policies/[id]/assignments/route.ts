@@ -72,11 +72,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let resolved: string[] = Array.isArray(userIds) ? userIds.filter((x): x is string => typeof x === "string") : [];
   if (typeof departmentId === "string" && departmentId) {
-    const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: "ACTIVE" }, select: { id: true } });
+    // Everyone in it who can sign in (on leave or on probation included), never someone removed.
+    const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
     resolved = [...new Set([...resolved, ...deptUsers.map((u) => u.id)])];
   }
   if (all === true) {
-    const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: "ACTIVE" }, select: { id: true } });
+    const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
     resolved = [...new Set([...resolved, ...allUsers.map((u) => u.id)])];
   }
   if (resolved.length === 0) return jsonError("No recipients. Provide userIds[], departmentId, or all:true");
@@ -91,6 +92,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const defaults = parseProcessSettings(settings.process).value;
   const due = typeof dueDate === "string" && dueDate ? new Date(dueDate) : (() => { const d = defaultAckDueDate(defaults.ackDueDays); return d ? new Date(d) : null; })();
 
+  // People who already hold this policy keep their row as it is and are not
+  // told again (assigning a department or everyone a second time is no nudge).
+  const held = new Set(
+    (await prisma.policyAssignment.findMany({ where: { policyId: id, userId: { in: resolved } }, select: { userId: true } })).map((a) => a.userId),
+  );
+
   const assignerId = getUserId(session);
   const result = await prisma.policyAssignment.createMany({
     data: resolved.map((uid) => ({ policyId: id, userId: uid, mandatory: mandatory === undefined ? true : !!mandatory, dueDate: due, assignedBy: assignerId })),
@@ -104,7 +111,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.policyAssignment.updateMany({ where: { policyId: id, userId: { in: alreadyAcked.map((a) => a.userId) }, status: { not: "COMPLETED" } }, data: { status: "COMPLETED", completedAt: new Date() } });
   }
   const ackedIds = new Set(alreadyAcked.map((a) => a.userId));
-  const toNotify = resolved.filter((uid) => !ackedIds.has(uid));
+  const toNotify = resolved.filter((uid) => !ackedIds.has(uid) && !held.has(uid));
 
   if (toNotify.length) await prisma.notification.createMany({
     data: toNotify.map((uid) => ({

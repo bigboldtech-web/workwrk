@@ -29,6 +29,7 @@ export function PersonFilterPick({
   placeholder?: string;
 }) {
   const picker = usePeoplePicker({ enabled: open, reach: "all", named: value ? [value] : [] });
+  // (The lookup by id names a deactivated owner too, for those who may see them.)
   const current = value ? picker.person(value) : undefined;
   const options: PickerOption[] = picker.people.map((p) => ({
     value: p.id,
@@ -58,7 +59,10 @@ export function PersonFilterPick({
         alwaysSearch
         onSearchChange={picker.setQuery}
         loading={picker.loading && options.length === 0}
-        emptyLabel={picker.query.trim() ? "No one matches" : "No one to show yet"}
+        emptyLabel={picker.failed ? "Couldn't load people" : picker.query.trim() ? "No one matches" : "No one to show yet"}
+        footer={picker.failed ? (
+          <button type="button" onClick={picker.retry} className="w-full px-2 py-1.5 text-start text-sm font-medium text-brand-deep hover:underline">Try again</button>
+        ) : undefined}
         selected={value}
         onSelect={(v) => {
           onChange(v);

@@ -1118,7 +1118,7 @@ function GroupBulkAdd({ kind, roleLabel, grantOne }: BulkAddProps & { kind: "dep
   // the run on a person who could never open the Space anyway.
   const membersOf = async (g: GroupRow): Promise<BulkPerson[]> => {
     const out: BulkPerson[] = [];
-    for (let page = 1; page <= 50; page++) {
+    for (let page = 1; page <= 1000; page++) {
       const qs = new URLSearchParams({ scope: "directory", size: "100", page: String(page) });
       qs.set(kind === "department" ? "dept" : "office", g.id);
       const res = await fetch(`/api/users?${qs}`, { cache: "no-store" });

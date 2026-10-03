@@ -226,10 +226,10 @@ export default function ProcessRunsPage() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = "runs.csv"; a.click(); URL.revokeObjectURL(url);
   };
-  // Reassign to anyone in the workspace who can do the run (the server takes
-  // any colleague), searched as the person types: the whole company, never
-  // only the reassigner's own report tree.
-  const reassignPicker = usePeoplePicker({ enabled: !!reassignFor, reach: "active", named: reassignFor?.row.assigneeId ? [reassignFor.row.assigneeId] : [] });
+  // Reassign to someone the run stays visible to (a run is read by its
+  // assignee, their manager chain and org-wide roles): the reassigner's
+  // report tree, everyone for an org-wide level, searched on the server.
+  const reassignPicker = usePeoplePicker({ enabled: !!reassignFor, source: "team", named: reassignFor?.row.assigneeId ? [reassignFor.row.assigneeId] : [] });
 
   const rows = payload?.data ?? null;
   const total = payload?.pagination.total ?? 0;

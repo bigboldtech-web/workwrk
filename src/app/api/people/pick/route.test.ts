@@ -161,4 +161,11 @@ describe("GET /api/people/pick?reach=all (a filter's picker)", () => {
   it("anyone else gets everyone who can sign in, never a deactivated person", async () => {
     expect(await pick("q=Verify%20Bot&reach=all")).toEqual(["u-bot"]);
   });
+
+  it("the id lookup names a deactivated person with reach=all, for an Admin only", async () => {
+    privileged = true;
+    expect(await pick("ids=u-gone,u-bot&reach=all")).toEqual(["u-bot", "u-gone"]);
+    privileged = false;
+    expect(await pick("ids=u-gone,u-bot&reach=all")).toEqual(["u-bot"]);
+  });
 });

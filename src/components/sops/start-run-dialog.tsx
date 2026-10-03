@@ -53,9 +53,11 @@ export function StartRunDialog({ open, onClose, sop, defaultAssigneeId, onStarte
   const [title, setTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState<string | null>(defaultAssigneeId ?? null);
   const [peopleOpen, setPeopleOpen] = useState(false);
-  // Assign to anyone in the workspace who can do the run, searched as the
-  // person types (the whole company, never only the starter's report tree).
-  const picker = usePeoplePicker({ enabled: open, reach: "active", named: assigneeId ? [assigneeId] : [] });
+  // Assign to someone the run will stay visible to: a run is read by its
+  // assignee, their manager chain and org-wide roles, so the list is the
+  // starter's report tree (everyone for an org-wide level), searched on the
+  // server as the person types, from an empty search each time it opens.
+  const picker = usePeoplePicker({ enabled: open && peopleOpen, source: "team", named: assigneeId ? [assigneeId] : [] });
   const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
 

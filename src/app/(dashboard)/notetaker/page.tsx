@@ -109,7 +109,13 @@ function personName(p: PersonRef): string {
   return `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "Unknown";
 }
 
-/** Seed a picker owner from the extracted name: first name, then last name, then the email. */
+/**
+ * Seed a picker owner from the extracted person: their email, else their full
+ * name, exactly. Matching searches the whole workspace, so a first name alone
+ * is never enough (an outside "Sarah" on a client call is not the one Sarah
+ * who works here); anyone not matched shows as not matched, for the person
+ * to pick.
+ */
 function matchPerson(people: PersonRef[], name?: string, email?: string | null): PersonRef | null {
   if (email) {
     const byEmail = people.find((p) => (p.email ?? "").toLowerCase() === email.toLowerCase());
@@ -118,11 +124,8 @@ function matchPerson(people: PersonRef[], name?: string, email?: string | null):
   if (!name) return null;
   const n = name.trim().toLowerCase();
   if (!n) return null;
-  const full = people.find((p) => personName(p).toLowerCase() === n);
-  if (full) return full;
-  const first = n.split(/\s+/)[0];
-  const hits = people.filter((p) => (p.firstName ?? "").toLowerCase() === first);
-  return hits.length === 1 ? hits[0] : null;
+  const full = people.filter((p) => personName(p).toLowerCase() === n);
+  return full.length === 1 ? full[0] : null;
 }
 
 function dueFromDays(days: number | null | undefined): string {

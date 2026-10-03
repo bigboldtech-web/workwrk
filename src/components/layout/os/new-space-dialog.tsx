@@ -76,7 +76,7 @@ export function NewSpaceDialog({
   // The Space owner can be anyone in the workspace who can sign in, searched
   // as the person types (usePeoplePicker), never only the creator's own
   // report tree, which is what /api/users answered below org-wide levels.
-  const ownerPicker = usePeoplePicker({ enabled: state.step === 2, reach: "signin", named: state.workflow.ownerId ? [state.workflow.ownerId] : [] });
+  const ownerPicker = usePeoplePicker({ enabled: state.step === 2 && state.subScreen === "owner", reach: "signin", named: state.workflow.ownerId ? [state.workflow.ownerId] : [] });
   const users = useMemo<UserOption[]>(
     () => ownerPicker.people.map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email ?? "", avatar: p.avatar, role: p.role ?? null })),
     [ownerPicker.people],
