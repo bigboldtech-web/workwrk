@@ -70,6 +70,28 @@ export function narrowerAuthor(creator: AutomationAuthor | null, publisher: Auto
   };
 }
 
+/**
+ * The reach one run has, for every path that runs or re-runs an automation
+ * (an event, a schedule, the retry cron, a manual Retry): the narrower of
+ * everyone whose choice is in what runs. The creator; whoever published the
+ * version that runs, or, for an older row that runs its draft, whoever last
+ * saved that draft; and for a manual Retry the person who clicked it, since
+ * the click makes the writes. The creator stays the run's person when there
+ * is one. Undefined only for an older automation with nobody on record at
+ * all, which keeps the behaviour it always had; null when any of them is no
+ * longer in the workspace (the run then reaches no List).
+ */
+export async function runReach(
+  load: (userId: string) => Promise<AutomationAuthor | null>,
+  people: { creatorId: string | null; publisherId: string | null; retrierId?: string | null },
+): Promise<AutomationAuthor | null | undefined> {
+  const ids = [...new Set([people.creatorId, people.publisherId, people.retrierId].filter((x): x is string => !!x))];
+  if (ids.length === 0) return undefined;
+  let reach = await load(ids[0]);
+  for (const id of ids.slice(1)) reach = narrowerAuthor(reach, await load(id));
+  return reach;
+}
+
 /** May the creator open this List. */
 export async function authorCanRead(author: AutomationAuthor | null, boardId: string): Promise<boolean> {
   return author ? author.canRead(boardId) : false;

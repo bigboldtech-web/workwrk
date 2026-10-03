@@ -7,7 +7,7 @@ import { buildIdempotencyKey, extractEventTimestamp, extractRecordId, extractEve
 import { getAction, type ActionContext } from "./registry-actions";
 import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
 import { triggerDisplayName } from "./registry-triggers";
-import { authorCanRead, eventAllowedForAuthor, loadAuthor, narrowerAuthor, type AutomationAuthor } from "./author-reach";
+import { authorCanRead, eventAllowedForAuthor, loadAuthor, runReach, type AutomationAuthor } from "./author-reach";
 
 /**
  * Automation engine entry point: called by `dispatchEvent` in
@@ -103,6 +103,8 @@ interface MatchedWorkflow {
   definition: Prisma.JsonValue;
   publishedVersionId: string | null;
   createdById: string | null;
+  /** Who last saved the draft: the reach cap for an older row that runs its draft. */
+  updatedById: string | null;
 }
 
 const MATCH_SELECT = {
@@ -112,6 +114,7 @@ const MATCH_SELECT = {
   definition: true,
   publishedVersionId: true,
   createdById: true,
+  updatedById: true,
 } as const;
 
 export async function runAutomationsForEvent(input: RunAutomationsInput): Promise<void> {
@@ -202,20 +205,20 @@ async function runMatched(args: {
   };
   const eventBoardId = typeof payload.boardId === "string" && payload.boardId ? payload.boardId : null;
 
-  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue; author: AutomationAuthor | null }> = [];
+  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue; author: AutomationAuthor | null | undefined }> = [];
   for (const wf of args.workflows) {
-    const live = liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null) as Prisma.JsonValue;
+    const version = wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : undefined;
+    const live = liveDefinition(wf, version ?? null) as Prisma.JsonValue;
     if (!whenMatches(event, readWhen(live), payload)) continue;
     // "On a schedule" fires for the workspace, not for a record, so it has
     // no place to match; its scope (if an older draft saved one) is moot.
     const placeless = event === "schedule.every";
     const scope = readScope(live);
     if (!placeless && !isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
-    let author: AutomationAuthor | null = null;
-    if (wf.createdById) {
-      const creator = await authorOf(wf.createdById);
-      const publisherId = wf.publishedVersionId ? versionById.get(wf.publishedVersionId)?.createdById ?? null : null;
-      author = publisherId && publisherId !== wf.createdById ? narrowerAuthor(creator, await authorOf(publisherId)) : creator;
+    // The run's reach (runReach): the creator and whoever published what
+    // runs, or last saved the draft when an older row runs its draft.
+    const author = await runReach(authorOf, { creatorId: wf.createdById, publisherId: version ? version.createdById ?? null : wf.updatedById });
+    if (author !== undefined) {
       if (!eventAllowedForAuthor(event, payload, author)) continue;
       if (eventBoardId && !(await authorCanRead(author, eventBoardId))) continue;
     }

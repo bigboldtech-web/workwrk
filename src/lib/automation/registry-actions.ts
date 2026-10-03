@@ -132,15 +132,16 @@ async function resolveItem(ctx: ActionContext, params: Record<string, unknown>) 
 
 /**
  * An automation never writes further than its creator can, nor further than
- * the person who published the version that runs (author-reach.ts,
- * narrowerAuthor): the step fails with a sentence the run drawer shows. A
- * workflow with no creator on record keeps the behaviour it always had.
+ * the person who published the version that runs, nor, on a manual Retry,
+ * further than the person who clicked it (author-reach.ts, runReach): the
+ * step fails with a sentence the run drawer shows. A workflow with nobody on
+ * record at all keeps the behaviour it always had.
  */
 async function assertCanWrite(ctx: ActionContext, boardId: string): Promise<void> {
-  if (!ctx.workflowCreatorId) return;
-  const author = ctx.author !== undefined ? ctx.author : await loadAuthor(ctx.organizationId, ctx.workflowCreatorId);
+  if (ctx.author === undefined && !ctx.workflowCreatorId) return;
+  const author = ctx.author !== undefined ? ctx.author : await loadAuthor(ctx.organizationId, ctx.workflowCreatorId as string);
   if (!(await authorCanWrite(author, boardId))) {
-    throw new Error("Whoever made or published this automation cannot make changes in that List, so it was left alone");
+    throw new Error("Whoever made, published or retried this automation cannot make changes in that List, so it was left alone");
   }
 }
 

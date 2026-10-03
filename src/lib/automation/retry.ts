@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { getAction, type ActionContext } from "./registry-actions";
 import { recordUsage } from "./usage";
-import { loadAuthor, narrowerAuthor } from "./author-reach";
+import { loadAuthor, runReach } from "./author-reach";
 
 /**
  * Retry queue: re-runs FAILED/PARTIAL runs whose failed steps are ALL
@@ -60,8 +60,8 @@ export async function processAutomationRetries(): Promise<{
     take: 100,
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { status: true, createdById: true } },
-      // Who published the version that ran: a retry is capped like the run (narrowerAuthor).
+      workflow: { select: { status: true, createdById: true, updatedById: true } },
+      // Who published the version that ran: a retry is capped like the run (runReach).
       workflowVersion: { select: { createdById: true } },
     },
   });
@@ -100,9 +100,12 @@ export async function processAutomationRetries(): Promise<{
         runId: run.id,
         depth,
         workflowCreatorId: run.workflow.createdById,
-        ...(run.workflow.createdById && run.workflowVersion?.createdById && run.workflowVersion.createdById !== run.workflow.createdById
-          ? { author: narrowerAuthor(await loadAuthor(run.organizationId, run.workflow.createdById), await loadAuthor(run.organizationId, run.workflowVersion.createdById)) }
-          : {}),
+        // Capped as the run was: the creator and whoever published the
+        // version that ran (or last saved the draft, for a run with no version).
+        author: await runReach((id) => loadAuthor(run.organizationId, id), {
+          creatorId: run.workflow.createdById,
+          publisherId: run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById,
+        }),
       };
 
       let stillFailing = 0;
