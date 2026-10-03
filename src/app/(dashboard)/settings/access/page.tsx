@@ -33,7 +33,9 @@ import {
 import { PublicLinksCard } from "@/components/settings/public-links-card";
 import { AccessTogglesCard } from "@/components/settings/access-toggles-card";
 import { AccessRequestsCard } from "@/components/settings/access-requests-card";
-import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { settingsTabs } from "@/lib/settings-registry";
+import { PermissionMatrixView } from "@/components/settings/permission-matrix-view";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { SaveBar } from "@/components/settings/save-bar";
@@ -61,6 +63,9 @@ const LEVEL_WORD: Record<AccessLevel, string> = {
 
 const clone = (m: PermissionMatrix): PermissionMatrix => JSON.parse(JSON.stringify(m));
 type Counts = { owners: number; admins: number; members: number; guests: number; peopleTeam: number };
+
+/** Settings, and "Who can do what", the read-only permission matrix. */
+const ACCESS_TABS: readonly SettingsTab[] = settingsTabs("access");
 
 export default function AccessSettingsPage() {
   const { isAdmin } = useViewerRole();
@@ -172,7 +177,8 @@ export default function AccessSettingsPage() {
   );
 
   return (
-    <SettingsPage pageKey="access" subtitle="Who can create, share and invite. A small team rarely needs to change these.">
+    <SettingsPage pageKey="access" tabs={ACCESS_TABS} subtitle="Who can create, share and invite. A small team rarely needs to change these.">
+      {(tab) => tab === "matrix" ? <PermissionMatrixView /> : (<>
       <SettingsCardStack>
         {canEdit ? null : <SettingsReadOnlyBanner>You can look at how access works here. Ask an Owner or Admin to change it.</SettingsReadOnlyBanner>}
         <SettingsCard title="How access works" wide="access.toggles" id="access.explainer">
@@ -186,7 +192,7 @@ export default function AccessSettingsPage() {
               The <strong>People team</strong>{counts ? ` (${counts.peopleTeam})` : ""}{" "}looks after everyone&apos;s people information. Until the new roles are switched on, a Member also carries a seniority tier (Manager, Director and so on) that decides which manager pages they open; set it on their row in Members.
             </p>
             <p>
-              Everything you make can be shared at one of four levels: <strong>Full access</strong>, <strong>Can edit</strong>, <strong>Can comment</strong> or <strong>Can view</strong>. Sharing flows down from a Space to its Folders and Lists, adding someone never takes anything away, and <strong>Private</strong> on a Folder or List stops it taking access from above. Assigning someone a task lets them open it; you have Full access to what you made.
+              Everything you make can be shared at one of four levels: <strong>Full access</strong>, <strong>Can edit</strong>, <strong>Can comment</strong> or <strong>Can view</strong>, and a List also offers <strong>Can edit assigned tasks</strong>: read and discuss every task, change only the tasks assigned to them. Sharing flows down from a Space to its Folders and Lists, adding someone never takes anything away, and <strong>Private</strong> on a Folder or List stops it taking access from above. Assigning someone a task lets them open it and change it, unless they hold Can comment, which never changes anything; you have Full access to what you made. <strong>Who can do what</strong> above lays it all out.
             </p>
             <p className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
               <Link href="/settings/members" className="font-medium text-brand-deep hover:underline">Manage people</Link>
@@ -268,6 +274,7 @@ export default function AccessSettingsPage() {
         )}
       </SettingsCardStack>
       {canEdit && matrixDecides ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => setMatrix(original)} onSave={save} /> : null}
+      </>)}
     </SettingsPage>
   );
 }

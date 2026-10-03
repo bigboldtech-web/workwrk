@@ -30,6 +30,7 @@ import { dropSide, indexFor, planDrop } from "@/lib/work/reorder";
 export function ItemSubtasks({
   item,
   canEdit,
+  canAdd,
   statuses,
   onOpenItem,
   onCountChange,
@@ -38,6 +39,12 @@ export function ItemSubtasks({
 }: {
   item: BoardItemRow;
   canEdit: boolean;
+  /**
+   * May the viewer add subtasks and reorder them? Both write the List (POST
+   * items, PUT order need Can edit on it), so an assignee who may change
+   * this task still may not. Absent: canEdit.
+   */
+  canAdd?: boolean;
   statuses: StatusOption[];
   onOpenItem?: (itemId: string) => void;
   /** Reports the loaded subtask count so a parent can collapse/expand the
@@ -139,7 +146,8 @@ export function ItemSubtasks({
   const doneCount = list.filter((r) => isDoneStatus(statuses, r.status)).length;
 
   // ── Order ──────────────────────────────────────────────────────────
-  const canReorder = canEdit && !!homeBoardId && !(contextBoardId && contextBoardId !== homeBoardId);
+  const mayAdd = canAdd ?? canEdit;
+  const canReorder = mayAdd && !!homeBoardId && !(contextBoardId && contextBoardId !== homeBoardId);
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<{ id: string; side: "before" | "after" } | null>(null);
   /** Move one subtask to `index` among the others; saved, or put back with the reason. */
@@ -177,7 +185,7 @@ export function ItemSubtasks({
     }
   };
 
-  if (!canEdit && list.length === 0) return null;
+  if (!mayAdd && !canEdit && list.length === 0) return null;
 
   return (
     <div>
@@ -253,7 +261,7 @@ export function ItemSubtasks({
             );
           })}
           {list.length === 0 ? <div className="px-3 py-2 text-base text-zinc-400">No subtasks yet.</div> : null}
-          {canEdit ? (
+          {mayAdd ? (
             <div className="flex items-center gap-2 px-3 py-2">
               <Plus className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
               <input

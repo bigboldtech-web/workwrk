@@ -171,6 +171,11 @@ const SQL_MANIFEST = [
   // only by the task share routes and the public task page, which treat a
   // missing table as "no link" until it is applied.
   "2026-10-04-item-public-link.sql",
+  // Batch 6: "BoardMember"."rung", the List ladder's Can comment and Can edit
+  // assigned tasks (founder decision 3). One nullable column and its CHECK:
+  // ADD COLUMN IF NOT EXISTS and a catalogue-guarded constraint, no existing
+  // column or row touched. Readers that do not know it see Can view.
+  "2026-10-04-board-member-rung.sql",
 ];
 
 /**

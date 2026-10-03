@@ -48,6 +48,8 @@ import {
 } from "./access-panel";
 import {
   NodeEvaluator,
+  boardMemberToRole,
+  isListRung,
   memberToRole,
   notepadOwnerOf,
   placementContainers,
@@ -253,8 +255,12 @@ async function readCurrent(tx: Tx, orgId: string, ref: NodeRef, userId: string):
       return r ? { role: memberToRole(r.role as MemberRole), stored: r.role as MemberRole } : { role: null, stored: null };
     }
     case "list": {
-      const r = await tx.boardMember.findUnique({ where: { boardId_userId: { boardId: ref.id, userId } }, select: { role: true } });
-      return r ? { role: memberToRole(r.role as MemberRole), stored: r.role as MemberRole } : { role: null, stored: null };
+      const r = await tx.boardMember.findUnique({ where: { boardId_userId: { boardId: ref.id, userId } }, select: { role: true, rung: true } });
+      if (!r) return { role: null, stored: null };
+      // A rung reads as its own stored value, so moving between Can view,
+      // Can comment and Can edit assigned tasks is a change (grant-plan.ts).
+      const rung = isListRung(r.rung) && r.role === "GUEST" ? r.rung : null;
+      return { role: boardMemberToRole(r.role as MemberRole, rung), stored: rung ?? (r.role as MemberRole) };
     }
     case "doc": {
       const entry = (await docSharingEntries(orgId, [ref.id], tx)).get(ref.id);
@@ -313,13 +319,18 @@ async function writeRow(tx: Tx, orgId: string, ref: NodeRef, userId: string, rol
         update: { role: role as MemberRole },
       });
       return;
-    case "list":
+    case "list": {
+      // Can comment and Can edit assigned tasks are a GUEST row with a rung;
+      // every other value clears the rung, so a plain Can view stays plain.
+      const rung = role === "COMMENT" || role === "ASSIGNED" ? role : null;
+      const stored: MemberRole = rung ? "GUEST" : (role as MemberRole);
       await tx.boardMember.upsert({
         where: { boardId_userId: { boardId: ref.id, userId } },
-        create: { boardId: ref.id, userId, role: role as MemberRole, invitedBy: actorId },
-        update: { role: role as MemberRole },
+        create: { boardId: ref.id, userId, role: stored, rung, invitedBy: actorId },
+        update: { role: stored, rung },
       });
       return;
+    }
     case "doc": {
       const prev = cur.docEntry ?? {};
       const panelRole = role as PanelRole;

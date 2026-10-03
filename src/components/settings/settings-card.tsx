@@ -23,6 +23,8 @@ export const WIDE_SETTINGS_CARDS = [
   "apps.modules",
   "access.toggles",
   "access.legacy",
+  // The read-only permission matrix (Who can do what): a named table.
+  "access.matrix",
   "scoring.weights",
   "scoring.bands",
   "data.retention",

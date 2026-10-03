@@ -220,6 +220,8 @@ export function itemsUrl(boardId: string): string {
 export function linkedRowAccess(i: {
   orgAdmin: boolean;
   homeRole: ItemRole;
+  /** Rule 9's lift on the home List (item-role.ts taskSideOfListRole); absent reads as true. */
+  assigneeLift?: boolean;
   assignee: boolean;
   creator: boolean;
   archived: boolean;
@@ -230,6 +232,7 @@ export function linkedRowAccess(i: {
     guest: false,
     creator: i.creator,
     assignee: i.assignee,
+    assigneeLift: i.assigneeLift,
     listRole: i.homeRole,
     archived: i.archived,
     linkedList: { id: "context", name: null },
@@ -257,6 +260,28 @@ export function linkedRowEditable(row: BoardItemRow, canContribute: boolean): bo
   if (!row.listLink) return canContribute;
   const role = row.listLink.role;
   return canContribute && !!role && rankOf(role) >= rankOf("EDIT");
+}
+
+/**
+ * The viewer of a List they cannot add to, as rule 9 reads them: being
+ * assigned a task lifts them to Can edit on it, except at Can comment
+ * (founder decision 3, item-role.ts taskSideOfListRole). Null for someone who
+ * may add to the List (every row is already theirs to edit).
+ */
+export interface AssigneeEdit {
+  userId: string;
+  lift: boolean;
+}
+
+/**
+ * May this viewer change this row in place because it is assigned to them?
+ * Home rows only: a row shown through a link carries its own role. Only the
+ * row's own fields: arranging the List (drag order, new subtasks, bulk) still
+ * needs Can edit on it, as the server says.
+ */
+export function assignedRowEditable(row: BoardItemRow, a: AssigneeEdit | null | undefined): boolean {
+  if (!a || !a.lift || row.listLink || row.archivedAt) return false;
+  return row.ownerId === a.userId || (row.assigneeIds ?? []).includes(a.userId);
 }
 
 export interface LinkedMenuFlags {

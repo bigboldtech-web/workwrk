@@ -123,9 +123,16 @@ export function maxGrantFor(kind: AccessNodeKind, role: NodeRole): PanelRole | n
   return best;
 }
 
-/** The stored value a requested role writes, per kind. */
+/**
+ * The stored value a requested role writes, per kind. A List's two rungs
+ * below Can edit are their own values here ("COMMENT", "ASSIGNED"); the row
+ * writer stores each as a GUEST role with that rung (grants.ts writeRow), so
+ * a change between them and Can view is a change, and a reader that does not
+ * know the rung sees Can view.
+ */
 export function storedRoleFor(kind: AccessNodeKind, requested: PanelRole, currentRow?: StoredRole | null): StoredRole {
   if (kind === "doc") return requested;
+  if (kind === "list" && (requested === "COMMENT" || requested === "ASSIGNED")) return requested;
   if (requested === "OWNER") return "OWNER";
   if (requested === "FULL") {
     // A Folder or List OWNER row already reads as Full access: keep it.

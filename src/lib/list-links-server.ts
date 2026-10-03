@@ -269,7 +269,7 @@ export function listReader(viewer: LinkViewer) {
     }
     return p;
   };
-  return { canRead, canContribute, row, prime };
+  return { canRead, canContribute, row, prime, role: roleOf };
 }
 
 export type ListReader = ReturnType<typeof listReader>;

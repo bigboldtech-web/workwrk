@@ -122,6 +122,13 @@ export interface ItemSignals {
   assignee: boolean;
   /** Rule 10: what the parent List gives this viewer, already resolved. */
   listRole: ItemRole;
+  /**
+   * Rule 9's lift: may being assigned raise this viewer to Can edit? Every
+   * List role lifts except "Can comment" (founder decision 3: "Read and
+   * discuss, never change"). Absent reads as true, today's rule.
+   * taskSideOfListRole works it out from the List role.
+   */
+  assigneeLift?: boolean;
   /** Rule 12: an archived task is read-only for everyone but FULL. */
   archived: boolean;
   /** The List, for `viaObject`. */
@@ -134,6 +141,38 @@ export interface ItemSignals {
    * only when that List is the one thing the viewer has.
    */
   linkedList?: { id: string; name: string | null } | null;
+}
+
+/**
+ * The task half of a List role (rule 10), and whether rule 9 lifts an
+ * assignee (founder decision 3, the List ladder's two lower rungs):
+ *
+ *   Can edit assigned tasks ("ASSIGNED")  reads as Can comment on the List,
+ *                                          and an assignee is lifted to Can
+ *                                          edit: they change their own tasks
+ *   Can comment ("COMMENT")                reads as Can comment and is never
+ *                                          lifted: read and discuss, never
+ *                                          change, even a task assigned to them
+ *   every other role                       as it always has, lifted
+ *
+ * Takes the resolver's role as a string so this module keeps no imports.
+ */
+export function taskSideOfListRole(role: string): { listRole: ItemRole; assigneeLift: boolean } {
+  switch (role) {
+    case "OWNER":
+    case "FULL":
+      return { listRole: "FULL", assigneeLift: true };
+    case "EDIT":
+      return { listRole: "EDIT", assigneeLift: true };
+    case "ASSIGNED":
+      return { listRole: "COMMENT", assigneeLift: true };
+    case "COMMENT":
+      return { listRole: "COMMENT", assigneeLift: false };
+    case "VIEW":
+      return { listRole: "VIEW", assigneeLift: true };
+    default:
+      return { listRole: "none", assigneeLift: true };
+  }
 }
 
 /**
@@ -158,7 +197,7 @@ export function decideItem(s: ItemSignals): ItemDecision {
     consider(s.listRole, "list", s.list ? { type: "list", id: s.list.id, name: s.list.name } : undefined);
   }
   if (s.linkedList) consider("VIEW", "linked-list", { type: "list", id: s.linkedList.id, name: s.linkedList.name });
-  if (s.assignee) consider("EDIT", "assignee");
+  if (s.assignee && s.assigneeLift !== false) consider("EDIT", "assignee");
   if (s.creator) consider("FULL", "creator");
   if (s.orgAdmin) consider("FULL", "org-admin");
 

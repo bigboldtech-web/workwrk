@@ -117,6 +117,8 @@ const STORED_ROLE_LABEL: Readonly<Record<string, PanelRole>> = {
   FULL: "FULL",
   EDIT: "EDIT",
   COMMENT: "COMMENT",
+  // The List ladder's rung between Can comment and Can edit.
+  ASSIGNED: "ASSIGNED",
   VIEW: "VIEW",
   // The legacy doc listing words.
   edit: "EDIT",

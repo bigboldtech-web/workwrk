@@ -5,7 +5,7 @@
 // no database.
 
 import type { ObjectRole } from "./types";
-import { OBJECT_ROLE_BLURB, OBJECT_ROLE_LABEL } from "./labels";
+import { ASSIGNED_ROLE_BLURB, ASSIGNED_ROLE_LABEL, LIST_ROLE_BLURB, OBJECT_ROLE_BLURB, OBJECT_ROLE_LABEL } from "./labels";
 
 export type AccessNodeKind = "space" | "folder" | "list" | "doc" | "table" | "canvas" | "form";
 
@@ -19,10 +19,21 @@ export const ACCESS_NODE_NOUN: Readonly<Record<AccessNodeKind, string>> = {
   space: "Space", folder: "Folder", list: "List", doc: "Doc", table: "Table", canvas: "Canvas", form: "Form",
 };
 
-/** A role as the dialog offers it. OWNER exists on Spaces only: Full access plus every Private List in the Space (a SpaceMember OWNER row). */
-export type PanelRole = ObjectRole | "OWNER";
+/**
+ * A role as the dialog offers it. OWNER exists on Spaces only: Full access
+ * plus every Private List in the Space (a SpaceMember OWNER row). ASSIGNED
+ * exists on Lists only: Can edit assigned tasks, between Can comment and Can
+ * edit (a BoardMember GUEST row with the rung "ASSIGNED").
+ */
+export type PanelRole = ObjectRole | "OWNER" | "ASSIGNED";
 
-export const PANEL_ROLE_RANK: Readonly<Record<PanelRole | "none", number>> = { none: 0, VIEW: 1, COMMENT: 2, EDIT: 3, FULL: 4, OWNER: 5 };
+/**
+ * ASSIGNED ranks between COMMENT and EDIT, so every comparison keeps its
+ * meaning: it reads and comments like Can comment and never clears an EDIT
+ * floor (no List-level write), and only the task gate gives it more, on the
+ * tasks assigned to the member.
+ */
+export const PANEL_ROLE_RANK: Readonly<Record<PanelRole | "none", number>> = { none: 0, VIEW: 1, COMMENT: 2, ASSIGNED: 2.5, EDIT: 3, FULL: 4, OWNER: 5 };
 
 export function panelAtLeast(role: PanelRole | "none", floor: PanelRole): boolean {
   return PANEL_ROLE_RANK[role] >= PANEL_ROLE_RANK[floor];
@@ -31,7 +42,7 @@ export function panelAtLeast(role: PanelRole | "none", floor: PanelRole): boolea
 export const ROLES_BY_KIND: Readonly<Record<AccessNodeKind, readonly PanelRole[]>> = {
   space: ["OWNER", "FULL", "EDIT", "VIEW"],
   folder: ["FULL", "EDIT", "VIEW"],
-  list: ["FULL", "EDIT", "VIEW"],
+  list: ["FULL", "EDIT", "ASSIGNED", "COMMENT", "VIEW"],
   doc: ["FULL", "EDIT", "COMMENT", "VIEW"],
   table: ["FULL", "EDIT"],
   canvas: ["FULL", "EDIT", "VIEW"],
@@ -44,11 +55,15 @@ export const MANAGE_BAR: Readonly<Record<AccessNodeKind, ObjectRole>> = {
 };
 
 export function panelRoleLabel(role: PanelRole): string {
-  return role === "OWNER" ? "Owner" : OBJECT_ROLE_LABEL[role];
+  if (role === "OWNER") return "Owner";
+  if (role === "ASSIGNED") return ASSIGNED_ROLE_LABEL;
+  return OBJECT_ROLE_LABEL[role];
 }
 
 export function panelRoleBlurb(kind: AccessNodeKind, role: PanelRole): string {
   if (role === "OWNER") return "Full access, plus every Private List in this Space.";
+  if (role === "ASSIGNED") return ASSIGNED_ROLE_BLURB;
+  if (kind === "list" && (role === "COMMENT" || role === "VIEW")) return LIST_ROLE_BLURB[role];
   if (kind === "doc" && role === "EDIT") return "Edit this doc and change who can open it.";
   if (kind === "doc" && role === "FULL") return "Also lock it, move it to Trash and save it as a template.";
   return OBJECT_ROLE_BLURB[role];

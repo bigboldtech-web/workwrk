@@ -20,6 +20,7 @@
 //
 // Server-only: prisma and the node-access resolver.
 
+import { taskSideOfListRole } from "@/lib/item-role";
 import { prisma } from "./prisma";
 import { delegatedWhere } from "./delegated-items";
 import type { ObjectRole, Viewer } from "./access/types";
@@ -158,8 +159,10 @@ function humaniseStatus(value: string): string {
  * List of the org through ONE node-access world. The Space Owner rung reads
  * as Full access on a List.
  */
-async function listRoles(viewer: Viewer): Promise<Map<string, ObjectRole>> {
+async function listRoles(viewer: Viewer): Promise<{ roles: Map<string, ObjectRole>; noLift: Set<string> }> {
   const out = new Map<string, ObjectRole>();
+  // Lists where being assigned does not lift the viewer (the Can comment rung).
+  const noLift = new Set<string>();
   const lists = await prisma.board.findMany({
     where: { organizationId: viewer.organizationId, archivedAt: null },
     select: { id: true },
@@ -167,14 +170,18 @@ async function listRoles(viewer: Viewer): Promise<Map<string, ObjectRole>> {
   const roles = await nodeRoleMap(nodeCtxFromViewer(viewer), "list", lists.map((l) => l.id));
   for (const [id, role] of roles) {
     if (role === "none") continue;
-    out.set(id, role === "OWNER" ? "FULL" : role);
+    // Can edit assigned tasks reads as Can comment on the List; a row
+    // assigned to the viewer is lifted below (taskSideOfListRole).
+    const side = taskSideOfListRole(role);
+    out.set(id, side.listRole === "none" ? "VIEW" : side.listRole);
+    if (!side.assigneeLift) noLift.add(id);
   }
-  return out;
+  return { roles: out, noLift };
 }
 
 export async function listEverything(viewer: Viewer, query: EverythingQuery): Promise<EverythingResult> {
   const orgId = viewer.organizationId;
-  const roles = await listRoles(viewer);
+  const { roles, noLift } = await listRoles(viewer);
 
   // Scope first: `?space=` and `?folder=` narrow the READABLE set on the
   // server, never the page after it. Narrowing after paging is how a scoped
@@ -401,7 +408,11 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     // its HOME's, which this page's picker for that List does not hold. The
     // task page edits it with the right vocabulary.
     const linkedLabel = label?.via === "linked";
-    const role = linkedLabel ? "VIEW" : roles.get(it.boardId) ?? "VIEW";
+    // Rule 9: a task assigned to the viewer is theirs to change, as the task
+    // gate says, except where they hold Can comment (founder decision 3).
+    const listRole = linkedLabel ? "VIEW" : roles.get(it.boardId) ?? "VIEW";
+    const mine = it.ownerId === viewer.userId || (it.assigneeIds ?? []).includes(viewer.userId);
+    const role: ObjectRole = !linkedLabel && mine && !noLift.has(it.boardId) && !atLeast(listRole, "EDIT") ? "EDIT" : listRole;
     return {
       id: it.id,
       title: it.title,

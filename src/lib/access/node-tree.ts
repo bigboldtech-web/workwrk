@@ -46,6 +46,7 @@ import {
   canvasFolderOf,
   docShape,
   folderParentOf,
+  boardMemberToRole,
   listFolderOf,
   memberToRole,
   notepadOwnerOf,
@@ -506,7 +507,8 @@ export function directRowOf(rows: NodeRows, grants: ViewerGrants, ref: NodeRef):
     }
     case "list": {
       const r = grants.list.get(ref.id);
-      return r ? { role: memberToRole(r), source: "BoardMember", stored: r, cap: false } : null;
+      const rung = grants.listRung?.get(ref.id);
+      return r ? { role: boardMemberToRole(r, rung), source: "BoardMember", stored: r, cap: false } : null;
     }
     case "doc": {
       const entry = rows.docSharing.get(ref.id);

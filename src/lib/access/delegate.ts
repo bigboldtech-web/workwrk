@@ -26,8 +26,11 @@ export function nodeRoleOfEngineRole(role: string, live: NodeRole): NodeRole {
   switch (role) {
     case "FULL":
       return live === "OWNER" ? "OWNER" : "FULL";
-    case "EDIT":
     case "COMMENT":
+      // The engine has no List rung between Can comment and Can edit: keep
+      // node-access's Can edit assigned tasks when that is what it gave.
+      return live === "ASSIGNED" ? "ASSIGNED" : "COMMENT";
+    case "EDIT":
     case "VIEW":
       return role;
     default:

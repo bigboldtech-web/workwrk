@@ -4716,6 +4716,10 @@ model BoardMember {
   userId    String
   user      User      @relation("BoardMemberUser", fields: [userId], references: [id], onDelete: Cascade)
   role      SpaceRole @default(MEMBER)
+  /// A rung below Can edit on a GUEST row: "COMMENT" (Can comment) or
+  /// "ASSIGNED" (Can edit assigned tasks). Null: the role says it all.
+  /// prisma/sql/2026-10-04-board-member-rung.sql
+  rung      String?
   invitedBy String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

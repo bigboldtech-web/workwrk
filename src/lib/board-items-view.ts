@@ -42,8 +42,11 @@ import {
   type ListReader,
 } from "@/lib/list-links-server";
 import { linkedRowAccess } from "@/lib/list-link-rows";
-import type { ItemRole } from "@/lib/item-role";
+import { taskSideOfListRole, type ItemRole } from "@/lib/item-role";
 import { withoutStoredSopTitle } from "@/lib/sop-step-owner";
+
+/** A home List read for a linked row: the task role it gives and rule 9's lift. */
+type HomeSide = { role: ItemRole; lift: boolean };
 
 export interface LinkedRowInfo {
   rootId: string;
@@ -220,18 +223,20 @@ export async function viewRows(
   // this role goes, so a reader of List B is never handed editors on a task B
   // only borrows. Home rows are untouched.
   const orgAdmin = viewerIsOrgAdmin(viewer);
-  const homeRoles = new Map<string, Promise<ItemRole>>();
-  const homeRoleOf = (homeId: string): Promise<ItemRole> => {
+  const homeRoles = new Map<string, Promise<HomeSide>>();
+  // The home List's task half: its role and rule 9's lift (the List
+  // ladder's Can comment withholds it, item-role.ts taskSideOfListRole).
+  const homeRoleOf = (homeId: string): Promise<HomeSide> => {
     let p = homeRoles.get(homeId);
     if (!p) {
-      p = (async (): Promise<ItemRole> => {
+      p = (async (): Promise<HomeSide> => {
         // An org admin holds FULL on every task already; no query can add to it.
-        if (orgAdmin) return "FULL";
-        if (await canEditFor(viewer, homeId)) return "FULL";
-        if (await canContributeFor(viewer, homeId)) return "EDIT";
-        if (await reader.canRead(homeId)) return "VIEW";
-        return "none";
-      })().catch((): ItemRole => "none");
+        if (orgAdmin) return { role: "FULL", lift: true };
+        if (await canEditFor(viewer, homeId)) return { role: "FULL", lift: true };
+        if (await canContributeFor(viewer, homeId)) return { role: "EDIT", lift: true };
+        const side = taskSideOfListRole(await reader.role(homeId));
+        return { role: side.listRole, lift: side.assigneeLift };
+      })().catch((): HomeSide => ({ role: "none", lift: true }));
       homeRoles.set(homeId, p);
     }
     return p;
@@ -301,9 +306,11 @@ export async function viewRows(
         next.groupKey = null;
       }
       const root = p.linked.position !== null;
+      const homeSide: HomeSide = p.row.boardId ? await homeRoleOf(p.row.boardId) : { role: "none", lift: true };
       const access = linkedRowAccess({
         orgAdmin,
-        homeRole: p.row.boardId ? await homeRoleOf(p.row.boardId) : "none",
+        homeRole: homeSide.role,
+        assigneeLift: homeSide.lift,
         assignee: p.row.ownerId === viewer.userId || (p.row.assigneeIds ?? []).includes(viewer.userId),
         creator: p.row.createdBy?.id === viewer.userId,
         archived: !!p.row.archivedAt,

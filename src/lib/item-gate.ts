@@ -40,6 +40,7 @@ import { prisma } from "@/lib/prisma";
 import { getBoardForReader } from "@/lib/board";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { readWatchers } from "@/lib/item-watchers";
@@ -48,6 +49,7 @@ import {
   allowsItemAction,
   decideItem,
   denialStatusFor,
+  taskSideOfListRole,
   type ItemAction,
   type ItemDecision,
 } from "@/lib/item-role";
@@ -170,6 +172,14 @@ export interface ItemGateOk {
    * reader pays no extra query for it.
    */
   viaLinkedList: { id: string; name: string } | null;
+  /**
+   * May this viewer add to the task's home List (Can edit on it, or an org
+   * admin)? Adding a subtask is adding to the List, whatever the viewer may
+   * do to this task (founder decision 3: Can edit assigned tasks changes
+   * their tasks, never adds one). Read from the List role the gate already
+   * resolved, so it costs nothing.
+   */
+  canAddToList: boolean;
 }
 
 export type ItemGateResult = { error: NextResponse } | ItemGateOk;
@@ -277,9 +287,14 @@ export async function gateItem(
   // the admin holds no grant on, which is a lie the header chip and support
   // would both repeat.
   let listRole: ItemDecision["role"] = "none";
+  // Rule 9's lift, which the List ladder's Can comment rung withholds
+  // (taskSideOfListRole, founder decision 3).
+  let assigneeLift = true;
+  let canAddToList = orgAdmin;
   if (!orgAdmin) {
     const d = await nodeRole(nodeCtxFromLevel(c.userId, c.organizationId, c.accessLevel), { kind: "list", id: item.boardId });
-    listRole = d.role === "none" ? "none" : d.role === "OWNER" ? "FULL" : d.role;
+    ({ listRole, assigneeLift } = taskSideOfListRole(d.role));
+    canAddToList = roleAtLeast(d.role, "EDIT");
   }
 
   // Rule 5, one indexed query. It is resolved on EVERY call rather than only
@@ -315,6 +330,7 @@ export async function gateItem(
     agent: c.accessLevel === "AGENT",
     creator: !!creatorId && creatorId === c.userId,
     assignee,
+    assigneeLift,
     listRole,
     archived: !!item.archivedAt,
     list: { id: item.board.id, name: item.board.name },
@@ -327,7 +343,7 @@ export async function gateItem(
   }
 
   const { watchers, unwatchers } = readWatchers(item.metadata);
-  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers, viaLinkedList };
+  return { item, decision, creatorId, isCreator, watcherIds: watchers, unwatcherIds: unwatchers, viaLinkedList, canAddToList };
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────

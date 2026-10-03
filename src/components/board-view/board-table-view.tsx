@@ -32,6 +32,7 @@ import { isBuiltinShown, catalogEntryForField, BUILTIN_COLUMN_BY_KEY, type Field
 import { fieldKeyOfId, tableColumnIdOf } from "@/lib/field-keys";
 import { isConnectField, isMirrorField } from "@/lib/list-connect";
 import {
+  assignedRowEditable,
   boardStatusFor,
   bulkStatusSkipMessage,
   computedCellValue,
@@ -49,6 +50,7 @@ import {
   refetchedFromRow,
   statusPickerFor,
   writeContext,
+  type AssigneeEdit,
   type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { MAX_PINNED_COLUMNS, ROW_HEIGHTS, type RowColorRule, type RowHeight } from "@/lib/list-comfort";
@@ -111,6 +113,12 @@ interface BoardTableViewProps {
   onOpenFields?: () => void;
   /** Viewer id — powers the toolbar "Me" (assigned to me) quick filter. */
   currentUserId?: string | null;
+  /**
+   * The viewer cannot add to this List, but rule 9 may lift them on the tasks
+   * assigned to them (list-link-rows.ts assignedRowEditable). Absent: no row
+   * is theirs beyond what canEdit says.
+   */
+  assigneeEdit?: AssigneeEdit | null;
   /** Right-aligned toolbar actions (Statuses / Fields / + Task) rendered on the
    *  same row as the group/subtask/columns icons, just below the view tabs. */
   toolbarActions?: React.ReactNode;
@@ -321,7 +329,7 @@ function bulkReasonSentences(reasons: string[]): string {
   return out.length ? ` ${out.join(" ")}` : "";
 }
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canManage: canManageProp, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canManage: canManageProp, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, assigneeEdit = null, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // The status a row has IN THIS LIST. A row shown here through a link keeps
@@ -1745,7 +1753,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     // as the viewer's role on the task goes, its status from its home set,
     // its menu from the link's own flags.
     const kind = linkedRowKind(row, boardId);
-    const rowCanEdit = linkedRowEditable(row, canEdit);
+    // Arranging this row in the List (drag order, a new subtask under it)
+    // needs Can edit on the List; changing the row's own fields also opens to
+    // the viewer it is assigned to, as the task gate already allows.
+    const rowCanArrange = linkedRowEditable(row, canEdit);
+    const assignedHere = !canEdit && assignedRowEditable(row, assigneeEdit);
+    const rowCanEdit = rowCanArrange || assignedHere;
     const flags = linkedMenuFlags(row, boardId, canEdit, currentUserId ?? null, { personalList });
     const picker = statusPickerFor(row, boardId, statuses);
     const colour = rowColorRules.length > 0 ? rowColorFor(row, rowColorRules, statusOf) : null;
@@ -1796,7 +1809,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         }}
         // A linked subtask has no place of its own in this List to drag to,
         // and a sorted List has no order of hand to drag into.
-        dragEnabled={rowCanEdit && !sortingRows && indent === 0 && !row.parentItemId && kind !== "linked-subtask"}
+        dragEnabled={rowCanArrange && !sortingRows && indent === 0 && !row.parentItemId && kind !== "linked-subtask"}
         dragHint={
           sortingRows
             ? "Turn off sorting to drag tasks into order"
@@ -1824,8 +1837,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         rowHeight={rowHeight}
         // The menu stays for someone who may take a shared task out of this
         // List even when they cannot edit the task itself.
-        showMenu={canEdit || (kind !== "home" && !!row.listLink?.canRemove)}
+        showMenu={canEdit || assignedHere || (kind !== "home" && !!row.listLink?.canRemove)}
         menuRole={kind === "home" ? undefined : flags.role}
+        menuAssigneeOnly={assignedHere}
         menuIsCreator={kind === "home" ? undefined : flags.isCreator}
         listContext={listContext}
         statusOptions={picker.options}
@@ -1839,7 +1853,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       for (const child of children) {
         nodes.push(...renderRowAndSubtasks(child, indent + 1));
       }
-      if (rowCanEdit) {
+      if (rowCanArrange) {
         nodes.push(
           <AddSubtaskRow
             key={`${row.id}-add-sub`}
@@ -2207,6 +2221,7 @@ function Row({
   showMenu,
   menuRole,
   menuIsCreator,
+  menuAssigneeOnly = false,
   listContext,
   statusOptions,
   statusEditable,
@@ -2267,6 +2282,8 @@ function Row({
   /** The TASK role for a row shown here through a link; undefined keeps the List's. */
   menuRole?: ItemRole | null;
   menuIsCreator?: boolean;
+  /** The row is the viewer's only because it is assigned to them: the menu offers what an assignee may do. */
+  menuAssigneeOnly?: boolean;
   listContext?: ItemMenuListContext;
   /** The statuses this row's picker offers (a linked row: its home set). */
   statusOptions?: StatusOption[];
@@ -2572,6 +2589,7 @@ function Row({
             statuses={statuses}
             timeTrackingOn={timeTrackingEnabled}
             isCreator={menuIsCreator}
+            assigneeOnly={menuAssigneeOnly}
             listContext={listContext}
             onPatch={(body) => onUpdate(row.id, body as Partial<BoardItemRow>)}
             onOpen={onOpen}

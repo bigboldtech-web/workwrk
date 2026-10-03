@@ -143,6 +143,9 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   }),
   page("workspace", "access", "Access", "/settings/access", "ShieldCheck", {
     group: "People",
+    // "Who can do what" is the read-only permission matrix (founder decision
+    // 3): every cell from the gate that enforces it (access/permission-matrix.ts).
+    tabs: ["settings", "matrix"],
     aliases: ["/settings/permissions"],
     keywords: ["permissions", "roles", "people team", "lock it down", "toggles", "public links"],
   }),
@@ -248,6 +251,7 @@ export const SETTINGS_TAB_LABELS: Readonly<Partial<Record<SettingsPageKey, Reado
   structure: { departments: "Departments", titles: "Job titles", offices: "Offices", fields: "Profile fields", chart: "Org chart" },
   tasks: { types: "Task types", tags: "Tags", templates: "Templates" },
   data: { export: "Export", import: "Import", retention: "Retention & privacy", trash: "Trash" },
+  access: { settings: "Settings", matrix: "Who can do what" },
   members: { people: "People", guests: "Guests", teams: "Teams", pending: "Pending invites" },
   security: { signin: "Sign-in policy", provisioning: "Provisioning" },
   audit: { all: "All", access: "Access", security: "Security", data: "Data", settings: "Settings" },

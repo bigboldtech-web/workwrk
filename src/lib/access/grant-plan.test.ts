@@ -16,11 +16,17 @@ const base = (over: Partial<GrantPlanInput> = {}): GrantPlanInput => ({
 });
 
 describe("roles per kind", () => {
-  it("refuses Can comment on every kind but a doc", () => {
-    for (const kind of ["space", "folder", "list", "table", "canvas", "form"] as AccessNodeKind[]) {
-      expect(planGrant(base({ kind, requested: "COMMENT", actorMax: kind === "space" ? "OWNER" : "FULL" })).error, kind).toBe("invalid_role");
+  it("offers Can comment on a doc and a List only, and Can edit assigned tasks on a List only", () => {
+    for (const kind of ["space", "folder", "table", "canvas", "form"] as AccessNodeKind[]) {
+      const actorMax = kind === "space" ? "OWNER" : "FULL";
+      expect(planGrant(base({ kind, requested: "COMMENT", actorMax })).error, kind).toBe("invalid_role");
+      expect(planGrant(base({ kind, requested: "ASSIGNED", actorMax })).error, kind).toBe("invalid_role");
     }
     expect(planGrant(base({ kind: "doc", requested: "COMMENT", actorMax: "EDIT" })).error).toBeUndefined();
+    expect(planGrant(base({ kind: "doc", requested: "ASSIGNED", actorMax: "FULL" })).error).toBe("invalid_role");
+    // Founder decision 3: the List ladder's two rungs below Can edit.
+    expect(planGrant(base({ kind: "list", requested: "COMMENT", actorMax: "FULL" })).error).toBeUndefined();
+    expect(planGrant(base({ kind: "list", requested: "ASSIGNED", actorMax: "FULL" })).error).toBeUndefined();
   });
 
   it("refuses Can view on a table", () => {

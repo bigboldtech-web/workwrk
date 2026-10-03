@@ -220,10 +220,10 @@ export function managesViaNode(panel: AccessPanel, kind: AccessNodeKind, id: str
 // ── Lines ───────────────────────────────────────────────────────────
 
 const EVERYONE_VERB: Record<PanelRole, string> = {
-  VIEW: "can view", COMMENT: "can comment", EDIT: "can edit", FULL: "has Full access", OWNER: "has Full access",
+  VIEW: "can view", COMMENT: "can comment", ASSIGNED: "can edit their assigned tasks", EDIT: "can edit", FULL: "has Full access", OWNER: "has Full access",
 };
 const HINT_VERB: Record<PanelRole, string> = {
-  VIEW: "view", COMMENT: "comment on", EDIT: "edit", FULL: "manage", OWNER: "manage",
+  VIEW: "view", COMMENT: "comment on", ASSIGNED: "edit their assigned tasks in", EDIT: "edit", FULL: "manage", OWNER: "manage",
 };
 
 function everyoneOrg(panel: AccessPanel): { org: string; from: { name: string } | null } | null {

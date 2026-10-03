@@ -110,6 +110,12 @@ export interface ItemListContext {
 }
 
 interface BoardItemDetailProps {
+  /**
+   * May the viewer add subtasks (and reorder them)? Both add to the List,
+   * which needs Can edit on it (founder decision 3: Can edit assigned tasks
+   * changes the viewer's tasks, never adds one). Absent: the task role says.
+   */
+  canAddSubtasks?: boolean;
   item: BoardItemRow;
   /** The one gate answer, from GET /api/items/[id]'s `decision`. */
   role: ItemRole;
@@ -236,6 +242,7 @@ function metadataPatch(patch: Record<string, unknown>): Record<string, unknown> 
 export function BoardItemDetail({
   item,
   role,
+  canAddSubtasks,
   currentUserId,
   customFields,
   statusOptions,
@@ -493,6 +500,7 @@ export function BoardItemDetail({
         <ItemSubtasks
           item={item}
           canEdit={canEdit}
+          canAdd={canAddSubtasks ?? canEdit}
           statuses={statusOptions}
           onOpenItem={onOpenItem}
           onCountChange={setSubtaskCount}

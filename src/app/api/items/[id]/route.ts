@@ -41,6 +41,7 @@ import { getBoardStatuses, makeStatusLookup, type StatusOption } from "@/lib/boa
 import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { boardContext, gateItem, itemBreadcrumb, itemCtx, itemServerError, listIsReadable, type ItemGateOk } from "@/lib/item-gate";
+import { allowsItemAction } from "@/lib/item-role";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
@@ -305,6 +306,9 @@ async function readItem(id: string, c: Ctx, requestedList: string | null) {
     },
     // Kept for every client that predates `decision`. Same answer, one source.
     canEdit: gate.decision.role === "EDIT" || gate.decision.role === "FULL",
+    // Adding a subtask adds to the List: Can edit on it (founder decision 3,
+    // Can edit assigned tasks changes the viewer's tasks, never adds one).
+    canAddToList: gate.canAddToList,
   });
 }
 
@@ -516,8 +520,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   // A move needs Can edit on BOTH Lists, so it gates on "move" rather than on
   // "edit" and then checks the target separately below.
-  const gate = await gateItem(id, c, parsed.data.boardId ? "move" : "edit");
+  //
+  // Watching is personal, like a reminder: a body that only changes
+  // watcherIds needs Can view, and below Can edit it can only add or remove
+  // the caller (applied to the stored list, so a stale list in the browser
+  // never adds or drops anyone else). The menu offers Watch at Can view.
+  const keys = Object.keys(parsed.data).filter((k) => (parsed.data as Record<string, unknown>)[k] !== undefined);
+  const onlyWatching = parsed.data.watcherIds !== undefined && keys.every((k) => k === "watcherIds" || k === "contextBoardId");
+  const gate = await gateItem(id, c, parsed.data.boardId ? "move" : onlyWatching ? "view" : "edit");
   if ("error" in gate) return gate.error;
+  if (onlyWatching && !allowsItemAction(gate.decision, "edit", { creator: gate.creatorId === c.userId })) {
+    const wants = parsed.data.watcherIds!.includes(c.userId);
+    const others = gate.watcherIds.filter((w) => w !== c.userId);
+    parsed.data.watcherIds = wants ? [...others, c.userId] : others;
+  }
 
   // Reserved keys are never written by a client, in either shape.
   for (const blob of [parsed.data.metadata, parsed.data.metadataPatch]) {

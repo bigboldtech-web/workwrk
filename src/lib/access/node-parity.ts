@@ -77,6 +77,7 @@ export function parityRoleOf(role: string | null | undefined): ParityRole {
       return "FULL";
     case "EDIT":
       return "EDIT";
+    case "ASSIGNED":
     case "COMMENT":
       return "COMMENT";
     case "VIEW":

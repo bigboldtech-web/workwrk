@@ -64,6 +64,18 @@ export type NodeKind = AccessNodeKind;
 export interface NodeRef { kind: NodeKind; id: string }
 export type NodeRole = PanelRole | "none";
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+
+/**
+ * A List member's rung below Can edit, stored beside a GUEST row
+ * ("BoardMember"."rung", prisma/sql/2026-10-04-board-member-rung.sql):
+ * "COMMENT" Can comment, "ASSIGNED" Can edit assigned tasks. A reader that
+ * does not know it sees the GUEST row, Can view, and can only under-grant.
+ */
+export type ListRung = "COMMENT" | "ASSIGNED";
+
+export function isListRung(v: unknown): v is ListRung {
+  return v === "COMMENT" || v === "ASSIGNED";
+}
 export type NodeVisibility = "PRIVATE" | "WORKSPACE" | "ORG";
 export type PrivateRule = "legacy" | "strict";
 /** The role vocabulary the tree rows and the "..." menus read. */
@@ -255,6 +267,8 @@ export interface ViewerGrants {
   space: Map<string, MemberRole>;
   folder: Map<string, MemberRole>;
   list: Map<string, MemberRole>;
+  /** The rung on a List row, when it has one (only ever on a GUEST row). */
+  listRung?: Map<string, ListRung>;
   object: Map<string, MemberRole>;
   /**
    * When each Space, Folder and List row was written, as epoch ms keyed by
@@ -323,6 +337,16 @@ export function memberToRole(role: MemberRole): PanelRole {
   return "VIEW";
 }
 
+/**
+ * m() for a BoardMember row with its rung: a GUEST row with "COMMENT" is Can
+ * comment and with "ASSIGNED" is Can edit assigned tasks. A rung on any other
+ * row is ignored (it cannot be written there), so it never widens one.
+ */
+export function boardMemberToRole(role: MemberRole, rung: ListRung | null | undefined): PanelRole {
+  if (role === "GUEST" && rung) return rung;
+  return memberToRole(role);
+}
+
 /** OWNER or FULL full, EDIT edit, COMMENT comment, VIEW view, none null. */
 export function toContainerRole(role: NodeRole): TreeRole | null {
   switch (role) {
@@ -331,6 +355,9 @@ export function toContainerRole(role: NodeRole): TreeRole | null {
       return "full";
     case "EDIT":
       return "edit";
+    // Can edit assigned tasks is a List-only rung that reads like Can comment
+    // everywhere but on the member's own tasks (the task gate's lift).
+    case "ASSIGNED":
     case "COMMENT":
       return "comment";
     case "VIEW":
@@ -344,14 +371,14 @@ export function toContainerRole(role: NodeRole): TreeRole | null {
 export function toLegacyPermission(role: NodeRole): "none" | "read" | "edit" | "admin" {
   if (role === "OWNER" || role === "FULL") return "admin";
   if (role === "EDIT") return "edit";
-  if (role === "COMMENT" || role === "VIEW") return "read";
+  if (role === "ASSIGNED" || role === "COMMENT" || role === "VIEW") return "read";
   return "none";
 }
 
 /** requireDocRole's vocabulary: FULL or EDIT "edit", COMMENT or VIEW "view", none null. */
 export function toDocRole(role: NodeRole): "edit" | "view" | null {
   if (role === "OWNER" || role === "FULL" || role === "EDIT") return "edit";
-  if (role === "COMMENT" || role === "VIEW") return "view";
+  if (role === "ASSIGNED" || role === "COMMENT" || role === "VIEW") return "view";
   return null;
 }
 
@@ -887,8 +914,9 @@ export class NodeEvaluator {
     const isPrivate = l.visibility === "PRIVATE";
     const upC = isPrivate ? null : up(parentRes);
     const own = this.grants.list.get(id);
+    const ownRung = this.grants.listRung?.get(id);
     const cands: Candidate[] = [];
-    if (own) cands.push({ role: memberToRole(own), via: { type: "own", node: ref, source: "BoardMember" }, prio: P_OWN });
+    if (own) cands.push({ role: boardMemberToRole(own, ownRung), via: { type: "own", node: ref, source: "BoardMember" }, prio: P_OWN });
     if (l.ownerId && l.ownerId === this.u && (isPrivate || (upC && upC.role !== "none"))) {
       cands.push({ role: "FULL", via: { type: "owner", node: ref }, prio: P_OWNER });
     }
