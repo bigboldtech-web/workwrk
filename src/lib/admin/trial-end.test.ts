@@ -69,6 +69,8 @@ describe("the days", () => {
 
   it("ends a self-serve trial the set number of days after signup", () => {
     expect(SELF_SERVE_TRIAL_DAYS).toBe(14);
-    expect(selfServeTrialEnd(new Date("2026-10-05T09:30:00.000Z")).toISOString()).toBe("2026-10-19T09:30:00.000Z");
+    expect(selfServeTrialEnd(new Date("2026-10-05T09:30:00.000Z")).toISOString()).toBe("2026-10-19T12:00:00.000Z");
+    // Late in the UTC day still names the UTC day fourteen days on.
+    expect(selfServeTrialEnd(new Date("2026-10-05T23:59:00.000Z")).toISOString()).toBe("2026-10-19T12:00:00.000Z");
   });
 });

@@ -86,8 +86,8 @@ describe("trial end", () => {
     expect(validateCompanyPatch({ trialEndsOn: "" })).toEqual({ ok: true, patch: { trialEndsOn: null } });
   });
   it("refuses anything that is not a real day", () => {
-    for (const trialEndsOn of ["2026-02-30", "2026-10-19T12:00:00Z", 20261019, "soon", true]) {
-      expect(validateCompanyPatch({ trialEndsOn })).toEqual({ ok: false, error: "The trial end must be a date, or empty to clear it" });
+    for (const trialEndsOn of ["2026-02-30", "2019-12-31", "2100-01-01", "2026-10-19T12:00:00Z", 20261019, "soon", true]) {
+      expect(validateCompanyPatch({ trialEndsOn })).toEqual({ ok: false, error: "The trial end must be a day from 2020 to 2099, or empty to clear it" });
     }
   });
 });

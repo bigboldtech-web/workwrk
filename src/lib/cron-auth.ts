@@ -1,16 +1,17 @@
 // The one door every scheduled job opens with: each route under /api/cron,
-// plus /api/email/process and /api/email/send-reminders, which the crontab
-// also calls (scripts/CRON-SETUP.md). Server-only (node:crypto).
+// plus /api/email/send-reminders, which the crontab also calls, and
+// /api/email/process, which is not scheduled (scripts/CRON-SETUP.md).
+// Server-only (node:crypto).
 //
 // FAIL-CLOSED. With no CRON_SECRET in the environment (or only whitespace) a
-// job answers 503 and runs nothing. Before this file, 16 of the routes under
+// job answers 503 and runs nothing. Before this file, 11 of the routes under
 // /api/cron skipped the check entirely when the secret was unset
-// (`if (cronSecret) { ... }`), so a server started without it ran hard
-// deletes, AI agents and email sends for anybody who found the URL. Three
-// more fell back to NEXTAUTH_SECRET, the key that signs every session, as a
-// bearer token (with both unset, two of them accepted "Bearer undefined").
-// And /api/cron/run-due-agents let ANY signed-in workspace admin fire every
-// workspace's due agents. Production has CRON_SECRET set (2026-10-04: the
+// (`if (cronSecret) { ... }`), and 4 more did outside production, so a
+// server started without it ran hard deletes and email sends for anybody who
+// found the URL. Three routes fell back to NEXTAUTH_SECRET, the key that
+// signs every session, as a bearer token (with both unset, two of them
+// accepted "Bearer undefined"). And /api/cron/run-due-agents let ANY
+// signed-in workspace admin fire every workspace's due agents. Production has CRON_SECRET set (2026-10-04: the
 // fail-closed talk-updates route answers 403, not 503, to a request with no
 // header), so an installed crontab row sees no change.
 //

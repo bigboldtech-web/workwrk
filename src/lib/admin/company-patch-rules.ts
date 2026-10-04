@@ -109,7 +109,7 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
   if (b.trialEndsOn !== undefined) {
     if (b.trialEndsOn === null || b.trialEndsOn === "") patch.trialEndsOn = null;
     else if (typeof b.trialEndsOn === "string" && isTrialEndDay(b.trialEndsOn)) patch.trialEndsOn = b.trialEndsOn;
-    else return { ok: false, error: "The trial end must be a date, or empty to clear it" };
+    else return { ok: false, error: "The trial end must be a day from 2020 to 2099, or empty to clear it" };
   }
   if (b.confirm !== undefined) {
     if (typeof b.confirm !== "string") return { ok: false, error: "`confirm` must be the company name" };

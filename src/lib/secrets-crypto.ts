@@ -26,10 +26,9 @@ interface CipherBlob {
   tag: string;
 }
 
-function masterKey(): Buffer {
-  const raw = process.env.SECRETS_ENCRYPTION_KEY;
-  if (!raw) throw new Error("SECRETS_ENCRYPTION_KEY is not set");
-  // Hex (64 chars) or base64 (44 chars with =) — try those first.
+/** A 32-byte key from the configured string (hex, base64, or hashed down). */
+function keyFrom(raw: string): Buffer {
+  // Hex (64 chars) or base64 (44 chars with =): try those first.
   if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, "hex");
   if (/^[A-Za-z0-9+/]+={0,2}$/.test(raw) && raw.length === 44) {
     return Buffer.from(raw, "base64");
@@ -38,9 +37,36 @@ function masterKey(): Buffer {
   return createHash("sha256").update(raw).digest();
 }
 
+function masterKey(): Buffer {
+  const raw = process.env.SECRETS_ENCRYPTION_KEY;
+  if (!raw) throw new Error("SECRETS_ENCRYPTION_KEY is not set");
+  return keyFrom(raw);
+}
+
 export function encryptSecret(plaintext: string): CipherBlob {
+  return encryptWithKey(plaintext, masterKey());
+}
+
+export function decryptSecret(blob: unknown): string {
+  return decryptWithKey(blob, masterKey());
+}
+
+/**
+ * The same two with a key given as its configured string, for
+ * scripts/rotate-secrets-key.ts, which holds the old and the new key at once.
+ */
+export function encryptSecretWith(plaintext: string, rawKey: string): CipherBlob {
+  if (!rawKey) throw new Error("No key given");
+  return encryptWithKey(plaintext, keyFrom(rawKey));
+}
+
+export function decryptSecretWith(blob: unknown, rawKey: string): string {
+  if (!rawKey) throw new Error("No key given");
+  return decryptWithKey(blob, keyFrom(rawKey));
+}
+
+function encryptWithKey(plaintext: string, key: Buffer): CipherBlob {
   if (!plaintext) throw new Error("Cannot encrypt an empty string");
-  const key = masterKey();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -53,11 +79,10 @@ export function encryptSecret(plaintext: string): CipherBlob {
   };
 }
 
-export function decryptSecret(blob: unknown): string {
+function decryptWithKey(blob: unknown, key: Buffer): string {
   if (!blob || typeof blob !== "object") throw new Error("Invalid cipher blob");
   const b = blob as CipherBlob;
   if (b.v !== 1) throw new Error(`Unsupported cipher version: ${b.v}`);
-  const key = masterKey();
   const iv = Buffer.from(b.iv, "hex");
   const ct = Buffer.from(b.ct, "hex");
   const tag = Buffer.from(b.tag, "hex");

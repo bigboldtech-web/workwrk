@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
 import { CREATED_SOMETHING, SETUP_DONE } from "@/lib/admin/company-milestones";
+import { ACTION_LABEL } from "@/lib/admin/staff-activity";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -14,9 +15,17 @@ import { CREATED_SOMETHING, SETUP_DONE } from "@/lib/admin/company-milestones";
  * Organization cascade in the database, so users, departments, tasks, etc.
  * go with it.
  *
- * THE DELETE IS CONDITIONAL. It re-checks, in the same statement, that the
- * company is still CANCELLED with the same schedule this run read, so a
- * restore that lands between the read and the delete keeps the company.
+ * THE DELETE IS CONDITIONAL. The transaction first locks the company's row,
+ * still CANCELLED with the same schedule this run read, so a restore that
+ * lands between the read and the delete keeps the company (and its staff
+ * audit rows untouched), and one that comes after finds it gone.
+ *
+ * STAFF AUDIT ROWS KEEP NO NAMES. The rows about the company (StaffAction,
+ * whose company link goes on delete) are kept, with their action, who did it
+ * and when, but their label, sentence, free-text reason and the name, email
+ * and company-name values in before and after are replaced, in the same
+ * transaction: the privacy policy deletes workspace data 30 days after
+ * termination, and those rows named the company and some of its people.
  *
  * THE RECORD THAT OUTLIVES IT is WorkspaceDeletion (no foreign key, no name,
  * no person). In the same transaction as the delete, the row for this
@@ -77,14 +86,22 @@ export async function POST(req: NextRequest) {
   let kept = 0;
   const failures: Array<{ id: string; error: string }> = [];
 
+  // The sentence each kind of staff action reads as, once its company is gone.
+  const labels = JSON.stringify(ACTION_LABEL);
+
   for (const org of due) {
-    const requestedAt = org.cancelledAt && ISO.test(org.cancelledAt) ? new Date(org.cancelledAt) : now;
-    // Timestamps go in as ISO text cast to UTC wall time, the way Prisma
-    // stores DateTime, so the result never depends on the session time zone.
-    const at = now.toISOString();
-    const asked = requestedAt.toISOString();
-    const sameFrom = new Date(requestedAt.getTime() - SAME_DELETION_MS).toISOString();
     try {
+      // Everything about one company, its parsing included, is inside the
+      // try: a bad value lands in failures and the next company still goes.
+      // The schedule's own cancelledAt when it is a real instant (a shape
+      // that parses to nothing, like month 13, falls back to now).
+      const parsed = org.cancelledAt && ISO.test(org.cancelledAt) ? new Date(org.cancelledAt) : null;
+      const requestedAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : now;
+      // Timestamps go in as ISO text cast to UTC wall time, the way Prisma
+      // stores DateTime, so the result never depends on the session time zone.
+      const at = now.toISOString();
+      const asked = requestedAt.toISOString();
+      const sameFrom = new Date(requestedAt.getTime() - SAME_DELETION_MS).toISOString();
       // The funnel's two milestones, read by the funnel's own definitions
       // (src/lib/admin/company-milestones.ts) while there is still a company.
       const [setupDone, createdSomething] = await Promise.all([
@@ -92,13 +109,36 @@ export async function POST(req: NextRequest) {
         prisma.organization.count({ where: { AND: [{ id: org.id }, CREATED_SOMETHING] } }).then((n) => n > 0),
       ]);
       const signedUp = new Date(org.createdAt).toISOString();
-      const [gone] = await prisma.$transaction([
+      const results = await prisma.$transaction([
+        // 1. The company's row, locked while it is still due.
+        prisma.$queryRaw`
+          SELECT 1 FROM "Organization"
+           WHERE "id" = ${org.id}
+             AND "status" = 'CANCELLED'
+             AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+             FOR UPDATE`,
+        // 2. Its staff audit rows lose every name (an AppSumo refund keeps
+        // its label, which is the code, not a name).
+        prisma.$executeRaw`
+          UPDATE "StaffAction"
+             SET "targetLabel" = CASE WHEN "action" = 'admin.code.refunded' THEN "targetLabel" ELSE 'A deleted company' END,
+                 "summary" = COALESCE(${labels}::jsonb ->> "action", 'Changed') || ' (the company was later deleted for good)',
+                 "reason" = NULL,
+                 "before" = CASE WHEN jsonb_typeof("before") = 'object' THEN "before" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "before" END,
+                 "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "after" END,
+                 "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+           WHERE "targetCompanyId" = ${org.id}
+             AND EXISTS (
+                   SELECT 1 FROM "Organization"
+                    WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+                 )`,
+        // 3. The company.
         prisma.$executeRaw`
           DELETE FROM "Organization"
            WHERE "id" = ${org.id}
              AND "status" = 'CANCELLED'
              AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}`,
-        // Only once the company is gone: stamp this deletion's row...
+        // 4. Only once the company is gone: stamp this deletion's row...
         prisma.$executeRaw`
           UPDATE "WorkspaceDeletion"
              SET "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
@@ -109,7 +149,7 @@ export async function POST(req: NextRequest) {
              AND "hardDeletedAt" IS NULL
              AND "requestedAt" >= (${sameFrom}::timestamptz AT TIME ZONE 'UTC')
              AND NOT EXISTS (SELECT 1 FROM "Organization" WHERE "id" = ${org.id})`,
-        // ...or write one when it has none.
+        // 5. ...or write one when it has none.
         prisma.$executeRaw`
           INSERT INTO "WorkspaceDeletion"
                  ("id", "organizationId", "plan", "signedUpAt", "requestedAt", "hardDeletedAt", "finishedSetup", "createdSomething")
@@ -124,6 +164,8 @@ export async function POST(req: NextRequest) {
                  )
           ON CONFLICT DO NOTHING`,
       ]);
+      // The DELETE is the third statement.
+      const gone = results[2];
       if (gone === 1) {
         deleted += 1;
         // The id only: the name is part of what was just deleted.

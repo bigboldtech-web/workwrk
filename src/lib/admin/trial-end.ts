@@ -44,9 +44,19 @@ export function trialEndFromDay(day: string): Date {
   return new Date(`${day}T12:00:00.000Z`);
 }
 
-/** The self-serve trial end for a company created at `createdAt`. */
+/**
+ * The self-serve trial end for a company created at `createdAt`: the
+ * calendar day SELF_SERVE_TRIAL_DAYS later, stored at noon UTC like a day
+ * staff pick, so the date box, the sentence beside it, the audit row and the
+ * CSV all name the same day.
+ */
 export function selfServeTrialEnd(createdAt: Date): Date {
-  return new Date(createdAt.getTime() + SELF_SERVE_TRIAL_DAYS * DAY_MS);
+  return trialEndFromDay(new Date(createdAt.getTime() + SELF_SERVE_TRIAL_DAYS * DAY_MS).toISOString().slice(0, 10));
+}
+
+/** The calendar day a stored trial end names ("2026-10-19"), read in UTC. */
+export function trialEndDay(at: Date | string): string {
+  return new Date(at).toISOString().slice(0, 10);
 }
 
 export interface TrialEndFacts {

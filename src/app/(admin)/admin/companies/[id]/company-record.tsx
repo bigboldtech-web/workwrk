@@ -633,8 +633,17 @@ function PlanCard({
   );
 }
 
-function trialLine(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"]): string {
-  return `${formatDate(at, datePrefs, "date")} ${trialLeft(at)}`;
+/**
+ * A self-serve trial end is a calendar day (stored at noon UTC), so it is
+ * read in UTC for every staff member: the same day in Auckland as in
+ * Honolulu. A Stripe trial end is an instant, read in their own zone.
+ */
+function trialPrefs(datePrefs: ReturnType<typeof useConsole>["datePrefs"]): ReturnType<typeof useConsole>["datePrefs"] {
+  return { ...datePrefs, timezone: "UTC" };
+}
+
+function trialLine(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"], day: boolean): string {
+  return `${formatDate(at, day ? trialPrefs(datePrefs) : datePrefs, "date")} ${trialLeft(at)}`;
 }
 
 /** "(12 days)", "(1 day)" or "(ended)". */
@@ -668,8 +677,8 @@ function TrialEndRow({
   onEdited: () => void;
 }) {
   const trial = company.trial;
-  // The day as this staff member reads it, in their own zone: what the box holds.
-  const storedDay = trial.endsAt ? dayKey(trial.endsAt, datePrefs) : "";
+  // The stored calendar day, read in UTC (trialPrefs): what the box holds.
+  const storedDay = trial.endsAt ? dayKey(trial.endsAt, trialPrefs(datePrefs)) : "";
   const [day, setDay] = useState(storedDay);
   const [seen, setSeen] = useState(storedDay);
   if (seen !== storedDay) {
@@ -680,7 +689,7 @@ function TrialEndRow({
     if (!trial.endsAt) return null;
     return (
       <Row label="Trial ends" hint={trial.source === "stripe" ? "Set by Stripe." : undefined}>
-        <span className="text-base text-ink">{trialLine(trial.endsAt, datePrefs)}</span>
+        <span className="text-base text-ink">{trialLine(trial.endsAt, datePrefs, trial.source !== "stripe")}</span>
       </Row>
     );
   }
@@ -705,7 +714,11 @@ function TrialEndRow({
         onBlur={() => void commit()}
         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         aria-label="Trial ends"
-        disabled={busy !== null && busy !== "trialEnd"}
+        min="2020-01-01"
+        max="2099-12-31"
+        // Locked through any save, its own included: a day picked while one
+        // is in flight would be overwritten by the reload that follows it.
+        disabled={busy !== null}
         className="h-9 w-44 rounded-md border border-line-strong bg-raised px-3 text-base tabular-nums text-ink focus:outline-none focus-visible:border-brand disabled:opacity-60"
       />
       {trial.endsAt && day === storedDay ? <span className="text-sm text-ink-2">{trialLeft(trial.endsAt)}</span> : null}

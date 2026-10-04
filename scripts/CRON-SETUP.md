@@ -31,12 +31,34 @@ Every endpoint in this file checks the secret the same way
 `Authorization: Bearer <secret>`, compared in constant time. With
 `CRON_SECRET` unset or empty in the app's environment, every one answers 503
 and runs nothing; a missing or wrong secret is a 403 (a few answered 401
-before, and `curl -fsS` fails the same way on both). Before this, 16 of the
-`/api/cron` routes ran for anybody when the secret was unset, three fell back
-to `NEXTAUTH_SECRET`, and `/api/cron/run-due-agents` let any signed-in
-workspace admin fire every workspace's agents. Production has the secret set,
-so no installed row changes. Locally, start the dev server with a
-`CRON_SECRET` and send it.
+before, and `curl -fsS` fails the same way on both). Before this, 11 of the
+`/api/cron` routes ran for anybody when the secret was unset and 4 more did
+outside production, three routes fell back to `NEXTAUTH_SECRET`, and
+`/api/cron/run-due-agents` let any signed-in workspace admin fire every
+workspace's agents. Production has the secret set, so no installed row
+changes. Locally, start the dev server with a `CRON_SECRET` and send it.
+
+## Rotating CRON_SECRET (do this now: the old value was public)
+
+Until 2026-10-05 this file and `LAUNCH-CHECKLIST.md` printed the production
+`CRON_SECRET` (and the checklist the `SECRETS_ENCRYPTION_KEY`), and the
+repository is public. Git history keeps them, so removing them from the files
+is not enough: anyone can still read them. With that value anybody can send
+every reminder email to every customer again and again, run the purge jobs,
+and forge a signed audit export. Replace it on the server:
+
+1. `openssl rand -hex 32` makes the new value.
+2. Put it in the app's `.env` as `CRON_SECRET`, in `/etc/profile.d/workwrk.sh`,
+   and in any crontab or aaPanel row that has the value written in.
+3. `pm2 reload workwrk --update-env`, so the app reads it.
+4. Check: `curl -s -o /dev/null -w '%{http_code}' -X POST -H "x-cron-secret: <the OLD value>" https://workwrk.com/api/cron/ratelimit-cleanup`
+   answers 403, and the next cron run in `/var/log/workwrk-cron.log` succeeds.
+5. Set a separate `AUDIT_SIGNING_KEY` (also `openssl rand -hex 32`): signed
+   audit exports fall back to `CRON_SECRET` without one.
+
+`SECRETS_ENCRYPTION_KEY` encrypts stored secrets (bring-your-own AI keys), so
+it is rotated with `scripts/rotate-secrets-key.ts`, which re-encrypts them:
+see that file's header.
 
 ## Removed: Task SLA check
 
@@ -375,19 +397,21 @@ and KPI emails **every day** it runs. Always pass one `type` per row.
 
 ## Where the cron secret comes from
 
-The same value that's in your env as `CRON_SECRET`. In the script
-above, `$CRON_SECRET` is a shell variable — for it to expand inside
+The same value that's in your env as `CRON_SECRET`. NEVER write its value in
+this file, or anywhere in this repository: the repository is public, and the
+value that used to be printed here had to be replaced (2026-10-05). In the
+script above, `$CRON_SECRET` is a shell variable — for it to expand inside
 the cron's environment you have **two options**:
 
 **Option A — inline the value in each cron script** (simplest):
 ```
-curl -fsS -X POST -H "x-cron-secret: b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1" https://workwrk.com/api/cron/email-queue
+curl -fsS -X POST -H "x-cron-secret: <the CRON_SECRET from the app's .env>" https://workwrk.com/api/cron/email-queue
 ```
 
 **Option B — export from /etc/profile.d** (if you want one place to update it):
 ```
 # /etc/profile.d/workwrk-secrets.sh
-export CRON_SECRET=b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1
+export CRON_SECRET=<the CRON_SECRET from the app's .env>
 ```
 Then make sure aaPanel's cron runs with a login shell so /etc/profile.d
 is sourced. Many setups use a non-login shell, so Option A is safer.

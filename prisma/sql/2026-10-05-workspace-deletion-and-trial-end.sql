@@ -45,11 +45,16 @@
 -- it fills, the house pattern (2026-09-18-notification-cleared-at.sql). A
 -- second run finds the marker and does nothing, so a trial date a staff
 -- member cleared is never filled in again, and no deletion is recorded twice.
+-- One fill does run on every deploy (section 3), guarded on its own effect:
+-- trials that signed up while the release was being built.
 --
--- NOTHING HERE CAN FAIL THE DEPLOY ON BAD DATA. settings.cancelledAt is only
--- cast to a timestamp when it has the exact shape the delete route writes
--- (Date.toISOString()), so a hand-edited value is skipped, never an error that
--- aborts the release.
+-- NOTHING HERE CAN FAIL THE DEPLOY ON BAD DATA. settings.cancelledAt is cast
+-- to a timestamp one row at a time, only when it has the shape the delete
+-- route writes (Date.toISOString()), and inside its own exception block, so
+-- a hand-edited value (even one shaped right but impossible, like
+-- 2026-09-31) is skipped, never an error that aborts the release. A skipped
+-- row loses nothing: the console still reads the live schedule, and the
+-- hard-delete cron writes the record when it deletes the company.
 --
 -- Local (applied by the authoring session against .env.local only).
 
@@ -81,6 +86,8 @@ CREATE INDEX IF NOT EXISTS "WorkspaceDeletion_signedUpAt_idx"
 DO $$
 DECLARE
   marker CONSTANT text := 'workspace-deletion-backfill-2026-10-05';
+  r record;
+  asked timestamp;
 BEGIN
   IF obj_description('"WorkspaceDeletion"'::regclass, 'pg_class') IS DISTINCT FROM marker THEN
     INSERT INTO "WorkspaceDeletion" ("id", "organizationId", "plan", "signedUpAt", "requestedAt")
@@ -90,19 +97,28 @@ BEGIN
      WHERE l."type" = 'organization_scheduled_deletion'
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO "WorkspaceDeletion" ("id", "organizationId", "plan", "signedUpAt", "requestedAt")
-    SELECT 'wd_live_' || o."id", o."id", o."plan"::text, o."createdAt",
-           ((o."settings"->>'cancelledAt')::timestamptz AT TIME ZONE 'UTC')
-      FROM "Organization" o
-     WHERE o."status" = 'CANCELLED'
-       AND o."settings"->>'scheduledHardDeleteAt' IS NOT NULL
-       AND o."settings"->>'cancelledAt' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$'
-       AND NOT EXISTS (
-             SELECT 1 FROM "WorkspaceDeletion" d
-              WHERE d."organizationId" = o."id"
-                AND d."requestedAt" >= ((o."settings"->>'cancelledAt')::timestamptz AT TIME ZONE 'UTC') - interval '5 minutes'
-           )
-    ON CONFLICT DO NOTHING;
+    FOR r IN
+      SELECT o."id", o."plan"::text AS plan, o."createdAt", o."settings"->>'cancelledAt' AS cancelled
+        FROM "Organization" o
+       WHERE o."status" = 'CANCELLED'
+         AND o."settings"->>'scheduledHardDeleteAt' IS NOT NULL
+         AND o."settings"->>'cancelledAt' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$'
+    LOOP
+      -- One row's cast, on its own: an impossible date skips that row only.
+      BEGIN
+        asked := (r.cancelled)::timestamptz AT TIME ZONE 'UTC';
+      EXCEPTION WHEN others THEN
+        asked := NULL;
+      END;
+      IF asked IS NOT NULL AND NOT EXISTS (
+           SELECT 1 FROM "WorkspaceDeletion" d
+            WHERE d."organizationId" = r."id" AND d."requestedAt" >= asked - interval '5 minutes'
+         ) THEN
+        INSERT INTO "WorkspaceDeletion" ("id", "organizationId", "plan", "signedUpAt", "requestedAt")
+        VALUES ('wd_live_' || r."id", r."id", r.plan, r."createdAt", asked)
+        ON CONFLICT DO NOTHING;
+      END IF;
+    END LOOP;
 
     EXECUTE format('COMMENT ON TABLE "WorkspaceDeletion" IS %L', marker);
   END IF;
@@ -126,10 +142,12 @@ BEGIN
     -- Every self-serve trial today: on TRIAL, with neither a Stripe
     -- subscription nor a lifetime deal (neither of which moves a company off
     -- TRIAL, so a paying company can still read TRIAL). Fourteen days from
-    -- signup, the same rule signup now applies. Older trials get a date in
-    -- the past and read "ended" to staff, which is what the rule says.
+    -- signup, the same rule signup now applies, stored as noon UTC on that
+    -- calendar day like every trial end (src/lib/admin/trial-end.ts). Older
+    -- trials get a date in the past and read "ended" to staff, which is what
+    -- the rule says.
     UPDATE "Organization" o
-       SET "trialEndsAt" = o."createdAt" + interval '14 days'
+       SET "trialEndsAt" = date_trunc('day', o."createdAt" + interval '14 days') + interval '12 hours'
      WHERE o."status" = 'TRIAL'
        AND o."trialEndsAt" IS NULL
        AND NOT EXISTS (
@@ -145,6 +163,28 @@ END $$;
 -- The same column again, outside the block, for scripts/check-schema-sql.mjs
 -- (and a no-op here, since the block above has added it).
 ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "trialEndsAt" TIMESTAMP(3);
+
+-- 3. EVERY deploy, guarded on its own effect: a self-serve trial that signed
+-- up while this release was being built (the old code still served signups
+-- and wrote no date, and the one-time block above had already run) gets its
+-- date. Only companies created since this file shipped, so an older company
+-- staff later move to Trial is left alone; and never one whose date a staff
+-- member cleared, since a clear always writes an admin.org.trial_end_changed
+-- row (it changes the value).
+UPDATE "Organization" o
+   SET "trialEndsAt" = date_trunc('day', o."createdAt" + interval '14 days') + interval '12 hours'
+ WHERE o."status" = 'TRIAL'
+   AND o."trialEndsAt" IS NULL
+   AND o."createdAt" >= TIMESTAMP '2026-10-05 00:00:00'
+   AND NOT EXISTS (
+         SELECT 1 FROM "Subscription" s
+          WHERE s."organizationId" = o."id"
+            AND (s."stripeSubscriptionId" IS NOT NULL OR s."billingMode" = 'FLAT_TIER')
+       )
+   AND NOT EXISTS (
+         SELECT 1 FROM "StaffAction" sa
+          WHERE sa."targetCompanyId" = o."id" AND sa."action" = 'admin.org.trial_end_changed'
+       );
 
 -- The console's trial reads ("Trials end in the next 7 days").
 CREATE INDEX IF NOT EXISTS "Organization_trialEndsAt_idx" ON "Organization" ("trialEndsAt");

@@ -36,13 +36,13 @@ Each item is one of:
 ### 2. Set production environment variables (10 min)
 SSH in and edit your `.env.production` (or use aaPanel Node config UI).
 
-Add these:
+Add these (generate each secret on the server; NEVER write a value into this repository, which is public):
 ```
 ADMIN_HOST=admin.workwrk.com
 APP_HOST=workwrk.com
 CUSTOM_DOMAINS_ENABLED=true
-CRON_SECRET=b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1
-SECRETS_ENCRYPTION_KEY=e13f9e09c2096a2263b1cb3d7e0ae183a172be66c04e678759a2b446cdeedc68
+CRON_SECRET=<generate: openssl rand -hex 32>
+SECRETS_ENCRYPTION_KEY=<generate: openssl rand -hex 32>
 ```
 
 Verify these existing ones are also present:

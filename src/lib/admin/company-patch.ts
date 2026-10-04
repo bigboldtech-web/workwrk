@@ -25,7 +25,7 @@ import { setFeature } from "@/lib/enterprise-features";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
 import { seatsAreUnlimited } from "@/lib/admin/companies-list";
-import { trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
+import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
 
 export {
@@ -341,7 +341,7 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
         const next = patch.trialEndsOn === null ? null : trialEndFromDay(patch.trialEndsOn);
         if ((was?.getTime() ?? null) !== (next?.getTime() ?? null)) {
           await tx.organization.update({ where: { id }, data: { trialEndsAt: next } });
-          const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "none");
+          const day = (d: Date | null) => (d ? trialEndDay(d) : "none");
           logged.push(
             await logStaffAction({
               db: tx,
@@ -349,10 +349,11 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
               actor,
               ip,
               targetCompanyId: id,
-              targetLabel: org.name,
-              summary: next
-                ? `Set ${org.name}'s trial end from ${day(was)} to ${day(next)}`
-                : `Cleared ${org.name}'s trial end (was ${day(was)})`,
+              // No name in this row: while the company exists the audit
+              // page names it through the link, and once it is deleted for
+              // good nothing kept may name it.
+              targetLabel: null,
+              summary: next ? `Set the trial end from ${day(was)} to ${day(next)}` : `Cleared the trial end (was ${day(was)})`,
               before: { trialEndsAt: was?.toISOString() ?? null },
               after: { trialEndsAt: next?.toISOString() ?? null },
             }),
