@@ -199,7 +199,7 @@ describe("review round 2", () => {
 
   it("offers a request's grant only while the object's app is open to the decider", () => {
     const list = read("src/app/api/access-requests/route.ts");
-    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff\),/);
+    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant\),/);
     expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\{req\.appOff \? \(/);
   });
 });
@@ -239,5 +239,32 @@ describe("review round 3", () => {
   it("offers only the request answers that give more than the person holds", () => {
     const list = read("src/app/api/access-requests/route.ts");
     expect(list).toMatch(/grants = objectRequestGrants\(objectKind, r\.role as RequestRole\)\.filter\(\(g\) => PANEL_ROLE_RANK\[objectGrantRole\(objectKind, g\.role\)\] > heldRank\);\n\s+if \(grants\.length === 0\) continue;/);
+  });
+});
+
+describe("review round 4", () => {
+  it("says what a removed person keeps only while their app lets them in", () => {
+    const tool = read("src/lib/access/object-share/tool.ts");
+    expect(tool).toMatch(/const keeps = out\.still && \(await appDoorFor\(ctx\.organizationId, input\.userId, "tool"\)\) === "open";/);
+    const goal = read("src/lib/access/object-share/goal.ts");
+    expect(goal).toMatch(/const stillReaches = reach && \(await appOpenFor\(ctx\.organizationId, input\.userId, "goal"\)\) \? reach : null;/);
+  });
+
+  it("qualifies a goal's rules when the Goals app is limited, and its creator note by their door", () => {
+    const goal = read("src/lib/access/object-share/goal.ts");
+    expect(goal).toMatch(/if \(limited\) notes\.push\("The Goals app is limited in Settings, Apps, so anyone it keeps out can't open this goal, whatever the lines above say\."\);/);
+    expect(goal).toMatch(/if \(creator && !\(await closedTo\(creator\.id\)\) && \(await canSeeGoal\(/);
+  });
+
+  it("offers a request's grant only to a decider who may share the object", () => {
+    const list = read("src/app/api/access-requests/route.ts");
+    expect(list).toMatch(/const cannotGrant = objectKind && !appOff \? !\(await shares\(objectKind, r\.objectId\)\) : false;/);
+    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant\),/);
+    expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\) : req\.cannotGrant \? \(/);
+  });
+
+  it("gives a team lead no one-word role menu, and an Agent's removal toast its working role", () => {
+    expect(read("src/lib/access/object-share/team.ts")).toMatch(/editable: withinGrant && maxGrant === "FULL",/);
+    expect(read("src/lib/access/object-share/sop-folder.ts")).toMatch(/out\.agent && out\.above\.role === "FULL" \? "EDIT" : out\.above\.role/);
   });
 });

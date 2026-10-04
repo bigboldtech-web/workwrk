@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
 import { objectGrantRole, objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
-import { objectAppOpen, objectHeldRole, objectShareOn } from "@/lib/access/object-share";
+import { objectAccessPanel, objectAppOpen, objectHeldRole, objectShareCtxFromSession, objectShareOn } from "@/lib/access/object-share";
 import { PANEL_ROLE_RANK } from "@/lib/access/access-panel";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
@@ -190,6 +190,19 @@ export async function GET(req: Request) {
     if (!appOpenOf.has(kind)) appOpenOf.set(kind, objectAppOpen(kind));
     return appOpenOf.get(kind)!;
   };
+  // Whether the decider may share each object (its owner may not, once their
+  // role no longer manages it; an Agent never shares): asked once per object,
+  // and not of a fresh Admin, who shares all four kinds.
+  const octx = objectsOn && pending.length > 0 && !admin ? await objectShareCtxFromSession() : null;
+  const sharesOf = new Map<string, Promise<boolean>>();
+  const shares = (kind: NonNullable<ReturnType<typeof requestObjectKind>>, objectId: string) => {
+    if (admin) return Promise.resolve(true);
+    const key = `${kind}:${objectId}`;
+    if (!sharesOf.has(key)) {
+      sharesOf.set(key, octx ? objectAccessPanel(octx, kind, objectId).then((p) => !!p?.viewer.canManage, () => false) : Promise.resolve(false));
+    }
+    return sharesOf.get(key)!;
+  };
   const requesterCtx = new Map<string, Awaited<ReturnType<typeof nodeCtxForUser>>>();
   const incoming = [];
   for (const r of pending) {
@@ -221,11 +234,12 @@ export async function GET(req: Request) {
     if (answered) continue;
     const objectKind = !node && objectsOn ? requestObjectKind(r.objectType) : null;
     const appOff = objectKind ? !(await appOpen(objectKind)) : false;
+    const cannotGrant = objectKind && !appOff ? !(await shares(objectKind, r.objectId)) : false;
     // Only the answers that give the person more than they hold now; none
     // left means the request is already answered, and it is left off the
     // card as a node's is.
     let grants: ReturnType<typeof objectRequestGrants> | undefined;
-    if (objectKind && !appOff) {
+    if (objectKind && !appOff && !cannotGrant) {
       const held = await objectHeldRole(objectKind, u.organizationId, r.objectId, r.requesterId);
       const heldRank = held ? PANEL_ROLE_RANK[held] : 0;
       grants = objectRequestGrants(objectKind, r.role as RequestRole).filter((g) => PANEL_ROLE_RANK[objectGrantRole(objectKind, g.role)] > heldRank);
@@ -240,10 +254,11 @@ export async function GET(req: Request) {
       createdAt: r.createdAt,
       link: t.link,
       name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
-      grantable: node !== null || (objectKind !== null && !appOff),
+      grantable: node !== null || (objectKind !== null && !appOff && !cannotGrant),
       ...(grants ? { grants } : {}),
-      // Its app is closed to the decider: only Decline can answer it.
+      // Its app is closed to the decider, or they may not share it: only Decline answers it.
       ...(appOff ? { appOff: true } : {}),
+      ...(cannotGrant ? { cannotGrant: true } : {}),
       requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },
     });
   }

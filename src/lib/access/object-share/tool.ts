@@ -278,7 +278,10 @@ export async function removeToolGrant(ctx: ObjectShareCtx, id: string, input: { 
   const panel = await freshPanel(ctx, id);
   // Full access left means a member type that manages every tool (an Admin is
   // named as one, an Executive is not); anything less is the maker's view.
-  const stillReaches = out.still
+  // Said only while the Tools app lets them in (a floor, a deactivated
+  // account): the same door their row and Check access ask.
+  const keeps = out.still && (await appDoorFor(ctx.organizationId, input.userId, "tool")) === "open";
+  const stillReaches = keeps && out.still
     ? { role: out.still, via: out.still === "FULL" && out.level ? levelVia(out.level, panel?.orgName ?? await orgNameOf(ctx.organizationId)) : ({ type: "owner" as const }) }
     : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };

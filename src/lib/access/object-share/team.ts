@@ -113,15 +113,17 @@ export async function teamPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   const direct: AccessDirectEntry[] = [];
   for (const r of live) {
     const role = roleOfRow(r)!;
-    const editable = canManage && rank(role) <= rank(maxGrant);
+    const withinGrant = canManage && rank(role) <= rank(maxGrant);
     const entry: AccessDirectEntry = {
       person: personOf(r.user),
       role,
       owner: false,
       source: "TeamMember",
-      editable,
+      // A role menu only for someone who chooses between Lead and Member (an
+      // Admin): a lead's menu would hold one word.
+      editable: withinGrant && maxGrant === "FULL",
       // A lead may always step off the team themselves.
-      removable: editable || (canManage && r.userId === ctx.userId),
+      removable: withinGrant || (canManage && r.userId === ctx.userId),
       lastFull: false,
       cap: false,
       // An Admin keeps changing the team without their own row.

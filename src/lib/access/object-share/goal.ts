@@ -224,14 +224,22 @@ export async function goalPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   if (goal.level !== "COMPANY") {
     if (ownerName) notes.push(`Anyone ${ownerName} reports to can view it, and edit it if they are a team lead or above.`);
     else if (!goal.ownerId) notes.push("It has no owner, so team leads and above can view it.");
-    if (rows.length > 0) notes.push("Anyone a contributor reports to can view it.");
+    if (rows.length > 0) {
+      // teamAudienceVisibilityOr: a person or tag row counts whatever their
+      // status; a department or job title row only through someone Active.
+      notes.push(rows.some((r) => r.departmentId || r.roleId)
+        ? "Anyone a contributor reports to can view it. Through a department or job title, that counts only while the person reporting is Active."
+        : "Anyone a contributor reports to can view it.");
+    }
     // The creator edits it only while they can see it (canSeeGoal has no creator door).
     const creator = target.creatorId && target.creatorId !== goal.ownerId ? byId.get(target.creatorId) : null;
-    if (creator && (await canSeeGoal(sessionFor(creator.id, ctx.organizationId, String(creator.accessLevel)), goal))) notes.push(`${nameOf(creator)} made it and can edit it.`);
+    if (creator && !(await closedTo(creator.id)) && (await canSeeGoal(sessionFor(creator.id, ctx.organizationId, String(creator.accessLevel)), goal))) notes.push(`${nameOf(creator)} made it and can edit it.`);
   }
   // By member type, as canSeeGoal reads it; the People team (the HR member type
   // or the list in Settings, Access) edits only the goals it can see.
   notes.push("Anyone whose member type is Executive, VP, Director or People team sees every goal. The People team can edit any goal they can see.");
+  // Every line above is about the goal; the app floor decides who reaches goals at all.
+  if (limited) notes.push("The Goals app is limited in Settings, Apps, so anyone it keeps out can't open this goal, whatever the lines above say.");
 
   return {
     node: { kind: KIND, id: goal.id, name: goal.title, noun: ACCESS_NODE_NOUN[KIND], href: hrefOf(goal.id), space: null, notepadOwner: null },
@@ -321,7 +329,9 @@ export async function removeGoalGrant(ctx: ObjectShareCtx, id: string, input: { 
       return { noChange: false, previousRole: curRole, goal };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
-  const [panel, stillReaches] = await Promise.all([freshPanel(ctx, id), out.noChange ? null : stillReachesGoal(ctx, out.goal, input.userId)]);
+  const [panel, reach] = await Promise.all([freshPanel(ctx, id), out.noChange ? null : stillReachesGoal(ctx, out.goal, input.userId)]);
+  // Said only while the Goals app lets them in: the door their row and Check access ask.
+  const stillReaches = reach && (await appOpenFor(ctx.organizationId, input.userId, "goal")) ? reach : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
 }

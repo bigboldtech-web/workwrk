@@ -34,6 +34,8 @@ interface IncomingRequest {
   grants?: Array<{ role: IncomingRequest["role"]; label: string }>;
   /** Its app is hidden or floored for you: it can only be declined. */
   appOff?: boolean;
+  /** You may not share it (your role no longer manages it): it can only be declined. */
+  cannotGrant?: boolean;
   requester: { id: string; name: string; avatar: string | null };
 }
 
@@ -121,6 +123,8 @@ export function AccessRequestsCard() {
               <div className="flex shrink-0 items-center gap-2">
                 {req.appOff ? (
                   <span className="text-sm text-ink-2">Its app isn&apos;t open to you</span>
+                ) : req.cannotGrant ? (
+                  <span className="text-sm text-ink-2">Only people who can share it give access</span>
                 ) : req.grantable && req.grants ? (
                   req.grants.map((g) => (
                     <button key={g.role} type="button" className={btn} disabled={busy === req.id} onClick={() => { void decide(req, "grant", g.role); }}>

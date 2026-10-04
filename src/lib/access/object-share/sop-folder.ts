@@ -274,7 +274,7 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: cur.role, store: "SOPFolderAccess" });
       const rest = await tx.sOPFolderAccess.findMany({ where: { userId: input.userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
       const target = await targetInOrg(tx, ctx.organizationId, input.userId);
-      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine, admin: !!target && ADMIN_LEVELS.has(target.accessLevel) };
+      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine, admin: !!target && ADMIN_LEVELS.has(target.accessLevel), agent: target?.accessLevel === "AGENT" };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
@@ -283,7 +283,10 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
   // An Owner or Admin keeps every folder: said first, as for a node.
   const stillReaches = "admin" in out && out.admin
     ? { role: "FULL" as PanelRole, via: { type: "org_admin" as const, orgName: await orgNameOf(ctx.organizationId) } }
-    : out.above ? { role: out.above.role, via: viaAt(ctx, out.mine, out.chain, out.above.at) } : null;
+    : out.above
+      // An Agent works at Can edit, whatever the folder above gives it.
+      ? { role: ("agent" in out && out.agent && out.above.role === "FULL" ? "EDIT" : out.above.role) as PanelRole, via: viaAt(ctx, out.mine, out.chain, out.above.at) }
+      : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
 }
