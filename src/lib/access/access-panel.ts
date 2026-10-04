@@ -242,6 +242,12 @@ export interface AccessPanel {
    * only. Absent on the node kinds.
    */
   notes?: string[];
+  /**
+   * People added here directly whom this viewer is not shown (an SOP folder's
+   * list is for those who manage it): counted, so the list never reads as
+   * "nobody". Absent on the node kinds.
+   */
+  hiddenDirect?: number;
   orgName: string;
   grantsAvailable: boolean;
 }

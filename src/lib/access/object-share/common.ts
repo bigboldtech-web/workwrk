@@ -148,12 +148,14 @@ export async function notifyObjectGrantee(
   granteeId: string,
   role: PanelRole,
   how: "shared" | "upgraded",
+  /** What else decides what the role lets them do, said after it. */
+  caveat?: string,
 ): Promise<void> {
   if (granteeId === ctx.userId) return;
   try {
     const who = await prisma.user.findUnique({ where: { id: ctx.userId }, select: { firstName: true, lastName: true, email: true } });
     const actorName = `${who?.firstName ?? ""} ${who?.lastName ?? ""}`.trim() || who?.email || "Someone";
-    const text = grantedNoticeText(kind, actorName, object.name, role, how);
+    const text = grantedNoticeText(kind, actorName, object.name, role, how, caveat);
     await prisma.notification.create({
       data: {
         userId: granteeId,

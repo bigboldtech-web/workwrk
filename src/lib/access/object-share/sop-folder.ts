@@ -184,14 +184,16 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
   let shownDirect = direct;
   let shownInherited = inherited;
   let shownMore = inheritedMore;
-  let others = 0;
+  let hiddenDirect = 0;
+  let othersAbove = 0;
   if (!canManage) {
     shownDirect = direct.filter((d) => d.person.id === ctx.userId);
     shownInherited = inherited.filter((e) => e.person.id === ctx.userId);
     shownMore = [];
-    const everyone = new Set([...direct.map((d) => d.person.id), ...[...groups.values()].flat().map((e) => e.person.id)]);
-    everyone.delete(ctx.userId);
-    others = everyone.size;
+    // Their own entry from the whole groups, not the 20 per folder shown to managers.
+    if (shownInherited.length === 0) shownInherited = [...groups.values()].flat().filter((e) => e.person.id === ctx.userId);
+    hiddenDirect = direct.length - shownDirect.length;
+    othersAbove = new Set([...groups.values()].flat().map((e) => e.person.id).filter((pid) => pid !== ctx.userId)).size;
   }
 
   const [orgName, adminCount] = await Promise.all([orgNameOf(ctx.organizationId), orgAdminCount(ctx.organizationId)]);
@@ -204,10 +206,11 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     inherited: shownInherited,
     inheritedMore: shownMore,
     hiddenInherited: [],
+    ...(hiddenDirect > 0 ? { hiddenDirect } : {}),
     everyone: null,
     admins: { count: adminCount },
     notes: [
-      ...(others > 0 ? [`Shared with ${others} more ${others === 1 ? "person" : "people"}. Only the people who manage this folder see who.`] : []),
+      ...(othersAbove > 0 ? [`${othersAbove} more ${othersAbove === 1 ? "person has" : "people have"} access from the folders above. Only the people who manage this folder see who.`] : []),
       `Everyone listed here also opens the folders inside ${folder.name}.`,
     ],
     orgName,
@@ -279,7 +282,15 @@ export async function setSopFolderGrant(ctx: ObjectShareCtx, id: string, body: G
   );
   const panel = await freshPanel(ctx, id);
   if (!out.noChange) {
-    if (out.how !== "none" && panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, "worksAt" in out ? out.worksAt : role, out.how);
+    if (out.how !== "none" && panel) {
+      const worksAt = "worksAt" in out ? out.worksAt : role;
+      // As the row says: Can edit reads the drafts, and saves only with a role that edits SOPs.
+      const level = (await prisma.user.findUnique({ where: { id: body.userId }, select: { accessLevel: true } }))?.accessLevel;
+      const caveat = rank(worksAt) >= rank("EDIT") && level && !(await editsSops(body.userId, ctx.organizationId, String(level)))
+        ? "Your workspace role can't edit SOPs, so you can read its drafts but not save changes."
+        : undefined;
+      await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, worksAt, out.how, caveat);
+    }
     await answerRequests(ctx, KIND, id, body.userId, role);
   }
   const change: GrantChange = { userId: body.userId, role: out.role, previousRole: out.previousRole, noChange: out.noChange, stillReaches: null, keepsInside: [] };

@@ -8,7 +8,7 @@ import {
 } from "./access-panel";
 import { accessActivityDescription, accessAuditSentence } from "./access-activity";
 import { objectGrantRole, objectRequestGrants, requestNodeRef, requestObjectKind } from "./access-requests";
-import { errorText, keptHigherText, removalNotice, sentenceNoun, strayFailureText, viaText } from "@/components/access/manage-access-model";
+import { errorText, hiddenDirectText, keptHigherText, removalNotice, sentenceNoun, strayFailureText, viaText } from "@/components/access/manage-access-model";
 import { grantedNoticeText } from "./object-share/words";
 
 const change = (over: Partial<GrantChange>): GrantChange => ({ userId: "u", role: null, previousRole: "EDIT", noChange: false, stillReaches: null, keepsInside: [], ...over });
@@ -131,5 +131,17 @@ describe("what a person is told", () => {
 
   it("says a lead changes members only when they can reach Members", () => {
     expect(panelRoleBlurb("team", "FULL")).toBe("On the team. A lead who can open Members adds and takes off its members.");
+  });
+});
+
+describe("round 6 words", () => {
+  it("counts hidden direct rows without saying nobody was added", () => {
+    expect(hiddenDirectText(2, false, "sop_folder")).toBe("2 people were added here directly. Only the people who manage this SOP folder see who.");
+    expect(hiddenDirectText(1, true, "sop_folder")).toBe("1 more person was added here directly. Only the people who manage this SOP folder see who.");
+  });
+
+  it("adds the workspace-role caveat to an SOP folder notice", () => {
+    expect(grantedNoticeText("sop_folder", "Max", "HR", "EDIT", "shared", "Your workspace role can't edit SOPs, so you can read its drafts but not save changes.").message)
+      .toBe("Can edit on this SOP folder. Your workspace role can't edit SOPs, so you can read its drafts but not save changes.");
   });
 });

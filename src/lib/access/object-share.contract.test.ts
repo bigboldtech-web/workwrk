@@ -300,3 +300,14 @@ describe("review round 5", () => {
     expect(read("src/components/sops/sop-editor-page.tsx")).toMatch(/onFolderChanged=\{\(\) => void refreshAccess\(\)\}/);
   });
 });
+
+describe("review round 6", () => {
+  it("counts the direct rows a non-manager is not shown, and finds their own row past any cut", () => {
+    const sop = read("src/lib/access/object-share/sop-folder.ts");
+    expect(sop).toMatch(/if \(shownInherited\.length === 0\) shownInherited = \[\.\.\.groups\.values\(\)\]\.flat\(\)\.filter\(\(e\) => e\.person\.id === ctx\.userId\);/);
+    expect(sop).toMatch(/hiddenDirect = direct\.length - shownDirect\.length;/);
+    expect(sop).toMatch(/\.\.\.\(hiddenDirect > 0 \? \{ hiddenDirect \} : \{\}\),/);
+    const list = read("src/components/access/who-has-access.tsx");
+    expect(list).toMatch(/return hiddenLine \?\? <p className="m-0 text-sm text-ink-2">Nobody has been added here directly\.<\/p>;/);
+  });
+});

@@ -22,7 +22,7 @@ import {
   type AccessDirectEntry, type AccessPanel, type AccessPerson, type ShareKind,
 } from "@/lib/access/access-panel";
 import {
-  adminsLine, alsoViaText, capText, everyoneLine, groupInherited, hasOlderRule, inheritedHeader,
+  adminsLine, alsoViaText, capText, everyoneLine, groupInherited, hasOlderRule, hiddenDirectText, inheritedHeader,
   LAST_FULL_TEXT, OLDER_RULE_FOOTNOTE,
 } from "./manage-access-model";
 
@@ -97,17 +97,24 @@ export function RoleWord({ role, kind }: { role: AccessDirectEntry["role"]; kind
 
 /** Everyone listed on the node itself, read only: the owner first, as the server orders them. */
 export function DirectAccessList({ panel, meId }: { panel: AccessPanel; meId: string | null }) {
+  // People added here whom this viewer is not shown are counted, never left
+  // to read as nobody (an SOP folder's list is for those who manage it).
+  const hidden = panel.hiddenDirect ?? 0;
+  const hiddenLine = hidden > 0 ? <p className="m-0 text-sm text-ink-2">{hiddenDirectText(hidden, panel.direct.length > 0, panel.node.kind)}</p> : null;
   if (panel.direct.length === 0) {
-    return <p className="m-0 text-sm text-ink-2">Nobody has been added here directly.</p>;
+    return hiddenLine ?? <p className="m-0 text-sm text-ink-2">Nobody has been added here directly.</p>;
   }
   return (
-    <ul className="m-0 list-none divide-y divide-line-soft p-0">
-      {panel.direct.map((e) => (
-        <AccessPersonRow key={e.person.id} person={e.person} isYou={e.person.id === meId} sub={<DirectEntrySub entry={e} showLastFull={false} />}>
-          {e.owner ? <OwnerChip /> : <RoleWord role={e.role} kind={panel.node.kind} />}
-        </AccessPersonRow>
-      ))}
-    </ul>
+    <>
+      <ul className="m-0 list-none divide-y divide-line-soft p-0">
+        {panel.direct.map((e) => (
+          <AccessPersonRow key={e.person.id} person={e.person} isYou={e.person.id === meId} sub={<DirectEntrySub entry={e} showLastFull={false} />}>
+            {e.owner ? <OwnerChip /> : <RoleWord role={e.role} kind={panel.node.kind} />}
+          </AccessPersonRow>
+        ))}
+      </ul>
+      {hiddenLine}
+    </>
   );
 }
 

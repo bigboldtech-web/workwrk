@@ -418,6 +418,12 @@ export function SELF_LOWER_CONFIRM(kind: ShareKind): { title: string; descriptio
   };
 }
 
+/** The line for people added directly whom the viewer is not shown; "more" when their own row is listed above it. */
+export function hiddenDirectText(n: number, more: boolean, kind: ShareKind): string {
+  const who = n === 1 ? "person was" : "people were";
+  return `${n} ${more ? "more " : ""}${who} added here directly. Only the people who manage this ${sentenceNoun(kind)} see who.`;
+}
+
 /** A role in the words of the kind it is on (a goal's Can check in, a team's Lead), else the ladder's. */
 function roleWords(role: PanelRole, kind?: ShareKind): string {
   return kind ? shareRoleLabel(kind, role) : panelRoleLabel(role);

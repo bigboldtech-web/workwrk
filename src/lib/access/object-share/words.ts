@@ -10,8 +10,10 @@ export function grantedNoticeText(
   objectName: string,
   role: PanelRole,
   how: "shared" | "upgraded",
+  caveat?: string,
 ): { title: string; message: string } {
   const label = shareRoleLabel(kind, role);
+  const tail = caveat ? ` ${caveat}` : "";
   if (kind === "goal") {
     return { title: `${actorName} added you as a contributor on ${objectName}`, message: "You can see the goal and check in on its targets." };
   }
@@ -21,6 +23,6 @@ export function grantedNoticeText(
   }
   return {
     title: how === "shared" ? `${actorName} shared ${objectName} with you` : `${actorName} gave you ${label} on ${objectName}`,
-    message: `${label} on this ${ACCESS_NODE_NOUN[kind]}.`,
+    message: `${label} on this ${ACCESS_NODE_NOUN[kind]}.${tail}`,
   };
 }
