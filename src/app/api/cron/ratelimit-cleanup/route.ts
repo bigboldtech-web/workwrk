@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron endpoint — trims stale rate-limit buckets.
@@ -23,14 +24,8 @@ import { prisma } from "@/lib/prisma";
  * Guard with CRON_SECRET in production.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const now = new Date();
   const minuteCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16);

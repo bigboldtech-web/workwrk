@@ -9,15 +9,13 @@ import {
 import { filterNotifyUsers } from "@/lib/notify-prefs";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
+import { cronRefusal } from "@/lib/cron-auth";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get("authorization");
-  const secret = process.env.CRON_SECRET || process.env.NEXTAUTH_SECRET;
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const { type } = await req.json().catch(() => ({ type: "all" }));
   const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";

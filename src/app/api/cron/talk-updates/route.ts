@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { cronRefusal } from "@/lib/cron-auth";
 import { isMissingUpdatesTable, processDueTalkUpdates } from "@/lib/talk-updates-server";
 
 /**
@@ -13,23 +13,15 @@ import { isMissingUpdatesTable, processDueTalkUpdates } from "@/lib/talk-updates
  * FAIL-CLOSED, like /api/cron/report-schedules: it posts into conversations
  * and sends task content to the AI provider, so with no CRON_SECRET it
  * answers 503 and runs nothing, never for whoever can reach the URL. The
- * secret is compared in constant time. The answer is counts only: no
+ * secret is compared in constant time (src/lib/cron-auth.ts, the door every
+ * scheduled job shares). The answer is counts only: no
  * workspace, conversation or person is named. The row is in
  * scripts/CRON-SETUP.md ("Scheduled AI updates in Talk"), NOT INSTALLED
  * until the founder adds it; installing it also sets TALK_UPDATES_CRON=on.
  */
-function sameSecret(a: string, b: string): boolean {
-  const x = createHash("sha256").update(a).digest();
-  const y = createHash("sha256").update(b).digest();
-  return timingSafeEqual(x, y);
-}
-
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return Response.json({ error: "CRON_SECRET is not set" }, { status: 503 });
-  const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization") ?? "";
-  const provided = header.replace(/^Bearer\s+/i, "");
-  if (!provided || !sameSecret(provided, cronSecret)) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const refused = cronRefusal(req);
+  if (refused) return refused;
   try {
     const result = await processDueTalkUpdates(new Date(), { limit: 25, budgetMs: 240_000 });
     return Response.json(result);

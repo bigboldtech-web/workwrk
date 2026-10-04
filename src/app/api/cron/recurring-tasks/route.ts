@@ -5,18 +5,13 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { spawnDueRecurringTasks } from "@/lib/recurring-tasks";
+import { cronRefusal } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
   try {
     const result = await spawnDueRecurringTasks();
     return NextResponse.json({ ran: true, at: new Date().toISOString(), ...result });

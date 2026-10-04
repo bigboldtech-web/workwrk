@@ -24,6 +24,20 @@ Editing rules:
 
 The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 
+## One secret check for every job (2026-10-05)
+
+Every endpoint in this file checks the secret the same way
+(`src/lib/cron-auth.ts`): `x-cron-secret: <secret>` or
+`Authorization: Bearer <secret>`, compared in constant time. With
+`CRON_SECRET` unset or empty in the app's environment, every one answers 503
+and runs nothing; a missing or wrong secret is a 403 (a few answered 401
+before, and `curl -fsS` fails the same way on both). Before this, 16 of the
+`/api/cron` routes ran for anybody when the secret was unset, three fell back
+to `NEXTAUTH_SECRET`, and `/api/cron/run-due-agents` let any signed-in
+workspace admin fire every workspace's agents. Production has the secret set,
+so no installed row changes. Locally, start the dev server with a
+`CRON_SECRET` and send it.
+
 ## Removed: Task SLA check
 
 `*/15 * * * * curl ... /api/tasks/run-sla-check`: **delete this row from the
@@ -339,9 +353,9 @@ so they never double-fire.
 ## Digest emails — `/api/email/send-reminders`
 
 This one endpoint runs several distinct reminder jobs selected by a
-`type` in the **JSON body**, and it authenticates with
-`Authorization: Bearer $CRON_SECRET` (NOT the `x-cron-secret` header the
-jobs above use). Because a path-only cron (e.g. the reference
+`type` in the **JSON body**, and the rows below authenticate with
+`Authorization: Bearer $CRON_SECRET` (the shared check above also accepts
+the `x-cron-secret` header the other jobs use, so either works). Because a path-only cron (e.g. the reference
 `vercel.json`) can't send a body, register these as separate aaPanel
 rows, one per `type`:
 

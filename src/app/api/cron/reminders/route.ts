@@ -6,13 +6,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fireReminder } from "@/lib/reminders";
+import { cronRefusal } from "@/lib/cron-auth";
 
 export async function POST(req: Request) {
-  const secret = process.env.CRON_SECRET || process.env.NEXTAUTH_SECRET;
-  const provided = (req.headers.get("x-cron-secret") ?? req.headers.get("authorization"))?.replace(/^Bearer\s+/i, "");
-  if (!secret || provided !== secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
   const due = await prisma.reminder.findMany({
     where: { status: "PENDING", remindAt: { lte: new Date() } },
     take: 500,

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { shouldEmail } from "@/lib/notify-prefs";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron — surfaces "you haven't checked in" nudges for OKR owners.
@@ -30,14 +31,8 @@ import { shouldEmail } from "@/lib/notify-prefs";
  * as the email-queue cron).
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const cadenceDays: Record<string, number> = {
     WEEKLY: 7,

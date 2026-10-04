@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron — nudges people who owe a KPI score. For every user with at least
@@ -21,14 +22,8 @@ import { prisma } from "@/lib/prisma";
 const DEDUPE_DAYS = 6;
 
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   // Everyone who owes a score: any KPI record still PENDING or REJECTED.
   const owed = await prisma.kPIRecord.groupBy({

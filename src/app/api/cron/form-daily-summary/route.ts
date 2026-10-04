@@ -4,6 +4,7 @@ import { readFormSettings } from "@/lib/forms/settings";
 import { dailySummaryInstalled, dailySummaryMessage } from "@/lib/forms/daily-summary";
 import { addressHref } from "@/lib/nav/object-href";
 import { usersWhoCanReadResponses } from "@/lib/access/node-access";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron endpoint: the form builder's "Send a daily summary instead" (spec-tables-
@@ -26,11 +27,8 @@ export async function POST(req: NextRequest) {
   // Fail-closed: it writes notifications into people's inboxes, so with no
   // CRON_SECRET configured it answers 503 and sends nothing, rather than
   // running for anybody who can reach the URL.
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return Response.json({ error: "CRON_SECRET is not set" }, { status: 503 });
-  const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-  const provided = header?.replace(/^Bearer\s+/i, "");
-  if (provided !== cronSecret) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   if (!dailySummaryInstalled()) return Response.json({ ok: true, skipped: "FORM_DAILY_SUMMARY_CRON is not on", formsSent: 0, notified: 0 });
 

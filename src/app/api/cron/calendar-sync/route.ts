@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { syncAllSubscriptions } from "@/services/googleCalendarSync";
 import { isGoogleEnabled } from "@/services/googleCalendar";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron — pulls deltas from every enabled inbound Google Calendar
@@ -11,14 +12,8 @@ import { isGoogleEnabled } from "@/services/googleCalendar";
  * dev environments without credentials can still schedule this cron.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
   if (!isGoogleEnabled()) {
     return Response.json({ ran: true, skipped: "google_not_configured" });
   }
