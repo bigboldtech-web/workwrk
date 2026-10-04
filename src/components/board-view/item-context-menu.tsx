@@ -178,7 +178,7 @@ export function ItemContextMenuHost({
       triggerless
       host="row"
       role={role}
-      item={{ id: target?.id ?? "", boardId: kind !== "home" ? target?.listLink?.homeList?.id ?? null : boardId, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null, parentItemId: target?.parentItemId ?? null }}
+      item={{ id: target?.id ?? "", boardId: kind !== "home" ? target?.listLink?.homeList?.id ?? null : boardId ?? target?.boardId ?? null, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null, parentItemId: target?.parentItemId ?? null }}
       isCreator={kind !== "home" ? flags?.isCreator : undefined}
       assigneeOnly={!!target && kind === "home" && !!relationOnly?.(target)}
       listContext={listContext}

@@ -529,7 +529,7 @@ export function BoardGanttView({
       {rows.length === 0 ? (
         <div className="rounded-xl border border-line bg-raised p-10 text-center">
           <div className="mb-1 text-xs font-medium text-ink">No tasks yet</div>
-          <p className="text-xs text-ink-2">Add a task below and it shows up here, ready to schedule.</p>
+          <p className="text-xs text-ink-2">Tasks in this view show up here, ready to schedule.</p>
         </div>
       ) : (
         <div className="flex items-stretch overflow-hidden rounded-xl border border-line bg-raised">

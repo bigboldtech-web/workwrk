@@ -153,7 +153,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
     return (
       <div className="rounded-lg border border-line bg-raised px-8 py-14 text-center">
         <CalendarRange className="mx-auto mb-3 h-8 w-8 text-ink-4" strokeWidth={1.5} aria-hidden />
-        <p className="text-base text-ink-2">No items yet. Schedule work with start and due dates to see the timeline.</p>
+        <p className="text-base text-ink-2">No tasks yet. Schedule work with start and due dates to see the timeline.</p>
       </div>
     );
   }

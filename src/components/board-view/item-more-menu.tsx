@@ -316,7 +316,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     canMoveElsewhere,
     assigneeOnly,
     isCreator,
-    isAgent,
+    // An Agent never deletes (rule 12): read from the session as well, so a
+    // host that does not pass it (the row, card and right-click menus) never
+    // offers an Agent a Delete the server refuses.
+    isAgent: isAgent || Boolean(bootState?.boot.viewer.isAgent),
     isGuest,
     archived,
     askAi,

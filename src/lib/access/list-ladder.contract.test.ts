@@ -147,6 +147,23 @@ describe("the task page and drawer for a rung", () => {
   });
 });
 
+describe("the List's calendar moves the date it shows", () => {
+  const cal = read("src/components/board-view/board-calendar-view.tsx");
+  it("writes the custom date field a chip is placed by, never the Due date behind it", () => {
+    expect(cal).toMatch(/dateSourceLocal === "__due" \? null\n\s+: dateSourceLocal !== "__auto" \? dateSourceLocal\n\s+: current\.dueAt \? null : firstDateFieldKey;/);
+    expect(cal).toMatch(/patch = \{ metadataPatch: \{ \[fieldKey\]: next \} \};/);
+  });
+  it("reads a date field's day as a local day", () => {
+    expect(cal).toMatch(/\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(raw\) \? new Date\(`\$\{raw\}T00:00:00`\)/);
+  });
+});
+
+describe("an Agent is never offered Delete", () => {
+  it("the menu reads the Agent flag from the session whatever its host passes", () => {
+    expect(read("src/components/board-view/item-more-menu.tsx")).toMatch(/isAgent: isAgent \|\| Boolean\(bootState\?\.boot\.viewer\.isAgent\),/);
+  });
+});
+
 describe("a raise writes and reports what it gave", () => {
   it("the grant writer and the request route both use the written role", () => {
     const grants = read("src/lib/access/grants.ts");
