@@ -1,11 +1,16 @@
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const orgId = getOrgId(session);
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
 
   const { title, context } = await req.json();

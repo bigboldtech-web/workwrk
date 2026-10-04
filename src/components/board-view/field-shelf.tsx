@@ -35,6 +35,9 @@ import {
 import { isConnectField, isMirrorField } from "@/lib/list-connect";
 import { ComingSoonRow, UpcomingOnly, useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { ConnectFieldConfig, fieldConfigMessage } from "./connect-field-config";
+import { AiFieldSetup } from "./ai-field-setup";
+import { useAiFieldsAvailable } from "./ai-field-value";
+import { isAiFieldType, type AiFieldType } from "@/lib/ai-fields";
 
 const CHOICE_TYPES: ReadonlySet<string> = new Set(["DROPDOWN", "MULTI_SELECT", "LABELS", "TSHIRT_SIZE", "CUSTOM_DROPDOWN"]);
 
@@ -142,6 +145,11 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
   // Phase 5b: a Connect or Mirror column is configured before it exists (and
   // an existing one is edited in the same form), in place of the tabs.
   const [config, setConfig] = useState<{ mode: "connect" | "mirror"; existing?: FieldDef; label?: string } | null>(null);
+  // Batch 8: an AI field is set up (and edited) in its own form, and only
+  // while the workspace has turned AI fields on; otherwise its tiles stay
+  // exactly as they were (absent, or Coming soon behind Show upcoming).
+  const aiOn = useAiFieldsAvailable();
+  const [aiSetup, setAiSetup] = useState<{ type: AiFieldType; existing?: FieldDef; label?: string } | null>(null);
 
   const showUpcoming = useShowUpcoming();
   const hidden = useMemo(() => new Set(hiddenFields ?? []), [hiddenFields]);
@@ -208,6 +216,11 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
   // A tile (or a suggestion) that needs configuring opens its form; every
   // other one creates its field at once, exactly as before.
   const pickEntry = (entry: FieldCatalogEntry, label: string) => {
+    if (aiOn && isAiFieldType(entry.type)) {
+      setError(null);
+      setAiSetup({ type: entry.type, label: label === entry.label ? undefined : label });
+      return;
+    }
     if (entry.needsConfig) {
       setError(null);
       setConfig({ mode: entry.type === "MIRROR" ? "mirror" : "connect", label: label === entry.label ? undefined : label });
@@ -292,10 +305,13 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
     onRename: (label: string) => patchField(f.key, { label }),
     onOptionsChange: (choices: FieldChoice[]) => patchField(f.key, { options: { ...(f.options ?? {}), choices } }),
     onRemove: () => removeField(f.key),
-    // A Connect or Mirror column opens the same form it was built with.
+    // A Connect or Mirror column opens the same form it was built with, and
+    // so does an AI field while AI fields are on.
     onConfigure: isConnectField(f) || isMirrorField(f)
       ? () => { setError(null); setConfig({ mode: isMirrorField(f) ? "mirror" : "connect", existing: f }); }
-      : undefined,
+      : aiOn && isAiFieldType(f.type)
+        ? () => { setError(null); setAiSetup({ type: f.type as AiFieldType, existing: f }); }
+        : undefined,
     dragging: dragKey === f.key,
     dragOver: dragOverKey === f.key,
     onDragStart: () => setDragKey(f.key),
@@ -370,6 +386,16 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
                   onSaved={async () => { await refetchFields(); setConfig(null); }}
                   onSwitchToConnect={() => setConfig({ mode: "connect" })}
                 />
+              ) : aiSetup ? (
+                <AiFieldSetup
+                  key={`${aiSetup.type}:${aiSetup.existing?.key ?? "new"}`}
+                  boardId={boardId}
+                  type={aiSetup.type}
+                  existing={aiSetup.existing ?? null}
+                  initialLabel={aiSetup.label}
+                  onCancel={() => setAiSetup(null)}
+                  onSaved={async () => { await refetchFields(); setAiSetup(null); }}
+                />
               ) : tab === "create" ? (
                 !customFieldsEnabled ? (
                   <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
@@ -394,7 +420,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
                   </div>
                 ) : (
                 /* Create new: the field-type catalog only (Popular + All). */
-                <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={pickEntry} />
+                <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} aiOn={aiOn} onPick={pickEntry} />
                 )
               ) : (
                 /* Add existing — ClickUp's Shown / Properties / Custom-Fields model. */
@@ -507,6 +533,7 @@ function CreateNewTab({
   catalog,
   busy,
   canEdit,
+  aiOn,
   onPick,
 }: {
   boardId: string;
@@ -514,6 +541,8 @@ function CreateNewTab({
   catalog: FieldCatalogEntry[];
   busy: boolean;
   canEdit: boolean;
+  /** Batch 8: the workspace turned AI fields on, so the four AI tiles are real. */
+  aiOn: boolean;
   /** The WHOLE entry, never its type alone: the Connect tile and the doc-link
    *  Relationship tile share a type and must never create each other's field. */
   onPick: (entry: FieldCatalogEntry, label: string) => void;
@@ -535,7 +564,9 @@ function CreateNewTab({
 
   // A type with no renderer yet (tier1:false) is absent, or a ComingSoonRow
   // behind Show upcoming features; never a disabled tile (spec-shell 1.15).
-  const Row = (e: FieldCatalogEntry) => !e.tier1 ? (
+  // The AI tiles are real while the workspace has AI fields on.
+  const live = (e: FieldCatalogEntry) => e.tier1 || (aiOn && isAiFieldType(e.type));
+  const Row = (e: FieldCatalogEntry) => !live(e) ? (
     <UpcomingOnly key={tileKey(e)}><li><ComingSoonRow label={e.label} icon={e.Icon} className="h-8 px-2" /></li></UpcomingOnly>
   ) : (
     <li key={tileKey(e)}>
@@ -548,7 +579,7 @@ function CreateNewTab({
       >
         <e.Icon className="w-4 h-4 shrink-0" style={{ color: e.color }} />
         <span className="text-xs flex-1 truncate">{e.label}</span>
-        {e.tier1 ? (
+        {live(e) ? (
           <span className="text-xs text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
             <Plus className="w-3 h-3" /> Create
           </span>

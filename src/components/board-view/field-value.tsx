@@ -6,8 +6,10 @@
 //
 // Phase 3f wires editors for Tier 1 types (TEXT, LONG_TEXT, NUMBER,
 // DATE, DATETIME, DROPDOWN, MULTI_SELECT, CHECKBOX, LABELS,
-// TSHIRT_SIZE, URL, EMAIL, PHONE, MONEY, PERCENT, RATING). Tier 2 /
-// AI types render as a muted "—" placeholder until Phase 4+.
+// TSHIRT_SIZE, URL, EMAIL, PHONE, MONEY, PERCENT, RATING). Tier 2 types
+// render as a muted placeholder. The four AI types (Batch 8) render through
+// AiFieldValue (./ai-field-value.tsx): their value, and Fill with AI only
+// while the workspace has turned AI fields on.
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Frame } from "lucide-react";
@@ -19,6 +21,8 @@ import Link from "next/link";
 import { useObjectHref } from "@/components/layout/os/use-object-href";
 import { isConnectField, isMirrorField, type ConnectionRef, type MirrorValue as MirrorData } from "@/lib/list-connect";
 import { ConnectValue, MirrorValue, type CommitResult } from "./connect-field-value";
+import { AiFieldValue } from "./ai-field-value";
+import type { AiFieldValue as AiValue } from "@/lib/ai-fields";
 
 // Cell-picker dropdown. Uses position:fixed (via useAnchorPos) so it escapes the
 // table's horizontal-scroll container — otherwise the menu is clipped at the
@@ -266,6 +270,11 @@ interface FieldValueProps {
    * rows), because that glyph must never be visible copy on a form.
    */
   emptyLabel?: string;
+  // ── Batch 8, the four AI types (src/lib/ai-fields.ts) ───────────────
+  /** "row" in the task detail (the value in full, with its actions); a table cell otherwise. */
+  aiLayout?: "cell" | "row";
+  /** A fill's value for the host's own copy of the row. */
+  onAiFilled?: (value: AiValue) => void;
 }
 
 /** The long-standing empty placeholder of table cells and drawer rows. */
@@ -351,6 +360,22 @@ export function FieldValue(props: FieldValueProps) {
       return <VotingValue value={value} readOnly={readOnly} onChange={onChange} currentUserId={currentUserId ?? null} />;
     case "FILES":
       return <FilesValue value={value} />;
+    case "SUMMARY":
+    case "SENTIMENT":
+    case "CATEGORIZE":
+    case "TRANSLATION":
+      return (
+        <AiFieldValue
+          field={field}
+          value={value}
+          editable={!readOnly}
+          itemId={props.itemId ?? null}
+          fieldListId={props.fieldListId ?? boardId}
+          layout={props.aiLayout ?? "cell"}
+          onChange={onChange}
+          onFilled={props.onAiFilled}
+        />
+      );
     default:
       return <span className="text-xs text-zinc-500">—</span>;
   }

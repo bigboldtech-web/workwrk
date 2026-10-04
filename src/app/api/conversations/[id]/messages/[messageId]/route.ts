@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
 import { canPost } from "@/lib/talk-access";
+import { serveAiUpdate } from "@/lib/talk-updates";
 
 // Edit and delete your OWN messages. Deletes are soft (deletedAt): the
 // row keeps its place so threads and history stay coherent, and the body
@@ -37,12 +38,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!text) return jsonError("Message can't be empty", 400);
   if (text.length > MAX_BODY) return jsonError("Message is too long", 400);
 
-  const message = await prisma.conversationMessage.update({
-    where: { id: messageId },
-    data: { body: text, editedAt: new Date() },
-    include: { author: { select: AUTHOR_SELECT } },
-  });
-  return jsonSuccess({ message });
+  // An AI update a person edits is no longer the AI's words (Batch 8): it
+  // stops saying so, and keeps its reader list, so what it was posted from
+  // still reaches only the people it was checked against. The kind changes
+  // in the database, in one statement, so a reaction saved at the same
+  // moment (which rewrites metadata too) is never lost.
+  const [, message] = await prisma.$transaction([
+    prisma.$executeRaw`
+      UPDATE "ConversationMessage"
+      SET "metadata" = jsonb_set("metadata", '{kind}', '"ai_update_edited"'::jsonb)
+      WHERE "id" = ${messageId} AND "metadata" ->> 'kind' = 'ai_update'`,
+    prisma.conversationMessage.update({
+      where: { id: messageId },
+      data: { body: text, editedAt: new Date() },
+      include: { author: { select: AUTHOR_SELECT } },
+    }),
+  ]);
+  return jsonSuccess({ message: serveAiUpdate(message, userId) });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
@@ -63,5 +75,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (own.parentId) {
     await prisma.conversationMessage.update({ where: { id: own.parentId }, data: { updatedAt: new Date() } }).catch(() => {});
   }
-  return jsonSuccess({ message });
+  // Served as every read serves a removed message: no words, no metadata
+  // (an AI update's reader list never leaves the server).
+  return jsonSuccess({ message: { ...message, body: "", metadata: null } });
 }

@@ -70,7 +70,7 @@ type ConvoLite = {
   unreadCount: number;
   memberCount?: number;
   members?: { userId: string; user: ChatUserLite }[];
-  lastMessage?: { body: string; authorId: string; createdAt: string } | null;
+  lastMessage?: { body: string; authorId: string; createdAt: string; metadata?: { kind?: string } | null } | null;
 };
 
 type ThreadRow = {
@@ -289,7 +289,10 @@ export default function TalkHomePage() {
                   <span className="shrink-0 text-xs text-ink-3">{fmt.date(c.lastMessageAt, "smart")}</span>
                 </span>
                 <span className="flex items-center gap-2 ps-8">
-                  <span className="flex-1 truncate text-sm text-ink-2">{c.lastMessage?.body || "No messages yet"}</span>
+                  <span className="flex-1 truncate text-sm text-ink-2">
+                    {/* An AI update this reader was not checked against carries no words (Batch 8). */}
+                    {c.lastMessage?.metadata?.kind === "ai_update_hidden" ? "AI update" : c.lastMessage?.body || "No messages yet"}
+                  </span>
                   {read ? null : <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">{c.unreadCount}</span>}
                 </span>
               </button>

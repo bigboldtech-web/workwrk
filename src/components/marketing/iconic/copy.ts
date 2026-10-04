@@ -160,8 +160,9 @@ export const LEGAL_COPY = {
     // residency promise, a usage-telemetry disclosure and a per-workspace
     // embeddings sentence were all removed as unevidenced. A reader and a
     // regulator both read this field as the date the disclosure in force was
-    // written, so it moves whenever the document does.
-    updated: "22 September 2026",
+    // written, so it moves whenever the document does. 4 October 2026:
+    // section 3 says when content is sent on a schedule (Batch 8).
+    updated: "4 October 2026",
   },
   terms: {
     eyebrow: "Terms",

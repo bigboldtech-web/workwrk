@@ -14,6 +14,7 @@
 
 import { CSV_BOM, csvLine, type CsvCell } from "@/lib/csv";
 import type { FieldDef } from "@/lib/field-catalog";
+import { aiValueText, isAiFieldType } from "@/lib/ai-fields";
 
 type Obj = Record<string, unknown>;
 
@@ -108,7 +109,10 @@ export function fieldValues(fields: readonly FieldDef[], values: Obj): Obj {
     const name = (uses.get(fieldName(f)) ?? 0) > 1 ? `${fieldName(f)} (${f.key})` : fieldName(f);
     const choices = Array.isArray(f.options?.choices) ? f.options!.choices! : [];
     const label = (v: unknown) => (typeof v === "string" ? choices.find((c) => c?.value === v)?.label ?? v : v);
-    out[name] = ONE_CHOICE.has(f.type) ? label(raw) : MANY_CHOICES.has(f.type) && Array.isArray(raw) ? raw.map(label) : raw;
+    // An AI field (Batch 8) as its words (the category's name, the
+    // sentiment, the text); its full stored value rides in the JSON copy.
+    const ai = isAiFieldType(f.type) ? aiValueText(f, raw) : null;
+    out[name] = ai ?? (ONE_CHOICE.has(f.type) ? label(raw) : MANY_CHOICES.has(f.type) && Array.isArray(raw) ? raw.map(label) : raw);
   }
   return out;
 }

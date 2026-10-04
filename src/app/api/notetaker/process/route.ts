@@ -21,6 +21,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -69,6 +70,11 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body", issues: parsed.error.issues }, { status: 400 });
+
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no model call, as the switch's helper says ("Off hides every AI entry point").
+  const aiOff = await aiOffResponse(user.organizationId);
+  if (aiOff) return aiOff;
 
   const resolved = await getAnthropicForOrg(user.organizationId);
   const model = modelFor(resolved, MODEL);

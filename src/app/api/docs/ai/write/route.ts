@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const schema = z.object({
   prompt: z.string().min(2).max(4000),
@@ -36,6 +37,10 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return jsonError("invalid body", 400);
   const { prompt, tone } = parsed.data;
 
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const resolved = await getAnthropicForOrg(orgId);
   const model = modelFor(resolved, "claude-haiku-4-5");
 

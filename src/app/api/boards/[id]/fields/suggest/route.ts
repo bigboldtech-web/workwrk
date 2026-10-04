@@ -13,6 +13,7 @@ import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { getBoardFields } from "@/lib/board-fields";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { prisma } from "@/lib/prisma";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 // Types the suggester may pick — the everyday, real-rendering ones.
 const ALLOWED_TYPES = new Set([
@@ -48,6 +49,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   ]);
   const existingLabels = existing.map((f) => f.label);
   const boardName = meta?.name ?? "Untitled list";
+
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no model call, as the switch's helper says ("Off hides every AI entry point").
+  // The panel asks on every visit, so it is told "no suggestions", never an error.
+  if (await aiOffResponse(c.organizationId)) return NextResponse.json({ suggestions: [] });
 
   try {
     const { client, preferredModel } = await getAnthropicForOrg(c.organizationId);

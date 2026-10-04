@@ -123,6 +123,36 @@ nothing, because it mails people. It needs prisma/sql/2026-09-24-phase5b-data.sq
 |---|---|---|
 | Scheduled email reports | `*/5 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/report-schedules` |
 
+## Scheduled AI updates in Talk (NOT INSTALLED: the founder adds this row)
+
+`POST /api/cron/talk-updates` posts the scheduled AI updates (Batch 8): a
+Daily standup or a Weekly project update that AI writes from one List or one
+Space, posted into a private channel or a group chat as the person who set it
+up. Every five minutes it takes the updates whose next instant has arrived,
+claims each instant with one compare-and-swap (an overlapping or retried tick
+posts nothing twice), skips a slot more than three hours late rather than
+posting at an odd hour, and lists only the tasks that the person who set it
+up AND every member of the conversation can open, recomputed at every run.
+A conversation with a Guest in it, a public channel, or a workspace with
+"Scheduled AI updates in Talk" off gets no post. The answer is counts only.
+Added in Batch 8 (2026-10-04).
+
+**Install it in two steps, together**: add the row below, AND set
+`TALK_UPDATES_CRON=on` in the app's `.env` (then reload pm2). The app cannot
+see the crontab, so that flag is how the Details panel says whether updates
+post on their schedule; until it is on, the panel says they post only with
+Post now.
+
+**It is fail-closed**: with `CRON_SECRET` unset it answers 503 and runs
+nothing, because it posts into conversations and sends task content to the
+AI provider. The secret is compared in constant time. It needs
+prisma/sql/2026-10-04-ai-fields-and-updates.sql (in the deploy manifest);
+before that file is applied it answers 503 `not_ready` and does nothing.
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Scheduled AI updates in Talk | `*/5 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/talk-updates` |
+
 ## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
 
 `POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people

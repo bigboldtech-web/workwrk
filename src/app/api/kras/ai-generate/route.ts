@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 /** The parts of Organization.settings this prompt reads. */
 interface OrgSettingsForKras {
@@ -14,6 +15,10 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
   const { jobTitle, jobDescription } = await req.json();
 

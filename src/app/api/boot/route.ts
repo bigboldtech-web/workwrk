@@ -16,6 +16,7 @@
 // boot screen renders as ErrorState, never a trip to /onboard.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
+import { aiFieldsOn, aiTalkUpdatesOn } from "@/lib/ai/ai-features";
 import { accessV2Tables, appGatesEnforce, delegateOn } from "@/lib/access/flags";
 import { settingsReaderPagesFor } from "@/lib/access/settings-door";
 import { mayCreateSpace } from "@/lib/access/space-create";
@@ -191,6 +192,14 @@ export interface BootPayload {
      * surface keeps the one it has. Optional for an older payload (read as off).
      */
     objectShare?: boolean;
+    /**
+     * The workspace turned on AI fields in Lists (settings.data.aiFields,
+     * with AI features for everyone on; src/lib/ai/ai-features.ts). Sent
+     * only while on, so the boot JSON is today's for every other workspace.
+     */
+    aiFields?: boolean;
+    /** The workspace turned on scheduled AI updates in Talk; sent only while on. */
+    aiTalkUpdates?: boolean;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -483,6 +492,8 @@ export async function GET(req: NextRequest) {
         taskPublicLinks: orgPublicLinksTurnedOn(settings),
         // Sent only while it is on, so the boot JSON is today's with it off.
         ...(accessV2Tables() ? { objectShare: true } : {}),
+        ...(aiFieldsOn(settings) ? { aiFields: true } : {}),
+        ...(aiTalkUpdatesOn(settings) ? { aiTalkUpdates: true } : {}),
       },
       counts: cf.counts,
       timer,

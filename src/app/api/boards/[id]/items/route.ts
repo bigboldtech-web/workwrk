@@ -24,6 +24,7 @@ import { fieldKeySets } from "@/lib/list-connect";
 import { validateConnectWrites } from "@/lib/list-connect-server";
 import { applyMetadataPatch, checkHomeMetadataKeys, isReservedMetadataKey, routeMetadataPatch } from "@/lib/list-metadata";
 import { linkedListsOf } from "@/lib/list-links-server";
+import { normalizeAiWrites } from "@/lib/ai-fields";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -119,12 +120,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   // ── Phase 5b: the metadata this create may carry ────────────────────
-  const submitted = parsed.data.metadata ?? {};
-  const reserved = Object.keys(submitted).find(isReservedMetadataKey);
+  const submittedRaw = parsed.data.metadata ?? {};
+  const reserved = Object.keys(submittedRaw).find(isReservedMetadataKey);
   if (reserved) return NextResponse.json({ error: "reserved_key", key: reserved }, { status: 400 });
   const listRow = await prisma.board.findUnique({ where: { id }, select: { schema: true } });
   const listFields = parseBoardSchema(listRow?.schema).fields;
   const listKeys = fieldKeySets(listFields);
+  // Batch 8: nothing is created looking filled by AI; only the fill writes
+  // source "ai" (src/lib/ai-fields.ts normalizeAiWrites, lenient: every other
+  // value goes through exactly as before).
+  const aiSafe = normalizeAiWrites(submittedRaw, { fields: listFields, stored: {}, actorId: c.userId, now: new Date().toISOString(), strict: false });
+  const submitted = aiSafe.ok ? aiSafe.patch : submittedRaw;
 
   // A subtask under a task that is LINKED into this List is created on the
   // parent's HOME List (a subtask belongs to its parent), and so it needs

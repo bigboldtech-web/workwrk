@@ -146,6 +146,8 @@ export function describeItemActivity(
     }
     case "FIELDS_UPDATED": {
       const fields = strList(meta.fields);
+      // Batch 8: Fill with AI writes as the person who asked, and says so.
+      if (meta.via === "ai") return fields.length === 0 ? "filled a field with AI" : `filled ${joinNames(fields)} with AI`;
       if (fields.length === 0) return "updated fields";
       return `updated ${joinNames(fields)}`;
     }

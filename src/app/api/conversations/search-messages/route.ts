@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { talkGate } from "@/lib/talk-gate";
+import { aiUpdateHiddenFor } from "@/lib/talk-updates";
 
 // Message search across MY conversations. One indexed-join query, capped.
 //
@@ -34,8 +35,19 @@ export async function GET(req: NextRequest) {
   if (!filtered && q.length < 2) return jsonError("Type at least 2 characters", 400);
   if (q.length > 200) return jsonError("Query too long", 400);
 
-  const rows = await prisma.conversationMessage.findMany({
+  // Paged past AI updates this person was not checked against (Batch 8):
+  // they are dropped before the first 20 are counted, so a hidden post never
+  // takes a visible match's place, and how many results come back says
+  // nothing about what is hidden.
+  const searchOrg = gate.organizationId;
+  const searcher = gate.userId;
+  const pageSize = filesOnly ? 120 : 40;
+  const wanted = filesOnly ? 120 : 20;
+  type Found = Awaited<ReturnType<typeof findPage>>[number];
+  async function findPage(cursor: { createdAt: Date; id: string } | null) {
+    return prisma.conversationMessage.findMany({
     where: {
+      ...(cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : {}),
       deletedAt: null,
       ...(q.length >= 2 ? { body: { contains: q, mode: "insensitive" as const } } : {}),
       ...(from ? { authorId: from } : {}),
@@ -45,13 +57,13 @@ export async function GET(req: NextRequest) {
       // below drops the ones whose metadata holds only mentions.
       ...(filesOnly ? { metadata: { not: Prisma.DbNull } } : {}),
       conversation: {
-        organizationId: gate.organizationId,
-        members: { some: { userId: gate.userId } },
+        organizationId: searchOrg,
+        members: { some: { userId: searcher } },
         ...(conversationId ? { id: conversationId } : {}),
       },
     },
-    orderBy: { createdAt: "desc" },
-    take: filesOnly ? 120 : 20,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: pageSize,
     select: {
       id: true,
       body: true,
@@ -72,6 +84,16 @@ export async function GET(req: NextRequest) {
       },
     },
   });
+  }
+  const rows: Found[] = [];
+  let cursor: { createdAt: Date; id: string } | null = null;
+  for (let page = 0; page < 6 && rows.length < wanted; page += 1) {
+    const got = await findPage(cursor);
+    for (const r of got) if (!aiUpdateHiddenFor(r.metadata, searcher)) rows.push(r);
+    if (got.length < pageSize) break;
+    const last = got[got.length - 1];
+    cursor = { createdAt: last.createdAt, id: last.id };
+  }
 
   const results = rows
     .filter((r) => {

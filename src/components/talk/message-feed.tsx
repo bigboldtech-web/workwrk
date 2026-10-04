@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
-  Smile, Trash2, Video, X,
+  Smile, Sparkles, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
 import { Dots } from "@/components/ui/dots";
@@ -42,6 +42,9 @@ export type FeedMessage = {
     names?: string[];
     endedAt?: string;
     durationMin?: number;
+    /// Batch 8: a scheduled AI update (kind "ai_update"), written by AI and
+    /// posted as the person who set it up. Only the server writes this kind.
+    update?: { id?: string; kind?: string; scope?: string; tasks?: number };
   } | null;
   author: ChatUserLite;
   /** Client-only send states. */
@@ -99,6 +102,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
     let prevDay = "";
     let prevAuthor = "";
     let prevTime = 0;
+    let prevAi = false;
     for (const m of messages) {
       const d = new Date(m.createdAt);
       // The divider buckets by the VIEWER'S day, from the same preference the
@@ -113,10 +117,15 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
         prevAuthor = "";
       }
       const t = d.getTime();
-      const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000;
+      // An AI update (Batch 8) always heads its own group, and the person's
+      // next message after one does too, so the "AI update" label is never
+      // folded into, or over, words the person wrote themselves.
+      const ai = m.metadata?.kind === "ai_update" || m.metadata?.kind === "ai_update_hidden";
+      const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000 || ai || prevAi;
       out.push({ kind: "msg", key: m.id, msg: m, head });
       prevAuthor = m.authorId;
       prevTime = t;
+      prevAi = ai;
     }
     return out;
   }, [messages, fmtDate, prefs, showDayDividers]);
@@ -209,10 +218,18 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // somebody their conversation.
   const author = msg.author ?? { id: msg.authorId, firstName: "Someone", lastName: "", avatar: null };
   const isCall = msg.metadata?.kind === "call";
+  // Batch 8: said plainly on the post itself, so nobody reads AI words as a
+  // person's own (src/lib/talk-updates.ts).
+  const aiUpdate = msg.metadata?.kind === "ai_update" ? msg.metadata.update ?? {} : null;
+  // An update this reader was not checked against arrives with no words
+  // (src/lib/talk-updates.ts serveAiUpdate); an edited one is the person's.
+  const aiHidden = msg.metadata?.kind === "ai_update_hidden";
+  const aiEdited = msg.metadata?.kind === "ai_update_edited";
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
-  const canAct = !deleted && !msg.pending && !msg.failed;
+  // Nothing to react to, copy or reply about in an update this reader cannot read.
+  const canAct = !deleted && !msg.pending && !msg.failed && !aiHidden;
 
   const saveEdit = () => {
     const trimmed = draft.trim();
@@ -240,6 +257,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             <span className="text-base font-semibold text-ink-strong">
               {mine ? "You" : `${author.firstName} ${author.lastName}`.trim()}
             </span>
+            {aiUpdate || aiHidden ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--os-brand-deep)]">
+                <Sparkles className="h-3 w-3" aria-hidden /> AI update
+              </span>
+            ) : null}
             <span className="text-xs text-ink-3 tabular-nums">{time}</span>
           </div>
         )}
@@ -302,6 +324,9 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           </div>
         ) : (
           <>
+            {aiHidden && !deleted ? (
+              <p className="text-sm leading-6 text-ink-3">This AI update was written for the people who were here when it was posted.</p>
+            ) : null}
             {(msg.body || deleted) && (
               deleted ? (
                 <p className="text-base leading-6 italic text-ink-3">Message removed</p>
@@ -309,6 +334,14 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 <div className={`text-ink ${msg.pending ? "opacity-60" : ""}`}>
                   <RichBody body={msg.body} memberNames={memberNames} />
                   {msg.editedAt && <span className="ml-1 text-xs text-ink-3">(edited)</span>}
+                  {aiUpdate ? (
+                    <p className="mt-1 text-xs text-ink-3">
+                      Written by AI for {mine ? "you" : author.firstName || "the person who set it up"}
+                      {typeof aiUpdate.tasks === "number" ? ` from ${aiUpdate.tasks} ${aiUpdate.tasks === 1 ? "task" : "tasks"}` : ""} that everyone here could open when it was posted.
+                    </p>
+                  ) : aiEdited ? (
+                    <p className="mt-1 text-xs text-ink-3">Edited from an AI update.</p>
+                  ) : null}
                 </div>
               )
             )}

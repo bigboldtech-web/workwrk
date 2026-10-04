@@ -79,6 +79,30 @@ export async function talkGate(): Promise<GateResult> {
   };
 }
 
+/**
+ * The same gate for a person who is NOT at the keyboard: a scheduled AI
+ * update posting as the person who set it up (src/lib/talk-updates-server.ts).
+ * The Talk module, then the person's org role read from their row, never
+ * from a session. "person_gone" when they are not a live member of this
+ * workspace (removed, deactivated, or in another one).
+ */
+export async function talkGateForUser(
+  userId: string,
+  organizationId: string,
+): Promise<{ ok: true; gate: TalkGate } | { ok: false; reason: "talk_off" | "person_gone" }> {
+  if (!(await isModuleActive(organizationId, TALK_MODULE_SLUG))) return { ok: false, reason: "talk_off" };
+  const row = await prisma.user.findFirst({
+    where: { id: userId, organizationId, deletedAt: null, status: { not: "INACTIVE" } },
+    select: { id: true, accessLevel: true },
+  });
+  if (!row) return { ok: false, reason: "person_gone" };
+  const accessLevel = row.accessLevel ?? "EMPLOYEE";
+  return {
+    ok: true,
+    gate: { userId: row.id, organizationId, orgRole: orgRoleOf({ accessLevel }) as TalkOrgRole, accessLevel },
+  };
+}
+
 export interface ConversationContext {
   conversation: TalkConversationFacts & {
     id: string;

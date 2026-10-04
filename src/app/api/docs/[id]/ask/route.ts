@@ -11,6 +11,7 @@ import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-he
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MAX_DOC_CHARS = 200_000;
 
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const text = extractDocText(doc.content);
   const trimmed = text.length > MAX_DOC_CHARS ? text.slice(0, MAX_DOC_CHARS) : text;
 
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const resolved = await getAnthropicForOrg(orgId);
   const model = modelFor(resolved, "claude-haiku-4-5");
 

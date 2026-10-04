@@ -66,6 +66,9 @@ import { decideContext, validateLinkedStatus } from "@/lib/list-links";
 import { linkedListsOf, listReader, readableItemsVia, type LinkRow, type ReadableList } from "@/lib/list-links-server";
 import { projectItemForViewer, redactFieldsForViewer } from "@/lib/board-items-view";
 import { BUILT_IN_FIELD_KEYS, fieldChanges } from "@/lib/automation/field-changes";
+import { linkedContextFor } from "@/lib/item-context";
+import { isAiFieldType, normalizeAiWrites } from "@/lib/ai-fields";
+import { aiFieldsOn } from "@/lib/ai/ai-features";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
 
@@ -83,31 +86,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   } catch (err) {
     return itemServerError(err, `GET /api/items/${id}`);
   }
-}
-
-/**
- * The linked context a request asked for, when it is one: a List the task
- * (or its top-level ancestor on the same home) is linked into and the caller
- * can read. Null for the home and for anything else, which the caller answers
- * as it decides (GET: as if absent; PATCH: invalid_context).
- */
-async function linkedContextFor(
-  gate: ItemGateOk,
-  requested: string | null | undefined,
-  c: Ctx,
-): Promise<{ list: ReadableList; link: LinkRow; rootId: string } | "home" | "invalid"> {
-  if (!requested || requested === gate.item.boardId) return "home";
-  const { rootId, links } = await linkedListsOf(gate.item);
-  const link = links.find((l) => l.boardId === requested) ?? null;
-  const list = link ? await listReader(c).row(requested) : null;
-  const kind = decideContext({
-    requested,
-    homeBoardId: gate.item.boardId,
-    linkedBoardIds: links.map((l) => l.boardId),
-    requestedReadable: !!list,
-  });
-  if (kind === "linked" && link && list) return { list, link, rootId };
-  return kind === "home" ? "home" : "invalid";
 }
 
 async function readItem(id: string, c: Ctx, requestedList: string | null) {
@@ -460,14 +438,27 @@ function metadataWriter(args: {
   metadataPatch?: Json;
   metadata?: Json;
   watcherIds?: string[];
+  /** One time for the whole request, so every re-run stamps the same value. */
+  now: string;
+  /** The workspace has AI fields on (src/lib/ai/ai-features.ts): AI values are checked and stamped. */
+  aiStrict: boolean;
 }) {
   const keys = fieldKeySets(args.fields);
+  // Batch 8: a write to one of this List's AI fields is a person's
+  // correction, checked and stamped as theirs (src/lib/ai-fields.ts); a value
+  // the client only re-sent stays exactly as stored.
+  const aiChecked = (patch: Json, place: Json): Json => {
+    const r = normalizeAiWrites(patch, { fields: args.fields, stored: place, actorId: args.c.userId, now: args.now, strict: args.aiStrict });
+    if (!r.ok) throw new Refusal(400, { error: r.error, key: r.key });
+    return r.patch;
+  };
   return async (stored: Json): Promise<Json> => {
     let next: Json = stored;
     if (args.linkedListId) {
       if (args.metadataPatch) {
         const routed = routeMetadataPatch(args.metadataPatch, { definedKeys: keys.stored, mirrorKeys: keys.mirror });
         if (!routed.ok) throw new Refusal(400, { error: routed.error, key: routed.key });
+        routed.ns = aiChecked(routed.ns, readNamespace(stored, args.linkedListId));
         const connect = await validateConnectWrites(args.c, args.fields, routed.ns, {
           stored: readNamespace(stored, args.linkedListId),
           selfId: args.itemId,
@@ -483,17 +474,19 @@ function metadataWriter(args: {
     } else if (args.metadataPatch) {
       const refused = checkHomeMetadataKeys(Object.keys(args.metadataPatch), keys.mirror);
       if (refused) throw new Refusal(400, { error: refused.error, key: refused.key });
-      const connect = await validateConnectWrites(args.c, args.fields, args.metadataPatch, { stored, selfId: args.itemId });
+      const patch = aiChecked(args.metadataPatch, stored);
+      const connect = await validateConnectWrites(args.c, args.fields, patch, { stored, selfId: args.itemId });
       if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
-      next = applyMetadataPatch(stored, { top: { ...args.metadataPatch, ...connect.values }, topConnectKeys: new Set(connect.keys) });
+      next = applyMetadataPatch(stored, { top: { ...patch, ...connect.values }, topConnectKeys: new Set(connect.keys) });
     } else if (args.metadata) {
       const refused = checkHomeMetadataKeys(Object.keys(args.metadata), keys.mirror);
       if (refused) throw new Refusal(400, { error: refused.error, key: refused.key });
-      const connect = await validateConnectWrites(args.c, args.fields, args.metadata, { stored, selfId: args.itemId });
+      const blob = aiChecked(args.metadata, stored);
+      const connect = await validateConnectWrites(args.c, args.fields, blob, { stored, selfId: args.itemId });
       if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
       // The whole-blob save keeps what the writer never saw: every "$" key,
       // and every connect value their projection hid.
-      next = mergeWholesaleMetadata(stored, { ...args.metadata, ...connect.values }, {
+      next = mergeWholesaleMetadata(stored, { ...blob, ...connect.values }, {
         keepKeys: hiddenFromHomeProjection(stored, keys.connect),
         topConnectKeys: new Set(connect.keys),
       });
@@ -674,15 +667,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // ── Phase 5b: the metadata write, as a function of the stored value ──
   const wantsMetadata = parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined;
+  const writerFields = wantsMetadata ? (linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId)) : [];
+  // Batch 8: whether AI-typed values are checked and stamped, read only when
+  // this write touches one (src/lib/ai-fields.ts normalizeAiWrites).
+  const touchedKeys = [...Object.keys(parsed.data.metadataPatch ?? {}), ...Object.keys(parsed.data.metadata ?? {})];
+  const touchesAi = touchedKeys.some((k) => writerFields.some((f) => f.key === k && isAiFieldType(f.type)));
+  const aiStrict = touchesAi
+    ? aiFieldsOn((await prisma.organization.findUnique({ where: { id: c.organizationId }, select: { settings: true } }))?.settings)
+    : false;
   const writer = wantsMetadata
     ? metadataWriter({
         c,
         itemId: id,
         linkedListId: linkedCtx ? linkedCtx.list.id : null,
-        fields: linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId),
+        fields: writerFields,
         metadataPatch: parsed.data.metadataPatch,
         metadata: parsed.data.metadata,
         watcherIds: parsed.data.watcherIds,
+        now: new Date().toISOString(),
+        aiStrict,
       })
     : null;
   if (writer) {

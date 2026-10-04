@@ -138,3 +138,19 @@ describe("rowColorFor", () => {
     expect(rowColorFor(linked, rules, () => "DONE")).toBe("green");
   });
 });
+
+describe("custom field values (Batch 8)", () => {
+  it("reads every value that is not an AI value exactly as before", () => {
+    // A doc-link Relationship stores { kind, id }: it is set.
+    const linked = row({ metadata: { rel: { kind: "DOC", id: "d1" } } });
+    expect(matchesRule(linked, rule("field:rel", "isSet"))).toBe(true);
+    expect(matchesRule(linked, rule("field:rel", "isNotSet"))).toBe(false);
+    expect(matchesRule(row({ metadata: {} }), rule("field:rel", "isSet"))).toBe(false);
+  });
+
+  it("reads an AI value by its words", () => {
+    const r = row({ metadata: { mood: { sentiment: "negative", source: "ai", at: "2026-10-04T00:00:00Z", by: "u1" } } });
+    expect(matchesRule(r, rule("field:mood", "isSet"))).toBe(true);
+    expect(matchesRule(r, rule("field:mood", "is", "negative"))).toBe(true);
+  });
+});

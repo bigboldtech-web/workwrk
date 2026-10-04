@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { talkGate } from "@/lib/talk-gate";
+import { serveAiUpdate } from "@/lib/talk-updates";
 
 // Comms Hub — conversation list + create (docs/plans/comms-hub.md).
 // Every route here is scoped twice: to the caller's org AND to
@@ -88,7 +89,8 @@ export async function GET() {
   const conversations = memberships
     .map((m) => ({
       ...m.conversation,
-      lastMessage: m.conversation.messages[0] ?? null,
+      // An AI update's words only for the people it was checked against (Batch 8).
+      lastMessage: m.conversation.messages[0] ? serveAiUpdate(m.conversation.messages[0], userId) : null,
       messages: undefined,
       memberCount: m.conversation._count.members,
       _count: undefined,

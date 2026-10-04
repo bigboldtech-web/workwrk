@@ -7,6 +7,7 @@
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const FIELD_TYPES = ["short_text", "long_text", "number", "email", "url", "date", "select", "multi_select", "checkbox"] as const;
 
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest) {
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) return jsonError("prompt required");
   if (prompt.length > 1000) return jsonError("prompt too long (max 1000 chars)");
+
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no model call, as the switch's helper says ("Off hides every AI entry point").
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
 
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");

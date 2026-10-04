@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat, Pin, PinOff } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat, Pin, PinOff, Sparkles } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
@@ -67,6 +67,11 @@ import type { LucideIcon } from "lucide-react";
 import { AssigneePicker, MultiAssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { rowAssigneeIds } from "./board-filter-bar";
 import { FieldValue } from "./field-value";
+import { useAiFieldsAvailable } from "./ai-field-value";
+import { FILL_BATCH, aiFieldConfig, aiFieldNotReady, aiValueSortKey, aiValueText, isAiFieldType, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
+import { PERMANENT_FILL_FAILURES, requestAiFill } from "@/lib/ai-fill-client";
+import { useOsToast } from "@/components/layout/os/toast";
+import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { useItemTypes, type ItemTypeLite } from "./use-item-types";
@@ -271,6 +276,10 @@ function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses
         if (computedKeys?.has(fieldKey)) return computedCellValue(row, fieldKey) ?? "￿";
         const v = row.metadata?.[fieldKey];
         if (v == null || v === "") return "￿";
+        // An AI value (Batch 8) sorts by its words; every other value sorts
+        // exactly as it always has.
+        const ai = aiValueSortKey(v);
+        if (ai !== null) return ai.toLowerCase();
         return typeof v === "number" ? v : String(v).toLowerCase();
       }
     }
@@ -306,6 +315,8 @@ type ColMenuCtx = {
   onEditField?: () => void;
   onDeleteField?: () => void;
   onAddColumn?: () => void;
+  /** Batch 8: an AI column fills its empty rows (at most FILL_BATCH a click). */
+  onFillEmpty?: () => void;
   /** Phase 5b: Pin / Unpin (only for a viewer who may save the view). */
   pinned?: boolean;
   onTogglePin?: () => void;
@@ -871,6 +882,11 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         return shown == null || shown === "" ? "__unset__" : String(shown);
       }
       const raw = it.metadata?.[fieldKey];
+      // An AI field (Batch 8) groups by its words: the category's name, the
+      // sentiment, or the text.
+      const def = fieldByCol.get(groupBy);
+      const words = def && isAiFieldType(def.type) ? aiValueText(def, raw) : null;
+      if (words) return words;
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
     const map = new Map<string, BoardItemRow[]>();
@@ -1456,6 +1472,95 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Retry, so a failure here restores ONLY this row's previous value and
   // chips for that column, never re-reads the whole List over the person's
   // other in-flight edits.
+  // ── Batch 8: Fill with AI ─────────────────────────────────────────
+  // A fill's value lands in this table's copy and the host's, exactly as a
+  // custom-field edit does (applyRowPatchReport merges the metadataPatch).
+  const aiAvailable = useAiFieldsAvailable();
+  const { toast } = useOsToast();
+  const [aiBatchKey, setAiBatchKey] = useState<string | null>(null);
+  const applyAiValue = useCallback((id: string, key: string, value: AiFieldValueShape) => {
+    const patch = { [key]: value };
+    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, metadata: mergeMetadataPatch(r.metadata, patch) } : r)));
+    onItemPatched?.(id, { metadataPatch: patch });
+  }, [onItemPatched]);
+  // "Fill empty rows with AI": the rows shown, in the order shown, that this
+  // viewer may edit and that hold NOTHING (an older value of another shape is
+  // data, never empty), at most FILL_BATCH a click, three at a time. Each asks
+  // the server with onlyIfEmpty, so a value somebody writes meanwhile is never
+  // replaced, and a refusal that would refuse every row (the daily limit, the
+  // switch turned off) stops the rest.
+  // Rows a fill already failed on in this visit are left out of the next
+  // click, so "Run it again" reaches the rows after them instead of the same
+  // failing rows every time.
+  const aiFailedRows = useRef(new Map<string, Set<string>>());
+  const emptyFillRows = useCallback((field: FieldDef): BoardItemRow[] => {
+    const shown = buckets ? buckets.flatMap((b) => b.rows) : topLevel;
+    const failed = aiFailedRows.current.get(field.key);
+    return shown.filter((r) => {
+      const v = r.metadata?.[field.key];
+      return rowFieldsEditable(r, canEdit, assigneeEdit) && (v === undefined || v === null || v === "") && !failed?.has(r.id);
+    });
+  }, [buckets, topLevel, canEdit, assigneeEdit]);
+  const fillEmptyRows = useCallback(async (field: FieldDef) => {
+    if (!isAiFieldType(field.type)) return;
+    const all = emptyFillRows(field);
+    const targets = all.slice(0, FILL_BATCH);
+    if (targets.length === 0) {
+      toast("Every row you can edit here already has a value.");
+      return;
+    }
+    setAiBatchKey(field.key);
+    toast(`Filling ${targets.length} ${targets.length === 1 ? "row" : "rows"} with AI…`);
+    let filled = 0;
+    let skipped = 0;
+    const failures = new Map<string, number>();
+    let stop: string | null = null;
+    let next = 0;
+    const worker = async () => {
+      while (next < targets.length && !stop) {
+        const row = targets[next++];
+        const r = await requestAiFill({ itemId: row.id, fieldKey: field.key, contextBoardId: boardId, onlyIfEmpty: true, expect: null });
+        if (r.ok && "value" in r) {
+          filled += 1;
+          applyAiValue(row.id, field.key, r.value);
+          // An open drawer on this task re-reads it (no List drops a row on it).
+          try {
+            window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.realtime, { detail: { type: "item", itemId: row.id, boardId: null } }));
+          } catch { /* its own poll catches up */ }
+        } else if (r.ok) {
+          skipped += 1;
+        } else {
+          failures.set(r.message, (failures.get(r.message) ?? 0) + 1);
+          if (r.stop) stop = r.message;
+          else if (PERMANENT_FILL_FAILURES.has(r.code)) {
+            // Only a row that can never fill as it is (nothing to translate,
+            // too long) is left out of the next click; a passing failure (the
+            // AI service did not answer) is tried again, as the toast says.
+            const set = aiFailedRows.current.get(field.key) ?? new Set<string>();
+            set.add(row.id);
+            aiFailedRows.current.set(field.key, set);
+          }
+        }
+      }
+    };
+    try {
+      await Promise.all([worker(), worker(), worker()]);
+    } finally {
+      setAiBatchKey(null);
+    }
+    const failed = [...failures.values()].reduce((a, b) => a + b, 0);
+    const parts: string[] = [`Filled ${filled} ${filled === 1 ? "row" : "rows"}.`];
+    if (skipped > 0) parts.push(`${skipped} got a value from someone else meanwhile.`);
+    if (stop) parts.push(stop);
+    else if (failed > 0) {
+      // The reason, not a blanket "try again": some failures never succeed (nothing to translate).
+      const [why, n] = [...failures.entries()].sort((a, b) => b[1] - a[1])[0];
+      parts.push(`${failed} couldn't be filled. ${failures.size === 1 ? why : `${n} of them: ${why}`}`);
+    }
+    if (!stop && all.length > targets.length) parts.push(`${all.length - targets.length} more empty rows remain. Run it again to fill up to ${FILL_BATCH} more.`);
+    toast(parts.join(" "));
+  }, [emptyFillRows, boardId, applyAiValue, toast]);
+
   const commitConnect = useCallback(async (id: string, key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
     const row = itemsRef.current.find((r) => r.id === id);
     if (!row) return { ok: false, message: "That task is no longer in this List." };
@@ -1642,6 +1747,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       onEditField: managed && onOpenFields ? onOpenFields : undefined,
       onDeleteField: managed ? () => deleteField(managed.key) : undefined,
       onAddColumn: canManage ? onOpenFields : undefined,
+      // Only where it can work: a set-up AI field, and at least one empty row this viewer may edit.
+      onFillEmpty: field && isAiFieldType(field.type) && aiAvailable && !aiBatchKey && !aiFieldNotReady(aiFieldConfig(field)!) && emptyFillRows(field).length > 0
+        ? () => void fillEmptyRows(field)
+        : undefined,
       // Name is always the first frozen column once anything is pinned, so it
       // has no pin of its own.
       ...(canSaveView && key !== "name" ? { pinned: pinnedColumns.includes(key), onTogglePin: () => togglePin(key) } : {}),
@@ -1840,6 +1949,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         statusCurrent={kind === "linked-root" ? row.listLink?.homeStatus ?? null : undefined}
         statusNote={kind === "linked-root" ? linkedStatusNote(row, boardId, statuses) : null}
         onCommitConnect={commitConnect}
+        onAiFilled={applyAiValue}
       />,
     ];
     if (expanded) {
@@ -2222,6 +2332,7 @@ function Row({
   statusCurrent,
   statusNote = null,
   onCommitConnect,
+  onAiFilled,
 }: {
   row: BoardItemRow;
   /** The list this table is showing, so the assignee picker can ask who is
@@ -2295,6 +2406,8 @@ function Row({
   /** Why a linked row sits under a status that is not its own (linkedStatusNote). */
   statusNote?: string | null;
   onCommitConnect?: (id: string, key: string, next: unknown) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Batch 8: an AI cell's fill, for the table's own copy of the row. */
+  onAiFilled?: (id: string, key: string, value: AiFieldValueShape) => void;
 }) {
   // Bumped by the hover "rename" pencil to put the title cell into edit mode.
   const [editToken, setEditToken] = useState(0);
@@ -2425,6 +2538,7 @@ function Row({
               connections={row.connections?.[f.key]}
               mirror={row.mirrors?.[f.key]}
               onCommit={onCommitConnect ? (next) => onCommitConnect(row.id, f.key, next) : undefined}
+              onAiFilled={onAiFilled ? (v) => onAiFilled(row.id, f.key, v) : undefined}
               // metadataPatch, never metadata: see the RowPatch comment. This
               // cell used to spread the row's cached blob, which destroyed the
               // task's description on any page that had been open while somebody
@@ -2616,11 +2730,13 @@ function Row({
 // (or no edit rights) see the compact display; editors get the field's own
 // inline editor — a dropdown for select fields, a text input for text, a date
 // picker for dates, etc. — so each column behaves like its own kind of cell.
-function EditableFieldCell({ field, value, canEdit, onChange, boardId, itemId, connections, mirror, onCommit }: {
+function EditableFieldCell({ field, value, canEdit, onChange, boardId, itemId, connections, mirror, onCommit, onAiFilled }: {
   field: FieldDef;
   value: unknown;
   canEdit: boolean;
   onChange: (next: unknown) => void;
+  /** Batch 8: an AI cell's fill lands in the table's own copy of the row. */
+  onAiFilled?: (value: AiFieldValueShape) => void;
   /** Scopes a USER / PEOPLE cell's candidates AND the people it can draw. */
   boardId: string | null;
   /** Phase 5b: a Connect cell excludes its own task from the picker. */
@@ -2641,6 +2757,7 @@ function EditableFieldCell({ field, value, canEdit, onChange, boardId, itemId, c
     ...(connections ? { connections } : {}),
     ...(mirror ? { mirror } : {}),
     ...(connect && onCommit ? { onCommit } : {}),
+    ...(onAiFilled ? { onAiFilled } : {}),
   };
   if (!canEdit) return <FieldValue field={field} value={value} mode="display" boardId={boardId} {...extra} />;
   return <FieldValue field={field} value={value} mode="edit" onChange={onChange} boardId={boardId} {...extra} />;
@@ -2947,7 +3064,7 @@ function ResizableTh({ label, width, className, canEdit, onResize, menu, icon, s
 // The column-header dropdown. Renders only the actions its ctx enables.
 function ColumnMenu({ ctx, close }: { ctx: ColMenuCtx; close: () => void }) {
   const run = (fn?: () => void) => { fn?.(); close(); };
-  const hasFieldOps = !!(ctx.onEditField || ctx.onMoveStart || ctx.onHide || ctx.onDeleteField);
+  const hasFieldOps = !!(ctx.onFillEmpty || ctx.onEditField || ctx.onMoveStart || ctx.onHide || ctx.onDeleteField);
   return (
     <MenuList className="min-w-[212px]" onClick={(e) => e.stopPropagation()}>
       <MenuItem icon={ArrowUp} label="Sort ascending" onClick={() => run(() => ctx.onSort("asc"))} />
@@ -2972,6 +3089,7 @@ function ColumnMenu({ ctx, close }: { ctx: ColMenuCtx; close: () => void }) {
         </>
       ) : null}
       {hasFieldOps ? <MenuSeparator /> : null}
+      {ctx.onFillEmpty ? <MenuItem icon={Sparkles} label="Fill empty rows with AI" onClick={() => run(ctx.onFillEmpty)} /> : null}
       {ctx.onEditField ? <MenuItem icon={Pencil} label="Edit field" onClick={() => run(ctx.onEditField)} /> : null}
       {ctx.onMoveStart ? <MenuItem icon={ChevronsLeft} label="Move to start" onClick={() => run(ctx.onMoveStart)} /> : null}
       {ctx.onMoveEnd ? <MenuItem icon={ChevronsRight} label="Move to end" onClick={() => run(ctx.onMoveEnd)} /> : null}

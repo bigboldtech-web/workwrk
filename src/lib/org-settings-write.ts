@@ -48,6 +48,39 @@ export async function writeOrgSettingsKeys(organizationId: string, patch: Record
   return count > 0;
 }
 
+/**
+ * Merge `patch` INTO one top-level section of Organization.settings (for
+ * example `data`), in one statement, so two saves of different keys of the
+ * same section at the same moment (two switches on Settings > Data) can
+ * never lose each other's change. A section that is absent or not an object
+ * starts as {}. Every other key of the settings, and every other key of the
+ * section, is kept.
+ */
+export async function mergeOrgSettingsSection(
+  organizationId: string,
+  section: string,
+  patch: Record<string, unknown>,
+  db: Db = prisma,
+): Promise<boolean> {
+  const set: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) if (value !== undefined) set[key] = value;
+  if (Object.keys(set).length === 0) return true;
+  const json = JSON.stringify(set);
+  // A bound Date, never NOW(), for the zone reason doc-lock.ts records.
+  const now = new Date();
+  const count = await db.$executeRaw`
+    UPDATE "Organization"
+    SET "settings" = jsonb_set(
+          CASE WHEN jsonb_typeof("settings") = 'object' THEN "settings" ELSE '{}'::jsonb END,
+          ARRAY[${section}]::text[],
+          (CASE WHEN jsonb_typeof("settings" -> ${section}) = 'object' THEN "settings" -> ${section} ELSE '{}'::jsonb END) || ${json}::jsonb,
+          true
+        ),
+        "updatedAt" = ${now}
+    WHERE "id" = ${organizationId}`;
+  return count > 0;
+}
+
 /** One key of Organization.settings as an object ({} when absent or not an object). */
 export function settingsKey(settings: unknown, key: string): Record<string, unknown> {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) return {};
