@@ -41,6 +41,7 @@ import {
   NO_GENERAL, USER_SELECT, notifyObjectGrantee, objectActivity, orgAdminCount, orgNameOf, personOf, targetInOrg,
   type ObjectShareCtx, type Tx,
 } from "./common";
+import { APP_CLOSED_NOTE, DOOR_SENTENCE, appDoorFor, appLimited, appOpenFor } from "./app-door";
 
 const KIND = "goal" as const;
 
@@ -177,12 +178,22 @@ export async function goalPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   const owner = goal.ownerId ? byId.get(goal.ownerId) ?? null : null;
   const ownerName = nameOf(owner);
 
+  // Once the engine enforces app gates, a Goals floor keeps some people out
+  // of every goal: their row says so (round 3). Asked per person only then.
+  const limited = await appLimited(ctx.organizationId, "goal");
+  const closedTo = async (userId: string) => limited && (await appDoorFor(ctx.organizationId, userId, "goal")) === "closed";
+
   const direct: AccessDirectEntry[] = [];
-  if (owner) direct.push({ person: personOf(owner), role: "FULL", owner: true, source: "Owner", editable: false, removable: false, lastFull: false, cap: false, alsoVia: null });
+  if (owner) {
+    const entry: AccessDirectEntry = { person: personOf(owner), role: "FULL", owner: true, source: "Owner", editable: false, removable: false, lastFull: false, cap: false, alsoVia: null };
+    if (await closedTo(owner.id)) entry.note = APP_CLOSED_NOTE.goal;
+    direct.push(entry);
+  }
   for (const uid of userIds) {
     const u = byId.get(uid);
     if (!u || uid === goal.ownerId) continue;
     const entry: AccessDirectEntry = { person: personOf(u), role: "EDIT", owner: false, source: "GoalAssignee", editable: false, removable: canManage, lastFull: false, cap: false, alsoVia: null };
+    if (await closedTo(uid)) entry.note = APP_CLOSED_NOTE.goal;
     // A contributor row never gives editing: the viewer who edits keeps that
     // when their own row goes, unless the row was their only way to see it.
     if (uid === ctx.userId && canManage && me.actor && (await seesWithoutOwnRow(ctx.session, goal))) {
@@ -282,7 +293,8 @@ export async function setGoalGrant(ctx: ObjectShareCtx, id: string, body: GrantW
   );
   const panel = await freshPanel(ctx, id);
   if (!out.noChange) {
-    if (panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, "EDIT", "shared");
+    // Nobody is told of a goal their Goals app keeps them out of.
+    if (panel && (await appOpenFor(ctx.organizationId, body.userId, "goal"))) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, "EDIT", "shared");
     // As the goal's Contributors row does: adding someone by name answers
     // every open Request they made on this goal.
     if (body.userId !== ctx.userId) {
@@ -373,10 +385,18 @@ export async function checkGoalAccess(
   if (!me.edit || ctx.isAgent) return "forbidden";
   const f = await goalFacts(ctx.organizationId, goal, userId);
   if (!f) return "not_in_org";
+  const door = await appDoorFor(ctx.organizationId, userId, "goal");
+  if (door !== "open") return { userId, name: f.name, role: "none", sentence: DOOR_SENTENCE.goal[door] };
   if (f.del) return { userId, name: f.name, role: "FULL", sentence: `Full access: edit, check in and delete. ${f.editWhy}` };
   if (f.edit) return { userId, name: f.name, role: "EDIT", sentence: `Can edit and check in, not delete. ${f.editWhy}` };
   if (f.ownRow) return { userId, name: f.name, role: "EDIT", sentence: "Can check in. Added as a contributor." };
   if (f.group) return { userId, name: f.name, role: "EDIT", sentence: `Can check in, ${f.group}.` };
   if (f.seen) return { userId, name: f.name, role: "VIEW", sentence: `Can view, ${f.viewWhy}.` };
   return { userId, name: f.name, role: "none", sentence: "No access. Nothing shares this goal with them." };
+}
+
+/** What this person holds on the goal as a contributor of their own (the one thing a request adds), or null. */
+export async function goalHeldRole(organizationId: string, okrId: string, userId: string): Promise<PanelRole | null> {
+  const row = await prisma.goalAssignee.findFirst({ where: { okrId, userId, okr: { organizationId } }, select: { id: true } });
+  return row ? "EDIT" : null;
 }

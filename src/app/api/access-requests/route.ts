@@ -12,8 +12,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
-import { objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
-import { objectAppOpen, objectShareOn } from "@/lib/access/object-share";
+import { objectGrantRole, objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
+import { objectAppOpen, objectHeldRole, objectShareOn } from "@/lib/access/object-share";
+import { PANEL_ROLE_RANK } from "@/lib/access/access-panel";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
@@ -220,6 +221,16 @@ export async function GET(req: Request) {
     if (answered) continue;
     const objectKind = !node && objectsOn ? requestObjectKind(r.objectType) : null;
     const appOff = objectKind ? !(await appOpen(objectKind)) : false;
+    // Only the answers that give the person more than they hold now; none
+    // left means the request is already answered, and it is left off the
+    // card as a node's is.
+    let grants: ReturnType<typeof objectRequestGrants> | undefined;
+    if (objectKind && !appOff) {
+      const held = await objectHeldRole(objectKind, u.organizationId, r.objectId, r.requesterId);
+      const heldRank = held ? PANEL_ROLE_RANK[held] : 0;
+      grants = objectRequestGrants(objectKind, r.role as RequestRole).filter((g) => PANEL_ROLE_RANK[objectGrantRole(objectKind, g.role)] > heldRank);
+      if (grants.length === 0) continue;
+    }
     incoming.push({
       id: r.id,
       objectType: r.objectType,
@@ -230,7 +241,7 @@ export async function GET(req: Request) {
       link: t.link,
       name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
       grantable: node !== null || (objectKind !== null && !appOff),
-      ...(objectKind && !appOff ? { grants: objectRequestGrants(objectKind, r.role as RequestRole) } : {}),
+      ...(grants ? { grants } : {}),
       // Its app is closed to the decider: only Decline can answer it.
       ...(appOff ? { appOff: true } : {}),
       requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },

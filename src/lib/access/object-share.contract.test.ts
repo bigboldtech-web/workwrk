@@ -191,7 +191,9 @@ describe("review round 2", () => {
 
   it("shows who holds a tool share only to the people who manage it", () => {
     const tool = read("src/lib/access/object-share/tool.ts");
-    expect(tool).toMatch(/if \(!canManage\) \{\n\s+shown = direct\.filter\(\(d\) => d\.source === "Owner" \|\| d\.person\.id === ctx\.userId\);/);
+    // The maker by id too (a demoted maker may hold a share), and never their role history.
+    expect(tool).toMatch(/if \(!canManage\) \{\n\s+shown = direct\.filter\(\(d\) => d\.source === "Owner" \|\| d\.person\.id === ctx\.userId \|\| d\.person\.id === tool\.addedBy\);/);
+    expect(tool).toMatch(/d\.person\.id === tool\.addedBy && d\.person\.id !== ctx\.userId && d\.note \? \{ \.\.\.d, note: "Added this tool\." \} : d/);
     expect(tool).toMatch(/direct: shown,/);
   });
 
@@ -199,5 +201,43 @@ describe("review round 2", () => {
     const list = read("src/app/api/access-requests/route.ts");
     expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff\),/);
     expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\{req\.appOff \? \(/);
+  });
+});
+
+describe("review round 3", () => {
+  it("probes the decider's Tools door without logging a denial", () => {
+    const index = read("src/lib/access/object-share/index.ts");
+    const probe = index.slice(index.indexOf("export async function objectAppOpen"));
+    expect(probe).toMatch(/\(await can\(viewer, "view", \{ type: "app", key: "tools" \}\)\)\.allowed/);
+    expect(probe.slice(0, probe.indexOf("\n}\n"))).not.toMatch(/requireApp/);
+  });
+
+  it("asks the described person's own app door in rows, Check access and notices", () => {
+    const tool = read("src/lib/access/object-share/tool.ts");
+    expect(tool).toMatch(/const door = await appDoorFor\(ctx\.organizationId, userId, "tool"\);\n\s+if \(door !== "open"\) return \{ userId, name, role: "none", sentence: DOOR_SENTENCE\.tool\[door\] \};/);
+    expect(tool).toMatch(/if \(out\.how !== "none" && panel && \(await appOpenFor\(ctx\.organizationId, body\.userId, "tool"\)\)\) \{/);
+    expect(tool).toMatch(/const closedTo = async \(userId: string\) => limited && \(await appDoorFor\(ctx\.organizationId, userId, "tool"\)\) === "closed";/);
+    const goal = read("src/lib/access/object-share/goal.ts");
+    expect(goal).toMatch(/const door = await appDoorFor\(ctx\.organizationId, userId, "goal"\);\n\s+if \(door !== "open"\) return \{ userId, name: f\.name, role: "none", sentence: DOOR_SENTENCE\.goal\[door\] \};/);
+    expect(goal).toMatch(/if \(panel && \(await appOpenFor\(ctx\.organizationId, body\.userId, "goal"\)\)\) await notifyObjectGrantee/);
+  });
+
+  it("tells an Agent the role it works at, and never of a raise that changes nothing for it", () => {
+    for (const name of ["tool", "sop-folder"]) {
+      const src = read(`src/lib/access/object-share/${name}.ts`);
+      expect(src).toMatch(/const works = \(r: PanelRole \| null\) => \(r && target\.accessLevel === "AGENT" && r === "FULL" \? "EDIT" : r\);/);
+      expect(src).toMatch(/"worksAt" in out \? out\.worksAt : role/);
+    }
+  });
+
+  it("shows an Owner's or Admin's reach on an SOP folder for every Admin row, and after a removal", () => {
+    const sop = read("src/lib/access/object-share/sop-folder.ts");
+    expect(sop).toMatch(/if \(\(self && ctx\.orgAdmin\) \|\| ADMIN_LEVELS\.has\(String\(r\.user\.accessLevel\)\)\) alsoVia = \{ role: "FULL", via: \{ type: "org_admin"/);
+    expect(sop).toMatch(/const stillReaches = "admin" in out && out\.admin\n\s+\? \{ role: "FULL" as PanelRole, via: \{ type: "org_admin" as const/);
+  });
+
+  it("offers only the request answers that give more than the person holds", () => {
+    const list = read("src/app/api/access-requests/route.ts");
+    expect(list).toMatch(/grants = objectRequestGrants\(objectKind, r\.role as RequestRole\)\.filter\(\(g\) => PANEL_ROLE_RANK\[objectGrantRole\(objectKind, g\.role\)\] > heldRank\);\n\s+if \(grants\.length === 0\) continue;/);
   });
 });

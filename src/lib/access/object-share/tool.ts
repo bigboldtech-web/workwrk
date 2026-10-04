@@ -29,6 +29,7 @@ import {
   NO_GENERAL, USER_SELECT, answerRequests, notifyObjectGrantee, objectActivity, orgAdminCount, orgNameOf, personOf, rank,
   targetInOrg, type ObjectShareCtx, type Tx,
 } from "./common";
+import { APP_CLOSED_NOTE, DOOR_SENTENCE, MAKER_APP_CLOSED_NOTE, appDoorFor, appLimited, appOpenFor } from "./app-door";
 import {
   canManageTool, canShareTool, storedToolShareRole, toolShareRole, toolViewerRole, type ToolRole, type ToolViewer,
 } from "@/lib/tools/tool-access";
@@ -92,11 +93,17 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
   const orgName = await orgNameOf(ctx.organizationId);
+  // With the Tools app limited in Settings, Apps, a share gives nothing to a
+  // person the app keeps out: asked per person only then (round 3).
+  const limited = await appLimited(ctx.organizationId, "tool");
+  const closedTo = async (userId: string) => limited && (await appDoorFor(ctx.organizationId, userId, "tool")) === "closed";
 
   const direct: AccessDirectEntry[] = [];
   const ownerManages = !!owner && canManageTool(toolViewerOf(owner.id, String(owner.accessLevel)), tool);
   if (owner && ownerManages) {
-    direct.push({ person: personOf(owner), role: "FULL", owner: true, source: "Owner", editable: false, removable: false, lastFull: false, cap: false, alsoVia: null });
+    const entry: AccessDirectEntry = { person: personOf(owner), role: "FULL", owner: true, source: "Owner", editable: false, removable: false, lastFull: false, cap: false, alsoVia: null };
+    if (await closedTo(owner.id)) entry.note = MAKER_APP_CLOSED_NOTE;
+    direct.push(entry);
   }
   for (const s of shares) {
     const u = byId.get(s.userId);
@@ -116,15 +123,18 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     const level = String(u.accessLevel);
     // Full access by member type whatever the share says: said beside the row
     // (and the viewer's own removal is no loss of the right to share).
-    if (canManageTool(toolViewerOf(u.id, level), tool)) entry.alsoVia = { role: "FULL", via: levelVia(level, orgName) };
-    if (s.userId === tool.addedBy) entry.note = OWNER_SHARED_NOTE;
+    const closed = await closedTo(u.id);
+    if (!closed && canManageTool(toolViewerOf(u.id, level), tool)) entry.alsoVia = { role: "FULL", via: levelVia(level, orgName) };
+    if (closed) entry.note = APP_CLOSED_NOTE.tool;
+    else if (s.userId === tool.addedBy) entry.note = OWNER_SHARED_NOTE;
     else if (level === "AGENT" && shareRole === "FULL") entry.note = AGENT_FULL_NOTE;
     direct.push(entry);
   }
   // Added by someone whose role no longer changes tools, with no share: they
   // see it as its maker. Giving them a role writes a share like anyone's.
   if (owner && !ownerManages && !shares.some((s) => s.userId === tool.addedBy)) {
-    direct.push({ person: personOf(owner), role: "VIEW", owner: false, source: "Owner", editable: canManage, removable: false, lastFull: false, cap: false, alsoVia: null, note: OWNER_DEMOTED_NOTE });
+    const note = (await closedTo(owner.id)) ? MAKER_APP_CLOSED_NOTE : OWNER_DEMOTED_NOTE;
+    direct.push({ person: personOf(owner), role: "VIEW", owner: false, source: "Owner", editable: canManage, removable: false, lastFull: false, cap: false, alsoVia: null, note });
   }
   direct.sort((a, b) => Number(b.owner) - Number(a.owner) || rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
 
@@ -134,8 +144,11 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   let shown = direct;
   let hiddenShares = 0;
   if (!canManage) {
-    shown = direct.filter((d) => d.source === "Owner" || d.person.id === ctx.userId);
+    shown = direct.filter((d) => d.source === "Owner" || d.person.id === ctx.userId || d.person.id === tool.addedBy);
     hiddenShares = direct.length - shown.length;
+    // What became of the maker's workspace role is not theirs to read (the
+    // tool routes name the maker only): to everyone else the maker "added it".
+    shown = shown.map((d) => (d.person.id === tool.addedBy && d.person.id !== ctx.userId && d.note ? { ...d, note: "Added this tool." } : d));
   }
 
   const adminCount = await orgAdminCount(ctx.organizationId);
@@ -153,7 +166,9 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     notes: [
       ...(hiddenShares > 0 ? [`Shared with ${hiddenShares} more ${hiddenShares === 1 ? "person" : "people"}. Only the people who manage this tool see who.`] : []),
       // By member type, as the tool gates read it (tool-access.ts), not the People team list.
-      "Anyone whose member type is Executive or People team also has Full access to every tool.",
+      limited
+        ? "Anyone whose member type is Executive or People team also has Full access to every tool, where the Tools app is open to them."
+        : "Anyone whose member type is Executive or People team also has Full access to every tool.",
     ],
     orgName,
     grantsAvailable: true,
@@ -199,7 +214,8 @@ export async function setToolGrant(ctx: ObjectShareCtx, id: string, body: GrantW
   const out = await withFreshPanel(ctx, id, () =>
     prisma.$transaction(async (tx) => {
       const tool = await actorGate(tx, ctx, id);
-      if (!(await targetInOrg(tx, ctx.organizationId, body.userId))) throw new GrantError("not_in_org");
+      const target = await targetInOrg(tx, ctx.organizationId, body.userId);
+      if (!target) throw new GrantError("not_in_org");
       if (await ownerPinned(tx, ctx.organizationId, tool, body.userId)) throw new GrantError("owner_fixed");
       const cur = await tx.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: body.userId } }, select: { role: true } });
       const curRole = toolShareRole(cur, true);
@@ -220,14 +236,20 @@ export async function setToolGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       await objectActivity(tx, ctx, KIND, id, curRole ? "access.role_changed" : "access.granted", {
         granteeId: body.userId, role, previousRole: curRole, store: "ToolShare",
       });
-      // The maker already saw it: raising them is an upgrade, not a share.
-      const how = !shown ? ("shared" as const) : rank(role) > rank(shown) ? ("upgraded" as const) : ("none" as const);
-      return { noChange: false, previousRole: curRole, role, how };
+      // The role they work at: an Agent never shares or deletes, so Full
+      // access is Can edit for it, and a raise that changes nothing it can
+      // do is told to nobody. The maker already saw it: an upgrade, not a share.
+      const works = (r: PanelRole | null) => (r && target.accessLevel === "AGENT" && r === "FULL" ? "EDIT" : r);
+      const how = !shown ? ("shared" as const) : rank(works(role)) > rank(works(shown)) ? ("upgraded" as const) : ("none" as const);
+      return { noChange: false, previousRole: curRole, role, how, worksAt: works(role) ?? role };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
   if (!out.noChange) {
-    if (out.how !== "none" && panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, role, out.how);
+    // Nobody is told of a share their Tools app keeps them out of.
+    if (out.how !== "none" && panel && (await appOpenFor(ctx.organizationId, body.userId, "tool"))) {
+      await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, "worksAt" in out ? out.worksAt : role, out.how);
+    }
     await answerRequests(ctx, KIND, id, body.userId, role);
   }
   const change: GrantChange = { userId: body.userId, role: out.role, previousRole: out.previousRole, noChange: out.noChange, stillReaches: null, keepsInside: [] };
@@ -278,6 +300,9 @@ export async function checkToolAccess(
   const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true } });
   if (!person) return "not_in_org";
   const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email;
+  // A share gives nothing to someone the Tools app keeps out.
+  const door = await appDoorFor(ctx.organizationId, userId, "tool");
+  if (door !== "open") return { userId, name, role: "none", sentence: DOOR_SENTENCE.tool[door] };
   const tv = toolViewerOf(userId, String(person.accessLevel));
   const share = await shareRoleOf(prisma, id, userId);
   const role = toolViewerRole(tv, tool, share);
@@ -291,4 +316,14 @@ export async function checkToolAccess(
   if (tv.isAgent && share === "FULL") return { userId, name, role: "EDIT", sentence: `${label("EDIT")}. Shared with them at Full access, and an Agent never shares or deletes.` };
   if (share) return { userId, name, role, sentence: `${label(role)}. Shared with them directly.` };
   return { userId, name, role, sentence: `${label(role)}. They added this tool, and their workspace role no longer changes tools.` };
+}
+
+/** What this person holds on the tool now (the role its gates give them), or null: what a request answer is measured against. */
+export async function toolHeldRole(organizationId: string, toolId: string, userId: string): Promise<PanelRole | null> {
+  const [tool, person] = await Promise.all([
+    loadTool(prisma, organizationId, toolId),
+    prisma.user.findFirst({ where: { id: userId, organizationId, deletedAt: null }, select: { accessLevel: true } }),
+  ]);
+  if (!tool || !person) return null;
+  return toolViewerRole(toolViewerOf(userId, String(person.accessLevel)), tool, await shareRoleOf(prisma, toolId, userId));
 }

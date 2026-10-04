@@ -81,6 +81,7 @@ async function editsSops(userId: string, organizationId: string, accessLevel: st
 }
 
 const NO_SOP_EDIT_NOTE = "Their workspace role can't edit SOPs: they read the drafts here but can't save changes.";
+const ADMIN_LEVELS: ReadonlySet<string> = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 const AGENT_OWNER_NOTE = "An Agent never changes who can open a folder, so this works as Can edit.";
 const AGENT_OWNER_NO_EDIT_NOTE = "An Agent never changes who can open a folder, and its workspace role can't edit SOPs: it reads the drafts here but can't save changes.";
 
@@ -126,7 +127,8 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     // Another way in at this role or above. For the viewer's own row an equal
     // role counts too, so removing it is never called a loss of managing.
     let alsoVia: AccessDirectEntry["alsoVia"] = above && (rank(above.role) > rank(role) || (self && rank(above.role) >= rank(role))) ? { role: above.role, via: viaFor(above.at) } : null;
-    if (self && ctx.orgAdmin) alsoVia = { role: "FULL", via: { type: "org_admin", orgName: await orgNameOf(ctx.organizationId) } };
+    // An Owner or Admin opens and changes every SOP folder, whatever their row says.
+    if ((self && ctx.orgAdmin) || ADMIN_LEVELS.has(String(r.user.accessLevel))) alsoVia = { role: "FULL", via: { type: "org_admin", orgName: await orgNameOf(ctx.organizationId) } };
     const entry: AccessDirectEntry = {
       person: personOf(r.user),
       role,
@@ -221,7 +223,8 @@ export async function setSopFolderGrant(ctx: ObjectShareCtx, id: string, body: G
     prisma.$transaction(async (tx) => {
       const { maxGrant } = await actorGate(tx, ctx, id);
       if (rank(role) > rank(maxGrant)) throw new GrantError("above_own_role");
-      if (!(await targetInOrg(tx, ctx.organizationId, body.userId))) throw new GrantError("not_in_org");
+      const target = await targetInOrg(tx, ctx.organizationId, body.userId);
+      if (!target) throw new GrantError("not_in_org");
       const cur = await tx.sOPFolderAccess.findUnique({ where: { folderId_userId: { folderId: id, userId: body.userId } }, select: { role: true } });
       const curRole = cur ? ROLE_OF[cur.role] : null;
       if (body.expected !== undefined && (body.expected ?? null) !== curRole) throw new GrantError("conflict");
@@ -239,13 +242,17 @@ export async function setSopFolderGrant(ctx: ObjectShareCtx, id: string, body: G
       await objectActivity(tx, ctx, KIND, id, curRole ? "access.role_changed" : "access.granted", {
         granteeId: body.userId, role: stored, previousRole: cur?.role ?? null, store: "SOPFolderAccess",
       });
-      const how = !curRole ? ("shared" as const) : rank(role) > rank(curRole) ? ("upgraded" as const) : ("none" as const);
-      return { noChange: false, previousRole: curRole, role, how };
+      // The role they work at: an Agent never changes who opens a folder, so
+      // Full access is Can edit for it, and a raise that changes nothing it
+      // can do is told to nobody.
+      const works = (r: PanelRole | null) => (r && target.accessLevel === "AGENT" && r === "FULL" ? "EDIT" : r);
+      const how = !curRole ? ("shared" as const) : rank(works(role)) > rank(works(curRole)) ? ("upgraded" as const) : ("none" as const);
+      return { noChange: false, previousRole: curRole, role, how, worksAt: works(role) ?? role };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
   if (!out.noChange) {
-    if (out.how !== "none" && panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, role, out.how);
+    if (out.how !== "none" && panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, "worksAt" in out ? out.worksAt : role, out.how);
     await answerRequests(ctx, KIND, id, body.userId, role);
   }
   const change: GrantChange = { userId: body.userId, role: out.role, previousRole: out.previousRole, noChange: out.noChange, stillReaches: null, keepsInside: [] };
@@ -266,13 +273,17 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
       await tx.sOPFolderAccess.delete({ where: { folderId_userId: { folderId: id, userId: input.userId } } });
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: cur.role, store: "SOPFolderAccess" });
       const rest = await tx.sOPFolderAccess.findMany({ where: { userId: input.userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
-      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine };
+      const target = await targetInOrg(tx, ctx.organizationId, input.userId);
+      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine, admin: !!target && ADMIN_LEVELS.has(target.accessLevel) };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
   // Still reaches it through a folder above: said after the removal, as for
   // a node, and named only when the viewer can open that folder.
-  const stillReaches = out.above ? { role: out.above.role, via: viaAt(ctx, out.mine, out.chain, out.above.at) } : null;
+  // An Owner or Admin keeps every folder: said first, as for a node.
+  const stillReaches = "admin" in out && out.admin
+    ? { role: "FULL" as PanelRole, via: { type: "org_admin" as const, orgName: await orgNameOf(ctx.organizationId) } }
+    : out.above ? { role: out.above.role, via: viaAt(ctx, out.mine, out.chain, out.above.at) } : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
 }
@@ -306,4 +317,15 @@ export async function checkSopFolderAccess(
   }
   const caveat = rank(from.role) >= rank("EDIT") && !(await editsSops(userId, ctx.organizationId, level)) ? ` ${NO_SOP_EDIT_NOTE}` : "";
   return { userId, name, role: from.role, sentence: `${shareRoleLabel(KIND, from.role)}. ${where}${caveat}` };
+}
+
+/** What this person holds on the folder now (an Owner or Admin every folder; else the strongest row on it or above it), or null. */
+export async function sopFolderHeldRole(organizationId: string, folderId: string, userId: string): Promise<PanelRole | null> {
+  const person = await prisma.user.findFirst({ where: { id: userId, organizationId, deletedAt: null }, select: { accessLevel: true } });
+  if (!person) return null;
+  if (ADMIN_LEVELS.has(String(person.accessLevel))) return "FULL";
+  const chain = await chainOf(prisma, organizationId, folderId);
+  if (chain.length === 0) return null;
+  const rows = await prisma.sOPFolderAccess.findMany({ where: { userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
+  return roleFrom(rows, chain, 0, userId)?.role ?? null;
 }

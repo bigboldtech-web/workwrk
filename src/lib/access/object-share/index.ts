@@ -8,10 +8,10 @@ import { requireApp } from "@/lib/app-gate";
 import { accessV2Resolver, settingsGateLogOnly } from "../flags";
 import { settingsGateMode } from "../settings-gate-engine";
 import type { ObjectShareCtx } from "./common";
-import { checkSopFolderAccess, removeSopFolderGrant, setSopFolderGrant, sopFolderPanel } from "./sop-folder";
-import { checkToolAccess, removeToolGrant, setToolGrant, toolPanel } from "./tool";
-import { checkGoalAccess, goalPanel, removeGoalGrant, setGoalGrant } from "./goal";
-import { checkTeamAccess, removeTeamGrant, setTeamGrant, teamPanel } from "./team";
+import { checkSopFolderAccess, removeSopFolderGrant, setSopFolderGrant, sopFolderHeldRole, sopFolderPanel } from "./sop-folder";
+import { checkToolAccess, removeToolGrant, setToolGrant, toolHeldRole, toolPanel } from "./tool";
+import { checkGoalAccess, goalHeldRole, goalPanel, removeGoalGrant, setGoalGrant } from "./goal";
+import { checkTeamAccess, removeTeamGrant, setTeamGrant, teamHeldRole, teamPanel } from "./team";
 
 export { objectShareCtxFromSession, objectShareOn, type ObjectShareCtx } from "./common";
 
@@ -58,9 +58,21 @@ async function appOpen(kind: ObjectShareKind): Promise<boolean> {
   return true;
 }
 
-/** Is this kind's app open to the person asking? (The Access requests card offers a grant only then.) */
+/**
+ * Is this kind's app open to the person asking? The Access requests card
+ * offers a grant only then. A probe, not an attempt: the tool door is asked
+ * with can(), which logs no denial (requireApp would write an access.denied
+ * row for an app nobody tried to open).
+ */
 export async function objectAppOpen(kind: ObjectShareKind): Promise<boolean> {
-  return appOpen(kind).catch(() => false);
+  if (kind !== "tool") return appOpen(kind).catch(() => false);
+  try {
+    const { viewerFromSession, can } = await import("../index");
+    const viewer = await viewerFromSession();
+    return !!viewer && (await can(viewer, "view", { type: "app", key: "tools" })).allowed;
+  } catch {
+    return false;
+  }
 }
 
 async function adapterOf(kind: ObjectShareKind): Promise<Adapter> {
@@ -85,4 +97,14 @@ export async function removeObjectGrant(ctx: ObjectShareCtx, kind: ObjectShareKi
 export async function checkObjectAccess(ctx: ObjectShareCtx, kind: ObjectShareKind, id: string, userId: string): Promise<ObjectCheckResult> {
   if (!(await appOpen(kind))) return "not_found";
   return ADAPTERS[kind].check(ctx, id, userId);
+}
+
+/**
+ * What the person holds on the object now, as a request's answer would
+ * measure it: an answer that gives nothing more is never offered (a tool
+ * request from the drawer always comes from someone who can already view it).
+ */
+export async function objectHeldRole(kind: ObjectShareKind, organizationId: string, objectId: string, userId: string): Promise<PanelRole | null> {
+  const held = { tool: toolHeldRole, goal: goalHeldRole, sop_folder: sopFolderHeldRole, team: teamHeldRole }[kind];
+  return held(organizationId, objectId, userId).catch(() => null);
 }

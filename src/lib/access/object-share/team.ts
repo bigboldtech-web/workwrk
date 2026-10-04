@@ -277,3 +277,9 @@ export async function checkTeamAccess(
   if (role === "VIEW") return { userId, name, role, sentence: `Member. They are on the team.${adminToo}` };
   return { userId, name, role: "none", sentence: `Not on the team.${isAdmin ? " As an Owner or Admin they change every team." : ""}` };
 }
+
+/** This person's row on the team now (Lead or Member), or null. */
+export async function teamHeldRole(organizationId: string, teamId: string, userId: string): Promise<PanelRole | null> {
+  const row = await prisma.teamMember.findFirst({ where: { teamId, userId, team: { organizationId } }, select: { lead: true } });
+  return roleOfRow(row);
+}
