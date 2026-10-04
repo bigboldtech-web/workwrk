@@ -75,5 +75,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (own.parentId) {
     await prisma.conversationMessage.update({ where: { id: own.parentId }, data: { updatedAt: new Date() } }).catch(() => {});
   }
-  return jsonSuccess({ message });
+  // Served as every read serves a removed message: no words, no metadata
+  // (an AI update's reader list never leaves the server).
+  return jsonSuccess({ message: { ...message, body: "", metadata: null } });
 }

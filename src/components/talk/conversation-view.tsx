@@ -823,7 +823,15 @@ export function ConversationView({
     // failure: a poll answering mid-PATCH would otherwise paint the saved
     // words back over the rewrite while it was still on its way.
     pendingEdits.current.set(m.id, { next: newBody, saved: savedBody, savedEditedAt, saving: true });
-    patchEverywhere(m.id, (x) => ({ ...x, body: newBody, editedAt: new Date().toISOString(), failed: false }));
+    // An AI update the person edits is theirs from now on (the server marks
+    // it the same way), so it stops saying AI wrote it at once.
+    patchEverywhere(m.id, (x) => ({
+      ...x,
+      body: newBody,
+      editedAt: new Date().toISOString(),
+      failed: false,
+      ...(x.metadata?.kind === "ai_update" ? { metadata: { ...x.metadata, kind: "ai_update_edited" } } : {}),
+    }));
     fetch(`/api/conversations/${id}/messages/${m.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

@@ -28,6 +28,7 @@ import { getBoardStatuses, makeStatusLookup, PRIORITY_OPTIONS } from "@/lib/boar
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { gateItem, type ItemCtx } from "@/lib/item-gate";
 import { linkedContextFor } from "@/lib/item-context";
+import { viewerZone } from "@/lib/dashboards/dashboard-server";
 import { canContributeFor } from "@/lib/list-links-server";
 import { BOARD_ITEM_ENTITY_TYPE } from "@/lib/item-thread";
 import { htmlToText } from "@/lib/html-text";
@@ -162,7 +163,10 @@ export async function fillAiField(args: {
   const status = gate.item.status ? makeStatusLookup(getBoardStatuses(gate.item.board))[gate.item.status]?.label ?? gate.item.status : null;
   const priority = gate.item.priority ? PRIORITY_OPTIONS.find((p) => p.value === gate.item.priority)?.label ?? null : null;
   const place = placeOf(stored);
+  // Due days in the person's own zone (else the workspace's), as they see them.
+  const timezone = await viewerZone(c, null).catch(() => "UTC");
   const facts = factsForFill(config, {
+    timezone,
     title: gate.item.title,
     status,
     priority,

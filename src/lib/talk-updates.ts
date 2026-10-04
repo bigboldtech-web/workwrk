@@ -127,10 +127,17 @@ export function scheduleText(s: TalkUpdateSchedule): string {
   return s.cadence === "weekly" ? `Every ${WEEKDAY_NAMES[(s.weekday ?? 1) - 1] ?? "Monday"} ${at}` : `Weekdays ${at}`;
 }
 
+/** The kind on its own (the setup form, where the cadence is picked next to it). */
 export const KIND_LABEL: Readonly<Record<TalkUpdateKind, string>> = {
-  standup: "Daily standup",
-  project: "Weekly project update",
+  standup: "Standup",
+  project: "Project update",
 };
+
+/** What an update is called, with its cadence: "Daily standup", "Weekly project update". */
+export function updateTitle(kind: TalkUpdateKind, cadence: TalkUpdateCadence): string {
+  const when = cadence === "weekly" ? "Weekly" : "Daily";
+  return kind === "standup" ? `${when} standup` : `${when} project update`;
+}
 
 /** YYYY-MM-DD of an instant's wall clock in `tz`. */
 export function zonedDay(instant: Date, tz: string): string {
@@ -196,6 +203,8 @@ export const RUN_REASONS = [
   "missed",
   "cooldown",
   "error",
+  "busy",
+  "recent_manual",
 ] as const;
 export type RunReason = (typeof RUN_REASONS)[number];
 
@@ -231,8 +240,8 @@ export const REASON_TEXT: Readonly<Record<RunReason, string>> = {
   too_many_people: `Updates post only where there are at most ${MAX_UPDATE_READERS} people.`,
   scope_gone: "The List or Space this reports on is gone, or the person who set this up can no longer open it.",
   nothing_to_report: "Nothing to report.",
-  nothing_new: "Nothing to report: no task here changed or is due soon.",
-  nothing_shared: "Nothing to report: none of the tasks that changed is open to everyone in this conversation.",
+  nothing_new: "Nothing to report: no task here was finished or changed in this period, and none is overdue or due soon.",
+  nothing_shared: "Nothing to report: the tasks to report on are not open to everyone in this conversation.",
   daily_limit: "This workspace has used today's AI updates.",
   not_configured: "AI isn't set up for this workspace yet.",
   not_ready: "Scheduled updates aren't ready on this server yet.",
@@ -241,6 +250,8 @@ export const REASON_TEXT: Readonly<Record<RunReason, string>> = {
   missed: "Skipped: the scheduler reached this more than three hours after its time.",
   cooldown: "Post now was used a moment ago. Try again in a few minutes.",
   error: "Something went wrong while posting. Nothing was posted.",
+  busy: "An update is being posted right now. Try again in a minute.",
+  recent_manual: "Skipped: Post now had just posted this update.",
 };
 
 // ── Who may read a posted update ───────────────────────────────────
@@ -310,9 +321,12 @@ export interface UpdateTaskFact {
 
 export interface UpdateFacts {
   kind: TalkUpdateKind;
+  cadence: TalkUpdateCadence;
   scopeName: string;
   windowStart: string;
   now: string;
+  /** The update's zone: the Period line's days are its days, as the due days are. */
+  timezone: string;
   tasks: UpdateTaskFact[];
 }
 
@@ -341,17 +355,17 @@ export function buildUpdateRequest(f: UpdateFacts): { system: string; prompt: st
   const c = factCounts(f.tasks);
   const shape =
     f.kind === "standup"
-      ? "Write a short daily standup for the team: what was finished, what is in progress, and what is blocked or overdue. " +
+      ? `Write a short ${f.cadence === "weekly" ? "weekly" : "daily"} standup for the team: what was finished, what is in progress, and what is blocked or overdue. ` +
         "Use at most three short sections with a bold label each and a few bullets, naming people by the first names given."
-      : "Write a short weekly project update for stakeholders: one sentence on overall progress, then highlights, risks " +
+      : `Write a short ${f.cadence === "weekly" ? "weekly" : "daily"} project update for stakeholders: one sentence on overall progress, then highlights, risks ` +
         "(overdue or stuck work) and what is next, with a bold label each and a few bullets.";
   return {
     system:
-      `You write a ${KIND_LABEL[f.kind].toLowerCase()} that is posted into a team chat. ${shape} ` +
+      `You write a ${updateTitle(f.kind, f.cadence).toLowerCase()} that is posted into a team chat. ${shape} ` +
       "Mention only tasks in the list. No greeting, no sign-off, no heading line, no tables, under 1200 characters. " +
       DATA_RULE,
     prompt:
-      `Reporting on: ${f.scopeName}\nPeriod: ${f.windowStart.slice(0, 10)} to ${f.now.slice(0, 10)}\n` +
+      `Reporting on: ${f.scopeName}\nPeriod: ${zonedDay(new Date(f.windowStart), f.timezone)} to ${zonedDay(new Date(f.now), f.timezone)}\n` +
       `Counts: ${c.done} finished in the period, ${c.open} still open, ${c.overdue} overdue, ${c.total} tasks listed.\n` +
       `<tasks>\n${f.tasks.map(line).join("\n")}\n</tasks>`,
     maxTokens: 700,
@@ -364,13 +378,15 @@ export function buildUpdateRequest(f: UpdateFacts): { system: string; prompt: st
  * new live link behind.
  */
 export function withoutLinks(text: string): string {
+  // The address may hold "(" (the Talk renderer accepts it, chat-markup.ts
+  // LINK_AT), so it runs to the first ")". Each pass removes at least one
+  // "[", so looping until nothing changes always ends.
   let t = text;
-  for (let i = 0; i < 10; i += 1) {
-    const next = t.replace(/!?\[([^\[\]]*)\]\(([^()]*)\)/g, "$1");
-    if (next === t) break;
+  for (;;) {
+    const next = t.replace(/!?\[([^\[\]]*)\]\(([^)]*)\)/g, "$1");
+    if (next === t) return t;
     t = next;
   }
-  return t;
 }
 
 /** A List's or Space's name as a post's title may carry it: plain words only. */
@@ -384,12 +400,13 @@ export function cleanUpdateAnswer(answer: string): string | null {
   if (!t) return null;
   // A heading line the model added anyway; the post carries its own title.
   t = t.replace(/^#{1,6}\s+.*\n+/, "");
-  // An @ in front of a word would read as a mention that rings nobody.
-  t = t.replace(/@(?=\w)/g, "");
   // A link whose words differ from where it goes is the one thing a task
   // title could plant in a post written under a colleague's name: its words
   // stay, the hidden address goes. A bare address still shows itself.
   t = withoutLinks(t);
+  // An @ in front of a word (in any script) would read as a mention that
+  // rings nobody.
+  t = t.replace(/@(?=[\p{L}\p{N}_])/gu, "");
   if (t.length > MAX_POST_CHARS) {
     const at = t.lastIndexOf("\n", MAX_POST_CHARS);
     t = t.slice(0, at > MAX_POST_CHARS * 0.6 ? at : MAX_POST_CHARS).trimEnd();
@@ -402,7 +419,8 @@ export function cleanUpdateAnswer(answer: string): string | null {
  * name is in the title only when everyone in the conversation can open it
  * (null otherwise).
  */
-export function updatePostBody(kind: TalkUpdateKind, scopeName: string | null, text: string): string {
+export function updatePostBody(kind: TalkUpdateKind, cadence: TalkUpdateCadence, scopeName: string | null, text: string): string {
   const name = scopeName ? plainName(scopeName) : "";
-  return name ? `**${KIND_LABEL[kind]}: ${name}**\n${text}` : `**${KIND_LABEL[kind]}**\n${text}`;
+  const title = updateTitle(kind, cadence);
+  return name ? `**${title}: ${name}**\n${text}` : `**${title}**\n${text}`;
 }

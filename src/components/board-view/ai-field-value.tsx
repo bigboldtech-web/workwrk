@@ -291,7 +291,8 @@ function AiRow({
         </button>
       ) : null}
       {!busy && notReady ? <span className="text-xs text-ink-3">{NOT_READY_TEXT[notReady]}</span> : null}
-      {!busy && canCorrect ? (
+      {/* Nothing to pick from in a Categorize field with no categories yet. */}
+      {!busy && canCorrect && !(config.type === "CATEGORIZE" && config.choices.length === 0) ? (
         <button
           type="button"
           className={link}

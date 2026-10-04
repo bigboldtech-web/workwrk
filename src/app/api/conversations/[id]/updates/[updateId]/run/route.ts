@@ -31,7 +31,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (row.status !== "active") return jsonError("This update is paused. Resume it first.", 409);
     const now = new Date();
     const claim = await claimManualRun(row.id, now);
-    if (!claim.ok) return jsonSuccess({ posted: false, reason: "cooldown", message: REASON_TEXT.cooldown });
+    if (!claim.ok) return jsonSuccess({ posted: false, reason: claim.reason, message: REASON_TEXT[claim.reason] });
     const minute = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
     const out = await runTalkUpdate({ update: row, trigger: "manual", dueAt: minute, now });
     if (out.status === "posted") return jsonSuccess({ posted: true, messageId: out.messageId, taskCount: out.taskCount });

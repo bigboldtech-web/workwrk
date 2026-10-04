@@ -145,7 +145,7 @@ export function TalkUpdatesSection({ conversationId }: { conversationId: string 
           <Dots variant="pending" label="Loading" className="text-ink-3" />
         ) : (
           <>
-            {data.updates.length === 0 && !adding ? (
+            {data.updates.length === 0 && !adding && data.canCreate ? (
               <p className="text-xs text-ink-2">A daily standup or a weekly project update, written by AI from a List or a Space and posted here on a schedule.</p>
             ) : null}
             {data.updates.map((u) => {

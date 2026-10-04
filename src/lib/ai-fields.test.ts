@@ -199,6 +199,14 @@ describe("what a fill reads", () => {
     });
   });
 
+  it("reads the due day in the person's zone (due dates are stored as midnight where they were set)", () => {
+    const config = aiFieldConfig(field({ type: "SUMMARY" }))!;
+    // Set in Kolkata for 5 October: 18:30 UTC on the 4th.
+    const due = new Date("2026-10-04T18:30:00Z");
+    expect(factsForFill(config, { ...src, dueAt: due, timezone: "Asia/Kolkata" }).dueAt).toBe("2026-10-05");
+    expect(factsForFill(config, { ...src, dueAt: due }).dueAt).toBe("2026-10-04");
+  });
+
   it("drops what the field's switches turn off", () => {
     const config = aiFieldConfig(field({ type: "SENTIMENT", options: { aiInputs: { description: false, comments: false, fields: false } } }))!;
     expect(factsForFill(config, src)).toMatchObject({ description: "", comments: [], fields: [] });

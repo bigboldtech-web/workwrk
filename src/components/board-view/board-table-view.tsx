@@ -71,6 +71,7 @@ import { useAiFieldsAvailable } from "./ai-field-value";
 import { FILL_BATCH, aiFieldConfig, aiFieldNotReady, aiValueSortKey, aiValueText, isAiFieldType, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
 import { requestAiFill } from "@/lib/ai-fill-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { useItemTypes, type ItemTypeLite } from "./use-item-types";
@@ -1488,11 +1489,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // the server with onlyIfEmpty, so a value somebody writes meanwhile is never
   // replaced, and a refusal that would refuse every row (the daily limit, the
   // switch turned off) stops the rest.
+  // Rows a fill already failed on in this visit are left out of the next
+  // click, so "Run it again" reaches the rows after them instead of the same
+  // failing rows every time.
+  const aiFailedRows = useRef(new Map<string, Set<string>>());
   const emptyFillRows = useCallback((field: FieldDef): BoardItemRow[] => {
     const shown = buckets ? buckets.flatMap((b) => b.rows) : topLevel;
+    const failed = aiFailedRows.current.get(field.key);
     return shown.filter((r) => {
       const v = r.metadata?.[field.key];
-      return rowFieldsEditable(r, canEdit, assigneeEdit) && (v === undefined || v === null || v === "");
+      return rowFieldsEditable(r, canEdit, assigneeEdit) && (v === undefined || v === null || v === "") && !failed?.has(r.id);
     });
   }, [buckets, topLevel, canEdit, assigneeEdit]);
   const fillEmptyRows = useCallback(async (field: FieldDef) => {
@@ -1517,11 +1523,20 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         if (r.ok && "value" in r) {
           filled += 1;
           applyAiValue(row.id, field.key, r.value);
+          // An open drawer on this task re-reads it (no List drops a row on it).
+          try {
+            window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.realtime, { detail: { type: "item", itemId: row.id, boardId: null } }));
+          } catch { /* its own poll catches up */ }
         } else if (r.ok) {
           skipped += 1;
         } else {
           failures.set(r.message, (failures.get(r.message) ?? 0) + 1);
           if (r.stop) stop = r.message;
+          else {
+            const set = aiFailedRows.current.get(field.key) ?? new Set<string>();
+            set.add(row.id);
+            aiFailedRows.current.set(field.key, set);
+          }
         }
       }
     };
@@ -1539,7 +1554,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       const [why, n] = [...failures.entries()].sort((a, b) => b[1] - a[1])[0];
       parts.push(`${failed} couldn't be filled. ${failures.size === 1 ? why : `${n} of them: ${why}`}`);
     }
-    if (!stop && all.length > targets.length) parts.push(`${all.length - targets.length} more empty rows remain: run it again for the next ${FILL_BATCH}.`);
+    if (!stop && all.length > targets.length) parts.push(`${all.length - targets.length} more empty rows remain. Run it again to fill up to ${FILL_BATCH} more.`);
     toast(parts.join(" "));
   }, [emptyFillRows, boardId, applyAiValue, toast]);
 

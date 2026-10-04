@@ -42,7 +42,6 @@ import { loadConversationRole, talkGateForUser, type TalkGate } from "@/lib/talk
 import { canPost } from "@/lib/talk-access";
 import { afterMessageSent, insertConversationMessage } from "@/lib/talk-post";
 import {
-  KIND_LABEL,
   MANUAL_COOLDOWN_MS,
   MAX_FACT_TASKS,
   MAX_UPDATE_READERS,
@@ -50,6 +49,7 @@ import {
   STALE_AFTER_MS,
   buildUpdateRequest,
   cleanUpdateAnswer,
+  updateTitle,
   conversationProblem,
   dueState,
   nextTalkUpdateAt,
@@ -230,11 +230,14 @@ export async function sharedFacts(args: {
   const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
   // Open work only, List by List (each List names its own done statuses; a
   // task with no status is open), so finished history never crowds it out.
+  // isDoneStatus also counts a value the List does not declare as done by
+  // its name ("done", "closed", ...), so those leave the open reads too.
+  const doneByName = ["done", "complete", "completed", "closed", "resolved"].flatMap((n) => [n, n.toUpperCase(), n[0].toUpperCase() + n.slice(1)]);
   const openInScope = lists.map((l) => ({
     boardId: l.id,
     OR: [
       { status: null },
-      { status: { notIn: (statusesOf.get(l.id) ?? []).filter((x) => x.group !== "ACTIVE").map((x) => x.value) } },
+      { status: { notIn: [...(statusesOf.get(l.id) ?? []).filter((x) => x.group !== "ACTIVE").map((x) => x.value), ...doneByName] } },
     ],
   }));
   // Three reads, so none crowds another out: what changed in the window
@@ -446,11 +449,14 @@ async function runSteps(
   if (claim === "not_ready") return stop("skipped", "not_ready");
 
   // 7. The model.
+  const cadence = u.cadence as TalkUpdateSchedule["cadence"];
   const request = buildUpdateRequest({
     kind,
+    cadence,
     scopeName: scopeName ?? (u.scopeKind === "list" ? "a List" : "a Space"),
     windowStart: windowStart.toISOString(),
     now: now.toISOString(),
+    timezone: u.timezone,
     tasks: facts.tasks,
   });
   let answer = "";
@@ -475,7 +481,7 @@ async function runSteps(
   // 8. One message, as the person who set it up, marked as an AI update,
   // carrying who it was checked against: only they read its words later.
   const readerIds = readers.map((r) => r.userId);
-  const body = updatePostBody(kind, scopeName, text);
+  const body = updatePostBody(kind, cadence, scopeName, text);
   const metadata = { kind: "ai_update", update: { id: u.id, kind, scope: scopeName, tasks: facts.tasks.length, readers: readerIds } };
   const posted = await insertConversationMessage({
     conversationId: u.conversationId,
@@ -507,7 +513,7 @@ async function runSteps(
     type: "data.ai_update_posted",
     actorId: u.createdById,
     organizationId: u.organizationId,
-    description: `Posted a scheduled AI update (${KIND_LABEL[kind]}) from ${facts.tasks.length} ${facts.tasks.length === 1 ? "task" : "tasks"}`,
+    description: `Posted a scheduled AI update (${updateTitle(kind, cadence)}) from ${facts.tasks.length} ${facts.tasks.length === 1 ? "task" : "tasks"}`,
     targetId: u.conversationId,
     targetType: "conversation",
     metadata: { updateId: u.id, runId, messageId: posted.message.id, trigger: args.trigger, taskCount: facts.tasks.length },
@@ -527,12 +533,12 @@ async function runSteps(
  * costs nobody the next ten minutes. A scheduled run still in progress also
  * refuses the press.
  */
-export async function claimManualRun(updateId: string, now: Date): Promise<{ ok: true; previous: Date | null } | { ok: false }> {
+export async function claimManualRun(updateId: string, now: Date): Promise<{ ok: true; previous: Date | null } | { ok: false; reason: "busy" | "cooldown" }> {
   const running = await prisma.talkUpdateRun.findFirst({
     where: { updateId, status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
     select: { id: true },
   });
-  if (running) return { ok: false };
+  if (running) return { ok: false, reason: "busy" };
   const before = await prisma.talkUpdate.findUnique({ where: { id: updateId }, select: { lastManualAt: true } });
   const previous = before?.lastManualAt ?? null;
   const claimed = await prisma.talkUpdate.updateMany({
@@ -542,7 +548,7 @@ export async function claimManualRun(updateId: string, now: Date): Promise<{ ok:
     },
     data: { lastManualAt: now },
   });
-  return claimed.count === 1 ? { ok: true, previous } : { ok: false };
+  return claimed.count === 1 ? { ok: true, previous } : { ok: false, reason: "cooldown" };
 }
 
 /** Give a Post now claim back when the press stopped before the AI was asked. */
@@ -555,6 +561,7 @@ export const BEFORE_AI_REASONS: ReadonlySet<RunReason> = new Set<RunReason>([
   "off", "talk_off", "ai_off", "creator_gone", "creator_guest", "creator_agent", "cannot_post",
   "public_channel", "not_supported", "guests", "too_many_people", "scope_gone",
   "nothing_to_report", "nothing_new", "nothing_shared", "daily_limit", "not_configured", "not_ready", "cooldown",
+  "busy", "recent_manual",
 ]);
 
 // ── The cron's loop ────────────────────────────────────────────────
@@ -583,6 +590,26 @@ export async function processDueTalkUpdates(now: Date, opts: { limit: number; bu
       data: { nextRunAt: next },
     });
     if (claimed.count !== 1) continue;
+    // A Post now in progress, or one that posted moments ago, already said
+    // what this slot would: the slot steps aside rather than post twice.
+    const manual = await prisma.talkUpdateRun.findFirst({
+      where: {
+        updateId: u.id,
+        trigger: "manual",
+        OR: [
+          { status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
+          { status: "posted", startedAt: { gte: new Date(now.getTime() - MANUAL_COOLDOWN_MS) } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (manual) {
+      counts.skipped += 1;
+      await prisma.talkUpdateRun
+        .create({ data: { updateId: u.id, organizationId: u.organizationId, dueAt, trigger: "schedule", status: "skipped", reason: "recent_manual", finishedAt: new Date() } })
+        .catch(() => {});
+      continue;
+    }
     if (now.getTime() - dueAt.getTime() > STALE_AFTER_MS) {
       counts.missed += 1;
       await prisma.talkUpdateRun
@@ -651,7 +678,7 @@ export async function describeUpdates(
     where: { updateId: { in: ids } },
     orderBy: [{ startedAt: "desc" }, { id: "desc" }],
     take: 200,
-    select: { updateId: true, status: true, reason: true, startedAt: true, taskCount: true, trigger: true },
+    select: { id: true, updateId: true, status: true, reason: true, startedAt: true, taskCount: true, trigger: true },
   });
   const lastRun = new Map<string, (typeof runs)[number]>();
   for (const r of runs) if (!lastRun.has(r.updateId)) lastRun.set(r.updateId, r);
@@ -668,15 +695,22 @@ export async function describeUpdates(
       if (s.ok) scopeName = s.name;
     }
     const run0 = lastRun.get(r.id);
-    // A run left "running" by a process that died is a failed run, not a post in progress.
-    const run = run0 && run0.status === "running" && Date.now() - run0.startedAt.getTime() > STUCK_RUN_MS
-      ? { ...run0, status: "failed", reason: "error" }
-      : run0;
+    // A run left "running" by a process that died is not a post in progress:
+    // it posted if its message exists (the process died after posting),
+    // else it failed.
+    let run = run0;
+    if (run0 && run0.status === "running" && Date.now() - run0.startedAt.getTime() > STUCK_RUN_MS) {
+      const postedIt = await prisma.conversationMessage.findFirst({
+        where: { conversationId: r.conversationId, clientId: `tu_${run0.id}` },
+        select: { id: true },
+      });
+      run = postedIt ? { ...run0, status: "posted" } : { ...run0, status: "failed", reason: "error" };
+    }
     const mine = r.createdById === viewer.userId;
     out.push({
       id: r.id,
       kind: r.kind as TalkUpdateKind,
-      kindLabel: KIND_LABEL[r.kind as TalkUpdateKind] ?? "Update",
+      kindLabel: updateTitle(r.kind as TalkUpdateKind, r.cadence as TalkUpdateSchedule["cadence"]),
       scopeKind: r.scopeKind as "list" | "space",
       scopeId: r.scopeId,
       scopeName,

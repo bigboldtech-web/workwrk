@@ -25,6 +25,7 @@
 //     an older client or an import) is never shown as an AI value.
 
 import type { FieldChoice, FieldDef, FieldOptions, FieldType } from "@/lib/field-catalog";
+import { isValidTimeZone, zonedParts } from "@/lib/reports/schedule";
 
 export const AI_FIELD_TYPES = ["SUMMARY", "SENTIMENT", "CATEGORIZE", "TRANSLATION"] as const;
 export type AiFieldType = (typeof AI_FIELD_TYPES)[number];
@@ -473,6 +474,12 @@ export function factsForFill(
     status: string | null;
     priority: string | null;
     dueAt: Date | string | null;
+    /**
+     * The zone a due date is read in (the person's own, else the
+     * workspace's): due dates are stored as midnight where they were set, so
+     * their UTC date is a day early east of UTC.
+     */
+    timezone?: string;
     description: string;
     /** Newest first, as the query returns them. */
     commentsNewestFirst: string[];
@@ -481,7 +488,13 @@ export function factsForFill(
     selfKey: string;
   },
 ): AiFillFacts {
-  const due = src.dueAt ? (typeof src.dueAt === "string" ? src.dueAt : src.dueAt.toISOString()).slice(0, 10) : null;
+  const dueInstant = src.dueAt ? (typeof src.dueAt === "string" ? new Date(src.dueAt) : src.dueAt) : null;
+  let due: string | null = null;
+  if (dueInstant && !Number.isNaN(dueInstant.getTime())) {
+    const tz = src.timezone && isValidTimeZone(src.timezone) ? src.timezone : "UTC";
+    const p = zonedParts(dueInstant, tz);
+    due = `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
+  }
   const comments: string[] = [];
   if (config.inputs.comments) {
     let total = 0;
@@ -633,7 +646,7 @@ export function parseFillAnswer(
       const named = config.choices.filter((c) =>
         unspaced.test(c.label)
           ? raw.toLowerCase().includes(c.label.toLowerCase())
-          : new RegExp(`(^|[^\\p{L}\\p{N}])${esc(c.label)}($|[^\\p{L}\\p{N}])`, "iu").test(raw),
+          : new RegExp(`(^|[^\\p{L}\\p{N}\\p{M}])${esc(c.label)}($|[^\\p{L}\\p{N}\\p{M}])`, "iu").test(raw),
       );
       return named.length === 1 ? { choice: named[0].value } : null;
     }
