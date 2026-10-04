@@ -9,7 +9,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
-import { canAddTool, canManageTool, hasLogin, seesAllTools } from "@/lib/tools/tool-access";
+import { accessV2Tables } from "@/lib/access/flags";
+import { canAddTool, canEditTool, canShareTool, hasLogin, seesAllTools, toolShareRole } from "@/lib/tools/tool-access";
 import { requireTools } from "@/lib/tools/tool-server";
 
 export async function GET(req: NextRequest) {
@@ -19,8 +20,11 @@ export async function GET(req: NextRequest) {
   const q = (sp.get("q") ?? "").trim().slice(0, 200);
   const category = (sp.get("category") ?? "").trim();
 
-  const mine = await prisma.toolShare.findMany({ where: { userId: v.userId, tool: { organizationId: v.orgId } }, select: { toolId: true, sharedAt: true } });
+  const mine = await prisma.toolShare.findMany({ where: { userId: v.userId, tool: { organizationId: v.orgId } }, select: { toolId: true, sharedAt: true, role: true } });
   const sharedAt = new Map(mine.map((s) => [s.toolId, s.sharedAt]));
+  // What each of the viewer's shares gives (Can view while ACCESS_V2_TABLES is off).
+  const rolesOn = accessV2Tables();
+  const myRole = new Map(mine.map((s) => [s.toolId, toolShareRole(s, rolesOn)]));
 
   const tools = await prisma.tool.findMany({
     where: {
@@ -50,11 +54,15 @@ export async function GET(req: NextRequest) {
 
   return jsonSuccess({
     tools: tools.map(({ credentials, shares, ...t }) => {
-      const manage = canManageTool(v, t);
+      const share = myRole.get(t.id) ?? null;
+      const manage = canShareTool(v, t, share);
       return {
         ...t,
         hasLogin: hasLogin(credentials),
+        // canManage: share and delete it. With the roles on (the flag),
+        // canEdit: change it (category, fields, login).
         canManage: manage,
+        ...(rolesOn ? { canEdit: canEditTool(v, t, share) } : {}),
         sharedAt: sharedAt.get(t.id) ?? null,
         addedByPerson: person.get(t.addedBy) ?? null,
         // Who it is shared with: shown to the people who can change it, and

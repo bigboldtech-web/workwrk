@@ -22,7 +22,7 @@ import type { Prisma } from "@/generated/prisma";
 import { isAccessActivityType, accessAuditSentence } from "@/lib/access/access-activity";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
-import type { AccessNodeKind } from "@/lib/access/access-panel";
+import { isObjectShareKind, type AccessNodeKind, type ObjectShareKind } from "@/lib/access/access-panel";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
@@ -223,6 +223,8 @@ async function accessSummaries(
       return {
         row: r,
         kind: kind && NODE_KINDS.has(kind) ? (kind as AccessNodeKind) : null,
+        // An SOP folder, a tool, a goal or a team (the one dialog, batch 7).
+        objectKind: kind && isObjectShareKind(kind) ? kind : null,
         nodeId: str(m.nodeId),
         // A task's public link (src/lib/task-public-link.ts): not a node, named as a task.
         taskId: kind === "task" ? str(m.nodeId) : null,
@@ -253,19 +255,41 @@ async function accessSummaries(
     taskIds.length ? prisma.item.findMany({ where: { id: { in: taskIds }, organizationId: orgId }, select: { id: true, title: true } }) : Promise.resolve([]),
   ]);
   const taskTitle = new Map(tasks.map((t) => [t.id, t.title]));
+  // The auditor (an Owner or an Admin) sees every SOP folder, tool, goal and team.
+  const objectNames = await objectShareNames(orgId, access.filter((a) => a.objectKind && a.nodeId).map((a) => ({ kind: a.objectKind!, id: a.nodeId! })));
   const personName = new Map(people.map((p) => [p.id, [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email || "Someone"]));
 
   for (const a of access) {
     if (!isAccessActivityType(a.row.type)) continue;
     out.set(a.row.id, accessAuditSentence(a.row.type, {
       kind: a.kind,
+      objectKind: a.objectKind,
       noun: a.taskId ? "task" : null,
-      nodeName: a.kind && a.nodeId ? names.get(`${a.kind}:${a.nodeId}`) ?? null : a.taskId ? taskTitle.get(a.taskId) ?? null : null,
+      nodeName: a.kind && a.nodeId ? names.get(`${a.kind}:${a.nodeId}`) ?? null
+        : a.objectKind && a.nodeId ? objectNames.get(`${a.objectKind}:${a.nodeId}`) ?? null
+        : a.taskId ? taskTitle.get(a.taskId) ?? null : null,
       granteeName: a.granteeId ? personName.get(a.granteeId) ?? "a former member" : a.email,
       role: a.role,
       previousRole: a.previousRole,
     }));
   }
+  return out;
+}
+
+/** The names of the SOP folders, tools, goals and teams access rows name, one query per kind, org scoped. */
+async function objectShareNames(orgId: string, refs: Array<{ kind: ObjectShareKind; id: string }>): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = (kind: ObjectShareKind) => [...new Set(refs.filter((r) => r.kind === kind).map((r) => r.id))];
+  const put = (kind: ObjectShareKind, rows: Array<{ id: string; name: string }>) => {
+    for (const r of rows) out.set(`${kind}:${r.id}`, r.name);
+  };
+  const where = (kind: ObjectShareKind) => ({ id: { in: ids(kind) }, organizationId: orgId });
+  const tasks: Array<Promise<void>> = [];
+  if (ids("sop_folder").length) tasks.push(prisma.sOPFolder.findMany({ where: where("sop_folder"), select: { id: true, name: true } }).then((r) => put("sop_folder", r)));
+  if (ids("tool").length) tasks.push(prisma.tool.findMany({ where: where("tool"), select: { id: true, name: true } }).then((r) => put("tool", r)));
+  if (ids("goal").length) tasks.push(prisma.oKR.findMany({ where: where("goal"), select: { id: true, title: true } }).then((r) => put("goal", r.map((g) => ({ id: g.id, name: g.title })))));
+  if (ids("team").length) tasks.push(prisma.team.findMany({ where: where("team"), select: { id: true, name: true } }).then((r) => put("team", r)));
+  await Promise.all(tasks);
   return out;
 }
 

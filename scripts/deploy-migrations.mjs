@@ -176,6 +176,12 @@ const SQL_MANIFEST = [
   // ADD COLUMN IF NOT EXISTS and a catalogue-guarded constraint, no existing
   // column or row touched. Readers that do not know it see Can view.
   "2026-10-04-board-member-rung.sql",
+  // Batch 7: "ToolShare"."role", Can edit and Full access on a tool share
+  // (the one share dialog for tools). One nullable column and its CHECK:
+  // ADD COLUMN IF NOT EXISTS and a catalogue-guarded constraint, no existing
+  // column or row touched. A row without a role is Can view, as every row
+  // is today. Applied before the reload: the model names the column.
+  "2026-10-04-tool-share-role.sql",
 ];
 
 /**
