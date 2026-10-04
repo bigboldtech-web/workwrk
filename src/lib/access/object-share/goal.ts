@@ -401,6 +401,19 @@ export async function checkGoalAccess(
   if (!me.edit || ctx.isAgent) return "forbidden";
   const f = await goalFacts(ctx.organizationId, goal, userId);
   if (!f) return "not_in_org";
+  // Someone who may not read member types (not an Admin, not at an org-wide
+  // level) learns only what the goal itself names: a colleague's level or
+  // People team seat never comes out of the rules (the directory and the
+  // people picker keep levels from them too).
+  if (!ctx.orgAdmin && !isOrgWideAlignment(ctx.session)) {
+    const named = goal.ownerId === userId ? "owner" : f.ownRow ? "row" : f.group ? "group" : null;
+    if (!named) return { userId, name: f.name, role: "unknown", sentence: "Not added to this goal. Anything more comes from their workspace role or reporting line." };
+    const door = await appDoorFor(ctx.organizationId, userId, "goal");
+    if (door !== "open") return { userId, name: f.name, role: "none", sentence: DOOR_SENTENCE.goal[door] };
+    if (named === "owner") return { userId, name: f.name, role: "FULL", sentence: "Full access: edit, check in and delete. They own this goal." };
+    if (named === "row") return { userId, name: f.name, role: "EDIT", sentence: "Can check in. Added as a contributor." };
+    return { userId, name: f.name, role: "EDIT", sentence: `Can check in, ${f.group}.` };
+  }
   const door = await appDoorFor(ctx.organizationId, userId, "goal");
   if (door !== "open") return { userId, name: f.name, role: "none", sentence: DOOR_SENTENCE.goal[door] };
   if (f.del) return { userId, name: f.name, role: "FULL", sentence: `Full access: edit, check in and delete. ${f.editWhy}` };

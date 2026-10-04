@@ -199,8 +199,8 @@ describe("review round 2", () => {
 
   it("offers a request's grant only while the object's app is open to the decider", () => {
     const list = read("src/app/api/access-requests/route.ts");
-    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant\),/);
-    expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\{req\.appOff \? \(/);
+    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant && !roleBlocked\),/);
+    expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\) : req\.appOff \? \(/);
   });
 });
 
@@ -259,7 +259,7 @@ describe("review round 4", () => {
   it("offers a request's grant only to a decider who may share the object", () => {
     const list = read("src/app/api/access-requests/route.ts");
     expect(list).toMatch(/const cannotGrant = objectKind && !appOff \? !\(await shares\(objectKind, r\.objectId\)\) : false;/);
-    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant\),/);
+    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff && !cannotGrant && !roleBlocked\),/);
     expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\) : req\.cannotGrant \? \(/);
   });
 
@@ -309,5 +309,24 @@ describe("review round 6", () => {
     expect(sop).toMatch(/\.\.\.\(hiddenDirect > 0 \? \{ hiddenDirect \} : \{\}\),/);
     const list = read("src/components/access/who-has-access.tsx");
     expect(list).toMatch(/return hiddenLine \?\? <p className="m-0 text-sm text-ink-2">Nobody has been added here directly\.<\/p>;/);
+  });
+});
+
+describe("review round 7", () => {
+  it("tells a checker who may not read member types only what the goal or tool names", () => {
+    const goal = read("src/lib/access/object-share/goal.ts");
+    expect(goal).toMatch(/if \(!ctx\.orgAdmin && !isOrgWideAlignment\(ctx\.session\)\) \{\n\s+const named = goal\.ownerId === userId \? "owner" : f\.ownRow \? "row" : f\.group \? "group" : null;/);
+    const tool = read("src/lib/access/object-share/tool.ts");
+    expect(tool).toMatch(/if \(!ctx\.orgAdmin && !TOOL_ADMIN_LEVELS\.has\(ctx\.accessLevel\) && userId !== tool\.addedBy && share === null\) \{/);
+  });
+
+  it("caveats a kept Can edit on an SOP folder, and lists a request no share can answer", () => {
+    const sop = read("src/lib/access/object-share/sop-folder.ts");
+    expect(sop).toMatch(/stillReaches\.via = \{ type: "rule", text: `\$\{place\}, though their workspace role can't save SOPs` \};/);
+    expect(sop).toMatch(/export async function sopFolderEditBlocked\(/);
+    const list = read("src/app/api/access-requests/route.ts");
+    expect(list).toMatch(/if \(objectKind && !roleBlocked\) \{/);
+    expect(list).toMatch(/if \(appOff \|\| cannotGrant \|\| roleBlocked\) grants = undefined;/);
+    expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\{req\.roleBlocked \? \(/);
   });
 });

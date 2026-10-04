@@ -9,6 +9,7 @@ import { accessV2Resolver, settingsGateLogOnly } from "../flags";
 import { settingsGateMode } from "../settings-gate-engine";
 import type { ObjectShareCtx } from "./common";
 import { checkSopFolderAccess, removeSopFolderGrant, setSopFolderGrant, sopFolderHeldRole, sopFolderPanel } from "./sop-folder";
+export { sopFolderEditBlocked } from "./sop-folder";
 import { checkToolAccess, removeToolGrant, setToolGrant, toolHeldRole, toolPanel } from "./tool";
 import { checkGoalAccess, goalHeldRole, goalPanel, removeGoalGrant, setGoalGrant } from "./goal";
 import { checkTeamAccess, removeTeamGrant, setTeamGrant, teamHeldRole, teamPanel } from "./team";

@@ -324,6 +324,7 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
         mine,
         admin: active && ADMIN_LEVELS.has(String(target!.accessLevel)),
         agent: String(target?.accessLevel) === "AGENT",
+        level: target ? String(target.accessLevel) : null,
       };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
@@ -337,6 +338,13 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
       // An Agent works at Can edit, whatever the folder above gives it.
       ? { role: ("agent" in out && out.agent && out.above.role === "FULL" ? "EDIT" : out.above.role) as PanelRole, via: viaAt(ctx, out.mine, out.chain, out.above.at) }
       : null;
+  // As the row said: Can edit kept from above still saves nothing for a
+  // workspace role that can't edit SOPs.
+  if (stillReaches && stillReaches.via.type !== "org_admin" && rank(stillReaches.role) >= rank("EDIT") && "level" in out && out.level && !(await editsSops(input.userId, ctx.organizationId, out.level))) {
+    const v = stillReaches.via;
+    const place = v.type === "node" ? `from ${v.name}` : "from a place you cannot open";
+    stillReaches.via = { type: "rule", text: `${place}, though their workspace role can't save SOPs` };
+  }
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
 }
@@ -382,4 +390,16 @@ export async function sopFolderHeldRole(organizationId: string, folderId: string
   if (chain.length === 0) return null;
   const rows = await prisma.sOPFolderAccess.findMany({ where: { userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
   return roleFrom(rows, chain, 0, userId)?.role ?? null;
+}
+
+/**
+ * An edit request no share can answer: the person already holds Can edit or
+ * Full access on the folder, and their workspace role can't edit SOPs. Only a
+ * change of role helps, so the card lists it to be declined, never skipped.
+ */
+export async function sopFolderEditBlocked(organizationId: string, folderId: string, userId: string): Promise<boolean> {
+  const held = await sopFolderHeldRole(organizationId, folderId, userId);
+  if (!held || rank(held) < rank("EDIT")) return false;
+  const person = await prisma.user.findFirst({ where: { id: userId, organizationId, deletedAt: null }, select: { accessLevel: true } });
+  return !!person && !(await editsSops(userId, organizationId, String(person.accessLevel)));
 }

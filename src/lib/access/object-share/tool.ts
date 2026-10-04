@@ -307,11 +307,17 @@ export async function checkToolAccess(
   const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true } });
   if (!person) return "not_in_org";
   const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email;
+  const share = await shareRoleOf(prisma, id, userId);
+  // Someone who may not read member types (not an Admin or a tool admin)
+  // learns nothing from a person the tool does not name: their level would
+  // come out of the rules (the directory keeps levels from them too).
+  if (!ctx.orgAdmin && !TOOL_ADMIN_LEVELS.has(ctx.accessLevel) && userId !== tool.addedBy && share === null) {
+    return { userId, name, role: "unknown", sentence: "Not shared with them. Their workspace role may still reach every tool." };
+  }
   // A share gives nothing to someone the Tools app keeps out.
   const door = await appDoorFor(ctx.organizationId, userId, "tool");
   if (door !== "open") return { userId, name, role: "none", sentence: DOOR_SENTENCE.tool[door] };
   const tv = toolViewerOf(userId, String(person.accessLevel));
-  const share = await shareRoleOf(prisma, id, userId);
   const role = toolViewerRole(tv, tool, share);
   const label = (r: PanelRole) => shareRoleLabel(KIND, r);
   if (!role) return { userId, name, role: "none", sentence: "No access. This tool is not shared with them." };

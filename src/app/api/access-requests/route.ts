@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
 import { objectGrantRole, objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
-import { objectAccessPanel, objectAppOpen, objectHeldRole, objectShareCtxFromSession, objectShareOn } from "@/lib/access/object-share";
+import { objectAccessPanel, objectAppOpen, objectHeldRole, objectShareCtxFromSession, objectShareOn, sopFolderEditBlocked } from "@/lib/access/object-share";
 import { PANEL_ROLE_RANK } from "@/lib/access/access-panel";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
@@ -238,7 +238,12 @@ export async function GET(req: Request) {
     // card as a node's is, whoever is deciding (asked first, so an answered
     // request never costs a door or a panel).
     let grants: ReturnType<typeof objectRequestGrants> | undefined;
-    if (objectKind) {
+    // An SOP folder edit ask from someone who holds Can edit there already,
+    // and whose workspace role can't edit SOPs: no share answers it, so it is
+    // listed to be declined rather than skipped as answered.
+    const roleBlocked = objectKind === "sop_folder" && objectGrantRole(objectKind, r.role as RequestRole) === "EDIT"
+      && (await sopFolderEditBlocked(u.organizationId, r.objectId, r.requesterId));
+    if (objectKind && !roleBlocked) {
       const held = await objectHeldRole(objectKind, u.organizationId, r.objectId, r.requesterId);
       const heldRank = held ? PANEL_ROLE_RANK[held] : 0;
       grants = objectRequestGrants(objectKind, r.role as RequestRole).filter((g) => PANEL_ROLE_RANK[objectGrantRole(objectKind, g.role)] > heldRank);
@@ -246,7 +251,7 @@ export async function GET(req: Request) {
     }
     const appOff = objectKind ? !(await appOpen(objectKind)) : false;
     const cannotGrant = objectKind && !appOff ? !(await shares(objectKind, r.objectId)) : false;
-    if (appOff || cannotGrant) grants = undefined;
+    if (appOff || cannotGrant || roleBlocked) grants = undefined;
     incoming.push({
       id: r.id,
       objectType: r.objectType,
@@ -256,11 +261,12 @@ export async function GET(req: Request) {
       createdAt: r.createdAt,
       link: t.link,
       name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
-      grantable: node !== null || (objectKind !== null && !appOff && !cannotGrant),
+      grantable: node !== null || (objectKind !== null && !appOff && !cannotGrant && !roleBlocked),
       ...(grants ? { grants } : {}),
       // Its app is closed to the decider, or they may not share it: only Decline answers it.
       ...(appOff ? { appOff: true } : {}),
       ...(cannotGrant ? { cannotGrant: true } : {}),
+      ...(roleBlocked ? { roleBlocked: true } : {}),
       requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },
     });
   }
