@@ -7021,6 +7021,8 @@ model TalkUpdate {
   pausedReason   String?
   nextRunAt      DateTime?
   lastPostedAt   DateTime?
+  /// The last Post now that claimed it (one compare-and-swap per press).
+  lastManualAt   DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @default(now()) @updatedAt
   runs           TalkUpdateRun[]

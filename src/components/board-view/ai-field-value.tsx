@@ -14,6 +14,7 @@
 // AI value only. The task detail's Refill over a correction asks first.
 
 import { useContext, useState, type ReactNode } from "react";
+import { useFormat } from "@/lib/format/use-date-prefs";
 import { RotateCw, Sparkles } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -65,19 +66,16 @@ function announce(itemId: string) {
   }
 }
 
-function dayOf(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-function provenance(v: AiFieldValue): string {
-  const day = dayOf(v.at);
+/** Where a value came from, in the viewer's own date format and zone. */
+function provenance(v: AiFieldValue, fmtDate: (iso: string) => string): string {
+  const d = new Date(v.at);
+  const day = Number.isNaN(d.getTime()) ? "" : fmtDate(v.at);
   return v.source === "ai" ? `Filled with AI${day ? ` on ${day}` : ""}` : `Edited by hand${day ? ` on ${day}` : ""}`;
 }
 
 const NOT_READY_TEXT = {
-  needs_categories: "Add at least two categories to this field in the Fields panel.",
-  needs_language: "Pick a language for this field in the Fields panel.",
+  needs_categories: "Not set up yet: someone who manages this List adds its categories in the Fields panel.",
+  needs_language: "Not set up yet: someone who manages this List picks its language in the Fields panel.",
 } as const;
 
 /** A pill: a token tone, or a choice's own colour (choice colours are data). */
@@ -129,8 +127,12 @@ export function AiFieldValue({
   const config = aiFieldConfig(field);
   const available = useAiFieldsAvailable();
   const { toast } = useOsToast();
-  // A fill's answer shows at once, until the host's value moves.
+  const { date } = useFormat();
+  const fmtDate = (iso: string) => date(iso, "date");
+  // A fill's answer shows at once, until the host's value moves; once it
+  // moves (the host caught up, or someone cleared it) the host is the truth.
   const [local, setLocal] = useState<{ base: unknown; value: AiFieldValue } | null>(null);
+  if (local && local.base !== value) setLocal(null);
   const [busy, setBusy] = useState(false);
   if (!config) return <span className="text-xs text-ink-3">{EMPTY}</span>;
   const type = field.type as AiFieldType;
@@ -139,8 +141,9 @@ export function AiFieldValue({
   const raw = local && local.base === value ? local.value : value;
   const shown = parseAiValue(type, raw);
   // A value of another shape (written before AI fields, by an import or an
-  // API client) is data: it is shown, and never treated as empty.
-  const older = !shown && !(raw === undefined || raw === null || raw === "") ? raw : undefined;
+  // API client) is data: while AI fields are on it is shown and never
+  // treated as empty; while they are off the column reads as it always did.
+  const older = available && !shown && !(raw === undefined || raw === null || raw === "") ? raw : undefined;
   const canFill = available && editable && !!itemId;
   const notReady = aiFieldNotReady(config);
 
@@ -156,8 +159,9 @@ export function AiFieldValue({
     }
     if ("skipped" in r) return;
     setLocal({ base: value, value: r.value });
-    if (onFilled) onFilled(r.value);
-    else announce(itemId);
+    onFilled?.(r.value);
+    // Every other place showing this task (an open drawer, another List) re-reads it.
+    announce(itemId);
   };
 
   if (layout === "row") {
@@ -199,7 +203,7 @@ export function AiFieldValue({
     );
   }
   return (
-    <span className="group/ai inline-flex min-w-0 max-w-full items-center gap-1" title={provenance(shown)}>
+    <span className="group/ai inline-flex min-w-0 max-w-full items-center gap-1" title={provenance(shown, fmtDate)}>
       {shown.source === "ai" ? <Sparkles className="w-3 h-3 shrink-0 text-brand-deep" aria-label="Filled with AI" /> : null}
       <ValueBody config={config} value={shown} full={false} />
       {canFill && !notReady && shown.source === "ai" ? (
@@ -247,6 +251,8 @@ function AiRow({
   onCorrect: (next: AiFieldValue | null) => void;
 }) {
   const confirm = useConfirm();
+  const { date } = useFormat();
+  const fmtDate = (iso: string) => date(iso, "date");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const stamp = () => ({ source: "person" as const, at: new Date().toISOString(), by: null });
@@ -274,7 +280,7 @@ function AiRow({
       {shown ? (
         <span className="inline-flex items-center gap-1 text-xs text-ink-3">
           {shown.source === "ai" ? <Sparkles className="w-3 h-3 text-brand-deep" aria-hidden /> : null}
-          {provenance(shown)}
+          {provenance(shown, fmtDate)}
         </span>
       ) : null}
       {busy ? <Dots variant="pending" label="Filling" className="text-ink-3" /> : null}
@@ -307,7 +313,8 @@ function AiRow({
       const save = () => {
         const text = draft.trim();
         setEditing(false);
-        if (text === (shown?.text ?? "").trim()) return;
+        // Saving what was already there changes nothing (an older value too).
+        if (text === (shown?.text ?? (typeof older === "string" ? older : "")).trim()) return;
         onCorrect(text ? { text, ...stamp() } : null);
       };
       return (

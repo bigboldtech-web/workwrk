@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
 import { canPost } from "@/lib/talk-access";
-import type { Prisma } from "@/generated/prisma";
 import { serveAiUpdate } from "@/lib/talk-updates";
 
 // Edit and delete your OWN messages. Deletes are soft (deletedAt): the
@@ -41,15 +40,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // An AI update a person edits is no longer the AI's words (Batch 8): it
   // stops saying so, and keeps its reader list, so what it was posted from
-  // still reaches only the people it was checked against.
-  const prior = await prisma.conversationMessage.findUnique({ where: { id: messageId }, select: { metadata: true } });
-  const priorMeta = prior?.metadata && typeof prior.metadata === "object" && !Array.isArray(prior.metadata) ? (prior.metadata as Record<string, unknown>) : null;
-  const edited = priorMeta?.kind === "ai_update" ? { ...priorMeta, kind: "ai_update_edited" } : null;
-  const message = await prisma.conversationMessage.update({
-    where: { id: messageId },
-    data: { body: text, editedAt: new Date(), ...(edited ? { metadata: edited as Prisma.InputJsonValue } : {}) },
-    include: { author: { select: AUTHOR_SELECT } },
-  });
+  // still reaches only the people it was checked against. The kind changes
+  // in the database, in one statement, so a reaction saved at the same
+  // moment (which rewrites metadata too) is never lost.
+  const [, message] = await prisma.$transaction([
+    prisma.$executeRaw`
+      UPDATE "ConversationMessage"
+      SET "metadata" = jsonb_set("metadata", '{kind}', '"ai_update_edited"'::jsonb)
+      WHERE "id" = ${messageId} AND "metadata" ->> 'kind' = 'ai_update'`,
+    prisma.conversationMessage.update({
+      where: { id: messageId },
+      data: { body: text, editedAt: new Date() },
+      include: { author: { select: AUTHOR_SELECT } },
+    }),
+  ]);
   return jsonSuccess({ message: serveAiUpdate(message, userId) });
 }
 

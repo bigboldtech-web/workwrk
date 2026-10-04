@@ -62,6 +62,9 @@ import {
   type UpdateTaskFact,
 } from "@/lib/talk-updates";
 
+/** A run still "running" after this long died with its process. */
+const STUCK_RUN_MS = 10 * 60 * 1000;
+
 /** The model a post asks, unless the workspace's own key names another. */
 export const UPDATE_MODEL = "claude-haiku-4-5";
 const UPDATE_TIMEOUT_MS = 60_000;
@@ -202,7 +205,7 @@ export async function everyoneReadsScope(scopeKind: string, scopeId: string, rea
 
 export interface SharedFacts {
   tasks: UpdateTaskFact[];
-  /** Tasks that changed or are due soon, before the reach check. */
+  /** Tasks a post would report (finished, moved, overdue or due soon), before the reach check. */
   candidates: number;
 }
 
@@ -223,49 +226,78 @@ export async function sharedFacts(args: {
     id: true, title: true, status: true, boardId: true, organizationId: true, ownerId: true,
     assigneeIds: true, parentItemId: true, dueAt: true, updatedAt: true,
   } as const;
-  const base = { organizationId: args.organizationId, boardId: { in: listIds }, archivedAt: null, parentItemId: null };
-  // Two reads, so neither crowds the other out: what changed in the window
-  // (newest first), and what is due by the horizon (soonest first, so a task
-  // overdue for weeks is never cut by a busy week).
-  const [moved, dated] = await Promise.all([
-    prisma.item.findMany({ where: { ...base, updatedAt: { gte: windowStart } }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 300, select }),
-    prisma.item.findMany({ where: { ...base, dueAt: { lte: soon } }, orderBy: [{ dueAt: "asc" }, { id: "asc" }], take: 300, select }),
+  const base = { organizationId: args.organizationId, archivedAt: null, parentItemId: null };
+  const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
+  // Open work only, List by List (each List names its own done statuses; a
+  // task with no status is open), so finished history never crowds it out.
+  const openInScope = lists.map((l) => ({
+    boardId: l.id,
+    OR: [
+      { status: null },
+      { status: { notIn: (statusesOf.get(l.id) ?? []).filter((x) => x.group !== "ACTIVE").map((x) => x.value) } },
+    ],
+  }));
+  // Three reads, so none crowds another out: what changed in the window
+  // (newest first), open work already overdue (most recently due first), and
+  // open work due from now to the horizon (soonest first).
+  const [moved, overdueRows, upcoming] = await Promise.all([
+    prisma.item.findMany({ where: { ...base, boardId: { in: listIds }, updatedAt: { gte: windowStart } }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 300, select }),
+    prisma.item.findMany({ where: { ...base, OR: openInScope, dueAt: { lt: now } }, orderBy: [{ dueAt: "desc" }, { id: "desc" }], take: 200, select }),
+    prisma.item.findMany({ where: { ...base, OR: openInScope, dueAt: { gte: now, lte: soon } }, orderBy: [{ dueAt: "asc" }, { id: "asc" }], take: 200, select }),
   ]);
   const byId = new Map<string, (typeof moved)[number]>();
-  for (const c of [...moved, ...dated]) byId.set(c.id, c);
-  const candidates = [...byId.values()];
-  if (candidates.length === 0) return { tasks: [], candidates: 0 };
-
-  // EVERY reader, the person who set it up included: one task any of them
-  // cannot open is one task the post must not name.
-  let shared = new Set(candidates.map((c) => c.id));
-  for (const r of readers) {
-    const seen = await readableItemsVia(r, candidates);
-    shared = new Set([...shared].filter((id) => seen.get(id)?.readable === true));
-    if (shared.size === 0) return { tasks: [], candidates: candidates.length };
-  }
-  const kept = candidates.filter((c) => shared.has(c.id));
+  for (const c of [...moved, ...overdueRows, ...upcoming]) byId.set(c.id, c);
+  const all = [...byId.values()];
+  if (all.length === 0) return { tasks: [], candidates: 0 };
 
   // Finished IN the window means moved to a done status in it (its own
   // activity row), not merely edited while done.
-  const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
   const finished = new Set<string>();
   const changes = await prisma.itemActivity.findMany({
     where: {
       organizationId: args.organizationId,
       entityType: "BOARD_ITEM",
-      entityId: { in: kept.map((c) => c.id) },
+      entityId: { in: all.map((c) => c.id) },
       action: "STATUS_CHANGED",
       createdAt: { gte: windowStart },
     },
     select: { entityId: true, meta: true },
   }).catch(() => [] as Array<{ entityId: string; meta: unknown }>);
-  const listOf = new Map(kept.map((c) => [c.id, c.boardId] as const));
+  const listOf = new Map(all.map((c) => [c.id, c.boardId] as const));
   for (const ch of changes) {
     const to = (ch.meta as { to?: unknown } | null)?.to;
-    const statuses = statusesOf.get(listOf.get(ch.entityId) ?? "") ?? [];
-    if (typeof to === "string" && isDoneStatus(statuses, to)) finished.add(ch.entityId);
+    const st = statusesOf.get(listOf.get(ch.entityId) ?? "") ?? [];
+    if (typeof to === "string" && isDoneStatus(st, to)) finished.add(ch.entityId);
   }
+
+  // What a post would report, BEFORE the reach check, so "nothing to
+  // report" can say whether nothing happened or nothing is open to everyone.
+  type Row = (typeof all)[number];
+  const judged = new Map<string, { done: boolean; finishedHere: boolean; movedHere: boolean; overdue: boolean; due: ReturnType<typeof dueState> }>();
+  const reportable: Row[] = [];
+  for (const c of all) {
+    const st = statusesOf.get(c.boardId) ?? [];
+    const done = isDoneStatus(st, c.status);
+    const due = dueState(c.dueAt, now, args.timezone);
+    const overdue = !done && due.overdue;
+    const dueSoon = !done && due.soon;
+    const finishedHere = done && finished.has(c.id);
+    const movedHere = done ? finishedHere : c.updatedAt.getTime() >= windowStart.getTime();
+    if (!movedHere && !overdue && !dueSoon) continue;
+    judged.set(c.id, { done, finishedHere, movedHere, overdue, due });
+    reportable.push(c);
+  }
+  if (reportable.length === 0) return { tasks: [], candidates: 0 };
+
+  // EVERY reader, the person who set it up included: one task any of them
+  // cannot open is one task the post must not name.
+  let shared = new Set(reportable.map((c) => c.id));
+  for (const r of readers) {
+    const seen = await readableItemsVia(r, reportable);
+    shared = new Set([...shared].filter((id) => seen.get(id)?.readable === true));
+    if (shared.size === 0) return { tasks: [], candidates: reportable.length };
+  }
+  const kept = reportable.filter((c) => shared.has(c.id));
 
   // A List's name only where every reader may know it.
   const sayable = new Set<string>();
@@ -283,26 +315,19 @@ export async function sharedFacts(args: {
 
   const facts: Array<UpdateTaskFact & { rank: number }> = [];
   for (const c of kept) {
-    const statuses = statusesOf.get(c.boardId) ?? [];
-    const done = isDoneStatus(statuses, c.status);
-    const due = dueState(c.dueAt, now, args.timezone);
-    const overdue = !done && due.overdue;
-    const dueSoon = !done && due.soon;
-    const finishedHere = done && finished.has(c.id);
-    const movedHere = done ? finishedHere : c.updatedAt.getTime() >= windowStart.getTime();
-    // Kept: what finished or moved in the window, and open work that is late or due soon.
-    if (!movedHere && !overdue && !dueSoon) continue;
+    const j = judged.get(c.id)!;
+    const st = statusesOf.get(c.boardId) ?? [];
     const ids = Array.from(new Set([c.ownerId, ...c.assigneeIds].filter((x): x is string => !!x)));
     facts.push({
       title: c.title,
-      status: (c.status && makeStatusLookup(statuses)[c.status]?.label) || c.status || "No status",
-      group: done ? "done" : "open",
+      status: (c.status && makeStatusLookup(st)[c.status]?.label) || c.status || "No status",
+      group: j.done ? "done" : "open",
       assignees: ids.map((id) => names.get(id) ?? "").filter(Boolean).slice(0, 3),
-      due: due.day,
-      overdue,
-      moved: movedHere,
+      due: j.due.day,
+      overdue: j.overdue,
+      moved: j.movedHere,
       list: sayable.has(c.boardId) ? listName.get(c.boardId) ?? null : null,
-      rank: overdue ? 0 : finishedHere ? 1 : movedHere ? 2 : 3,
+      rank: j.overdue ? 0 : j.finishedHere ? 1 : j.movedHere ? 2 : 3,
     });
   }
   facts.sort((a, b) => a.rank - b.rank);
@@ -311,7 +336,7 @@ export async function sharedFacts(args: {
       title: f.title, status: f.status, group: f.group, assignees: f.assignees,
       due: f.due, overdue: f.overdue, moved: f.moved, list: f.list,
     })),
-    candidates: candidates.length,
+    candidates: reportable.length,
   };
 }
 
@@ -494,23 +519,43 @@ async function runSteps(
 }
 
 /**
- * Post now's own rule: a press that reached the AI (it posted, or the model
- * failed) blocks another for MANUAL_COOLDOWN_MS, and one still running blocks
- * any. A press that stopped before the AI (nothing to report, a Guest in the
- * conversation) costs nothing and blocks nothing beyond its own minute.
+ * Post now's own rule, as ONE compare-and-swap on lastManualAt: a press
+ * claims the update only when no press claimed it in the last
+ * MANUAL_COOLDOWN_MS, so two presses at once (or across a minute boundary)
+ * can never both post. A press that stops before the AI is asked gives the
+ * claim back (releaseManualRun), so a press that found nothing to report
+ * costs nobody the next ten minutes. A scheduled run still in progress also
+ * refuses the press.
  */
-export async function manualRunAllowed(updateId: string, now: Date): Promise<boolean> {
-  const recent = await prisma.talkUpdateRun.findFirst({
-    where: {
-      updateId,
-      trigger: "manual",
-      startedAt: { gte: new Date(now.getTime() - MANUAL_COOLDOWN_MS) },
-      OR: [{ status: "running" }, { status: "posted" }, { status: "failed" }],
-    },
+export async function claimManualRun(updateId: string, now: Date): Promise<{ ok: true; previous: Date | null } | { ok: false }> {
+  const running = await prisma.talkUpdateRun.findFirst({
+    where: { updateId, status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
     select: { id: true },
   });
-  return !recent;
+  if (running) return { ok: false };
+  const before = await prisma.talkUpdate.findUnique({ where: { id: updateId }, select: { lastManualAt: true } });
+  const previous = before?.lastManualAt ?? null;
+  const claimed = await prisma.talkUpdate.updateMany({
+    where: {
+      id: updateId,
+      OR: [{ lastManualAt: null }, { lastManualAt: { lt: new Date(now.getTime() - MANUAL_COOLDOWN_MS) } }],
+    },
+    data: { lastManualAt: now },
+  });
+  return claimed.count === 1 ? { ok: true, previous } : { ok: false };
 }
+
+/** Give a Post now claim back when the press stopped before the AI was asked. */
+export async function releaseManualRun(updateId: string, claimedAt: Date, previous: Date | null): Promise<void> {
+  await prisma.talkUpdate.updateMany({ where: { id: updateId, lastManualAt: claimedAt }, data: { lastManualAt: previous } }).catch(() => {});
+}
+
+/** The reasons a run stops at before the AI is asked: nothing was spent. */
+export const BEFORE_AI_REASONS: ReadonlySet<RunReason> = new Set<RunReason>([
+  "off", "talk_off", "ai_off", "creator_gone", "creator_guest", "creator_agent", "cannot_post",
+  "public_channel", "not_supported", "guests", "too_many_people", "scope_gone",
+  "nothing_to_report", "nothing_new", "nothing_shared", "daily_limit", "not_configured", "not_ready", "cooldown",
+]);
 
 // ── The cron's loop ────────────────────────────────────────────────
 
@@ -622,7 +667,11 @@ export async function describeUpdates(
       const s = await scopeFor(r.scopeKind, r.scopeId, viewer.linkViewer);
       if (s.ok) scopeName = s.name;
     }
-    const run = lastRun.get(r.id);
+    const run0 = lastRun.get(r.id);
+    // A run left "running" by a process that died is a failed run, not a post in progress.
+    const run = run0 && run0.status === "running" && Date.now() - run0.startedAt.getTime() > STUCK_RUN_MS
+      ? { ...run0, status: "failed", reason: "error" }
+      : run0;
     const mine = r.createdById === viewer.userId;
     out.push({
       id: r.id,

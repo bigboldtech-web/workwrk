@@ -67,7 +67,8 @@ import { linkedListsOf, listReader, readableItemsVia, type LinkRow, type Readabl
 import { projectItemForViewer, redactFieldsForViewer } from "@/lib/board-items-view";
 import { BUILT_IN_FIELD_KEYS, fieldChanges } from "@/lib/automation/field-changes";
 import { linkedContextFor } from "@/lib/item-context";
-import { normalizeAiWrites } from "@/lib/ai-fields";
+import { isAiFieldType, normalizeAiWrites } from "@/lib/ai-fields";
+import { aiFieldsOn } from "@/lib/ai/ai-features";
 
 type Ctx = Exclude<Awaited<ReturnType<typeof itemCtx>>, { error: NextResponse }>;
 
@@ -439,13 +440,15 @@ function metadataWriter(args: {
   watcherIds?: string[];
   /** One time for the whole request, so every re-run stamps the same value. */
   now: string;
+  /** The workspace has AI fields on (src/lib/ai/ai-features.ts): AI values are checked and stamped. */
+  aiStrict: boolean;
 }) {
   const keys = fieldKeySets(args.fields);
   // Batch 8: a write to one of this List's AI fields is a person's
   // correction, checked and stamped as theirs (src/lib/ai-fields.ts); a value
   // the client only re-sent stays exactly as stored.
   const aiChecked = (patch: Json, place: Json): Json => {
-    const r = normalizeAiWrites(patch, { fields: args.fields, stored: place, actorId: args.c.userId, now: args.now });
+    const r = normalizeAiWrites(patch, { fields: args.fields, stored: place, actorId: args.c.userId, now: args.now, strict: args.aiStrict });
     if (!r.ok) throw new Refusal(400, { error: r.error, key: r.key });
     return r.patch;
   };
@@ -664,16 +667,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // ── Phase 5b: the metadata write, as a function of the stored value ──
   const wantsMetadata = parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined;
+  const writerFields = wantsMetadata ? (linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId)) : [];
+  // Batch 8: whether AI-typed values are checked and stamped, read only when
+  // this write touches one (src/lib/ai-fields.ts normalizeAiWrites).
+  const touchedKeys = [...Object.keys(parsed.data.metadataPatch ?? {}), ...Object.keys(parsed.data.metadata ?? {})];
+  const touchesAi = touchedKeys.some((k) => writerFields.some((f) => f.key === k && isAiFieldType(f.type)));
+  const aiStrict = touchesAi
+    ? aiFieldsOn((await prisma.organization.findUnique({ where: { id: c.organizationId }, select: { settings: true } }))?.settings)
+    : false;
   const writer = wantsMetadata
     ? metadataWriter({
         c,
         itemId: id,
         linkedListId: linkedCtx ? linkedCtx.list.id : null,
-        fields: linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId),
+        fields: writerFields,
         metadataPatch: parsed.data.metadataPatch,
         metadata: parsed.data.metadata,
         watcherIds: parsed.data.watcherIds,
         now: new Date().toISOString(),
+        aiStrict,
       })
     : null;
   if (writer) {

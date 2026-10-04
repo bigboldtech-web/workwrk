@@ -237,6 +237,8 @@ function NewUpdateForm({
 }) {
   const [kind, setKind] = useState<TalkUpdateKind>("standup");
   const [scope, setScope] = useState("");
+  // The chosen List or Space stays chosen, and shown, whatever a later search returns.
+  const [scopeLabel, setScopeLabel] = useState("");
   const [cadence, setCadence] = useState<"weekdays" | "weekly">("weekdays");
   const [weekday, setWeekday] = useState(1);
   const [time, setTime] = useState("09:00");
@@ -306,8 +308,19 @@ function NewUpdateForm({
           aria-label="Find a List or a Space"
           className={`${field} mb-1`}
         />
-        <select value={scope} onChange={(e) => setScope(e.target.value)} className={field} disabled={!options}>
+        <select
+          value={scope}
+          onChange={(e) => {
+            setScope(e.target.value);
+            setScopeLabel(e.target.selectedOptions[0]?.textContent ?? "");
+          }}
+          className={field}
+          disabled={!options}
+        >
           <option value="">{options ? "Pick a List or a Space" : "Loading"}</option>
+          {scope && options && !options.boards.some((b) => `list:${b.id}` === scope) && !options.spaces.some((x) => `space:${x.id}` === scope) ? (
+            <option value={scope}>{scopeLabel || "Chosen"}</option>
+          ) : null}
           {options && options.spaces.length > 0 ? (
             <optgroup label="Spaces">
               {options.spaces.map((s) => <option key={`space:${s.id}`} value={`space:${s.id}`}>{s.name}</option>)}

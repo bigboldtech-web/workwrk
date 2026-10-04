@@ -3,8 +3,8 @@
 // Runs one update at once, by the same steps as its schedule
 // (src/lib/talk-updates-server.ts runTalkUpdate). Only the person it posts as
 // may press it: a post written as somebody is never started by somebody
-// else. At most once in MANUAL_COOLDOWN_MS, and once per minute by the run
-// row's own key, so a double click never posts twice.
+// else. At most once in MANUAL_COOLDOWN_MS, claimed by one compare-and-swap
+// on TalkUpdate.lastManualAt, so two presses at once never both post.
 //
 // Answers { posted: true, messageId, taskCount } or { posted: false, reason,
 // message }: a run that had nothing to say is an answer, not an error.
@@ -16,7 +16,7 @@ import { requireApp } from "@/lib/app-gate";
 import { requireConversation } from "@/lib/talk-gate";
 import { canPost } from "@/lib/talk-access";
 import { REASON_TEXT } from "@/lib/talk-updates";
-import { isMissingUpdatesTable, manualRunAllowed, runTalkUpdate } from "@/lib/talk-updates-server";
+import { BEFORE_AI_REASONS, claimManualRun, isMissingUpdatesTable, releaseManualRun, runTalkUpdate } from "@/lib/talk-updates-server";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; updateId: string }> }) {
   const app = await requireApp("ai");
@@ -30,10 +30,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (row.createdById !== ctx.viewer.userId) return jsonError("Only the person this update posts as can post it now.", 403);
     if (row.status !== "active") return jsonError("This update is paused. Resume it first.", 409);
     const now = new Date();
-    if (!(await manualRunAllowed(row.id, now))) return jsonSuccess({ posted: false, reason: "cooldown", message: REASON_TEXT.cooldown });
+    const claim = await claimManualRun(row.id, now);
+    if (!claim.ok) return jsonSuccess({ posted: false, reason: "cooldown", message: REASON_TEXT.cooldown });
     const minute = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
     const out = await runTalkUpdate({ update: row, trigger: "manual", dueAt: minute, now });
     if (out.status === "posted") return jsonSuccess({ posted: true, messageId: out.messageId, taskCount: out.taskCount });
+    // Stopped before the AI was asked: the next press need not wait.
+    if (BEFORE_AI_REASONS.has(out.reason)) await releaseManualRun(row.id, now, claim.previous);
     return jsonSuccess({ posted: false, reason: out.reason, message: REASON_TEXT[out.reason] });
   } catch (err) {
     if (isMissingUpdatesTable(err)) return jsonError("Scheduled updates aren't ready on this server yet.", 503);

@@ -228,7 +228,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
-  const canAct = !deleted && !msg.pending && !msg.failed;
+  // Nothing to react to, copy or reply about in an update this reader cannot read.
+  const canAct = !deleted && !msg.pending && !msg.failed && !aiHidden;
 
   const saveEdit = () => {
     const trimmed = draft.trim();

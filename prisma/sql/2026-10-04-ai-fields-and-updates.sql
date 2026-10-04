@@ -69,10 +69,14 @@ CREATE TABLE IF NOT EXISTS "TalkUpdate" (
   "pausedReason"   TEXT,
   "nextRunAt"      TIMESTAMP(3),
   "lastPostedAt"   TIMESTAMP(3),
+  "lastManualAt"   TIMESTAMP(3),
   "createdAt"      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt"      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "TalkUpdate_pkey" PRIMARY KEY ("id")
 );
+
+-- The same column on a table made by an earlier copy of this file.
+ALTER TABLE "TalkUpdate" ADD COLUMN IF NOT EXISTS "lastManualAt" TIMESTAMP(3);
 
 CREATE INDEX IF NOT EXISTS "TalkUpdate_status_nextRunAt_idx" ON "TalkUpdate" ("status", "nextRunAt");
 CREATE INDEX IF NOT EXISTS "TalkUpdate_conversationId_idx" ON "TalkUpdate" ("conversationId");

@@ -109,8 +109,10 @@ describe("the request and the post", () => {
 
   it("drops a heading the model added, defuses an @, and keeps the post short", () => {
     expect(cleanUpdateAnswer("# Standup\n\n**Done**\n- Ship login @Ana")).toBe("**Done**\n- Ship login Ana");
-    // A link's hidden address goes; its words stay.
+    // A link's hidden address goes; its words stay, nested ones too.
     expect(cleanUpdateAnswer("- See [the plan](https://evil.example/x) now")).toBe("- See the plan now");
+    expect(cleanUpdateAnswer("[[Click here](https://a.example)](https://evil.example)")).toBe("Click here");
+    expect(cleanUpdateAnswer("![img](https://x.example/p.png) ok")).toBe("img ok");
     expect(cleanUpdateAnswer("   ")).toBeNull();
     const long = Array.from({ length: 400 }, (_, i) => `- line ${i}`).join("\n");
     expect((cleanUpdateAnswer(long) ?? "").length).toBeLessThanOrEqual(MAX_POST_CHARS);
@@ -120,6 +122,8 @@ describe("the request and the post", () => {
     expect(updatePostBody("project", "Q4 *Launch*", "Body")).toBe("**Weekly project update: Q4 Launch**\nBody");
     // A List or Space not everyone here can open is never named.
     expect(updatePostBody("standup", null, "Body")).toBe("**Daily standup**\nBody");
+    // A List named like a link is plain words in the title.
+    expect(updatePostBody("standup", "Launch [docs](https://evil.example)", "B")).toBe("**Daily standup: Launch docs**\nB");
   });
 });
 

@@ -331,7 +331,19 @@ export type AiWriteIssue = "invalid_ai_value";
  */
 export function normalizeAiWrites(
   patch: Record<string, unknown>,
-  ctx: { fields: readonly FieldDef[]; stored: Record<string, unknown>; actorId: string; now: string },
+  ctx: {
+    fields: readonly FieldDef[];
+    stored: Record<string, unknown>;
+    actorId: string;
+    now: string;
+    /**
+     * The workspace has AI fields on: values are checked and stamped as
+     * above. Off: every write goes through exactly as it always has, except
+     * that a value claiming to be AI-written is recorded as the person's,
+     * so nothing can be made to look filled by AI.
+     */
+    strict: boolean;
+  },
 ): { ok: true; patch: Record<string, unknown> } | { ok: false; key: string; error: AiWriteIssue } {
   const byKey = new Map(ctx.fields.filter((f) => isAiFieldType(f.type)).map((f) => [f.key, f] as const));
   if (byKey.size === 0) return { ok: true, patch };
@@ -342,6 +354,11 @@ export function normalizeAiWrites(
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     if (key in ctx.stored && stable(ctx.stored[key]) === stable(value)) {
       out[key] = ctx.stored[key];
+      continue;
+    }
+    if (!ctx.strict) {
+      const claimed = value as Record<string, unknown>;
+      if (claimed.source === "ai") out[key] = { ...claimed, source: "person" };
       continue;
     }
     const type = field.type as AiFieldType;
@@ -608,9 +625,16 @@ export function parseFillAnswer(
       const exact = config.choices.find((c) => c.label.toLowerCase() === said);
       if (exact) return { choice: exact.value };
       // A category named on its own, never inside another word ("Bug" is not
-      // in "Debugging"), and only when exactly one is named.
+      // in "Debugging"), and only when exactly one is named. Scripts written
+      // without spaces between words (Chinese, Japanese, Thai, Korean with
+      // particles) have no word edges, so there the name alone must appear.
       const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const named = config.choices.filter((c) => new RegExp(`(^|[^\\p{L}\\p{N}])${esc(c.label)}($|[^\\p{L}\\p{N}])`, "iu").test(raw));
+      const unspaced = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+      const named = config.choices.filter((c) =>
+        unspaced.test(c.label)
+          ? raw.toLowerCase().includes(c.label.toLowerCase())
+          : new RegExp(`(^|[^\\p{L}\\p{N}])${esc(c.label)}($|[^\\p{L}\\p{N}])`, "iu").test(raw),
+      );
       return named.length === 1 ? { choice: named[0].value } : null;
     }
   }

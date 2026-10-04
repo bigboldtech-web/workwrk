@@ -358,6 +358,26 @@ export function buildUpdateRequest(f: UpdateFacts): { system: string; prompt: st
   };
 }
 
+/**
+ * Markdown links and images reduced to their words, again and again until
+ * none is left: one pass over nested brackets ("[[x](a)](b)") would leave a
+ * new live link behind.
+ */
+export function withoutLinks(text: string): string {
+  let t = text;
+  for (let i = 0; i < 10; i += 1) {
+    const next = t.replace(/!?\[([^\[\]]*)\]\(([^()]*)\)/g, "$1");
+    if (next === t) break;
+    t = next;
+  }
+  return t;
+}
+
+/** A List's or Space's name as a post's title may carry it: plain words only. */
+export function plainName(name: string): string {
+  return withoutLinks(name).replace(/[*_`[\]]/g, "").replace(/\s+/g, " ").trim();
+}
+
 /** The model's answer as the post's body, or null when it is not usable. */
 export function cleanUpdateAnswer(answer: string): string | null {
   let t = (answer ?? "").trim();
@@ -369,7 +389,7 @@ export function cleanUpdateAnswer(answer: string): string | null {
   // A link whose words differ from where it goes is the one thing a task
   // title could plant in a post written under a colleague's name: its words
   // stay, the hidden address goes. A bare address still shows itself.
-  t = t.replace(/!?\[([^\]]*)\]\(([^)]*)\)/g, "$1");
+  t = withoutLinks(t);
   if (t.length > MAX_POST_CHARS) {
     const at = t.lastIndexOf("\n", MAX_POST_CHARS);
     t = t.slice(0, at > MAX_POST_CHARS * 0.6 ? at : MAX_POST_CHARS).trimEnd();
@@ -383,5 +403,6 @@ export function cleanUpdateAnswer(answer: string): string | null {
  * (null otherwise).
  */
 export function updatePostBody(kind: TalkUpdateKind, scopeName: string | null, text: string): string {
-  return scopeName ? `**${KIND_LABEL[kind]}: ${scopeName.replace(/\*/g, "")}**\n${text}` : `**${KIND_LABEL[kind]}**\n${text}`;
+  const name = scopeName ? plainName(scopeName) : "";
+  return name ? `**${KIND_LABEL[kind]}: ${name}**\n${text}` : `**${KIND_LABEL[kind]}**\n${text}`;
 }

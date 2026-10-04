@@ -125,7 +125,7 @@ describe("normalizeAiWrites (a person's correction)", () => {
     field({ key: "mood", type: "SENTIMENT" }),
     field({ key: "note", type: "TEXT" }),
   ];
-  const ctx = (stored: Record<string, unknown> = {}) => ({ fields, stored, actorId: "u2", now: "2026-10-04T12:00:00.000Z" });
+  const ctx = (stored: Record<string, unknown> = {}, strict = true) => ({ fields, stored, actorId: "u2", now: "2026-10-04T12:00:00.000Z", strict });
 
   it("stamps a changed value as the person's, whatever source the client sent", () => {
     const r = normalizeAiWrites({ sum: { text: " Mine ", source: "ai", at: "1999", by: "u9" } }, ctx());
@@ -143,6 +143,12 @@ describe("normalizeAiWrites (a person's correction)", () => {
     expect(normalizeAiWrites({ mood: { sentiment: "furious" } }, ctx())).toEqual({ ok: false, key: "mood", error: "invalid_ai_value" });
     expect(normalizeAiWrites({ cat: { choice: "nope" } }, ctx())).toEqual({ ok: false, key: "cat", error: "invalid_ai_value" });
     expect(normalizeAiWrites({ cat: { choice: "bug" } }, ctx()).ok).toBe(true);
+  });
+
+  it("with AI fields off, writes as before, but nothing can claim to be AI-written", () => {
+    const patch = { sum: { text: "" }, mood: { sentiment: "furious", source: "ai", at: "x", by: "u9" }, cat: { choice: "nope" } };
+    const r = normalizeAiWrites(patch, ctx({}, false));
+    expect(r).toEqual({ ok: true, patch: { ...patch, mood: { sentiment: "furious", source: "person", at: "x", by: "u9" } } });
   });
 
   it("leaves clears, older shapes and other fields alone", () => {
@@ -242,6 +248,10 @@ describe("the model request and its answer", () => {
     expect(parseFillAnswer(categorize, "bug")).toEqual({ choice: "bug" });
     expect(parseFillAnswer(categorize, "Category: Question")).toEqual({ choice: "question" });
     expect(parseFillAnswer(categorize, "Something else")).toBeNull();
+    // Never inside another word.
+    expect(parseFillAnswer(categorize, "Debugging notes")).toBeNull();
+    const cjk = aiFieldConfig(field({ type: "CATEGORIZE", options: { choices: [{ value: "c1", label: "請求" }, { value: "c2", label: "障害" }] } }))!;
+    expect(parseFillAnswer(cjk, "これは請求の問題です")).toEqual({ choice: "c1" });
 
     const summary = aiFieldConfig(field({ type: "SUMMARY" }))!;
     expect(parseFillAnswer(summary, "  \"Short.\"  ")).toEqual({ text: "Short." });

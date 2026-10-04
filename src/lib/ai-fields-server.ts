@@ -139,7 +139,9 @@ export async function fillAiField(args: {
   if (args.onlyIfEmpty && !isEmptyValue(holds(stored))) {
     return NextResponse.json({ skipped: "has_value" }, { headers: { "Cache-Control": "no-store" } });
   }
-  const unexpected = (blob: Json): boolean => !!args.expect && stable(holds(blob) ?? null) !== stable(args.expect.value ?? null);
+  // Nothing stored and an empty string are the same empty cell.
+  const asSeen = (v: unknown): unknown => (isEmptyValue(v) ? null : v);
+  const unexpected = (blob: Json): boolean => !!args.expect && stable(asSeen(holds(blob))) !== stable(asSeen(args.expect.value));
   if (unexpected(stored)) return refuse(409, { error: "changed" });
 
   // ── 3. Reach: what every reader of this List's value already sees ──
