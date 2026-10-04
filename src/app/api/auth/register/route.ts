@@ -13,6 +13,7 @@ import { logAuditEvent } from "@/lib/activity";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { signupTemplateKey } from "@/lib/templates/tuesday-template";
 import { applySignupTemplate } from "@/lib/templates/apply-tuesday";
+import { selfServeTrialEnd } from "@/lib/admin/trial-end";
 
 // The Terms and Privacy Policy version a signup agrees to (the consent line
 // on /signup). Bumped when either document changes; recorded on the
@@ -94,6 +95,9 @@ export async function POST(req: Request) {
           name: organizationName,
           slug,
           status: "TRIAL",
+          // When staff follow the trial up: never shown to the customer, and
+          // nothing changes on it (src/lib/admin/trial-end.ts).
+          trialEndsAt: selfServeTrialEnd(new Date()),
         },
       });
 

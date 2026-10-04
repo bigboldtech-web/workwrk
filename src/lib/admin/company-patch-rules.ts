@@ -5,6 +5,7 @@
 
 import type { EnterpriseFeature } from "@/lib/enterprise-features";
 import { MODULES } from "@/lib/modules";
+import { isTrialEndDay } from "@/lib/admin/trial-end";
 
 export const VALID_PLANS = ["STARTER", "GROWTH", "SCALE", "ENTERPRISE"] as const;
 export const VALID_STATUSES = ["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"] as const;
@@ -39,6 +40,11 @@ export interface CompanyPatch {
   /** A premium module by app key ("chat" is Talk, "tables" is Tables). */
   module?: { key: string; enabled: boolean };
   /**
+   * A self-serve trial's end, for staff only, as a calendar day
+   * ("2026-10-19"), or null to clear it (src/lib/admin/trial-end.ts).
+   */
+  trialEndsOn?: string | null;
+  /**
    * The company name as the staff member typed it. Required, and checked on
    * the server, for SUSPENDED and CANCELLED: the typed confirmation is not
    * only a dialog, so a script or a replayed request cannot sign a whole
@@ -51,7 +57,8 @@ export type ValidatedPatch = { ok: true; patch: CompanyPatch } | { ok: false; er
 
 /**
  * Body to patch, or the one sentence that says why not. Pure. Accepts
- * `plan`, `status`, `seats` (a whole number, or null or "" for unlimited),
+ * `plan`, `status`, `trialEndsOn` (a calendar day, or null or "" to clear),
+ * `seats` (a whole number, or null or "" for unlimited),
  * `feature` + `enabled` and `module` + `enabled`; anything else in the body
  * is ignored. A feature and a module share `enabled`, so one body carries
  * at most one of the two. An empty patch is valid and applies nothing.
@@ -98,6 +105,11 @@ export function validateCompanyPatch(body: unknown): ValidatedPatch {
     } else {
       return { ok: false, error: "Seats must be a whole number from 1 to 1,000,000, or empty for unlimited" };
     }
+  }
+  if (b.trialEndsOn !== undefined) {
+    if (b.trialEndsOn === null || b.trialEndsOn === "") patch.trialEndsOn = null;
+    else if (typeof b.trialEndsOn === "string" && isTrialEndDay(b.trialEndsOn)) patch.trialEndsOn = b.trialEndsOn;
+    else return { ok: false, error: "The trial end must be a date, or empty to clear it" };
   }
   if (b.confirm !== undefined) {
     if (typeof b.confirm !== "string") return { ok: false, error: "`confirm` must be the company name" };

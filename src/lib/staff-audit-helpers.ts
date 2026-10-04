@@ -12,6 +12,7 @@ export const STAFF_ACTIONS = [
   "admin.org.seats_changed",
   "admin.org.module_changed",
   "admin.org.feature_changed",
+  "admin.org.trial_end_changed",
   "admin.org.owner_set",
   "admin.staff.added",
   "admin.staff.removed",
@@ -205,6 +206,10 @@ export function tenantEventFor(action: StaffActionKey, before: Rec, after: Rec):
         },
       };
     }
+    // Staff only, on purpose: the customer is never shown a self-serve trial's
+    // end (src/lib/admin/trial-end.ts), so their audit log does not name it.
+    case "admin.org.trial_end_changed":
+      return null;
     default:
       return null;
   }

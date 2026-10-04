@@ -67,7 +67,7 @@ interface Analytics {
   cancellations: {
     id: string;
     name: string;
-    /** Null only for a company deleted for good (`gone`). */
+    /** Null only for a company deleted for good before its plan was recorded (`gone`). */
     plan: string | null;
     canceledAt: string | null;
     what: "subscription" | "workspace" | "deleted";

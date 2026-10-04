@@ -189,6 +189,14 @@ const SQL_MANIFEST = [
   // touched. Applied before the reload: a fill or an update answers "not
   // ready" and sends nothing until the tables exist.
   "2026-10-04-ai-fields-and-updates.sql",
+  // Batch 9: "WorkspaceDeletion" (an Owner's deletion, kept after the
+  // workspace is gone, with no name and no foreign key) and the staff-only
+  // "Organization"."trialEndsAt". A new table and a new nullable column, plus
+  // two one-time backfills guarded by marker comments, because this list runs
+  // on every deploy. Applied before the reload: Prisma selects every
+  // Organization column on a read with no select, so the column must exist
+  // before the release that knows about it starts.
+  "2026-10-05-workspace-deletion-and-trial-end.sql",
 ];
 
 /**

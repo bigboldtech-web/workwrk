@@ -30,7 +30,7 @@ import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
 import { StatusChip, Chip } from "@/components/ui/chip";
 import { apiFetch } from "@/lib/api-fetch";
-import { formatDate, formatDateTitle, formatRelative } from "@/lib/format/date";
+import { dayKey, formatDate, formatDateTitle, formatRelative } from "@/lib/format/date";
 import { PLAN_OPTIONS, STATUS_OPTIONS, companyStatusColor, peopleCount, planLabel, statusLabel } from "@/lib/admin/console-labels";
 import { createWriteLedger } from "@/lib/admin/company-patch-rules";
 import { useCompanyCrumb, useConsole } from "../../../console-context";
@@ -62,6 +62,12 @@ export interface CompanyRecordData {
     updatedAt: string;
   } | null;
   lifetimeCode: { code: string; tier: number; refunded: boolean } | null;
+  /**
+   * When the trial ends, as staff read it (src/lib/admin/trial-end.ts):
+   * Stripe's date, or the company's own self-serve date, which only staff
+   * see. `editable` while that self-serve date is the one that counts.
+   */
+  trial: { endsAt: string | null; source: "stripe" | "self_serve" | null; editable: boolean; whyNot: string | null };
   modules: { key: string; label: string; competesWith: string; blurb: string; on: boolean; available: boolean }[];
   people: number;
   owners: { id: string; name: string; email: string }[];
@@ -314,6 +320,8 @@ export function CompanyRecord({
                 }}
                 onSeats={(n) => patch("seats", { seats: n })}
                 onSeatsEdited={() => forgetFailure("seats")}
+                onTrialEnd={(day) => patch("trialEnd", { trialEndsOn: day })}
+                onTrialEndEdited={() => forgetFailure("trialEnd")}
               />
               <ModulesCard
                 company={company}
@@ -568,6 +576,8 @@ function PlanCard({
   onStatus,
   onSeats,
   onSeatsEdited,
+  onTrialEnd,
+  onTrialEndEdited,
 }: {
   company: CompanyRecordData;
   busy: string | null;
@@ -578,8 +588,9 @@ function PlanCard({
   onStatus: (s: Status) => void;
   onSeats: (n: number | null) => Promise<boolean>;
   onSeatsEdited: () => void;
+  onTrialEnd: (day: string | null) => Promise<boolean>;
+  onTrialEndEdited: () => void;
 }) {
-  const sub = company.subscription;
   const limit = company.planLimits[company.plan] ?? UNLIMITED_USERS;
   const limitText = limit >= UNLIMITED_USERS ? `${planLabel(company.plan)} has no people limit.` : `${planLabel(company.plan)} allows ${limit}.`;
   return (
@@ -609,20 +620,99 @@ function PlanCard({
           <SubscriptionLine company={company} datePrefs={datePrefs} />
         </span>
       </Row>
-      {sub?.trialEndsAt ? (
-        <Row label="Trial ends">
-          <span className="text-base text-ink">{trialLine(sub.trialEndsAt, datePrefs)}</span>
-        </Row>
-      ) : null}
+      <TrialEndRow
+        company={company}
+        busy={busy}
+        saved={saved}
+        notSaved={notSaved}
+        datePrefs={datePrefs}
+        onTrialEnd={onTrialEnd}
+        onEdited={onTrialEndEdited}
+      />
     </Card>
   );
 }
 
 function trialLine(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"]): string {
+  return `${formatDate(at, datePrefs, "date")} ${trialLeft(at)}`;
+}
+
+/** "(12 days)", "(1 day)" or "(ended)". */
+function trialLeft(at: string): string {
   const days = Math.ceil((new Date(at).getTime() - Date.now()) / 86_400_000);
-  const when = formatDate(at, datePrefs, "date");
-  if (days < 0) return `${when} (ended)`;
-  return `${when} (${days} ${days === 1 ? "day" : "days"})`;
+  if (days < 0) return "(ended)";
+  return `(${days} ${days === 1 ? "day" : "days"})`;
+}
+
+/**
+ * "Trial ends". Stripe's date reads as it is. A self-serve trial's own date,
+ * which only staff see, is a date box: leaving it saves, and empty clears it.
+ * Nothing shows for a company with no trial and no way to have one here.
+ */
+function TrialEndRow({
+  company,
+  busy,
+  saved,
+  notSaved,
+  datePrefs,
+  onTrialEnd,
+  onEdited,
+}: {
+  company: CompanyRecordData;
+  busy: string | null;
+  saved: Record<string, number>;
+  notSaved: Record<string, () => void>;
+  datePrefs: ReturnType<typeof useConsole>["datePrefs"];
+  onTrialEnd: (day: string | null) => Promise<boolean>;
+  /** The box changed after a failed save: its Retry (for the old date) goes. */
+  onEdited: () => void;
+}) {
+  const trial = company.trial;
+  // The day as this staff member reads it, in their own zone: what the box holds.
+  const storedDay = trial.endsAt ? dayKey(trial.endsAt, datePrefs) : "";
+  const [day, setDay] = useState(storedDay);
+  const [seen, setSeen] = useState(storedDay);
+  if (seen !== storedDay) {
+    setSeen(storedDay);
+    setDay(storedDay);
+  }
+  if (!trial.editable) {
+    if (!trial.endsAt) return null;
+    return (
+      <Row label="Trial ends" hint={trial.source === "stripe" ? "Set by Stripe." : undefined}>
+        <span className="text-base text-ink">{trialLine(trial.endsAt, datePrefs)}</span>
+      </Row>
+    );
+  }
+  // A failed save keeps the picked date in the box, beside "Not saved · Retry",
+  // so what Retry sends is the date on screen (the Seats row's rule).
+  const commit = async () => {
+    if (day === storedDay) return;
+    await onTrialEnd(day === "" ? null : day);
+  };
+  return (
+    <Row
+      label="Trial ends"
+      hint="Only WorkwrK staff see this date. The company is not told it, and nothing changes for them on it: it is when to follow the trial up. Empty clears it."
+    >
+      <input
+        type="date"
+        value={day}
+        onChange={(e) => {
+          setDay(e.target.value);
+          if (notSaved.trialEnd) onEdited();
+        }}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        aria-label="Trial ends"
+        disabled={busy !== null && busy !== "trialEnd"}
+        className="h-9 w-44 rounded-md border border-line-strong bg-raised px-3 text-base tabular-nums text-ink focus:outline-none focus-visible:border-brand disabled:opacity-60"
+      />
+      {trial.endsAt && day === storedDay ? <span className="text-sm text-ink-2">{trialLeft(trial.endsAt)}</span> : null}
+      <SavedMark at={saved.trialEnd} />
+      <NotSavedMark retry={notSaved.trialEnd} />
+    </Row>
+  );
 }
 
 function SubscriptionLine({ company, datePrefs }: { company: CompanyRecordData; datePrefs: ReturnType<typeof useConsole>["datePrefs"] }) {
