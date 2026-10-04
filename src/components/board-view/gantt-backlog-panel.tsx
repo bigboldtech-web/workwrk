@@ -98,7 +98,7 @@ export function GanttBacklogPanel({
             const end = endById.get(it.id);
             const daysLate = end ? Math.max(1, Math.floor((startOfToday - end.getTime()) / MS_PER_DAY)) : 0;
             // Drag onto the chart and "Today" only for a row the viewer may date.
-            const mayDate = canEdit && (!editableIds || editableIds.has(it.id));
+            const mayDate = editableIds ? editableIds.has(it.id) : canEdit;
             return (
               <li key={it.id}>
                 <div

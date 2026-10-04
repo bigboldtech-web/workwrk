@@ -87,12 +87,72 @@ describe("every task menu writes once, and offers only what its host can open", 
   });
 
   it("offers Share only where the host can open it", () => {
-    expect(menu).toMatch(/\.filter\(\(row\) => !\(row\.key === "share" && !onShare\)\);/);
+    expect(menu).toMatch(/\.filter\(\(row\) => !\(row\.key === "share" && !onShare\)\)/);
   });
 
   it("gives the right-click menu each row's own role and List writes", () => {
     expect(host).toMatch(/const mayEdit = !!target && \(rowCanEdit \? rowCanEdit\(target\) : canEdit\);/);
     expect(host).toMatch(/assigneeOnly=\{!!target && kind === "home" && !!relationOnly\?\.\(target\)\}/);
+  });
+});
+
+describe("the List ladder on every surface that lists a person's own tasks", () => {
+  it("the planner holds a frozen task still", () => {
+    expect(read("src/app/api/calendar/events/route.ts")).toMatch(/editable: calendar === "my" && kind === "task" && !\(it\.boardId && readOnlyBoardIds\.has\(it\.boardId\)\),/);
+  });
+
+  it("My work decides each row as the gate does, Assigned by me included", () => {
+    const route = read("src/app/api/me/work/route.ts");
+    expect(route).toMatch(/scope === "delegated"\n\s+\? sides\.addable\.has\(it\.boardId\) \|\| \(madeByViewer\.has\(it\.id\) && !sides\.withheld\.has\(it\.boardId\)\)\n\s+: !sides\.withheld\.has\(it\.boardId\);/);
+    expect(route).toMatch(/canAddToList: sides\.addable\.has\(it\.boardId\),/);
+  });
+
+  it("Everything applies rules 9 and 5 where the List's lift applies", () => {
+    const everything = read("src/lib/everything.ts");
+    expect(everything).toMatch(/lifts && madeByViewer\.has\(it\.id\) \? "FULL"/);
+    expect(everything).toMatch(/: lifts && mine && !atLeast\(listRole, "EDIT"\) \? "EDIT"/);
+    expect(everything).toMatch(/canAddToList: atLeast\(listRole, "EDIT"\),/);
+  });
+
+  it("the List page hands every view the same per-row rule as the Table", () => {
+    const canvas = read("src/components/board-view/board-canvas.tsx");
+    expect(canvas).toMatch(/editableRow: \(row: BoardItemRow\) => rowFieldsEditable\(row, canEdit, assigneeEdit\),/);
+    expect(canvas.match(/editableRow=\{rowRules\?\.editableRow\}/g)?.length).toBe(5);
+    expect(canvas.match(/deletableRow=\{deletableRow\}/g)?.length).toBe(5);
+    // The row rule stands on its own in the Gantt: canEdit is the List's add right.
+    expect(read("src/components/board-view/board-gantt-view.tsx")).toMatch(/\(editableRow \? editableRow\(it\) : linkedRowEditable\(it, canEdit\)\)/);
+  });
+});
+
+describe("the task page and drawer for a rung", () => {
+  it("offer no List writes to the task's maker below Can edit", () => {
+    for (const p of ["src/components/board-view/item-drawer-host.tsx", "src/app/(dashboard)/item/[id]/page.tsx"]) {
+      expect(read(p), p).toMatch(/assigneeOnly=\{decision\.via === "assignee" \|\| \(decision\.via === "creator" && task\.canAddToList === false\)\}/);
+    }
+  });
+
+  it("offer Manage fields and statuses with Full access on the List, never in a List the task is only shown in", () => {
+    expect(read("src/lib/item-gate.ts")).toMatch(/canManageList = roleAtLeast\(d\.role, "FULL"\);/);
+    expect(read("src/app/api/items/[id]/route.ts")).toMatch(/canManageList: linked \? false : gate\.canManageList,/);
+  });
+
+  it("offer the Watchers picker to editors only", () => {
+    expect(read("src/components/board-view/board-item-detail.tsx")).toMatch(/open=\{canEdit && open\}/);
+  });
+
+  it("drop Mark complete and Rename where they cannot work", () => {
+    const menu = read("src/components/board-view/item-more-menu.tsx");
+    expect(menu).toMatch(/\.filter\(\(row\) => !\(row\.key === "complete" && completionStatuses\.length === 0\)\)/);
+    expect(menu).toMatch(/\.filter\(\(row\) => !\(row\.key === "rename" && !onRenameRequested\)\);/);
+  });
+});
+
+describe("a raise writes and reports what it gave", () => {
+  it("the grant writer and the request route both use the written role", () => {
+    const grants = read("src/lib/access/grants.ts");
+    expect(grants).toMatch(/role: plan\.role \?\? requested, noChange: false, notify: plan\.notify/);
+    expect(grants).toMatch(/notifyGrantee\(actor, ref, gate\.rows, userId, outcome\.role \?\? requested, outcome\.notify\)/);
+    expect(read("src/app/api/access-requests/[id]/route.ts")).toMatch(/if \(change\.role\) granted = change\.role;/);
   });
 });
 

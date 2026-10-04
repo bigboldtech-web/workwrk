@@ -24,6 +24,7 @@ import { requestExpired, requestNodeRef } from "@/lib/access/access-requests";
 import { requestTargetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
+import { panelRoleLabel, type PanelRole } from "@/lib/access/access-panel";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
@@ -102,15 +103,20 @@ export async function PATCH(req: Request, { params }: Params) {
   // refused (not a Full holder, a Private note, ...), the claim is released
   // and the request is pending again for someone who can answer it.
   if (!(await claim(request.id, "APPROVED", u.id))) return closedNow(request.id);
+  // What the grant actually wrote: a raise only adds, so a List's Can view
+  // and Can comment raised onto each other is Can edit assigned tasks
+  // (grant-plan.ts), and the record says that, not the button's word.
+  let granted: PanelRole = role;
   try {
-    await setNodeGrant(ctx, node, { userId: request.requesterId, role, mode: "raise" }, "dialog");
+    const { change } = await setNodeGrant(ctx, node, { userId: request.requesterId, role, mode: "raise" }, "dialog");
+    if (change.role) granted = change.role;
   } catch (err) {
     await release(request.id, u.id);
     if (err instanceof GrantError) return NextResponse.json({ error: err.code, message: err.message }, { status: err.status, headers: NO_STORE });
     throw err;
   }
   // grants.ts already tells the requester ("Shared with you", access_granted).
-  const word = role === "EDIT" ? "Can edit" : role === "COMMENT" ? "Can comment" : "Can view";
+  const word = panelRoleLabel(granted);
   await logActivity({
     organizationId: u.organizationId,
     actorId: u.id,
@@ -118,9 +124,9 @@ export async function PATCH(req: Request, { params }: Params) {
     targetType: request.objectType,
     targetId: request.objectId,
     description: `${actorName} granted ${word} on request`,
-    metadata: { requestId: request.id, requesterId: request.requesterId, role },
+    metadata: { requestId: request.id, requesterId: request.requesterId, role: granted, requested: role },
   }).catch(() => {});
-  return NextResponse.json({ ok: true, status: "APPROVED", role }, { headers: NO_STORE });
+  return NextResponse.json({ ok: true, status: "APPROVED", role: granted }, { headers: NO_STORE });
 }
 
 /** Move a PENDING request to its answer. False when someone else answered it first. */

@@ -328,11 +328,16 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
     canSharePublicly,
   })
-    .filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0))
-    // Share / Who has access opens the host's share dialog: a host that
-    // passes none (the List views' row, card and right-click menus) gets no
-    // row, rather than one that closes the menu and opens nothing.
-    .filter((row) => !(row.key === "share" && !onShare));
+    // Mark complete writes one of this task's List's statuses: with none to
+    // pick from (a linked task whose home set is not shared, a chart of many
+    // Lists) there is nothing it could write, so it is not offered.
+    .filter((row) => !(row.key === "complete" && completionStatuses.length === 0))
+    // Share / Who has access opens the host's share dialog, and Rename the
+    // host's title editor: a host that passes neither (the right-click menu of
+    // the calendar, gantt, timeline, hierarchy and cards views) gets no row,
+    // rather than one that closes the menu and does nothing.
+    .filter((row) => !(row.key === "share" && !onShare))
+    .filter((row) => !(row.key === "rename" && !onRenameRequested));
 
   const close = useCallback(() => setOpen(false), []);
 

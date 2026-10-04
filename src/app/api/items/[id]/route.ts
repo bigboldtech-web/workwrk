@@ -309,7 +309,10 @@ async function readItem(id: string, c: Ctx, requestedList: string | null) {
     // Adding a subtask adds to the List: Can edit on it (founder decision 3,
     // Can edit assigned tasks changes the viewer's tasks, never adds one).
     canAddToList: gate.canAddToList,
-    canManageList: gate.canManageList,
+    // Managing statuses and fields is the HOME List's (Full access on it), but
+    // opened in a List the task is only shown in, the page's fields and its
+    // Manage links are that other List's: no answer here fits both, so none.
+    canManageList: linked ? false : gate.canManageList,
   });
 }
 

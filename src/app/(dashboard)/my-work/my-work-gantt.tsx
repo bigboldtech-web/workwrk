@@ -78,6 +78,13 @@ function useRowRules(rows: readonly MyWorkRow[]) {
       // Open only through being assigned (or having made it), below Can edit
       // on its List: the menu offers no List writes for it.
       relationOnly: (row: { id: string }) => byId.get(row.id)?.canAddToList === false,
+      // Everything's rows carry the task role; Full access offers Delete.
+      deletableRow: (row: { id: string }) => (byId.get(row.id) as { role?: string } | undefined)?.role === "FULL",
+      // A Personal List task is the viewer's alone: nothing to share there.
+      personalRow: (row: { id: string }) => {
+        const r = byId.get(row.id);
+        return !!r?.board && !r.board.spaceId;
+      },
     };
   }, [rows]);
 }
@@ -93,7 +100,7 @@ export function MyWorkGantt({
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
-  const { editableRow, relationOnly } = useRowRules(rows);
+  const { editableRow, relationOnly, deletableRow, personalRow } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
@@ -103,8 +110,12 @@ export function MyWorkGantt({
         canEdit
         editableRow={editableRow}
         relationOnly={relationOnly}
+        deletableRow={deletableRow}
+        personalRow={personalRow}
         onOpenItem={(id) => openTask(router, id)}
         onItemChanged={onChanged}
+        // A copy from the right-click menu keeps the assignees: re-read so it shows.
+        onItemCreated={onChanged}
         onItemRemoved={onChanged}
         timeTrackingEnabled={false}
       />
@@ -122,7 +133,7 @@ export function MyWorkTimeline({
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
-  const { editableRow, relationOnly } = useRowRules(rows);
+  const { editableRow, relationOnly, deletableRow, personalRow } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
@@ -132,6 +143,8 @@ export function MyWorkTimeline({
         canEdit
         editableRow={editableRow}
         relationOnly={relationOnly}
+        deletableRow={deletableRow}
+        personalRow={personalRow}
         onOpenItem={(id) => openTask(router, id)}
         onItemCreated={onChanged}
         onItemRemoved={onChanged}

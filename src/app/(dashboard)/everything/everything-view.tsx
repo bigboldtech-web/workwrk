@@ -812,9 +812,9 @@ export function EverythingClient({
           ) : view === "calendar" ? (
             <MyWorkCalendar rows={rows} locale={locale} onCreate={() => openCreateTask()} />
           ) : view === "gantt" ? (
-            // Drag-to-reschedule is on only when every row on the page is
-            // editable: the renderer takes one answer and a Can view row must
-            // not move under a drag the API would refuse.
+            // Each row carries its own canEdit and canAddToList (everything.ts):
+            // the chart decides drag, dates and the right-click menu per row, so
+            // a row the API would refuse never moves and the others still do.
             <MyWorkGantt rows={rows} onChanged={() => void load()} />
           ) : view === "timeline" ? (
             <MyWorkTimeline rows={rows} onChanged={() => void load()} />

@@ -45,6 +45,17 @@ interface BoardCalendarViewProps {
    * they load the body is today's.
    */
   loadedSettings?: LoadedListSettings | null;
+  /**
+   * Which rows this viewer may change, when the host knows it per row (the
+   * List page below Can edit: a task assigned to them or that they made).
+   * Absent: the List's own rule. The day "+" stays on canEdit (adding is a
+   * List write).
+   */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /** Rows open only through being assigned or having made them: no List writes in their menu. */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
 }
 
 function dateKey(d: Date): string {
@@ -60,7 +71,11 @@ function localMidnightIso(dayKey: string): string {
   return new Date(`${dayKey}T00:00:00`).toISOString();
 }
 
-export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled, loadedSettings = null }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled, loadedSettings = null, editableRow, relationOnly, deletableRow }: BoardCalendarViewProps) {
+  // May this viewer move this chip? A task shown here through a link moves
+  // only as far as its task role allows (list-link-rows.ts); below Can edit,
+  // the host's row rule opens the tasks assigned to them or that they made.
+  const chipMay = useCallback((it: BoardItemRow) => (editableRow ? editableRow(it) : linkedRowEditable(it, canEdit)), [editableRow, canEdit]);
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on any day chip opens the shared item menu.
@@ -169,12 +184,10 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
   const rescheduleTo = useCallback(async (itemId: string, dayKey: string) => {
     setDragId(null);
     setDragOverDay(null);
-    if (!canEdit) return;
     const current = initialItems.find((it) => it.id === itemId);
     if (!current) return;
-    // A task shown here through a link moves only as far as its task role
-    // allows, and its write names this List (list-link-rows.ts).
-    if (!linkedRowEditable(current, canEdit)) return;
+    // Its write names this List when it is shown here through a link.
+    if (!chipMay(current)) return;
     const nextDue = localMidnightIso(dayKey);
     if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
     setError(null);
@@ -195,7 +208,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reschedule");
     }
-  }, [canEdit, initialItems, onItemChanged, boardId]);
+  }, [chipMay, initialItems, onItemChanged, boardId]);
 
   // 6-week grid starting Sunday. Lead/trail cells carry the adjacent
   // month's real greyed day numbers (ClickUp), but stay inert.
@@ -310,7 +323,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                       : "bg-zinc-50/50 dark:bg-white/[0.04]"
                 }`}
                 onDragOver={(e) => {
-                  if (!canEdit || !dragId || !cell.inMonth) return;
+                  if (!dragId || !cell.inMonth) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   setDragOverDay(cell.key);
@@ -358,7 +371,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                   {dayItems.slice(0, 4).map((it) => {
                     // A linked task shows its HOME status colour.
                     const dot = it.listLink?.homeStatus?.color ?? (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
-                    const chipEditable = linkedRowEditable(it, canEdit);
+                    const chipEditable = chipMay(it);
                     return (
                       <li key={it.id}>
                         {/* ClickUp chip: status-tinted wash + saturated left edge. */}
@@ -405,6 +418,10 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
+        rowCanEdit={editableRow}
+        relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        statuses={statuses}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

@@ -23,9 +23,15 @@ interface BoardHierarchyViewProps {
   /** Canvas sync after the context menu archives/deletes a node's item. */
   onItemRemoved?: (id: string) => void;
   timeTrackingEnabled?: boolean;
+  /** Which rows this viewer may change, when the host knows it per row (the List page below Can edit). */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /** Rows open only through being assigned or having made them: no List writes in their menu. */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
 }
 
-export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardHierarchyViewProps) {
+export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled, editableRow, relationOnly, deletableRow }: BoardHierarchyViewProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Right-click on any tree row opens the shared item menu.
   const menu = useItemContextMenu();
@@ -62,7 +68,7 @@ export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = 
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <ListTree className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-base text-zinc-500">No items yet — add tasks and subtasks to grow the tree.</p>
+        <p className="text-base text-zinc-500">No tasks yet. Add tasks and subtasks to grow the tree.</p>
       </div>
     );
   }
@@ -127,6 +133,10 @@ export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = 
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
+        rowCanEdit={editableRow}
+        relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        statuses={statuses}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

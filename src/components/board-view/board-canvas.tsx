@@ -49,6 +49,7 @@ import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
   applyRowPatchReport,
+  assignedRowEditable,
   boardStatusFor,
   computedFieldsKey,
   itemEventAction,
@@ -57,6 +58,7 @@ import {
   mergeRefetchedRow,
   reconcilePoll,
   refetchedFromRow,
+  rowFieldsEditable,
   type RefetchedTask,
   type RowPatchReport,
 } from "@/lib/list-link-rows";
@@ -164,6 +166,27 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // rename closes was between content write and managing the List itself,
   // and `canManage` is the only thing that travels for the latter.
   const canEdit = canContribute;
+  // Below Can edit, the tasks assigned to this viewer or made by them are
+  // theirs to change in place (rules 9 and 5), in every view of the List, as
+  // the Table and Kanban already have it: the views that only take one List
+  // flag get this rule per row. Arranging and adding stay at Can edit.
+  const rowRules = useMemo(
+    () =>
+      assigneeEdit
+        ? {
+            editableRow: (row: BoardItemRow) => rowFieldsEditable(row, canEdit, assigneeEdit),
+            relationOnly: (row: BoardItemRow) => !canEdit && assignedRowEditable(row, assigneeEdit),
+          }
+        : null,
+    [assigneeEdit, canEdit],
+  );
+  // Delete in the views' right-click menu, as the gate decides it: Full access
+  // on the List, or a task this viewer made where rule 5 applies (never at Can
+  // comment held as their whole access here).
+  const deletableRow = useCallback(
+    (row: BoardItemRow) => !!canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId && (assigneeEdit?.lift ?? true)),
+    [canDeleteTasks, currentUserId, assigneeEdit],
+  );
   const mayManage = canManage ?? canContribute;
   const router = useRouter();
   const { toast } = useOsToast();
@@ -728,6 +751,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemChanged={handleItemChanged}
@@ -745,6 +771,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemChanged={handleItemChanged}
           onItemCreated={handleItemCreated}
@@ -789,6 +818,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -811,6 +843,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -833,6 +868,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -849,7 +887,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">{viewType} view</div>
           <p className="text-xs text-zinc-500 max-w-[460px] mx-auto">
-            This view type isn&apos;t supported by this build yet — refresh, or pick another view tab.
+            This view type isn&apos;t supported by this build yet. Refresh, or pick another view tab.
           </p>
         </div>
       )}

@@ -40,6 +40,10 @@ interface BoardTimelineViewProps {
   editableRow?: (row: BoardItemRow) => boolean;
   /** Rows open only through being assigned or having made them: no List writes in their menu. */
   relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
+  /** Personal List rows on a chart of many Lists: no Share, no public link. */
+  personalRow?: (row: BoardItemRow) => boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -54,7 +58,7 @@ function toDate(v: Date | string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled, editableRow, relationOnly }: BoardTimelineViewProps) {
+export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled, editableRow, relationOnly, deletableRow, personalRow }: BoardTimelineViewProps) {
   // Right-click on any bar / unscheduled chip opens the shared item menu.
   const menu = useItemContextMenu();
   // Window: 2 weeks back from this week's Sunday, 10 forward.
@@ -278,8 +282,13 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
-        rowCanEdit={editableRow ? (row) => canEdit && editableRow(row) : undefined}
+        rowCanEdit={editableRow}
         relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        rowPersonal={personalRow}
+        // One List's statuses only (Mark complete writes one of them); a chart
+        // of many Lists has no one set.
+        statuses={boardId ? statuses : undefined}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

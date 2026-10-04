@@ -64,6 +64,8 @@ export function ItemContextMenuHost({
   canEdit,
   rowCanEdit,
   relationOnly,
+  rowCanDelete,
+  rowPersonal,
   statuses = [],
   timeTrackingEnabled = true,
   onOpenItem,
@@ -71,7 +73,10 @@ export function ItemContextMenuHost({
   onItemRemoved,
 }: {
   menu: ItemContextMenu;
-  /** Enables Duplicate (the copy POSTs to this board). */
+  /**
+   * The List these rows are drawn in. Absent on a chart of many Lists (My
+   * work, Everything), where every row is read as its home's.
+   */
   boardId?: string | null;
   canEdit: boolean;
   /** Per row, when the host knows better than one flag (My work, Everything, the Gantt's own set). */
@@ -82,6 +87,13 @@ export function ItemContextMenuHost({
    * Move, Add to another List, Share, Public link), which the List refuses.
    */
   relationOnly?: (row: BoardItemRow) => boolean;
+  /**
+   * Rows the viewer holds at Full access (Full on the List, or a task they
+   * made where rule 5 applies): their menu offers Delete as the server allows.
+   */
+  rowCanDelete?: (row: BoardItemRow) => boolean;
+  /** Personal List rows on a chart of many Lists: nothing to share, no public link. */
+  rowPersonal?: (row: BoardItemRow) => boolean;
   /** The List's own statuses, so "Mark complete" sets one it actually has. */
   statuses?: StatusOption[];
   /** Time Tracking module gate, hides "Start timer" when false. */
@@ -155,7 +167,8 @@ export function ItemContextMenuHost({
         }
     : undefined;
   const mayEdit = !!target && (rowCanEdit ? rowCanEdit(target) : canEdit);
-  const role = kind !== "home" && flags?.role ? flags.role : mayEdit ? "EDIT" : "VIEW";
+  const role = kind !== "home" && flags?.role ? flags.role : mayEdit ? (rowCanDelete?.(target!) ? "FULL" : "EDIT") : "VIEW";
+  const personalHere = personalList || (!!target && !!rowPersonal?.(target));
 
   return (
     <ItemMoreMenu
@@ -171,7 +184,7 @@ export function ItemContextMenuHost({
       listContext={listContext}
       onRemovedFromList={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       currentUserId={currentUserId}
-      personalList={personalList}
+      personalList={personalHere}
       statuses={statuses}
       watcherIds={watcherIdsOf(target)}
       timeTrackingOn={timeTrackingEnabled ?? true}
@@ -180,7 +193,10 @@ export function ItemContextMenuHost({
       // The menu has already asked and written each of these (item-more-menu.tsx):
       // the host only shows the result. Writing them again here made every
       // Duplicate two copies and every Archive two dialogs.
-      onDuplicated={boardId && onItemCreated && target ? (_id, copy) => { if (copy) onItemCreated(copy as BoardItemRow); } : undefined}
+      // A copy of a task shown here through a link lives in that task's HOME
+      // List, not here: it is left to the List's own poll rather than drawn
+      // as if it lived here. Everything else shows the copy at once.
+      onDuplicated={onItemCreated && target ? (_id, copy) => { if (copy && kind === "home") onItemCreated(copy as BoardItemRow); } : undefined}
       onArchived={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       onDeleted={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
     />

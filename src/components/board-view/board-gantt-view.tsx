@@ -90,6 +90,10 @@ interface BoardGanttViewProps {
    * them, below Can edit on the List: their menu offers no List writes.
    */
   relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
+  /** Personal List rows on a chart of many Lists: no Share, no public link. */
+  personalRow?: (row: BoardItemRow) => boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -134,6 +138,8 @@ export function BoardGanttView({
   loadedSettings = null,
   editableRow,
   relationOnly,
+  deletableRow,
+  personalRow,
 }: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on a name row / bar / marker opens the shared item menu.
@@ -355,13 +361,18 @@ export function BoardGanttView({
   // Which tasks this viewer may drag, resize or date here: every task on a
   // List they write, and a task shown through a link only as far as its task
   // role goes.
+  //
+  // A host that knows the rule per row (the List page for a Can edit assigned
+  // tasks member or an assignee below Can edit, My work, Everything) passes
+  // editableRow, and it stands on its own: canEdit is the List-wide add right
+  // (the Add Task row), which such a viewer does not hold.
   const editableIds = useMemo(
-    () => new Set(initialItems.filter((it) => (editableRow ? canEdit && editableRow(it) : linkedRowEditable(it, canEdit))).map((it) => it.id)),
+    () => new Set(initialItems.filter((it) => (editableRow ? editableRow(it) : linkedRowEditable(it, canEdit))).map((it) => it.id)),
     [initialItems, canEdit, editableRow],
   );
 
   const beginDrag = (e: React.PointerEvent, id: string, mode: DragMode) => {
-    if (!canEdit || !editableIds.has(id)) return;
+    if (!editableIds.has(id)) return;
     // Primary button only — right-click opens the context menu, not a drag.
     if (e.button !== 0) return;
     e.preventDefault();
@@ -570,7 +581,7 @@ export function BoardGanttView({
                     >
                       {item.title}
                     </button>
-                    {!start && !end && canEdit && editableIds.has(item.id) ? (
+                    {!start && !end && editableIds.has(item.id) ? (
                       <label className="relative inline-flex items-center justify-center w-5 h-5 rounded text-ink-4 hover:text-ink hover:bg-hover cursor-pointer shrink-0" title="Set due date">
                         <CalendarPlus className="w-3.5 h-3.5" />
                         <input
@@ -661,7 +672,7 @@ export function BoardGanttView({
                 className="relative"
                 style={{ height: chartHeight }}
                 onDragOver={(e) => {
-                  if (!panelDragId || !canEdit) return;
+                  if (!panelDragId || !editableIds.has(panelDragId)) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   const rect = lanesRef.current?.getBoundingClientRect();
@@ -731,7 +742,7 @@ export function BoardGanttView({
 
                 {rows.map(({ item, start, end }, rowIndex) => {
                   const color = item.listLink?.homeStatus?.color ?? (item.status ? statusLookup[item.status]?.color : null) ?? "var(--os-ink-3)";
-                  const barEditable = canEdit && editableIds.has(item.id);
+                  const barEditable = editableIds.has(item.id);
                   const top = rowIndex * ROW_H + (ROW_H - 24) / 2;
 
                   // Undated → a schedule marker parked on today (draggable / clickable).
@@ -928,6 +939,12 @@ export function BoardGanttView({
         canEdit={canEdit}
         rowCanEdit={(row) => editableIds.has(row.id)}
         relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        rowPersonal={personalRow}
+        // One List's statuses only: Mark complete writes one of them. A chart
+        // of many Lists (My work, Everything) has no one set, so no Mark
+        // complete there.
+        statuses={boardId ? statuses : undefined}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

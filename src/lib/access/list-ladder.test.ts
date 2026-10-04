@@ -395,24 +395,31 @@ describe("the List ladder: what hangs off a List never reads a task-only rung", 
   });
 
   // An older row set to a rung in place keeps its createdAt, and a workspace
-  // may have no cutoff at all: neither may read the rung row as an older
-  // grant, or the older rule's "every reader edits an unrestricted doc" (A8)
-  // would hand a Can comment member the List's docs and its tasks' docs.
+  // may have no cutoff at all. Can comment must never read as the older Can
+  // view row it is stored as, or the older rule's "every reader edits an
+  // unrestricted doc" (A8) would hand a comment-only member the List's docs
+  // and its tasks' docs. Can edit assigned tasks holds everything Can view
+  // gives, so on an older row it keeps the older rule like Can view does: a
+  // raise from Can view never lowers a doc.
   for (const privateRule of ["legacy", "strict"] as const) {
     for (const cutoff of ["older row", "no cutoff"] as const) {
       for (const anchor of ["BOARD", "BOARD_ITEM"] as const) {
-        it(`a ${anchor === "BOARD" ? "doc on the List" : "doc on one of its tasks"} reads either rung as Can comment (${cutoff}, ${privateRule} rule)`, () => {
-          for (const rung of ["COMMENT", "ASSIGNED"] as const) {
+        it(`a ${anchor === "BOARD" ? "doc on the List" : "doc on one of its tasks"}: Can comment reads Can comment, Can edit assigned tasks keeps Can view's older reach (${cutoff}, ${privateRule} rule)`, () => {
+          const docRole = (rung: "COMMENT" | "ASSIGNED" | null) => {
             const { rows, g } = world();
             rows.privateRule = privateRule;
             if (cutoff === "no cutoff") rows.legacyBefore = null;
             rows.items.set("t", { id: "t", organizationId: ORG, boardId: "l" });
             rows.docs.set("d", { id: "d", organizationId: ORG, title: "d", entityType: anchor, entityId: anchor === "BOARD" ? "l" : "t", parentId: null, createdById: OTHER });
             g.list.set("l", "GUEST");
-            (g.listRung ??= new Map()).set("l", rung);
+            if (rung) (g.listRung ??= new Map()).set("l", rung);
             g.since!.set("list:l", CUTOFF - 1);
-            expect(new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role, rung).toBe("COMMENT");
-          }
+            return new NodeEvaluator(rows, g).effective({ kind: "doc", id: "d" }).role;
+          };
+          expect(docRole("COMMENT")).toBe("COMMENT");
+          // The same older row at Can view and raised to Can edit assigned tasks.
+          expect(docRole("ASSIGNED")).toBe(docRole(null));
+          expect(docRole(null)).toBe("EDIT");
         });
       }
     }
