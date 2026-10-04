@@ -216,14 +216,26 @@ export function writtenBeforeCutoff(rows: NodeRows, at: number | null | undefine
  * The viewer's rows as today's code would have seen them: every Space,
  * Folder and List row written at or after the cutoff removed. The same object
  * when nothing is dropped.
+ *
+ * A List row at Can comment is dropped whatever its date. That rung exists
+ * only on this release's ladder and means "change nothing", even when the
+ * grant writer set it in place on an older row (which keeps that row's
+ * createdAt): read back as the older Can view row it is stored as, it would
+ * hand its holder "every reader edits an unrestricted doc" (A8) on the List's
+ * docs and its tasks' docs. Can edit assigned tasks is not dropped: it holds
+ * everything Can view gives, so an older row raised to it keeps the older
+ * rule's reach, and a raise never lowers what the person had on those docs.
  */
 export function legacyGrantsOf(rows: NodeRows, grants: ViewerGrants): ViewerGrants {
   const since = grants.since;
-  if (rows.legacyBefore === null || !since || since.size === 0) return grants;
+  const rung = grants.listRung && grants.listRung.size > 0 ? grants.listRung : null;
+  const frozen = !!rung && [...rung.values()].includes("COMMENT");
+  if (!frozen && (rows.legacyBefore === null || !since || since.size === 0)) return grants;
   const keep = (kind: "space" | "folder" | "list", m: ViewerGrants["space"]) => {
     let out: ViewerGrants["space"] | null = null;
     for (const id of m.keys()) {
-      if (writtenBeforeCutoff(rows, since.get(`${kind}:${id}`))) continue;
+      const commentRow = kind === "list" && !!rung && rung.get(id) === "COMMENT";
+      if (!commentRow && writtenBeforeCutoff(rows, since?.get(`${kind}:${id}`))) continue;
       out ??= new Map(m);
       out.delete(id);
     }

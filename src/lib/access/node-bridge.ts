@@ -48,6 +48,8 @@ export function objectRoleOfNodeRole(role: NodeRole): ObjectRole | null {
       return "FULL";
     case "EDIT":
       return "EDIT";
+    // The engine's four roles: Can edit assigned tasks reads as Can comment.
+    case "ASSIGNED":
     case "COMMENT":
       return "COMMENT";
     case "VIEW":

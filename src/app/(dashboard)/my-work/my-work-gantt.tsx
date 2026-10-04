@@ -65,29 +65,57 @@ function Legend({ rows }: { rows: readonly MyWorkRow[] }) {
   );
 }
 
+/**
+ * Each row says what the viewer may do with it (the server works it out per
+ * row, src/lib/assignee-lift.ts), so one task in a List where Can comment is
+ * all they hold never stops them rescheduling every other one.
+ */
+function useRowRules(rows: readonly MyWorkRow[]) {
+  return useMemo(() => {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return {
+      editableRow: (row: { id: string }) => byId.get(row.id)?.canEdit ?? false,
+      // Open only through being assigned (or having made it), below Can edit
+      // on its List: the menu offers no List writes for it.
+      relationOnly: (row: { id: string }) => byId.get(row.id)?.canAddToList === false,
+      // Everything's rows carry the task role; Full access offers Delete.
+      deletableRow: (row: { id: string }) => (byId.get(row.id) as { role?: string } | undefined)?.role === "FULL",
+      // A Personal List task is the viewer's alone: nothing to share there.
+      personalRow: (row: { id: string }) => {
+        const r = byId.get(row.id);
+        return !!r?.board && !r.board.spaceId;
+      },
+    };
+  }, [rows]);
+}
+
 export function MyWorkGantt({
   rows,
-  canEdit = true,
   onChanged,
 }: {
   rows: readonly MyWorkRow[];
-  /** False when any row on the page is read-only (Everything at Can view). */
-  canEdit?: boolean;
   /** After a drag or a date write: the page re-reads its rows. */
   onChanged: () => void;
 }) {
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
+  const { editableRow, relationOnly, deletableRow, personalRow } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
       <BoardGanttView
         initialItems={items}
         statuses={statuses}
-        canEdit={canEdit}
+        canEdit
+        editableRow={editableRow}
+        relationOnly={relationOnly}
+        deletableRow={deletableRow}
+        personalRow={personalRow}
         onOpenItem={(id) => openTask(router, id)}
         onItemChanged={onChanged}
+        // A copy from the right-click menu keeps the assignees: re-read so it shows.
+        onItemCreated={onChanged}
         onItemRemoved={onChanged}
         timeTrackingEnabled={false}
       />
@@ -97,23 +125,26 @@ export function MyWorkGantt({
 
 export function MyWorkTimeline({
   rows,
-  canEdit = true,
   onChanged,
 }: {
   rows: readonly MyWorkRow[];
-  canEdit?: boolean;
   onChanged: () => void;
 }) {
   const router = useRouter();
   const items = useMemo(() => toBoardRows(rows), [rows]);
   const statuses = useMemo(() => statusOptionsFrom(rows), [rows]);
+  const { editableRow, relationOnly, deletableRow, personalRow } = useRowRules(rows);
   return (
     <div>
       <Legend rows={rows} />
       <BoardTimelineView
         initialItems={items}
         statuses={statuses}
-        canEdit={canEdit}
+        canEdit
+        editableRow={editableRow}
+        relationOnly={relationOnly}
+        deletableRow={deletableRow}
+        personalRow={personalRow}
         onOpenItem={(id) => openTask(router, id)}
         onItemCreated={onChanged}
         onItemRemoved={onChanged}

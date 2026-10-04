@@ -51,9 +51,12 @@ export function requestTypesForNode(kind: NodeRef["kind"]): string[] {
   return [kind];
 }
 
-// VIEW < COMMENT < EDIT < FULL < OWNER, the same ladder as PANEL_ROLE_RANK,
-// kept here so this module stays importable without the panel vocabulary.
-const HELD_RANK: Readonly<Record<string, number>> = { VIEW: 1, COMMENT: 2, EDIT: 3, FULL: 4, OWNER: 5 };
+// VIEW < COMMENT < ASSIGNED < EDIT < FULL < OWNER, the same ladder as
+// PANEL_ROLE_RANK (list-ladder.test.ts holds the two together),
+// kept here so this module stays importable without the panel vocabulary. A
+// List's Can edit assigned tasks answers a request for Can view or Can
+// comment, never one for Can edit.
+const HELD_RANK: Readonly<Record<string, number>> = { VIEW: 1, COMMENT: 2, ASSIGNED: 2.5, EDIT: 3, FULL: 4, OWNER: 5 };
 const REQUEST_ROLES: readonly RequestRole[] = ["VIEW", "COMMENT", "EDIT"];
 
 /** Does a role the person holds now answer a request for `asked`? None never does; an unknown ask reads as Edit. */

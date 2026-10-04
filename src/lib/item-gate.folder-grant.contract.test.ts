@@ -25,7 +25,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { allowsItemAction, decideItem } from "./item-role";
+import { allowsItemAction, decideItem, taskSideOfListRole } from "./item-role";
 
 const code = readFileSync(join(__dirname, "item-gate.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -53,7 +53,15 @@ describe("gateItem takes a folder grantee's role from the one resolver", () => {
   });
 
   it("reads the Space Owner rung as Full access and fabricates nothing else", () => {
-    expect(listRoleBlock).toMatch(/listRole = d\.role === "none" \? "none" : d\.role === "OWNER" \? "FULL" : d\.role;/);
+    // The List role's task half comes from one pure map (founder decision 3
+    // added the List's two rungs below Can edit to it).
+    expect(listRoleBlock).toMatch(/\(\{ listRole, assigneeLift, creatorLift \} = taskSideOfListRole\(d\.role\)\);/);
+    expect(taskSideOfListRole("OWNER").listRole).toBe("FULL");
+    for (const r of ["FULL", "EDIT", "COMMENT", "VIEW", "none"] as const) expect(taskSideOfListRole(r).listRole, r).toBe(r);
+    // Can edit assigned tasks is Can comment on the task, plus both lifts;
+    // Can comment withholds both.
+    expect(taskSideOfListRole("ASSIGNED")).toEqual({ listRole: "COMMENT", assigneeLift: true, creatorLift: true });
+    expect(taskSideOfListRole("COMMENT")).toMatchObject({ assigneeLift: false, creatorLift: false });
   });
 
   it("keeps the org-admin short cut ahead of every List read", () => {

@@ -16,7 +16,6 @@ import { createContext, useCallback, useContext, useRef, useState } from "react"
 import { useSession } from "next-auth/react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
-import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
 import { accessMessage } from "@/lib/access-message";
@@ -63,6 +62,10 @@ export function ItemContextMenuHost({
   menu,
   boardId,
   canEdit,
+  rowCanEdit,
+  relationOnly,
+  rowCanDelete,
+  rowPersonal,
   statuses = [],
   timeTrackingEnabled = true,
   onOpenItem,
@@ -70,9 +73,27 @@ export function ItemContextMenuHost({
   onItemRemoved,
 }: {
   menu: ItemContextMenu;
-  /** Enables Duplicate (the copy POSTs to this board). */
+  /**
+   * The List these rows are drawn in. Absent on a chart of many Lists (My
+   * work, Everything), where every row is read as its home's.
+   */
   boardId?: string | null;
   canEdit: boolean;
+  /** Per row, when the host knows better than one flag (My work, Everything, the Gantt's own set). */
+  rowCanEdit?: (row: BoardItemRow) => boolean;
+  /**
+   * Rows open only because the viewer is assigned to them or made them,
+   * below Can edit on the List: the menu offers no List writes (Duplicate,
+   * Move, Add to another List, Share, Public link), which the List refuses.
+   */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /**
+   * Rows the viewer holds at Full access (Full on the List, or a task they
+   * made where rule 5 applies): their menu offers Delete as the server allows.
+   */
+  rowCanDelete?: (row: BoardItemRow) => boolean;
+  /** Personal List rows on a chart of many Lists: nothing to share, no public link. */
+  rowPersonal?: (row: BoardItemRow) => boolean;
   /** The List's own statuses, so "Mark complete" sets one it actually has. */
   statuses?: StatusOption[];
   /** Time Tracking module gate, hides "Start timer" when false. */
@@ -85,7 +106,6 @@ export function ItemContextMenuHost({
 }) {
   const { menuRef, target } = menu;
   const personalList = useContext(PersonalListSurface);
-  const confirm = useConfirm();
   const { toast } = useOsToast();
   const { data: session } = useSession();
   // Read here rather than threaded through five renderers that have no other
@@ -125,34 +145,7 @@ export function ItemContextMenuHost({
     [target, boardId, onItemRemoved, toast],
   );
 
-  // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate), so
-  // Duplicate means the same thing on every surface. The body assembled here
-  // still dropped the assignees and the tags.
-  const duplicate = useCallback(async (item: BoardItemRow) => {
-    try {
-      const res = await fetch(`/api/items/${item.id}/duplicate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.item) onItemCreated?.(data.item as BoardItemRow);
-      else toast(accessMessage(data, "Couldn't duplicate this task."));
-    } catch { toast("Couldn't duplicate this task."); }
-  }, [onItemCreated, toast]);
 
-  // Soft archive (DELETE without ?hard), remove locally only after the server
-  // confirms, since these renderers have no refetch to fall back on.
-  const archive = useCallback(async (item: BoardItemRow) => {
-    const ok = await confirm({
-      title: "Archive task",
-      description: `Archive "${item.title}"? You can restore it later from Trash.`,
-      destructive: true,
-      confirmLabel: "Archive",
-    });
-    if (!ok) return;
-    try {
-      const res = await fetch(`/api/items/${item.id}`, { method: "DELETE" });
-      if (res.ok) onItemRemoved?.(item.id);
-      else { const d = await res.json().catch(() => ({})); toast(accessMessage(d, "Couldn't archive this task.")); }
-    } catch { toast("Couldn't archive"); }
-  }, [confirm, onItemRemoved, toast]);
 
   // A task shown here THROUGH A LINK: its menu is the link's (Remove from
   // this List, the link Move, Delete everywhere) and its role the task's.
@@ -173,7 +166,9 @@ export function ItemContextMenuHost({
           canShareHome: flags.canShareHome,
         }
     : undefined;
-  const role = kind !== "home" && flags?.role ? flags.role : canEdit && target ? "EDIT" : "VIEW";
+  const mayEdit = !!target && (rowCanEdit ? rowCanEdit(target) : canEdit);
+  const role = kind !== "home" && flags?.role ? flags.role : mayEdit ? (rowCanDelete?.(target!) ? "FULL" : "EDIT") : "VIEW";
+  const personalHere = personalList || (!!target && !!rowPersonal?.(target));
 
   return (
     <ItemMoreMenu
@@ -183,19 +178,26 @@ export function ItemContextMenuHost({
       triggerless
       host="row"
       role={role}
-      item={{ id: target?.id ?? "", boardId: kind !== "home" ? target?.listLink?.homeList?.id ?? null : boardId, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null, parentItemId: target?.parentItemId ?? null }}
+      item={{ id: target?.id ?? "", boardId: kind !== "home" ? target?.listLink?.homeList?.id ?? null : boardId ?? target?.boardId ?? null, title: target?.title ?? "", status: target?.status ?? null, assigneeIds: target?.assigneeIds, itemTypeId: target?.itemTypeId ?? null, parentItemId: target?.parentItemId ?? null }}
       isCreator={kind !== "home" ? flags?.isCreator : undefined}
+      assigneeOnly={!!target && kind === "home" && !!relationOnly?.(target)}
       listContext={listContext}
       onRemovedFromList={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       currentUserId={currentUserId}
-      personalList={personalList}
+      personalList={personalHere}
       statuses={statuses}
       watcherIds={watcherIdsOf(target)}
       timeTrackingOn={timeTrackingEnabled ?? true}
       onPatch={(body) => void patch(body)}
       onOpen={onOpenItem && target ? () => onOpenItem(target.id) : undefined}
-      onDuplicated={boardId && onItemCreated && target ? () => void duplicate(target) : undefined}
-      onArchived={onItemRemoved && target ? () => void archive(target) : undefined}
+      // The menu has already asked and written each of these (item-more-menu.tsx):
+      // the host only shows the result. Writing them again here made every
+      // Duplicate two copies and every Archive two dialogs.
+      // A copy of a task shown here through a link lives in that task's HOME
+      // List, not here: it is left to the List's own poll rather than drawn
+      // as if it lived here. Everything else shows the copy at once.
+      onDuplicated={onItemCreated && target ? (_id, copy) => { if (copy && kind === "home") onItemCreated(copy as BoardItemRow); } : undefined}
+      onArchived={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
       onDeleted={onItemRemoved && target ? () => onItemRemoved(target.id) : undefined}
     />
   );

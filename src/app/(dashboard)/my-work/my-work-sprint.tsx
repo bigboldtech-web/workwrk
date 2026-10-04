@@ -131,14 +131,18 @@ export function MyWorkSprint({
                   <span className={r.dueBucket === "overdue" ? "shrink-0 text-xs font-medium text-danger-text" : "shrink-0 text-xs text-ink-2"}>
                     {dueChipLabel(r.dueAt ?? r.startAt, now, locale) ?? (r.assignees.length === 0 ? "Unassigned" : "")}
                   </span>
-                  <button
-                    type="button"
-                    disabled={busy.has(r.id)}
-                    onClick={() => void markDone(r)}
-                    className="hidden h-7 shrink-0 items-center rounded-md border border-line px-2 text-xs font-medium text-ink-2 hover:bg-raised hover:text-ink group-hover:inline-flex disabled:opacity-50"
-                  >
-                    Mark done
-                  </button>
+                  {/* Only on a task the viewer may change (not where Can
+                      comment is all they hold on its List). */}
+                  {r.canEdit ? (
+                    <button
+                      type="button"
+                      disabled={busy.has(r.id)}
+                      onClick={() => void markDone(r)}
+                      className="hidden h-7 shrink-0 items-center rounded-md border border-line px-2 text-xs font-medium text-ink-2 hover:bg-raised hover:text-ink group-hover:inline-flex disabled:opacity-50"
+                    >
+                      Mark done
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>

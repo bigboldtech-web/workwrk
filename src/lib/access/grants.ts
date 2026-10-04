@@ -48,6 +48,8 @@ import {
 } from "./access-panel";
 import {
   NodeEvaluator,
+  boardMemberToRole,
+  isListRung,
   memberToRole,
   notepadOwnerOf,
   placementContainers,
@@ -64,7 +66,7 @@ import {
   type PrivateRule,
   type ViewerGrants,
 } from "./node-rules";
-import { maxGrantFor, planGrant, planRemove, type StoredRole } from "./grant-plan";
+import { maxGrantFor, memberRouteKeepsRow, planGrant, planRemove, type StoredRole } from "./grant-plan";
 import { ACCESS_ACTIVITY_TYPES, ACTIVITY_TARGET_TYPE, accessActivityDescription, type AccessActivityType } from "./access-activity";
 import {
   accessGrantTableReady,
@@ -253,8 +255,12 @@ async function readCurrent(tx: Tx, orgId: string, ref: NodeRef, userId: string):
       return r ? { role: memberToRole(r.role as MemberRole), stored: r.role as MemberRole } : { role: null, stored: null };
     }
     case "list": {
-      const r = await tx.boardMember.findUnique({ where: { boardId_userId: { boardId: ref.id, userId } }, select: { role: true } });
-      return r ? { role: memberToRole(r.role as MemberRole), stored: r.role as MemberRole } : { role: null, stored: null };
+      const r = await tx.boardMember.findUnique({ where: { boardId_userId: { boardId: ref.id, userId } }, select: { role: true, rung: true } });
+      if (!r) return { role: null, stored: null };
+      // A rung reads as its own stored value, so moving between Can view,
+      // Can comment and Can edit assigned tasks is a change (grant-plan.ts).
+      const rung = isListRung(r.rung) && r.role === "GUEST" ? r.rung : null;
+      return { role: boardMemberToRole(r.role as MemberRole, rung), stored: rung ?? (r.role as MemberRole) };
     }
     case "doc": {
       const entry = (await docSharingEntries(orgId, [ref.id], tx)).get(ref.id);
@@ -313,13 +319,18 @@ async function writeRow(tx: Tx, orgId: string, ref: NodeRef, userId: string, rol
         update: { role: role as MemberRole },
       });
       return;
-    case "list":
+    case "list": {
+      // Can comment and Can edit assigned tasks are a GUEST row with a rung;
+      // every other value clears the rung, so a plain Can view stays plain.
+      const rung = role === "COMMENT" || role === "ASSIGNED" ? role : null;
+      const stored: MemberRole = rung ? "GUEST" : (role as MemberRole);
       await tx.boardMember.upsert({
         where: { boardId_userId: { boardId: ref.id, userId } },
-        create: { boardId: ref.id, userId, role: role as MemberRole, invitedBy: actorId },
-        update: { role: role as MemberRole },
+        create: { boardId: ref.id, userId, role: stored, rung, invitedBy: actorId },
+        update: { role: stored, rung },
       });
       return;
+    }
     case "doc": {
       const prev = cur.docEntry ?? {};
       const panelRole = role as PanelRole;
@@ -585,7 +596,9 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
     });
     if (plan.error) throw new GrantError(plan.error);
     const writeRole = stored ?? plan.writeRole;
-    const noChange = stored ? cur.stored === stored : plan.noChange;
+    // The member routes' GUEST onto a List rung row is that same row
+    // (grant-plan.ts memberRouteKeepsRow).
+    const noChange = stored ? memberRouteKeepsRow(ref.kind, stored, cur.stored) : plan.noChange;
     if (noChange || !writeRole) return { previousRole: cur.role, role: cur.role, noChange: true, notify: "none" as const };
     await writeRow(tx, actor.organizationId, ref, userId, writeRole, actor.userId, cur);
     await activity(tx, actor, ref, cur.role ? T_CHANGED : T_GRANTED, {
@@ -595,11 +608,12 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
       store: plan.store,
       source,
     });
-    return { previousRole: cur.role, role: requested, noChange: false, notify: plan.notify };
+    // A raise that joined two List rungs gives the union (grant-plan.ts).
+    return { previousRole: cur.role, role: plan.role ?? requested, noChange: false, notify: plan.notify };
   });
 
   if (outcome.notify === "shared" || outcome.notify === "upgraded") {
-    await notifyGrantee(actor, ref, gate.rows, userId, requested, outcome.notify);
+    await notifyGrantee(actor, ref, gate.rows, userId, outcome.role ?? requested, outcome.notify);
   }
   // A grant answers the person's open Request access on this node (spec 5.6
   // item 2), whichever door made it: the dialog, a members route or the

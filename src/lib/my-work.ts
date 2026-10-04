@@ -105,6 +105,20 @@ export interface MyWorkRow {
   /** True when the viewer can open the List page the chip points at. */
   listReadable: boolean;
   /**
+   * May the viewer change this task here, as the task gate decides it? On
+   * their own work every row is theirs (owner or assignee) and rule 9 lets
+   * them change it, except where Can comment is the whole of their access to
+   * its List (founder decision 3, src/lib/assignee-lift.ts). On "Assigned by
+   * me" rows rule 9 does not reach them: Can edit on the List, or having made
+   * the task (rule 5), does. False rows render without their edits.
+   */
+  canEdit: boolean;
+  /**
+   * May the viewer add to and arrange this task's List (Can edit on it): the
+   * menu's List writes (Duplicate, Move, Add to another List) need it.
+   */
+  canAddToList: boolean;
+  /**
    * The people on the task, owner (the DRI) first, hydrated server-side.
    *
    * Multi-assignee shipped but /my-work had no Assignees column and no field

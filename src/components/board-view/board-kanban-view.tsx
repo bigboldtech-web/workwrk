@@ -27,6 +27,7 @@ import { type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { accessMessage } from "@/lib/access-message";
 import {
+  assignedRowEditable,
   boardStatusFor,
   bulkStatusSkipMessage,
   homeStatusTarget,
@@ -41,8 +42,11 @@ import {
   linkedStatusRefusal,
   planBulkStatus,
   refetchedFromRow,
+  rowFieldsEditable,
   statusPickerFor,
+  watchOnlyPatch,
   writeContext,
+  type AssigneeEdit,
   type RowPatchReport,
 } from "@/lib/list-link-rows";
 import { applyDefaultsToCreateBody, type LoadedListSettings } from "@/lib/list-defaults-client";
@@ -57,6 +61,8 @@ interface BoardKanbanViewProps {
   /** Per-List statuses (backbone #1) — one column per entry, in order. */
   statuses: StatusOption[];
   canEdit: boolean;
+  /** The viewer cannot add to this List, but rule 9 may lift them on the cards assigned to them (list-link-rows.ts assignedRowEditable). */
+  assigneeEdit?: AssigneeEdit | null;
   /** Full access on the List. Only gates the card menu's Delete row, which
    *  wants full access OR the task's creator, never plain Can edit. */
   canDeleteTasks?: boolean;
@@ -88,7 +94,7 @@ interface BoardKanbanViewProps {
 // What a bulk refusal of a card shown here THROUGH A LINK means.
 const LINKED_ARCHIVE_REFUSED = "Tasks shown here from other Lists can't be archived or deleted from this List. Remove them from this List instead, or open their home List.";
 
-export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true, loadedSettings = null, statusOf: statusOfProp, personalList = false }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, assigneeEdit = null, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true, loadedSettings = null, statusOf: statusOfProp, personalList = false }: BoardKanbanViewProps) {
   const confirm = useConfirm();
   // The column a card belongs to HERE: a card shown through a link stores its
   // home status, remapped into this board's set (Done stays Done).
@@ -385,8 +391,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>): Promise<boolean> => {
     const card = itemsRef.current.find((r) => r.id === id);
     // A card shown here through a link is edited only as far as the viewer's
-    // role on the TASK goes.
-    if (!canEdit || (card && !linkedRowEditable(card, canEdit))) return false;
+    // role on the TASK goes; a card assigned to someone who cannot add to the
+    // List is theirs to change (rule 9), never theirs to arrange
+    // (list-link-rows.ts rowFieldsEditable, the rule the card is drawn by).
+    // Watching is personal, so any reader's watch goes through.
+    const mayChange = card ? rowFieldsEditable(card, canEdit, assigneeEdit) : canEdit;
+    if (!mayChange && !watchOnlyPatch(apiBody)) return false;
     const linked = card ? linkedRowKind(card, boardId) !== "home" : false;
     const optimisticFor = (r: BoardItemRow): BoardItemRow => {
       const next: BoardItemRow = { ...r, ...localPatch };
@@ -424,7 +434,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       }
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); return false; }
-  }, [canEdit, refetch, onItemPatched, boardId]);
+  }, [canEdit, assigneeEdit, refetch, onItemPatched, boardId]);
 
   // ── Dragging a card up or down, and across ────────────────────────────
   // Where the pointer would drop the card: a column and a place among that
@@ -611,55 +621,25 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate).
   // The body this used to send dropped the assignees, the tags, both dates and
   // the priority.
-  const duplicateCard = useCallback(async (card: BoardItemRow) => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch(`/api/items/${card.id}/duplicate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      // A copy of a card shown here through a link lives in its HOME, and is
-      // here only if it was linked here too: the board is re-read.
-      if (res.ok && linkedRowKind(card, boardId) !== "home") {
-        await refetch();
-        return;
-      }
-      if (res.ok && data?.item) {
-        setItems((prev) => [...prev, data.item as BoardItemRow]);
-        reportCreated(data.item as BoardItemRow);
-        return;
-      }
-      // There was no else branch and the catch was empty, so a refused
-      // Duplicate produced nothing at all and the row looked like a dead
-      // button. Every refusal gets a sentence, the same way the List view's
-      // Duplicate already does.
-      setError(accessMessage(data, "Couldn't duplicate this task."));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
+  // The card menu has already made the copy (item-more-menu.tsx
+  // "duplicate"): this only shows it. Making it here again was a second copy
+  // on every Duplicate.
+  const cardDuplicated = useCallback(async (card: BoardItemRow, copy: BoardItemRow | null) => {
+    // A copy of a card shown here through a link lives in its HOME, and is
+    // here only if it was linked here too: the board is re-read.
+    if (linkedRowKind(card, boardId) !== "home" || !copy) {
+      await refetch();
+      return;
     }
-  }, [canEdit, reportCreated, boardId, refetch]);
+    setItems((prev) => (prev.some((r) => r.id === copy.id) ? prev : [...prev, copy]));
+    reportCreated(copy);
+  }, [reportCreated, boardId, refetch]);
 
   const removeLocal = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
     reportRemoved(id);
   }, [reportRemoved]);
 
-  const archiveCard = useCallback(async (id: string) => {
-    if (!canEdit) return;
-    if (!(await confirm({ title: "Archive card", description: "Archive this card? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
-    setItems((prev) => prev.filter((r) => r.id !== id));
-    reportRemoved(id);
-    try {
-      const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        // The card reappearing with no message reads as a glitch. Say why.
-        const d = await res.json().catch(() => ({}));
-        setError(accessMessage(d, "Couldn't archive that card."));
-        await refetch();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't archive that card.");
-      await refetch();
-    }
-  }, [canEdit, confirm, refetch, reportRemoved]);
 
   // The card being dragged, read by each column to say whether it may go there.
   const dragCard = useMemo(() => (dragId ? items.find((r) => r.id === dragId) ?? null : null), [dragId, items]);
@@ -782,13 +762,17 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   // known (a drop writes a home status), its menu from the
                   // link's own flags.
                   const kind = linkedRowKind(card, boardId);
-                  const cardCanEdit = linkedRowEditable(card, canEdit);
+                  // Arranging (drag) needs Can edit on the List; the card's own
+                  // fields also open to the viewer it is assigned to.
+                  const cardCanArrange = linkedRowEditable(card, canEdit);
+                  const assignedHere = !canEdit && assignedRowEditable(card, assigneeEdit);
+                  const cardCanEdit = rowFieldsEditable(card, canEdit, assigneeEdit);
                   const flags = linkedMenuFlags(card, boardId, canEdit, currentUserId ?? null, { personalList });
                   // A linked card drags only when its home set is known here:
                   // the columns it can go in are then the ones its home maps.
                   // A subtask shown on its own (a filter hid its parent) keeps its
                   // order under its parent, so it is not dragged among the cards.
-                  const draggable = cardCanEdit && !card.parentItemId && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
+                  const draggable = cardCanArrange && !card.parentItemId && (kind === "home" || statusPickerFor(card, boardId, statuses).editable);
                   const listContext: ItemMenuListContext | undefined = kind === "home"
                     ? { boardId, kind: "home", canAddToList: flags.canAddToList, canShareHome: flags.canShareHome }
                     : {
@@ -821,9 +805,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                         : card.listLink?.homeStatuses ?? (card.listLink?.homeStatus ? [card.listLink.homeStatus] : statuses)
                     }
                     canEdit={cardCanEdit}
+                    canArrange={cardCanArrange}
                     draggableCard={draggable}
                     menuRole={kind === "home" ? undefined : flags.role}
                     menuIsCreator={kind === "home" ? undefined : flags.isCreator}
+                    menuAssigneeOnly={assignedHere}
                     listContext={listContext}
                     homeBoardId={card.listLink?.homeList?.id ?? null}
                     statusNote={kind === "linked-root" ? linkedStatusNote(card, boardId, statuses) : null}
@@ -832,7 +818,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     canDelete={
                       kind !== "home" || canDeleteTasks === undefined
                         ? undefined
-                        : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId)
+                        // The creator deletes their own task (rule 5), except at
+                        // Can comment held as their whole access here, which
+                        // withholds rule 5 too.
+                        : canDeleteTasks || (!!currentUserId && card.createdBy?.id === currentUserId && (assigneeEdit?.lift ?? true))
                     }
                     onDragStart={() => setDragId(card.id)}
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); setDropAt(null); }}
@@ -843,8 +832,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onPatch={patchCard}
                     onToggleComplete={() => toggleComplete(card)}
                     onAddSubtask={(title) => addSubtask(card.id, card.status, title)}
-                    onDuplicate={() => duplicateCard(card)}
-                    onArchive={() => archiveCard(card.id)}
+                    onDuplicated={(copy) => void cardDuplicated(card, copy)}
+                    // The card menu has already asked and archived it on the
+                    // server (item-more-menu.tsx "archive"): the card only
+                    // leaves the board here. Asking and archiving again put a
+                    // second dialog in front of every List editor.
+                    onArchive={() => removeLocal(card.id)}
                     onDeleted={() => removeLocal(card.id)}
                     autoEdit={autoEditId === card.id}
                     onAutoEditHandled={() => setAutoEditId(null)}
@@ -912,9 +905,11 @@ function KanbanCard({
   subtaskCount,
   statuses,
   canEdit,
+  canArrange,
   draggableCard,
   menuRole,
   menuIsCreator,
+  menuAssigneeOnly = false,
   listContext,
   homeBoardId,
   statusNote = null,
@@ -930,7 +925,7 @@ function KanbanCard({
   onPatch,
   onToggleComplete,
   onAddSubtask,
-  onDuplicate,
+  onDuplicated,
   onArchive,
   onDeleted,
   autoEdit = false,
@@ -945,11 +940,19 @@ function KanbanCard({
   subtaskCount: number;
   statuses: StatusOption[];
   canEdit: boolean;
+  /**
+   * May the viewer arrange this card in the List: select it for the bulk bar
+   * or add a subtask under it (Can edit on the List). A card open to them only
+   * because it is assigned to them is edited in place and has neither.
+   */
+  canArrange: boolean;
   /** Phase 5b: a linked card drags only when its home set is known. */
   draggableCard: boolean;
   /** The TASK role for a card shown here through a link; undefined keeps the List's. */
   menuRole?: ItemRole | null;
   menuIsCreator?: boolean;
+  /** The card is the viewer's only because it is assigned to them: the menu offers what an assignee may do. */
+  menuAssigneeOnly?: boolean;
   listContext?: ItemMenuListContext;
   /** The task's home List, when the viewer can read it. */
   homeBoardId: string | null;
@@ -974,7 +977,8 @@ function KanbanCard({
   onToggleComplete: () => void;
   /** Type-first: the card's inline input hands over the title the user typed. */
   onAddSubtask: (title: string) => Promise<{ ok: boolean; error?: string }>;
-  onDuplicate: () => void;
+  /** After the card menu made a copy: show it (the menu already wrote it). */
+  onDuplicated: (copy: BoardItemRow | null) => void;
   onArchive: () => void;
   onDeleted: () => void;
   autoEdit?: boolean;
@@ -1050,7 +1054,7 @@ function KanbanCard({
     >
       {/* Title + action rail */}
       <div className="flex items-start gap-1.5">
-        {canEdit ? (
+        {canArrange ? (
           <button
             type="button"
             role="checkbox"
@@ -1113,7 +1117,7 @@ function KanbanCard({
               <CheckCircle2 className="w-3.5 h-3.5" />
             </button>
           ) : null}
-          {canEdit ? (
+          {canArrange ? (
             <button
               type="button"
               onClick={(e) => { stop(e); setSubtaskOpen(true); setSubtaskError(null); requestAnimationFrame(() => subtaskRef.current?.focus()); }}
@@ -1139,6 +1143,7 @@ function KanbanCard({
             // may know it): the menu's events and Move are about that task.
             item={{ id: card.id, boardId: card.listLink ? homeBoardId : boardId, title: card.title, status: card.status, assigneeIds: card.assigneeIds, itemTypeId: card.itemTypeId ?? null, parentItemId: card.parentItemId ?? null }}
             isCreator={menuIsCreator}
+            assigneeOnly={menuAssigneeOnly}
             listContext={listContext}
             onRemovedFromList={onDeleted}
             // Not null: ItemMoreMenu guards "Assign to me" and "Watch" on
@@ -1150,7 +1155,7 @@ function KanbanCard({
             onPatch={(body) => onPatch(card.id, body as Partial<BoardItemRow>, body as Partial<BoardItemRow>)}
             onOpen={onOpen}
             onRenameRequested={startEdit}
-            onDuplicated={onDuplicate}
+            onDuplicated={(_id, copy) => onDuplicated((copy as BoardItemRow | undefined) ?? null)}
             onArchived={onArchive}
             onDeleted={onDeleted}
             // A moved task belongs to the destination List now, so its card

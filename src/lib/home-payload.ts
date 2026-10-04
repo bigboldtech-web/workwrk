@@ -19,6 +19,13 @@ export interface HomeTaskRow {
    * than writing a status the List does not hold.
    */
   doneStatus: string | null;
+  /**
+   * May the viewer change this task: every row is theirs, and rule 9 lets an
+   * assignee change it, except where Can comment is the whole of their access
+   * to its List (founder decision 3, src/lib/assignee-lift.ts). False rows
+   * draw no checkbox.
+   */
+  canEdit: boolean;
 }
 
 export interface HomeWorkData {

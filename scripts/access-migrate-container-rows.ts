@@ -15,8 +15,9 @@
  *   --write    apply the diff per workspace in one transaction, with the
  *              row-count assertion (copies equal member rows, per type);
  *              a failed assertion rolls that workspace back
- *   --verify   the drift report alone (exit 1 on any drift): run it before
- *              any reader is ever pointed at the copies
+ *   --verify   the drift report alone (exit 1 on any drift, and on any
+ *              List row with a rung, which no copy can hold yet): run it
+ *              before any reader is ever pointed at the copies
  *
  * The copies are a snapshot: member rows written after a --write are not
  * copied until the next run (see container-copy-plan.ts for why the loader
@@ -51,7 +52,7 @@ async function memberRows(organizationId: string): Promise<{ rows: MemberRow[]; 
   const [sm, fm, bm, ga, groups] = await Promise.all([
     prisma.spaceMember.findMany({ where: { space: { organizationId } }, select: { spaceId: true, userId: true, role: true, createdAt: true } }),
     prisma.folderMember.findMany({ where: { folder: { organizationId } }, select: { folderId: true, userId: true, role: true, createdAt: true } }),
-    prisma.boardMember.findMany({ where: { board: { organizationId } }, select: { boardId: true, userId: true, role: true, createdAt: true } }),
+    prisma.boardMember.findMany({ where: { board: { organizationId } }, select: { boardId: true, userId: true, role: true, rung: true, createdAt: true } }),
     prisma.goalAssignee.findMany({ where: { okr: { organizationId }, userId: { not: null } }, select: { okrId: true, userId: true, createdAt: true } }),
     prisma.goalAssignee.count({ where: { okr: { organizationId }, userId: null } }),
   ]);
@@ -59,7 +60,7 @@ async function memberRows(organizationId: string): Promise<{ rows: MemberRow[]; 
     rows: [
       ...sm.map((r) => ({ objectType: "SPACE" as const, objectId: r.spaceId, userId: r.userId, role: r.role, createdAt: r.createdAt })),
       ...fm.map((r) => ({ objectType: "FOLDER" as const, objectId: r.folderId, userId: r.userId, role: r.role, createdAt: r.createdAt })),
-      ...bm.map((r) => ({ objectType: "LIST" as const, objectId: r.boardId, userId: r.userId, role: r.role, createdAt: r.createdAt })),
+      ...bm.map((r) => ({ objectType: "LIST" as const, objectId: r.boardId, userId: r.userId, role: r.role, createdAt: r.createdAt, rung: r.rung })),
       ...ga.map((r) => ({ objectType: "GOAL" as const, objectId: r.okrId, userId: r.userId as string, role: GOAL_COPY_ROLE, createdAt: r.createdAt })),
     ],
     goalGroupRows: groups,
@@ -84,6 +85,9 @@ async function main() {
   const orgs = ONLY_ORG ? [{ id: ONLY_ORG, name: ONLY_ORG }] : await prisma.organization.findMany({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } });
   const report: Record<string, unknown>[] = [];
   let drift = 0;
+  // List rows whose rung no copy can hold yet: never fixed by a --write,
+  // always a --verify failure (container-copy-plan rungNotCarried).
+  let rungRows = 0;
   let failed = 0;
   for (const o of orgs) {
     const { rows, goalGroupRows } = await memberRows(o.id);
@@ -107,14 +111,16 @@ async function main() {
       heldByProtected: diff.heldByProtected,
       adoptUntagged: untagged.length,
       goalGroupRowsKept: goalGroupRows,
+      rungNotCarried: diff.rungNotCarried,
     };
     // Drift is a copy that differs from its member row. Tagging an untagged
     // copy from a run before the source column is bookkeeping a --write does,
     // not drift, so --verify does not fail on it.
     const changes = diff.insert.length + diff.update.length + diff.remove.length + untagged.length;
     drift += diff.insert.length + diff.update.length + diff.remove.length;
+    rungRows += diff.rungNotCarried;
     if (rows.length || copies.length) {
-      console.log(`${o.name} (${o.id}): members ${JSON.stringify(members)}  insert ${diff.insert.length}  re-role ${diff.update.length}  delete ${diff.remove.length}  equal ${diff.equal}  protected kept ${diff.protectedKept}  tag ${untagged.length}  goal group rows kept in GoalAssignee ${goalGroupRows}`);
+      console.log(`${o.name} (${o.id}): members ${JSON.stringify(members)}  insert ${diff.insert.length}  re-role ${diff.update.length}  delete ${diff.remove.length}  equal ${diff.equal}  protected kept ${diff.protectedKept}  tag ${untagged.length}  goal group rows kept in GoalAssignee ${goalGroupRows}  List rungs no copy carries ${diff.rungNotCarried}`);
     }
     if (WRITE && changes > 0) {
       try {
@@ -153,13 +159,13 @@ async function main() {
     }
     report.push(entry);
   }
-  console.log(`\nworkspaces: ${orgs.length}   rows to change: ${drift}${WRITE ? `   failed workspaces: ${failed}` : ""}`);
+  console.log(`\nworkspaces: ${orgs.length}   rows to change: ${drift}   List rungs no copy carries: ${rungRows}${WRITE ? `   failed workspaces: ${failed}` : ""}`);
   if (OUT) {
     writeFileSync(OUT, JSON.stringify({ ranAt: new Date().toISOString(), database: databaseLabel(), mode: WRITE ? "write" : VERIFY ? "verify" : "dry-run", report }, null, 2));
     console.log(`report written to ${OUT}`);
   }
   await prisma.$disconnect();
-  if ((VERIFY && drift > 0) || failed > 0) process.exit(1);
+  if ((VERIFY && (drift > 0 || rungRows > 0)) || failed > 0) process.exit(1);
 }
 
 main().catch(async (err) => {

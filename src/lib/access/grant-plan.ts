@@ -79,6 +79,11 @@ export interface GrantPlan {
   notify: NotifyKind;
   noChange: boolean;
   error?: GrantErrorCode;
+  /**
+   * The role this write gives, when it is not the one asked for: a raise on
+   * a List that joins Can view and Can comment gives Can edit assigned tasks.
+   */
+  role?: PanelRole;
 }
 
 export interface RemovePlanInput {
@@ -123,9 +128,28 @@ export function maxGrantFor(kind: AccessNodeKind, role: NodeRole): PanelRole | n
   return best;
 }
 
-/** The stored value a requested role writes, per kind. */
+/**
+ * The member routes write a SpaceRole and cannot name a List rung, so their
+ * GUEST onto a GUEST row that carries one ("COMMENT" or "ASSIGNED", which
+ * readCurrent reports as the stored value) is that same row: no change.
+ * Rewriting it would silently reset Can comment or Can edit assigned tasks to
+ * plain Can view; only the share dialog moves between them.
+ */
+export function memberRouteKeepsRow(kind: AccessNodeKind, memberRole: string, currentStored: string | null): boolean {
+  if (memberRole === currentStored) return true;
+  return kind === "list" && memberRole === "GUEST" && (currentStored === "COMMENT" || currentStored === "ASSIGNED");
+}
+
+/**
+ * The stored value a requested role writes, per kind. A List's two rungs
+ * below Can edit are their own values here ("COMMENT", "ASSIGNED"); the row
+ * writer stores each as a GUEST role with that rung (grants.ts writeRow), so
+ * a change between them and Can view is a change, and a reader that does not
+ * know the rung sees Can view.
+ */
 export function storedRoleFor(kind: AccessNodeKind, requested: PanelRole, currentRow?: StoredRole | null): StoredRole {
   if (kind === "doc") return requested;
+  if (kind === "list" && (requested === "COMMENT" || requested === "ASSIGNED")) return requested;
   if (requested === "OWNER") return "OWNER";
   if (requested === "FULL") {
     // A Folder or List OWNER row already reads as Full access: keep it.
@@ -157,11 +181,21 @@ export function planGrant(input: GrantPlanInput): GrantPlan {
   if (input.current && rank(input.current) > rank(input.actorMax)) return fail(store, "above_own_role");
 
   const mode = input.mode ?? "set";
-  if (input.current && (input.current === input.requested || (mode === "raise" && rank(input.current) >= rank(input.requested)))) {
+  // A raise only adds (founder decision 3: the rungs are additive). On a List,
+  // Can view and Can comment each give what the other does not (Can view lets
+  // an assignee change their task, Can comment discusses every task), so a
+  // raise of one onto the other gives both: Can edit assigned tasks. A set
+  // (the dialog's choice) writes exactly what was chosen.
+  const joined =
+    mode === "raise" && input.kind === "list" &&
+    ((input.current === "VIEW" && input.requested === "COMMENT") || (input.current === "COMMENT" && input.requested === "VIEW"));
+  const requested: PanelRole = joined ? "ASSIGNED" : input.requested;
+  if (rank(requested) > rank(input.actorMax)) return fail(store, "above_own_role");
+  if (input.current && (input.current === requested || (mode === "raise" && rank(input.current) >= rank(requested)))) {
     return { store, writeRole: null, notify: "none", noChange: true };
   }
 
-  const writeRole = storedRoleFor(input.kind, input.requested, input.currentRow);
+  const writeRole = storedRoleFor(input.kind, requested, input.currentRow);
   // Lowering the last active Full row of a Space. Adds and raises never fire.
   if (
     input.kind === "space" &&
@@ -176,9 +210,9 @@ export function planGrant(input: GrantPlanInput): GrantPlan {
   let notify: NotifyKind = "none";
   if (!input.self) {
     if (!input.current) notify = "shared";
-    else if (rank(input.requested) > rank(input.current)) notify = "upgraded";
+    else if (rank(requested) > rank(input.current)) notify = "upgraded";
   }
-  return { store, writeRole, notify, noChange: false };
+  return { store, writeRole, notify, noChange: false, ...(joined ? { role: requested } : {}) };
 }
 
 export function planRemove(input: RemovePlanInput): RemovePlan {

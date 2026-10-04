@@ -208,6 +208,9 @@ export function TaskDetailBody({
   const canRestore = decision.roleBeforeArchive === "EDIT" || decision.roleBeforeArchive === "FULL";
   const readOnly = rankOf(decision.role) < rankOf("EDIT");
   const roleWord = decision.role === "COMMENT" ? "Can comment" : "View only";
+  // Adding a subtask adds to the List, which needs Can edit on it (the task
+  // gate's canAddToList), whatever the viewer may do to this task.
+  const canAddSubtasks = task.canAddToList ?? !readOnly;
   const ownerName = [listOwner?.firstName, listOwner?.lastName].filter(Boolean).join(" ").trim() || listOwner?.email || null;
   // Open in a List the task is only SHOWN in (Phase 5b). A link grants Can
   // view at most, whatever the viewer holds on that List, so nobody on it can
@@ -306,6 +309,8 @@ export function TaskDetailBody({
       <BoardItemDetail
         item={item}
         role={decision.role}
+        canAddSubtasks={canAddSubtasks}
+        canManageList={task.canManageList}
         currentUserId={currentUserId}
         customFields={board?.fields ?? []}
         statusOptions={statuses}

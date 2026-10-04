@@ -46,6 +46,7 @@ import {
   canvasFolderOf,
   docShape,
   folderParentOf,
+  boardMemberToRole,
   listFolderOf,
   memberToRole,
   notepadOwnerOf,
@@ -506,7 +507,8 @@ export function directRowOf(rows: NodeRows, grants: ViewerGrants, ref: NodeRef):
     }
     case "list": {
       const r = grants.list.get(ref.id);
-      return r ? { role: memberToRole(r), source: "BoardMember", stored: r, cap: false } : null;
+      const rung = grants.listRung?.get(ref.id);
+      return r ? { role: boardMemberToRole(r, rung), source: "BoardMember", stored: r, cap: false } : null;
     }
     case "doc": {
       const entry = rows.docSharing.get(ref.id);
@@ -611,7 +613,7 @@ export function accessEntries(input: AccessEntriesInput): AccessEntries {
       let alsoVia: AccessDirectEntry["alsoVia"] = null;
       if (rankP(d.role) > rankP(row.role) && d.role !== "none") {
         const v = toAccessVia(d.via);
-        alsoVia = { role: d.role, via: v === "path" ? { type: "hidden" } : v };
+        alsoVia = { role: d.role, via: v === "path" ? { type: "hidden" } : v, ...(d.via.plusOwnComment ? { plusOwnComment: true } : {}) };
       }
       direct.push({ person: p.person, role: row.role, owner: false, source: row.source, editable, removable: editable && !lastFull, lastFull, cap: row.cap, alsoVia });
       continue;

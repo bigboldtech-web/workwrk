@@ -819,11 +819,14 @@ export async function listBoardMembers(boardId: string) {
   });
 }
 
+// A plain role row: it clears the List ladder's rung, which only the grant
+// writer (src/lib/access/grants.ts) sets, so a stale Can comment never rides
+// along on a row written here.
 export async function addBoardMember(boardId: string, userId: string, role: SpaceRole, invitedBy?: string) {
   return prisma.boardMember.upsert({
     where: { boardId_userId: { boardId, userId } },
     create: { boardId, userId, role, invitedBy: invitedBy ?? null },
-    update: { role },
+    update: { role, rung: null },
   });
 }
 

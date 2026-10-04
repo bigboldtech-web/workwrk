@@ -7,6 +7,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
+import type { AssigneeEdit } from "@/lib/list-link-rows";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
@@ -48,6 +49,7 @@ import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
   applyRowPatchReport,
+  assignedRowEditable,
   boardStatusFor,
   computedFieldsKey,
   itemEventAction,
@@ -56,6 +58,7 @@ import {
   mergeRefetchedRow,
   reconcilePoll,
   refetchedFromRow,
+  rowFieldsEditable,
   type RefetchedTask,
   type RowPatchReport,
 } from "@/lib/list-link-rows";
@@ -121,6 +124,12 @@ interface BoardCanvasProps {
   /** Threaded through to the drawer so the comments thread can gate
    *  "delete my own comment" without an extra session fetch. */
   currentUserId: string | null;
+  /**
+   * The viewer cannot add to this List, and rule 9 may still lift them on the
+   * tasks assigned to them: those rows and cards are theirs to change in
+   * place (list-link-rows.ts assignedRowEditable). Absent: canContribute alone.
+   */
+  assigneeEdit?: AssigneeEdit | null;
   /** The "+ Task" affordance, rendered on the right of the single toolbar row
    *  (ClickUp keeps create + filters + Statuses/Fields on one line). */
   addTaskSlot?: ReactNode;
@@ -150,13 +159,34 @@ interface BoardCanvasProps {
   personalList?: boolean;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, addTaskSlot, moduleGating, sprint, initialRowColorRules, canSaveView = false, personalList = false }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, assigneeEdit = null, addTaskSlot, moduleGating, sprint, initialRowColorRules, canSaveView = false, personalList = false }: BoardCanvasProps) {
   // Below this line the renderers each take a `canEdit` prop, and at THAT
   // level the word is unambiguous: it is content write on a row, which is
   // exactly what `canContribute` answers. The board-level confusion the
   // rename closes was between content write and managing the List itself,
   // and `canManage` is the only thing that travels for the latter.
   const canEdit = canContribute;
+  // Below Can edit, the tasks assigned to this viewer or made by them are
+  // theirs to change in place (rules 9 and 5), in every view of the List, as
+  // the Table and Kanban already have it: the views that only take one List
+  // flag get this rule per row. Arranging and adding stay at Can edit.
+  const rowRules = useMemo(
+    () =>
+      assigneeEdit
+        ? {
+            editableRow: (row: BoardItemRow) => rowFieldsEditable(row, canEdit, assigneeEdit),
+            relationOnly: (row: BoardItemRow) => !canEdit && assignedRowEditable(row, assigneeEdit),
+          }
+        : null,
+    [assigneeEdit, canEdit],
+  );
+  // Delete in the views' right-click menu, as the gate decides it: Full access
+  // on the List, or a task this viewer made where rule 5 applies (never at Can
+  // comment held as their whole access here).
+  const deletableRow = useCallback(
+    (row: BoardItemRow) => !!canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId && (assigneeEdit?.lift ?? true)),
+    [canDeleteTasks, currentUserId, assigneeEdit],
+  );
   const mayManage = canManage ?? canContribute;
   const router = useRouter();
   const { toast } = useOsToast();
@@ -230,7 +260,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     // router.replace below re-renders before the param clears.
     if (refusedPanelRef.current === panelParam) return;
     refusedPanelRef.current = panelParam;
-    toast(`${panelParam === "fields" ? "Custom fields" : "Task statuses"} need Can edit on this List. Ask a List or Space admin to change your access.`);
+    toast(`${panelParam === "fields" ? "Custom fields" : "Task statuses"} need Full access on this List. Ask a List or Space admin to change your access.`);
     stripPanel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelParam, mayManage]);
@@ -668,6 +698,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           // field creation and editing only to `mayManage` (below).
           onOpenFields={() => setShelfOpen(true)}
           currentUserId={currentUserId}
+          assigneeEdit={assigneeEdit}
           toolbarActions={toolbarActions}
           filterSlot={filterMenu}
           hiddenBuiltins={tableHiddenBuiltins}
@@ -695,6 +726,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
+          assigneeEdit={assigneeEdit}
           canDeleteTasks={canDeleteTasks}
           currentUserId={currentUserId}
           onOpenItem={openItem}
@@ -719,6 +751,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemChanged={handleItemChanged}
@@ -736,6 +771,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemChanged={handleItemChanged}
           onItemCreated={handleItemCreated}
@@ -780,6 +818,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -802,6 +843,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -824,6 +868,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
+          editableRow={rowRules?.editableRow}
+          relationOnly={rowRules?.relationOnly}
+          deletableRow={deletableRow}
           onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -840,7 +887,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <div className="border border-zinc-200 rounded-xl px-8 py-16 text-center bg-white">
           <div className="text-base font-medium mb-1">{viewType} view</div>
           <p className="text-xs text-zinc-500 max-w-[460px] mx-auto">
-            This view type isn&apos;t supported by this build yet — refresh, or pick another view tab.
+            This view type isn&apos;t supported by this build yet. Refresh, or pick another view tab.
           </p>
         </div>
       )}

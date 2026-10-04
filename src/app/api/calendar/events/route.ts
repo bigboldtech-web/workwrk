@@ -59,6 +59,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/calendar-event";
 
 export type CalendarEventKind = "task" | "meeting" | "event" | "external" | "reminder";
@@ -114,7 +115,7 @@ function defaultRange(): { from: Date; to: Date } {
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  const u = session?.user as { id?: string; organizationId?: string } | undefined;
+  const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
   if (!u?.id || !u.organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -238,7 +239,7 @@ export async function GET(req: Request) {
       },
       select: {
         id: true, title: true, status: true, startAt: true, dueAt: true,
-        ownerId: true, assigneeIds: true, metadata: true,
+        ownerId: true, assigneeIds: true, metadata: true, boardId: true,
       },
       // `nulls: "first"` is not decoration. A task whose only date is a due
       // date has a NULL startAt, and Postgres sorts NULLS LAST under a plain
@@ -249,6 +250,12 @@ export async function GET(req: Request) {
       take: TAKE_ITEMS,
     });
     if (items.length === TAKE_ITEMS) truncated.push("task");
+    // On My calendar every task is the viewer's own (rule 9), so it moves,
+    // except in a List where Can comment is the whole of their access (founder
+    // decision 3): the task gate refuses those dates, so the block holds still.
+    const readOnlyBoardIds = calendar === "my"
+      ? await liftWithheldListIds({ userId: viewerId, organizationId: orgId, accessLevel: u.accessLevel }, items.map((i) => i.boardId))
+      : new Set<string>();
     for (const it of items) {
       const start = it.startAt ?? it.dueAt;
       if (!start) continue;
@@ -287,7 +294,7 @@ export async function GET(req: Request) {
         url: `/item/${it.id}`,
         // A team read is read only: moving somebody else's task from a
         // calendar is not a gesture this product has.
-        editable: calendar === "my" && kind === "task",
+        editable: calendar === "my" && kind === "task" && !(it.boardId && readOnlyBoardIds.has(it.boardId)),
       });
     }
   }

@@ -94,10 +94,17 @@ export interface ItemMoreMenuProps {
   onPatch: (body: Record<string, unknown>) => void;
   onOpen?: () => void;
   onRenameRequested?: () => void;
+  /**
+   * After the menu's OWN archive, delete, move or duplicate: the menu has
+   * already asked and written it. The host only shows the result (takes the
+   * row away, adds the copy); it never asks or writes a second time, which
+   * once made every Duplicate two copies and every Archive two dialogs.
+   */
   onArchived?: () => void;
   onDeleted?: () => void;
   onMoved?: (boardId: string) => void;
-  onDuplicated?: (itemId: string) => void;
+  /** The copy as POST /api/items/[id]/duplicate returns it. */
+  onDuplicated?: (itemId: string, copy: unknown) => void;
   /** Absent means no Share row: a Personal List task has nothing to share. */
   onShare?: () => void;
   /** Archive's Undo restored the task: the host re-reads it. */
@@ -309,7 +316,10 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     canMoveElsewhere,
     assigneeOnly,
     isCreator,
-    isAgent,
+    // An Agent never deletes (rule 12): read from the session as well, so a
+    // host that does not pass it (the row, card and right-click menus) never
+    // offers an Agent a Delete the server refuses.
+    isAgent: isAgent || Boolean(bootState?.boot.viewer.isAgent),
     isGuest,
     archived,
     askAi,
@@ -320,7 +330,17 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
     canRemoveFromList: linked ? Boolean(listContext?.canRemoveFromList) : undefined,
     linkedSubtask: linked ? Boolean(listContext?.linkedSubtask || item.parentItemId) : undefined,
     canSharePublicly,
-  }).filter((row) => !(row.key === "complete" && linked && completionStatuses.length === 0));
+  })
+    // Mark complete writes one of this task's List's statuses: with none to
+    // pick from (a linked task whose home set is not shared, a chart of many
+    // Lists) there is nothing it could write, so it is not offered.
+    .filter((row) => !(row.key === "complete" && completionStatuses.length === 0))
+    // Share / Who has access opens the host's share dialog, and Rename the
+    // host's title editor: a host that passes neither (the right-click menu of
+    // the calendar, gantt, timeline, hierarchy and cards views) gets no row,
+    // rather than one that closes the menu and does nothing.
+    .filter((row) => !(row.key === "share" && !onShare))
+    .filter((row) => !(row.key === "rename" && !onRenameRequested));
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -376,7 +396,7 @@ export const ItemMoreMenu = forwardRef<ContextMenuHandle, ItemMoreMenuProps>(fun
             return;
           }
           toast("Task duplicated");
-          if (data.item?.id) onDuplicated?.(data.item.id);
+          if (data.item?.id) onDuplicated?.(data.item.id, data.item);
           return;
         }
         case "move":

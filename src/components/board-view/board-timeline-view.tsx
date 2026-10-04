@@ -36,6 +36,14 @@ interface BoardTimelineViewProps {
   /** Canvas sync after the context menu archives/deletes an item. */
   onItemRemoved?: (id: string) => void;
   timeTrackingEnabled?: boolean;
+  /** Which rows this viewer may change, when the host knows it per row (My work, Everything). */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /** Rows open only through being assigned or having made them: no List writes in their menu. */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
+  /** Personal List rows on a chart of many Lists: no Share, no public link. */
+  personalRow?: (row: BoardItemRow) => boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -50,7 +58,7 @@ function toDate(v: Date | string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardTimelineViewProps) {
+export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled, editableRow, relationOnly, deletableRow, personalRow }: BoardTimelineViewProps) {
   // Right-click on any bar / unscheduled chip opens the shared item menu.
   const menu = useItemContextMenu();
   // Window: 2 weeks back from this week's Sunday, 10 forward.
@@ -145,7 +153,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
     return (
       <div className="rounded-lg border border-line bg-raised px-8 py-14 text-center">
         <CalendarRange className="mx-auto mb-3 h-8 w-8 text-ink-4" strokeWidth={1.5} aria-hidden />
-        <p className="text-base text-ink-2">No items yet. Schedule work with start and due dates to see the timeline.</p>
+        <p className="text-base text-ink-2">No tasks yet. Schedule work with start and due dates to see the timeline.</p>
       </div>
     );
   }
@@ -274,6 +282,13 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
+        rowCanEdit={editableRow}
+        relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        rowPersonal={personalRow}
+        // One List's statuses only (Mark complete writes one of them); a chart
+        // of many Lists has no one set.
+        statuses={boardId ? statuses : undefined}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

@@ -45,6 +45,17 @@ interface BoardCalendarViewProps {
    * they load the body is today's.
    */
   loadedSettings?: LoadedListSettings | null;
+  /**
+   * Which rows this viewer may change, when the host knows it per row (the
+   * List page below Can edit: a task assigned to them or that they made).
+   * Absent: the List's own rule. The day "+" stays on canEdit (adding is a
+   * List write).
+   */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /** Rows open only through being assigned or having made them: no List writes in their menu. */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
 }
 
 function dateKey(d: Date): string {
@@ -60,7 +71,11 @@ function localMidnightIso(dayKey: string): string {
   return new Date(`${dayKey}T00:00:00`).toISOString();
 }
 
-export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled, loadedSettings = null }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled, loadedSettings = null, editableRow, relationOnly, deletableRow }: BoardCalendarViewProps) {
+  // May this viewer move this chip? A task shown here through a link moves
+  // only as far as its task role allows (list-link-rows.ts); below Can edit,
+  // the host's row rule opens the tasks assigned to them or that they made.
+  const chipMay = useCallback((it: BoardItemRow) => (editableRow ? editableRow(it) : linkedRowEditable(it, canEdit)), [editableRow, canEdit]);
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
   // Right-click on any day chip opens the shared item menu.
@@ -97,7 +112,10 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
   const resolveDate = useCallback((it: BoardItemRow): Date | null => {
     const parse = (raw: unknown): Date | null => {
       if (!raw) return null;
-      const d = new Date(raw as string);
+      // A date field's "YYYY-MM-DD" is a day, not an instant: read it as the
+      // local day (new Date("YYYY-MM-DD") is UTC midnight, the previous day
+      // for anyone west of UTC), the same day a drop writes.
+      const d = typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw as string);
       return Number.isNaN(d.getTime()) ? null : d;
     };
     if (dateSourceLocal === "__due") return parse(it.dueAt);
@@ -147,7 +165,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
         // The status is not the person's choice, so a List default status
         // replaces it (the day is: dueAt is always sent).
         body: JSON.stringify(
-          applyDefaultsToCreateBody({ title: "New item", status: firstActiveStatus, dueAt: localMidnightIso(key) }, loadedSettings, new Set(), boardId),
+          applyDefaultsToCreateBody({ title: "New task", status: firstActiveStatus, dueAt: localMidnightIso(key) }, loadedSettings, new Set(), boardId),
         ),
       });
       const data = await res.json().catch(() => ({}));
@@ -158,7 +176,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       onItemCreated?.(data.item as BoardItemRow);
       onOpenItem?.(data.item.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add item");
+      setError(e instanceof Error ? e.message : "Couldn't add a task.");
     } finally {
       setBusyDay(null);
     }
@@ -169,20 +187,44 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
   const rescheduleTo = useCallback(async (itemId: string, dayKey: string) => {
     setDragId(null);
     setDragOverDay(null);
-    if (!canEdit) return;
     const current = initialItems.find((it) => it.id === itemId);
     if (!current) return;
-    // A task shown here through a link moves only as far as its task role
-    // allows, and its write names this List (list-link-rows.ts).
-    if (!linkedRowEditable(current, canEdit)) return;
-    const nextDue = localMidnightIso(dayKey);
-    if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
+    // Its write names this List when it is shown here through a link.
+    if (!chipMay(current)) return;
+    // Move the date the chip is drawn from: the Due date, or the custom date
+    // field this calendar is set to (Auto: the Due date when the task has one,
+    // else the first date field it was placed by). Writing the Due date for a
+    // chip placed by a custom field changed a date the person never saw, and
+    // the chip jumped back.
+    const fieldKey =
+      dateSourceLocal === "__due" ? null
+        : dateSourceLocal !== "__auto" ? dateSourceLocal
+          : current.dueAt ? null : firstDateFieldKey;
+    let patch: Record<string, unknown>;
+    if (fieldKey) {
+      const was = current.metadata?.[fieldKey];
+      const wasDate = typeof was === "string" && was ? new Date(was) : null;
+      // A date field stores the day ("YYYY-MM-DD"); a date and time field
+      // stores local "YYYY-MM-DDTHH:mm", and keeps its time of day.
+      let next = dayKey;
+      if (dateFields.find((f) => f.key === fieldKey)?.type === "DATETIME") {
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const t = wasDate && !Number.isNaN(wasDate.getTime()) ? `${pad(wasDate.getHours())}:${pad(wasDate.getMinutes())}` : "00:00";
+        next = `${dayKey}T${t}`;
+      }
+      if (was === next) return;
+      patch = { metadataPatch: { [fieldKey]: next } };
+    } else {
+      const nextDue = localMidnightIso(dayKey);
+      if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
+      patch = { dueAt: nextDue };
+    }
     setError(null);
     try {
       const res = await fetch(`/api/items/${itemId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dueAt: nextDue, ...writeContext(current, boardId) }),
+        body: JSON.stringify({ ...patch, ...writeContext(current, boardId) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -195,7 +237,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reschedule");
     }
-  }, [canEdit, initialItems, onItemChanged, boardId]);
+  }, [chipMay, initialItems, onItemChanged, boardId, dateSourceLocal, firstDateFieldKey, dateFields]);
 
   // 6-week grid starting Sunday. Lead/trail cells carry the adjacent
   // month's real greyed day numbers (ClickUp), but stay inert.
@@ -281,7 +323,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
           </label>
         ) : null}
         <span className="text-xs text-zinc-400 hidden lg:inline">
-          {datedCount} dated item{datedCount === 1 ? "" : "s"}
+          {datedCount} dated task{datedCount === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -310,7 +352,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                       : "bg-zinc-50/50 dark:bg-white/[0.04]"
                 }`}
                 onDragOver={(e) => {
-                  if (!canEdit || !dragId || !cell.inMonth) return;
+                  if (!dragId || !cell.inMonth) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   setDragOverDay(cell.key);
@@ -346,7 +388,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           disabled={busyDay === cell.key}
                           onClick={() => void addOnDay(cell.key)}
                           className="inline-flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-100 hover:text-zinc-600 disabled:opacity-50"
-                          aria-label={`Add item on day ${cell.day}`}
+                          aria-label={`Add a task on day ${cell.day}`}
                         >
                           <Plus className="w-3 h-3" />
                         </button>
@@ -358,7 +400,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                   {dayItems.slice(0, 4).map((it) => {
                     // A linked task shows its HOME status colour.
                     const dot = it.listLink?.homeStatus?.color ?? (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
-                    const chipEditable = linkedRowEditable(it, canEdit);
+                    const chipEditable = chipMay(it);
                     return (
                       <li key={it.id}>
                         {/* ClickUp chip: status-tinted wash + saturated left edge. */}
@@ -405,6 +447,10 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
         menu={menu}
         boardId={boardId}
         canEdit={canEdit}
+        rowCanEdit={editableRow}
+        relationOnly={relationOnly}
+        rowCanDelete={deletableRow}
+        statuses={statuses}
         timeTrackingEnabled={timeTrackingEnabled}
         onOpenItem={onOpenItem}
         onItemCreated={onItemCreated}

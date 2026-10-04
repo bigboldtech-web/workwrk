@@ -11,8 +11,10 @@
 // on every navigation.
 //
 // THE ROWS ARE ITEMS, and every one of them is assigned to the viewer, so
-// access rule 9 gives them Can edit on every row: the inline status, due date
-// and priority edits always render. The List chip is a LINK only when the
+// access rule 9 gives them Can edit on nearly every row. The exception is a
+// List where Can comment is the whole of their access (founder decision 3):
+// the server says so per row (`canEdit`), and such a row has no bulk
+// checkbox, no Mark done and no drag. The List chip is a LINK only when the
 // viewer can open the List (the server answers that per row), and a plain
 // label otherwise: a chip that 404s is worse than no chip.
 //
@@ -1352,13 +1354,20 @@ function ListView({
               className="flex items-center gap-3 border-b border-line-soft px-4 last:border-b-0 hover:bg-hover"
               style={{ minHeight: "var(--os-row-h)" }}
             >
-              <input
-                type="checkbox"
-                className="h-[18px] w-[18px] shrink-0 accent-[var(--os-brand)]"
-                checked={selected.has(r.id)}
-                onChange={() => onToggle(r.id)}
-                aria-label={`Select "${r.title}"`}
-              />
+              {/* The checkbox selects for the bulk bar, whose every action
+                  changes the task: a row the viewer may not change (Can
+                  comment is all they hold on its List) has none. */}
+              {r.canEdit ? (
+                <input
+                  type="checkbox"
+                  className="h-[18px] w-[18px] shrink-0 accent-[var(--os-brand)]"
+                  checked={selected.has(r.id)}
+                  onChange={() => onToggle(r.id)}
+                  aria-label={`Select "${r.title}"`}
+                />
+              ) : (
+                <span className="h-[18px] w-[18px] shrink-0" aria-hidden />
+              )}
               <button
                 type="button"
                 onClick={() => openTask(router, r.id)}

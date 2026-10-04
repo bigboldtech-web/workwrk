@@ -153,7 +153,9 @@ export function buildItemMenu(ctx: ItemMenuContext): ItemMenuRow[] {
   if (canEdit) rows.push({ key: "rename", label: "Rename" });
   if (canView) rows.push({ key: "copy-link", label: "Copy link" });
   if (canView) rows.push({ key: "copy-id", label: "Copy task ID" });
-  if (canEdit) rows.push({ key: "duplicate", label: "Duplicate" });
+  // A copy is a new task on the List, which needs Can edit on it: someone
+  // whose edit comes only from being assigned has no List to copy into.
+  if (canEdit && !ctx.assigneeOnly) rows.push({ key: "duplicate", label: "Duplicate" });
   // In a List the task only appears in, Move moves the LINK (the host passes
   // its link-move flag as canMoveElsewhere), and a subtask shown through its
   // parent has no link of its own to move.

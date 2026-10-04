@@ -25,9 +25,15 @@ interface BoardCardsViewProps {
   /** Canvas sync after the context menu archives/deletes a card. */
   onItemRemoved?: (id: string) => void;
   timeTrackingEnabled?: boolean;
+  /** Which rows this viewer may change, when the host knows it per row (the List page below Can edit). */
+  editableRow?: (row: BoardItemRow) => boolean;
+  /** Rows open only through being assigned or having made them: no List writes in their menu. */
+  relationOnly?: (row: BoardItemRow) => boolean;
+  /** Rows the viewer holds at Full access: their menu offers Delete. */
+  deletableRow?: (row: BoardItemRow) => boolean;
 }
 
-export function BoardCardsView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardCardsViewProps) {
+export function BoardCardsView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled, editableRow, relationOnly, deletableRow }: BoardCardsViewProps) {
   // Right-click on any card opens the shared item menu (one hidden host,
   // re-targeted per card).
   const menu = useItemContextMenu();
@@ -36,7 +42,7 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <LayoutGrid className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-base text-zinc-500">No items yet — new tasks show up here as cards.</p>
+        <p className="text-base text-zinc-500">No tasks yet. New tasks show up here as cards.</p>
       </div>
     );
   }
@@ -107,6 +113,10 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
       menu={menu}
       boardId={boardId}
       canEdit={canEdit}
+      rowCanEdit={editableRow}
+      relationOnly={relationOnly}
+      rowCanDelete={deletableRow}
+      statuses={statuses}
       timeTrackingEnabled={timeTrackingEnabled}
       onOpenItem={onOpenItem}
       onItemCreated={onItemCreated}

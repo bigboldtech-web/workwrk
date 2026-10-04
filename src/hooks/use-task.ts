@@ -91,6 +91,16 @@ export interface UseTask {
   listOwner: TaskPerson | null;
   /** The Space's module toggles. Undefined on a server that predates them. */
   moduleGating: ItemModuleGating | undefined;
+  /**
+   * May the viewer add to the task's List (subtasks included)? Undefined on a
+   * server that predates it, which reads as "the task role says".
+   */
+  canAddToList: boolean | undefined;
+  /**
+   * May the viewer manage the task's List (statuses, custom fields: Full
+   * access on it)? Undefined on a server that predates it.
+   */
+  canManageList: boolean | undefined;
   loading: boolean;
   /**
    * A load failure that is neither 404 nor 403, as one sentence that names
@@ -138,6 +148,8 @@ interface TaskResponse {
   createdById?: string | null;
   createdBy?: TaskPerson | null;
   listOwner?: TaskPerson | null;
+  canAddToList?: boolean;
+  canManageList?: boolean;
   moduleGating?: ItemModuleGating;
 }
 
@@ -342,6 +354,8 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
     createdBy: data?.createdBy ?? null,
     listOwner: data?.listOwner ?? null,
     moduleGating: data?.moduleGating,
+    canAddToList: data?.canAddToList,
+    canManageList: data?.canManageList,
     loading,
     error,
     errorStatus,

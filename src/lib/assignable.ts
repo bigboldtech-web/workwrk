@@ -40,7 +40,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { NodeEvaluator, emptyGrants, roleAtLeast, type NodeCtx, type NodeRef, type ViewerGrants } from "@/lib/access/node-rules";
-import { loadAllGrants, loadOrgAdmins, loadPeople, loadRows, loadViewerGrants, peopleNamedByRows } from "@/lib/access/node-world";
+import { grantsWithViewer, loadAllGrants, loadOrgAdmins, loadPeople, loadRows, loadViewerGrants, peopleNamedByRows } from "@/lib/access/node-world";
 
 export interface AssignableUser {
   id: string;
@@ -132,7 +132,7 @@ async function rosterIds(board: { id: string }, organizationId: string, viewer: 
   const ids = new Set<string>();
   for (const [id, p] of people) {
     const g = all.get(id);
-    const grants: ViewerGrants = { viewer: p.viewer, space: g?.space ?? new Map(), folder: g?.folder ?? new Map(), list: g?.list ?? new Map(), object: g?.object ?? new Map(), since: g?.since };
+    const grants = grantsWithViewer(p.viewer, g);
     const d = new NodeEvaluator(rows, grants).decision(ref);
     if (!roleAtLeast(d.role, "VIEW")) continue;
     const via = d.via;

@@ -115,7 +115,10 @@ export function viaText(via: AccessVia): string {
 }
 
 /** The second line of a direct row that also reaches the node another way. */
-export function alsoViaText(also: { role: PanelRole; via: AccessVia }): string {
+export function alsoViaText(also: { role: PanelRole; via: AccessVia; plusOwnComment?: boolean }): string {
+  // A List's union: the other way gives Can view, and with their own Can
+  // comment row that is Can edit assigned tasks. Say what each half gives.
+  if (also.plusOwnComment) return `With Can view ${viaText(also.via)}, they also change tasks assigned to them or that they made`;
   // An admin's reach is always Full access, whatever role rode along with it.
   const role = also.via.type === "org_admin" || also.via.type === "owner" ? "FULL" : also.role;
   return `Also ${panelRoleLabel(role)} ${viaText(also.via)}`;
@@ -220,10 +223,10 @@ export function managesViaNode(panel: AccessPanel, kind: AccessNodeKind, id: str
 // ── Lines ───────────────────────────────────────────────────────────
 
 const EVERYONE_VERB: Record<PanelRole, string> = {
-  VIEW: "can view", COMMENT: "can comment", EDIT: "can edit", FULL: "has Full access", OWNER: "has Full access",
+  VIEW: "can view", COMMENT: "can comment", ASSIGNED: "can edit their assigned tasks", EDIT: "can edit", FULL: "has Full access", OWNER: "has Full access",
 };
 const HINT_VERB: Record<PanelRole, string> = {
-  VIEW: "view", COMMENT: "comment on", EDIT: "edit", FULL: "manage", OWNER: "manage",
+  VIEW: "view", COMMENT: "comment on", ASSIGNED: "edit their assigned tasks in", EDIT: "edit", FULL: "manage", OWNER: "manage",
 };
 
 function everyoneOrg(panel: AccessPanel): { org: string; from: { name: string } | null } | null {

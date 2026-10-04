@@ -35,6 +35,27 @@ export const ORG_ROLE_BLURB: Record<OrgRole, string> = {
   GUEST: "Outside the company, sees only what is shared.",
 };
 
+/**
+ * The List ladder's rung between Can comment and Can edit (founder decision 3,
+ * docs/plans/competitor-gap-2026-09.md section 7): the role a List share
+ * calls "ASSIGNED". It exists on Lists only.
+ */
+export const ASSIGNED_ROLE_LABEL = "Can edit assigned tasks";
+export const ASSIGNED_ROLE_BLURB = "Read and discuss every task, change only tasks assigned to them or that they made.";
+
+/**
+ * The three lower rungs on a List, where assignment matters: rules 9 and 5
+ * let an assignee and a creator change their task at Can view and at Can edit
+ * assigned tasks, never at Can comment held as the person's whole access to
+ * the List (src/lib/item-role.ts taskSideOfListRole; with Can view from
+ * anywhere else, node-rules listCommentUnion reads it as Can edit assigned
+ * tasks, because a share only adds).
+ */
+export const LIST_ROLE_BLURB = {
+  COMMENT: "Read and discuss every task, change none, not even their own, unless they can open the List another way.",
+  VIEW: "Read only, except tasks assigned to them or that they made, which they can change.",
+} as const;
+
 /** The order every role picker renders, widest first. */
 export const OBJECT_ROLE_ORDER: readonly ObjectRole[] = ["FULL", "EDIT", "COMMENT", "VIEW"];
 export const ORG_ROLE_ORDER: readonly OrgRole[] = ["OWNER", "ADMIN", "MEMBER", "GUEST"];

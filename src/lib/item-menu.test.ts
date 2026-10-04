@@ -97,6 +97,9 @@ describe("buildItemMenu", () => {
   it("hides Share on a Personal List task and for an assignee-only viewer", () => {
     expect(keys(ctx({ personalList: true }))).not.toContain("share");
     expect(keys(ctx({ assigneeOnly: true }))).not.toContain("share");
+    // A copy is a new task on the List: assignee-only access has no List to copy into.
+    expect(keys(ctx({ assigneeOnly: true }))).not.toContain("duplicate");
+    expect(keys(ctx({ assigneeOnly: false }))).toContain("duplicate");
   });
 
   it("reads Who has access for a viewer who cannot grant", () => {

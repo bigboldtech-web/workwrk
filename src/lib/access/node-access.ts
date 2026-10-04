@@ -62,6 +62,7 @@ import {
 } from "./node-rules";
 import { accessEntries, ancestorsOf, assembleSpaceTree, inheritanceOf, keepsRestrictedDoc, nodeName, renderedCounts, type SpaceTreeResult } from "./node-tree";
 import {
+  grantsWithViewer,
   loadAllGrants,
   loadOrgAdmins,
   loadPathEvidence,
@@ -679,7 +680,7 @@ export async function usersWhoCanReadResponses(organizationId: string, formId: s
   const [all, people] = await Promise.all([loadAllGrants(rows), loadPeople(organizationId, ids)]);
   for (const [id, p] of people) {
     const g = all.get(id);
-    const grants: ViewerGrants = { viewer: p.viewer, space: g?.space ?? new Map(), folder: g?.folder ?? new Map(), list: g?.list ?? new Map(), object: g?.object ?? new Map(), since: g?.since };
+    const grants = grantsWithViewer(p.viewer, g);
     if (new NodeEvaluator(rows, grants).formResponsesAllowed(formId)) out.add(id);
   }
   return out;
@@ -707,7 +708,7 @@ export async function usersWhoCanRead(
   const out = new Map<string, NodeRole>();
   for (const [id, p] of people) {
     const g = all.get(id);
-    const grants: ViewerGrants = { viewer: p.viewer, space: g?.space ?? new Map(), folder: g?.folder ?? new Map(), list: g?.list ?? new Map(), object: g?.object ?? new Map(), since: g?.since };
+    const grants = grantsWithViewer(p.viewer, g);
     const role = new NodeEvaluator(rows, grants).effective(ref).role;
     if (roleAtLeast(role, min)) out.set(id, role);
   }
@@ -856,7 +857,7 @@ export async function accessPanel(ctx: NodeCtx, ref: NodeRef): Promise<AccessPan
   const facts = await loadPeople(ctx.organizationId, ids);
   const people = [...facts.values()].map((p) => {
     const g = all.get(p.id);
-    const grants: ViewerGrants = { viewer: p.viewer, space: g?.space ?? new Map(), folder: g?.folder ?? new Map(), list: g?.list ?? new Map(), object: g?.object ?? new Map(), since: g?.since };
+    const grants = grantsWithViewer(p.viewer, g);
     const person: AccessPerson = { id: p.id, name: p.name, email: p.email, avatar: p.avatar, active: p.active };
     return { person, grants };
   });

@@ -64,6 +64,21 @@ export type NodeKind = AccessNodeKind;
 export interface NodeRef { kind: NodeKind; id: string }
 export type NodeRole = PanelRole | "none";
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+
+/**
+ * A List member's rung below Can edit, stored beside a GUEST row
+ * ("BoardMember"."rung", prisma/sql/2026-10-04-board-member-rung.sql):
+ * "COMMENT" Can comment, "ASSIGNED" Can edit assigned tasks. A reader that
+ * does not know it sees the GUEST row, Can view: never Can edit on the List,
+ * but on a task Can view gives back the assignee and creator lifts that Can
+ * comment withholds. So every reader that DECIDES access must know the rung:
+ * the loaders in node-world.ts fill it for every one of them.
+ */
+export type ListRung = "COMMENT" | "ASSIGNED";
+
+export function isListRung(v: unknown): v is ListRung {
+  return v === "COMMENT" || v === "ASSIGNED";
+}
 export type NodeVisibility = "PRIVATE" | "WORKSPACE" | "ORG";
 export type PrivateRule = "legacy" | "strict";
 /** The role vocabulary the tree rows and the "..." menus read. */
@@ -255,6 +270,8 @@ export interface ViewerGrants {
   space: Map<string, MemberRole>;
   folder: Map<string, MemberRole>;
   list: Map<string, MemberRole>;
+  /** The rung on a List row, when it has one (only ever on a GUEST row). */
+  listRung?: Map<string, ListRung>;
   object: Map<string, MemberRole>;
   /**
    * When each Space, Folder and List row was written, as epoch ms keyed by
@@ -323,6 +340,16 @@ export function memberToRole(role: MemberRole): PanelRole {
   return "VIEW";
 }
 
+/**
+ * m() for a BoardMember row with its rung: a GUEST row with "COMMENT" is Can
+ * comment and with "ASSIGNED" is Can edit assigned tasks. A rung on any other
+ * row is ignored (it cannot be written there), so it never widens one.
+ */
+export function boardMemberToRole(role: MemberRole, rung: ListRung | null | undefined): PanelRole {
+  if (role === "GUEST" && rung) return rung;
+  return memberToRole(role);
+}
+
 /** OWNER or FULL full, EDIT edit, COMMENT comment, VIEW view, none null. */
 export function toContainerRole(role: NodeRole): TreeRole | null {
   switch (role) {
@@ -331,6 +358,9 @@ export function toContainerRole(role: NodeRole): TreeRole | null {
       return "full";
     case "EDIT":
       return "edit";
+    // Can edit assigned tasks is a List-only rung that reads like Can comment
+    // everywhere but on the member's own tasks (the task gate's lift).
+    case "ASSIGNED":
     case "COMMENT":
       return "comment";
     case "VIEW":
@@ -344,14 +374,14 @@ export function toContainerRole(role: NodeRole): TreeRole | null {
 export function toLegacyPermission(role: NodeRole): "none" | "read" | "edit" | "admin" {
   if (role === "OWNER" || role === "FULL") return "admin";
   if (role === "EDIT") return "edit";
-  if (role === "COMMENT" || role === "VIEW") return "read";
+  if (role === "ASSIGNED" || role === "COMMENT" || role === "VIEW") return "read";
   return "none";
 }
 
 /** requireDocRole's vocabulary: FULL or EDIT "edit", COMMENT or VIEW "view", none null. */
 export function toDocRole(role: NodeRole): "edit" | "view" | null {
   if (role === "OWNER" || role === "FULL" || role === "EDIT") return "edit";
-  if (role === "COMMENT" || role === "VIEW") return "view";
+  if (role === "ASSIGNED" || role === "COMMENT" || role === "VIEW") return "view";
   return null;
 }
 
@@ -413,7 +443,7 @@ export function readPrivateRule(settings: unknown): PrivateRule {
 
 // ── where a role comes from ──────────────────────────────────────────
 
-export type NodeVia =
+export type NodeVia = (
   | { type: "org_admin" }
   | { type: "own"; node: NodeRef; source: AccessGrantSource }
   | { type: "owner"; node: NodeRef }
@@ -422,7 +452,15 @@ export type NodeVia =
   | { type: "inherited"; node: NodeRef; source: AccessGrantSource | null }
   | { type: "everyone"; node: NodeRef | null }
   | { type: "floor"; node: NodeRef }
-  | { type: "none" };
+  | { type: "none" }
+) & {
+  /**
+   * Set only by a List's union answer (listCommentUnion): the role is Can edit
+   * assigned tasks because the person's own Can comment row and THIS way in
+   * give it together. The words that explain a role name both halves.
+   */
+  plusOwnComment?: true;
+};
 
 export interface NodeDecision {
   /** The effective role (R11): the strict role, or today's when that is higher under the legacy rule. */
@@ -458,9 +496,16 @@ function pick(cands: Candidate[]): Res {
   return best ? { role: best.role, via: best.via } : NONE;
 }
 
-/** A child inherits the parent's role; the Space Owner rung is Full access below the Space. */
+/**
+ * A child inherits the parent's role; the Space Owner rung is Full access
+ * below the Space, and a List's Can edit assigned tasks is Can comment on
+ * what hangs off the List (a doc has no assigned tasks: only the task gate
+ * gives that rung more than Can comment).
+ */
 function inheritRole(role: NodeRole): NodeRole {
-  return role === "OWNER" ? "FULL" : role;
+  if (role === "OWNER") return "FULL";
+  if (role === "ASSIGNED") return "COMMENT";
+  return role;
 }
 
 /** The via a child reads when its role comes from its parent: the node holding the grant. */
@@ -795,7 +840,7 @@ export class NodeEvaluator {
    */
   private computeEffective(ref: NodeRef): Res {
     const strict = this.strict(ref);
-    if (this.rows.privateRule === "strict") return strict;
+    if (this.rows.privateRule === "strict") return this.listCommentUnion(ref, strict);
     let best = strict;
     if (ref.kind === "doc") {
       const d = this.rows.docs.get(ref.id);
@@ -813,7 +858,30 @@ export class NodeEvaluator {
     if (best.via.type === "everyone" && best.via.node !== null) return best;
     const floor = floorFor(this.rows, this.grants, ref);
     if (rankOf(floor) > rankOf(best.role)) return { role: floor, via: { type: "floor", node: ref } };
-    return best;
+    return this.listCommentUnion(ref, best);
+  }
+
+  /**
+   * A share only adds (founder decision 3: the rungs are "additive roles over
+   * the existing ladder"). A List's Can comment rung withholds rules 9 and 5
+   * on its tasks, so held as the person's whole access to the List it changes
+   * nothing there, not even their own tasks. But when they can open the List
+   * at Can view another way (its Space or a Folder, the whole company, the
+   * older rule), that way already lets them change the tasks assigned to them
+   * and the tasks they made, and Can comment adds discussing every task: the
+   * two together are exactly Can edit assigned tasks, which is the answer.
+   * The via names the other way, so the panel says where the rest comes from.
+   * A Can comment row is the only source of "COMMENT" on a List.
+   */
+  private listCommentUnion(ref: NodeRef, res: Res): Res {
+    if (ref.kind !== "list" || res.role !== "COMMENT") return res;
+    if (this.grants.listRung?.get(ref.id) !== "COMMENT") return res;
+    const list = new Map(this.grants.list);
+    list.delete(ref.id);
+    const listRung = new Map(this.grants.listRung);
+    listRung.delete(ref.id);
+    const without = new NodeEvaluator(this.rows, { ...this.grants, list, listRung }).effective(ref);
+    return roleAtLeast(without.role, "VIEW") ? { role: "ASSIGNED", via: { ...without.via, plusOwnComment: true } } : res;
   }
 
   /**
@@ -887,8 +955,9 @@ export class NodeEvaluator {
     const isPrivate = l.visibility === "PRIVATE";
     const upC = isPrivate ? null : up(parentRes);
     const own = this.grants.list.get(id);
+    const ownRung = this.grants.listRung?.get(id);
     const cands: Candidate[] = [];
-    if (own) cands.push({ role: memberToRole(own), via: { type: "own", node: ref, source: "BoardMember" }, prio: P_OWN });
+    if (own) cands.push({ role: boardMemberToRole(own, ownRung), via: { type: "own", node: ref, source: "BoardMember" }, prio: P_OWN });
     if (l.ownerId && l.ownerId === this.u && (isPrivate || (upC && upC.role !== "none"))) {
       cands.push({ role: "FULL", via: { type: "owner", node: ref }, prio: P_OWNER });
     }
@@ -1126,7 +1195,12 @@ export class NodeEvaluator {
       // Member once held Can edit on every form, so a person with nothing on
       // a private Space rewrote its form's questions and where they went.
       const parentRes = this.strict(dest);
-      if (parentRes.role !== "none") cands.push(up(parentRes));
+      if (parentRes.role !== "none") {
+        // A form has no comments: the List ladder's two rungs below Can edit
+        // open its questions read-only, as Can view always has.
+        const fromDest = up(parentRes);
+        cands.push(fromDest.role === "COMMENT" ? { ...fromDest, role: "VIEW" } : fromDest);
+      }
       if (member) cands.push({ role: "VIEW", via: { type: "everyone", node: null }, prio: P_EVERYONE });
     } else if (member) {
       // Nowhere yet: the org root's rule, as for a table or a canvas there.

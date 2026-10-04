@@ -41,6 +41,7 @@ import { getBoardStatuses, makeStatusLookup, type StatusOption } from "@/lib/boa
 import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { boardContext, gateItem, itemBreadcrumb, itemCtx, itemServerError, listIsReadable, type ItemGateOk } from "@/lib/item-gate";
+import { allowsItemAction } from "@/lib/item-role";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
@@ -305,6 +306,13 @@ async function readItem(id: string, c: Ctx, requestedList: string | null) {
     },
     // Kept for every client that predates `decision`. Same answer, one source.
     canEdit: gate.decision.role === "EDIT" || gate.decision.role === "FULL",
+    // Adding a subtask adds to the List: Can edit on it (founder decision 3,
+    // Can edit assigned tasks changes the viewer's tasks, never adds one).
+    canAddToList: gate.canAddToList,
+    // Managing statuses and fields is the HOME List's (Full access on it), but
+    // opened in a List the task is only shown in, the page's fields and its
+    // Manage links are that other List's: no answer here fits both, so none.
+    canManageList: linked ? false : gate.canManageList,
   });
 }
 
@@ -516,8 +524,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   // A move needs Can edit on BOTH Lists, so it gates on "move" rather than on
   // "edit" and then checks the target separately below.
-  const gate = await gateItem(id, c, parsed.data.boardId ? "move" : "edit");
+  //
+  // Watching is personal, like a reminder: a body that only changes
+  // watcherIds needs Can view, and below Can edit it can only add or remove
+  // the caller (applied to the stored list, so a stale list in the browser
+  // never adds or drops anyone else). The menu offers Watch at Can view.
+  const keys = Object.keys(parsed.data).filter((k) => (parsed.data as Record<string, unknown>)[k] !== undefined);
+  const onlyWatching = parsed.data.watcherIds !== undefined && keys.every((k) => k === "watcherIds" || k === "contextBoardId");
+  const gate = await gateItem(id, c, parsed.data.boardId ? "move" : onlyWatching ? "view" : "edit");
   if ("error" in gate) return gate.error;
+  if (onlyWatching && !allowsItemAction(gate.decision, "edit", { creator: gate.creatorId === c.userId })) {
+    const wants = parsed.data.watcherIds!.includes(c.userId);
+    const others = gate.watcherIds.filter((w) => w !== c.userId);
+    parsed.data.watcherIds = wants ? [...others, c.userId] : others;
+  }
 
   // Reserved keys are never written by a client, in either shape.
   for (const blob of [parsed.data.metadata, parsed.data.metadataPatch]) {
@@ -554,6 +574,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
       }
     }
+  }
+
+  // Where a task sits in its List (its order, and the older group key) is the
+  // List's arrangement, a List write: Can edit on the List, the same rule as
+  // PUT /api/boards/[id]/order. Being assigned opens a task's content to
+  // change (rule 9), never its place among everyone else's.
+  if ((parsed.data.position !== undefined || parsed.data.groupKey !== undefined) && !gate.canAddToList) {
+    return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
   }
 
   // EVERY assignee id is a real, live person in THIS organization.

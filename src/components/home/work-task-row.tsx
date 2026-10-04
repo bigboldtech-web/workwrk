@@ -65,14 +65,19 @@ export function WorkTaskRow({
       )}
       style={{ minHeight: "var(--os-row-h)" }}
     >
-      <input
-        type="checkbox"
-        className="h-[18px] w-[18px] shrink-0 accent-[var(--os-brand)]"
-        checked={false}
-        disabled={completing}
-        onChange={() => onComplete(item)}
-        aria-label={`Mark "${item.title}" done`}
-      />
+      {item.canEdit ? (
+        <input
+          type="checkbox"
+          className="h-[18px] w-[18px] shrink-0 accent-[var(--os-brand)]"
+          checked={false}
+          disabled={completing}
+          onChange={() => onComplete(item)}
+          aria-label={`Mark "${item.title}" done`}
+        />
+      ) : (
+        // Can comment is all they hold on this task's List: nothing to tick.
+        <span className="h-[18px] w-[18px] shrink-0" aria-hidden />
+      )}
 
       <button
         type="button"

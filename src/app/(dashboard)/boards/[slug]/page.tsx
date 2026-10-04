@@ -181,6 +181,27 @@ export default async function BoardPage(props: {
   const items = await listBoardItems(board.id, { view: { viewer, contextBoardId: board.id }, includeLinked: LIST_LINK_CANVAS_LIVE });
   const canContribute = roleAtLeast(self.role, "EDIT");
   const canManage = roleAtLeast(self.role, "FULL");
+  // Below Can edit, the tasks assigned to this viewer are still theirs to
+  // change (rule 9), except at Can comment held as their whole access here
+  // (founder decision 3; with Can view from anywhere else the resolver
+  // already answers Can edit assigned tasks): the views open those rows and
+  // cards, never the List's own arranging.
+  const assigneeEdit = !canContribute ? { userId: u.id, lift: self.role !== "COMMENT" } : null;
+  const accessChip =
+    self.role === "ASSIGNED"
+      ? {
+          label: "Can edit assigned tasks",
+          title: `You can read and discuss every task in ${board.name} and change the tasks assigned to you or that you made. Adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
+        }
+      : self.role === "COMMENT"
+        ? {
+            label: "Can comment",
+            title: `You can read and discuss every task in ${board.name}, but not change one, not even your own. Ask a List or Space admin to change your access.`,
+          }
+        : {
+            label: "View only",
+            title: `You have view access to ${board.name}: you can switch views, read tasks and change the tasks assigned to you or that you made, but adding tasks or views needs Can edit, and custom fields or statuses need Full access. Ask a List or Space admin to change your access.`,
+          };
   const canDeleteTasks = canManage;
   // A connect column names only the Lists this viewer can read, a mirror only
   // its lookups into them: the same redaction every fields read applies.
@@ -242,11 +263,8 @@ export default async function BoardPage(props: {
             List with no "+ Task", no row menus and no explanation, which reads
             as a broken page rather than as the access they were given. */}
         {!canContribute ? (
-          <span
-            className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-ink-3"
-            title={`You have view access to ${board.name}: you can switch views and read tasks, but adding views, custom fields, statuses or tasks needs Can edit. Ask a List or Space admin to change your access.`}
-          >
-            View only
+          <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-ink-3" title={accessChip.title}>
+            {accessChip.label}
           </span>
         ) : null}
 
@@ -329,6 +347,7 @@ export default async function BoardPage(props: {
           canDeleteTasks={canDeleteTasks}
           canSaveView={mayConfigureView}
           currentUserId={u.id}
+          assigneeEdit={assigneeEdit}
           sprint={sprint}
           addTaskSlot={
             // The one blue primary, and only for people who can use it. It was

@@ -21,11 +21,12 @@
 // week, Later, No date.
 //
 // ACCESS. Every row is assigned to the viewer, and access rule 9 says being
-// assigned a task grants Can edit on it. So this route deliberately does NOT
-// filter by List membership: doing that is what used to hide people's own
-// work from them. The List name travels with the row for display, and the
-// client renders it as a plain label rather than a link when the viewer cannot
-// open the List.
+// assigned a task grants Can edit on it, except where Can comment is the whole
+// of their access to its List (founder decision 3): each row says which in
+// `canEdit`. So this route deliberately does NOT filter by List membership:
+// doing that is what used to hide people's own work from them. The List name
+// travels with the row for display, and the client renders it as a plain
+// label rather than a link when the viewer cannot open the List.
 //
 // COMPATIBILITY. The planner side panel reads `buckets` and `counts` off this
 // route. Both are still returned, computed from the same rows, so nothing has
@@ -44,6 +45,7 @@ import { parseWorkScope, type MyWorkRow, type WorkGroupKey, type WorkSortKey } f
 import { delegatedWhere } from "@/lib/delegated-items";
 import type { Prisma } from "@/generated/prisma";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { listSidesFor } from "@/lib/assignee-lift";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +92,7 @@ function orderFor(group: WorkGroupKey, sort: WorkSortKey, dir: "asc" | "desc"): 
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  const u = session?.user as { id?: string; organizationId?: string } | undefined;
+  const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
   if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(req.url);
@@ -281,6 +283,26 @@ export async function GET(req: Request) {
     u.organizationId,
     Array.from(new Set(page.map((r) => r.boardId))),
   );
+  // What each List lets this viewer do with a task in it (assignee-lift.ts).
+  const sides = await listSidesFor(
+    { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel },
+    page.map((r) => r.boardId),
+  );
+  // "Assigned by me" rows are assigned to someone else, so rule 9 does not
+  // reach them: the viewer changes one with Can edit on its List, or because
+  // they made it (rule 5, read from the CREATED row as the gate reads it).
+  const madeByViewer = scope === "delegated" && page.length > 0
+    ? new Set(
+        (await prisma.itemActivity.findMany({
+          where: { organizationId: u.organizationId, entityType: "BOARD_ITEM", entityId: { in: page.map((r) => r.id) }, action: "CREATED", actorId: u.id },
+          select: { entityId: true },
+        })).map((r) => r.entityId),
+      )
+    : new Set<string>();
+  const canEditRow = (it: { id: string; boardId: string }): boolean =>
+    scope === "delegated"
+      ? sides.addable.has(it.boardId) || (madeByViewer.has(it.id) && !sides.withheld.has(it.boardId))
+      : !sides.withheld.has(it.boardId);
 
   const now = new Date();
   // One status lookup per List, not per row.
@@ -322,6 +344,8 @@ export async function GET(req: Request) {
       : null,
     space: it.board?.spaceId ? spaceById.get(it.board.spaceId) ?? null : null,
     listReadable: readableBoardIds.has(it.boardId),
+    canEdit: canEditRow(it),
+    canAddToList: sides.addable.has(it.boardId),
   }));
 
   // The legacy shape the planner side panel still reads. Same rows, five

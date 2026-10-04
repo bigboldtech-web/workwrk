@@ -110,6 +110,18 @@ export interface ItemListContext {
 }
 
 interface BoardItemDetailProps {
+  /**
+   * May the viewer add subtasks (and reorder them)? Both add to the List,
+   * which needs Can edit on it (founder decision 3: Can edit assigned tasks
+   * changes the viewer's tasks, never adds one). Absent: the task role says.
+   */
+  canAddSubtasks?: boolean;
+  /**
+   * May the viewer manage the List (its statuses and custom fields: Full
+   * access on it)? The task role can be Full without it (the person who made
+   * the task). Absent: the task role says.
+   */
+  canManageList?: boolean;
   item: BoardItemRow;
   /** The one gate answer, from GET /api/items/[id]'s `decision`. */
   role: ItemRole;
@@ -236,6 +248,8 @@ function metadataPatch(patch: Record<string, unknown>): Record<string, unknown> 
 export function BoardItemDetail({
   item,
   role,
+  canAddSubtasks,
+  canManageList,
   currentUserId,
   customFields,
   statusOptions,
@@ -348,8 +362,13 @@ export function BoardItemDetail({
   const showChecklist = revealed.has("checklist") || checklistItems.length > 0;
   const showRelated = revealed.has("related") || (attachCount ?? 0) > 0;
 
+  // Adding a subtask is a List write (Can edit on the List): someone who may
+  // change this task only because it is assigned to them is not offered it.
+  const mayAddSubtasks = canAddSubtasks ?? canEdit;
+  // "Manage fields" and "Manage statuses" open the List's own settings.
+  const mayManageList = canManageList ?? role === "FULL";
   const addRows = [
-    !showSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
+    !showSubtasks && mayAddSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
     !showChecklist ? { key: "checklist", icon: ClipboardList, label: "Add checklist", onClick: () => reveal("checklist") } : null,
     !showRelated ? { key: "related", icon: Paperclip, label: "Attach file", onClick: () => reveal("related") } : null,
   ].filter((r): r is { key: string; icon: LucideIcon; label: string; onClick: () => void } => r !== null);
@@ -382,7 +401,7 @@ export function BoardItemDetail({
                 onPatch={onPatch}
                 statusOptions={statusOptions}
                 listSlug={listContext?.slug ?? null}
-                role={role}
+                canManageList={mayManageList}
                 watcherIds={watcherIds}
                 currentUserId={currentUserId}
                 locale={locale}
@@ -402,7 +421,7 @@ export function BoardItemDetail({
             listFieldHasValue={listFieldHasValue}
             onToggleListField={toggleListField}
             listSlug={listContext?.slug ?? null}
-            canManageFields={role === "FULL"}
+            canManageFields={mayManageList}
           />
         ) : null}
       </div>
@@ -493,6 +512,7 @@ export function BoardItemDetail({
         <ItemSubtasks
           item={item}
           canEdit={canEdit}
+          canAdd={mayAddSubtasks}
           statuses={statusOptions}
           onOpenItem={onOpenItem}
           onCountChange={setSubtaskCount}
@@ -602,7 +622,7 @@ function FieldControl({
   onPatch,
   statusOptions,
   listSlug,
-  role,
+  canManageList,
   watcherIds,
   currentUserId,
   locale,
@@ -613,14 +633,15 @@ function FieldControl({
   onPatch: (b: DetailPatch, optimistic?: Partial<BoardItemRow>) => void;
   statusOptions: StatusOption[];
   listSlug: string | null;
-  role: ItemRole;
+  /** Full access on the List: the status picker's "Manage statuses" footer. */
+  canManageList: boolean;
   watcherIds: string[];
   currentUserId: string | null;
   locale: LocalePrefs | null;
 }) {
   switch (fieldKey) {
     case "status":
-      return <StatusField value={item.status} statuses={statusOptions} canEdit={canEdit} isFull={role === "FULL"} listSlug={listSlug} onChange={(v) => onPatch({ status: v })} />;
+      return <StatusField value={item.status} statuses={statusOptions} canEdit={canEdit} isFull={canManageList} listSlug={listSlug} onChange={(v) => onPatch({ status: v })} />;
     case "assignees":
       return <AssigneesField item={item} canEdit={canEdit} currentUserId={currentUserId} onPatch={onPatch} />;
     case "dueDate":
@@ -645,7 +666,7 @@ function FieldControl({
     case "alignment":
       return <AlignmentField item={item} canEdit={canEdit} onPatch={onPatch} />;
     case "watchers":
-      return <WatchersField watcherIds={watcherIds} boardId={item.boardId ?? null} currentUserId={currentUserId} onPatch={onPatch} />;
+      return <WatchersField watcherIds={watcherIds} boardId={item.boardId ?? null} currentUserId={currentUserId} canEdit={canEdit} onPatch={onPatch} />;
     default:
       return null;
   }
@@ -953,11 +974,18 @@ function WatchersField({
   watcherIds,
   boardId,
   currentUserId,
+  canEdit,
   onPatch,
 }: {
   watcherIds: string[];
   boardId: string | null;
   currentUserId: string | null;
+  /**
+   * Adding or removing someone else is a change to the task (Can edit).
+   * Below it the viewer watches or unwatches themselves only, which the route
+   * allows at Can view, so the picker of other people is not offered.
+   */
+  canEdit: boolean;
   onPatch: (b: DetailPatch) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1004,9 +1032,13 @@ function WatchersField({
 
   return (
     <span className="relative inline-flex items-center gap-2">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center">
-        {stack}
-      </button>
+      {canEdit ? (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center">
+          {stack}
+        </button>
+      ) : (
+        stack
+      )}
       {currentUserId ? (
         <button
           type="button"
@@ -1021,7 +1053,7 @@ function WatchersField({
         </button>
       ) : null}
       <Picker
-        open={open}
+        open={canEdit && open}
         onClose={() => setOpen(false)}
         sections={sections}
         multi

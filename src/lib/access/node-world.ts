@@ -31,6 +31,7 @@ import { readDocLocks } from "../doc-lock";
 import {
   emptyGrants,
   emptyRows,
+  isListRung,
   objectGrantKey,
   topAnchorDoc,
   type CanvasFact,
@@ -273,7 +274,7 @@ export async function loadViewerGrants(ctx: NodeCtx, rows: NodeRows): Promise<Vi
   const [sm, fm, bm, tg, cg, og] = await Promise.all([
     spaceIds.length ? prisma.spaceMember.findMany({ where: { userId: u, spaceId: { in: spaceIds } }, select: { spaceId: true, role: true, createdAt: true } }) : Promise.resolve([]),
     folderIds.length ? prisma.folderMember.findMany({ where: { userId: u, folderId: { in: folderIds } }, select: { folderId: true, role: true, createdAt: true } }) : Promise.resolve([]),
-    listIds.length ? prisma.boardMember.findMany({ where: { userId: u, boardId: { in: listIds } }, select: { boardId: true, role: true, createdAt: true } }) : Promise.resolve([]),
+    listIds.length ? prisma.boardMember.findMany({ where: { userId: u, boardId: { in: listIds } }, select: { boardId: true, role: true, rung: true, createdAt: true } }) : Promise.resolve([]),
     objectGrants("table", [...rows.tables.keys()], { userId: u }),
     objectGrants("canvas", [...rows.canvases.keys()], { userId: u }),
     objectGrants("form", [...rows.forms.keys()], { userId: u }),
@@ -289,6 +290,7 @@ export async function loadViewerGrants(ctx: NodeCtx, rows: NodeRows): Promise<Vi
   }
   for (const r of bm) {
     g.list.set(r.boardId, r.role as MemberRole);
+    if (r.role === "GUEST" && isListRung(r.rung)) (g.listRung ??= new Map()).set(r.boardId, r.rung);
     since.set(`list:${r.boardId}`, r.createdAt.getTime());
   }
   for (const r of [...tg, ...cg, ...og]) g.object.set(objectGrantKey(KIND_BY_OBJECT_TYPE[r.objectType], r.objectId), r.role);
@@ -357,7 +359,7 @@ export async function loadAllGrants(rows: NodeRows): Promise<Map<string, Omit<Vi
   const [sm, fm, bm, tg, cg, og] = await Promise.all([
     spaceIds.length ? prisma.spaceMember.findMany({ where: { spaceId: { in: spaceIds } }, select: { spaceId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
     folderIds.length ? prisma.folderMember.findMany({ where: { folderId: { in: folderIds } }, select: { folderId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
-    listIds.length ? prisma.boardMember.findMany({ where: { boardId: { in: listIds } }, select: { boardId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
+    listIds.length ? prisma.boardMember.findMany({ where: { boardId: { in: listIds } }, select: { boardId: true, userId: true, role: true, rung: true, createdAt: true } }) : Promise.resolve([]),
     objectGrants("table", [...rows.tables.keys()]),
     objectGrants("canvas", [...rows.canvases.keys()]),
     objectGrants("form", [...rows.forms.keys()]),
@@ -384,10 +386,20 @@ export async function loadAllGrants(rows: NodeRows): Promise<Map<string, Omit<Vi
   for (const r of bm) {
     const g = of(r.userId);
     g.list.set(r.boardId, r.role as MemberRole);
+    if (r.role === "GUEST" && isListRung(r.rung)) (g.listRung ??= new Map()).set(r.boardId, r.rung);
     g.since?.set(`list:${r.boardId}`, r.createdAt.getTime());
   }
   for (const r of [...tg, ...cg, ...og]) of(r.subjectId).object.set(objectGrantKey(KIND_BY_OBJECT_TYPE[r.objectType], r.objectId), r.role);
   return out;
+}
+
+/**
+ * One person's rows from loadAllGrants as their ViewerGrants. Every field is
+ * carried, the List rung included: a copy that names the fields one by one
+ * drops any it does not name, and a Can comment row then reads as Can view.
+ */
+export function grantsWithViewer(viewer: NodeViewer, g: Omit<ViewerGrants, "viewer"> | undefined): ViewerGrants {
+  return g ? { ...g, viewer } : emptyGrants(viewer);
 }
 
 /** Everyone listed on the world's docs, and every owner or creator of its nodes. */
