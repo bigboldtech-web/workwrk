@@ -30,6 +30,7 @@ import { MessageBox, type MessagePayload } from "@/components/talk/message-box";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { apiFetch } from "@/lib/api-fetch";
+import { TalkUpdatesSection, useTalkUpdatesAvailable } from "@/components/talk/talk-updates-section";
 import {
   canAddPeople,
   canArchive,
@@ -236,6 +237,8 @@ export function DetailsPanel({
   onOpenSearch: () => void;
 }) {
   const { date: fmtDate, relative } = useFormat();
+  // Batch 8: scheduled AI updates, only while the workspace has them on.
+  const talkUpdatesOn = useTalkUpdatesAvailable();
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState(conversation.topic ?? "");
   const [savingTopic, setSavingTopic] = useState(false);
@@ -395,6 +398,9 @@ export function DetailsPanel({
           </div>
         </>
       ) : null}
+
+      {/* Scheduled AI updates (Batch 8), group chats and channels only */}
+      {!isDM && talkUpdatesOn ? <TalkUpdatesSection conversationId={conversation.id} /> : null}
 
       {/* Members */}
       {!isDM ? (

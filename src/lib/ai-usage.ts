@@ -23,9 +23,9 @@ export async function claimAiUse(organizationId: string, kind: AiUseKind, cap: n
   try {
     const rows = await prisma.$queryRaw<Array<{ count: number }>>`
       INSERT INTO "AiUsageDay" ("organizationId", "day", "kind", "count", "updatedAt")
-      VALUES (${organizationId}, (now() AT TIME ZONE 'UTC')::date, ${kind}, 1, now())
+      VALUES (${organizationId}, (now() AT TIME ZONE 'UTC')::date, ${kind}, 1, now() AT TIME ZONE 'UTC')
       ON CONFLICT ("organizationId", "day", "kind")
-      DO UPDATE SET "count" = "AiUsageDay"."count" + 1, "updatedAt" = now()
+      DO UPDATE SET "count" = "AiUsageDay"."count" + 1, "updatedAt" = now() AT TIME ZONE 'UTC'
       WHERE "AiUsageDay"."count" < ${Math.floor(cap)}
       RETURNING "count"`;
     return rows.length > 0 ? "ok" : "limit";
@@ -39,7 +39,7 @@ export async function claimAiUse(organizationId: string, kind: AiUseKind, cap: n
 export async function releaseAiUse(organizationId: string, kind: AiUseKind): Promise<void> {
   try {
     await prisma.$executeRaw`
-      UPDATE "AiUsageDay" SET "count" = "count" - 1, "updatedAt" = now()
+      UPDATE "AiUsageDay" SET "count" = "count" - 1, "updatedAt" = now() AT TIME ZONE 'UTC'
       WHERE "organizationId" = ${organizationId}
         AND "day" = (now() AT TIME ZONE 'UTC')::date
         AND "kind" = ${kind}

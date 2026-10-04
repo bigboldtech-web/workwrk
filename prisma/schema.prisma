@@ -173,6 +173,8 @@ model Organization {
   automationUsage        AutomationUsage[]
   // Batch 8: the daily AI use guard rail (src/lib/ai-usage.ts)
   aiUsageDays            AiUsageDay[]
+  // Batch 8: scheduled AI updates in Talk (src/lib/talk-updates-server.ts)
+  talkUpdates            TalkUpdate[]
   integrationConnections IntegrationConnection[]
   // 🆕 Comms Hub — team chat
   conversations          Conversation[]
@@ -6028,6 +6030,8 @@ model Conversation {
   archivedAt     DateTime?
   members        ConversationMember[]
   messages       ConversationMessage[]
+  /// Batch 8: the scheduled AI updates posted here.
+  talkUpdates    TalkUpdate[]
 
   @@index([organizationId, lastMessageAt])
   @@index([organizationId, archivedAt])
@@ -6985,6 +6989,67 @@ model AiUsageDay {
   updatedAt      DateTime     @default(now())
 
   @@id([organizationId, day, kind])
+}
+
+/// A scheduled AI update in one private channel or group chat (Batch 8,
+/// src/lib/talk-updates.ts): a Daily standup or a Weekly project update that
+/// AI writes from one List or one Space and posts as the person who set it
+/// up. `createdById` has no foreign key on purpose: a person who leaves
+/// pauses their updates (the runner checks), and nothing is deleted with
+/// them. `nextRunAt` is claimed by compare-and-swap per due instant.
+model TalkUpdate {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdById    String
+  /// "standup" | "project"
+  kind           String
+  /// "list" | "space"
+  scopeKind      String
+  scopeId        String
+  /// "weekdays" | "weekly"
+  cadence        String
+  /// ISO weekday 1 to 7, for weekly.
+  weekday        Int?
+  /// HH:MM in `timezone`.
+  timeOfDay      String
+  timezone       String
+  /// "active" | "paused"
+  status         String          @default("active")
+  pausedReason   String?
+  nextRunAt      DateTime?
+  lastPostedAt   DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @default(now()) @updatedAt
+  runs           TalkUpdateRun[]
+
+  @@index([status, nextRunAt])
+  @@index([conversationId])
+}
+
+/// One run of a TalkUpdate: scheduled (one row per due instant, the unique
+/// key) or Post now. Counts and a reason only; the post itself is the
+/// message.
+model TalkUpdateRun {
+  id             String     @id @default(cuid())
+  updateId       String
+  update         TalkUpdate @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  organizationId String
+  dueAt          DateTime
+  /// "schedule" | "manual"
+  trigger        String
+  /// "running" | "posted" | "skipped" | "failed"
+  status         String
+  reason         String?
+  messageId      String?
+  taskCount      Int?
+  startedAt      DateTime   @default(now())
+  finishedAt     DateTime?
+
+  @@unique([updateId, dueAt])
+  @@index([updateId, startedAt])
 }
 
 /// A person's grant on one table, canvas or form: the three node kinds that

@@ -182,11 +182,12 @@ const SQL_MANIFEST = [
   // column or row touched. A row without a role is Can view, as every row
   // is today. Applied before the reload: the model names the column.
   "2026-10-04-tool-share-role.sql",
-  // Batch 8: "AiUsageDay", the daily AI use guard rail for Fill with AI on
-  // List fields (claimed by one atomic upsert per use). New tables only:
-  // CREATE TABLE IF NOT EXISTS and catalogue-guarded foreign keys, no
-  // existing column or row touched. Applied before the reload: a fill answers
-  // "not ready" and sends nothing until the table exists.
+  // Batch 8: "AiUsageDay", the daily AI use guard rail (claimed by one
+  // atomic upsert per use), and "TalkUpdate" / "TalkUpdateRun", scheduled AI
+  // updates in Talk. New tables only: CREATE TABLE / INDEX IF NOT EXISTS and
+  // catalogue-guarded foreign keys and CHECKs, no existing column or row
+  // touched. Applied before the reload: a fill or an update answers "not
+  // ready" and sends nothing until the tables exist.
   "2026-10-04-ai-fields-and-updates.sql",
 ];
 

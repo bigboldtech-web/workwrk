@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
-  Smile, Trash2, Video, X,
+  Smile, Sparkles, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
 import { Dots } from "@/components/ui/dots";
@@ -42,6 +42,9 @@ export type FeedMessage = {
     names?: string[];
     endedAt?: string;
     durationMin?: number;
+    /// Batch 8: a scheduled AI update (kind "ai_update"), written by AI and
+    /// posted as the person who set it up. Only the server writes this kind.
+    update?: { id?: string; kind?: string; scope?: string; tasks?: number };
   } | null;
   author: ChatUserLite;
   /** Client-only send states. */
@@ -99,6 +102,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
     let prevDay = "";
     let prevAuthor = "";
     let prevTime = 0;
+    let prevAi = false;
     for (const m of messages) {
       const d = new Date(m.createdAt);
       // The divider buckets by the VIEWER'S day, from the same preference the
@@ -113,10 +117,15 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
         prevAuthor = "";
       }
       const t = d.getTime();
-      const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000;
+      // An AI update (Batch 8) always heads its own group, and the person's
+      // next message after one does too, so the "AI update" label is never
+      // folded into, or over, words the person wrote themselves.
+      const ai = m.metadata?.kind === "ai_update";
+      const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000 || ai || prevAi;
       out.push({ kind: "msg", key: m.id, msg: m, head });
       prevAuthor = m.authorId;
       prevTime = t;
+      prevAi = ai;
     }
     return out;
   }, [messages, fmtDate, prefs, showDayDividers]);
@@ -209,6 +218,9 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // somebody their conversation.
   const author = msg.author ?? { id: msg.authorId, firstName: "Someone", lastName: "", avatar: null };
   const isCall = msg.metadata?.kind === "call";
+  // Batch 8: said plainly on the post itself, so nobody reads AI words as a
+  // person's own (src/lib/talk-updates.ts).
+  const aiUpdate = msg.metadata?.kind === "ai_update" ? msg.metadata.update ?? {} : null;
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
@@ -240,6 +252,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             <span className="text-base font-semibold text-ink-strong">
               {mine ? "You" : `${author.firstName} ${author.lastName}`.trim()}
             </span>
+            {aiUpdate ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--os-brand-deep)]">
+                <Sparkles className="h-3 w-3" aria-hidden /> AI update
+              </span>
+            ) : null}
             <span className="text-xs text-ink-3 tabular-nums">{time}</span>
           </div>
         )}
@@ -309,6 +326,12 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 <div className={`text-ink ${msg.pending ? "opacity-60" : ""}`}>
                   <RichBody body={msg.body} memberNames={memberNames} />
                   {msg.editedAt && <span className="ml-1 text-xs text-ink-3">(edited)</span>}
+                  {aiUpdate ? (
+                    <p className="mt-1 text-xs text-ink-3">
+                      Written by AI for {mine ? "you" : author.firstName || "the person who set it up"}
+                      {typeof aiUpdate.tasks === "number" ? ` from ${aiUpdate.tasks} ${aiUpdate.tasks === 1 ? "task" : "tasks"}` : ""} that everyone here can open.
+                    </p>
+                  ) : null}
                 </div>
               )
             )}

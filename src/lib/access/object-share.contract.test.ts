@@ -116,7 +116,8 @@ describe("the schema change", () => {
     expect(statements).toMatch(/IF NOT EXISTS \(\n\s+SELECT 1 FROM pg_constraint WHERE conname = 'ToolShare_role_check'\n\s+\) THEN/);
     expect(statements).toMatch(/CHECK \("role" IS NULL OR "role" IN \('EDIT', 'FULL'\)\)/);
     expect(statements).not.toMatch(/DROP|DELETE|UPDATE "ToolShare"|ALTER COLUMN/);
-    expect(read("scripts/deploy-migrations.mjs")).toMatch(/\n  "2026-10-04-tool-share-role\.sql",\n\];/);
+    // In the deploy list (later batches' files follow it).
+    expect(read("scripts/deploy-migrations.mjs")).toMatch(/\n  "2026-10-04-tool-share-role\.sql",\n/);
     expect(read("prisma/schema.prisma")).toMatch(/model ToolShare \{[\s\S]+?\n  role     String\?\n/);
   });
 });

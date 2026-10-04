@@ -155,13 +155,19 @@ export default function PrivacyPage() {
               {/* "strict zero-retention agreements" describes a contract,
                   and what a third party retains is that third party's
                   commitment rather than ours to repeat. What we can state is
-                  what OUR code does: it sends on an action, not on a
-                  schedule, and it sends nothing on its own. */}
+                  what OUR code does. It sends when a person triggers an AI
+                  action, and on a schedule ONLY for the features a workspace
+                  sets up to run on one: scheduled agents and the scheduled
+                  AI updates in Talk (Batch 8, off until a workspace turns
+                  them on). The earlier "never on a schedule" sentence stopped
+                  being true when scheduled agents shipped. The AI switch is
+                  Settings > Data, "AI features for everyone". */}
               <p>
                 workwrk uses AI for search, triage, and summarization, through a third party model provider. Your
-                workspace content is sent to that provider only when you trigger an AI action. We do not send it on a
-                schedule, in the background, or for training, and we do not use your workspace content to train anything
-                of our own.
+                workspace content is sent to that provider when someone in your workspace triggers an AI action, and on a
+                schedule only for AI features your workspace sets up to run on one, such as scheduled agents and scheduled
+                AI updates in Talk. We do not send it for training, and we do not use your workspace content to train
+                anything of our own. An Owner or Admin can turn AI features off for the whole workspace.
               </p>
               <p>
                 Which provider we use, and what their own retention terms say, is a question we will answer in writing
