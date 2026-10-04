@@ -69,7 +69,7 @@ import { rowAssigneeIds } from "./board-filter-bar";
 import { FieldValue } from "./field-value";
 import { useAiFieldsAvailable } from "./ai-field-value";
 import { FILL_BATCH, aiFieldConfig, aiFieldNotReady, aiValueSortKey, aiValueText, isAiFieldType, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
-import { requestAiFill } from "@/lib/ai-fill-client";
+import { PERMANENT_FILL_FAILURES, requestAiFill } from "@/lib/ai-fill-client";
 import { useOsToast } from "@/components/layout/os/toast";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { PriorityPicker } from "./priority-picker";
@@ -1532,7 +1532,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         } else {
           failures.set(r.message, (failures.get(r.message) ?? 0) + 1);
           if (r.stop) stop = r.message;
-          else {
+          else if (PERMANENT_FILL_FAILURES.has(r.code)) {
+            // Only a row that can never fill as it is (nothing to translate,
+            // too long) is left out of the next click; a passing failure (the
+            // AI service did not answer) is tried again, as the toast says.
             const set = aiFailedRows.current.get(field.key) ?? new Set<string>();
             set.add(row.id);
             aiFailedRows.current.set(field.key, set);

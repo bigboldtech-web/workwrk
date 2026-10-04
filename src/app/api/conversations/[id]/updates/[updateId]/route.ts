@@ -60,6 +60,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if ((resumed || scheduleChanged) && row.createdById !== ctx.viewer.userId) {
       return jsonError("Only the person this update posts as can resume it or change when it posts.", 403);
     }
+    // Nothing changes (a repeated Pause, a stale tab): nothing is written and
+    // the audit log says nothing happened, because nothing did.
+    const me0 = await memberViewer(ctx.viewer.userId, ctx.gate.organizationId);
+    const viewOf = async (u: typeof row) => (await describeUpdates([u], {
+      userId: ctx.viewer.userId,
+      organizationId: ctx.gate.organizationId,
+      manageAll,
+      linkViewer: me0,
+      agent: false,
+      canPostHere: canPost(ctx.conversation, ctx.role) && !!me0,
+    }))[0];
+    if (status === row.status && !scheduleChanged) return jsonSuccess({ update: await viewOf(row) });
     const updated = await prisma.talkUpdate.update({
       where: { id: row.id },
       data: {
@@ -78,16 +90,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       targetType: "conversation",
       metadata: { updateId: row.id },
     });
-    const me = await memberViewer(ctx.viewer.userId, ctx.gate.organizationId);
-    const [update] = await describeUpdates([updated], {
-      userId: ctx.viewer.userId,
-      organizationId: ctx.gate.organizationId,
-      manageAll,
-      linkViewer: me,
-      agent: false,
-      canPostHere: canPost(ctx.conversation, ctx.role) && !!me,
-    });
-    return jsonSuccess({ update });
+    return jsonSuccess({ update: await viewOf(updated) });
   } catch (err) {
     if (isMissingUpdatesTable(err)) return jsonError("Scheduled updates aren't ready on this server yet.", 503);
     throw err;

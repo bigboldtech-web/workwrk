@@ -200,8 +200,10 @@ export async function fillAiField(args: {
       { timeout: FILL_TIMEOUT_MS, maxRetries: 1 },
     );
     answer = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-    // An answer cut off at the token limit is never stored as if whole.
+    // Only an answer the model finished is stored: one cut off at the token
+    // limit, refused, or stopped for any other reason never reads as whole.
     if (msg.stop_reason === "max_tokens") return refuse(502, { error: config.type === "TRANSLATION" ? "too_long" : "ai_unusable" });
+    if (msg.stop_reason !== "end_turn" && msg.stop_reason !== "stop_sequence") return refuse(502, { error: "ai_unusable" });
   } catch (err) {
     await releaseAiUse(c.organizationId, "field_fill");
     console.error(`[ai-fill] ${gate.item.id}/${field.key}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);

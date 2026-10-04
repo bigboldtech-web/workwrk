@@ -155,9 +155,15 @@ export function AiFieldValue({
     setBusy(false);
     if (!r.ok) {
       toast(r.message);
+      // The stored value moved: every view of this task re-reads it, so the
+      // new value shows and the next Fill is for that one.
+      if (r.code === "changed") announce(itemId);
       return;
     }
-    if ("skipped" in r) return;
+    if ("skipped" in r) {
+      announce(itemId);
+      return;
+    }
     setLocal({ base: value, value: r.value });
     onFilled?.(r.value);
     // Every other place showing this task (an open drawer, another List) re-reads it.

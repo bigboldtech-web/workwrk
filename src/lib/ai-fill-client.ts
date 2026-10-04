@@ -6,6 +6,9 @@
 import type { AiFieldValue } from "@/lib/ai-fields";
 import { accessMessage } from "@/lib/access-message";
 
+/** Refusals a retry of the same row cannot change until someone edits the task. */
+export const PERMANENT_FILL_FAILURES: ReadonlySet<string> = new Set(["nothing_to_translate", "too_long"]);
+
 export type AiFillResult =
   | { ok: true; value: AiFieldValue }
   | { ok: true; skipped: true }

@@ -232,14 +232,20 @@ export async function sharedFacts(args: {
   // task with no status is open), so finished history never crowds it out.
   // isDoneStatus also counts a value the List does not declare as done by
   // its name ("done", "closed", ...), so those leave the open reads too.
+  // A List that declares such a status itself (even as an active stage)
+  // decides for itself, exactly as isDoneStatus does.
   const doneByName = ["done", "complete", "completed", "closed", "resolved"].flatMap((n) => [n, n.toUpperCase(), n[0].toUpperCase() + n.slice(1)]);
-  const openInScope = lists.map((l) => ({
-    boardId: l.id,
-    OR: [
-      { status: null },
-      { status: { notIn: [...(statusesOf.get(l.id) ?? []).filter((x) => x.group !== "ACTIVE").map((x) => x.value), ...doneByName] } },
-    ],
-  }));
+  const openInScope = lists.map((l) => {
+    const declared = statusesOf.get(l.id) ?? [];
+    const own = new Set(declared.map((x) => x.value));
+    return {
+      boardId: l.id,
+      OR: [
+        { status: null },
+        { status: { notIn: [...declared.filter((x) => x.group !== "ACTIVE").map((x) => x.value), ...doneByName.filter((n) => !own.has(n))] } },
+      ],
+    };
+  });
   // Three reads, so none crowds another out: what changed in the window
   // (newest first), open work already overdue (most recently due first), and
   // open work due from now to the horizon (soonest first).
@@ -469,7 +475,9 @@ async function runSteps(
       { timeout: UPDATE_TIMEOUT_MS, maxRetries: 1 },
     );
     answer = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-    cutOff = msg.stop_reason === "max_tokens";
+    // Only an answer the model finished is posted (not one cut off at the
+    // token limit, refused, or stopped for any other reason).
+    cutOff = msg.stop_reason !== "end_turn" && msg.stop_reason !== "stop_sequence";
   } catch (err) {
     await releaseAiUse(u.organizationId, "talk_update");
     console.error(`[talk-update] ${u.id}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
@@ -533,12 +541,19 @@ async function runSteps(
  * costs nobody the next ten minutes. A scheduled run still in progress also
  * refuses the press.
  */
-export async function claimManualRun(updateId: string, now: Date): Promise<{ ok: true; previous: Date | null } | { ok: false; reason: "busy" | "cooldown" }> {
+export async function claimManualRun(updateId: string, now: Date): Promise<{ ok: true; previous: Date | null } | { ok: false; reason: "busy" | "cooldown" | "just_posted" }> {
   const running = await prisma.talkUpdateRun.findFirst({
     where: { updateId, status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
     select: { id: true },
   });
   if (running) return { ok: false, reason: "busy" };
+  // Posted moments ago, on its schedule or by a press: a second post would
+  // say the same thing again.
+  const recent = await prisma.talkUpdateRun.findFirst({
+    where: { updateId, status: "posted", startedAt: { gte: new Date(now.getTime() - MANUAL_COOLDOWN_MS) } },
+    select: { trigger: true },
+  });
+  if (recent) return { ok: false, reason: recent.trigger === "manual" ? "cooldown" : "just_posted" };
   const before = await prisma.talkUpdate.findUnique({ where: { id: updateId }, select: { lastManualAt: true } });
   const previous = before?.lastManualAt ?? null;
   const claimed = await prisma.talkUpdate.updateMany({
@@ -561,7 +576,7 @@ export const BEFORE_AI_REASONS: ReadonlySet<RunReason> = new Set<RunReason>([
   "off", "talk_off", "ai_off", "creator_gone", "creator_guest", "creator_agent", "cannot_post",
   "public_channel", "not_supported", "guests", "too_many_people", "scope_gone",
   "nothing_to_report", "nothing_new", "nothing_shared", "daily_limit", "not_configured", "not_ready", "cooldown",
-  "busy", "recent_manual",
+  "busy", "recent_manual", "just_posted",
 ]);
 
 // ── The cron's loop ────────────────────────────────────────────────
@@ -584,23 +599,24 @@ export async function processDueTalkUpdates(now: Date, opts: { limit: number; bu
   for (const u of due) {
     if (Date.now() - started > opts.budgetMs) break;
     const dueAt = u.nextRunAt!;
+    // A Post now still running: the slot is left unclaimed, for the next
+    // tick (well inside STALE_AFTER_MS) to decide once that press has ended,
+    // so a press that then posts nothing never costs the day its update.
+    const pressing = await prisma.talkUpdateRun.findFirst({
+      where: { updateId: u.id, trigger: "manual", status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
+      select: { id: true },
+    });
+    if (pressing) continue;
     const next = nextTalkUpdateAt(scheduleOf(u), now);
     const claimed = await prisma.talkUpdate.updateMany({
       where: { id: u.id, status: "active", nextRunAt: dueAt },
       data: { nextRunAt: next },
     });
     if (claimed.count !== 1) continue;
-    // A Post now in progress, or one that posted moments ago, already said
-    // what this slot would: the slot steps aside rather than post twice.
+    // A Post now that POSTED moments ago already said what this slot would:
+    // the slot steps aside rather than post twice (and only then says so).
     const manual = await prisma.talkUpdateRun.findFirst({
-      where: {
-        updateId: u.id,
-        trigger: "manual",
-        OR: [
-          { status: "running", startedAt: { gte: new Date(now.getTime() - STUCK_RUN_MS) } },
-          { status: "posted", startedAt: { gte: new Date(now.getTime() - MANUAL_COOLDOWN_MS) } },
-        ],
-      },
+      where: { updateId: u.id, trigger: "manual", status: "posted", startedAt: { gte: new Date(now.getTime() - MANUAL_COOLDOWN_MS) } },
       select: { id: true },
     });
     if (manual) {

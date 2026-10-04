@@ -32,8 +32,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const now = new Date();
     const claim = await claimManualRun(row.id, now);
     if (!claim.ok) return jsonSuccess({ posted: false, reason: claim.reason, message: REASON_TEXT[claim.reason] });
-    const minute = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
-    const out = await runTalkUpdate({ update: row, trigger: "manual", dueAt: minute, now });
+    // The press's own instant (never on a whole minute, where a scheduled
+    // slot's run row lives): the lastManualAt claim already stops two presses.
+    const pressedAt = now.getTime() % 60_000 === 0 ? new Date(now.getTime() + 1) : now;
+    const out = await runTalkUpdate({ update: row, trigger: "manual", dueAt: pressedAt, now });
     if (out.status === "posted") return jsonSuccess({ posted: true, messageId: out.messageId, taskCount: out.taskCount });
     // Stopped before the AI was asked: the next press need not wait.
     if (BEFORE_AI_REASONS.has(out.reason)) await releaseManualRun(row.id, now, claim.previous);

@@ -205,6 +205,7 @@ export const RUN_REASONS = [
   "error",
   "busy",
   "recent_manual",
+  "just_posted",
 ] as const;
 export type RunReason = (typeof RUN_REASONS)[number];
 
@@ -240,7 +241,7 @@ export const REASON_TEXT: Readonly<Record<RunReason, string>> = {
   too_many_people: `Updates post only where there are at most ${MAX_UPDATE_READERS} people.`,
   scope_gone: "The List or Space this reports on is gone, or the person who set this up can no longer open it.",
   nothing_to_report: "Nothing to report.",
-  nothing_new: "Nothing to report: no task here was finished or changed in this period, and none is overdue or due soon.",
+  nothing_new: "Nothing to report for this period: no task here was finished, no open task was updated, and none is overdue or due soon (subtasks are not reported).",
   nothing_shared: "Nothing to report: the tasks to report on are not open to everyone in this conversation.",
   daily_limit: "This workspace has used today's AI updates.",
   not_configured: "AI isn't set up for this workspace yet.",
@@ -250,7 +251,8 @@ export const REASON_TEXT: Readonly<Record<RunReason, string>> = {
   missed: "Skipped: the scheduler reached this more than three hours after its time.",
   cooldown: "Post now was used a moment ago. Try again in a few minutes.",
   error: "Something went wrong while posting. Nothing was posted.",
-  busy: "An update is being posted right now. Try again in a minute.",
+  busy: "This update is being posted right now.",
+  just_posted: "This update was just posted on its schedule. Post now works again in a few minutes.",
   recent_manual: "Skipped: Post now had just posted this update.",
 };
 
