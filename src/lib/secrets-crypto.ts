@@ -47,8 +47,20 @@ export function encryptSecret(plaintext: string): CipherBlob {
   return encryptWithKey(plaintext, masterKey());
 }
 
+/**
+ * With the configured key, or, while a key is being rotated, the previous
+ * one (SECRETS_ENCRYPTION_KEY_PREVIOUS): the app holds both for the length
+ * of scripts/rotate-secrets-key.ts, so no stored secret stops working while
+ * it is re-encrypted. New secrets are always written with the current key.
+ */
 export function decryptSecret(blob: unknown): string {
-  return decryptWithKey(blob, masterKey());
+  try {
+    return decryptWithKey(blob, masterKey());
+  } catch (err) {
+    const previous = process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
+    if (!previous) throw err;
+    return decryptWithKey(blob, keyFrom(previous));
+  }
 }
 
 /**

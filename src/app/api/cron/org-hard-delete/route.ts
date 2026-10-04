@@ -40,9 +40,12 @@ import { ACTION_LABEL } from "@/lib/admin/staff-activity";
  * User at all and failed the foreign key. And a row that did survive would
  * have kept the company's name past the 30 days the privacy policy promises.
  *
- * NOT AN INTERACTIVE TRANSACTION. A large company's cascade can take longer
- * than an interactive transaction's timeout, which would roll the delete back
- * on every run, forever. A batch of plain statements has no such timeout.
+ * ITS OWN TIMEOUT. In Prisma 7 every transaction, the array form included,
+ * runs under the client's transaction timeout, 5 seconds unless the call
+ * gives its own. A large company's cascade takes longer than that, and a
+ * timed-out transaction rolls the delete back on every run, forever (the
+ * company, and its people's data, kept past the promised 30 days). So this
+ * is the callback form, which takes a timeout: 30 minutes, at 03:30.
  *
  * Schedule: daily (scripts/CRON-SETUP.md). Lateness tolerance is about a day
  * since the grace window is already 30 days. Guarded by the shared cron door
@@ -109,63 +112,65 @@ export async function POST(req: NextRequest) {
         prisma.organization.count({ where: { AND: [{ id: org.id }, CREATED_SOMETHING] } }).then((n) => n > 0),
       ]);
       const signedUp = new Date(org.createdAt).toISOString();
-      const results = await prisma.$transaction([
-        // 1. The company's row, locked while it is still due.
-        prisma.$queryRaw`
-          SELECT 1 FROM "Organization"
-           WHERE "id" = ${org.id}
-             AND "status" = 'CANCELLED'
-             AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
-             FOR UPDATE`,
-        // 2. Its staff audit rows lose every name (an AppSumo refund keeps
-        // its label, which is the code, not a name).
-        prisma.$executeRaw`
-          UPDATE "StaffAction"
-             SET "targetLabel" = CASE WHEN "action" = 'admin.code.refunded' THEN "targetLabel" ELSE 'A deleted company' END,
-                 "summary" = COALESCE(${labels}::jsonb ->> "action", 'Changed') || ' (the company was later deleted for good)',
-                 "reason" = NULL,
-                 "before" = CASE WHEN jsonb_typeof("before") = 'object' THEN "before" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "before" END,
-                 "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "after" END,
-                 "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-           WHERE "targetCompanyId" = ${org.id}
-             AND EXISTS (
-                   SELECT 1 FROM "Organization"
-                    WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
-                 )`,
-        // 3. The company.
-        prisma.$executeRaw`
-          DELETE FROM "Organization"
-           WHERE "id" = ${org.id}
-             AND "status" = 'CANCELLED'
-             AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}`,
-        // 4. Only once the company is gone: stamp this deletion's row...
-        prisma.$executeRaw`
-          UPDATE "WorkspaceDeletion"
-             SET "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
-                 "signedUpAt" = COALESCE("signedUpAt", (${signedUp}::timestamptz AT TIME ZONE 'UTC')),
-                 "finishedSetup" = ${setupDone},
-                 "createdSomething" = ${createdSomething}
-           WHERE "organizationId" = ${org.id}
-             AND "hardDeletedAt" IS NULL
-             AND "requestedAt" >= (${sameFrom}::timestamptz AT TIME ZONE 'UTC')
-             AND NOT EXISTS (SELECT 1 FROM "Organization" WHERE "id" = ${org.id})`,
-        // 5. ...or write one when it has none.
-        prisma.$executeRaw`
-          INSERT INTO "WorkspaceDeletion"
-                 ("id", "organizationId", "plan", "signedUpAt", "requestedAt", "hardDeletedAt", "finishedSetup", "createdSomething")
-          SELECT ${`wd_hd_${org.id}_${now.getTime()}`}, ${org.id}, ${org.plan},
-                 (${signedUp}::timestamptz AT TIME ZONE 'UTC'),
-                 (${asked}::timestamptz AT TIME ZONE 'UTC'), (${at}::timestamptz AT TIME ZONE 'UTC'),
-                 ${setupDone}, ${createdSomething}
-           WHERE NOT EXISTS (SELECT 1 FROM "Organization" WHERE "id" = ${org.id})
-             AND NOT EXISTS (
-                   SELECT 1 FROM "WorkspaceDeletion"
-                    WHERE "organizationId" = ${org.id} AND "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
-                 )
-          ON CONFLICT DO NOTHING`,
-      ]);
-      // The DELETE is the third statement.
-      const gone = results[2];
+      const gone = await prisma.$transaction(
+        async (tx) => {
+          // 1. The company's row, locked while it is still due.
+          await tx.$queryRaw`
+            SELECT 1 FROM "Organization"
+             WHERE "id" = ${org.id}
+               AND "status" = 'CANCELLED'
+               AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+               FOR UPDATE`;
+          // 2. Its staff audit rows lose every name (an AppSumo refund keeps
+          // its label, which is the code, not a name).
+          await tx.$executeRaw`
+            UPDATE "StaffAction"
+               SET "targetLabel" = CASE WHEN "action" = 'admin.code.refunded' THEN "targetLabel" ELSE 'A deleted company' END,
+                   "summary" = COALESCE(${labels}::jsonb ->> "action", 'Changed') || ' (the company was later deleted for good)',
+                   "reason" = NULL,
+                   "before" = CASE WHEN jsonb_typeof("before") = 'object' THEN "before" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "before" END,
+                   "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "after" END,
+                   "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+             WHERE "targetCompanyId" = ${org.id}
+               AND EXISTS (
+                     SELECT 1 FROM "Organization"
+                      WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+                   )`;
+          // 3. The company.
+          const n = await tx.$executeRaw`
+            DELETE FROM "Organization"
+             WHERE "id" = ${org.id}
+               AND "status" = 'CANCELLED'
+               AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}`;
+          // 4. Only once the company is gone: stamp this deletion's row...
+          await tx.$executeRaw`
+            UPDATE "WorkspaceDeletion"
+               SET "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC'),
+                   "signedUpAt" = COALESCE("signedUpAt", (${signedUp}::timestamptz AT TIME ZONE 'UTC')),
+                   "finishedSetup" = ${setupDone},
+                   "createdSomething" = ${createdSomething}
+             WHERE "organizationId" = ${org.id}
+               AND "hardDeletedAt" IS NULL
+               AND "requestedAt" >= (${sameFrom}::timestamptz AT TIME ZONE 'UTC')
+               AND NOT EXISTS (SELECT 1 FROM "Organization" WHERE "id" = ${org.id})`;
+          // 5. ...or write one when it has none.
+          await tx.$executeRaw`
+            INSERT INTO "WorkspaceDeletion"
+                   ("id", "organizationId", "plan", "signedUpAt", "requestedAt", "hardDeletedAt", "finishedSetup", "createdSomething")
+            SELECT ${`wd_hd_${org.id}_${now.getTime()}`}, ${org.id}, ${org.plan},
+                   (${signedUp}::timestamptz AT TIME ZONE 'UTC'),
+                   (${asked}::timestamptz AT TIME ZONE 'UTC'), (${at}::timestamptz AT TIME ZONE 'UTC'),
+                   ${setupDone}, ${createdSomething}
+             WHERE NOT EXISTS (SELECT 1 FROM "Organization" WHERE "id" = ${org.id})
+               AND NOT EXISTS (
+                     SELECT 1 FROM "WorkspaceDeletion"
+                      WHERE "organizationId" = ${org.id} AND "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+                   )
+            ON CONFLICT DO NOTHING`;
+          return n;
+        },
+        { maxWait: 10_000, timeout: 30 * 60_000 },
+      );
       if (gone === 1) {
         deleted += 1;
         // The id only: the name is part of what was just deleted.

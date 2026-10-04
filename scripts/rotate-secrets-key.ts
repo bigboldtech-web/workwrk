@@ -1,78 +1,104 @@
-// Re-encrypt every secret stored under SECRETS_ENCRYPTION_KEY with a new
-// key. Written 2026-10-05, when the production key was found committed in
-// LAUNCH-CHECKLIST.md in a public repository: git history keeps it, so the
-// key must be replaced, and the secrets it protects re-encrypted with the
-// new one or they stop working.
+// Move every secret stored under SECRETS_ENCRYPTION_KEY to a new key, with
+// nothing failing at any moment. Written 2026-10-05, when the production key
+// was found committed in LAUNCH-CHECKLIST.md in a public repository: git
+// history keeps it, so it must be replaced, and the secrets it protects
+// re-encrypted under the new one.
 //
-// RUN IT ON THE SERVER, by the founder, with the app's own database:
+// RUN IT ON THE SERVER, by the founder, in this order:
 //
-//   # 1. Dry run: says how many secrets there are and that each one opens
-//   #    with the old key. Writes nothing.
-//   OLD_SECRETS_ENCRYPTION_KEY='<the current key>' SECRETS_ENCRYPTION_KEY='<the new key>' \
-//     npx tsx scripts/rotate-secrets-key.ts
+//   1. Make the new key: `openssl rand -hex 32`. In EVERY place the app reads
+//      its environment (.env and any .env.production*, the aaPanel Node
+//      settings), set SECRETS_ENCRYPTION_KEY to the NEW key and
+//      SECRETS_ENCRYPTION_KEY_PREVIOUS to the OLD one. Reload from a fresh
+//      shell: pm2 reload workwrk --update-env && pm2 save. The app now writes
+//      with the new key and reads either (src/lib/secrets-crypto.ts).
+//   2. Dry run, with the same two values: says how many secrets are on each
+//      key. Writes nothing.
+//        DIRECT_URL= DATABASE_URL=<the app's database> SECRETS_ENCRYPTION_KEY=<new> \
+//          SECRETS_ENCRYPTION_KEY_PREVIOUS=<old> npx tsx scripts/rotate-secrets-key.ts
+//   3. The same with --write: each secret still on the old key is
+//      re-encrypted, one by one, and only if nobody changed it since it was
+//      read. Run it again until it says every secret is on the new key.
+//   4. Remove SECRETS_ENCRYPTION_KEY_PREVIOUS everywhere, reload again
+//      (pm2 reload workwrk --update-env && pm2 save), and run the dry run once
+//      more WITHOUT the previous key: it must say every secret opens with the
+//      new key.
 //
-//   # 2. Re-encrypt, all in ONE transaction:
-//   OLD_SECRETS_ENCRYPTION_KEY='<the current key>' SECRETS_ENCRYPTION_KEY='<the new key>' \
-//     npx tsx scripts/rotate-secrets-key.ts --write
-//
-//   # 3. Put the new key in the app's .env as SECRETS_ENCRYPTION_KEY, then
-//   pm2 reload workwrk --update-env
-//
-// Make the new key with `openssl rand -hex 32`, and never write either value
-// into this repository.
+// Never write either key into this repository. It prints the database it is
+// pointed at, counts and row ids: never a key, and never a secret.
 //
 // WHAT IT COVERS: OrgSecret.encryptedKey (a workspace's own AI key, Settings
-// > AI). Each blob is decrypted with the old key and encrypted with the new
-// one. If ANY blob does not open with the old key, nothing is written and the
-// run says which row (by id) failed, so a wrong old key can never leave some
-// secrets on one key and some on another. Between step 2 and step 3 the app
-// still holds the old key, so a workspace's own AI key fails for that
-// moment; do the two steps back to back.
-//
-// It prints counts and row ids only: never a key, and never a secret.
+// > AI).
 
-import { prisma } from "../src/lib/prisma";
+import type { Prisma } from "../src/generated/prisma";
+import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 import { decryptSecretWith, encryptSecretWith } from "../src/lib/secrets-crypto";
 
+const prisma = scriptPrisma();
+
+function opens(blob: unknown, key: string): string | null {
+  try {
+    return decryptSecretWith(blob, key);
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
-  const oldKey = process.env.OLD_SECRETS_ENCRYPTION_KEY ?? "";
   const newKey = process.env.SECRETS_ENCRYPTION_KEY ?? "";
+  const oldKey = process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS ?? "";
   const write = process.argv.includes("--write");
-  if (!oldKey || !newKey) {
-    console.error("Set OLD_SECRETS_ENCRYPTION_KEY (the current key) and SECRETS_ENCRYPTION_KEY (the new one).");
+  if (!newKey) {
+    console.error("Set SECRETS_ENCRYPTION_KEY (the new key) and, until every secret is moved, SECRETS_ENCRYPTION_KEY_PREVIOUS (the old one).");
     process.exit(2);
   }
-  if (oldKey === newKey) {
-    console.error("The old and the new key are the same: make a new one with `openssl rand -hex 32`.");
+  if (oldKey && oldKey === newKey) {
+    console.error("The previous and the new key are the same: make a new one with `openssl rand -hex 32`.");
     process.exit(2);
   }
+  console.log(`Database: ${databaseLabel()}`);
 
   const rows = await prisma.orgSecret.findMany({ select: { id: true, encryptedKey: true } });
-  const fresh: { id: string; blob: object }[] = [];
-  const failed: string[] = [];
+  let onNew = 0;
+  let moved = 0;
+  const onOld: string[] = [];
+  const unreadable: string[] = [];
+  const changed: string[] = [];
+
   for (const r of rows) {
-    try {
-      const plain = decryptSecretWith(r.encryptedKey, oldKey);
-      const blob = encryptSecretWith(plain, newKey);
-      // Prove the new blob opens with the new key before anything is written.
-      if (decryptSecretWith(blob, newKey) !== plain) throw new Error("round trip");
-      fresh.push({ id: r.id, blob });
-    } catch {
-      failed.push(r.id);
+    if (opens(r.encryptedKey, newKey) !== null) {
+      onNew += 1;
+      continue;
     }
+    const plain = oldKey ? opens(r.encryptedKey, oldKey) : null;
+    if (plain === null) {
+      unreadable.push(r.id);
+      continue;
+    }
+    if (!write) {
+      onOld.push(r.id);
+      continue;
+    }
+    const blob = encryptSecretWith(plain, newKey);
+    if (opens(blob, newKey) !== plain) throw new Error(`Re-encrypting ${r.id} did not round-trip. Nothing more is written.`);
+    // Only if the row still holds what was read: a secret a person saved in
+    // the meantime (already on the new key) is never overwritten.
+    const res = await prisma.orgSecret.updateMany({
+      where: { id: r.id, encryptedKey: { equals: r.encryptedKey as object } },
+      data: { encryptedKey: blob as unknown as Prisma.InputJsonValue },
+    });
+    if (res.count === 1) moved += 1;
+    else changed.push(r.id);
   }
 
-  console.log(`OrgSecret rows: ${rows.length}. Open with the old key: ${fresh.length}. Do not: ${failed.length}.`);
-  if (failed.length > 0) {
-    console.error(`Nothing written. These rows do not open with the old key: ${failed.join(", ")}`);
+  console.log(`OrgSecret rows: ${rows.length}. On the new key: ${onNew}. ${write ? `Moved now: ${moved}.` : `On the old key: ${onOld.length}.`}`);
+  if (changed.length) console.log(`Changed while this ran, so left for the next run: ${changed.join(", ")}`);
+  if (unreadable.length) {
+    console.error(`These rows open with neither key, so they were not touched: ${unreadable.join(", ")}`);
     process.exit(1);
   }
-  if (!write) {
-    console.log("Dry run: nothing written. Run again with --write to re-encrypt.");
-    return;
-  }
-  await prisma.$transaction(fresh.map((f) => prisma.orgSecret.update({ where: { id: f.id }, data: { encryptedKey: f.blob } })));
-  console.log(`Re-encrypted ${fresh.length} secrets. Now put the new key in the app's .env and run: pm2 reload workwrk --update-env`);
+  if (!write && onOld.length) console.log("Dry run: nothing written. Run again with --write.");
+  if (onNew + moved === rows.length) console.log("Every secret is on the new key.");
 }
 
 main()

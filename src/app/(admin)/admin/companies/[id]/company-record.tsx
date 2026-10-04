@@ -643,14 +643,27 @@ function trialPrefs(datePrefs: ReturnType<typeof useConsole>["datePrefs"]): Retu
 }
 
 function trialLine(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"], day: boolean): string {
-  return `${formatDate(at, day ? trialPrefs(datePrefs) : datePrefs, "date")} ${trialLeft(at)}`;
+  return `${formatDate(at, day ? trialPrefs(datePrefs) : datePrefs, "date")} ${trialLeft(at, datePrefs, day)}`;
 }
 
-/** "(12 days)", "(1 day)" or "(ended)". */
-function trialLeft(at: string): string {
-  const days = Math.ceil((new Date(at).getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return "(ended)";
-  return `(${days} ${days === 1 ? "day" : "days"})`;
+/**
+ * "(12 days)", "(1 day)", "(ends today)" or "(ended)". A self-serve end is a
+ * calendar day, so it counts calendar days from today in the staff member's
+ * own zone to that day; a Stripe end is an instant, counted in whole days left.
+ */
+function trialLeft(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"], day: boolean): string {
+  const words = (n: number) => `(${n} ${n === 1 ? "day" : "days"})`;
+  if (day) {
+    const end = Date.parse(`${dayKey(at, trialPrefs(datePrefs))}T00:00:00Z`);
+    const today = Date.parse(`${dayKey(new Date(), datePrefs)}T00:00:00Z`);
+    const days = Math.round((end - today) / 86_400_000);
+    if (days < 0) return "(ended)";
+    if (days === 0) return "(ends today)";
+    return words(days);
+  }
+  const ms = new Date(at).getTime() - Date.now();
+  if (ms < 0) return "(ended)";
+  return words(Math.max(1, Math.ceil(ms / 86_400_000)));
 }
 
 /**
@@ -695,7 +708,14 @@ function TrialEndRow({
   }
   // A failed save keeps the picked date in the box, beside "Not saved · Retry",
   // so what Retry sends is the date on screen (the Seats row's rule).
-  const commit = async () => {
+  const commit = async (input: HTMLInputElement) => {
+    // A date only partly typed reads as "" too: put the stored day back
+    // rather than save it as a clear. Only a box emptied of every part (or
+    // the picker's Clear) clears the date.
+    if (input.validity.badInput) {
+      setDay(storedDay);
+      return;
+    }
     if (day === storedDay) return;
     await onTrialEnd(day === "" ? null : day);
   };
@@ -711,7 +731,7 @@ function TrialEndRow({
           setDay(e.target.value);
           if (notSaved.trialEnd) onEdited();
         }}
-        onBlur={() => void commit()}
+        onBlur={(e) => void commit(e.currentTarget)}
         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         aria-label="Trial ends"
         min="2020-01-01"
@@ -721,7 +741,7 @@ function TrialEndRow({
         disabled={busy !== null}
         className="h-9 w-44 rounded-md border border-line-strong bg-raised px-3 text-base tabular-nums text-ink focus:outline-none focus-visible:border-brand disabled:opacity-60"
       />
-      {trial.endsAt && day === storedDay ? <span className="text-sm text-ink-2">{trialLeft(trial.endsAt)}</span> : null}
+      {trial.endsAt && day === storedDay ? <span className="text-sm text-ink-2">{trialLeft(trial.endsAt, datePrefs, true)}</span> : null}
       <SavedMark at={saved.trialEnd} />
       <NotSavedMark retry={notSaved.trialEnd} />
     </Row>

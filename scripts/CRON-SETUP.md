@@ -48,13 +48,24 @@ every reminder email to every customer again and again, run the purge jobs,
 and forge a signed audit export. Replace it on the server:
 
 1. `openssl rand -hex 32` makes the new value.
-2. Put it in the app's `.env` as `CRON_SECRET`, in `/etc/profile.d/workwrk.sh`,
-   and in any crontab or aaPanel row that has the value written in.
-3. `pm2 reload workwrk --update-env`, so the app reads it.
-4. Check: `curl -s -o /dev/null -w '%{http_code}' -X POST -H "x-cron-secret: <the OLD value>" https://workwrk.com/api/cron/ratelimit-cleanup`
-   answers 403, and the next cron run in `/var/log/workwrk-cron.log` succeeds.
-5. Set a separate `AUDIT_SIGNING_KEY` (also `openssl rand -hex 32`): signed
-   audit exports fall back to `CRON_SECRET` without one.
+2. Replace the old value EVERYWHERE it lives, or the old one keeps working:
+   - every env file the app reads (`grep -l CRON_SECRET /www/wwwroot/workwrk.com/.env*`
+     lists them: `.env`, and any `.env.production` or `.env.production.local`);
+   - the aaPanel Node project's environment settings, if it is set there;
+   - `/etc/profile.d/workwrk.sh` (what the crontab rows read);
+   - any crontab or aaPanel cron row with the value typed in (`crontab -l | grep -c x-cron-secret`).
+3. Open a NEW SSH session (or `source /etc/profile.d/workwrk.sh`), so the shell
+   no longer holds the old value, then `pm2 reload workwrk --update-env` and
+   `pm2 save`, so a reboot does not bring the old environment back.
+4. Check both ways round:
+   `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "x-cron-secret: <the OLD value>" https://workwrk.com/api/cron/ratelimit-cleanup`
+   must answer 403. A 200 means the app still holds the old value (from the
+   shell or pm2's saved environment): repeat step 3 from a fresh shell. The
+   same request with the NEW value answers 200, and the next row in
+   `/var/log/workwrk-cron.log` succeeds.
+5. Set a separate `AUDIT_SIGNING_KEY` (also `openssl rand -hex 32`, in the same
+   places as step 2, then step 3 again): signed audit exports fall back to
+   `CRON_SECRET` without one.
 
 `SECRETS_ENCRYPTION_KEY` encrypts stored secrets (bring-your-own AI keys), so
 it is rotated with `scripts/rotate-secrets-key.ts`, which re-encrypts them:

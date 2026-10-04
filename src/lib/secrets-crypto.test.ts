@@ -4,9 +4,12 @@ import { decryptSecret, decryptSecretWith, encryptSecret, encryptSecretWith } fr
 const OLD = "a".repeat(64);
 const NEW = "b".repeat(64);
 const saved = process.env.SECRETS_ENCRYPTION_KEY;
+const savedPrevious = process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
 afterEach(() => {
   if (saved === undefined) delete process.env.SECRETS_ENCRYPTION_KEY;
   else process.env.SECRETS_ENCRYPTION_KEY = saved;
+  if (savedPrevious === undefined) delete process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
+  else process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS = savedPrevious;
 });
 
 describe("secrets-crypto", () => {
@@ -27,5 +30,16 @@ describe("secrets-crypto", () => {
   it("refuses an empty key", () => {
     expect(() => encryptSecretWith("x", "")).toThrow();
     expect(() => decryptSecretWith({}, "")).toThrow();
+  });
+  it("reads with the previous key while a rotation runs, and writes with the new one", () => {
+    const old = encryptSecretWith("sk-ant-test-value", OLD);
+    process.env.SECRETS_ENCRYPTION_KEY = NEW;
+    delete process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
+    expect(() => decryptSecret(old)).toThrow();
+    process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS = OLD;
+    expect(decryptSecret(old)).toBe("sk-ant-test-value");
+    const fresh = encryptSecret("sk-ant-new-value");
+    expect(decryptSecretWith(fresh, NEW)).toBe("sk-ant-new-value");
+    expect(() => decryptSecretWith(fresh, OLD)).toThrow();
   });
 });
