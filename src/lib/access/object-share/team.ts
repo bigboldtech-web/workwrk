@@ -24,6 +24,7 @@ import { settingsDoorAllows } from "../settings-door";
 import { legacySettingsAllows } from "../settings-legacy";
 import { settingsGateMode } from "../settings-gate-engine";
 import { accessV2Resolver, settingsGateLogOnly } from "../flags";
+import { RULE_1_DENIED_STATUSES } from "../resolve";
 import { GrantError } from "../grants";
 import {
   ACCESS_NODE_NOUN, ROLES_BY_KIND,
@@ -167,7 +168,8 @@ async function freshPanel(ctx: ObjectShareCtx, id: string): Promise<AccessPanel 
 async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<{ maxGrant: PanelRole; admin: boolean }> {
   const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "Team" WHERE id = ${id} AND "organizationId" = ${ctx.organizationId} AND "archivedAt" IS NULL FOR UPDATE`;
   if (locked.length === 0) throw new GrantError("not_found");
-  const mineRow = await tx.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: ctx.userId } }, select: { lead: true } });
+  // Locked like the target's row: a lead's own Lead mark is judged as it stands.
+  const [mineRow] = await tx.$queryRaw<{ lead: boolean }[]>`SELECT "lead" FROM "TeamMember" WHERE "teamId" = ${id} AND "userId" = ${ctx.userId} FOR UPDATE`;
   const mine = roleOfRow(mineRow);
   const admin = await freshAdmin(ctx);
   const door = admin || (await opensMembers(ctx.session));
@@ -194,7 +196,9 @@ export async function setTeamGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       const { maxGrant } = await actorGate(tx, ctx, id);
       if (rank(role) > rank(maxGrant)) throw new GrantError("above_own_role");
       if (!(await targetInOrg(tx, ctx.organizationId, body.userId))) throw new GrantError("not_in_org");
-      const cur = await tx.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: body.userId } }, select: { lead: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ lead: boolean }[]>`SELECT "lead" FROM "TeamMember" WHERE "teamId" = ${id} AND "userId" = ${body.userId} FOR UPDATE`;
       const curRole = roleOfRow(cur);
       if (body.expected !== undefined && (body.expected ?? null) !== curRole) throw new GrantError("conflict");
       // A lead never changes another lead.
@@ -233,7 +237,9 @@ export async function removeTeamGrant(ctx: ObjectShareCtx, id: string, input: { 
   const out = await withFreshPanel(ctx, id, () =>
     prisma.$transaction(async (tx) => {
       const { maxGrant } = await actorGate(tx, ctx, id);
-      const cur = await tx.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: input.userId } }, select: { lead: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ lead: boolean }[]>`SELECT "lead" FROM "TeamMember" WHERE "teamId" = ${id} AND "userId" = ${input.userId} FOR UPDATE`;
       const curRole = roleOfRow(cur);
       // Removing a row that is not there changed nothing: a retry is a
       // success, whatever role the retry still names.
@@ -264,10 +270,14 @@ export async function checkTeamAccess(
   const door = admin || (await opensMembers(ctx.session));
   if (!mine && !door) return "not_found";
   if (!maxGrantOf(admin, mine, ctx.isAgent, door)) return "forbidden";
-  const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true } });
+  const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true, status: true } });
   if (!person) return "not_in_org";
   const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email;
   const role = roleOfRow(await prisma.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId } }, select: { lead: true } }));
+  // A deactivated account is still listed, and does nothing.
+  if (RULE_1_DENIED_STATUSES.has(String(person.status))) {
+    return { userId, name, role: role ?? "none", sentence: `${role === "FULL" ? "Lead" : role === "VIEW" ? "Member" : "Not on the team"}. Their account is deactivated, so they change nothing.` };
+  }
   const level = String(person.accessLevel);
   const isAdmin = level === "SUPER_ADMIN" || level === "COMPANY_ADMIN";
   const adminToo = isAdmin ? " As an Owner or Admin they also change every team." : "";

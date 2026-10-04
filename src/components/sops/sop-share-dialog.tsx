@@ -35,13 +35,15 @@ type AccessRow = { user: PersonRef & { role?: { title?: string } | null; departm
 
 const FOLDER_ROLE_LABEL: Record<AccessRow["role"], string> = { VIEWER: OBJECT_ROLE_LABEL.VIEW, EDITOR: OBJECT_ROLE_LABEL.EDIT, OWNER: OBJECT_ROLE_LABEL.FULL };
 
-export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }: {
+export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange, onFolderChanged }: {
   open: boolean;
   onClose: () => void;
   /** "share" = the write dialog; "who" = read-only "Who has access". */
   mode: "share" | "who";
   sop: { id: string; title: string; status: string; folderId: string | null; folderName: string | null; shareToken: string | null; ownerName: string | null; canManageFolder: boolean };
   onShareTokenChange?: (token: string | null) => void;
+  /** The folder's people changed in the one dialog (the viewer's own role may have too). */
+  onFolderChanged?: () => void;
 }) {
   const { toast } = useOsToast();
   const { boot } = useBoot();
@@ -217,6 +219,7 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
         onOpenChange={(o) => { if (!o) setFolderOpen(null); }}
         target={{ kind: "sop_folder", id: sop.folderId, name: sop.folderName ?? "This folder" }}
         readOnly={folderOpen !== "manage"}
+        onChanged={() => onFolderChanged?.()}
       />
     ) : null}
     </>

@@ -232,7 +232,7 @@ describe("review round 3", () => {
 
   it("shows an Owner's or Admin's reach on an SOP folder for every Admin row, and after a removal", () => {
     const sop = read("src/lib/access/object-share/sop-folder.ts");
-    expect(sop).toMatch(/if \(\(self && ctx\.orgAdmin\) \|\| ADMIN_LEVELS\.has\(String\(r\.user\.accessLevel\)\)\) alsoVia = \{ role: "FULL", via: \{ type: "org_admin"/);
+    expect(sop).toMatch(/if \(\(self && ctx\.orgAdmin\) \|\| \(active && ADMIN_LEVELS\.has\(String\(r\.user\.accessLevel\)\)\)\) alsoVia = \{ role: "FULL", via: \{ type: "org_admin"/);
     expect(sop).toMatch(/const stillReaches = "admin" in out && out\.admin\n\s+\? \{ role: "FULL" as PanelRole, via: \{ type: "org_admin" as const/);
   });
 
@@ -266,5 +266,37 @@ describe("review round 4", () => {
   it("gives a team lead no one-word role menu, and an Agent's removal toast its working role", () => {
     expect(read("src/lib/access/object-share/team.ts")).toMatch(/editable: withinGrant && maxGrant === "FULL",/);
     expect(read("src/lib/access/object-share/sop-folder.ts")).toMatch(/out\.agent && out\.above\.role === "FULL" \? "EDIT" : out\.above\.role/);
+  });
+});
+
+describe("review round 5", () => {
+  for (const [name, table] of [["team", "TeamMember"], ["goal", "GoalAssignee"], ["sop-folder", "SOPFolderAccess"], ["tool", "ToolShare"]] as const) {
+    it(`${name}: reads the person's own row under a lock before judging and writing it`, () => {
+      const src = read(`src/lib/access/object-share/${name}.ts`);
+      const locks = src.match(new RegExp(`FROM "${table}" WHERE [^\`]+ FOR UPDATE\``, "g")) ?? [];
+      expect(locks.length).toBeGreaterThanOrEqual(2);
+    });
+  }
+
+  it("shows an SOP folder's other people only to those who manage it", () => {
+    const sop = read("src/lib/access/object-share/sop-folder.ts");
+    expect(sop).toMatch(/if \(!canManage\) \{\n\s+shownDirect = direct\.filter\(\(d\) => d\.person\.id === ctx\.userId\);\n\s+shownInherited = inherited\.filter\(\(e\) => e\.person\.id === ctx\.userId\);\n\s+shownMore = \[\];/);
+    expect(sop).toMatch(/direct: shownDirect,\n\s+inherited: shownInherited,\n\s+inheritedMore: shownMore,/);
+  });
+
+  it("credits a deactivated account with nothing", () => {
+    const sop = read("src/lib/access/object-share/sop-folder.ts");
+    expect(sop).toMatch(/if \(RULE_1_DENIED_STATUSES\.has\(String\(person\.status\)\)\) return \{ userId, name, role: "none", sentence: "No access\. Their account is deactivated\." \};/);
+    expect(sop).toMatch(/above: active \? roleFrom\(rest, chain, 1, input\.userId\) : null,/);
+    expect(read("src/lib/access/object-share/team.ts")).toMatch(/Their account is deactivated, so they change nothing\./);
+    expect(read("src/lib/access/object-share/goal.ts")).toMatch(/const creator = found && personOf\(found\)\.active \? found : null;/);
+    expect(read("src/lib/access/object-share/tool.ts")).toMatch(/if \(!closed && entry\.person\.active && canManageTool\(/);
+  });
+
+  it("leaves an answered request off the card whoever decides, and refreshes the SOP page's role", () => {
+    const list = read("src/app/api/access-requests/route.ts");
+    expect(list.indexOf("const held = await objectHeldRole(")).toBeLessThan(list.indexOf("const appOff = objectKind ?"));
+    expect(read("src/components/sops/sop-share-dialog.tsx")).toMatch(/onChanged=\{\(\) => onFolderChanged\?\.\(\)\}/);
+    expect(read("src/components/sops/sop-editor-page.tsx")).toMatch(/onFolderChanged=\{\(\) => void refreshAccess\(\)\}/);
   });
 });

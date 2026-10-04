@@ -254,6 +254,17 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
     return r.data;
   }, [sopId]);
 
+  // The one share dialog changed who opens the SOP's folder, perhaps the
+  // viewer's own role: read the SOP's access again, and only that, so no edit
+  // buffer moves. Gone for them while not editing: the page says so; while
+  // editing, the next save reports the refusal and the typed content stays.
+  const refreshAccess = useCallback(async () => {
+    if (!sopId) return;
+    const r = await apiFetch<SopPayload>(`/api/sops/${sopId}`, { cache: "no-store" });
+    if (r.ok) { setSop((p) => (p ? { ...p, access: r.data.access } : p)); return; }
+    if (r.status === 404 && !editing) setLoadState("notfound");
+  }, [sopId, editing]);
+
   // First load hydrates the buffers; later reloads (after publish, restore)
   // update `sop` and re-hydrate only when not editing, so typing is never
   // clobbered by a background refresh.
@@ -1065,6 +1076,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
             onClose={() => setShareOpen(null)}
             sop={{ id: sop.id, title: sop.title, status: sop.status, folderId: sop.folderId, folderName: sop.folder?.name ?? null, shareToken: sop.shareToken, ownerName, canManageFolder: role === "FULL" }}
             onShareTokenChange={(token) => setSop((p) => (p ? { ...p, shareToken: token } : p))}
+            onFolderChanged={() => void refreshAccess()}
           />
           {presentOpen ? <SopWalkthrough sop={{ id: sop.id, title: sop.title, sopType: sop.sopType, content: sop.content as never }} onClose={() => setPresentOpen(false)} /> : null}
         </>

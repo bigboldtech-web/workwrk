@@ -19,6 +19,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/api-helpers";
+import { RULE_1_DENIED_STATUSES } from "../resolve";
 import type { SOPFolderRole } from "@/generated/prisma";
 import { GrantError } from "../grants";
 import {
@@ -126,9 +127,11 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     const self = r.userId === ctx.userId;
     // Another way in at this role or above. For the viewer's own row an equal
     // role counts too, so removing it is never called a loss of managing.
-    let alsoVia: AccessDirectEntry["alsoVia"] = above && (rank(above.role) > rank(role) || (self && rank(above.role) >= rank(role))) ? { role: above.role, via: viaFor(above.at) } : null;
+    // A deactivated account opens nothing, so it reaches nothing another way either.
+    const active = personOf(r.user).active;
+    let alsoVia: AccessDirectEntry["alsoVia"] = active && above && (rank(above.role) > rank(role) || (self && rank(above.role) >= rank(role))) ? { role: above.role, via: viaFor(above.at) } : null;
     // An Owner or Admin opens and changes every SOP folder, whatever their row says.
-    if ((self && ctx.orgAdmin) || ADMIN_LEVELS.has(String(r.user.accessLevel))) alsoVia = { role: "FULL", via: { type: "org_admin", orgName: await orgNameOf(ctx.organizationId) } };
+    if ((self && ctx.orgAdmin) || (active && ADMIN_LEVELS.has(String(r.user.accessLevel)))) alsoVia = { role: "FULL", via: { type: "org_admin", orgName: await orgNameOf(ctx.organizationId) } };
     const entry: AccessDirectEntry = {
       person: personOf(r.user),
       role,
@@ -157,6 +160,9 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     const from = roleFrom(live, chain, 1, userId);
     const user = people.get(userId);
     if (!from || !user) continue;
+    // The admins line speaks for Owners and Admins (as node-tree does), and a
+    // deactivated account reaches no folder through the ones above it.
+    if (ADMIN_LEVELS.has(levelOf.get(userId) ?? "") || !personOf(user).active) continue;
     const list = groups.get(from.at) ?? [];
     const entry: AccessInheritedEntry = { person: personOf(user), role: from.role, via: viaFor(from.at) };
     const note = await roleNote(userId, ctx.organizationId, levelOf.get(userId) ?? "EMPLOYEE", from.role);
@@ -172,19 +178,38 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     if (list.length > INHERITED_PER_VIA) inheritedMore.push({ via: viaFor(at), more: list.length - INHERITED_PER_VIA });
   }
 
+  // Who else holds a role is for the people who manage the folder, as GET
+  // /api/sop-folders/[id]/access keeps it (admins only there; Full access
+  // here, Broken #21): everyone else sees their own row and a count.
+  let shownDirect = direct;
+  let shownInherited = inherited;
+  let shownMore = inheritedMore;
+  let others = 0;
+  if (!canManage) {
+    shownDirect = direct.filter((d) => d.person.id === ctx.userId);
+    shownInherited = inherited.filter((e) => e.person.id === ctx.userId);
+    shownMore = [];
+    const everyone = new Set([...direct.map((d) => d.person.id), ...[...groups.values()].flat().map((e) => e.person.id)]);
+    everyone.delete(ctx.userId);
+    others = everyone.size;
+  }
+
   const [orgName, adminCount] = await Promise.all([orgNameOf(ctx.organizationId), orgAdminCount(ctx.organizationId)]);
   return {
     node: { kind: KIND, id: folder.id, name: folder.name, noun: ACCESS_NODE_NOUN[KIND], href: hrefOf(folder.id), space: null, notepadOwner: null },
     viewer: { role: viewerRole, canManage, maxGrant, isAgent: ctx.isAgent },
     roles: ROLES_BY_KIND[KIND],
     general: NO_GENERAL,
-    direct,
-    inherited,
-    inheritedMore,
+    direct: shownDirect,
+    inherited: shownInherited,
+    inheritedMore: shownMore,
     hiddenInherited: [],
     everyone: null,
     admins: { count: adminCount },
-    notes: [`Everyone listed here also opens the folders inside ${folder.name}.`],
+    notes: [
+      ...(others > 0 ? [`Shared with ${others} more ${others === 1 ? "person" : "people"}. Only the people who manage this folder see who.`] : []),
+      `Everyone listed here also opens the folders inside ${folder.name}.`,
+    ],
     orgName,
     grantsAvailable: true,
   };
@@ -225,7 +250,9 @@ export async function setSopFolderGrant(ctx: ObjectShareCtx, id: string, body: G
       if (rank(role) > rank(maxGrant)) throw new GrantError("above_own_role");
       const target = await targetInOrg(tx, ctx.organizationId, body.userId);
       if (!target) throw new GrantError("not_in_org");
-      const cur = await tx.sOPFolderAccess.findUnique({ where: { folderId_userId: { folderId: id, userId: body.userId } }, select: { role: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ role: SOPFolderRole }[]>`SELECT "role"::text AS role FROM "SOPFolderAccess" WHERE "folderId" = ${id} AND "userId" = ${body.userId} FOR UPDATE`;
       const curRole = cur ? ROLE_OF[cur.role] : null;
       if (body.expected !== undefined && (body.expected ?? null) !== curRole) throw new GrantError("conflict");
       // Nobody changes the access of someone who holds more than they may give.
@@ -263,7 +290,9 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
   const out = await withFreshPanel(ctx, id, () =>
     prisma.$transaction(async (tx) => {
       const { chain, maxGrant, mine } = await actorGate(tx, ctx, id);
-      const cur = await tx.sOPFolderAccess.findUnique({ where: { folderId_userId: { folderId: id, userId: input.userId } }, select: { role: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ role: SOPFolderRole }[]>`SELECT "role"::text AS role FROM "SOPFolderAccess" WHERE "folderId" = ${id} AND "userId" = ${input.userId} FOR UPDATE`;
       const curRole = cur ? ROLE_OF[cur.role] : null;
       // Removing a row that is not there changed nothing: a retry is a
       // success, whatever role the retry still names.
@@ -273,8 +302,18 @@ export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, inpu
       await tx.sOPFolderAccess.delete({ where: { folderId_userId: { folderId: id, userId: input.userId } } });
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: cur.role, store: "SOPFolderAccess" });
       const rest = await tx.sOPFolderAccess.findMany({ where: { userId: input.userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
-      const target = await targetInOrg(tx, ctx.organizationId, input.userId);
-      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine, admin: !!target && ADMIN_LEVELS.has(target.accessLevel), agent: target?.accessLevel === "AGENT" };
+      const target = await tx.user.findFirst({ where: { id: input.userId, organizationId: ctx.organizationId, deletedAt: null }, select: { accessLevel: true, status: true } });
+      // A deactivated account keeps nothing: no admin reach, no folder above.
+      const active = !!target && !RULE_1_DENIED_STATUSES.has(String(target.status));
+      return {
+        noChange: false,
+        previousRole: curRole,
+        above: active ? roleFrom(rest, chain, 1, input.userId) : null,
+        chain,
+        mine,
+        admin: active && ADMIN_LEVELS.has(String(target!.accessLevel)),
+        agent: String(target?.accessLevel) === "AGENT",
+      };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
@@ -303,9 +342,10 @@ export async function checkSopFolderAccess(
   const mine = viewerRoleAt(ctx, rows, chain, 0);
   if (!mine) return "not_found";
   if (!managesWith(ctx, mine)) return "forbidden";
-  const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true } });
+  const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true, status: true } });
   if (!person) return "not_in_org";
   const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email;
+  if (RULE_1_DENIED_STATUSES.has(String(person.status))) return { userId, name, role: "none", sentence: "No access. Their account is deactivated." };
   const level = String(person.accessLevel);
   if (level === "SUPER_ADMIN" || level === "COMPANY_ADMIN") {
     return { userId, name, role: "FULL", sentence: `${shareRoleLabel(KIND, "FULL")}. They are an Owner or Admin, and Admins see every SOP folder.` };

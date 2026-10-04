@@ -232,7 +232,9 @@ export async function goalPanel(ctx: ObjectShareCtx, id: string): Promise<Access
         : "Anyone a contributor reports to can view it.");
     }
     // The creator edits it only while they can see it (canSeeGoal has no creator door).
-    const creator = target.creatorId && target.creatorId !== goal.ownerId ? byId.get(target.creatorId) : null;
+    const found = target.creatorId && target.creatorId !== goal.ownerId ? byId.get(target.creatorId) : null;
+    // A deactivated creator edits nothing.
+    const creator = found && personOf(found).active ? found : null;
     if (creator && !(await closedTo(creator.id)) && (await canSeeGoal(sessionFor(creator.id, ctx.organizationId, String(creator.accessLevel)), goal))) notes.push(`${nameOf(creator)} made it and can edit it.`);
   }
   // By member type, as canSeeGoal reads it; the People team (the HR member type
@@ -290,7 +292,9 @@ export async function setGoalGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       const goal = await actorGate(tx, ctx, id);
       if (!(await targetInOrg(tx, ctx.organizationId, body.userId))) throw new GrantError("not_in_org");
       if (goal.ownerId === body.userId) throw new GrantError("owner_fixed");
-      const cur = await tx.goalAssignee.findFirst({ where: { okrId: id, userId: body.userId }, select: { id: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "GoalAssignee" WHERE "okrId" = ${id} AND "userId" = ${body.userId} FOR UPDATE`;
       const curRole: PanelRole | null = cur ? "EDIT" : null;
       if (body.expected !== undefined && (body.expected ?? null) !== curRole) throw new GrantError("conflict");
       if (cur) return { noChange: true, previousRole: curRole, role: curRole };
@@ -318,7 +322,9 @@ export async function removeGoalGrant(ctx: ObjectShareCtx, id: string, input: { 
     prisma.$transaction(async (tx) => {
       const goal = await actorGate(tx, ctx, id);
       if (goal.ownerId === input.userId) throw new GrantError("owner_fixed");
-      const cur = await tx.goalAssignee.findFirst({ where: { okrId: id, userId: input.userId }, select: { id: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "GoalAssignee" WHERE "okrId" = ${id} AND "userId" = ${input.userId} FOR UPDATE`;
       const curRole: PanelRole | null = cur ? "EDIT" : null;
       // Removing a row that is not there changed nothing: a retry is a
       // success, whatever role the retry still names.

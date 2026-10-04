@@ -124,7 +124,7 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     // Full access by member type whatever the share says: said beside the row
     // (and the viewer's own removal is no loss of the right to share).
     const closed = await closedTo(u.id);
-    if (!closed && canManageTool(toolViewerOf(u.id, level), tool)) entry.alsoVia = { role: "FULL", via: levelVia(level, orgName) };
+    if (!closed && entry.person.active && canManageTool(toolViewerOf(u.id, level), tool)) entry.alsoVia = { role: "FULL", via: levelVia(level, orgName) };
     if (closed) entry.note = APP_CLOSED_NOTE.tool;
     else if (s.userId === tool.addedBy) entry.note = OWNER_SHARED_NOTE;
     else if (level === "AGENT" && shareRole === "FULL") entry.note = AGENT_FULL_NOTE;
@@ -217,7 +217,9 @@ export async function setToolGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       const target = await targetInOrg(tx, ctx.organizationId, body.userId);
       if (!target) throw new GrantError("not_in_org");
       if (await ownerPinned(tx, ctx.organizationId, tool, body.userId)) throw new GrantError("owner_fixed");
-      const cur = await tx.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: body.userId } }, select: { role: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ role: string | null }[]>`SELECT "role" FROM "ToolShare" WHERE "toolId" = ${id} AND "userId" = ${body.userId} FOR UPDATE`;
       const curRole = toolShareRole(cur, true);
       // The role the dialog shows: a maker whose role no longer changes tools
       // reads Can view with no share (the pinned maker was refused above).
@@ -261,7 +263,9 @@ export async function removeToolGrant(ctx: ObjectShareCtx, id: string, input: { 
     prisma.$transaction(async (tx) => {
       const tool = await actorGate(tx, ctx, id);
       if (await ownerPinned(tx, ctx.organizationId, tool, input.userId)) throw new GrantError("owner_fixed");
-      const cur = await tx.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: input.userId } }, select: { role: true } });
+      // The person's own row, locked: an older route writes these rows
+      // without the object's lock, so the row judged is the row written.
+      const [cur] = await tx.$queryRaw<{ role: string | null }[]>`SELECT "role" FROM "ToolShare" WHERE "toolId" = ${id} AND "userId" = ${input.userId} FOR UPDATE`;
       const curRole = toolShareRole(cur, true);
       // Removing a share that is not there changed nothing: a retry is a
       // success, whatever role the retry still names.

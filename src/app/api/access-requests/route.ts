@@ -233,18 +233,20 @@ export async function GET(req: Request) {
     }
     if (answered) continue;
     const objectKind = !node && objectsOn ? requestObjectKind(r.objectType) : null;
-    const appOff = objectKind ? !(await appOpen(objectKind)) : false;
-    const cannotGrant = objectKind && !appOff ? !(await shares(objectKind, r.objectId)) : false;
     // Only the answers that give the person more than they hold now; none
     // left means the request is already answered, and it is left off the
-    // card as a node's is.
+    // card as a node's is, whoever is deciding (asked first, so an answered
+    // request never costs a door or a panel).
     let grants: ReturnType<typeof objectRequestGrants> | undefined;
-    if (objectKind && !appOff && !cannotGrant) {
+    if (objectKind) {
       const held = await objectHeldRole(objectKind, u.organizationId, r.objectId, r.requesterId);
       const heldRank = held ? PANEL_ROLE_RANK[held] : 0;
       grants = objectRequestGrants(objectKind, r.role as RequestRole).filter((g) => PANEL_ROLE_RANK[objectGrantRole(objectKind, g.role)] > heldRank);
       if (grants.length === 0) continue;
     }
+    const appOff = objectKind ? !(await appOpen(objectKind)) : false;
+    const cannotGrant = objectKind && !appOff ? !(await shares(objectKind, r.objectId)) : false;
+    if (appOff || cannotGrant) grants = undefined;
     incoming.push({
       id: r.id,
       objectType: r.objectType,
