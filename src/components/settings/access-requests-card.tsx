@@ -30,6 +30,14 @@ interface IncomingRequest {
   link: string | null;
   name: string | null;
   grantable: boolean;
+  /** The answers for an ask on a tool, a goal, an SOP folder or a team, in its own words (batch 7). */
+  grants?: Array<{ role: IncomingRequest["role"]; label: string }>;
+  /** Its app is hidden or floored for you: it can only be declined. */
+  appOff?: boolean;
+  /** You may not share it (your role no longer manages it): it can only be declined. */
+  cannotGrant?: boolean;
+  /** They hold Can edit already; their workspace role can't edit SOPs, which no share changes. */
+  roleBlocked?: boolean;
   requester: { id: string; name: string; avatar: string | null };
 }
 
@@ -115,7 +123,19 @@ export function AccessRequestsCard() {
                 {rowError[req.id] ? <p className="text-sm text-danger-text" role="alert">{rowError[req.id]}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {req.grantable ? (
+                {req.roleBlocked ? (
+                  <span className="text-sm text-ink-2">Their workspace role can&apos;t edit SOPs</span>
+                ) : req.appOff ? (
+                  <span className="text-sm text-ink-2">Its app isn&apos;t open to you</span>
+                ) : req.cannotGrant ? (
+                  <span className="text-sm text-ink-2">Only people who can share it give access</span>
+                ) : req.grantable && req.grants ? (
+                  req.grants.map((g) => (
+                    <button key={g.role} type="button" className={btn} disabled={busy === req.id} onClick={() => { void decide(req, "grant", g.role); }}>
+                      {g.label}
+                    </button>
+                  ))
+                ) : req.grantable ? (
                   <>
                     <button type="button" className={btn} disabled={busy === req.id} onClick={() => { void decide(req, "grant", req.role); }}>
                       {GIVE[req.role]}

@@ -10,8 +10,9 @@
 // what a path must never show.
 
 import { NextResponse } from "next/server";
-import { GRANT_ERROR_MESSAGE, isAccessNodeKind, type GrantErrorBody } from "@/lib/access/access-panel";
+import { GRANT_ERROR_MESSAGE, isAccessNodeKind, isObjectShareKind, type GrantErrorBody } from "@/lib/access/access-panel";
 import { accessPanel, nodeCtxFromSession } from "@/lib/access/node-access";
+import { objectAccessPanel, objectShareCtxFromSession, objectShareOn } from "@/lib/access/object-share";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
@@ -24,6 +25,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ kind: s
   const ctx = await nodeCtxFromSession();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   const { kind, id } = await params;
+  // An SOP folder, a tool, a goal or a team (batch 7): served by the one
+  // dialog only while ACCESS_V2_TABLES is on, over the store its own gates
+  // read. Off, it is not there, exactly as before.
+  if (isObjectShareKind(kind) && id) {
+    if (!objectShareOn()) return refusal("not_found", 404);
+    const octx = await objectShareCtxFromSession();
+    if (!octx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    try {
+      const panel = await objectAccessPanel(octx, kind, id);
+      if (!panel) return refusal("not_found", 404);
+      return NextResponse.json(panel, { headers: NO_STORE });
+    } catch (err) {
+      console.error(`[access] panel for ${kind} ${id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      return NextResponse.json({ error: "server_error", message: "Could not load who has access." } satisfies GrantErrorBody, { status: 500, headers: NO_STORE });
+    }
+  }
   if (!isAccessNodeKind(kind) || !id) return refusal("invalid_body", 400);
   try {
     const panel = await accessPanel(ctx, { kind, id });

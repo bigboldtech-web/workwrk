@@ -17,7 +17,7 @@
 //
 // Pure: imports ./access-panel and ../activity-targets only.
 
-import { ACCESS_NODE_NOUN, panelRoleLabel, type AccessNodeKind, type PanelRole } from "./access-panel";
+import { ACCESS_NODE_NOUN, panelRoleLabel, shareRoleLabel, type AccessNodeKind, type ObjectShareKind, type PanelRole, type ShareKind } from "./access-panel";
 import { normaliseTargetType } from "../activity-targets";
 
 export const ACCESS_ACTIVITY_TYPES = [
@@ -41,7 +41,7 @@ export function isAccessActivityType(type: string | null | undefined): type is A
 }
 
 /** ActivityLog.targetType per node kind, in the keys src/lib/activity-targets.ts resolves. */
-export const ACTIVITY_TARGET_TYPE: Readonly<Record<AccessNodeKind, string>> = {
+export const ACTIVITY_TARGET_TYPE: Readonly<Record<ShareKind, string>> = {
   space: "space",
   folder: "folder",
   list: "list",
@@ -49,13 +49,25 @@ export const ACTIVITY_TARGET_TYPE: Readonly<Record<AccessNodeKind, string>> = {
   table: "data_table",
   canvas: "whiteboard",
   form: "form_definition",
+  // The objects the one dialog serves beside the nodes (object-share).
+  sop_folder: "sop_folder",
+  tool: "tool",
+  goal: "okr",
+  team: "team",
 };
 
-const withArticle = (noun: string) => `${/^[AEIOU]/.test(noun) ? "an" : "a"} ${noun}`;
+// "an SOP folder": SOP is read letter by letter.
+const withArticle = (noun: string) => `${/^([AEIOU]|SOP\b)/.test(noun) ? "an" : "a"} ${noun}`;
 
 /** The one sentence an access row carries: the kind of change and the noun, nothing else. */
-export function accessActivityDescription(type: AccessActivityType, kind: AccessNodeKind | null): string {
+export function accessActivityDescription(type: AccessActivityType, kind: ShareKind | null): string {
   const noun = kind ? withArticle(ACCESS_NODE_NOUN[kind]) : "a node";
+  // A team's people are on it, not given access to it.
+  if (kind === "team") {
+    if (type === "access.granted") return `Added someone to ${noun}`;
+    if (type === "access.role_changed") return `Changed someone's role on ${noun}`;
+    if (type === "access.revoked") return `Took someone off ${noun}`;
+  }
   switch (type) {
     case "access.granted":
       return `Gave someone access to ${noun}`;
@@ -123,6 +135,9 @@ const STORED_ROLE_LABEL: Readonly<Record<string, PanelRole>> = {
   // The legacy doc listing words.
   edit: "EDIT",
   view: "COMMENT",
+  // SOPFolderAccess rows (OWNER reads as Full access, below).
+  EDITOR: "EDIT",
+  VIEWER: "VIEW",
 };
 
 /**
@@ -154,6 +169,8 @@ const SPACE_GENERAL_LABEL: Readonly<Record<string, string>> = {
 
 export interface AccessAuditFacts {
   kind: AccessNodeKind | null;
+  /** An SOP folder, a tool, a goal or a team (batch 7): named by its own noun and its own role words. */
+  objectKind?: ObjectShareKind | null;
   /** The noun for a target that is not a node (a task's public link): "task". Absent reads "item". */
   noun?: string | null;
   /** The node's name, or null when the auditor cannot open it (it is then named by its noun only). */
@@ -170,11 +187,21 @@ export interface AccessAuditFacts {
  * carries stays name free for every other feed.
  */
 export function accessAuditSentence(type: AccessActivityType, f: AccessAuditFacts): string {
-  const noun = f.kind ? ACCESS_NODE_NOUN[f.kind] : f.noun || "item";
+  const noun = f.kind ? ACCESS_NODE_NOUN[f.kind] : f.objectKind ? ACCESS_NODE_NOUN[f.objectKind] : f.noun || "item";
   const node = f.nodeName ? `the ${noun} ${f.nodeName}` : withArticle(noun);
   const who = f.granteeName ?? "someone";
-  const role = auditRoleLabel(f.role, f.kind);
-  const prev = auditRoleLabel(f.previousRole, f.kind);
+  const words = (stored: string | null) => {
+    if (!f.objectKind) return auditRoleLabel(stored, f.kind);
+    const r = stored === "OWNER" ? "FULL" : stored ? STORED_ROLE_LABEL[stored] : undefined;
+    return r ? shareRoleLabel(f.objectKind, r) : null;
+  };
+  const role = words(f.role);
+  const prev = words(f.previousRole);
+  // A team's people are on it as Lead or Member.
+  if (f.objectKind === "team") {
+    if (type === "access.granted") return role ? `Added ${who} to ${node} as ${role}` : `Added ${who} to ${node}`;
+    if (type === "access.revoked") return prev ? `Took ${who} (${prev}) off ${node}` : `Took ${who} off ${node}`;
+  }
   switch (type) {
     case "access.granted":
       return role ? `Gave ${who} ${role} on ${node}` : `Gave ${who} access to ${node}`;

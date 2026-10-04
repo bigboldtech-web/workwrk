@@ -10,8 +10,8 @@
 // loads it in node.
 
 import {
-  GRANT_ERROR_MESSAGE, MANAGE_BAR, PANEL_ROLE_RANK, panelAtLeast, panelRoleLabel,
-  type AccessDirectEntry, type AccessInheritedEntry, type AccessNodeKind, type AccessPanel, type AccessPerson,
+  GRANT_ERROR_MESSAGE, MANAGE_BAR, PANEL_ROLE_RANK, panelAtLeast, panelRoleLabel, shareRoleLabel,
+  type AccessDirectEntry, type AccessInheritedEntry, type AccessNodeKind, type AccessPanel, type AccessPerson, type ShareKind,
   type AccessVia, type GrantChange, type GrantErrorCode, type PanelRole,
 } from "@/lib/access/access-panel";
 
@@ -22,7 +22,7 @@ import {
  * their capital ("this Space", "this Folder", "this List"), as the rest of the
  * Work surfaces write them; the objects read as plain words ("this doc").
  */
-export function sentenceNoun(kind: AccessNodeKind): string {
+export function sentenceNoun(kind: ShareKind): string {
   switch (kind) {
     case "space": return "Space";
     case "folder": return "Folder";
@@ -31,6 +31,10 @@ export function sentenceNoun(kind: AccessNodeKind): string {
     case "table": return "table";
     case "canvas": return "canvas";
     case "form": return "form";
+    case "sop_folder": return "SOP folder";
+    case "tool": return "tool";
+    case "goal": return "goal";
+    case "team": return "team";
   }
 }
 
@@ -111,6 +115,7 @@ export function viaText(via: AccessVia): string {
     case "org_admin": return "as an admin";
     case "owner": return "as the person who made it";
     case "older_rule": return "under the older rule for Private items";
+    case "rule": return via.text;
   }
 }
 
@@ -133,6 +138,7 @@ export function inheritedHeader(via: AccessVia): string {
     case "org_admin": return `Admins at ${via.orgName}`;
     case "owner": return "The person who made it";
     case "older_rule": return via.from ? `From ${via.from.name}, under the older rule for Private items` : "Under the older rule for Private items";
+    case "rule": return via.text.charAt(0).toUpperCase() + via.text.slice(1);
   }
 }
 
@@ -141,6 +147,7 @@ function viaKey(via: AccessVia): string {
     case "node": return `node:${via.kind}:${via.id}`;
     case "everyone": return `everyone:${via.from?.kind ?? ""}:${via.from?.name ?? ""}`;
     case "older_rule": return `older:${via.from?.kind ?? ""}:${via.from?.name ?? ""}`;
+    case "rule": return `rule:${via.text}`;
     default: return via.type;
   }
 }
@@ -388,7 +395,7 @@ export function notepadText(owner: AccessPerson, meId: string | null = null): st
   return `This is ${owner.name}'s private note. Only they can open it.`;
 }
 
-export function grantsUnavailableText(kind: AccessNodeKind): string {
+export function grantsUnavailableText(kind: ShareKind): string {
   return `Adding people to a ${sentenceNoun(kind)} is not available on this server yet.`;
 }
 
@@ -404,19 +411,30 @@ export function removeConfirm(name: string, panel: AccessPanel, losesOwnManage: 
   };
 }
 
-export function SELF_LOWER_CONFIRM(kind: AccessNodeKind): { title: string; description: string } {
+export function SELF_LOWER_CONFIRM(kind: ShareKind): { title: string; description: string } {
   return {
     title: "Lower your own access?",
     description: `You will not be able to change who can open this ${sentenceNoun(kind)} any more.`,
   };
 }
 
+/** The line for people added directly whom the viewer is not shown; "more" when their own row is listed above it. */
+export function hiddenDirectText(n: number, more: boolean, kind: ShareKind): string {
+  const who = n === 1 ? "person was" : "people were";
+  return `${n} ${more ? "more " : ""}${who} added here directly. Only the people who manage this ${sentenceNoun(kind)} see who.`;
+}
+
+/** A role in the words of the kind it is on (a goal's Can check in, a team's Lead), else the ladder's. */
+function roleWords(role: PanelRole, kind?: ShareKind): string {
+  return kind ? shareRoleLabel(kind, role) : panelRoleLabel(role);
+}
+
 /** The toast after a removal: what actually happened, including what the person keeps. */
-export function removalNotice(change: GrantChange, name: string): string {
+export function removalNotice(change: GrantChange, name: string, kind?: ShareKind): string {
   if (change.noChange) return "Already removed.";
   const parts: string[] = [];
   parts.push(change.stillReaches
-    ? `Removed. ${name} still has ${panelRoleLabel(change.stillReaches.role)} ${viaText(change.stillReaches.via)}.`
+    ? `Removed. ${name} still has ${roleWords(change.stillReaches.role, kind)} ${viaText(change.stillReaches.via)}.`
     : `Removed ${name}.`);
   const kept = change.keepsInside;
   if (kept.length > 0) {
@@ -430,8 +448,8 @@ export function removalNotice(change: GrantChange, name: string): string {
  * removed them meanwhile). The row is gone, so the line says who it was for
  * and, for a role change, what Retry will do: give them that role again.
  */
-export function strayFailureText(name: string, message: string, role: PanelRole | null): string {
-  return role ? `${name}: ${message} Retry gives them ${panelRoleLabel(role)}.` : `${name}: ${message}`;
+export function strayFailureText(name: string, message: string, role: PanelRole | null, kind?: ShareKind): string {
+  return role ? `${name}: ${message} Retry gives them ${roleWords(role, kind)}.` : `${name}: ${message}`;
 }
 
 /**
@@ -440,10 +458,10 @@ export function strayFailureText(name: string, message: string, role: PanelRole 
  * lowered and the line says what they keep. Null when the Add changed their
  * role as asked.
  */
-export function keptHigherText(change: GrantChange, name: string, requested: PanelRole): string | null {
+export function keptHigherText(change: GrantChange, name: string, requested: PanelRole, kind?: ShareKind): string | null {
   if (!change.noChange || !change.role || change.role === requested) return null;
   if (PANEL_ROLE_RANK[change.role] <= PANEL_ROLE_RANK[requested]) return null;
-  return `${name} already has ${panelRoleLabel(change.role)}, so it was kept.`;
+  return `${name} already has ${roleWords(change.role, kind)}, so it was kept.`;
 }
 
 // ── Errors ──────────────────────────────────────────────────────────
@@ -458,9 +476,18 @@ export function refusedByOwnAccess(code: GrantErrorCode): boolean {
 }
 
 /** The sentence for a grant error. Two read the kind: who may share it, and whether grants exist here yet. */
-export function errorText(code: GrantErrorCode, kind: AccessNodeKind): string {
-  if (code === "forbidden") return `You need ${panelRoleLabel(MANAGE_BAR[kind])} to change who can open this ${sentenceNoun(kind)}.`;
+export function errorText(code: GrantErrorCode, kind: ShareKind): string {
+  if (code === "forbidden") {
+    // The objects served beside the nodes say who decides there, in their own terms.
+    if (kind === "goal") return "Only people who can edit this goal change who can see it.";
+    if (kind === "team") return "Only Owners, Admins and the team's leads change who is on it.";
+    return `You need ${panelRoleLabel(MANAGE_BAR[kind])} to change who can open this ${sentenceNoun(kind)}.`;
+  }
   if (code === "grants_unavailable") return grantsUnavailableText(kind);
+  // A team's lead adds and takes off members; leads are an Admin's to change.
+  if (code === "above_own_role" && kind === "team") return "Only Owners and Admins make someone a lead, or change or take off a lead.";
+  // A goal's owner is its accountable person, not necessarily who made it.
+  if (code === "owner_fixed" && kind === "goal") return "The goal's owner always keeps it. Change the owner from the goal's menu.";
   return GRANT_ERROR_MESSAGE[code] ?? GRANT_ERROR_MESSAGE.server_error;
 }
 
@@ -471,7 +498,7 @@ export function errorText(code: GrantErrorCode, kind: AccessNodeKind): string {
  * own sentence when it sends one, else the kind's forbidden and not-found
  * wording, else the control's own fallback.
  */
-export function generalErrorText(status: number, body: unknown, kind: AccessNodeKind, fallback: string): string {
+export function generalErrorText(status: number, body: unknown, kind: ShareKind, fallback: string): string {
   const b = body && typeof body === "object" ? (body as { message?: unknown; error?: unknown }) : null;
   if (b && typeof b.message === "string" && b.message.trim()) return b.message.trim();
   if (status === 403) return errorText("forbidden", kind);
@@ -498,11 +525,11 @@ export function parseGrantError(status: number, body: unknown): { code: GrantErr
 
 // ── URLs ────────────────────────────────────────────────────────────
 
-export function panelUrl(kind: AccessNodeKind, id: string): string {
+export function panelUrl(kind: ShareKind, id: string): string {
   return `/api/access/${kind}/${encodeURIComponent(id)}`;
 }
 
-export function grantsUrl(kind: AccessNodeKind, id: string): string {
+export function grantsUrl(kind: ShareKind, id: string): string {
   return `${panelUrl(kind, id)}/grants`;
 }
 

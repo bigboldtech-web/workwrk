@@ -34,6 +34,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useBoot } from "@/components/layout/os/boot-context";
 import type { FolderNode } from "@/lib/sop-folder-node";
 import { SopFolderShareDialog } from "@/components/sops/sop-folder-share-dialog";
+import { ShareDialog } from "@/components/access/share-dialog";
 import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 
@@ -250,7 +251,18 @@ export function SopFoldersTagsManager({ tab = "folders", canCreateTopLevel = tru
           onSelect={(v) => void setColour(colourFor.node, v === "none" ? null : HUES.find((h) => h.key === v)?.hex ?? null)}
           sections={[{ options: [{ value: "none", label: "Neutral", glyph: <span className="inline-block h-3 w-3 rounded-full border border-line-strong" /> }, ...HUES.map((h) => ({ value: h.key, label: h.label, glyph: <span className="inline-block h-3 w-3 rounded-full" style={{ background: h.hex }} /> }))] }]} width={220} />
       ) : null}
-      <SopFolderShareDialog open={!!shareFor} onClose={() => setShareFor(null)} folder={shareFor} onSaved={() => void load()} />
+      {/* While the one dialog serves SOP folders (ACCESS_V2_TABLES on, batch 7),
+          Share opens it; otherwise the folder's own dialog, as before. */}
+      {boot.org.objectShare ? (
+        <ShareDialog
+          open={!!shareFor}
+          onOpenChange={(o) => { if (!o) setShareFor(null); }}
+          target={shareFor ? { kind: "sop_folder", id: shareFor.id, name: shareFor.name } : null}
+          onChanged={() => void load()}
+        />
+      ) : (
+        <SopFolderShareDialog open={!!shareFor} onClose={() => setShareFor(null)} folder={shareFor} onSaved={() => void load()} />
+      )}
     </>
   );
 }

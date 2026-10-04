@@ -23,9 +23,12 @@
 // could be stale.
 
 import { ManageAccessDialog } from "./manage-access-dialog";
-import type { AccessPanel } from "@/lib/access/access-panel";
+import type { AccessPanel, ShareKind } from "@/lib/access/access-panel";
 
-export type ShareKind = "space" | "folder" | "list" | "doc" | "table" | "canvas" | "form";
+// The seven node kinds, and the objects served beside them while
+// ACCESS_V2_TABLES is on (an SOP folder, a tool, a goal, a team; batch 7):
+// a host offers those only when boot.org.objectShare says the dialog serves them.
+export type { ShareKind };
 
 export interface ShareTarget {
   kind: ShareKind;

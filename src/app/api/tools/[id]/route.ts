@@ -5,6 +5,10 @@
 //        delete with no org check; now it is restorable for the retention
 //        window, with its shares.
 //
+// A share's role (Can edit opens PATCH, Full access also DELETE and the share
+// routes) is read only while ACCESS_V2_TABLES is on (tool-access.ts): with
+// the flag off every share is Can view and the answers are today's.
+//
 // Every method answers the same 404 for a tool the viewer cannot see. PATCH
 // and DELETE used to decide manage before see, so a Member whose share had
 // just been taken back (still holding the /tools?tool=<id> link from the
@@ -18,7 +22,8 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
-import { canManageTool, canSeeTool, hasLogin } from "@/lib/tools/tool-access";
+import { accessV2Tables } from "@/lib/access/flags";
+import { canEditTool, canSeeTool, canShareTool, hasLogin, toolShareRole, toolViewerRole } from "@/lib/tools/tool-access";
 import { requireTools } from "@/lib/tools/tool-server";
 
 type Viewer = Exclude<Awaited<ReturnType<typeof requireTools>>, { error: unknown }>;
@@ -30,25 +35,27 @@ async function load(id: string, orgId: string) {
   });
 }
 
-// The tool as the viewer may know it: null when it is another org's, gone,
-// or simply not shared with them (canSeeTool needs the viewer's ToolShare).
-// share/route.ts applies the same rule; a Member must not be able to tell
-// the three apart on any method.
+// The tool as the viewer may know it, with what their share gives: null when
+// it is another org's, gone, or simply not shared with them (canSeeTool needs
+// the viewer's ToolShare). share/route.ts applies the same rule; a Member
+// must not be able to tell the three apart on any method.
 async function loadVisible(id: string, v: Viewer) {
   const tool = await load(id, v.orgId);
   if (!tool) return null;
-  const share = await prisma.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: v.userId } }, select: { id: true } });
-  return canSeeTool(v, tool, Boolean(share)) ? tool : null;
+  const row = await prisma.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: v.userId } }, select: { id: true, role: true } });
+  return canSeeTool(v, tool, Boolean(row)) ? { tool, share: toolShareRole(row, accessV2Tables()) } : null;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await loadVisible(id, v);
-  if (!tool) return jsonError("Not found", 404);
-  const manage = canManageTool(v, tool);
-  const rows = manage ? await prisma.toolShare.findMany({ where: { toolId: id }, select: { userId: true, sharedAt: true }, orderBy: { sharedAt: "asc" } }) : [];
+  const seen = await loadVisible(id, v);
+  if (!seen) return jsonError("Not found", 404);
+  const { tool, share } = seen;
+  const manage = canShareTool(v, tool, share);
+  const rolesOn = accessV2Tables();
+  const rows = manage ? await prisma.toolShare.findMany({ where: { toolId: id }, select: { userId: true, sharedAt: true, role: true }, orderBy: { sharedAt: "asc" } }) : [];
   const users = rows.length
     ? await prisma.user.findMany({ where: { id: { in: rows.map((r) => r.userId) }, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } })
     : [];
@@ -56,20 +63,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Who added it, so a Can view holder's banner can name the person to ask.
   const owner = await prisma.user.findFirst({ where: { id: tool.addedBy, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } });
   const addedByPerson = owner ? { id: owner.id, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || "Someone", avatar: owner.avatar } : null;
-  const shares = rows.map((r) => {
+  const shares = rows.map(({ role, ...r }) => {
     const u = byId.get(r.userId);
-    return { ...r, name: u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone" : "Former member", avatar: u?.avatar ?? null };
+    return { ...r, ...(rolesOn ? { role: toolShareRole({ role }, true) } : {}), name: u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone" : "Former member", avatar: u?.avatar ?? null };
   });
-  return jsonSuccess({ tool: { ...tool, hasLogin: hasLogin(tool.credentials), canManage: manage, shares, addedByPerson } });
+  return jsonSuccess({ tool: {
+    ...tool,
+    hasLogin: hasLogin(tool.credentials),
+    // canManage: share and delete it (Full access). With the roles on (the
+    // flag), canEdit (the fields and the login) and the viewer's role too.
+    canManage: manage,
+    ...(rolesOn ? { canEdit: canEditTool(v, tool, share), role: toolViewerRole(v, tool, share) } : {}),
+    shares,
+    addedByPerson,
+  } });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await loadVisible(id, v);
-  if (!tool) return jsonError("Not found", 404);
-  if (!canManageTool(v, tool)) return jsonError("You can't change this tool. Ask whoever added it.", 403);
+  const seen = await loadVisible(id, v);
+  if (!seen) return jsonError("Not found", 404);
+  if (!canEditTool(v, seen.tool, seen.share)) return jsonError("You can't change this tool. Ask whoever added it.", 403);
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") return jsonError("Invalid body");
@@ -104,9 +120,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const v = await requireTools();
   if ("error" in v) return v.error;
   const { id } = await params;
-  const tool = await loadVisible(id, v);
-  if (!tool) return jsonError("Not found", 404);
-  if (!canManageTool(v, tool)) return jsonError("You can't delete this tool. Ask whoever added it.", 403);
+  const seen = await loadVisible(id, v);
+  if (!seen) return jsonError("Not found", 404);
+  if (!canShareTool(v, seen.tool, seen.share)) return jsonError("You can't delete this tool. Ask whoever added it.", 403);
   const moved = await moveToTrash("tool", id, { organizationId: v.orgId, userId: v.userId, userName: v.name });
   if (!moved) return jsonError("Not found", 404);
   return jsonSuccess({ trashed: true });

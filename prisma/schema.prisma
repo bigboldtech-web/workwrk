@@ -3076,6 +3076,10 @@ model ToolShare {
   userId   String
   sharedBy String
   sharedAt DateTime @default(now())
+  /// Null is Can view, as every share was before batch 7; "EDIT" or "FULL"
+  /// (prisma/sql/2026-10-04-tool-share-role.sql). Read only while
+  /// ACCESS_V2_TABLES is on (src/lib/tools/tool-access.ts toolShareRole).
+  role     String?
 
   @@unique([toolId, userId])
   @@index([userId])

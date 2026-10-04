@@ -20,6 +20,12 @@
 // footer, and Export CSV in the "…" square; the drawer's autosaving fields
 // carry an AutosaveIndicator, and a Can view holder's banner names the
 // person to ask, with a Request link into the access request flow.
+//
+// While the one share dialog serves tools (ACCESS_V2_TABLES on, batch 7) a
+// share carries a role: the drawer header's Share (Full access) or role chip
+// opens the one dialog, the row menu's Share opens it too, and Can edit
+// opens the fields and the login. With the flag off every share is Can view
+// and the drawer keeps its own Who has access section, as before.
 
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -47,6 +53,8 @@ import type { AutosaveStatus } from "@/hooks/use-autosave";
 import { useShortcut } from "@/lib/shortcuts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-fetch";
+import { ShareDialog } from "@/components/access/share-dialog";
+import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 
@@ -61,7 +69,10 @@ type ToolRow = {
   addedBy: string;
   createdAt: string;
   hasLogin: boolean;
+  /** Share it and delete it (Full access). */
   canManage: boolean;
+  /** Change it: only while the roles are on (the flag); otherwise canManage decides. */
+  canEdit?: boolean;
   sharedAt: string | null;
   addedByPerson: Person | null;
   sharedWith: Person[];
@@ -70,8 +81,13 @@ type ToolRow = {
 type Credentials = { username?: string; password?: string; apiKey?: string; notes?: string };
 type ToolDetail = Omit<ToolRow, "sharedWith" | "shareCount" | "sharedAt"> & {
   credentials: Credentials | null;
-  shares: Array<{ userId: string; sharedAt: string; name: string; avatar: string | null }>;
+  /** The viewer's role: only while the roles are on (the flag). */
+  role?: "FULL" | "EDIT" | "VIEW" | null;
+  shares: Array<{ userId: string; sharedAt: string; name: string; avatar: string | null; role?: "FULL" | "EDIT" | "VIEW" | null }>;
 };
+
+/** Change it: Can edit and up while the roles are on; otherwise whoever manages it. */
+const editsTool = (t: { canManage: boolean; canEdit?: boolean }) => t.canEdit ?? t.canManage;
 
 const LOGIN_FIELDS: Array<{ key: keyof Credentials; label: string; secret: boolean }> = [
   { key: "username", label: "Username", secret: false },
@@ -118,6 +134,9 @@ export default function ToolsPage() {
   // category, Copy link, then Delete; only on a row the viewer manages.
   const [menu, setMenu] = useState<{ tool: ToolRow; anchor: RefObject<HTMLElement | null> } | null>(null);
   const shareOpen = sp?.get("share") === "1";
+  // The one share dialog for a row's Share while it serves tools (the flag).
+  const objectShare = !!boot.org.objectShare;
+  const [shareFor, setShareFor] = useState<{ id: string; name: string } | null>(null);
 
   // One patch per change. Three calls in a row would each rebuild the URL
   // from the same stale search params and only the last would land.
@@ -356,7 +375,7 @@ export default function ToolsPage() {
                 <BulkButton icon={Trash2} label="Delete" destructive onClick={() => void bulk("delete")} />
               </>
             ) : undefined}
-            rowMenu={(t) => t.canManage ? (
+            rowMenu={(t) => editsTool(t) ? (
               <button
                 type="button"
                 aria-label={`Actions for ${t.name}`}
@@ -391,7 +410,9 @@ export default function ToolsPage() {
             {websiteHref(menu.tool) ? (
               <MenuItem icon={ExternalLink} label="Open website" onClick={() => { const href = websiteHref(menu.tool); setMenu(null); if (href) window.open(href, "_blank", "noopener,noreferrer"); }} />
             ) : null}
-            <MenuItem icon={UserPlus} label="Share" onClick={() => { const t = menu.tool; setMenu(null); setParams({ tool: t.id, share: "1" }); }} />
+            {menu.tool.canManage ? (
+              <MenuItem icon={UserPlus} label="Share" onClick={() => { const t = menu.tool; setMenu(null); if (objectShare) setShareFor({ id: t.id, name: t.name }); else setParams({ tool: t.id, share: "1" }); }} />
+            ) : null}
             <MenuSubmenu icon={Tag} label="Change category">
               {categories.map((c) => (
                 <MenuItem key={c} label={c} onClick={() => { const t = menu.tool; setMenu(null); void rowCategory(t, c); }} />
@@ -400,12 +421,24 @@ export default function ToolsPage() {
               <MenuItem label="New category…" onClick={() => { const t = menu.tool; setMenu(null); void rowCategory(t, "__new__"); }} />
             </MenuSubmenu>
             <MenuItem icon={Link2} label="Copy link" onClick={() => { const t = menu.tool; setMenu(null); void rowCopyLink(t); }} />
-            <MenuSeparator />
-            <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const t = menu.tool; setMenu(null); void rowDelete(t); }} />
+            {menu.tool.canManage ? (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const t = menu.tool; setMenu(null); void rowDelete(t); }} />
+              </>
+            ) : null}
           </MenuList>
         </MorePortal>
       ) : null}
       <ToolDrawer id={openId} shareOpen={shareOpen} onClose={() => setParams({ tool: null, share: null })} onChanged={() => void load()} />
+      {objectShare ? (
+        <ShareDialog
+          open={!!shareFor}
+          onOpenChange={(o) => { if (!o) setShareFor(null); }}
+          target={shareFor ? { kind: "tool", id: shareFor.id, name: shareFor.name } : null}
+          onChanged={() => void load()}
+        />
+      ) : null}
       {addOpen ? <AddToolDialog onClose={() => setAddOpen(false)} onAdded={(id) => { setAddOpen(false); void load(); setParam("tool", id); }} /> : null}
     </>
   );
@@ -469,6 +502,10 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
   const [saveStatus, setSaveStatus] = useState<AutosaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [requested, setRequested] = useState(false);
+  // The one share dialog while it serves tools (the flag): "share" for Full
+  // access, "who" (read only) for everyone else.
+  const objectShare = !!boot.org.objectShare;
+  const [shareMode, setShareMode] = useState<"share" | "who" | null>(null);
 
   const load = useCallback(async (toolId: string) => {
     const r = await apiFetch<{ tool: ToolDetail }>(`/api/tools/${toolId}`, { cache: "no-store" });
@@ -531,9 +568,18 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
   }
 
   const manage = tool?.canManage ?? false;
+  const edit = tool ? editsTool(tool) : false;
   const creds = tool?.credentials ?? {};
+  // The row menu's Share (?share=1) opens the one dialog once the tool loads.
+  const toolId = tool?.id ?? null;
+  useEffect(() => {
+    if (!objectShare || !shareOpen || !toolId || !manage) return;
+    const t = setTimeout(() => setShareMode("share"), 0);
+    return () => clearTimeout(t);
+  }, [objectShare, shareOpen, toolId, manage]);
 
   return (
+    <>
     <Drawer
       open={Boolean(id)}
       onClose={onClose}
@@ -547,8 +593,10 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
               <Link2 className="h-4 w-4" />
             </button>
           ) : null}
-          {tool && manage ? <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} /> : null}
-          {tool && !manage ? <span className="inline-flex h-6 items-center rounded-md bg-hover px-2 text-xs font-medium text-ink-2">Can view</span> : null}
+          {tool && edit ? <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} /> : null}
+          {tool && objectShare ? (
+            <ShareOrRoleChip role={tool.role ?? (manage ? "FULL" : "VIEW")} onOpen={(m) => setShareMode(m)} />
+          ) : tool && !manage ? <span className="inline-flex h-6 items-center rounded-md bg-hover px-2 text-xs font-medium text-ink-2">Can view</span> : null}
           <button type="button" aria-label="Close" onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             <X className="h-4 w-4" />
           </button>
@@ -563,7 +611,7 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
         <div className="p-4"><SkeletonLines lines={6} /></div>
       ) : (
         <div className="flex flex-col gap-6 p-4">
-          {!manage ? (
+          {!edit ? (
             <div className="flex items-center gap-2 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
               <span className="min-w-0 flex-1">View only. Ask {tool.addedByPerson?.name ?? "whoever added it"} for edit access.</span>
               {requested ? <span className="shrink-0 text-ink-3">Requested</span> : (
@@ -573,17 +621,17 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
           ) : null}
 
           <section className="flex flex-col">
-            <FieldRow label="Name" value={tool.name} editable={manage} onSave={(v) => patch({ name: v })} required />
-            <FieldRow label="Website" value={tool.url ?? ""} editable={manage} onSave={(v) => patch({ url: v })} placeholder="https://" />
-            <FieldRow label="Category" value={tool.category ?? ""} editable={manage} onSave={(v) => patch({ category: v })} placeholder="No category" />
-            <FieldRow label="Icon" value={tool.icon ?? ""} editable={manage} onSave={(v) => patch({ icon: v })} placeholder="An emoji" />
-            <FieldRow label="Description" value={tool.description ?? ""} editable={manage} onSave={(v) => patch({ description: v })} multiline />
+            <FieldRow label="Name" value={tool.name} editable={edit} onSave={(v) => patch({ name: v })} required />
+            <FieldRow label="Website" value={tool.url ?? ""} editable={edit} onSave={(v) => patch({ url: v })} placeholder="https://" />
+            <FieldRow label="Category" value={tool.category ?? ""} editable={edit} onSave={(v) => patch({ category: v })} placeholder="No category" />
+            <FieldRow label="Icon" value={tool.icon ?? ""} editable={edit} onSave={(v) => patch({ icon: v })} placeholder="An emoji" />
+            <FieldRow label="Description" value={tool.description ?? ""} editable={edit} onSave={(v) => patch({ description: v })} multiline />
           </section>
 
           <section className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-ink">Login</h3>
-              {manage && !loginDraft ? (
+              {edit && !loginDraft ? (
                 <button type="button" onClick={() => setLoginDraft({ ...creds })} className="text-sm font-medium text-brand-deep hover:underline">Edit</button>
               ) : null}
             </div>
@@ -631,7 +679,7 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
             )}
           </section>
 
-          {manage ? (
+          {manage && !objectShare ? (
             <ShareSection tool={tool} initialOpen={shareOpen} onChanged={async () => { await load(tool.id); onChanged(); }} />
           ) : null}
 
@@ -645,6 +693,16 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
         </div>
       )}
     </Drawer>
+    {objectShare && tool ? (
+      <ShareDialog
+        open={shareMode !== null}
+        onOpenChange={(o) => { if (!o) setShareMode(null); }}
+        target={{ kind: "tool", id: tool.id, name: tool.name }}
+        readOnly={shareMode === "who"}
+        onChanged={() => { void load(tool.id); onChanged(); }}
+      />
+    ) : null}
+    </>
   );
 }
 

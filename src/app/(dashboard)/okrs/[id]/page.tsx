@@ -36,7 +36,8 @@ import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
-import { CopyLinkButton, GoalChildUnlink, GoalDates, GoalReadOnlyStrip, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
+import { CopyLinkButton, GoalChildUnlink, GoalDates, GoalReadOnlyStrip, GoalShareDoor, GoalSummaryAssessment, GoalWorkCards } from "./goal-page-bits";
+import { accessV2Tables } from "@/lib/access/flags";
 import type { TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { OsPageHeader } from "@/components/layout/os/page-header";
@@ -165,10 +166,14 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
       <OsPageHeader
         title={okr.title}
         back={back}
-        actions={canEditGoal ? (
-          <GoalDetailMenu goal={editable} canDelete={canDelete} canEdit={canEditGoal} canAssignOwner={mayAssign}
-            completed={okr.completedAt != null} afterDelete={back.fallbackHref} />
-        ) : <CopyLinkButton okrId={okr.id} />}
+        actions={<>
+          {/* The one share dialog, while it serves goals (ACCESS_V2_TABLES on, batch 7). */}
+          {accessV2Tables() ? <GoalShareDoor okrId={okr.id} title={okr.title} canShare={canEditGoal && viewer.accessLevel !== "AGENT"} canEdit={canEditGoal} canCheckIn={canCheckIn} /> : null}
+          {canEditGoal ? (
+            <GoalDetailMenu goal={editable} canDelete={canDelete} canEdit={canEditGoal} canAssignOwner={mayAssign}
+              completed={okr.completedAt != null} afterDelete={back.fallbackHref} />
+          ) : <CopyLinkButton okrId={okr.id} />}
+        </>}
       />
       {viewOnly ? <GoalReadOnlyStrip okrId={okr.id} ownerFirstName={owner?.firstName ?? null} /> : null}
 

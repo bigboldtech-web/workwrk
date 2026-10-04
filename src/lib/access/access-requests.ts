@@ -12,6 +12,7 @@
 
 import { prisma } from "../prisma";
 import type { NodeRef } from "./node-rules";
+import type { ObjectShareKind, PanelRole } from "./access-panel";
 
 export type RequestRole = "VIEW" | "COMMENT" | "EDIT";
 export type RequestStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
@@ -38,6 +39,34 @@ export function requestNodeRef(objectType: string, objectId: string): NodeRef | 
     default:
       return null;
   }
+}
+
+/**
+ * The object beside the nodes a request names, which the one share dialog
+ * serves (batch 7): a tool, a goal, an SOP folder, a team. A request on one
+ * is granted through its own writer (src/lib/access/object-share), and only
+ * while ACCESS_V2_TABLES is on; the routes check the flag. A request on a
+ * single SOP is not one of them: answering it by sharing the SOP's folder
+ * would open every SOP in it, so it is shared from the SOP itself.
+ */
+export function requestObjectKind(objectType: string): ObjectShareKind | null {
+  return objectType === "tool" || objectType === "goal" || objectType === "sop_folder" || objectType === "team" ? objectType : null;
+}
+
+/** The role answering an ask gives on such an object, in what its store can hold. */
+export function objectGrantRole(kind: ObjectShareKind, asked: RequestRole): PanelRole {
+  // A goal row has one role (Can check in); a team's people join as Members.
+  if (kind === "goal") return "EDIT";
+  if (kind === "team") return "VIEW";
+  // No comments live on a tool or an SOP folder: Can comment asks read Can view.
+  return asked === "EDIT" ? "EDIT" : "VIEW";
+}
+
+/** The answers the Access requests card offers for an ask on such an object, strongest first. */
+export function objectRequestGrants(kind: ObjectShareKind, asked: RequestRole): Array<{ role: RequestRole; label: string }> {
+  if (kind === "goal") return [{ role: "EDIT", label: "Add as contributor" }];
+  if (kind === "team") return [{ role: "VIEW", label: "Add to the team" }];
+  return objectGrantRole(kind, asked) === "EDIT" ? [{ role: "EDIT", label: "Give edit" }, { role: "VIEW", label: "Give view" }] : [{ role: "VIEW", label: "Give view" }];
 }
 
 /**
