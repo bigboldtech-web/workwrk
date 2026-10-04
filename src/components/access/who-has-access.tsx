@@ -19,7 +19,7 @@ import { Globe, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar-stack";
 import {
   panelRoleLabel, shareRoleLabel,
-  type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type AccessPerson, type ShareKind,
+  type AccessDirectEntry, type AccessPanel, type AccessPerson, type ShareKind,
 } from "@/lib/access/access-panel";
 import {
   adminsLine, alsoViaText, capText, everyoneLine, groupInherited, hasOlderRule, inheritedHeader,
@@ -147,7 +147,12 @@ export function InheritedAccess({
             {g.entries.length > 0 ? (
               <ul className="m-0 list-none divide-y divide-line-soft p-0">
                 {g.entries.map((e) => (
-                  <AccessPersonRow key={`${g.key}:${e.person.id}`} person={e.person} isYou={e.person.id === meId}>
+                  <AccessPersonRow
+                    key={`${g.key}:${e.person.id}`}
+                    person={e.person}
+                    isYou={e.person.id === meId}
+                    sub={e.note ? <span className="block text-xs text-ink-2">{e.note}</span> : undefined}
+                  >
                     <RoleWord role={e.role} kind={panel.node.kind} />
                   </AccessPersonRow>
                 ))}

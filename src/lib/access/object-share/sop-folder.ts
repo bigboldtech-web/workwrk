@@ -53,13 +53,6 @@ async function chainOf(db: Tx | typeof prisma, organizationId: string, folderId:
     SELECT id, name, "parentId" FROM chain ORDER BY depth`;
 }
 
-/** The strongest role among rows. */
-function strongest(roles: PanelRole[]): PanelRole | null {
-  let best: PanelRole | null = null;
-  for (const r of roles) if (!best || rank(r) > rank(best)) best = r;
-  return best;
-}
-
 type AccessRow = { folderId: string; userId: string; role: SOPFolderRole };
 
 /** The role a person holds at chain position `from` (that folder or above): grants cascade down. */
@@ -88,6 +81,13 @@ async function editsSops(userId: string, organizationId: string, accessLevel: st
 }
 
 const NO_SOP_EDIT_NOTE = "Their workspace role can't edit SOPs: they read the drafts here but can't save changes.";
+const AGENT_OWNER_NOTE = "An Agent never changes who can open a folder, so this works as Can edit.";
+
+/** A folder above this one, named only when the viewer can open it; else "a place you cannot open". */
+function viaAt(ctx: ObjectShareCtx, rows: readonly AccessRow[], chain: readonly ChainRow[], at: number): AccessVia {
+  if (!ctx.orgAdmin && !viewerRoleAt(ctx, rows, chain, at)) return { type: "hidden" };
+  return { type: "node", kind: KIND, id: chain[at].id, name: chain[at].name, href: hrefOf(chain[at].id), canManage: managesWith(ctx, viewerRoleAt(ctx, rows, chain, at)) };
+}
 
 export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<AccessPanel | null> {
   const chain = await chainOf(prisma, ctx.organizationId, id);
@@ -104,14 +104,8 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
   const canManage = managesWith(ctx, viewerRole);
   const maxGrant: PanelRole | null = canManage ? (ctx.orgAdmin ? "FULL" : viewerRole) : null;
 
-  const viaFor = (at: number): AccessVia => ({
-    type: "node",
-    kind: KIND,
-    id: chain[at].id,
-    name: chain[at].name,
-    href: hrefOf(chain[at].id),
-    canManage: managesWith(ctx, viewerRoleAt(ctx, live, chain, at)),
-  });
+  const viaFor = (at: number): AccessVia => viaAt(ctx, live, chain, at);
+  const levelOf = new Map(live.map((r) => [r.userId, String(r.user.accessLevel)]));
 
   const people = new Map(live.map((r) => [r.userId, r.user]));
   const direct: AccessDirectEntry[] = [];
@@ -119,6 +113,11 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     const role = ROLE_OF[r.role];
     const above = roleFrom(live, chain, 1, r.userId);
     const editable = canManage && !!maxGrant && rank(role) <= rank(maxGrant);
+    const self = r.userId === ctx.userId;
+    // Another way in at this role or above. For the viewer's own row an equal
+    // role counts too, so removing it is never called a loss of managing.
+    let alsoVia: AccessDirectEntry["alsoVia"] = above && (rank(above.role) > rank(role) || (self && rank(above.role) >= rank(role))) ? { role: above.role, via: viaFor(above.at) } : null;
+    if (self && ctx.orgAdmin) alsoVia = { role: "FULL", via: { type: "org_admin", orgName: await orgNameOf(ctx.organizationId) } };
     const entry: AccessDirectEntry = {
       person: personOf(r.user),
       role,
@@ -128,9 +127,13 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
       removable: editable,
       lastFull: false,
       cap: false,
-      alsoVia: above && rank(above.role) > rank(role) ? { role: above.role, via: viaFor(above.at) } : null,
+      alsoVia,
     };
-    if (rank(role) >= rank("EDIT") && !(await editsSops(r.userId, ctx.organizationId, String(r.user.accessLevel)))) entry.note = NO_SOP_EDIT_NOTE;
+    const level = String(r.user.accessLevel);
+    // The caveat follows the strongest role the row shows, its own or the one beside it.
+    const shown = alsoVia && rank(alsoVia.role) > rank(role) ? alsoVia.role : role;
+    if (level === "AGENT" && rank(shown) >= rank("FULL")) entry.note = AGENT_OWNER_NOTE;
+    else if (rank(shown) >= rank("EDIT") && !(await editsSops(r.userId, ctx.organizationId, level))) entry.note = NO_SOP_EDIT_NOTE;
     direct.push(entry);
   }
   direct.sort((a, b) => rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
@@ -145,7 +148,11 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     const user = people.get(userId);
     if (!from || !user) continue;
     const list = groups.get(from.at) ?? [];
-    list.push({ person: personOf(user), role: from.role, via: viaFor(from.at) });
+    const entry: AccessInheritedEntry = { person: personOf(user), role: from.role, via: viaFor(from.at) };
+    const level = levelOf.get(userId) ?? "EMPLOYEE";
+    if (level === "AGENT" && from.role === "FULL") entry.note = AGENT_OWNER_NOTE;
+    else if (rank(from.role) >= rank("EDIT") && !(await editsSops(userId, ctx.organizationId, level))) entry.note = NO_SOP_EDIT_NOTE;
+    list.push(entry);
     groups.set(from.at, list);
   }
   const inherited: AccessInheritedEntry[] = [];
@@ -179,7 +186,7 @@ async function freshPanel(ctx: ObjectShareCtx, id: string): Promise<AccessPanel 
 }
 
 /** The actor's right to change who has access, read inside the transaction from the locked folder's chain. */
-async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<{ chain: ChainRow[]; maxGrant: PanelRole }> {
+async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<{ chain: ChainRow[]; maxGrant: PanelRole; mine: AccessRow[] }> {
   const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "SOPFolder" WHERE id = ${id} AND "organizationId" = ${ctx.organizationId} FOR UPDATE`;
   if (locked.length === 0) throw new GrantError("not_found");
   const chain = await chainOf(tx, ctx.organizationId, id);
@@ -187,7 +194,7 @@ async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<{ cha
   const role = viewerRoleAt(ctx, mine, chain, 0);
   if (!role) throw new GrantError("not_found");
   if (!managesWith(ctx, role)) throw new GrantError("forbidden");
-  return { chain, maxGrant: ctx.orgAdmin ? "FULL" : role };
+  return { chain, maxGrant: ctx.orgAdmin ? "FULL" : role, mine };
 }
 
 async function withFreshPanel<T>(ctx: ObjectShareCtx, id: string, fn: () => Promise<T>): Promise<T> {
@@ -241,24 +248,24 @@ export async function setSopFolderGrant(ctx: ObjectShareCtx, id: string, body: G
 export async function removeSopFolderGrant(ctx: ObjectShareCtx, id: string, input: { userId: string; expected?: PanelRole | null }): Promise<GrantWriteResult> {
   const out = await withFreshPanel(ctx, id, () =>
     prisma.$transaction(async (tx) => {
-      const { chain, maxGrant } = await actorGate(tx, ctx, id);
+      const { chain, maxGrant, mine } = await actorGate(tx, ctx, id);
       const cur = await tx.sOPFolderAccess.findUnique({ where: { folderId_userId: { folderId: id, userId: input.userId } }, select: { role: true } });
       const curRole = cur ? ROLE_OF[cur.role] : null;
+      // Removing a row that is not there changed nothing: a retry is a
+      // success, whatever role the retry still names.
+      if (!cur || !curRole) return { noChange: true, previousRole: null, above: null as { role: PanelRole; at: number } | null, chain, mine };
       if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
-      // Removing a row that is not there changed nothing: a retry is a success.
-      if (!cur || !curRole) return { noChange: true, previousRole: null, above: null as { role: PanelRole; at: number } | null, chain };
       if (rank(curRole) > rank(maxGrant)) throw new GrantError("above_own_role");
       await tx.sOPFolderAccess.delete({ where: { folderId_userId: { folderId: id, userId: input.userId } } });
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: cur.role, store: "SOPFolderAccess" });
       const rest = await tx.sOPFolderAccess.findMany({ where: { userId: input.userId, folderId: { in: chain.map((c) => c.id) } }, select: { folderId: true, userId: true, role: true } });
-      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain };
+      return { noChange: false, previousRole: curRole, above: roleFrom(rest, chain, 1, input.userId), chain, mine };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
-  // Still reaches it through a folder above: said after the removal, as for a node.
-  const stillReaches = out.above
-    ? { role: out.above.role, via: { type: "node" as const, kind: KIND, id: out.chain[out.above.at].id, name: out.chain[out.above.at].name, href: hrefOf(out.chain[out.above.at].id), canManage: false } }
-    : null;
+  // Still reaches it through a folder above: said after the removal, as for
+  // a node, and named only when the viewer can open that folder.
+  const stillReaches = out.above ? { role: out.above.role, via: viaAt(ctx, out.mine, out.chain, out.above.at) } : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
 }
@@ -284,7 +291,11 @@ export async function checkSopFolderAccess(
   }
   const from = roleFrom(rows, chain, 0, userId);
   if (!from) return { userId, name, role: "none", sentence: "No access. Nothing shares this folder with them, or any folder above it." };
-  const where = from.at === 0 ? "Shared with them directly." : `From SOP folder ${chain[from.at].name}.`;
+  const named = ctx.orgAdmin || !!viewerRoleAt(ctx, rows, chain, from.at);
+  const where = from.at === 0 ? "Shared with them directly." : named ? `From SOP folder ${chain[from.at].name}.` : "From a folder above it.";
+  if (level === "AGENT" && from.role === "FULL") {
+    return { userId, name, role: "EDIT", sentence: `${shareRoleLabel(KIND, "EDIT")}. ${where} An Agent never changes who can open a folder.` };
+  }
   const caveat = rank(from.role) >= rank("EDIT") && !(await editsSops(userId, ctx.organizationId, level)) ? ` ${NO_SOP_EDIT_NOTE}` : "";
   return { userId, name, role: from.role, sentence: `${shareRoleLabel(KIND, from.role)}. ${where}${caveat}` };
 }

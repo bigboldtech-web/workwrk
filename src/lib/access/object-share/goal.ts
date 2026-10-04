@@ -24,9 +24,11 @@
 //               there, and the step-7 copy would eat an untagged one.
 
 import { prisma } from "@/lib/prisma";
-import { canSeeGoal } from "@/lib/goal-audience";
-import { goalCreatorIds, goalRightsActor, ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
-import { mayDeleteGoal, mayEditGoal, type GoalRightsTarget } from "@/lib/goals/goal-rights";
+import { isManager } from "@/lib/api-helpers";
+import { canSeeGoal, memberVisibilityOr, seesUnownedGoals, teamAudienceVisibilityOr } from "@/lib/goal-audience";
+import { goalCreatorIds, goalRightsActor, isOrgWideAlignment, ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
+import { mayDeleteGoal, mayEditGoal, type GoalRightsActor, type GoalRightsTarget } from "@/lib/goals/goal-rights";
+import { getTeamUserIds } from "@/lib/team";
 import { getUserTagIds } from "@/lib/user-tags";
 import { resolveRequestsFor } from "../access-requests";
 import { GrantError } from "../grants";
@@ -56,9 +58,61 @@ const nameOf = (u: { firstName: string | null; lastName: string | null; email: s
 
 /** What the viewer may do: see, edit (and so change who contributes), delete. */
 async function rightsOf(session: ReturnType<typeof sessionFor>, goal: GoalRow, target: GoalRightsTarget) {
-  if (!(await canSeeGoal(session, goal))) return { seen: false, edit: false, del: false };
+  if (!(await canSeeGoal(session, goal))) return { seen: false, edit: false, del: false, actor: null };
   const actor = await goalRightsActor(session);
-  return { seen: true, edit: mayEditGoal(actor, target), del: mayDeleteGoal(actor, target) };
+  return { seen: true, edit: mayEditGoal(actor, target), del: mayDeleteGoal(actor, target), actor };
+}
+
+/**
+ * Why someone edits (or deletes) this goal, by mayEditGoal's own order. The
+ * People team edits, never deletes: a delete is never put down to it.
+ */
+function rightsReason(actor: GoalRightsActor, goal: GoalRow, target: GoalRightsTarget, userId: string, ownerName: string, forDelete: boolean): string {
+  return RIGHTS_WORDS[rightsSource(actor, goal, target, userId, forDelete)].sentence(ownerName);
+}
+
+type RightsSource = "admin" | "owner" | "people" | "creator" | "chain";
+
+function rightsSource(actor: GoalRightsActor, goal: GoalRow, target: GoalRightsTarget, userId: string, forDelete: boolean): RightsSource {
+  if (actor.admin) return "admin";
+  if (goal.ownerId === userId) return "owner";
+  if (!forDelete && actor.peopleTeam) return "people";
+  if (goal.level !== "COMPANY" && target.creatorId === userId) return "creator";
+  return "chain";
+}
+
+const RIGHTS_WORDS: Readonly<Record<RightsSource, { sentence: (owner: string) => string; via: (owner: string) => string }>> = {
+  admin: { sentence: () => "They are an Owner or Admin.", via: () => "as an Owner or Admin" },
+  owner: { sentence: () => "They own this goal.", via: () => "as its owner" },
+  people: { sentence: () => "They are on the People team.", via: () => "as the People team" },
+  creator: { sentence: () => "They made this goal.", via: () => "as the person who made it" },
+  chain: { sentence: (owner) => `${owner} reports to them.`, via: (owner) => `as someone ${owner} reports to` },
+};
+
+/**
+ * Would canSeeGoal still hold for this person without their own contributor
+ * row? The same doors (goal-audience.ts canSeeGoal): an org-wide level, a
+ * Company goal, the owner, a Department goal of their department, a
+ * department, job title or tag row, and a manager's tree (their reports'
+ * rows, never their own).
+ */
+async function seesWithoutOwnRow(session: ReturnType<typeof sessionFor>, goal: GoalRow): Promise<boolean> {
+  const { id: userId, organizationId } = session.user;
+  if (isOrgWideAlignment(session) || goal.level === "COMPANY" || goal.ownerId === userId) return true;
+  const me = await prisma.user.findUnique({ where: { id: userId }, select: { departmentId: true, roleId: true } });
+  if (goal.level === "DEPARTMENT" && goal.departmentId && me?.departmentId === goal.departmentId) return true;
+  const tagIds = await getUserTagIds(organizationId, userId);
+  // Their department, job title and tags: memberVisibilityOr's first fragment
+  // is their own row, which is the one left out.
+  const groupOr = memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds }).slice(1);
+  if (groupOr.length > 0 && (await prisma.oKR.count({ where: { id: goal.id, OR: groupOr } })) > 0) return true;
+  const reports = (await getTeamUserIds(organizationId, userId)).filter((id) => id !== userId);
+  const manager = isManager(session);
+  if (!manager && reports.length === 0) return false;
+  if (!goal.ownerId && seesUnownedGoals({ manager })) return true;
+  if (goal.ownerId && reports.includes(goal.ownerId)) return true;
+  const teamOr = await teamAudienceVisibilityOr(reports);
+  return teamOr.length > 0 && (await prisma.oKR.count({ where: { id: goal.id, OR: teamOr } })) > 0;
 }
 
 async function rightsTargetOf(organizationId: string, goal: GoalRow): Promise<GoalRightsTarget> {
@@ -78,7 +132,8 @@ async function groupWords(organizationId: string, rows: readonly AssigneeRow[]) 
   const [depts, roles, tags] = await Promise.all([
     ids("departmentId").length ? prisma.department.findMany({ where: { id: { in: ids("departmentId") }, organizationId }, select: { id: true, name: true } }) : [],
     ids("roleId").length ? prisma.role.findMany({ where: { id: { in: ids("roleId") }, organizationId }, select: { id: true, title: true } }) : [],
-    ids("tagId").length ? prisma.tag.findMany({ where: { id: { in: ids("tagId") }, organizationId }, select: { id: true, name: true } }) : [],
+    // An archived tag matches nobody (getUserTagIds), so its row gives no note.
+    ids("tagId").length ? prisma.tag.findMany({ where: { id: { in: ids("tagId") }, organizationId, archived: false }, select: { id: true, name: true } }) : [],
   ]);
   return {
     dept: new Map(depts.map((d) => [d.id, d.name])),
@@ -109,22 +164,31 @@ export async function goalPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   const me = await rightsOf(ctx.session, goal, target);
   // Someone who cannot see the goal never learns it exists.
   if (!me.seen) return null;
-  const canManage = me.edit;
+  // An Agent never shares (the house rule), whatever the goal lets it edit.
+  const canManage = me.edit && !ctx.isAgent;
   const rows = await assigneeRows(prisma, id);
   const userIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => !!v))];
   const lookIds = [...new Set([...userIds, ...(goal.ownerId ? [goal.ownerId] : []), ...(target.creatorId ? [target.creatorId] : [])])];
   const users = lookIds.length
-    ? await prisma.user.findMany({ where: { id: { in: lookIds }, organizationId: ctx.organizationId, deletedAt: null }, select: USER_SELECT })
+    ? await prisma.user.findMany({ where: { id: { in: lookIds }, organizationId: ctx.organizationId, deletedAt: null }, select: { ...USER_SELECT, accessLevel: true } })
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
   const owner = goal.ownerId ? byId.get(goal.ownerId) ?? null : null;
+  const ownerName = nameOf(owner);
 
   const direct: AccessDirectEntry[] = [];
   if (owner) direct.push({ person: personOf(owner), role: "FULL", owner: true, source: "Owner", editable: false, removable: false, lastFull: false, cap: false, alsoVia: null });
   for (const uid of userIds) {
     const u = byId.get(uid);
     if (!u || uid === goal.ownerId) continue;
-    direct.push({ person: personOf(u), role: "EDIT", owner: false, source: "GoalAssignee", editable: false, removable: canManage, lastFull: false, cap: false, alsoVia: null });
+    const entry: AccessDirectEntry = { person: personOf(u), role: "EDIT", owner: false, source: "GoalAssignee", editable: false, removable: canManage, lastFull: false, cap: false, alsoVia: null };
+    // A contributor row never gives editing: the viewer who edits keeps that
+    // when their own row goes, unless the row was their only way to see it.
+    if (uid === ctx.userId && canManage && me.actor && (await seesWithoutOwnRow(ctx.session, goal))) {
+      const source = rightsSource(me.actor, goal, target, ctx.userId, false);
+      entry.alsoVia = { role: "EDIT", via: { type: "rule", text: RIGHTS_WORDS[source].via(ownerName ?? "the owner") } };
+    }
+    direct.push(entry);
   }
   direct.sort((a, b) => Number(b.owner) - Number(a.owner) || a.person.name.localeCompare(b.person.name));
 
@@ -145,14 +209,17 @@ export async function goalPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     }
     notes.push("Departments, job titles and tags change on the goal's Contributors row.");
   }
-  const ownerName = nameOf(owner);
   if (goal.level !== "COMPANY") {
     if (ownerName) notes.push(`Anyone ${ownerName} reports to can view it, and edit it if they are a team lead or above.`);
     else if (!goal.ownerId) notes.push("It has no owner, so team leads and above can view it.");
+    if (rows.length > 0) notes.push("Anyone a contributor reports to can view it.");
+    // The creator edits it only while they can see it (canSeeGoal has no creator door).
     const creator = target.creatorId && target.creatorId !== goal.ownerId ? byId.get(target.creatorId) : null;
-    if (creator) notes.push(`${nameOf(creator)} made it and can edit it.`);
+    if (creator && (await canSeeGoal(sessionFor(creator.id, ctx.organizationId, String(creator.accessLevel)), goal))) notes.push(`${nameOf(creator)} made it and can edit it.`);
   }
-  notes.push("Executives, VPs, Directors and the People team see every goal, and the People team can edit it.");
+  // By member type, as canSeeGoal reads it; the People team (the HR member type
+  // or the list in Settings, Access) edits only the goals it can see.
+  notes.push("Anyone whose member type is Executive, VP, Director or People team sees every goal. The People team can edit any goal they can see.");
 
   return {
     node: { kind: KIND, id: goal.id, name: goal.title, noun: ACCESS_NODE_NOUN[KIND], href: hrefOf(goal.id), space: null, notepadOwner: null },
@@ -183,7 +250,7 @@ async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<GoalR
   if (!goal) throw new GrantError("not_found");
   const me = await rightsOf(ctx.session, goal, await rightsTargetOf(ctx.organizationId, goal));
   if (!me.seen) throw new GrantError("not_found");
-  if (!me.edit) throw new GrantError("forbidden");
+  if (!me.edit || ctx.isAgent) throw new GrantError("forbidden");
   return goal;
 }
 
@@ -232,9 +299,10 @@ export async function removeGoalGrant(ctx: ObjectShareCtx, id: string, input: { 
       if (goal.ownerId === input.userId) throw new GrantError("owner_fixed");
       const cur = await tx.goalAssignee.findFirst({ where: { okrId: id, userId: input.userId }, select: { id: true } });
       const curRole: PanelRole | null = cur ? "EDIT" : null;
-      if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
-      // Removing a row that is not there changed nothing: a retry is a success.
+      // Removing a row that is not there changed nothing: a retry is a
+      // success, whatever role the retry still names.
       if (!cur) return { noChange: true, previousRole: null, goal };
+      if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
       await tx.goalAssignee.deleteMany({ where: { okrId: id, userId: input.userId } });
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: "EDIT", store: "GoalAssignee" });
       return { noChange: false, previousRole: curRole, goal };
@@ -275,14 +343,8 @@ async function goalFacts(organizationId: string, goal: GoalRow, userId: string) 
   const owner = goal.ownerId ? await prisma.user.findFirst({ where: { id: goal.ownerId, organizationId }, select: { firstName: true, lastName: true, email: true } }) : null;
   const ownerName = nameOf(owner) ?? "the owner";
 
-  let editWhy: string | null = null;
-  if (actor && edit) {
-    if (actor.admin) editWhy = "They are an Owner or Admin.";
-    else if (goal.ownerId === person.id) editWhy = "They own this goal.";
-    else if (actor.peopleTeam) editWhy = "They are on the People team.";
-    else if (goal.level !== "COMPANY" && target.creatorId === person.id) editWhy = "They made this goal.";
-    else editWhy = `${ownerName} reports to them.`;
-  }
+  // A delete is put down to what grants it (never the People team).
+  const editWhy = actor && edit ? rightsReason(actor, goal, target, person.id, ownerName, del) : null;
   let viewWhy: string | null = null;
   if (seen) {
     if (ORG_WIDE_ALIGNMENT_LEVELS.has(level)) viewWhy = "through their workspace role, which sees every goal";
@@ -304,7 +366,7 @@ export async function checkGoalAccess(
   if (!goal) return "not_found";
   const me = await rightsOf(ctx.session, goal, await rightsTargetOf(ctx.organizationId, goal));
   if (!me.seen) return "not_found";
-  if (!me.edit) return "forbidden";
+  if (!me.edit || ctx.isAgent) return "forbidden";
   const f = await goalFacts(ctx.organizationId, goal, userId);
   if (!f) return "not_in_org";
   if (f.del) return { userId, name: f.name, role: "FULL", sentence: `Full access: edit, check in and delete. ${f.editWhy}` };

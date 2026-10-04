@@ -159,14 +159,16 @@ export function CopyLinkButton({ okrId }: { okrId: string }) {
  * owner and the goal's rules. A change refreshes the page, so the Contributors
  * row and the check-in controls follow it.
  */
-export function GoalShareDoor({ okrId, title, canShare, canCheckIn }: { okrId: string; title: string; canShare: boolean; canCheckIn: boolean }) {
+export function GoalShareDoor({ okrId, title, canShare, canEdit, canCheckIn }: { okrId: string; title: string; canShare: boolean; canEdit: boolean; canCheckIn: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<"share" | "who" | null>(null);
+  // The chip's word: someone who edits but never shares (an Agent) reads Can
+  // edit; a contributor, Can check in; everyone else, Can view.
   return (
     <>
       <ShareOrRoleChip
-        role={canShare ? "FULL" : canCheckIn ? "EDIT" : "VIEW"}
-        label={!canShare && canCheckIn ? shareRoleLabel("goal", "EDIT") : undefined}
+        role={canShare ? "FULL" : canEdit || canCheckIn ? "EDIT" : "VIEW"}
+        label={!canShare && !canEdit && canCheckIn ? shareRoleLabel("goal", "EDIT") : undefined}
         onOpen={setMode}
       />
       <ShareDialog

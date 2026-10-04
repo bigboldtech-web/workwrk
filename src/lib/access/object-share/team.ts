@@ -7,10 +7,11 @@
 //   who sees    whoever opens Members (the Teams tab's readers) and the
 //               team's own people
 //   who changes Owners and Admins, read fresh from the database as the
-//               team routes read them; and the team's leads, who add and
+//               team routes read them; and the team's leads who can open
+//               Settings > Members (the dialog's only door), who add and
 //               remove its members. Only Owners and Admins make someone a
 //               lead or take it away: a lead never hands out what they hold,
-//               and never changes another lead
+//               and never changes another lead. An Agent lead changes nothing
 //   what a team a named group: being on it opens nothing else (no grant
 //   opens        names a team yet), and the dialog says so
 //   writes      one row at a time in a transaction that locks the team row,
@@ -49,33 +50,49 @@ async function freshAdmin(ctx: ObjectShareCtx): Promise<boolean> {
   return fresh.ok && fresh.admin;
 }
 
-/** What the viewer may give: an Admin anything, a lead Member only, anyone else nothing. */
-function maxGrantOf(admin: boolean, mine: PanelRole | null, isAgent: boolean): PanelRole | null {
+/**
+ * Opens Settings > Members, where the team dialog's only door is (the
+ * manager tier today). A lead who cannot is never told they change members.
+ */
+async function opensMembers(session: ObjectShareCtx["session"]): Promise<boolean> {
+  return settingsDoorAllows("members", session).catch(() => false);
+}
+
+const sessionFor = (userId: string, organizationId: string, accessLevel: string) => ({ user: { id: userId, organizationId, accessLevel } });
+
+/** What the viewer may give: an Admin anything; a lead who can open Members, Member only; anyone else nothing. */
+function maxGrantOf(admin: boolean, mine: PanelRole | null, isAgent: boolean, door: boolean): PanelRole | null {
   if (isAgent) return null;
   if (admin) return "FULL";
-  return mine === "FULL" ? "VIEW" : null;
+  return mine === "FULL" && door ? "VIEW" : null;
 }
+
+const AGENT_LEAD_NOTE = "An Agent lead never adds or takes off members.";
+const DOORLESS_LEAD_NOTE = "They can't open Members, so they don't change who is on it.";
 
 export async function teamPanel(ctx: ObjectShareCtx, id: string): Promise<AccessPanel | null> {
   const team = await loadTeam(prisma, ctx.organizationId, id);
   if (!team) return null;
   const rows = await prisma.teamMember.findMany({
     where: { teamId: id },
-    select: { userId: true, lead: true, user: { select: { ...USER_SELECT, organizationId: true } } },
+    select: { userId: true, lead: true, user: { select: { ...USER_SELECT, organizationId: true, accessLevel: true } } },
     orderBy: { createdAt: "asc" },
   });
   const live = rows.filter((r) => r.user && !r.user.deletedAt && r.user.organizationId === ctx.organizationId);
   const mine = roleOfRow(live.find((r) => r.userId === ctx.userId));
   const admin = await freshAdmin(ctx);
+  const door = admin || (await opensMembers(ctx.session));
   // The team's own people read it, and whoever opens Members reads every team.
-  if (!mine && !admin && !(await settingsDoorAllows("members", ctx.session))) return null;
-  const maxGrant = maxGrantOf(admin, mine, ctx.isAgent);
+  if (!mine && !door) return null;
+  const maxGrant = maxGrantOf(admin, mine, ctx.isAgent, door);
   const canManage = maxGrant !== null;
+  const orgName = await orgNameOf(ctx.organizationId);
 
-  const direct: AccessDirectEntry[] = live.map((r) => {
+  const direct: AccessDirectEntry[] = [];
+  for (const r of live) {
     const role = roleOfRow(r)!;
     const editable = canManage && rank(role) <= rank(maxGrant);
-    return {
+    const entry: AccessDirectEntry = {
       person: personOf(r.user),
       role,
       owner: false,
@@ -85,12 +102,19 @@ export async function teamPanel(ctx: ObjectShareCtx, id: string): Promise<Access
       removable: editable || (canManage && r.userId === ctx.userId),
       lastFull: false,
       cap: false,
-      alsoVia: null,
+      // An Admin keeps changing the team without their own row.
+      alsoVia: admin && r.userId === ctx.userId ? { role: "FULL", via: { type: "org_admin", orgName } } : null,
     };
-  });
+    if (role === "FULL") {
+      const level = String(r.user.accessLevel);
+      if (level === "AGENT") entry.note = AGENT_LEAD_NOTE;
+      else if (!(await opensMembers(sessionFor(r.userId, ctx.organizationId, level)))) entry.note = DOORLESS_LEAD_NOTE;
+    }
+    direct.push(entry);
+  }
   direct.sort((a, b) => rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
 
-  const [orgName, adminCount] = await Promise.all([orgNameOf(ctx.organizationId), orgAdminCount(ctx.organizationId)]);
+  const adminCount = await orgAdminCount(ctx.organizationId);
   return {
     node: { kind: KIND, id: team.id, name: team.name, noun: ACCESS_NODE_NOUN[KIND], href: HREF, space: null, notepadOwner: null },
     viewer: { role: admin ? "FULL" : mine ?? "VIEW", canManage, maxGrant, isAgent: ctx.isAgent },
@@ -103,7 +127,7 @@ export async function teamPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     everyone: null,
     admins: { count: adminCount },
     notes: [
-      "Leads add and take off the team's members. Only Owners and Admins make someone a lead.",
+      "A lead who can open Members adds and takes off the team's members. Only Owners and Admins make someone a lead.",
       "A team is a named group: being on it opens nothing else yet.",
     ],
     orgName,
@@ -122,8 +146,9 @@ async function actorGate(tx: Tx, ctx: ObjectShareCtx, id: string): Promise<{ max
   const mineRow = await tx.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: ctx.userId } }, select: { lead: true } });
   const mine = roleOfRow(mineRow);
   const admin = await freshAdmin(ctx);
-  if (!mine && !admin && !(await settingsDoorAllows("members", ctx.session))) throw new GrantError("not_found");
-  const maxGrant = maxGrantOf(admin, mine, ctx.isAgent);
+  const door = admin || (await opensMembers(ctx.session));
+  if (!mine && !door) throw new GrantError("not_found");
+  const maxGrant = maxGrantOf(admin, mine, ctx.isAgent, door);
   if (!maxGrant) throw new GrantError("forbidden");
   return { maxGrant, admin };
 }
@@ -168,7 +193,12 @@ export async function setTeamGrant(ctx: ObjectShareCtx, id: string, body: GrantW
   );
   const panel = await freshPanel(ctx, id);
   if (!out.noChange) {
-    if (out.how !== "none" && panel) await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href: panel.node.href }, body.userId, role, out.how);
+    if (out.how !== "none" && panel) {
+      // The link only for someone who can open it: Members is the manager tier's.
+      const target = await prisma.user.findUnique({ where: { id: body.userId }, select: { accessLevel: true } });
+      const href = target && (await opensMembers(sessionFor(body.userId, ctx.organizationId, String(target.accessLevel)))) ? HREF : null;
+      await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href }, body.userId, role, out.how);
+    }
     await answerRequests(ctx, KIND, id, body.userId, role);
   }
   const change: GrantChange = { userId: body.userId, role: out.role, previousRole: out.previousRole, noChange: out.noChange, stillReaches: null, keepsInside: [] };
@@ -181,9 +211,10 @@ export async function removeTeamGrant(ctx: ObjectShareCtx, id: string, input: { 
       const { maxGrant } = await actorGate(tx, ctx, id);
       const cur = await tx.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: input.userId } }, select: { lead: true } });
       const curRole = roleOfRow(cur);
-      if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
-      // Removing a row that is not there changed nothing: a retry is a success.
+      // Removing a row that is not there changed nothing: a retry is a
+      // success, whatever role the retry still names.
       if (!curRole) return { noChange: true, previousRole: null };
+      if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
       // A lead takes off members, and themselves; never another lead.
       if (rank(curRole) > rank(maxGrant) && input.userId !== ctx.userId) throw new GrantError("above_own_role");
       await tx.teamMember.delete({ where: { teamId_userId: { teamId: id, userId: input.userId } } });
@@ -206,8 +237,9 @@ export async function checkTeamAccess(
   if (!team) return "not_found";
   const mine = roleOfRow(await prisma.teamMember.findUnique({ where: { teamId_userId: { teamId: id, userId: ctx.userId } }, select: { lead: true } }));
   const admin = await freshAdmin(ctx);
-  if (!mine && !admin && !(await settingsDoorAllows("members", ctx.session))) return "not_found";
-  if (!maxGrantOf(admin, mine, ctx.isAgent)) return "forbidden";
+  const door = admin || (await opensMembers(ctx.session));
+  if (!mine && !door) return "not_found";
+  if (!maxGrantOf(admin, mine, ctx.isAgent, door)) return "forbidden";
   const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true, accessLevel: true } });
   if (!person) return "not_in_org";
   const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email;
@@ -215,7 +247,11 @@ export async function checkTeamAccess(
   const level = String(person.accessLevel);
   const isAdmin = level === "SUPER_ADMIN" || level === "COMPANY_ADMIN";
   const adminToo = isAdmin ? " As an Owner or Admin they also change every team." : "";
-  if (role === "FULL") return { userId, name, role, sentence: `Lead. They add and take off the team's members.${adminToo}` };
+  if (role === "FULL") {
+    if (level === "AGENT") return { userId, name, role, sentence: `Lead. ${AGENT_LEAD_NOTE}` };
+    const opens = isAdmin || (await opensMembers(sessionFor(userId, ctx.organizationId, level)));
+    return { userId, name, role, sentence: opens ? `Lead. They add and take off the team's members.${adminToo}` : `Lead. ${DOORLESS_LEAD_NOTE}` };
+  }
   if (role === "VIEW") return { userId, name, role, sentence: `Member. They are on the team.${adminToo}` };
   return { userId, name, role: "none", sentence: `Not on the team.${isAdmin ? " As an Owner or Admin they change every team." : ""}` };
 }

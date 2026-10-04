@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { addressHref, workDoorHref } from "@/lib/nav/object-href";
+import { accessV2Tables } from "@/lib/access/flags";
 
 export const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | "tool" | "goal" | "doc" | "table" | "canvas" | "form" | null> = {
   space: "space",
@@ -131,13 +132,15 @@ export async function requestObjectName(type: string, id: string, organizationId
         return (await prisma.sOP.findFirst({ where, select: { title: true } }))?.title ?? null;
       case "goal":
         return (await prisma.oKR.findFirst({ where, select: { title: true } }))?.title ?? null;
-      // The card lists a request to the object's owner and the admins, who see these.
+      // Named while the one share dialog serves them (the flag), so the card
+      // says which one; with it off the card reads "a tool", as before. The
+      // card lists a request to the object's owner and the admins, who see these.
       case "tool":
-        return (await prisma.tool.findFirst({ where, select: { name: true } }))?.name ?? null;
+        return accessV2Tables() ? (await prisma.tool.findFirst({ where, select: { name: true } }))?.name ?? null : null;
       case "sop_folder":
-        return (await prisma.sOPFolder.findFirst({ where, select: { name: true } }))?.name ?? null;
+        return accessV2Tables() ? (await prisma.sOPFolder.findFirst({ where, select: { name: true } }))?.name ?? null : null;
       case "team":
-        return (await prisma.team.findFirst({ where, select: { name: true } }))?.name ?? null;
+        return accessV2Tables() ? (await prisma.team.findFirst({ where, select: { name: true } }))?.name ?? null : null;
       default:
         return null;
     }

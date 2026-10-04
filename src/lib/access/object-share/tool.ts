@@ -23,7 +23,7 @@ import { legacyIsManagerLevel } from "../legacy-levels";
 import { GrantError } from "../grants";
 import {
   ACCESS_NODE_NOUN, ROLES_BY_KIND, shareRoleLabel,
-  type AccessDirectEntry, type AccessPanel, type GrantChange, type GrantWriteBody, type GrantWriteResult, type PanelRole,
+  type AccessDirectEntry, type AccessPanel, type AccessVia, type GrantChange, type GrantWriteBody, type GrantWriteResult, type PanelRole,
 } from "../access-panel";
 import {
   NO_GENERAL, USER_SELECT, answerRequests, notifyObjectGrantee, objectActivity, orgAdminCount, orgNameOf, personOf, rank,
@@ -48,7 +48,18 @@ const viewerOf = (ctx: ObjectShareCtx) => toolViewerOf(ctx.userId, ctx.accessLev
 
 const OWNER_DEMOTED_NOTE = "Added this tool. Their workspace role no longer changes tools, so they see it and its login only.";
 const OWNER_SHARED_NOTE = "Added this tool. Their workspace role no longer changes tools, so this role decides what they can do.";
-const TOOL_ADMIN_NOTE = "Full access anyway: their workspace role manages every tool.";
+const AGENT_FULL_NOTE = "An Agent never shares or deletes, so this works as Can edit.";
+
+/**
+ * Where a person's Full access by level comes from, in words: an Owner or
+ * Admin, or a member type that manages every tool (Executive, People team).
+ * An Executive is not an Admin, so they are never called one.
+ */
+function levelVia(accessLevel: string, orgName: string): AccessVia {
+  return accessLevel === "SUPER_ADMIN" || accessLevel === "COMPANY_ADMIN"
+    ? { type: "org_admin", orgName }
+    : { type: "rule", text: "through their member type, which manages every tool" };
+}
 
 type ToolRow = { id: string; name: string; addedBy: string };
 
@@ -80,6 +91,7 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     ? await prisma.user.findMany({ where: { id: { in: shares.map((s) => s.userId) }, organizationId: ctx.organizationId, deletedAt: null }, select: { ...USER_SELECT, accessLevel: true } })
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
+  const orgName = await orgNameOf(ctx.organizationId);
 
   const direct: AccessDirectEntry[] = [];
   const ownerManages = !!owner && canManageTool(toolViewerOf(owner.id, String(owner.accessLevel)), tool);
@@ -101,8 +113,12 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
       cap: false,
       alsoVia: null,
     };
+    const level = String(u.accessLevel);
+    // Full access by member type whatever the share says: said beside the row
+    // (and the viewer's own removal is no loss of the right to share).
+    if (canManageTool(toolViewerOf(u.id, level), tool)) entry.alsoVia = { role: "FULL", via: levelVia(level, orgName) };
     if (s.userId === tool.addedBy) entry.note = OWNER_SHARED_NOTE;
-    else if (shareRole !== "FULL" && canManageTool(toolViewerOf(u.id, String(u.accessLevel)), tool)) entry.note = TOOL_ADMIN_NOTE;
+    else if (level === "AGENT" && shareRole === "FULL") entry.note = AGENT_FULL_NOTE;
     direct.push(entry);
   }
   // Added by someone whose role no longer changes tools, with no share: they
@@ -112,7 +128,7 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   }
   direct.sort((a, b) => Number(b.owner) - Number(a.owner) || rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
 
-  const [orgName, adminCount] = await Promise.all([orgNameOf(ctx.organizationId), orgAdminCount(ctx.organizationId)]);
+  const adminCount = await orgAdminCount(ctx.organizationId);
   return {
     node: { kind: KIND, id: tool.id, name: tool.name, noun: ACCESS_NODE_NOUN[KIND], href: hrefOf(tool.id), space: null, notepadOwner: null },
     viewer: { role, canManage, maxGrant, isAgent: ctx.isAgent },
@@ -124,7 +140,8 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     hiddenInherited: [],
     everyone: null,
     admins: { count: adminCount },
-    notes: ["Executives and the People team also have Full access to every tool."],
+    // By member type, as the tool gates read it (tool-access.ts), not the People team list.
+    notes: ["Anyone whose member type is Executive or People team also has Full access to every tool."],
     orgName,
     grantsAvailable: true,
   };
@@ -173,10 +190,13 @@ export async function setToolGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       if (await ownerPinned(tx, ctx.organizationId, tool, body.userId)) throw new GrantError("owner_fixed");
       const cur = await tx.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: body.userId } }, select: { role: true } });
       const curRole = toolShareRole(cur, true);
-      if (body.expected !== undefined && (body.expected ?? null) !== curRole) throw new GrantError("conflict");
+      // The role the dialog shows: a maker whose role no longer changes tools
+      // reads Can view with no share (the pinned maker was refused above).
+      const shown: PanelRole | null = curRole ?? (body.userId === tool.addedBy ? "VIEW" : null);
+      if (body.expected !== undefined && (body.expected ?? null) !== shown) throw new GrantError("conflict");
       const mode = body.mode ?? "set";
-      if (curRole && (curRole === role || (mode === "raise" && rank(curRole) >= rank(role)))) {
-        return { noChange: true, previousRole: curRole, role: curRole, how: "none" as const };
+      if (shown && (shown === role || (mode === "raise" && rank(shown) >= rank(role)))) {
+        return { noChange: true, previousRole: shown, role: shown, how: "none" as const };
       }
       const stored = storedToolShareRole(role);
       await tx.toolShare.upsert({
@@ -187,7 +207,8 @@ export async function setToolGrant(ctx: ObjectShareCtx, id: string, body: GrantW
       await objectActivity(tx, ctx, KIND, id, curRole ? "access.role_changed" : "access.granted", {
         granteeId: body.userId, role, previousRole: curRole, store: "ToolShare",
       });
-      const how = !curRole ? ("shared" as const) : rank(role) > rank(curRole) ? ("upgraded" as const) : ("none" as const);
+      // The maker already saw it: raising them is an upgrade, not a share.
+      const how = !shown ? ("shared" as const) : rank(role) > rank(shown) ? ("upgraded" as const) : ("none" as const);
       return { noChange: false, previousRole: curRole, role, how };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
@@ -207,20 +228,23 @@ export async function removeToolGrant(ctx: ObjectShareCtx, id: string, input: { 
       if (await ownerPinned(tx, ctx.organizationId, tool, input.userId)) throw new GrantError("owner_fixed");
       const cur = await tx.toolShare.findUnique({ where: { toolId_userId: { toolId: id, userId: input.userId } }, select: { role: true } });
       const curRole = toolShareRole(cur, true);
+      // Removing a share that is not there changed nothing: a retry is a
+      // success, whatever role the retry still names.
+      if (!curRole) return { noChange: true, previousRole: null, still: null as ToolRole | null, level: null as string | null };
       if (input.expected !== undefined && (input.expected ?? null) !== curRole) throw new GrantError("conflict");
-      // Removing a share that is not there changed nothing: a retry is a success.
-      if (!curRole) return { noChange: true, previousRole: null, still: null as ToolRole | null };
       await tx.toolShare.delete({ where: { toolId_userId: { toolId: id, userId: input.userId } } });
       await objectActivity(tx, ctx, KIND, id, "access.revoked", { granteeId: input.userId, role: null, previousRole: curRole, store: "ToolShare" });
       // What they keep without the share: their maker's view, or a tool admin's reach.
       const target = await targetInOrg(tx, ctx.organizationId, input.userId);
       const still = target ? toolViewerRole(toolViewerOf(target.id, target.accessLevel), tool, null) : null;
-      return { noChange: false, previousRole: curRole, still };
+      return { noChange: false, previousRole: curRole, still, level: target?.accessLevel ?? null };
     }, { timeout: 20_000, maxWait: 10_000 }),
   );
   const panel = await freshPanel(ctx, id);
+  // Full access left means a member type that manages every tool (an Admin is
+  // named as one, an Executive is not); anything less is the maker's view.
   const stillReaches = out.still
-    ? { role: out.still, via: out.still === "FULL" ? ({ type: "org_admin" as const, orgName: panel?.orgName ?? "" }) : ({ type: "owner" as const }) }
+    ? { role: out.still, via: out.still === "FULL" && out.level ? levelVia(out.level, panel?.orgName ?? await orgNameOf(ctx.organizationId)) : ({ type: "owner" as const }) }
     : null;
   const change: GrantChange = { userId: input.userId, role: null, previousRole: out.previousRole, noChange: out.noChange, stillReaches, keepsInside: [] };
   return { panel, change };
@@ -247,7 +271,8 @@ export async function checkToolAccess(
   const label = (r: PanelRole) => shareRoleLabel(KIND, r);
   if (!role) return { userId, name, role: "none", sentence: "No access. This tool is not shared with them." };
   if (canManageTool(tv, tool)) {
-    const why = userId === tool.addedBy ? "They added this tool." : "Their workspace role manages every tool.";
+    const level = String(person.accessLevel);
+    const why = userId === tool.addedBy ? "They added this tool." : level === "SUPER_ADMIN" || level === "COMPANY_ADMIN" ? "They are an Owner or Admin." : "Their member type manages every tool.";
     return { userId, name, role: "FULL", sentence: `${label("FULL")}. ${why}` };
   }
   if (tv.isAgent && share === "FULL") return { userId, name, role: "EDIT", sentence: `${label("EDIT")}. Shared with them at Full access, and an Agent never shares or deletes.` };

@@ -52,7 +52,7 @@ import {
 import { accessChanged } from "@/lib/work/container-events";
 import {
   ACCESS_NODE_NOUN, isObjectShareKind, panelRoleBlurb, panelRoleLabel, shareRoleLabel,
-  type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type GrantErrorCode, type GrantWriteBody,
+  type AccessDirectEntry, type AccessPanel, type GrantErrorCode, type GrantWriteBody,
   type GrantWriteResult, type PanelRole, type ShareKind,
 } from "@/lib/access/access-panel";
 import {

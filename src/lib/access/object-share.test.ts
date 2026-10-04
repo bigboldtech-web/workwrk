@@ -9,6 +9,7 @@ import {
 import { accessActivityDescription, accessAuditSentence } from "./access-activity";
 import { objectGrantRole, objectRequestGrants, requestNodeRef, requestObjectKind } from "./access-requests";
 import { errorText, keptHigherText, removalNotice, sentenceNoun, strayFailureText, viaText } from "@/components/access/manage-access-model";
+import { grantedNoticeText } from "./object-share/words";
 
 const change = (over: Partial<GrantChange>): GrantChange => ({ userId: "u", role: null, previousRole: "EDIT", noChange: false, stillReaches: null, keepsInside: [], ...over });
 
@@ -116,5 +117,19 @@ describe("the dialog's sentences on them", () => {
   it("word a kept role and a retry in the kind's words", () => {
     expect(keptHigherText(change({ noChange: true, role: "FULL" }), "Leo", "VIEW", "team")).toBe("Leo already has Lead, so it was kept.");
     expect(strayFailureText("Leo", "Not changed.", "VIEW", "team")).toBe("Leo: Not changed. Retry gives them Member.");
+  });
+});
+
+describe("what a person is told", () => {
+  it("joins a goal and a team, and shares a tool or an SOP folder", () => {
+    expect(grantedNoticeText("goal", "Max", "Ship it", "EDIT", "shared")).toEqual({ title: "Max added you as a contributor on Ship it", message: "You can see the goal and check in on its targets." });
+    expect(grantedNoticeText("team", "Mona", "Design", "VIEW", "shared")).toEqual({ title: "Mona added you to Design", message: "You are on this team." });
+    expect(grantedNoticeText("team", "Mona", "Design", "FULL", "upgraded")).toEqual({ title: "Mona made you a lead of Design", message: "You are on this team as its Lead." });
+    expect(grantedNoticeText("tool", "Max", "Figma", "EDIT", "shared")).toEqual({ title: "Max shared Figma with you", message: "Can edit on this Tool." });
+    expect(grantedNoticeText("sop_folder", "Max", "HR", "FULL", "upgraded")).toEqual({ title: "Max gave you Full access on HR", message: "Full access on this SOP folder." });
+  });
+
+  it("says a lead changes members only when they can reach Members", () => {
+    expect(panelRoleBlurb("team", "FULL")).toBe("On the team. A lead who can open Members adds and takes off its members.");
   });
 });

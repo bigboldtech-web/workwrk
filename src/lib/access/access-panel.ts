@@ -114,7 +114,7 @@ const OBJECT_BLURB: Readonly<Record<ObjectShareKind, Partial<Record<PanelRole, s
     EDIT: "See the goal and check in on its targets. Never rename, delete or share it.",
   },
   team: {
-    FULL: "On the team, and adds or removes its members.",
+    FULL: "On the team. A lead who can open Members adds and takes off its members.",
     VIEW: "On the team.",
   },
 };
@@ -177,7 +177,13 @@ export interface AccessDirectEntry {
   note?: string;
 }
 
-export interface AccessInheritedEntry { person: AccessPerson; role: PanelRole; via: AccessVia }
+export interface AccessInheritedEntry {
+  person: AccessPerson;
+  role: PanelRole;
+  via: AccessVia;
+  /** As on a direct row: what else decides what they can do (an SOP folder's workspace-role caveat). */
+  note?: string;
+}
 
 export interface AccessGeneral {
   visibility: "PRIVATE" | "WORKSPACE" | "ORG" | null;

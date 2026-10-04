@@ -18,11 +18,9 @@ import { accessV2Tables } from "../flags";
 import { legacyIsAdminLevel } from "../legacy-levels";
 import { RULE_1_DENIED_STATUSES } from "../resolve";
 import { accessActivityDescription, ACTIVITY_TARGET_TYPE, type AccessActivityType } from "../access-activity";
+import { grantedNoticeText } from "./words";
 import { requestRolesCoveredBy, resolveRequestsFor } from "../access-requests";
-import {
-  ACCESS_NODE_NOUN, PANEL_ROLE_RANK, shareRoleLabel,
-  type AccessGeneral, type AccessPerson, type ObjectShareKind, type PanelRole,
-} from "../access-panel";
+import { PANEL_ROLE_RANK, type AccessGeneral, type AccessPerson, type ObjectShareKind, type PanelRole } from "../access-panel";
 
 export type Tx = Prisma.TransactionClient;
 
@@ -34,8 +32,12 @@ export interface ObjectShareCtx {
   /** An org Owner or Admin (SUPER_ADMIN, COMPANY_ADMIN). */
   orgAdmin: boolean;
   isAgent: boolean;
-  /** The session shape the object gates take (hasPermission, folderGrantRole). */
-  session: { user: { id: string; organizationId: string; accessLevel: string } };
+  /**
+   * The session shape the object gates take (hasPermission, folderGrantRole,
+   * canSeeGoal), with the session's tokenVersion so the fresh checks
+   * (freshWorkspaceActor) refuse a session signed out everywhere.
+   */
+  session: { user: { id: string; organizationId: string; accessLevel: string; tokenVersion?: number } };
 }
 
 /** The flag every object kind rides behind. Read per request. */
@@ -43,21 +45,31 @@ export function objectShareOn(): boolean {
   return accessV2Tables();
 }
 
+/**
+ * The asker, or null (the routes answer 401) when the database no longer
+ * backs the session: the account is deleted or INACTIVE, or it was signed out
+ * everywhere (its tokenVersion moved). The level is the session's, as each
+ * object's own routes read it (legacySessionTiers, isOrgAdmin, canSeeGoal);
+ * the team writer re-reads an Admin fresh (freshWorkspaceActor).
+ */
 export async function objectShareCtxFromSession(): Promise<ObjectShareCtx | null> {
   const session = await getServerSession(authOptions);
-  const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string } | undefined;
+  const u = session?.user as { id?: string; organizationId?: string; accessLevel?: string; tokenVersion?: number } | undefined;
   if (!u?.id || !u.organizationId) return null;
-  return objectShareCtxFor(u.id, u.organizationId, u.accessLevel ?? "EMPLOYEE");
+  const row = await prisma.user.findUnique({ where: { id: u.id }, select: { deletedAt: true, status: true, tokenVersion: true } });
+  if (!row || row.deletedAt || RULE_1_DENIED_STATUSES.has(String(row.status))) return null;
+  if (typeof u.tokenVersion === "number" && u.tokenVersion !== row.tokenVersion) return null;
+  return objectShareCtxFor(u.id, u.organizationId, u.accessLevel ?? "EMPLOYEE", u.tokenVersion);
 }
 
-export function objectShareCtxFor(userId: string, organizationId: string, accessLevel: string): ObjectShareCtx {
+export function objectShareCtxFor(userId: string, organizationId: string, accessLevel: string, tokenVersion?: number): ObjectShareCtx {
   return {
     userId,
     organizationId,
     accessLevel,
     orgAdmin: legacyIsAdminLevel(accessLevel),
     isAgent: accessLevel === "AGENT",
-    session: { user: { id: userId, organizationId, accessLevel } },
+    session: { user: { id: userId, organizationId, accessLevel, ...(typeof tokenVersion === "number" ? { tokenVersion } : {}) } },
   };
 }
 
@@ -124,11 +136,15 @@ export async function objectActivity(
   });
 }
 
-/** Tell the person they were given access, after the write committed. Never fails the write. */
+/**
+ * Tell the person they were given access, after the write committed. Never
+ * fails the write. A null href sends no link: a page the person cannot open
+ * would be a dead end.
+ */
 export async function notifyObjectGrantee(
   ctx: ObjectShareCtx,
   kind: ObjectShareKind,
-  object: { id: string; name: string; href: string },
+  object: { id: string; name: string; href: string | null },
   granteeId: string,
   role: PanelRole,
   how: "shared" | "upgraded",
@@ -137,13 +153,13 @@ export async function notifyObjectGrantee(
   try {
     const who = await prisma.user.findUnique({ where: { id: ctx.userId }, select: { firstName: true, lastName: true, email: true } });
     const actorName = `${who?.firstName ?? ""} ${who?.lastName ?? ""}`.trim() || who?.email || "Someone";
-    const label = shareRoleLabel(kind, role);
+    const text = grantedNoticeText(kind, actorName, object.name, role, how);
     await prisma.notification.create({
       data: {
         userId: granteeId,
         type: "access_granted",
-        title: how === "shared" ? `${actorName} shared ${object.name} with you` : `${actorName} gave you ${label} on ${object.name}`,
-        message: `${label} on this ${ACCESS_NODE_NOUN[kind]}.`,
+        title: text.title,
+        message: text.message,
         link: object.href,
       },
     });

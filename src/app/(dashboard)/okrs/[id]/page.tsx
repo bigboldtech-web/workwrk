@@ -168,7 +168,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
         back={back}
         actions={<>
           {/* The one share dialog, while it serves goals (ACCESS_V2_TABLES on, batch 7). */}
-          {accessV2Tables() ? <GoalShareDoor okrId={okr.id} title={okr.title} canShare={canEditGoal} canCheckIn={canCheckIn} /> : null}
+          {accessV2Tables() ? <GoalShareDoor okrId={okr.id} title={okr.title} canShare={canEditGoal && viewer.accessLevel !== "AGENT"} canEdit={canEditGoal} canCheckIn={canCheckIn} /> : null}
           {canEditGoal ? (
             <GoalDetailMenu goal={editable} canDelete={canDelete} canEdit={canEditGoal} canAssignOwner={mayAssign}
               completed={okr.completedAt != null} afterDelete={back.fallbackHref} />
@@ -201,7 +201,8 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
             {mayAssign ? <span className="ms-2"><GoalEditLink goal={editable} label={owner ? "Change" : "Assign"} /></span> : null}
           </DetailRow>
           <DetailRow label="Contributors">
-            <OkrAudience okrId={okr.id} canEdit={canEditGoal} initialEntries={audienceEntries} initialMembers={audienceMembers.slice(0, 5)} initialTotal={audienceMembers.length} />
+            {/* Keyed on the audience so a refresh after the Share dialog changed it shows the new one. */}
+            <OkrAudience key={`${audienceEntries.map((e) => `${e.type}:${e.id}`).join(",")}#${audienceMembers.length}`} okrId={okr.id} canEdit={canEditGoal} initialEntries={audienceEntries} initialMembers={audienceMembers.slice(0, 5)} initialTotal={audienceMembers.length} />
           </DetailRow>
           <DetailRow label="Level"><span>{LEVEL_WORD[okr.level] ?? okr.level}</span></DetailRow>
           <DetailRow label="Part of">

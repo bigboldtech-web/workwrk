@@ -119,3 +119,55 @@ describe("the schema change", () => {
     expect(read("prisma/schema.prisma")).toMatch(/model ToolShare \{[\s\S]+?\n  role     String\?\n/);
   });
 });
+
+describe("review round 1", () => {
+  it("names a tool, an SOP folder or a team on the requests card only with the flag on", () => {
+    const target = read("src/lib/access/access-request-target.ts");
+    for (const [kind, model] of [["tool", "tool"], ["sop_folder", "sOPFolder"], ["team", "team"]]) {
+      expect(target).toMatch(new RegExp(`case "${kind}":\\n\\s+return accessV2Tables\\(\\) \\? \\(await prisma\\.${model}\\.findFirst`));
+    }
+  });
+
+  it("leaves the live activity feed's targets as they were (no team or SOP folder entry)", () => {
+    const targets = read("src/lib/activity-targets.ts");
+    expect(targets).not.toMatch(/\n  team: \{/);
+    expect(targets).not.toMatch(/\n  sop_folder: \{/);
+  });
+
+  it("opens each object only through its own app row", () => {
+    const index = read("src/lib/access/object-share/index.ts");
+    expect(index).toMatch(/const APP_OF: Readonly<Partial<Record<ObjectShareKind, AppKey>>> = \{ tool: "tools", goal: "goals", sop_folder: "sops" \};/);
+    expect(index).toMatch(/return !\("error" in \(await requireApp\(key\)\)\);/);
+    expect(index).toMatch(/export async function objectAccessPanel[^{]+\{\n\s+if \(!\(await appOpen\(kind\)\)\) return null;/);
+    expect(index).toMatch(/export async function checkObjectAccess[^{]+\{\n\s+if \(!\(await appOpen\(kind\)\)\) return "not_found";/);
+  });
+
+  it("refuses a session the database no longer backs", () => {
+    const common = read("src/lib/access/object-share/common.ts");
+    expect(common).toMatch(/if \(!row \|\| row\.deletedAt \|\| RULE_1_DENIED_STATUSES\.has\(String\(row\.status\)\)\) return null;/);
+    expect(common).toMatch(/if \(typeof u\.tokenVersion === "number" && u\.tokenVersion !== row\.tokenVersion\) return null;/);
+  });
+
+  for (const name of ADAPTERS) {
+    it(`${name}: a repeated removal is a no change, never a conflict`, () => {
+      const src = read(`src/lib/access/object-share/${name}.ts`);
+      const remove = src.slice(src.indexOf("export async function remove"));
+      expect(remove.indexOf("noChange: true")).toBeGreaterThan(-1);
+      expect(remove.indexOf("noChange: true")).toBeLessThan(remove.indexOf('throw new GrantError("conflict")'));
+    });
+  }
+
+  it("never lets an Agent share a goal, and a team lead changes members only through the door they can open", () => {
+    const goal = read("src/lib/access/object-share/goal.ts");
+    expect(goal).toMatch(/const canManage = me\.edit && !ctx\.isAgent;/);
+    expect(goal).toMatch(/if \(!me\.edit \|\| ctx\.isAgent\) throw new GrantError\("forbidden"\);/);
+    expect(goal).toMatch(/if \(!me\.edit \|\| ctx\.isAgent\) return "forbidden";/);
+    expect(read("src/app/(dashboard)/okrs/[id]/page.tsx")).toMatch(/canShare=\{canEditGoal && viewer\.accessLevel !== "AGENT"\}/);
+    const team = read("src/lib/access/object-share/team.ts");
+    expect(team).toMatch(/return mine === "FULL" && door \? "VIEW" : null;/);
+  });
+
+  it("refreshes the goal's Contributors row after the dialog changes it", () => {
+    expect(read("src/app/(dashboard)/okrs/[id]/page.tsx")).toMatch(/<OkrAudience key=\{`\$\{audienceEntries\.map\(\(e\) => `\$\{e\.type\}:\$\{e\.id\}`\)\.join\(","\)\}#\$\{audienceMembers\.length\}`\}/);
+  });
+});
