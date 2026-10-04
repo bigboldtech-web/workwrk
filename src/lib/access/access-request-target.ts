@@ -131,6 +131,13 @@ export async function requestObjectName(type: string, id: string, organizationId
         return (await prisma.sOP.findFirst({ where, select: { title: true } }))?.title ?? null;
       case "goal":
         return (await prisma.oKR.findFirst({ where, select: { title: true } }))?.title ?? null;
+      // The card lists a request to the object's owner and the admins, who see these.
+      case "tool":
+        return (await prisma.tool.findFirst({ where, select: { name: true } }))?.name ?? null;
+      case "sop_folder":
+        return (await prisma.sOPFolder.findFirst({ where, select: { name: true } }))?.name ?? null;
+      case "team":
+        return (await prisma.team.findFirst({ where, select: { name: true } }))?.name ?? null;
       default:
         return null;
     }

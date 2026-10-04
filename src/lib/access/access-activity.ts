@@ -62,6 +62,12 @@ const withArticle = (noun: string) => `${/^([AEIOU]|SOP\b)/.test(noun) ? "an" : 
 /** The one sentence an access row carries: the kind of change and the noun, nothing else. */
 export function accessActivityDescription(type: AccessActivityType, kind: ShareKind | null): string {
   const noun = kind ? withArticle(ACCESS_NODE_NOUN[kind]) : "a node";
+  // A team's people are on it, not given access to it.
+  if (kind === "team") {
+    if (type === "access.granted") return `Added someone to ${noun}`;
+    if (type === "access.role_changed") return `Changed someone's role on ${noun}`;
+    if (type === "access.revoked") return `Took someone off ${noun}`;
+  }
   switch (type) {
     case "access.granted":
       return `Gave someone access to ${noun}`;
@@ -191,6 +197,11 @@ export function accessAuditSentence(type: AccessActivityType, f: AccessAuditFact
   };
   const role = words(f.role);
   const prev = words(f.previousRole);
+  // A team's people are on it as Lead or Member.
+  if (f.objectKind === "team") {
+    if (type === "access.granted") return role ? `Added ${who} to ${node} as ${role}` : `Added ${who} to ${node}`;
+    if (type === "access.revoked") return prev ? `Took ${who} (${prev}) off ${node}` : `Took ${who} off ${node}`;
+  }
   switch (type) {
     case "access.granted":
       return role ? `Gave ${who} ${role} on ${node}` : `Gave ${who} access to ${node}`;

@@ -12,7 +12,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
-import { recordAccessRequest, requestNodeRef, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS } from "@/lib/access/access-requests";
+import { objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
+import { objectShareOn } from "@/lib/access/object-share";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
@@ -178,6 +179,9 @@ export async function GET(req: Request) {
     }),
   ]);
   const ctx = pending.length > 0 ? await nodeCtxFromSession() : null;
+  // A tool, a goal, an SOP folder or a team is granted here too while the one
+  // share dialog serves them (the flag), in the answers its store can hold.
+  const objectsOn = objectShareOn();
   const requesterCtx = new Map<string, Awaited<ReturnType<typeof nodeCtxForUser>>>();
   const incoming = [];
   for (const r of pending) {
@@ -207,6 +211,7 @@ export async function GET(req: Request) {
       answered = roleCoversRequest((await nodeRole(rc, node)).role, r.role);
     }
     if (answered) continue;
+    const objectKind = !node && objectsOn ? requestObjectKind(r.objectType) : null;
     incoming.push({
       id: r.id,
       objectType: r.objectType,
@@ -216,7 +221,8 @@ export async function GET(req: Request) {
       createdAt: r.createdAt,
       link: t.link,
       name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
-      grantable: node !== null,
+      grantable: node !== null || objectKind !== null,
+      ...(objectKind ? { grants: objectRequestGrants(objectKind, r.role as RequestRole) } : {}),
       requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },
     });
   }
@@ -249,7 +255,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "closed", status: request.status }, { status: 409, headers: NO_STORE });
   }
   if (request.requesterId === u.id) return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
-  if (requestNodeRef(request.objectType, request.objectId)) {
+  if (requestNodeRef(request.objectType, request.objectId) || (objectShareOn() && requestObjectKind(request.objectType))) {
     return NextResponse.json({ error: "use_grant" }, { status: 409, headers: NO_STORE });
   }
   const t = await targetFor(request.objectType, request.objectId, u.organizationId);

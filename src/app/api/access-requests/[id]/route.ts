@@ -10,7 +10,10 @@
 //
 // A kind grants.ts does not own (a SOP, a goal, a tool, a contract) can only
 // be declined here; a grant answers 409 not_grantable with the object's own
-// page, where it is shared.
+// page, where it is shared. While the one share dialog serves tools, goals,
+// SOP folders and teams (ACCESS_V2_TABLES on, batch 7) a request on one of
+// those is granted through that object's own writer instead, with the same
+// rules the dialog enforces there.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -20,11 +23,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { nodeCtxFromSession } from "@/lib/access/node-access";
 import { GrantError, mayManageNode, setNodeGrant } from "@/lib/access/grants";
-import { requestExpired, requestNodeRef } from "@/lib/access/access-requests";
+import { objectGrantRole, requestExpired, requestNodeRef, requestObjectKind } from "@/lib/access/access-requests";
+import { objectAccessPanel, objectShareCtxFromSession, objectShareOn, setObjectGrant } from "@/lib/access/object-share";
 import { requestTargetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
-import { panelRoleLabel, type PanelRole } from "@/lib/access/access-panel";
+import { panelRoleLabel, shareRoleLabel, type PanelRole } from "@/lib/access/access-panel";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
@@ -56,6 +60,8 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const target = await requestTargetFor(request.objectType, request.objectId, u.organizationId);
   const node = requestNodeRef(request.objectType, request.objectId);
+  // A tool, a goal, an SOP folder or a team, granted through its own writer (the flag).
+  const objectKind = !node && objectShareOn() ? requestObjectKind(request.objectType) : null;
   const actorName = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone";
 
   if (parsed.data.decision === "decline") {
@@ -71,6 +77,10 @@ export async function PATCH(req: Request, { params }: Params) {
     if (!mayDecline && node) {
       const managerCtx = await nodeCtxFromSession();
       mayDecline = !!managerCtx && (await mayManageNode(managerCtx, node));
+    }
+    if (!mayDecline && objectKind) {
+      const octx = await objectShareCtxFromSession();
+      mayDecline = !!octx && !!(await objectAccessPanel(octx, objectKind, request.objectId).catch(() => null))?.viewer.canManage;
     }
     if (!mayDecline) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
@@ -92,6 +102,7 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ ok: true, status: "DENIED" }, { headers: NO_STORE });
   }
 
+  if (objectKind) return grantObject(request, objectKind, parsed.data.role, u.id, u.organizationId, actorName);
   if (!node) {
     return NextResponse.json({ error: "not_grantable", link: target.link }, { status: 409, headers: NO_STORE });
   }
@@ -125,6 +136,47 @@ export async function PATCH(req: Request, { params }: Params) {
     targetId: request.objectId,
     description: `${actorName} granted ${word} on request`,
     metadata: { requestId: request.id, requesterId: request.requesterId, role: granted, requested: role },
+  }).catch(() => {});
+  return NextResponse.json({ ok: true, status: "APPROVED", role: granted }, { headers: NO_STORE });
+}
+
+/**
+ * Grant a request on a tool, a goal, an SOP folder or a team through that
+ * object's own writer, claimed first exactly as a node's grant is: the
+ * writer's refusal releases the claim, a raise never lowers what the person
+ * holds, and the writer tells the requester.
+ */
+async function grantObject(
+  request: { id: string; objectType: string; objectId: string; requesterId: string; role: string },
+  kind: NonNullable<ReturnType<typeof requestObjectKind>>,
+  askedRole: "VIEW" | "COMMENT" | "EDIT" | undefined,
+  deciderId: string,
+  organizationId: string,
+  actorName: string,
+) {
+  const octx = await objectShareCtxFromSession();
+  if (!octx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+  const asked = askedRole ?? (request.role as "VIEW" | "COMMENT" | "EDIT");
+  const role = objectGrantRole(kind, asked);
+  if (!(await claim(request.id, "APPROVED", deciderId))) return closedNow(request.id);
+  let granted: PanelRole = role;
+  try {
+    const { change } = await setObjectGrant(octx, kind, request.objectId, { userId: request.requesterId, role, mode: "raise" });
+    if (change.role) granted = change.role;
+  } catch (err) {
+    await release(request.id, deciderId);
+    if (err instanceof GrantError) return NextResponse.json({ error: err.code, message: err.message }, { status: err.status, headers: NO_STORE });
+    throw err;
+  }
+  const word = shareRoleLabel(kind, granted);
+  await logActivity({
+    organizationId,
+    actorId: deciderId,
+    type: "access.request.granted",
+    targetType: request.objectType,
+    targetId: request.objectId,
+    description: `${actorName} granted ${word} on request`,
+    metadata: { requestId: request.id, requesterId: request.requesterId, role: granted, requested: asked },
   }).catch(() => {});
   return NextResponse.json({ ok: true, status: "APPROVED", role: granted }, { headers: NO_STORE });
 }

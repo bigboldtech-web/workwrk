@@ -478,6 +478,8 @@ export function errorText(code: GrantErrorCode, kind: ShareKind): string {
     return `You need ${panelRoleLabel(MANAGE_BAR[kind])} to change who can open this ${sentenceNoun(kind)}.`;
   }
   if (code === "grants_unavailable") return grantsUnavailableText(kind);
+  // A team's lead adds and takes off members; leads are an Admin's to change.
+  if (code === "above_own_role" && kind === "team") return "Only Owners and Admins make someone a lead, or change or take off a lead.";
   // A goal's owner is its accountable person, not necessarily who made it.
   if (code === "owner_fixed" && kind === "goal") return "The goal's owner always keeps it. Change the owner from the goal's menu.";
   return GRANT_ERROR_MESSAGE[code] ?? GRANT_ERROR_MESSAGE.server_error;

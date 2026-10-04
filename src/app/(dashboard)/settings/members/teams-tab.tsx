@@ -7,6 +7,11 @@
 // today: it is a saved group, and sharing with a whole Team arrives with the
 // new access engine (a Team is not yet a principal in the share dialog). The
 // Lead mark is a label on the Team today: nothing else reads it yet.
+//
+// While the one share dialog serves teams (ACCESS_V2_TABLES on, batch 7) a
+// card also has Manage people, for Owners and Admins and for the team's own
+// leads, who add and take off its members there (only Owners and Admins
+// make someone a lead).
 
 import { useCallback, useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
@@ -18,6 +23,8 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { Picker, type PickerOption } from "@/components/ui/picker";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { ShareDialog } from "@/components/access/share-dialog";
 
 interface TeamPerson { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null; lead: boolean }
 interface Team { id: string; name: string; description: string | null; members: TeamPerson[] }
@@ -109,6 +116,10 @@ export function TeamsTab() {
 }
 
 function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; onChanged: () => void }) {
+  const { boot } = useBoot();
+  // The one dialog's door: Owners and Admins, and this team's leads.
+  const isLead = team.members.some((m) => m.id === boot.viewer.id && m.lead);
+  const [manageOpen, setManageOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PickerOption[] | null>(null);
@@ -182,6 +193,11 @@ function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; 
           <h3 className="m-0 min-w-0 flex-1 truncate text-row font-semibold text-ink">{team.name}</h3>
         )}
         <span className="text-sm text-ink-2">{team.members.length === 1 ? "1 person" : `${team.members.length} people`}</span>
+        {boot.org.objectShare && (canEdit || isLead) && !renaming ? (
+          <button type="button" onClick={() => setManageOpen(true)} aria-haspopup="dialog" className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+            Manage people
+          </button>
+        ) : null}
         {canEdit && !renaming ? (
           <button type="button" onClick={() => { setNameDraft(team.name); setRenaming(true); }} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
             Rename
@@ -235,6 +251,14 @@ function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: boolean; 
         </div>
       ) : null}
       {err ? <p className="m-0 mt-2 text-sm text-danger-text" role="alert">{err}</p> : null}
+      {boot.org.objectShare ? (
+        <ShareDialog
+          open={manageOpen}
+          onOpenChange={setManageOpen}
+          target={{ kind: "team", id: team.id, name: team.name }}
+          onChanged={() => onChanged()}
+        />
+      ) : null}
     </section>
   );
 }
