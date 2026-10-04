@@ -51,9 +51,9 @@ import {
 } from "@/components/layout/os/share-space-dialog";
 import { accessChanged } from "@/lib/work/container-events";
 import {
-  ACCESS_NODE_NOUN, panelRoleBlurb, panelRoleLabel,
+  ACCESS_NODE_NOUN, isObjectShareKind, panelRoleBlurb, panelRoleLabel, shareRoleLabel,
   type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type GrantErrorCode, type GrantWriteBody,
-  type GrantWriteResult, type PanelRole,
+  type GrantWriteResult, type PanelRole, type ShareKind,
 } from "@/lib/access/access-panel";
 import {
   canEditEntry, canManageHere, canRemoveEntry, defaultRole, dialogSubtitle, dialogTitle, entryRoleOptions,
@@ -68,7 +68,7 @@ import {
 import { GeneralAccess } from "./general-access";
 
 export interface ManageAccessTarget {
-  kind: AccessNodeKind;
+  kind: ShareKind;
   id: string;
   name: string;
 }
@@ -83,7 +83,7 @@ export interface ManageAccessDialogProps {
   onChanged?: (panel: AccessPanel | null) => void;
 }
 
-const CONTAINERS: ReadonlySet<AccessNodeKind> = new Set<AccessNodeKind>(["space", "folder", "list"]);
+const CONTAINERS: ReadonlySet<ShareKind> = new Set<ShareKind>(["space", "folder", "list"]);
 
 type Load =
   | { state: "loading"; key: string }
@@ -100,7 +100,7 @@ type WriteRequest =
   | { method: "POST"; body: GrantWriteBody }
   | { method: "DELETE"; userId: string; expected: PanelRole | null };
 
-const keyOf = (t: { kind: AccessNodeKind; id: string } | null) => (t ? `${t.kind}:${t.id}` : "");
+const keyOf = (t: { kind: ShareKind; id: string } | null) => (t ? `${t.kind}:${t.id}` : "");
 
 /** The panel, whichever envelope the route answers with. */
 function readPanel(body: unknown): AccessPanel | null {
@@ -111,7 +111,7 @@ function readPanel(body: unknown): AccessPanel | null {
   return null;
 }
 
-async function fetchPanel(t: { kind: AccessNodeKind; id: string }): Promise<PanelFetch> {
+async function fetchPanel(t: { kind: ShareKind; id: string }): Promise<PanelFetch> {
   try {
     const res = await fetch(panelUrl(t.kind, t.id), { cache: "no-store" });
     const body = await res.json().catch(() => null);
@@ -123,7 +123,7 @@ async function fetchPanel(t: { kind: AccessNodeKind; id: string }): Promise<Pane
   }
 }
 
-async function sendGrant(t: { kind: AccessNodeKind; id: string }, req: WriteRequest): Promise<WriteOutcome> {
+async function sendGrant(t: { kind: ShareKind; id: string }, req: WriteRequest): Promise<WriteOutcome> {
   const url = grantsUrl(t.kind, t.id);
   let res: Response;
   try {
@@ -270,14 +270,18 @@ function ManageAccessBody({
   const title = dialogTitle(panel, ro);
   const subtitle = panel ? dialogSubtitle(panel) : `${ACCESS_NODE_NOUN[current.kind]} · ${current.name}`;
 
+  // A container and an object the one dialog serves beside the nodes (an SOP
+  // folder, a tool, a goal, a team) link to the page the panel names; a node
+  // object to its canonical address.
+  const linkFromPanel = CONTAINERS.has(current.kind) || isObjectShareKind(current.kind);
   const copyLink = () => {
-    const text = CONTAINERS.has(current.kind)
+    const text = linkFromPanel
       ? panel ? `${window.location.origin}${panel.node.href}` : null
       : copyObjectLink(current.kind as "doc" | "table" | "canvas" | "form", current.id);
     if (!text) return;
     void navigator.clipboard?.writeText(text).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" }));
   };
-  const canCopy = !CONTAINERS.has(current.kind) || !!panel;
+  const canCopy = !linkFromPanel || !!panel;
 
   return (
     <DialogContent
@@ -497,7 +501,7 @@ function AddPeople({
       onChange={(e) => setRole(e.target.value as PanelRole)}
       className="h-9 shrink-0 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink focus:outline-none focus-visible:border-brand"
     >
-      {options.map((r) => <option key={r} value={r}>{panelRoleLabel(r)}</option>)}
+      {options.map((r) => <option key={r} value={r}>{shareRoleLabel(kind, r)}</option>)}
     </select>
   );
 
@@ -540,7 +544,7 @@ function AddPeople({
               {busy ? <Dots variant="pending" /> : null} Add
             </button>
           </div>
-          <p className="m-0 mt-1.5 text-xs text-ink-2">{panelRoleLabel(roleNow)}: {panelRoleBlurb(kind, roleNow)}</p>
+          <p className="m-0 mt-1.5 text-xs text-ink-2">{shareRoleLabel(kind, roleNow)}: {panelRoleBlurb(kind, roleNow)}</p>
           {hint ? <p className="m-0 mt-1 text-xs text-ink-2">{hint}</p> : null}
           {failure ? <InlineRetry message={failure.message} onRetry={retry} /> : null}
         </>
@@ -678,7 +682,7 @@ function PeopleField({
  * manages who has access here, pick a person and read what they can do and
  * why, in one sentence, from the live resolver (POST /api/access/check).
  */
-function CheckAccess({ target, meId }: { target: { kind: AccessNodeKind; id: string }; meId: string | null }) {
+function CheckAccess({ target, meId }: { target: { kind: ShareKind; id: string }; meId: string | null }) {
   const [open, setOpen] = useState(false);
   const [person, setPerson] = useState<PickPerson | null>(null);
   const [answer, setAnswer] = useState<{ state: "idle" | "busy" | "done" | "failed"; sentence?: string; message?: string }>({ state: "idle" });
@@ -854,10 +858,10 @@ function DirectRows({
                     aria-busy={busy[id] || undefined}
                     className="h-8 rounded-md border border-line-strong bg-raised px-1.5 text-sm text-ink focus:outline-none focus-visible:border-brand"
                   >
-                    {entryRoleOptions(panel, entry).map((r) => <option key={r} value={r}>{panelRoleLabel(r)}</option>)}
+                    {entryRoleOptions(panel, entry).map((r) => <option key={r} value={r}>{shareRoleLabel(panel.node.kind, r)}</option>)}
                   </select>
                 ) : (
-                  <RoleWord role={entry.role} />
+                  <RoleWord role={entry.role} kind={panel.node.kind} />
                 )}
                 {removable ? (
                   <button

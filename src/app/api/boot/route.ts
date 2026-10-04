@@ -184,6 +184,13 @@ export interface BootPayload {
      * payload (read as off).
      */
     taskPublicLinks?: boolean;
+    /**
+     * The one share dialog serves SOP folders, tools, goals and teams
+     * (batch 7, behind ACCESS_V2_TABLES, src/lib/access/object-share): their
+     * Share entries render only when this is on, so with the flag off every
+     * surface keeps the one it has. Optional for an older payload (read as off).
+     */
+    objectShare?: boolean;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -474,6 +481,7 @@ export async function GET(req: NextRequest) {
         aiEnabled: aiEnabledFromSettings(settings),
         currency: orgCurrencyFromSettings(settings),
         taskPublicLinks: orgPublicLinksTurnedOn(settings),
+        objectShare: accessV2Tables(),
       },
       counts: cf.counts,
       timer,

@@ -17,9 +17,11 @@ import { z } from "zod";
 import {
   GRANT_ERROR_MESSAGE,
   isAccessNodeKind,
+  isObjectShareKind,
   type GrantErrorBody,
   type PanelRole,
 } from "@/lib/access/access-panel";
+import { objectShareCtxFromSession, objectShareOn, removeObjectGrant, setObjectGrant } from "@/lib/access/object-share";
 import { nodeCtxFromSession } from "@/lib/access/node-access";
 import { GrantError, removeNodeGrant, setNodeGrant } from "@/lib/access/grants";
 
@@ -57,6 +59,19 @@ export async function POST(req: Request, { params }: Params) {
   const ctx = await nodeCtxFromSession();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   const { kind, id } = await params;
+  // An SOP folder, a tool, a goal or a team: only while ACCESS_V2_TABLES is on (object-share).
+  if (isObjectShareKind(kind) && id) {
+    if (!objectShareOn()) return refusal("not_found", 404);
+    const octx = await objectShareCtxFromSession();
+    if (!octx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    const body = postSchema.safeParse(await req.json().catch(() => null));
+    if (!body.success) return refusal("invalid_body", 400);
+    try {
+      return NextResponse.json(await setObjectGrant(octx, kind, id, body.data), { headers: NO_STORE });
+    } catch (err) {
+      return failure(err, `grant on ${kind} ${id}`);
+    }
+  }
   if (!isAccessNodeKind(kind) || !id) return refusal("invalid_body", 400);
   const parsed = postSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return refusal("invalid_body", 400);
@@ -72,7 +87,9 @@ export async function DELETE(req: Request, { params }: Params) {
   const ctx = await nodeCtxFromSession();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   const { kind, id } = await params;
-  if (!isAccessNodeKind(kind) || !id) return refusal("invalid_body", 400);
+  const objectKind = isObjectShareKind(kind) ? kind : null;
+  if (objectKind && !objectShareOn()) return refusal("not_found", 404);
+  if ((!objectKind && !isAccessNodeKind(kind)) || !id) return refusal("invalid_body", 400);
   const url = new URL(req.url);
   const userId = url.searchParams.get("userId");
   if (!userId) return refusal("invalid_body", 400);
@@ -85,6 +102,16 @@ export async function DELETE(req: Request, { params }: Params) {
     if (!parsed.success) return refusal("invalid_body", 400);
     expected = parsed.data;
   }
+  if (objectKind) {
+    const octx = await objectShareCtxFromSession();
+    if (!octx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    try {
+      return NextResponse.json(await removeObjectGrant(octx, objectKind, id, { userId, expected }), { headers: NO_STORE });
+    } catch (err) {
+      return failure(err, `removal on ${kind} ${id}`);
+    }
+  }
+  if (!isAccessNodeKind(kind)) return refusal("invalid_body", 400);
   try {
     const result = await removeNodeGrant(ctx, { kind, id }, { userId, expected }, "dialog");
     return NextResponse.json(result, { headers: NO_STORE });

@@ -18,15 +18,15 @@ import type { ReactNode } from "react";
 import { Globe, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar-stack";
 import {
-  panelRoleLabel,
-  type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type AccessPerson,
+  panelRoleLabel, shareRoleLabel,
+  type AccessDirectEntry, type AccessNodeKind, type AccessPanel, type AccessPerson, type ShareKind,
 } from "@/lib/access/access-panel";
 import {
   adminsLine, alsoViaText, capText, everyoneLine, groupInherited, hasOlderRule, inheritedHeader,
   LAST_FULL_TEXT, OLDER_RULE_FOOTNOTE,
 } from "./manage-access-model";
 
-export type ManageInTarget = { kind: AccessNodeKind; id: string; name: string };
+export type ManageInTarget = { kind: ShareKind; id: string; name: string };
 
 /** The one micro heading every section of the dialog carries. */
 export function AccessSectionHeading({ children }: { children: ReactNode }) {
@@ -73,6 +73,7 @@ export function DirectEntrySub({ entry, showLastFull }: { entry: AccessDirectEnt
   const lines: string[] = [];
   if (entry.alsoVia) lines.push(alsoViaText(entry.alsoVia));
   if (entry.cap) lines.push(capText(entry));
+  if (entry.note) lines.push(entry.note);
   if (showLastFull && entry.lastFull) lines.push(LAST_FULL_TEXT);
   if (lines.length === 0) return null;
   return (
@@ -89,9 +90,9 @@ export function OwnerChip() {
   return <span className="inline-flex h-6 items-center rounded-md bg-active px-2 text-xs font-medium text-ink">Owner</span>;
 }
 
-/** A role as a word, where the viewer cannot change it. */
-export function RoleWord({ role }: { role: AccessDirectEntry["role"] }) {
-  return <span className="text-sm text-ink-2">{panelRoleLabel(role)}</span>;
+/** A role as a word, where the viewer cannot change it, in its kind's words (a goal's, a team's). */
+export function RoleWord({ role, kind }: { role: AccessDirectEntry["role"]; kind?: ShareKind }) {
+  return <span className="text-sm text-ink-2">{kind ? shareRoleLabel(kind, role) : panelRoleLabel(role)}</span>;
 }
 
 /** Everyone listed on the node itself, read only: the owner first, as the server orders them. */
@@ -103,7 +104,7 @@ export function DirectAccessList({ panel, meId }: { panel: AccessPanel; meId: st
     <ul className="m-0 list-none divide-y divide-line-soft p-0">
       {panel.direct.map((e) => (
         <AccessPersonRow key={e.person.id} person={e.person} isYou={e.person.id === meId} sub={<DirectEntrySub entry={e} showLastFull={false} />}>
-          {e.owner ? <OwnerChip /> : <RoleWord role={e.role} />}
+          {e.owner ? <OwnerChip /> : <RoleWord role={e.role} kind={panel.node.kind} />}
         </AccessPersonRow>
       ))}
     </ul>
@@ -147,7 +148,7 @@ export function InheritedAccess({
               <ul className="m-0 list-none divide-y divide-line-soft p-0">
                 {g.entries.map((e) => (
                   <AccessPersonRow key={`${g.key}:${e.person.id}`} person={e.person} isYou={e.person.id === meId}>
-                    <RoleWord role={e.role} />
+                    <RoleWord role={e.role} kind={panel.node.kind} />
                   </AccessPersonRow>
                 ))}
               </ul>
@@ -168,7 +169,10 @@ export function InheritedAccess({
 export function EveryoneAndAdmins({ panel }: { panel: AccessPanel }) {
   const everyone = everyoneLine(panel);
   const admins = adminsLine(panel);
-  if (!everyone && !admins) return null;
+  // The rules that decide access here and are no one's row (an SOP folder's,
+  // a tool's, a goal's, a team's), as the server words them.
+  const notes = panel.notes ?? [];
+  if (!everyone && !admins && notes.length === 0) return null;
   return (
     <div className="flex flex-col gap-1.5">
       {everyone ? (
@@ -181,6 +185,11 @@ export function EveryoneAndAdmins({ panel }: { panel: AccessPanel }) {
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden /> <span className="min-w-0">{admins}</span>
         </p>
       ) : null}
+      {notes.map((note) => (
+        <p key={note} className="m-0 flex items-start gap-2 text-sm text-ink-2">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.75} aria-hidden /> <span className="min-w-0">{note}</span>
+        </p>
+      ))}
     </div>
   );
 }

@@ -29,6 +29,7 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { apiFetch } from "@/lib/api-fetch";
 import { OBJECT_ROLE_LABEL } from "@/lib/access/labels";
+import { ShareDialog } from "@/components/access/share-dialog";
 
 type AccessRow = { user: PersonRef & { role?: { title?: string } | null; department?: { name?: string } | null }; role: "VIEWER" | "EDITOR" | "OWNER" };
 
@@ -48,9 +49,29 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
   const { openSettings } = useSettingsNav();
   const [rows, setRows] = useState<AccessRow[] | null | "hidden">(null);
   const [busy, setBusy] = useState<"mint" | "revoke" | null>(null);
+  // While the one dialog serves SOP folders (ACCESS_V2_TABLES on, batch 7),
+  // the folder's people live there, and anyone with a role on the folder
+  // reads them, not only admins; Full access on it changes them (Broken #21).
+  const objectShare = !!boot.org.objectShare;
+  const [folderPanel, setFolderPanel] = useState<{ canManage: boolean } | "none" | null>(null);
+  // Which way the folder dialog opens is fixed at the click: closing this
+  // dialog first turns its own mode back to "who".
+  const [folderOpen, setFolderOpen] = useState<"manage" | "read" | null>(null);
 
   useEffect(() => {
-    if (!open || !sop.folderId) return;
+    if (!open || !sop.folderId || !objectShare) return;
+    let live = true;
+    void (async () => {
+      const res = await fetch(`/api/access/sop_folder/${encodeURIComponent(sop.folderId!)}`, { cache: "no-store" }).catch(() => null);
+      const body = res && res.ok ? ((await res.json().catch(() => null)) as { viewer?: { canManage?: boolean } } | null) : null;
+      if (!live) return;
+      setFolderPanel(body?.viewer ? { canManage: !!body.viewer.canManage } : "none");
+    })();
+    return () => { live = false; };
+  }, [open, sop.folderId, objectShare]);
+
+  useEffect(() => {
+    if (!open || !sop.folderId || objectShare) return;
     let live = true;
     void (async () => {
       const r = await apiFetch<AccessRow[] | { data?: AccessRow[] }>(`/api/sop-folders/${sop.folderId}/access`, { cache: "no-store" });
@@ -59,7 +80,7 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
       setRows(Array.isArray(r.data) ? r.data : r.data?.data ?? []);
     })();
     return () => { live = false; };
-  }, [open, sop.folderId]);
+  }, [open, sop.folderId, objectShare]);
 
   const publicUrl = sop.shareToken ? `${typeof window !== "undefined" ? window.location.origin : ""}/share/sop/${sop.shareToken}` : null;
 
@@ -103,13 +124,35 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
   }
 
   const readOnly = mode === "who";
+  // The folder door follows the folder's own answer: a non-admin with Full
+  // access on the folder manages its people even where this SOP reads "who"
+  // for them (the SOP's own public link stays Full access on the SOP).
+  const manageFolder = folderPanel !== null && folderPanel !== "none" && folderPanel.canManage;
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-[560px]">
         <DialogTitle>{readOnly ? "Who has access" : "Share"}</DialogTitle>
         <DialogDescription>{sop.title || "Untitled SOP"}</DialogDescription>
         <div className="mt-2 flex w-full min-w-0 flex-col overflow-hidden">
-          {sop.folderId ? (
+          {sop.folderId && objectShare ? (
+            <>
+              <div className="flex h-11 items-center gap-3 border-b border-line">
+                <Users className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-base text-ink">This SOP follows <span className="font-medium">{sop.folderName ?? "its folder"}</span>&apos;s sharing</span>
+                {folderPanel && folderPanel !== "none" ? (
+                  <button type="button" onClick={() => { setFolderOpen(manageFolder ? "manage" : "read"); onClose(); }} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">
+                    {manageFolder ? "Manage access" : "Who has access"}
+                  </button>
+                ) : null}
+              </div>
+              {folderPanel === null ? (
+                <div className="py-2"><SkeletonRows rows={1} rowHeight="36px" /></div>
+              ) : folderPanel === "none" ? (
+                <p className="py-3 text-sm text-ink-2">The folder&apos;s people are managed by the people with Full access on it, and by admins.</p>
+              ) : null}
+            </>
+          ) : sop.folderId ? (
             <>
               <div className="flex h-11 items-center gap-3 border-b border-line">
                 <Users className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
@@ -168,5 +211,14 @@ export function SopShareDialog({ open, onClose, mode, sop, onShareTokenChange }:
         </div>
       </DialogContent>
     </Dialog>
+    {sop.folderId && objectShare ? (
+      <ShareDialog
+        open={folderOpen !== null}
+        onOpenChange={(o) => { if (!o) setFolderOpen(null); }}
+        target={{ kind: "sop_folder", id: sop.folderId, name: sop.folderName ?? "This folder" }}
+        readOnly={folderOpen !== "manage"}
+      />
+    ) : null}
+    </>
   );
 }

@@ -640,7 +640,7 @@ export function accessEntries(input: AccessEntriesInput): AccessEntries {
     } else {
       via = { type: "hidden" };
     }
-    const key = d.via.type === "floor" ? `older:${groupRef ? refKey(groupRef) : ""}` : via.type === "node" ? refKey({ kind: via.kind, id: via.id }) : "hidden";
+    const key = d.via.type === "floor" ? `older:${groupRef ? refKey(groupRef) : ""}` : via.type === "node" ? `${via.kind}:${via.id}` : "hidden";
     const g = groups.get(key) ?? {
       via,
       order: groupRef ? orderIndex.get(refKey(groupRef)) ?? order.length : order.length + 1,

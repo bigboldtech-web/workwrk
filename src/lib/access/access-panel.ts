@@ -15,8 +15,27 @@ export function isAccessNodeKind(s: string): s is AccessNodeKind {
   return (ACCESS_NODE_KINDS as readonly string[]).includes(s);
 }
 
-export const ACCESS_NODE_NOUN: Readonly<Record<AccessNodeKind, string>> = {
+/**
+ * The objects the one dialog serves beside the nodes (batch 7, access-model
+ * spec section 6.1), each over the store it already reads: SOPFolderAccess,
+ * ToolShare, the goal's GoalAssignee rows and TeamMember. Served only while
+ * ACCESS_V2_TABLES is on (src/lib/access/object-share): the node kinds above
+ * are never widened, because they drive node-access.
+ */
+export type ObjectShareKind = "sop_folder" | "tool" | "goal" | "team";
+
+export const OBJECT_SHARE_KINDS: readonly ObjectShareKind[] = ["sop_folder", "tool", "goal", "team"];
+
+export function isObjectShareKind(s: string): s is ObjectShareKind {
+  return (OBJECT_SHARE_KINDS as readonly string[]).includes(s);
+}
+
+/** Every kind the one dialog can open. */
+export type ShareKind = AccessNodeKind | ObjectShareKind;
+
+export const ACCESS_NODE_NOUN: Readonly<Record<ShareKind, string>> = {
   space: "Space", folder: "Folder", list: "List", doc: "Doc", table: "Table", canvas: "Canvas", form: "Form",
+  sop_folder: "SOP folder", tool: "Tool", goal: "Goal", team: "Team",
 };
 
 /**
@@ -39,7 +58,7 @@ export function panelAtLeast(role: PanelRole | "none", floor: PanelRole): boolea
   return PANEL_ROLE_RANK[role] >= PANEL_ROLE_RANK[floor];
 }
 
-export const ROLES_BY_KIND: Readonly<Record<AccessNodeKind, readonly PanelRole[]>> = {
+export const ROLES_BY_KIND: Readonly<Record<ShareKind, readonly PanelRole[]>> = {
   space: ["OWNER", "FULL", "EDIT", "VIEW"],
   folder: ["FULL", "EDIT", "VIEW"],
   list: ["FULL", "EDIT", "ASSIGNED", "COMMENT", "VIEW"],
@@ -47,11 +66,23 @@ export const ROLES_BY_KIND: Readonly<Record<AccessNodeKind, readonly PanelRole[]
   table: ["FULL", "EDIT"],
   canvas: ["FULL", "EDIT", "VIEW"],
   form: ["FULL", "EDIT", "VIEW"],
+  // SOPFolderAccess OWNER / EDITOR / VIEWER. No comments live on a folder.
+  sop_folder: ["FULL", "EDIT", "VIEW"],
+  // A tool has no comments, so no Can comment (ToolShare.role).
+  tool: ["FULL", "EDIT", "VIEW"],
+  // A GoalAssignee row has no role: every one sees the goal and checks in.
+  goal: ["EDIT"],
+  // A TeamMember row is a member or, with its lead flag, a lead.
+  team: ["FULL", "VIEW"],
 };
 
-/** Who may change who has access: Can edit on a doc (today's doc sharing rule), Full access on every other kind. */
-export const MANAGE_BAR: Readonly<Record<AccessNodeKind, ObjectRole>> = {
+/**
+ * Who may change who has access: Can edit on a doc (today's doc sharing
+ * rule) and on a goal (mayEditGoal), Full access on every other kind.
+ */
+export const MANAGE_BAR: Readonly<Record<ShareKind, ObjectRole>> = {
   space: "FULL", folder: "FULL", list: "FULL", doc: "EDIT", table: "FULL", canvas: "FULL", form: "FULL",
+  sop_folder: "FULL", tool: "FULL", goal: "EDIT", team: "FULL",
 };
 
 export function panelRoleLabel(role: PanelRole): string {
@@ -60,7 +91,39 @@ export function panelRoleLabel(role: PanelRole): string {
   return OBJECT_ROLE_LABEL[role];
 }
 
-export function panelRoleBlurb(kind: AccessNodeKind, role: PanelRole): string {
+/** A role in the words of its kind: a goal's one role and a team's two are not the ladder's. */
+export function shareRoleLabel(kind: ShareKind, role: PanelRole): string {
+  if (kind === "goal" && role === "EDIT") return "Can check in";
+  if (kind === "team" && role === "FULL") return "Lead";
+  if (kind === "team" && role === "VIEW") return "Member";
+  return panelRoleLabel(role);
+}
+
+const OBJECT_BLURB: Readonly<Record<ObjectShareKind, Partial<Record<PanelRole, string>>>> = {
+  sop_folder: {
+    FULL: "Write its SOPs and change who can open the folder.",
+    EDIT: "Read and write its SOPs, drafts included.",
+    VIEW: "Read its published SOPs.",
+  },
+  tool: {
+    FULL: "Change the tool and its saved login, share it and delete it.",
+    EDIT: "Change the tool and its saved login.",
+    VIEW: "See the tool and use its saved login.",
+  },
+  goal: {
+    EDIT: "See the goal and check in on its targets. Never rename, delete or share it.",
+  },
+  team: {
+    FULL: "On the team, and adds or removes its members.",
+    VIEW: "On the team.",
+  },
+};
+
+export function panelRoleBlurb(kind: ShareKind, role: PanelRole): string {
+  if (isObjectShareKind(kind)) {
+    const own = OBJECT_BLURB[kind][role];
+    if (own) return own;
+  }
   if (role === "OWNER") return "Full access, plus every Private List in this Space.";
   if (role === "ASSIGNED") return ASSIGNED_ROLE_BLURB;
   if (kind === "list" && (role === "COMMENT" || role === "VIEW")) return LIST_ROLE_BLURB[role];
@@ -73,14 +136,16 @@ export interface AccessPerson { id: string; name: string; email: string; avatar:
 
 /** Where a person's access comes from, in words the viewer may see. A container the viewer cannot open is never named: it is "hidden". */
 export type AccessVia =
-  | { type: "node"; kind: AccessNodeKind; id: string; name: string; href: string | null; canManage: boolean }
+  | { type: "node"; kind: ShareKind; id: string; name: string; href: string | null; canManage: boolean }
   | { type: "hidden" }
-  | { type: "everyone"; orgName: string; from: { kind: AccessNodeKind; name: string } | null }
+  | { type: "everyone"; orgName: string; from: { kind: ShareKind; name: string } | null }
   | { type: "org_admin"; orgName: string }
   | { type: "owner" }
-  | { type: "older_rule"; from: { kind: AccessNodeKind; name: string } | null };
+  | { type: "older_rule"; from: { kind: ShareKind; name: string } | null };
 
-export type AccessGrantSource = "SpaceMember" | "FolderMember" | "BoardMember" | "AccessGrant" | "DocSharing" | "DocSharingLegacy" | "Owner";
+export type AccessGrantSource =
+  | "SpaceMember" | "FolderMember" | "BoardMember" | "AccessGrant" | "DocSharing" | "DocSharingLegacy" | "Owner"
+  | "SOPFolderAccess" | "ToolShare" | "GoalAssignee" | "TeamMember";
 
 export interface AccessDirectEntry {
   person: AccessPerson;
@@ -98,6 +163,12 @@ export interface AccessDirectEntry {
    * Can view this other way give Can edit assigned tasks together).
    */
   alsoVia: { role: PanelRole; via: AccessVia; plusOwnComment?: boolean } | null;
+  /**
+   * What else decides what this person can do here, when the role alone would
+   * mislead: on an SOP folder, a workspace role that cannot edit SOPs. Read
+   * only. Absent on the node kinds.
+   */
+  note?: string;
 }
 
 export interface AccessInheritedEntry { person: AccessPerson; role: PanelRole; via: AccessVia }
@@ -133,7 +204,7 @@ export interface AccessGeneral {
 
 export interface AccessPanel {
   node: {
-    kind: AccessNodeKind;
+    kind: ShareKind;
     id: string;
     name: string;
     noun: string;
@@ -150,9 +221,15 @@ export interface AccessPanel {
   /** Nearest ancestor first. */
   inherited: AccessInheritedEntry[];
   inheritedMore: Array<{ via: AccessVia; more: number }>;
-  hiddenInherited: Array<{ kind: AccessNodeKind; name: string }>;
+  hiddenInherited: Array<{ kind: ShareKind; name: string }>;
   everyone: { role: PanelRole; via: AccessVia } | null;
   admins: { count: number } | null;
+  /**
+   * Rules that decide access here and are no one's row, in plain words: who
+   * always sees every SOP folder or tool, a goal's level and audiences. Read
+   * only. Absent on the node kinds.
+   */
+  notes?: string[];
   orgName: string;
   grantsAvailable: boolean;
 }

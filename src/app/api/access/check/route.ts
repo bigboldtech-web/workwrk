@@ -14,7 +14,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { issueKey } from "@/lib/zod-issue-key";
-import { isAccessNodeKind } from "@/lib/access/access-panel";
+import { isAccessNodeKind, isObjectShareKind } from "@/lib/access/access-panel";
+import { checkObjectAccess, objectShareCtxFromSession, objectShareOn } from "@/lib/access/object-share";
 import { nodeCtxFromSession, nodeRoles } from "@/lib/access/node-access";
 import { checkNodeAccess } from "@/lib/access/check-access";
 
@@ -44,8 +45,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ results }, { headers: NO_STORE });
   }
   const { userId, target } = parsed.data;
-  if (!isAccessNodeKind(target.kind)) return NextResponse.json({ error: "Not found" }, { status: 404, headers: NO_STORE });
-  const r = await checkNodeAccess(ctx, { kind: target.kind, id: target.id }, userId);
+  // An SOP folder, a tool, a goal or a team: answered by its own live rules,
+  // only while ACCESS_V2_TABLES is on (object-share).
+  let r: Awaited<ReturnType<typeof checkNodeAccess>>;
+  if (isObjectShareKind(target.kind) && objectShareOn()) {
+    const octx = await objectShareCtxFromSession();
+    if (!octx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    r = await checkObjectAccess(octx, target.kind, target.id, userId);
+  } else if (isAccessNodeKind(target.kind)) {
+    r = await checkNodeAccess(ctx, { kind: target.kind, id: target.id }, userId);
+  } else {
+    return NextResponse.json({ error: "Not found" }, { status: 404, headers: NO_STORE });
+  }
   if (r === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404, headers: NO_STORE });
   if (r === "forbidden") return NextResponse.json({ error: "no_access", message: "Only people who manage who has access here can check someone else." }, { status: 403, headers: NO_STORE });
   if (r === "not_in_org") return NextResponse.json({ error: "not_in_org" }, { status: 400, headers: NO_STORE });

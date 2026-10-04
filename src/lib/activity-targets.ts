@@ -93,6 +93,9 @@ const TARGETS: Readonly<Record<string, TargetDef>> = {
   announcement: { glyph: "doc", family: "docs", href: null },
   // Alignment
   okr: { glyph: "goal", family: "goals", href: (id) => `/okrs/${id}` },
+  // Access changes on the objects the one dialog serves beside the nodes.
+  sop_folder: { glyph: "sop", family: "sops", href: (id) => `/sops?folderId=${encodeURIComponent(id)}` },
+  team: { glyph: "person", family: "people", href: () => "/settings/members?tab=teams" },
   kra: { glyph: "goal", family: "goals", href: (id) => `/kra-kpi?kra=${id}` },
   kpi: { glyph: "goal", family: "goals", href: (id) => `/kra-kpi?kpi=${id}` },
   ownership_area: { glyph: "goal", family: "goals", href: null },

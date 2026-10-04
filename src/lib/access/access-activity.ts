@@ -17,7 +17,7 @@
 //
 // Pure: imports ./access-panel and ../activity-targets only.
 
-import { ACCESS_NODE_NOUN, panelRoleLabel, type AccessNodeKind, type PanelRole } from "./access-panel";
+import { ACCESS_NODE_NOUN, panelRoleLabel, type AccessNodeKind, type PanelRole, type ShareKind } from "./access-panel";
 import { normaliseTargetType } from "../activity-targets";
 
 export const ACCESS_ACTIVITY_TYPES = [
@@ -41,7 +41,7 @@ export function isAccessActivityType(type: string | null | undefined): type is A
 }
 
 /** ActivityLog.targetType per node kind, in the keys src/lib/activity-targets.ts resolves. */
-export const ACTIVITY_TARGET_TYPE: Readonly<Record<AccessNodeKind, string>> = {
+export const ACTIVITY_TARGET_TYPE: Readonly<Record<ShareKind, string>> = {
   space: "space",
   folder: "folder",
   list: "list",
@@ -49,12 +49,18 @@ export const ACTIVITY_TARGET_TYPE: Readonly<Record<AccessNodeKind, string>> = {
   table: "data_table",
   canvas: "whiteboard",
   form: "form_definition",
+  // The objects the one dialog serves beside the nodes (object-share).
+  sop_folder: "sop_folder",
+  tool: "tool",
+  goal: "okr",
+  team: "team",
 };
 
-const withArticle = (noun: string) => `${/^[AEIOU]/.test(noun) ? "an" : "a"} ${noun}`;
+// "an SOP folder": SOP is read letter by letter.
+const withArticle = (noun: string) => `${/^([AEIOU]|SOP\b)/.test(noun) ? "an" : "a"} ${noun}`;
 
 /** The one sentence an access row carries: the kind of change and the noun, nothing else. */
-export function accessActivityDescription(type: AccessActivityType, kind: AccessNodeKind | null): string {
+export function accessActivityDescription(type: AccessActivityType, kind: ShareKind | null): string {
   const noun = kind ? withArticle(ACCESS_NODE_NOUN[kind]) : "a node";
   switch (type) {
     case "access.granted":
