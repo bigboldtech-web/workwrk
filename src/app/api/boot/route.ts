@@ -481,7 +481,8 @@ export async function GET(req: NextRequest) {
         aiEnabled: aiEnabledFromSettings(settings),
         currency: orgCurrencyFromSettings(settings),
         taskPublicLinks: orgPublicLinksTurnedOn(settings),
-        objectShare: accessV2Tables(),
+        // Sent only while it is on, so the boot JSON is today's with it off.
+        ...(accessV2Tables() ? { objectShare: true } : {}),
       },
       counts: cf.counts,
       timer,

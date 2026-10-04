@@ -25,6 +25,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { isManager } from "@/lib/api-helpers";
+import { legacyIsManagerLevel } from "../legacy-levels";
 import { canSeeGoal, memberVisibilityOr, seesUnownedGoals, teamAudienceVisibilityOr } from "@/lib/goal-audience";
 import { goalCreatorIds, goalRightsActor, isOrgWideAlignment, ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { mayDeleteGoal, mayEditGoal, type GoalRightsActor, type GoalRightsTarget } from "@/lib/goals/goal-rights";
@@ -350,7 +351,10 @@ async function goalFacts(organizationId: string, goal: GoalRow, userId: string) 
     if (ORG_WIDE_ALIGNMENT_LEVELS.has(level)) viewWhy = "through their workspace role, which sees every goal";
     else if (goal.level === "COMPANY") viewWhy = "as everyone does on a Company goal";
     else if (goal.level === "DEPARTMENT" && goal.departmentId && goal.departmentId === person.departmentId) viewWhy = "as a member of the goal's department";
-    else if (!goal.ownerId) viewWhy = "as a team lead or above, who see goals without an owner";
+    // Team leads and above see every unowned goal (seesUnownedGoals); anyone
+    // else sees one only through a contributor who reports to them.
+    else if (!goal.ownerId && legacyIsManagerLevel(level)) viewWhy = "as a team lead or above, who see goals without an owner";
+    else if (!goal.ownerId) viewWhy = "as someone a contributor reports to";
     else viewWhy = `as someone ${ownerName} or a contributor reports to`;
   }
   return { name: nameOf(person)!, seen, edit, del, ownRow, group, editWhy, viewWhy };

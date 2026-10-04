@@ -3,9 +3,10 @@
 // objectShareOn(): with ACCESS_V2_TABLES off they answer 404 and never get here.
 
 import type { AccessPanel, GrantWriteBody, GrantWriteResult, ObjectShareKind, PanelRole } from "../access-panel";
-import type { AppKey } from "../types";
 import { GrantError } from "../grants";
 import { requireApp } from "@/lib/app-gate";
+import { accessV2Resolver, settingsGateLogOnly } from "../flags";
+import { settingsGateMode } from "../settings-gate-engine";
 import type { ObjectShareCtx } from "./common";
 import { checkSopFolderAccess, removeSopFolderGrant, setSopFolderGrant, sopFolderPanel } from "./sop-folder";
 import { checkToolAccess, removeToolGrant, setToolGrant, toolPanel } from "./tool";
@@ -31,17 +32,35 @@ const ADAPTERS: Readonly<Record<ObjectShareKind, Adapter>> = {
 };
 
 /**
- * The app each kind lives in. Its own page gates on that app row (hidden,
- * floored, Guests, INACTIVE), so the dialog's door does too: a tool, a goal
- * or an SOP folder is "not there" for whoever the app refuses. A team lives
- * in Settings > Members, whose door the team writer checks itself.
+ * Each kind's app door, exactly as that object's own pages and routes keep it
+ * (round 2: the dialog is never stricter or looser than the object itself):
+ *
+ *   tool        the Tools app row, always (tools/layout.tsx AppKeyGate and
+ *               every /api/tools route's requireTools)
+ *   goal        the goal page's rule (requireGoalPage + FlaggedAppKeyGate):
+ *               a Guest or an INACTIVE account never; a hidden or floored
+ *               Goals app only once the engine enforces app gates
+ *   sop_folder  none: no SOP page or route reads the app row
+ *   team        none here: Settings > Members, whose door the team writer
+ *               checks itself
  */
-const APP_OF: Readonly<Partial<Record<ObjectShareKind, AppKey>>> = { tool: "tools", goal: "goals", sop_folder: "sops" };
-
 async function appOpen(kind: ObjectShareKind): Promise<boolean> {
-  const key = APP_OF[kind];
-  if (!key) return true;
-  return !("error" in (await requireApp(key)));
+  if (kind === "tool") return !("error" in (await requireApp("tools")));
+  if (kind === "goal") {
+    const { viewerFromSession, can } = await import("../index");
+    const viewer = await viewerFromSession();
+    if (!viewer) return false;
+    const decision = await can(viewer, "view", { type: "app", key: "goals" });
+    if (decision.allowed) return true;
+    if (!decision.discoverable) return false;
+    return settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() }) !== "engine";
+  }
+  return true;
+}
+
+/** Is this kind's app open to the person asking? (The Access requests card offers a grant only then.) */
+export async function objectAppOpen(kind: ObjectShareKind): Promise<boolean> {
+  return appOpen(kind).catch(() => false);
 }
 
 async function adapterOf(kind: ObjectShareKind): Promise<Adapter> {

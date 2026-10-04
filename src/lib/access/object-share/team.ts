@@ -21,6 +21,9 @@
 import { prisma } from "@/lib/prisma";
 import { freshWorkspaceActor } from "../workspace-admin";
 import { settingsDoorAllows } from "../settings-door";
+import { legacySettingsAllows } from "../settings-legacy";
+import { settingsGateMode } from "../settings-gate-engine";
+import { accessV2Resolver, settingsGateLogOnly } from "../flags";
 import { GrantError } from "../grants";
 import {
   ACCESS_NODE_NOUN, ROLES_BY_KIND,
@@ -58,7 +61,26 @@ async function opensMembers(session: ObjectShareCtx["session"]): Promise<boolean
   return settingsDoorAllows("members", session).catch(() => false);
 }
 
-const sessionFor = (userId: string, organizationId: string, accessLevel: string) => ({ user: { id: userId, organizationId, accessLevel } });
+/**
+ * ANOTHER person's door to Settings > Members, from their own facts.
+ * settingsDoorAllows takes its engine half from the request's session, so it
+ * would answer for the viewer: engine mode asks the engine as them; every
+ * other mode reads their level against today's table. Never logs a
+ * disagreement (that log is about the person asking).
+ */
+async function membersDoorFor(organizationId: string, userId: string, accessLevel: string): Promise<boolean> {
+  try {
+    if (settingsGateMode({ resolver: accessV2Resolver(), logOnly: settingsGateLogOnly() }) === "engine") {
+      const { viewerForUser } = await import("../viewer");
+      const { can } = await import("../index");
+      const viewer = await viewerForUser(organizationId, userId);
+      return !!viewer && (await can(viewer, "view", { type: "settings", page: "members" })).allowed;
+    }
+    return legacySettingsAllows("members", accessLevel);
+  } catch {
+    return false;
+  }
+}
 
 /** What the viewer may give: an Admin anything; a lead who can open Members, Member only; anyone else nothing. */
 function maxGrantOf(admin: boolean, mine: PanelRole | null, isAgent: boolean, door: boolean): PanelRole | null {
@@ -108,7 +130,7 @@ export async function teamPanel(ctx: ObjectShareCtx, id: string): Promise<Access
     if (role === "FULL") {
       const level = String(r.user.accessLevel);
       if (level === "AGENT") entry.note = AGENT_LEAD_NOTE;
-      else if (!(await opensMembers(sessionFor(r.userId, ctx.organizationId, level)))) entry.note = DOORLESS_LEAD_NOTE;
+      else if (!(await membersDoorFor(ctx.organizationId, r.userId, level))) entry.note = DOORLESS_LEAD_NOTE;
     }
     direct.push(entry);
   }
@@ -196,7 +218,7 @@ export async function setTeamGrant(ctx: ObjectShareCtx, id: string, body: GrantW
     if (out.how !== "none" && panel) {
       // The link only for someone who can open it: Members is the manager tier's.
       const target = await prisma.user.findUnique({ where: { id: body.userId }, select: { accessLevel: true } });
-      const href = target && (await opensMembers(sessionFor(body.userId, ctx.organizationId, String(target.accessLevel)))) ? HREF : null;
+      const href = target && (await membersDoorFor(ctx.organizationId, body.userId, String(target.accessLevel))) ? HREF : null;
       await notifyObjectGrantee(ctx, KIND, { id, name: panel.node.name, href }, body.userId, role, out.how);
     }
     await answerRequests(ctx, KIND, id, body.userId, role);
@@ -249,7 +271,7 @@ export async function checkTeamAccess(
   const adminToo = isAdmin ? " As an Owner or Admin they also change every team." : "";
   if (role === "FULL") {
     if (level === "AGENT") return { userId, name, role, sentence: `Lead. ${AGENT_LEAD_NOTE}` };
-    const opens = isAdmin || (await opensMembers(sessionFor(userId, ctx.organizationId, level)));
+    const opens = isAdmin || (await membersDoorFor(ctx.organizationId, userId, level));
     return { userId, name, role, sentence: opens ? `Lead. They add and take off the team's members.${adminToo}` : `Lead. ${DOORLESS_LEAD_NOTE}` };
   }
   if (role === "VIEW") return { userId, name, role, sentence: `Member. They are on the team.${adminToo}` };

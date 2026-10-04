@@ -46,7 +46,8 @@ describe("the object writers", () => {
 
   it("rides one flag", () => {
     expect(read("src/lib/access/object-share/common.ts")).toMatch(/export function objectShareOn\(\): boolean \{\n\s+return accessV2Tables\(\);\n\}/);
-    expect(read("src/app/api/boot/route.ts")).toMatch(/objectShare: accessV2Tables\(\),/);
+    // Sent only while on, so the boot JSON is today's with it off.
+    expect(read("src/app/api/boot/route.ts")).toMatch(/\.\.\.\(accessV2Tables\(\) \? \{ objectShare: true \} : \{\}\),/);
   });
 });
 
@@ -134,10 +135,14 @@ describe("review round 1", () => {
     expect(targets).not.toMatch(/\n  sop_folder: \{/);
   });
 
-  it("opens each object only through its own app row", () => {
+  it("opens each object through exactly the door its own pages and routes keep", () => {
     const index = read("src/lib/access/object-share/index.ts");
-    expect(index).toMatch(/const APP_OF: Readonly<Partial<Record<ObjectShareKind, AppKey>>> = \{ tool: "tools", goal: "goals", sop_folder: "sops" \};/);
-    expect(index).toMatch(/return !\("error" in \(await requireApp\(key\)\)\);/);
+    // Tools: the app row, always.
+    expect(index).toMatch(/if \(kind === "tool"\) return !\("error" in \(await requireApp\("tools"\)\)\);/);
+    // Goals: the goal page's rule: never a Guest or INACTIVE account; a hidden or floored app only in engine mode.
+    expect(index).toMatch(/if \(!decision\.discoverable\) return false;\n\s+return settingsGateMode\(\{ resolver: accessV2Resolver\(\), logOnly: settingsGateLogOnly\(\) \}\) !== "engine";/);
+    // SOP folders and teams: no app row (no SOP surface reads one; Members is the team door).
+    expect(index).not.toMatch(/requireApp\("sops"\)|key: "sops"/);
     expect(index).toMatch(/export async function objectAccessPanel[^{]+\{\n\s+if \(!\(await appOpen\(kind\)\)\) return null;/);
     expect(index).toMatch(/export async function checkObjectAccess[^{]+\{\n\s+if \(!\(await appOpen\(kind\)\)\) return "not_found";/);
   });
@@ -167,7 +172,32 @@ describe("review round 1", () => {
     expect(team).toMatch(/return mine === "FULL" && door \? "VIEW" : null;/);
   });
 
-  it("refreshes the goal's Contributors row after the dialog changes it", () => {
-    expect(read("src/app/(dashboard)/okrs/[id]/page.tsx")).toMatch(/<OkrAudience key=\{`\$\{audienceEntries\.map\(\(e\) => `\$\{e\.type\}:\$\{e\.id\}`\)\.join\(","\)\}#\$\{audienceMembers\.length\}`\}/);
+  it("refreshes the goal's Contributors row after the dialog changes it, without remounting it", () => {
+    const page = read("src/app/(dashboard)/okrs/[id]/page.tsx");
+    expect(page).toMatch(/<OkrAudience okrId=\{okr\.id\} canEdit/);
+    expect(read("src/app/(dashboard)/okrs/[id]/goal-page-bits.tsx")).toMatch(/window\.dispatchEvent\(new CustomEvent\(GOAL_AUDIENCE_CHANGED, \{ detail: okrId \}\)\);/);
+    expect(read("src/components/okrs/okr-audience.tsx")).toMatch(/window\.addEventListener\(GOAL_AUDIENCE_CHANGED, onChanged\);/);
+  });
+});
+
+describe("review round 2", () => {
+  it("asks another person's Members door from their own facts, never the viewer's session", () => {
+    const team = read("src/lib/access/object-share/team.ts");
+    expect(team.match(/membersDoorFor\(ctx\.organizationId, /g)?.length).toBe(3);
+    // opensMembers is only ever the viewer's own door.
+    const calls = team.match(/opensMembers\(([^)]*)\)/g) ?? [];
+    expect(calls.filter((c) => c !== "opensMembers(ctx.session)" && c !== "opensMembers(session: ObjectShareCtx[\"session\"])")).toEqual([]);
+  });
+
+  it("shows who holds a tool share only to the people who manage it", () => {
+    const tool = read("src/lib/access/object-share/tool.ts");
+    expect(tool).toMatch(/if \(!canManage\) \{\n\s+shown = direct\.filter\(\(d\) => d\.source === "Owner" \|\| d\.person\.id === ctx\.userId\);/);
+    expect(tool).toMatch(/direct: shown,/);
+  });
+
+  it("offers a request's grant only while the object's app is open to the decider", () => {
+    const list = read("src/app/api/access-requests/route.ts");
+    expect(list).toMatch(/grantable: node !== null \|\| \(objectKind !== null && !appOff\),/);
+    expect(read("src/components/settings/access-requests-card.tsx")).toMatch(/\{req\.appOff \? \(/);
   });
 });

@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { listOrgAdmins } from "@/lib/access/admins";
 import { canSeeGoal } from "@/lib/goal-audience";
 import { objectRequestGrants, recordAccessRequest, requestNodeRef, requestObjectKind, requestTypesForNode, roleCoversRequest, REQUEST_TTL_MS, type RequestRole } from "@/lib/access/access-requests";
-import { objectShareOn } from "@/lib/access/object-share";
+import { objectAppOpen, objectShareOn } from "@/lib/access/object-share";
 import { nodeCtxForUser, nodeCtxFromSession, nodeRole } from "@/lib/access/node-access";
 import { OWNER_FIELD, requestObjectName, requestTargetFor as targetFor } from "@/lib/access/access-request-target";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
@@ -182,6 +182,13 @@ export async function GET(req: Request) {
   // A tool, a goal, an SOP folder or a team is granted here too while the one
   // share dialog serves them (the flag), in the answers its store can hold.
   const objectsOn = objectShareOn();
+  // Whether each kind's app is open to the decider (a hidden Tools app makes
+  // every grant on a tool fail): asked once per kind per read.
+  const appOpenOf = new Map<string, Promise<boolean>>();
+  const appOpen = (kind: NonNullable<ReturnType<typeof requestObjectKind>>) => {
+    if (!appOpenOf.has(kind)) appOpenOf.set(kind, objectAppOpen(kind));
+    return appOpenOf.get(kind)!;
+  };
   const requesterCtx = new Map<string, Awaited<ReturnType<typeof nodeCtxForUser>>>();
   const incoming = [];
   for (const r of pending) {
@@ -212,6 +219,7 @@ export async function GET(req: Request) {
     }
     if (answered) continue;
     const objectKind = !node && objectsOn ? requestObjectKind(r.objectType) : null;
+    const appOff = objectKind ? !(await appOpen(objectKind)) : false;
     incoming.push({
       id: r.id,
       objectType: r.objectType,
@@ -221,8 +229,10 @@ export async function GET(req: Request) {
       createdAt: r.createdAt,
       link: t.link,
       name: await requestObjectName(r.objectType, r.objectId, u.organizationId),
-      grantable: node !== null || objectKind !== null,
-      ...(objectKind ? { grants: objectRequestGrants(objectKind, r.role as RequestRole) } : {}),
+      grantable: node !== null || (objectKind !== null && !appOff),
+      ...(objectKind && !appOff ? { grants: objectRequestGrants(objectKind, r.role as RequestRole) } : {}),
+      // Its app is closed to the decider: only Decline can answer it.
+      ...(appOff ? { appOff: true } : {}),
       requester: { id: r.requester.id, name: `${r.requester.firstName ?? ""} ${r.requester.lastName ?? ""}`.trim() || r.requester.email, avatar: r.requester.avatar },
     });
   }

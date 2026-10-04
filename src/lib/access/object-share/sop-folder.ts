@@ -82,6 +82,15 @@ async function editsSops(userId: string, organizationId: string, accessLevel: st
 
 const NO_SOP_EDIT_NOTE = "Their workspace role can't edit SOPs: they read the drafts here but can't save changes.";
 const AGENT_OWNER_NOTE = "An Agent never changes who can open a folder, so this works as Can edit.";
+const AGENT_OWNER_NO_EDIT_NOTE = "An Agent never changes who can open a folder, and its workspace role can't edit SOPs: it reads the drafts here but can't save changes.";
+
+/** The caveat a role at this folder carries for this person: the Agent rule and the workspace-role rule, together. */
+async function roleNote(userId: string, organizationId: string, level: string, role: PanelRole): Promise<string | undefined> {
+  if (rank(role) < rank("EDIT")) return undefined;
+  const edits = await editsSops(userId, organizationId, level);
+  if (level === "AGENT" && rank(role) >= rank("FULL")) return edits ? AGENT_OWNER_NOTE : AGENT_OWNER_NO_EDIT_NOTE;
+  return edits ? undefined : NO_SOP_EDIT_NOTE;
+}
 
 /** A folder above this one, named only when the viewer can open it; else "a place you cannot open". */
 function viaAt(ctx: ObjectShareCtx, rows: readonly AccessRow[], chain: readonly ChainRow[], at: number): AccessVia {
@@ -129,11 +138,10 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
       cap: false,
       alsoVia,
     };
-    const level = String(r.user.accessLevel);
     // The caveat follows the strongest role the row shows, its own or the one beside it.
     const shown = alsoVia && rank(alsoVia.role) > rank(role) ? alsoVia.role : role;
-    if (level === "AGENT" && rank(shown) >= rank("FULL")) entry.note = AGENT_OWNER_NOTE;
-    else if (rank(shown) >= rank("EDIT") && !(await editsSops(r.userId, ctx.organizationId, level))) entry.note = NO_SOP_EDIT_NOTE;
+    const note = await roleNote(r.userId, ctx.organizationId, String(r.user.accessLevel), shown);
+    if (note) entry.note = note;
     direct.push(entry);
   }
   direct.sort((a, b) => rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
@@ -149,9 +157,8 @@ export async function sopFolderPanel(ctx: ObjectShareCtx, id: string): Promise<A
     if (!from || !user) continue;
     const list = groups.get(from.at) ?? [];
     const entry: AccessInheritedEntry = { person: personOf(user), role: from.role, via: viaFor(from.at) };
-    const level = levelOf.get(userId) ?? "EMPLOYEE";
-    if (level === "AGENT" && from.role === "FULL") entry.note = AGENT_OWNER_NOTE;
-    else if (rank(from.role) >= rank("EDIT") && !(await editsSops(userId, ctx.organizationId, level))) entry.note = NO_SOP_EDIT_NOTE;
+    const note = await roleNote(userId, ctx.organizationId, levelOf.get(userId) ?? "EMPLOYEE", from.role);
+    if (note) entry.note = note;
     list.push(entry);
     groups.set(from.at, list);
   }
@@ -294,7 +301,8 @@ export async function checkSopFolderAccess(
   const named = ctx.orgAdmin || !!viewerRoleAt(ctx, rows, chain, from.at);
   const where = from.at === 0 ? "Shared with them directly." : named ? `From SOP folder ${chain[from.at].name}.` : "From a folder above it.";
   if (level === "AGENT" && from.role === "FULL") {
-    return { userId, name, role: "EDIT", sentence: `${shareRoleLabel(KIND, "EDIT")}. ${where} An Agent never changes who can open a folder.` };
+    const noEdit = !(await editsSops(userId, ctx.organizationId, level)) ? ` ${NO_SOP_EDIT_NOTE}` : "";
+    return { userId, name, role: "EDIT", sentence: `${shareRoleLabel(KIND, "EDIT")}. ${where} An Agent never changes who can open a folder.${noEdit}` };
   }
   const caveat = rank(from.role) >= rank("EDIT") && !(await editsSops(userId, ctx.organizationId, level)) ? ` ${NO_SOP_EDIT_NOTE}` : "";
   return { userId, name, role: from.role, sentence: `${shareRoleLabel(KIND, from.role)}. ${where}${caveat}` };

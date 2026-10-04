@@ -29,6 +29,7 @@ import { ReadOnlyBanner } from "@/components/access/read-only-banner";
 import { ShareDialog } from "@/components/access/share-dialog";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { shareRoleLabel } from "@/lib/access/access-panel";
+import { GOAL_AUDIENCE_CHANGED } from "@/components/okrs/okr-audience";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
@@ -176,7 +177,11 @@ export function GoalShareDoor({ okrId, title, canShare, canEdit, canCheckIn }: {
         onOpenChange={(o) => { if (!o) setMode(null); }}
         target={{ kind: "goal", id: okrId, name: title }}
         readOnly={mode === "who"}
-        onChanged={() => router.refresh()}
+        onChanged={() => {
+          router.refresh();
+          // The Contributors row keeps its own state: tell it to read the rows again.
+          window.dispatchEvent(new CustomEvent(GOAL_AUDIENCE_CHANGED, { detail: okrId }));
+        }}
       />
     </>
   );

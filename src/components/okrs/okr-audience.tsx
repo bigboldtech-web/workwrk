@@ -6,7 +6,7 @@
 // POST/DELETE /api/okrs/[id]/assignees; every response returns the fresh
 // resolved summary, so the stack always reflects read-time membership.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   GoalAudiencePicker,
   MemberAvatarStack,
@@ -18,6 +18,13 @@ interface AudienceResponse {
   entries?: AudienceEntry[];
   audience?: { members: AudienceMember[]; totalMembers: number };
 }
+
+/**
+ * Fired (detail: the goal id) by the one share dialog when it changed this
+ * goal's contributors (batch 7, GoalShareDoor), so this strip refetches
+ * instead of showing the audience it last saved.
+ */
+export const GOAL_AUDIENCE_CHANGED = "workwrk:goal-audience-changed";
 
 interface OkrAudienceProps {
   okrId: string;
@@ -32,6 +39,24 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
   const [members, setMembers] = useState<AudienceMember[]>(initialMembers);
   const [total, setTotal] = useState(initialTotal);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== okrId) return;
+      void (async () => {
+        const res = await fetch(`/api/okrs/${okrId}/assignees`, { cache: "no-store" }).catch(() => null);
+        if (!res || !res.ok) return;
+        const body = (await res.json().catch(() => null)) as AudienceResponse | null;
+        if (body?.entries) setEntries(body.entries);
+        if (body?.audience) {
+          setMembers(body.audience.members);
+          setTotal(body.audience.totalMembers);
+        }
+      })();
+    };
+    window.addEventListener(GOAL_AUDIENCE_CHANGED, onChanged);
+    return () => window.removeEventListener(GOAL_AUDIENCE_CHANGED, onChanged);
+  }, [okrId]);
 
   async function apply(next: AudienceEntry[]) {
     const prev = entries;

@@ -32,6 +32,8 @@ interface IncomingRequest {
   grantable: boolean;
   /** The answers for an ask on a tool, a goal, an SOP folder or a team, in its own words (batch 7). */
   grants?: Array<{ role: IncomingRequest["role"]; label: string }>;
+  /** Its app is hidden or floored for you: it can only be declined. */
+  appOff?: boolean;
   requester: { id: string; name: string; avatar: string | null };
 }
 
@@ -117,7 +119,9 @@ export function AccessRequestsCard() {
                 {rowError[req.id] ? <p className="text-sm text-danger-text" role="alert">{rowError[req.id]}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {req.grantable && req.grants ? (
+                {req.appOff ? (
+                  <span className="text-sm text-ink-2">Its app isn&apos;t open to you</span>
+                ) : req.grantable && req.grants ? (
                   req.grants.map((g) => (
                     <button key={g.role} type="button" className={btn} disabled={busy === req.id} onClick={() => { void decide(req, "grant", g.role); }}>
                       {g.label}

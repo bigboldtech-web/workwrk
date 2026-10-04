@@ -201,8 +201,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
             {mayAssign ? <span className="ms-2"><GoalEditLink goal={editable} label={owner ? "Change" : "Assign"} /></span> : null}
           </DetailRow>
           <DetailRow label="Contributors">
-            {/* Keyed on the audience so a refresh after the Share dialog changed it shows the new one. */}
-            <OkrAudience key={`${audienceEntries.map((e) => `${e.type}:${e.id}`).join(",")}#${audienceMembers.length}`} okrId={okr.id} canEdit={canEditGoal} initialEntries={audienceEntries} initialMembers={audienceMembers.slice(0, 5)} initialTotal={audienceMembers.length} />
+            <OkrAudience okrId={okr.id} canEdit={canEditGoal} initialEntries={audienceEntries} initialMembers={audienceMembers.slice(0, 5)} initialTotal={audienceMembers.length} />
           </DetailRow>
           <DetailRow label="Level"><span>{LEVEL_WORD[okr.level] ?? okr.level}</span></DetailRow>
           <DetailRow label="Part of">

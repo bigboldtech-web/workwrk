@@ -128,20 +128,33 @@ export async function toolPanel(ctx: ObjectShareCtx, id: string): Promise<Access
   }
   direct.sort((a, b) => Number(b.owner) - Number(a.owner) || rank(b.role) - rank(a.role) || a.person.name.localeCompare(b.person.name));
 
+  // Who holds a share is for the people who manage the tool, as GET
+  // /api/tools and /api/tools/[id] keep it (everyone else gets a count): a
+  // Can view or Can edit holder sees the maker, themselves and how many more.
+  let shown = direct;
+  let hiddenShares = 0;
+  if (!canManage) {
+    shown = direct.filter((d) => d.source === "Owner" || d.person.id === ctx.userId);
+    hiddenShares = direct.length - shown.length;
+  }
+
   const adminCount = await orgAdminCount(ctx.organizationId);
   return {
     node: { kind: KIND, id: tool.id, name: tool.name, noun: ACCESS_NODE_NOUN[KIND], href: hrefOf(tool.id), space: null, notepadOwner: null },
     viewer: { role, canManage, maxGrant, isAgent: ctx.isAgent },
     roles: ROLES_BY_KIND[KIND],
     general: NO_GENERAL,
-    direct,
+    direct: shown,
     inherited: [],
     inheritedMore: [],
     hiddenInherited: [],
     everyone: null,
     admins: { count: adminCount },
-    // By member type, as the tool gates read it (tool-access.ts), not the People team list.
-    notes: ["Anyone whose member type is Executive or People team also has Full access to every tool."],
+    notes: [
+      ...(hiddenShares > 0 ? [`Shared with ${hiddenShares} more ${hiddenShares === 1 ? "person" : "people"}. Only the people who manage this tool see who.`] : []),
+      // By member type, as the tool gates read it (tool-access.ts), not the People team list.
+      "Anyone whose member type is Executive or People team also has Full access to every tool.",
+    ],
     orgName,
     grantsAvailable: true,
   };
