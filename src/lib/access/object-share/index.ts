@@ -7,6 +7,7 @@ import { GrantError } from "../grants";
 import type { ObjectShareCtx } from "./common";
 import { checkSopFolderAccess, removeSopFolderGrant, setSopFolderGrant, sopFolderPanel } from "./sop-folder";
 import { checkToolAccess, removeToolGrant, setToolGrant, toolPanel } from "./tool";
+import { checkGoalAccess, goalPanel, removeGoalGrant, setGoalGrant } from "./goal";
 
 export { objectShareCtxFromSession, objectShareOn, type ObjectShareCtx } from "./common";
 
@@ -22,6 +23,7 @@ interface Adapter {
 const ADAPTERS: Partial<Record<ObjectShareKind, Adapter>> = {
   sop_folder: { panel: sopFolderPanel, set: setSopFolderGrant, remove: removeSopFolderGrant, check: checkSopFolderAccess },
   tool: { panel: toolPanel, set: setToolGrant, remove: removeToolGrant, check: checkToolAccess },
+  goal: { panel: goalPanel, set: setGoalGrant, remove: removeGoalGrant, check: checkGoalAccess },
 };
 
 function adapterOf(kind: ObjectShareKind): Adapter {

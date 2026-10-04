@@ -10,7 +10,7 @@
 // loads it in node.
 
 import {
-  GRANT_ERROR_MESSAGE, MANAGE_BAR, PANEL_ROLE_RANK, panelAtLeast, panelRoleLabel,
+  GRANT_ERROR_MESSAGE, MANAGE_BAR, PANEL_ROLE_RANK, panelAtLeast, panelRoleLabel, shareRoleLabel,
   type AccessDirectEntry, type AccessInheritedEntry, type AccessNodeKind, type AccessPanel, type AccessPerson, type ShareKind,
   type AccessVia, type GrantChange, type GrantErrorCode, type PanelRole,
 } from "@/lib/access/access-panel";
@@ -115,6 +115,7 @@ export function viaText(via: AccessVia): string {
     case "org_admin": return "as an admin";
     case "owner": return "as the person who made it";
     case "older_rule": return "under the older rule for Private items";
+    case "rule": return via.text;
   }
 }
 
@@ -137,6 +138,7 @@ export function inheritedHeader(via: AccessVia): string {
     case "org_admin": return `Admins at ${via.orgName}`;
     case "owner": return "The person who made it";
     case "older_rule": return via.from ? `From ${via.from.name}, under the older rule for Private items` : "Under the older rule for Private items";
+    case "rule": return via.text.charAt(0).toUpperCase() + via.text.slice(1);
   }
 }
 
@@ -145,6 +147,7 @@ function viaKey(via: AccessVia): string {
     case "node": return `node:${via.kind}:${via.id}`;
     case "everyone": return `everyone:${via.from?.kind ?? ""}:${via.from?.name ?? ""}`;
     case "older_rule": return `older:${via.from?.kind ?? ""}:${via.from?.name ?? ""}`;
+    case "rule": return `rule:${via.text}`;
     default: return via.type;
   }
 }
@@ -415,12 +418,17 @@ export function SELF_LOWER_CONFIRM(kind: ShareKind): { title: string; descriptio
   };
 }
 
+/** A role in the words of the kind it is on (a goal's Can check in, a team's Lead), else the ladder's. */
+function roleWords(role: PanelRole, kind?: ShareKind): string {
+  return kind ? shareRoleLabel(kind, role) : panelRoleLabel(role);
+}
+
 /** The toast after a removal: what actually happened, including what the person keeps. */
-export function removalNotice(change: GrantChange, name: string): string {
+export function removalNotice(change: GrantChange, name: string, kind?: ShareKind): string {
   if (change.noChange) return "Already removed.";
   const parts: string[] = [];
   parts.push(change.stillReaches
-    ? `Removed. ${name} still has ${panelRoleLabel(change.stillReaches.role)} ${viaText(change.stillReaches.via)}.`
+    ? `Removed. ${name} still has ${roleWords(change.stillReaches.role, kind)} ${viaText(change.stillReaches.via)}.`
     : `Removed ${name}.`);
   const kept = change.keepsInside;
   if (kept.length > 0) {
@@ -434,8 +442,8 @@ export function removalNotice(change: GrantChange, name: string): string {
  * removed them meanwhile). The row is gone, so the line says who it was for
  * and, for a role change, what Retry will do: give them that role again.
  */
-export function strayFailureText(name: string, message: string, role: PanelRole | null): string {
-  return role ? `${name}: ${message} Retry gives them ${panelRoleLabel(role)}.` : `${name}: ${message}`;
+export function strayFailureText(name: string, message: string, role: PanelRole | null, kind?: ShareKind): string {
+  return role ? `${name}: ${message} Retry gives them ${roleWords(role, kind)}.` : `${name}: ${message}`;
 }
 
 /**
@@ -444,10 +452,10 @@ export function strayFailureText(name: string, message: string, role: PanelRole 
  * lowered and the line says what they keep. Null when the Add changed their
  * role as asked.
  */
-export function keptHigherText(change: GrantChange, name: string, requested: PanelRole): string | null {
+export function keptHigherText(change: GrantChange, name: string, requested: PanelRole, kind?: ShareKind): string | null {
   if (!change.noChange || !change.role || change.role === requested) return null;
   if (PANEL_ROLE_RANK[change.role] <= PANEL_ROLE_RANK[requested]) return null;
-  return `${name} already has ${panelRoleLabel(change.role)}, so it was kept.`;
+  return `${name} already has ${roleWords(change.role, kind)}, so it was kept.`;
 }
 
 // ── Errors ──────────────────────────────────────────────────────────
@@ -470,6 +478,8 @@ export function errorText(code: GrantErrorCode, kind: ShareKind): string {
     return `You need ${panelRoleLabel(MANAGE_BAR[kind])} to change who can open this ${sentenceNoun(kind)}.`;
   }
   if (code === "grants_unavailable") return grantsUnavailableText(kind);
+  // A goal's owner is its accountable person, not necessarily who made it.
+  if (code === "owner_fixed" && kind === "goal") return "The goal's owner always keeps it. Change the owner from the goal's menu.";
   return GRANT_ERROR_MESSAGE[code] ?? GRANT_ERROR_MESSAGE.server_error;
 }
 

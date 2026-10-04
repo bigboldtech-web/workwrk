@@ -141,7 +141,13 @@ export type AccessVia =
   | { type: "everyone"; orgName: string; from: { kind: ShareKind; name: string } | null }
   | { type: "org_admin"; orgName: string }
   | { type: "owner" }
-  | { type: "older_rule"; from: { kind: ShareKind; name: string } | null };
+  | { type: "older_rule"; from: { kind: ShareKind; name: string } | null }
+  /**
+   * A live rule that is not a place, on the objects served beside the nodes
+   * (a goal's department, job title or tag audience, the owner's managers):
+   * its words, read only ("as a member of Engineering").
+   */
+  | { type: "rule"; text: string };
 
 export type AccessGrantSource =
   | "SpaceMember" | "FolderMember" | "BoardMember" | "AccessGrant" | "DocSharing" | "DocSharingLegacy" | "Owner"

@@ -465,7 +465,7 @@ function AddPeople({
       queue = queue.slice(1);
       setSelection(queue);
       setExpectedFor((m) => { const next = { ...m }; delete next[p.id]; return next; });
-      const kept = keptHigherText(out.result.change, p.name, roleNow);
+      const kept = keptHigherText(out.result.change, p.name, roleNow, kind);
       if (kept) toast(kept);
       if (!apply(out.result)) return;
     }
@@ -777,7 +777,7 @@ function DirectRows({
       return;
     }
     setDrafts((d) => { const next = { ...d }; delete next[userId]; return next; });
-    if (action.kind === "remove") toast(removalNotice(out.result.change, name));
+    if (action.kind === "remove") toast(removalNotice(out.result.change, name, panel.node.kind));
     apply(out.result);
   };
 
@@ -817,7 +817,7 @@ function DirectRows({
   return (
     <>
       {stray.map(([id, f]) => (
-        <InlineRetry key={id} message={strayFailureText(f.name, f.message, f.action.kind === "role" ? f.action.role : null)} onRetry={() => retry(id)} />
+        <InlineRetry key={id} message={strayFailureText(f.name, f.message, f.action.kind === "role" ? f.action.role : null, panel.node.kind)} onRetry={() => retry(id)} />
       ))}
       {panel.direct.length === 0 ? (
         <p className="m-0 text-sm text-ink-2">Nobody has been added here directly.</p>

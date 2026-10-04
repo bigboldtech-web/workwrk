@@ -13,6 +13,10 @@
 //                      and offers Request again.
 //   CopyLinkButton     the title-row Copy link when "..." would hold nothing
 //                      else.
+//   GoalShareDoor      the title row's Share (batch 7, while the one share
+//                      dialog serves goals): Share for whoever may edit the
+//                      goal, the role chip ("Can check in", "Can view") for
+//                      everyone else, read only.
 //   GoalBody           the column the islands share, so "Check in" on the
 //                      stale line and "View history" on a target can reach
 //                      the Targets and Activity cards.
@@ -22,6 +26,9 @@ import { useRouter } from "next/navigation";
 import { Link2, Unlink } from "lucide-react";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { ReadOnlyBanner } from "@/components/access/read-only-banner";
+import { ShareDialog } from "@/components/access/share-dialog";
+import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
+import { shareRoleLabel } from "@/lib/access/access-panel";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
@@ -144,6 +151,32 @@ export function CopyLinkButton({ okrId }: { okrId: string }) {
     >
       <Link2 className="h-4 w-4" aria-hidden /> Copy link
     </button>
+  );
+}
+
+/**
+ * The one share dialog on this goal: who contributes (Can check in), the
+ * owner and the goal's rules. A change refreshes the page, so the Contributors
+ * row and the check-in controls follow it.
+ */
+export function GoalShareDoor({ okrId, title, canShare, canCheckIn }: { okrId: string; title: string; canShare: boolean; canCheckIn: boolean }) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"share" | "who" | null>(null);
+  return (
+    <>
+      <ShareOrRoleChip
+        role={canShare ? "FULL" : canCheckIn ? "EDIT" : "VIEW"}
+        label={!canShare && canCheckIn ? shareRoleLabel("goal", "EDIT") : undefined}
+        onOpen={setMode}
+      />
+      <ShareDialog
+        open={mode !== null}
+        onOpenChange={(o) => { if (!o) setMode(null); }}
+        target={{ kind: "goal", id: okrId, name: title }}
+        readOnly={mode === "who"}
+        onChanged={() => router.refresh()}
+      />
+    </>
   );
 }
 

@@ -29,12 +29,15 @@ export function ShareOrRoleChip({
   role,
   editorsCanShare = false,
   onOpen,
+  label: ownLabel,
   className,
 }: {
   role: ShareChipRole;
   editorsCanShare?: boolean;
   /** "share" = the write dialog; "who" = the read-only Who has access body. */
   onOpen: (mode: "share" | "who") => void;
+  /** The chip's word where the object has its own (a goal's "Can check in"). */
+  label?: string;
   className?: string;
 }) {
   const canShare = canShareWithRole(role, editorsCanShare);
@@ -52,7 +55,7 @@ export function ShareOrRoleChip({
       </button>
     );
   }
-  const label = role === "none" ? OBJECT_ROLE_LABEL.VIEW : OBJECT_ROLE_LABEL[role];
+  const label = ownLabel ?? (role === "none" ? OBJECT_ROLE_LABEL.VIEW : OBJECT_ROLE_LABEL[role]);
   return (
     <button
       type="button"
