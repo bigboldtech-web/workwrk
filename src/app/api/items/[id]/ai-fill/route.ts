@@ -10,7 +10,8 @@
 // the task (edit), the List the value belongs to, the field, the daily cap
 // (429 ai_daily_limit), the model, one write.
 //
-// Answers { value } (the stored AI value), or { skipped: "has_value" }.
+// Answers { value } (the stored AI value), or { skipped: "has_value" }; 409
+// { error: "changed" } when the stored value is not the one the person saw.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -22,6 +23,9 @@ const bodySchema = z.object({
   fieldKey: z.string().min(1).max(80),
   contextBoardId: z.string().min(1).max(64).nullable().optional(),
   onlyIfEmpty: z.boolean().optional(),
+  // The value the person is looking at (null for an empty cell): the fill
+  // replaces exactly that, or nothing.
+  expect: z.unknown().optional(),
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,6 +45,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       fieldKey: parsed.data.fieldKey,
       contextBoardId: parsed.data.contextBoardId ?? null,
       onlyIfEmpty: parsed.data.onlyIfEmpty === true,
+      expect: parsed.data && "expect" in parsed.data ? { value: parsed.data.expect ?? null } : null,
       plan: org.plan,
     });
   } catch (err) {

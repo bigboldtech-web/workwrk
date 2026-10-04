@@ -11,6 +11,7 @@ import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/a
 import { specToScene, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { sequenceToScene, type SequenceSpec } from "@/lib/canvas/sequence";
 import type { CanvasScene } from "@/lib/canvas/scene";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const SYSTEM = `You are a principal software architect. Turn the user's description into a clean diagram. FIRST choose the diagram TYPE, then output ONLY a JSON object (no markdown, no prose) in that type's shape.
 
@@ -92,6 +93,10 @@ export async function POST(req: NextRequest) {
     return jsonError("Describe what you want to design.");
   }
 
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
   if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     const spec = priorSpec ?? FALLBACK;

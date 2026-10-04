@@ -45,7 +45,6 @@ import {
   buildFillRequest,
   factsForFill,
   isAiFieldType,
-  parseAiValue,
   parseFillAnswer,
   translationSourceText,
   type AiFieldValue,
@@ -58,6 +57,31 @@ const FILL_TIMEOUT_MS = 45_000;
 
 function asObject(v: unknown): Json {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {};
+}
+
+/** JSON with object keys sorted, so two reads of one value compare equal. */
+function stable(v: unknown): string {
+  const norm = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(norm);
+    if (x && typeof x === "object") {
+      const o = x as Record<string, unknown>;
+      return Object.fromEntries(Object.keys(o).sort().map((k) => [k, norm(o[k])]));
+    }
+    return x ?? null;
+  };
+  return JSON.stringify(norm(v));
+}
+
+/** Nothing stored at all: the only value a fill may take the place of unasked. */
+function isEmptyValue(v: unknown): boolean {
+  return v === undefined || v === null || v === "";
+}
+
+/** Thrown inside the write when the stored value is not the one the fill was for: nothing is written. */
+class KeptValue extends Error {
+  constructor(readonly why: "has_value" | "changed") {
+    super(why);
+  }
 }
 
 function refuse(status: number, body: Record<string, unknown>): NextResponse {
@@ -77,6 +101,13 @@ export async function fillAiField(args: {
   contextBoardId: string | null;
   /** Fill empty rows: never replace a value that is there (or lands meanwhile). */
   onlyIfEmpty: boolean;
+  /**
+   * The value the person is looking at (null for an empty cell). A fill
+   * replaces exactly that value: if the stored one is different, before the
+   * model is asked or when the answer is written, nothing is written. Absent
+   * (an API caller): no such check.
+   */
+  expect: { value: unknown } | null;
   plan: string | null;
 }): Promise<NextResponse> {
   const { c } = args;
@@ -95,7 +126,6 @@ export async function fillAiField(args: {
   const fields = parseBoardSchema(linked ? linked.list.schema : gate.item.board.schema).fields;
   const field = fields.find((f) => f.key === args.fieldKey);
   if (!field || !isAiFieldType(field.type)) return refuse(404, { error: "unknown_field" });
-  const type = field.type;
   const config = aiFieldConfig(field)!;
   const notReady = aiFieldNotReady(config);
   if (notReady) return refuse(409, { error: "needs_setup", reason: notReady });
@@ -103,9 +133,14 @@ export async function fillAiField(args: {
   const stored = asObject(gate.item.metadata);
   const listId = linked ? linked.list.id : null;
   const placeOf = (blob: Json): Json => (listId ? readNamespace(blob, listId) : blob);
-  if (args.onlyIfEmpty && parseAiValue(type, placeOf(stored)[field.key])) {
+  // Any stored value counts, an older non-AI one included: Fill empty rows
+  // takes only the place of nothing.
+  const holds = (blob: Json): unknown => placeOf(blob)[field.key];
+  if (args.onlyIfEmpty && !isEmptyValue(holds(stored))) {
     return NextResponse.json({ skipped: "has_value" }, { headers: { "Cache-Control": "no-store" } });
   }
+  const unexpected = (blob: Json): boolean => !!args.expect && stable(holds(blob) ?? null) !== stable(args.expect.value ?? null);
+  if (unexpected(stored)) return refuse(409, { error: "changed" });
 
   // ── 3. Reach: what every reader of this List's value already sees ──
   const description = htmlToText(stored.description);
@@ -159,6 +194,8 @@ export async function fillAiField(args: {
       { timeout: FILL_TIMEOUT_MS, maxRetries: 1 },
     );
     answer = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+    // An answer cut off at the token limit is never stored as if whole.
+    if (msg.stop_reason === "max_tokens") return refuse(502, { error: config.type === "TRANSLATION" ? "too_long" : "ai_unusable" });
   } catch (err) {
     await releaseAiUse(c.organizationId, "field_fill");
     console.error(`[ai-fill] ${gate.item.id}/${field.key}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
@@ -169,22 +206,30 @@ export async function fillAiField(args: {
 
   // ── 6. One write of one key ──────────────────────────────────────
   const value: AiFieldValue = { ...parsed, source: "ai", at: new Date().toISOString(), by: c.userId };
-  let kept = false;
-  const updated = await updateBoardItem(gate.item.id, {}, c.userId, {
-    metadataFn: (now) => {
-      // Fill empty rows never replaces a value someone wrote meanwhile.
-      if (args.onlyIfEmpty && parseAiValue(type, placeOf(asObject(now))[field.key])) {
-        kept = true;
-        return now;
-      }
-      kept = false;
-      return listId
-        ? applyMetadataPatch(now, { ns: { [field.key]: value }, listId })
-        : applyMetadataPatch(now, { top: { [field.key]: value } });
-    },
-    activityMeta: { via: "ai" },
-  });
-  if (kept) return NextResponse.json({ skipped: "has_value" }, { headers: { "Cache-Control": "no-store" } });
+  let updated: Awaited<ReturnType<typeof updateBoardItem>>;
+  try {
+    updated = await updateBoardItem(gate.item.id, {}, c.userId, {
+      metadataFn: (now) => {
+        // Re-checked on the row as it is now (and on every re-run): a value
+        // somebody wrote while the model was answering is never replaced,
+        // and nothing at all is written then.
+        const current = asObject(now);
+        if (args.onlyIfEmpty && !isEmptyValue(holds(current))) throw new KeptValue("has_value");
+        if (unexpected(current)) throw new KeptValue("changed");
+        return listId
+          ? applyMetadataPatch(current, { ns: { [field.key]: value }, listId })
+          : applyMetadataPatch(current, { top: { [field.key]: value } });
+      },
+      activityMeta: { via: "ai" },
+    });
+  } catch (err) {
+    if (err instanceof KeptValue) {
+      return err.why === "has_value"
+        ? NextResponse.json({ skipped: "has_value" }, { headers: { "Cache-Control": "no-store" } })
+        : refuse(409, { error: "changed" });
+    }
+    throw err;
+  }
 
   // "When a task field changes", for the home List's fields, exactly as an
   // edit fires it (PATCH /api/items/[id]). Never throws.

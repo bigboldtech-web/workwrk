@@ -94,6 +94,11 @@ export async function afterMessageSent(args: {
   parentId: string | null;
   isCallCard: boolean;
   now: Date;
+  /**
+   * Ring only these people (a scheduled AI update rings only the readers it
+   * was checked against). Absent: every member, as for any message.
+   */
+  onlyUserIds?: readonly string[];
 }): Promise<void> {
   const { conversationId: id, conversation: conversationFacts, message, authorId: userId, text, parentId, isCallCard, now } = args;
 
@@ -127,10 +132,11 @@ export async function afterMessageSent(args: {
         ? `#${conversationFacts.name ?? "channel"}`
         : (conversationFacts.name || "a group chat");
 
-    const members = await prisma.conversationMember.findMany({
+    const onlySet = args.onlyUserIds ? new Set(args.onlyUserIds) : null;
+    const members = (await prisma.conversationMember.findMany({
       where: { conversationId: id, userId: { not: userId } },
       select: { userId: true, notifyLevel: true },
-    });
+    })).filter((m) => !onlySet || onlySet.has(m.userId));
     const mentionSet = new Set(args.mentions);
 
     // One read for the whole roster rather than one per person. The key and

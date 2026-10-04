@@ -16,6 +16,7 @@ import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } fr
 import { computeGoalEffort } from "@/lib/goal-effort";
 import { verdictForGoal, verdictNarrative } from "@/lib/goal-verdict";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 type AiVerdictReply = { headline?: string; reasons?: string[]; recommendation?: string };
 
@@ -100,6 +101,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   };
   const heuristic = verdictNarrative(verdict, base);
 
+  // AI features turned off for the workspace (settings.data.aiEnabled): no
+  // workspace content goes to the model provider, and the goal still gets
+  // the assessment worked out without AI, as it does with no AI key.
+  if (await aiOffResponse(orgId)) return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });
   const ai = await getAnthropicForOrg(orgId);
   if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });

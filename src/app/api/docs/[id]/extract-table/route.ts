@@ -17,6 +17,7 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { logActivity } from "@/lib/activity";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const COL_TYPES = ["short_text", "long_text", "number", "select", "date", "checkbox", "url", "email"] as const;
 const MAX_INPUT_CHARS = 100_000;
@@ -47,6 +48,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!text.trim()) return jsonError("doc is empty", 422);
   const trimmed = text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text;
 
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { talkGate } from "@/lib/talk-gate";
+import { aiUpdateHiddenFor } from "@/lib/talk-updates";
 
 // Message search across MY conversations. One indexed-join query, capped.
 //
@@ -74,6 +75,9 @@ export async function GET(req: NextRequest) {
   });
 
   const results = rows
+    // An AI update a person was not checked against is never a search hit:
+    // not its words, and not even that its words matched (Batch 8).
+    .filter((r) => !aiUpdateHiddenFor(r.metadata, gate.userId))
     .filter((r) => {
       if (!filesOnly) return true;
       const meta = r.metadata as { attachments?: unknown[] } | null;

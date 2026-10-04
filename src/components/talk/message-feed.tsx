@@ -120,7 +120,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
       // An AI update (Batch 8) always heads its own group, and the person's
       // next message after one does too, so the "AI update" label is never
       // folded into, or over, words the person wrote themselves.
-      const ai = m.metadata?.kind === "ai_update";
+      const ai = m.metadata?.kind === "ai_update" || m.metadata?.kind === "ai_update_hidden";
       const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000 || ai || prevAi;
       out.push({ kind: "msg", key: m.id, msg: m, head });
       prevAuthor = m.authorId;
@@ -221,6 +221,10 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // Batch 8: said plainly on the post itself, so nobody reads AI words as a
   // person's own (src/lib/talk-updates.ts).
   const aiUpdate = msg.metadata?.kind === "ai_update" ? msg.metadata.update ?? {} : null;
+  // An update this reader was not checked against arrives with no words
+  // (src/lib/talk-updates.ts serveAiUpdate); an edited one is the person's.
+  const aiHidden = msg.metadata?.kind === "ai_update_hidden";
+  const aiEdited = msg.metadata?.kind === "ai_update_edited";
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
@@ -252,7 +256,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             <span className="text-base font-semibold text-ink-strong">
               {mine ? "You" : `${author.firstName} ${author.lastName}`.trim()}
             </span>
-            {aiUpdate ? (
+            {aiUpdate || aiHidden ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--os-brand-deep)]">
                 <Sparkles className="h-3 w-3" aria-hidden /> AI update
               </span>
@@ -319,6 +323,9 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           </div>
         ) : (
           <>
+            {aiHidden && !deleted ? (
+              <p className="text-sm leading-6 text-ink-3">This AI update was written for the people who were here when it was posted.</p>
+            ) : null}
             {(msg.body || deleted) && (
               deleted ? (
                 <p className="text-base leading-6 italic text-ink-3">Message removed</p>
@@ -329,8 +336,10 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                   {aiUpdate ? (
                     <p className="mt-1 text-xs text-ink-3">
                       Written by AI for {mine ? "you" : author.firstName || "the person who set it up"}
-                      {typeof aiUpdate.tasks === "number" ? ` from ${aiUpdate.tasks} ${aiUpdate.tasks === 1 ? "task" : "tasks"}` : ""} that everyone here can open.
+                      {typeof aiUpdate.tasks === "number" ? ` from ${aiUpdate.tasks} ${aiUpdate.tasks === 1 ? "task" : "tasks"}` : ""} that everyone here could open when it was posted.
                     </p>
+                  ) : aiEdited ? (
+                    <p className="mt-1 text-xs text-ink-3">Edited from an AI update.</p>
                   ) : null}
                 </div>
               )

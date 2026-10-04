@@ -3,12 +3,14 @@ import {
   MAX_POST_CHARS,
   buildUpdateRequest,
   cleanUpdateAnswer,
+  aiUpdateHiddenFor,
   conversationProblem,
   dueState,
   nextTalkUpdateAt,
   reportWindowStart,
   scheduleProblem,
   scheduleText,
+  serveAiUpdate,
   talkUpdateInputSchema,
   talkUpdatesPerDay,
   updatePostBody,
@@ -78,15 +80,16 @@ describe("the schedule", () => {
 describe("the window a run reports on", () => {
   const now = new Date("2026-10-05T09:00:00Z");
   const day = 24 * 60 * 60 * 1000;
-  it("is a week for a project update", () => {
-    expect(reportWindowStart("project", now, null).getTime()).toBe(now.getTime() - 7 * day);
+  it("is the whole week for a weekly update, whatever its kind", () => {
+    expect(reportWindowStart("weekly", now, null).getTime()).toBe(now.getTime() - 7 * day);
+    expect(reportWindowStart("weekly", now, new Date(now.getTime() - 7 * day)).getTime()).toBe(now.getTime() - 7 * day);
   });
-  it("is since the last post for a standup, between one and three days", () => {
-    expect(reportWindowStart("standup", now, null).getTime()).toBe(now.getTime() - day);
-    expect(reportWindowStart("standup", now, new Date(now.getTime() - 3 * day)).getTime()).toBe(now.getTime() - 3 * day);
-    expect(reportWindowStart("standup", now, new Date(now.getTime() - 9 * day)).getTime()).toBe(now.getTime() - 3 * day);
+  it("is since the last post on weekdays, between one and three days", () => {
+    expect(reportWindowStart("weekdays", now, null).getTime()).toBe(now.getTime() - day);
+    expect(reportWindowStart("weekdays", now, new Date(now.getTime() - 3 * day)).getTime()).toBe(now.getTime() - 3 * day);
+    expect(reportWindowStart("weekdays", now, new Date(now.getTime() - 9 * day)).getTime()).toBe(now.getTime() - 3 * day);
     // A post an hour ago still reports on a whole day.
-    expect(reportWindowStart("standup", now, new Date(now.getTime() - 3600_000)).getTime()).toBe(now.getTime() - day);
+    expect(reportWindowStart("weekdays", now, new Date(now.getTime() - 3600_000)).getTime()).toBe(now.getTime() - day);
   });
 });
 
@@ -106,6 +109,8 @@ describe("the request and the post", () => {
 
   it("drops a heading the model added, defuses an @, and keeps the post short", () => {
     expect(cleanUpdateAnswer("# Standup\n\n**Done**\n- Ship login @Ana")).toBe("**Done**\n- Ship login Ana");
+    // A link's hidden address goes; its words stay.
+    expect(cleanUpdateAnswer("- See [the plan](https://evil.example/x) now")).toBe("- See the plan now");
     expect(cleanUpdateAnswer("   ")).toBeNull();
     const long = Array.from({ length: 400 }, (_, i) => `- line ${i}`).join("\n");
     expect((cleanUpdateAnswer(long) ?? "").length).toBeLessThanOrEqual(MAX_POST_CHARS);
@@ -113,25 +118,49 @@ describe("the request and the post", () => {
 
   it("titles the post with its kind and scope", () => {
     expect(updatePostBody("project", "Q4 *Launch*", "Body")).toBe("**Weekly project update: Q4 Launch**\nBody");
+    // A List or Space not everyone here can open is never named.
+    expect(updatePostBody("standup", null, "Body")).toBe("**Daily standup**\nBody");
   });
 });
 
 describe("a due date against today", () => {
-  const due = new Date("2026-10-04T00:00:00Z");
-  it("is not overdue on its own day, anywhere", () => {
-    expect(dueState(due, new Date("2026-10-04T15:00:00Z"), "UTC")).toEqual({ day: "2026-10-04", overdue: false, soon: true });
-    expect(dueState(due, new Date("2026-10-04T15:00:00Z"), "Asia/Kolkata").overdue).toBe(false);
+  it("reads the due day in the update's zone (stored as midnight where it was set)", () => {
+    // Set in Kolkata for 5 October: midnight IST is 18:30 UTC on the 4th.
+    const due = new Date("2026-10-04T18:30:00Z");
+    expect(dueState(due, new Date("2026-10-05T06:00:00Z"), "Asia/Kolkata")).toEqual({ day: "2026-10-05", overdue: false, soon: true });
+    expect(dueState(due, new Date("2026-10-05T19:00:00Z"), "Asia/Kolkata").overdue).toBe(true);
   });
-  it("is overdue from the next day in the update's zone", () => {
+  it("is not overdue on its own day", () => {
+    const due = new Date("2026-10-04T00:00:00Z");
+    expect(dueState(due, new Date("2026-10-04T15:00:00Z"), "UTC")).toEqual({ day: "2026-10-04", overdue: false, soon: true });
     expect(dueState(due, new Date("2026-10-05T00:30:00Z"), "UTC").overdue).toBe(true);
-    // 23:30 UTC on the 4th is already the 5th in Kolkata.
-    expect(dueState(due, new Date("2026-10-04T23:30:00Z"), "Asia/Kolkata").overdue).toBe(true);
-    expect(dueState(due, new Date("2026-10-04T23:30:00Z"), "America/New_York").overdue).toBe(false);
   });
   it("is soon for today and the next two days only", () => {
     const now = new Date("2026-10-04T12:00:00Z");
     expect(dueState(new Date("2026-10-06T00:00:00Z"), now, "UTC").soon).toBe(true);
     expect(dueState(new Date("2026-10-07T00:00:00Z"), now, "UTC").soon).toBe(false);
     expect(dueState(null, now, "UTC")).toEqual({ day: null, overdue: false, soon: false });
+  });
+});
+
+describe("who reads a posted update", () => {
+  const meta = { kind: "ai_update", update: { id: "u1", kind: "standup", scope: "Launch", tasks: 3, readers: ["a", "b"] } };
+  const msg = { id: "m1", body: "**Daily standup: Launch**\nWords", metadata: meta };
+  it("gives its words only to the people it was checked against, never the list itself", () => {
+    expect(aiUpdateHiddenFor(meta, "a")).toBe(false);
+    expect(aiUpdateHiddenFor(meta, "c")).toBe(true);
+    const forA = serveAiUpdate(msg, "a");
+    expect(forA.body).toBe(msg.body);
+    expect((forA.metadata as { update: Record<string, unknown> }).update).toEqual({ id: "u1", kind: "standup", scope: "Launch", tasks: 3 });
+    expect(serveAiUpdate(msg, "c")).toEqual({ id: "m1", body: "", metadata: { kind: "ai_update_hidden" } });
+  });
+  it("keeps the rule after an edit, and hides an update with no list from everyone", () => {
+    expect(aiUpdateHiddenFor({ ...meta, kind: "ai_update_edited" }, "c")).toBe(true);
+    expect(aiUpdateHiddenFor({ kind: "ai_update", update: {} }, "a")).toBe(true);
+  });
+  it("leaves every other message alone", () => {
+    const plain = { body: "hi", metadata: { mentions: ["c"] } };
+    expect(serveAiUpdate(plain, "c")).toBe(plain);
+    expect(aiUpdateHiddenFor(null, "c")).toBe(false);
   });
 });

@@ -134,14 +134,21 @@ export function AiFieldValue({
   const [busy, setBusy] = useState(false);
   if (!config) return <span className="text-xs text-ink-3">{EMPTY}</span>;
   const type = field.type as AiFieldType;
-  const shown = local && local.base === value ? local.value : parseAiValue(type, value);
+  // What is stored, as this person sees it: a fill's answer until the host
+  // catches up, else the host's value.
+  const raw = local && local.base === value ? local.value : value;
+  const shown = parseAiValue(type, raw);
+  // A value of another shape (written before AI fields, by an import or an
+  // API client) is data: it is shown, and never treated as empty.
+  const older = !shown && !(raw === undefined || raw === null || raw === "") ? raw : undefined;
   const canFill = available && editable && !!itemId;
   const notReady = aiFieldNotReady(config);
 
   const fill = async () => {
     if (!itemId || busy) return;
     setBusy(true);
-    const r = await requestAiFill({ itemId, fieldKey: field.key, contextBoardId: fieldListId });
+    // The value replaced is exactly the one shown here, or nothing is written.
+    const r = await requestAiFill({ itemId, fieldKey: field.key, contextBoardId: fieldListId, expect: raw ?? null });
     setBusy(false);
     if (!r.ok) {
       toast(r.message);
@@ -158,6 +165,7 @@ export function AiFieldValue({
       <AiRow
         config={config}
         shown={shown}
+        older={older}
         busy={busy}
         canFill={canFill && !notReady}
         notReady={canFill ? notReady : null}
@@ -173,6 +181,9 @@ export function AiFieldValue({
   }
 
   if (busy) return <Dots variant="pending" label="Filling" className="text-ink-3" />;
+  if (older !== undefined) {
+    return <span className="min-w-0 truncate text-xs text-ink-2" title="An older value, not written by AI fields">{olderText(older)}</span>;
+  }
   if (!shown) {
     if (!canFill || notReady) return <span className="text-xs text-ink-3">{EMPTY}</span>;
     return (
@@ -206,11 +217,17 @@ export function AiFieldValue({
   );
 }
 
+/** An older value in words: its text, or a plain note for any other shape. */
+function olderText(v: unknown): string {
+  return typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "Older value";
+}
+
 // ── The task detail row: the value, where it came from, and its actions ──
 
 function AiRow({
   config,
   shown,
+  older,
   busy,
   canFill,
   notReady,
@@ -220,6 +237,8 @@ function AiRow({
 }: {
   config: AiFieldConfig;
   shown: AiFieldValue | null;
+  /** A stored value of another shape: shown, and replaced only when asked twice. */
+  older: unknown;
   busy: boolean;
   canFill: boolean;
   notReady: keyof typeof NOT_READY_TEXT | null;
@@ -233,17 +252,21 @@ function AiRow({
   const stamp = () => ({ source: "person" as const, at: new Date().toISOString(), by: null });
 
   const refill = async () => {
-    // A person's correction is theirs: replacing it is asked first.
-    if (shown?.source === "person") {
+    // A person's correction is theirs, and an older value is data: replacing
+    // either is asked first.
+    if (shown?.source === "person" || older !== undefined) {
       const ok = await confirm({
-        title: "Replace the edited value?",
-        description: "Someone edited this value by hand. A new AI fill replaces it.",
+        title: older !== undefined ? "Replace the older value?" : "Replace the edited value?",
+        description: older !== undefined
+          ? "This field holds a value that was not written by AI fields. A new AI fill replaces it."
+          : "Someone edited this value by hand. A new AI fill replaces it.",
         confirmLabel: "Replace",
       });
       if (!ok) return;
     }
     await onFill();
   };
+  const hasValue = !!shown || older !== undefined;
 
   const link = "text-xs font-medium text-ink-2 hover:text-ink";
   const actions = (
@@ -256,9 +279,9 @@ function AiRow({
       ) : null}
       {busy ? <Dots variant="pending" label="Filling" className="text-ink-3" /> : null}
       {!busy && canFill ? (
-        <button type="button" className={`${link} inline-flex items-center gap-1`} onClick={() => void (shown ? refill() : onFill())}>
-          {shown ? <RotateCw className="w-3 h-3" aria-hidden /> : <Sparkles className="w-3 h-3" aria-hidden />}
-          {shown ? "Refill" : "Fill with AI"}
+        <button type="button" className={`${link} inline-flex items-center gap-1`} onClick={() => void (hasValue ? refill() : onFill())}>
+          {hasValue ? <RotateCw className="w-3 h-3" aria-hidden /> : <Sparkles className="w-3 h-3" aria-hidden />}
+          {hasValue ? "Refill" : "Fill with AI"}
         </button>
       ) : null}
       {!busy && notReady ? <span className="text-xs text-ink-3">{NOT_READY_TEXT[notReady]}</span> : null}
@@ -266,12 +289,12 @@ function AiRow({
         <button
           type="button"
           className={link}
-          onClick={() => { setDraft(shown?.text ?? ""); setEditing(true); }}
+          onClick={() => { setDraft(shown?.text ?? (typeof older === "string" ? older : "")); setEditing(true); }}
         >
           Edit
         </button>
       ) : null}
-      {!busy && canCorrect && shown ? (
+      {!busy && canCorrect && hasValue ? (
         <button type="button" className={link} onClick={() => onCorrect(null)}>
           Clear
         </button>
@@ -340,8 +363,17 @@ function AiRow({
 
   return (
     <div className="w-full min-w-0 space-y-1">
-      {shown ? <ValueBody config={config} value={shown} full /> : <span className="text-xs text-ink-3">{EMPTY}</span>}
-      {canFill || notReady || canCorrect || shown || busy ? actions : null}
+      {shown ? (
+        <ValueBody config={config} value={shown} full />
+      ) : older !== undefined ? (
+        <p className="text-xs text-ink-2 whitespace-pre-wrap break-words">
+          {olderText(older)}
+          <span className="block text-ink-3">An older value, not written by AI fields.</span>
+        </p>
+      ) : (
+        <span className="text-xs text-ink-3">{EMPTY}</span>
+      )}
+      {canFill || notReady || canCorrect || hasValue || busy ? actions : null}
     </div>
   );
 }

@@ -564,7 +564,8 @@ export function buildFillRequest(config: AiFieldConfig, facts: AiFillFacts, sour
           `You translate one task's text into ${aiLanguageLabel(config.language) ?? "English"}. ` +
           "Answer with the translation only, keeping its line breaks. " + DATA_RULE + extra(config),
         prompt: `<text>\n${sourceText}\n</text>`,
-        maxTokens: 2000,
+        // Room for 6000 characters in any script; a cut-off answer is refused.
+        maxTokens: 4096,
       };
   }
 }
@@ -606,7 +607,10 @@ export function parseFillAnswer(
       const said = bare(raw).toLowerCase();
       const exact = config.choices.find((c) => c.label.toLowerCase() === said);
       if (exact) return { choice: exact.value };
-      const named = config.choices.filter((c) => raw.toLowerCase().includes(c.label.toLowerCase()));
+      // A category named on its own, never inside another word ("Bug" is not
+      // in "Debugging"), and only when exactly one is named.
+      const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const named = config.choices.filter((c) => new RegExp(`(^|[^\\p{L}\\p{N}])${esc(c.label)}($|[^\\p{L}\\p{N}])`, "iu").test(raw));
       return named.length === 1 ? { choice: named[0].value } : null;
     }
   }

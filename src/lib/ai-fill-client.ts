@@ -38,6 +38,10 @@ export function aiFillMessage(status: number, body: unknown): { code: string; me
       return { code, message: "The AI service didn't answer. Try again.", stop: false };
     case "ai_unusable":
       return { code, message: "The AI answer didn't fit this field. Try again.", stop: false };
+    case "too_long":
+      return { code, message: "This text is too long to translate in one go. Shorten the description, or translate the title.", stop: false };
+    case "changed":
+      return { code, message: "This field changed since you opened it. Check the new value, then try again.", stop: false };
     case "unknown_field":
       return { code, message: "This field is no longer on the List.", stop: true };
     default:
@@ -52,6 +56,8 @@ export async function requestAiFill(args: {
   /** The List whose field it is: the home, or a List the task is linked into. */
   contextBoardId: string | null;
   onlyIfEmpty?: boolean;
+  /** The value the person is looking at (null for an empty cell): replaced exactly, or not at all. */
+  expect: unknown;
 }): Promise<AiFillResult> {
   try {
     const res = await fetch(`/api/items/${encodeURIComponent(args.itemId)}/ai-fill`, {
@@ -61,6 +67,7 @@ export async function requestAiFill(args: {
         fieldKey: args.fieldKey,
         ...(args.contextBoardId ? { contextBoardId: args.contextBoardId } : {}),
         ...(args.onlyIfEmpty ? { onlyIfEmpty: true } : {}),
+        expect: args.expect === undefined ? null : args.expect,
       }),
     });
     const body = await res.json().catch(() => null);

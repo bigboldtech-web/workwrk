@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { settingsWriteGate } from "@/lib/access/settings-write";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -10,6 +11,10 @@ export async function POST(req: NextRequest) {
   const writeGate = await settingsWriteGate(session, "identity");
   if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
   const body = await req.json();
   const { companyName, website, industry, currentAbout, currentMission, currentVision, currentValues } = body;

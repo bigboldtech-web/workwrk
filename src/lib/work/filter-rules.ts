@@ -66,9 +66,11 @@ function scalarFor(row: BoardItemRow, field: string): string {
     default: {
       const v = row.metadata?.[fieldKeyOfId(field)];
       if (v == null) return "";
-      // An AI value (Batch 8) filters by its words, never "[object Object]".
-      if (typeof v === "object" && !Array.isArray(v)) return aiValueSortKey(v) ?? "";
-      return String(v);
+      // An AI value (Batch 8) filters by its words. Every other value reads
+      // exactly as it always has (a doc-link Relationship's { kind, id } is
+      // still "set").
+      const ai = aiValueSortKey(v);
+      return ai !== null ? ai : String(v);
     }
   }
 }

@@ -6,6 +6,7 @@ import { canPost } from "@/lib/talk-access";
 import { presignGetUrl } from "@/lib/s3";
 import { publishToConversation } from "@/lib/realtime-bus";
 import { afterMessageSent, insertConversationMessage } from "@/lib/talk-post";
+import { serveAiUpdate } from "@/lib/talk-updates";
 
 // Messages: cursor-paged reads plus sends. This is the hot path (the open
 // pane polls GET every few seconds), so reads are one indexed query and
@@ -44,7 +45,7 @@ async function alreadySent(conversationId: string, authorId: string, clientId: s
   });
   if (!row) return null;
   const replyCount = await prisma.conversationMessage.count({ where: { parentId: row.id, deletedAt: null } });
-  const [served] = await serveMessages([{ ...row, replyCount }]);
+  const [served] = await serveMessages([{ ...row, replyCount }], authorId);
   return served;
 }
 
@@ -68,11 +69,14 @@ async function answerDuplicate(conversationId: string, sent: NonNullable<Awaited
 /** Outbound shaping for every read path:
  *  - "removed" messages must not leak their content through the API:
  *    body and metadata are blanked server-side, not just hidden in UI;
+ *  - an AI update's words reach only the people it was checked against
+ *    when it was posted (Batch 8, src/lib/talk-updates.ts serveAiUpdate);
  *  - S3-backed attachments carry an s3Key and get a fresh presigned
  *    URL on every read (stored URLs expire after an hour). */
-async function serveMessages<T extends { deletedAt: Date | null; metadata: unknown }>(rows: T[]): Promise<T[]> {
-  return Promise.all(rows.map(async (m) => {
-    if (m.deletedAt) return { ...m, body: "", metadata: null };
+async function serveMessages<T extends { deletedAt: Date | null; metadata: unknown; body: string }>(rows: T[], viewerId: string): Promise<T[]> {
+  return Promise.all(rows.map(async (row) => {
+    if (row.deletedAt) return { ...row, body: "", metadata: null };
+    const m = serveAiUpdate(row, viewerId);
     const meta = m.metadata as { attachments?: { url: string; s3Key?: string }[] } | null;
     if (!meta?.attachments?.some((a) => a.s3Key)) return m;
     const attachments = await Promise.all(meta.attachments.map(async (a) => {
@@ -125,8 +129,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   // Read needs `view`: an archived channel still reads, and a Full holder who
   // is not a member (an Admin on a public channel) reads rather than 404s.
-  const { error } = await requireConversation(id, { floor: "view" });
+  const { error, ctx } = await requireConversation(id, { floor: "view" });
   if (error) return error;
+  const viewerId = ctx.viewer.userId;
 
   const { searchParams } = new URL(req.url);
   const before = searchParams.get("before");  // message id: page older history
@@ -175,7 +180,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const hasNewer = newerAsc.length > HALF;          // unread tail below
     const window = [...olderDesc.slice(0, HALF).reverse(), ...newerAsc.slice(0, HALF)];
     const counts = await replyMeta(id, window.map((m) => m.id));
-    const served = await serveMessages(window);
+    const served = await serveMessages(window, viewerId);
     return jsonSuccess({
       messages: withReplies(served, counts),
       hasMore,
@@ -199,8 +204,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       take: 200,
       include: { author: { select: AUTHOR_SELECT } },
     });
-    const [servedParent] = await serveMessages([parentMsg]);
-    const servedReplies = await serveMessages(replies);
+    const [servedParent] = await serveMessages([parentMsg], viewerId);
+    const servedReplies = await serveMessages(replies, viewerId);
     return jsonSuccess({
       parent: { ...servedParent, replyCount: replies.filter((r) => !r.deletedAt).length },
       messages: servedReplies,
@@ -229,7 +234,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { author: { select: AUTHOR_SELECT } },
     });
     const counts = await replyMeta(id, messages.filter((m) => !m.parentId).map((m) => m.id));
-    const served = await serveMessages(messages);
+    const served = await serveMessages(messages, viewerId);
     const last = messages[messages.length - 1];
     return jsonSuccess({
       messages: withReplies(served, counts),
@@ -261,7 +266,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const hasMore = page.length > PAGE;
   const window = page.slice(0, PAGE);
   const counts = await replyMeta(id, window.map((m) => m.id));
-  const served = await serveMessages(window);
+  const served = await serveMessages(window, viewerId);
   const messages = withReplies(served.reverse(), counts);
   return jsonSuccess({ messages, hasMore });
 }

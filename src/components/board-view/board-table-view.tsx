@@ -68,7 +68,7 @@ import { AssigneePicker, MultiAssigneePicker, PersonAvatar, type PersonRef } fro
 import { rowAssigneeIds } from "./board-filter-bar";
 import { FieldValue } from "./field-value";
 import { useAiFieldsAvailable } from "./ai-field-value";
-import { FILL_BATCH, aiValueSortKey, aiValueText, isAiFieldType, parseAiValue, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
+import { FILL_BATCH, aiFieldConfig, aiFieldNotReady, aiValueSortKey, aiValueText, isAiFieldType, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
 import { requestAiFill } from "@/lib/ai-fill-client";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PriorityPicker } from "./priority-picker";
@@ -275,8 +275,10 @@ function compareByColumn(a: BoardItemRow, b: BoardItemRow, key: string, statuses
         if (computedKeys?.has(fieldKey)) return computedCellValue(row, fieldKey) ?? "￿";
         const v = row.metadata?.[fieldKey];
         if (v == null || v === "") return "￿";
-        // An AI value (Batch 8) sorts by its words; other objects last.
-        if (typeof v === "object" && !Array.isArray(v)) return aiValueSortKey(v)?.toLowerCase() ?? "￿";
+        // An AI value (Batch 8) sorts by its words; every other value sorts
+        // exactly as it always has.
+        const ai = aiValueSortKey(v);
+        if (ai !== null) return ai.toLowerCase();
         return typeof v === "number" ? v : String(v).toLowerCase();
       }
     }
@@ -882,7 +884,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       // An AI field (Batch 8) groups by its words: the category's name, the
       // sentiment, or the text.
       const def = fieldByCol.get(groupBy);
-      if (def && isAiFieldType(def.type)) return aiValueText(def, raw) ?? "__unset__";
+      const words = def && isAiFieldType(def.type) ? aiValueText(def, raw) : null;
+      if (words) return words;
       return raw == null || raw === "" ? "__unset__" : String(raw);
     };
     const map = new Map<string, BoardItemRow[]>();
@@ -1480,17 +1483,22 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     onItemPatched?.(id, { metadataPatch: patch });
   }, [onItemPatched]);
   // "Fill empty rows with AI": the rows shown, in the order shown, that this
-  // viewer may edit and that hold no value, at most FILL_BATCH a click, three
-  // at a time. Each asks the server with onlyIfEmpty, so a value somebody
-  // writes meanwhile is never replaced, and a refusal that would refuse every
-  // row (the daily limit, the switch turned off) stops the rest.
+  // viewer may edit and that hold NOTHING (an older value of another shape is
+  // data, never empty), at most FILL_BATCH a click, three at a time. Each asks
+  // the server with onlyIfEmpty, so a value somebody writes meanwhile is never
+  // replaced, and a refusal that would refuse every row (the daily limit, the
+  // switch turned off) stops the rest.
+  const emptyFillRows = useCallback((field: FieldDef): BoardItemRow[] => {
+    const shown = buckets ? buckets.flatMap((b) => b.rows) : topLevel;
+    return shown.filter((r) => {
+      const v = r.metadata?.[field.key];
+      return rowFieldsEditable(r, canEdit, assigneeEdit) && (v === undefined || v === null || v === "");
+    });
+  }, [buckets, topLevel, canEdit, assigneeEdit]);
   const fillEmptyRows = useCallback(async (field: FieldDef) => {
     if (!isAiFieldType(field.type)) return;
-    const type = field.type;
-    const shown = buckets ? buckets.flatMap((b) => b.rows) : topLevel;
-    const targets = shown
-      .filter((r) => rowFieldsEditable(r, canEdit, assigneeEdit) && !parseAiValue(type, r.metadata?.[field.key]))
-      .slice(0, FILL_BATCH);
+    const all = emptyFillRows(field);
+    const targets = all.slice(0, FILL_BATCH);
     if (targets.length === 0) {
       toast("Every row you can edit here already has a value.");
       return;
@@ -1498,18 +1506,21 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setAiBatchKey(field.key);
     toast(`Filling ${targets.length} ${targets.length === 1 ? "row" : "rows"} with AI…`);
     let filled = 0;
-    let failed = 0;
+    let skipped = 0;
+    const failures = new Map<string, number>();
     let stop: string | null = null;
     let next = 0;
     const worker = async () => {
       while (next < targets.length && !stop) {
         const row = targets[next++];
-        const r = await requestAiFill({ itemId: row.id, fieldKey: field.key, contextBoardId: boardId, onlyIfEmpty: true });
+        const r = await requestAiFill({ itemId: row.id, fieldKey: field.key, contextBoardId: boardId, onlyIfEmpty: true, expect: null });
         if (r.ok && "value" in r) {
           filled += 1;
           applyAiValue(row.id, field.key, r.value);
-        } else if (!r.ok) {
-          failed += 1;
+        } else if (r.ok) {
+          skipped += 1;
+        } else {
+          failures.set(r.message, (failures.get(r.message) ?? 0) + 1);
           if (r.stop) stop = r.message;
         }
       }
@@ -1519,10 +1530,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAiBatchKey(null);
     }
-    if (stop) toast(filled > 0 ? `Filled ${filled}. ${stop}` : stop);
-    else if (failed > 0) toast(`Filled ${filled} of ${targets.length}. ${failed} couldn't be filled. Try those again.`);
-    else toast(`Filled ${filled} ${filled === 1 ? "row" : "rows"}.`);
-  }, [buckets, topLevel, canEdit, assigneeEdit, boardId, applyAiValue, toast]);
+    const failed = [...failures.values()].reduce((a, b) => a + b, 0);
+    const parts: string[] = [`Filled ${filled} ${filled === 1 ? "row" : "rows"}.`];
+    if (skipped > 0) parts.push(`${skipped} got a value from someone else meanwhile.`);
+    if (stop) parts.push(stop);
+    else if (failed > 0) {
+      // The reason, not a blanket "try again": some failures never succeed (nothing to translate).
+      const [why, n] = [...failures.entries()].sort((a, b) => b[1] - a[1])[0];
+      parts.push(`${failed} couldn't be filled. ${failures.size === 1 ? why : `${n} of them: ${why}`}`);
+    }
+    if (!stop && all.length > targets.length) parts.push(`${all.length - targets.length} more empty rows remain: run it again for the next ${FILL_BATCH}.`);
+    toast(parts.join(" "));
+  }, [emptyFillRows, boardId, applyAiValue, toast]);
 
   const commitConnect = useCallback(async (id: string, key: string, next: unknown): Promise<{ ok: true } | { ok: false; message: string }> => {
     const row = itemsRef.current.find((r) => r.id === id);
@@ -1710,7 +1729,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       onEditField: managed && onOpenFields ? onOpenFields : undefined,
       onDeleteField: managed ? () => deleteField(managed.key) : undefined,
       onAddColumn: canManage ? onOpenFields : undefined,
-      onFillEmpty: field && isAiFieldType(field.type) && aiAvailable && !aiBatchKey ? () => void fillEmptyRows(field) : undefined,
+      // Only where it can work: a set-up AI field, and at least one empty row this viewer may edit.
+      onFillEmpty: field && isAiFieldType(field.type) && aiAvailable && !aiBatchKey && !aiFieldNotReady(aiFieldConfig(field)!) && emptyFillRows(field).length > 0
+        ? () => void fillEmptyRows(field)
+        : undefined,
       // Name is always the first frozen column once anything is pinned, so it
       // has no pin of its own.
       ...(canSaveView && key !== "name" ? { pinned: pinnedColumns.includes(key), onTogglePin: () => togglePin(key) } : {}),

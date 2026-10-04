@@ -39,6 +39,7 @@ interface UpdateView {
   createdBy: { id: string; name: string };
   lastRun: { status: string; reason: RunReason | null; at: string; taskCount: number | null } | null;
   canManage: boolean;
+  canResume: boolean;
   canRunNow: boolean;
 }
 
@@ -100,6 +101,8 @@ export function TalkUpdatesSection({ conversationId }: { conversationId: string 
     setBusy(null);
     if (!r.ok) {
       toast(r.error ?? "Couldn't do that. Try again.");
+      // What the server refused may be because the list changed: read it again.
+      await load();
       return;
     }
     done?.(r.data);
@@ -169,17 +172,21 @@ export function TalkUpdatesSection({ conversationId }: { conversationId: string 
                       </p>
                     </div>
                   </div>
-                  {u.canRunNow || u.canManage ? (
+                  {u.canRunNow || u.canManage || u.canResume ? (
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                       {u.canRunNow ? (
                         <button type="button" className={ghost} disabled={busy !== null} onClick={() => void postNow(u)}>
                           {busy === `run:${u.id}` ? <Dots variant="pending" label="Posting" /> : <Send className="h-3.5 w-3.5" aria-hidden />} Post now
                         </button>
                       ) : null}
-                      {u.canManage ? (
-                        <button type="button" className={ghost} disabled={busy !== null} onClick={() => void setStatus(u, u.status === "active" ? "paused" : "active")}>
-                          {u.status === "active" ? <Pause className="h-3.5 w-3.5" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
-                          {u.status === "active" ? "Pause" : "Resume"}
+                      {u.status === "active" && u.canManage ? (
+                        <button type="button" className={ghost} disabled={busy !== null} onClick={() => void setStatus(u, "paused")}>
+                          <Pause className="h-3.5 w-3.5" aria-hidden /> Pause
+                        </button>
+                      ) : null}
+                      {u.status === "paused" && u.canResume ? (
+                        <button type="button" className={ghost} disabled={busy !== null} onClick={() => void setStatus(u, "active")}>
+                          <Play className="h-3.5 w-3.5" aria-hidden /> Resume
                         </button>
                       ) : null}
                       {u.canManage ? (
@@ -237,14 +244,18 @@ function NewUpdateForm({
   const [options, setOptions] = useState<ReadableListsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The picker reads at most a page of Lists; a search box finds the rest.
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let alive = true;
-    void apiFetch<ReadableListsResponse>(readableListsUrl({ targets: true, limit: 100 }), { cache: "no-store" }).then((r) => {
-      if (alive) setOptions(r.ok && r.data ? r.data : { boards: [], spaces: [], truncated: false });
-    });
-    return () => { alive = false; };
-  }, []);
+    const t = window.setTimeout(() => {
+      void apiFetch<ReadableListsResponse>(readableListsUrl({ targets: true, limit: 100, q: query }), { cache: "no-store" }).then((r) => {
+        if (alive) setOptions(r.ok && r.data ? r.data : { boards: [], spaces: [], truncated: false });
+      });
+    }, query ? 250 : 0);
+    return () => { alive = false; window.clearTimeout(t); };
+  }, [query]);
 
   const pickKind = (k: TalkUpdateKind) => {
     setKind(k);
@@ -287,6 +298,14 @@ function NewUpdateForm({
       />
       <label className="block">
         <span className="mb-0.5 block text-xs font-medium text-ink">Report on</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find a List or a Space"
+          aria-label="Find a List or a Space"
+          className={`${field} mb-1`}
+        />
         <select value={scope} onChange={(e) => setScope(e.target.value)} className={field} disabled={!options}>
           <option value="">{options ? "Pick a List or a Space" : "Loading"}</option>
           {options && options.spaces.length > 0 ? (
@@ -304,6 +323,7 @@ function NewUpdateForm({
             </optgroup>
           ) : null}
         </select>
+        {options?.truncated ? <span className="mt-0.5 block text-xs text-ink-3">More Lists match. Type to narrow the list.</span> : null}
       </label>
       <div className="flex items-end gap-2">
         <label className="block flex-1">

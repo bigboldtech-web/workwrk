@@ -20,9 +20,11 @@ import { canPost } from "@/lib/talk-access";
 import { logActivity } from "@/lib/activity";
 import { aiTalkUpdatesOn } from "@/lib/ai/ai-features";
 import { memberViewer } from "@/lib/list-links-server";
+import { viewerFromSession } from "@/lib/access/viewer";
 import {
   MAX_UPDATES_PER_CONVERSATION,
   REASON_TEXT,
+  SETUP_TEXT,
   nextTalkUpdateAt,
   scheduleProblem,
   talkUpdateInputSchema,
@@ -50,20 +52,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const on = aiTalkUpdatesOn(org?.settings);
     const rows = await prisma.talkUpdate.findMany({ where: { conversationId: id, organizationId: orgId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     const me = await memberViewer(ctx.viewer.userId, orgId);
+    const agent = Boolean((await viewerFromSession())?.isAgent);
+    const posting = canPost(ctx.conversation, ctx.role) && !!me;
     const manageAll = ctx.role === "full" || ctx.gate.orgRole === "OWNER" || ctx.gate.orgRole === "ADMIN";
-    const updates = await describeUpdates(rows, { userId: ctx.viewer.userId, organizationId: orgId, manageAll, linkViewer: me });
+    const updates = await describeUpdates(rows, { userId: ctx.viewer.userId, organizationId: orgId, manageAll, linkViewer: me, agent, canPostHere: posting });
     // Whether this person could set one up here, and if not, the one reason
-    // the panel says (never a button that is refused).
+    // the panel says, in words about them (never a button that is refused):
+    // the same checks, in the same order, as POST below.
     let blocked: string | null = null;
     if (!on) blocked = REASON_TEXT.off;
-    else if (!canPost(ctx.conversation, ctx.role) || !me) blocked = REASON_TEXT.cannot_post;
+    else if (agent) blocked = SETUP_TEXT.agent;
+    else if (ctx.conversation.archivedAt) blocked = SETUP_TEXT.archived;
+    else if (!posting) blocked = SETUP_TEXT.cannot_post;
     else {
       const problem = conversationProblem(ctx.conversation);
       if (problem) blocked = REASON_TEXT[problem];
-      else if (rows.length >= MAX_UPDATES_PER_CONVERSATION) blocked = `A conversation holds at most ${MAX_UPDATES_PER_CONVERSATION} scheduled updates.`;
+      else if (rows.length >= MAX_UPDATES_PER_CONVERSATION) blocked = SETUP_TEXT.full;
       else {
         const readers = await conversationReaders(id, orgId);
-        if (!readers.ok) blocked = REASON_TEXT[readers.reason];
+        if (!readers.ok) blocked = readers.reason === "guests" ? SETUP_TEXT.guests : REASON_TEXT[readers.reason];
       }
     }
     return jsonSuccess({ on, cronOn: talkUpdatesCronInstalled(), canCreate: blocked === null, blocked, updates });
@@ -81,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (error) return error;
   const orgId = ctx.gate.organizationId;
   const userId = ctx.viewer.userId;
-  if (app.viewer.isAgent) return jsonError("An agent account can't set up scheduled updates.", 403);
+  if (app.viewer.isAgent) return jsonError(SETUP_TEXT.agent, 403);
 
   const parsed = talkUpdateInputSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return jsonError("Check the update's settings.", 400);
@@ -96,9 +103,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const problem = conversationProblem(ctx.conversation);
     if (problem) return jsonError(REASON_TEXT[problem], 400);
     const count = await prisma.talkUpdate.count({ where: { conversationId: id } });
-    if (count >= MAX_UPDATES_PER_CONVERSATION) return jsonError(`A conversation holds at most ${MAX_UPDATES_PER_CONVERSATION} scheduled updates.`, 409);
+    if (count >= MAX_UPDATES_PER_CONVERSATION) return jsonError(SETUP_TEXT.full, 409);
     const readers = await conversationReaders(id, orgId);
-    if (!readers.ok) return jsonError(REASON_TEXT[readers.reason], 400);
+    if (!readers.ok) return jsonError(readers.reason === "guests" ? SETUP_TEXT.guests : REASON_TEXT[readers.reason], 400);
     const me = await memberViewer(userId, orgId);
     if (!me) return jsonError(REASON_TEXT.cannot_post, 403);
     const scope = await scopeFor(input.scopeKind, input.scopeId, me);
@@ -123,12 +130,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       type: "talk.update_created",
       actorId: userId,
       organizationId: orgId,
-      description: `Set up a scheduled AI update in ${ctx.conversation.name ? `#${ctx.conversation.name}` : "a group chat"}`,
+      // Never the conversation's name: activity feeds reach people who cannot see a private channel.
+      description: "Set up a scheduled AI update in Talk",
       targetId: id,
       targetType: "conversation",
       metadata: { updateId: row.id, kind: input.kind, scopeKind: input.scopeKind, cadence: input.cadence },
     });
-    const [update] = await describeUpdates([row], { userId, organizationId: orgId, manageAll: true, linkViewer: me });
+    const [update] = await describeUpdates([row], { userId, organizationId: orgId, manageAll: true, linkViewer: me, agent: false, canPostHere: true });
     return jsonSuccess({ update }, 201);
   } catch (err) {
     if (isMissingUpdatesTable(err)) return notReady();

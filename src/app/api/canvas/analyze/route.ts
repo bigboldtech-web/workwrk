@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import type { CanvasScene, CanvasElement } from "@/lib/canvas/scene";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const EXPLAIN = `You are a principal software architect explaining a system-design diagram to a teammate.
 Given the diagram's components and connections, write a clear, concise walkthrough:
@@ -76,6 +77,10 @@ export async function POST(req: NextRequest) {
   const drawable = scene.elements.filter((e) => e.type !== "text" && e.type !== "image");
   if (drawable.length === 0) return jsonError("The canvas is empty — draw or generate a diagram first.");
 
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no workspace content goes to the model provider.
+  const aiOffAnswer = await aiOffResponse(orgId);
+  if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
   if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     return jsonError("AI isn't configured for this workspace yet. Add an API key in Settings to use Explain / Critique.");

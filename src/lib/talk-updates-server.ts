@@ -187,6 +187,25 @@ export async function scopeFor(
 
 // ── 5. The facts every reader can open ─────────────────────────────
 
+/** Can every reader open this List? (Its name may then be said.) */
+async function everyoneReadsList(readers: readonly LinkViewer[], listId: string): Promise<boolean> {
+  for (const r of readers) if (!(await listReader(r).canRead(listId))) return false;
+  return true;
+}
+
+/** Can every reader open the scope itself? (Its name may then be said.) */
+export async function everyoneReadsScope(scopeKind: string, scopeId: string, readers: readonly LinkViewer[]): Promise<boolean> {
+  if (scopeKind === "list") return everyoneReadsList(readers, scopeId);
+  for (const r of readers) if (!(await spaceForViewer(r, scopeId))) return false;
+  return true;
+}
+
+export interface SharedFacts {
+  tasks: UpdateTaskFact[];
+  /** Tasks that changed or are due soon, before the reach check. */
+  candidates: number;
+}
+
 export async function sharedFacts(args: {
   organizationId: string;
   lists: ScopeList[];
@@ -195,39 +214,66 @@ export async function sharedFacts(args: {
   now: Date;
   /** The update's zone: what "today" means for a due date. */
   timezone: string;
-}): Promise<UpdateTaskFact[]> {
+}): Promise<SharedFacts> {
   const { lists, readers, windowStart, now } = args;
-  if (lists.length === 0 || readers.length === 0) return [];
-  const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-  const candidates = await prisma.item.findMany({
-    where: {
-      organizationId: args.organizationId,
-      boardId: { in: lists.map((l) => l.id) },
-      archivedAt: null,
-      parentItemId: null,
-      OR: [{ updatedAt: { gte: windowStart } }, { dueAt: { lte: soon } }],
-    },
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    take: 400,
-    select: {
-      id: true, title: true, status: true, boardId: true, organizationId: true, ownerId: true,
-      assigneeIds: true, parentItemId: true, dueAt: true, updatedAt: true,
-    },
-  });
-  if (candidates.length === 0) return [];
+  if (lists.length === 0 || readers.length === 0) return { tasks: [], candidates: 0 };
+  const listIds = lists.map((l) => l.id);
+  const soon = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const select = {
+    id: true, title: true, status: true, boardId: true, organizationId: true, ownerId: true,
+    assigneeIds: true, parentItemId: true, dueAt: true, updatedAt: true,
+  } as const;
+  const base = { organizationId: args.organizationId, boardId: { in: listIds }, archivedAt: null, parentItemId: null };
+  // Two reads, so neither crowds the other out: what changed in the window
+  // (newest first), and what is due by the horizon (soonest first, so a task
+  // overdue for weeks is never cut by a busy week).
+  const [moved, dated] = await Promise.all([
+    prisma.item.findMany({ where: { ...base, updatedAt: { gte: windowStart } }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 300, select }),
+    prisma.item.findMany({ where: { ...base, dueAt: { lte: soon } }, orderBy: [{ dueAt: "asc" }, { id: "asc" }], take: 300, select }),
+  ]);
+  const byId = new Map<string, (typeof moved)[number]>();
+  for (const c of [...moved, ...dated]) byId.set(c.id, c);
+  const candidates = [...byId.values()];
+  if (candidates.length === 0) return { tasks: [], candidates: 0 };
 
-  // EVERY reader, the person who set it up included: one task none of them
-  // may open is one task the post must not name.
+  // EVERY reader, the person who set it up included: one task any of them
+  // cannot open is one task the post must not name.
   let shared = new Set(candidates.map((c) => c.id));
   for (const r of readers) {
     const seen = await readableItemsVia(r, candidates);
     shared = new Set([...shared].filter((id) => seen.get(id)?.readable === true));
-    if (shared.size === 0) return [];
+    if (shared.size === 0) return { tasks: [], candidates: candidates.length };
+  }
+  const kept = candidates.filter((c) => shared.has(c.id));
+
+  // Finished IN the window means moved to a done status in it (its own
+  // activity row), not merely edited while done.
+  const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
+  const finished = new Set<string>();
+  const changes = await prisma.itemActivity.findMany({
+    where: {
+      organizationId: args.organizationId,
+      entityType: "BOARD_ITEM",
+      entityId: { in: kept.map((c) => c.id) },
+      action: "STATUS_CHANGED",
+      createdAt: { gte: windowStart },
+    },
+    select: { entityId: true, meta: true },
+  }).catch(() => [] as Array<{ entityId: string; meta: unknown }>);
+  const listOf = new Map(kept.map((c) => [c.id, c.boardId] as const));
+  for (const ch of changes) {
+    const to = (ch.meta as { to?: unknown } | null)?.to;
+    const statuses = statusesOf.get(listOf.get(ch.entityId) ?? "") ?? [];
+    if (typeof to === "string" && isDoneStatus(statuses, to)) finished.add(ch.entityId);
   }
 
-  const listById = new Map(lists.map((l) => [l.id, l] as const));
-  const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
-  const people = Array.from(new Set(candidates.flatMap((c) => [c.ownerId, ...c.assigneeIds]).filter((x): x is string => !!x)));
+  // A List's name only where every reader may know it.
+  const sayable = new Set<string>();
+  if (lists.length > 1) {
+    for (const l of lists) if (kept.some((c) => c.boardId === l.id) && (await everyoneReadsList(readers, l.id))) sayable.add(l.id);
+  }
+  const listName = new Map(lists.map((l) => [l.id, l.name] as const));
+  const people = Array.from(new Set(kept.flatMap((c) => [c.ownerId, ...c.assigneeIds]).filter((x): x is string => !!x)));
   const names = new Map(
     (people.length
       ? await prisma.user.findMany({ where: { id: { in: people }, organizationId: args.organizationId }, select: { id: true, firstName: true } })
@@ -236,16 +282,16 @@ export async function sharedFacts(args: {
   );
 
   const facts: Array<UpdateTaskFact & { rank: number }> = [];
-  for (const c of candidates) {
-    if (!shared.has(c.id)) continue;
+  for (const c of kept) {
     const statuses = statusesOf.get(c.boardId) ?? [];
     const done = isDoneStatus(statuses, c.status);
-    const moved = c.updatedAt.getTime() >= windowStart.getTime();
     const due = dueState(c.dueAt, now, args.timezone);
     const overdue = !done && due.overdue;
     const dueSoon = !done && due.soon;
-    // Kept: what moved in the window, and open work that is late or due soon.
-    if (!moved && !overdue && !dueSoon) continue;
+    const finishedHere = done && finished.has(c.id);
+    const movedHere = done ? finishedHere : c.updatedAt.getTime() >= windowStart.getTime();
+    // Kept: what finished or moved in the window, and open work that is late or due soon.
+    if (!movedHere && !overdue && !dueSoon) continue;
     const ids = Array.from(new Set([c.ownerId, ...c.assigneeIds].filter((x): x is string => !!x)));
     facts.push({
       title: c.title,
@@ -254,16 +300,19 @@ export async function sharedFacts(args: {
       assignees: ids.map((id) => names.get(id) ?? "").filter(Boolean).slice(0, 3),
       due: due.day,
       overdue,
-      moved,
-      list: lists.length > 1 ? listById.get(c.boardId)?.name ?? null : null,
-      rank: overdue ? 0 : done && moved ? 1 : moved ? 2 : 3,
+      moved: movedHere,
+      list: sayable.has(c.boardId) ? listName.get(c.boardId) ?? null : null,
+      rank: overdue ? 0 : finishedHere ? 1 : movedHere ? 2 : 3,
     });
   }
   facts.sort((a, b) => a.rank - b.rank);
-  return facts.slice(0, MAX_FACT_TASKS).map((f) => ({
-    title: f.title, status: f.status, group: f.group, assignees: f.assignees,
-    due: f.due, overdue: f.overdue, moved: f.moved, list: f.list,
-  }));
+  return {
+    tasks: facts.slice(0, MAX_FACT_TASKS).map((f) => ({
+      title: f.title, status: f.status, group: f.group, assignees: f.assignees,
+      due: f.due, overdue: f.overdue, moved: f.moved, list: f.list,
+    })),
+    candidates: candidates.length,
+  };
 }
 
 // ── One run ────────────────────────────────────────────────────────
@@ -305,7 +354,7 @@ async function finish(
  * Run one update now. A scheduled run is called after its instant is
  * claimed (processDueTalkUpdates); Post now passes the minute it was pressed,
  * and the run row's (update, instant) key refuses a second press in the
- * same minute.
+ * same minute. Every exit, a throw included, finishes its run row.
  */
 export async function runTalkUpdate(args: {
   update: UpdateRow;
@@ -313,7 +362,7 @@ export async function runTalkUpdate(args: {
   dueAt: Date;
   now: Date;
 }): Promise<RunOutcome> {
-  const { update: u, now } = args;
+  const { update: u } = args;
   let runId: string | null = null;
   try {
     const run = await prisma.talkUpdateRun.create({
@@ -325,6 +374,21 @@ export async function runTalkUpdate(args: {
     if ((err as { code?: string })?.code === "P2002") return { status: "skipped", reason: "cooldown", runId: null };
     throw err;
   }
+  try {
+    return await runSteps(u, runId, args);
+  } catch (err) {
+    console.error(`[talk-update] ${u.id} run ${runId}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
+    await finish(u, runId, { status: "failed", reason: "error" }, args.now);
+    return { status: "failed", reason: "error", runId };
+  }
+}
+
+async function runSteps(
+  u: UpdateRow,
+  runId: string,
+  args: { trigger: "schedule" | "manual"; now: Date },
+): Promise<RunOutcome> {
+  const { now } = args;
   const stop = async (status: "skipped" | "failed", reason: RunReason): Promise<RunOutcome> => {
     await finish(u, runId, { status, reason }, now);
     return { status, reason, runId };
@@ -342,12 +406,13 @@ export async function runTalkUpdate(args: {
   const scope = await scopeFor(u.scopeKind, u.scopeId, who.creator);
   if (!scope.ok) return stop("skipped", scope.reason);
 
-  // 5. The facts.
+  // 5. The facts, against every reader.
   const kind = u.kind as TalkUpdateKind;
-  const windowStart = reportWindowStart(kind, now, u.lastPostedAt);
+  const windowStart = reportWindowStart(u.cadence as TalkUpdateSchedule["cadence"], now, u.lastPostedAt);
   const readers = [who.creator, ...where.readers.filter((r) => r.userId !== who.creator.userId)];
-  const tasks = await sharedFacts({ organizationId: u.organizationId, lists: scope.lists, readers, windowStart, now, timezone: u.timezone });
-  if (tasks.length === 0) return stop("skipped", "nothing_to_report");
+  const facts = await sharedFacts({ organizationId: u.organizationId, lists: scope.lists, readers, windowStart, now, timezone: u.timezone });
+  if (facts.tasks.length === 0) return stop("skipped", facts.candidates === 0 ? "nothing_new" : "nothing_shared");
+  const scopeName = (await everyoneReadsScope(u.scopeKind, u.scopeId, readers)) ? scope.name : null;
 
   // 6. Cost.
   if (!(await isAiConfigured(u.organizationId))) return stop("skipped", "not_configured");
@@ -356,8 +421,15 @@ export async function runTalkUpdate(args: {
   if (claim === "not_ready") return stop("skipped", "not_ready");
 
   // 7. The model.
-  const request = buildUpdateRequest({ kind, scopeName: scope.name, windowStart: windowStart.toISOString(), now: now.toISOString(), tasks });
+  const request = buildUpdateRequest({
+    kind,
+    scopeName: scopeName ?? (u.scopeKind === "list" ? "a List" : "a Space"),
+    windowStart: windowStart.toISOString(),
+    now: now.toISOString(),
+    tasks: facts.tasks,
+  });
   let answer = "";
+  let cutOff = false;
   try {
     const ai = await getAnthropicForOrg(u.organizationId);
     const msg = await createMessageWithFallback(
@@ -366,17 +438,20 @@ export async function runTalkUpdate(args: {
       { timeout: UPDATE_TIMEOUT_MS, maxRetries: 1 },
     );
     answer = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    cutOff = msg.stop_reason === "max_tokens";
   } catch (err) {
     await releaseAiUse(u.organizationId, "talk_update");
     console.error(`[talk-update] ${u.id}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
     return stop("failed", "ai_failed");
   }
-  const text = cleanUpdateAnswer(answer);
+  const text = cutOff ? null : cleanUpdateAnswer(answer);
   if (!text) return stop("failed", "ai_unusable");
 
-  // 8. One message, as the person who set it up, marked as an AI update.
-  const body = updatePostBody(kind, scope.name, text);
-  const metadata = { kind: "ai_update", update: { id: u.id, kind, scope: scope.name, tasks: tasks.length } };
+  // 8. One message, as the person who set it up, marked as an AI update,
+  // carrying who it was checked against: only they read its words later.
+  const readerIds = readers.map((r) => r.userId);
+  const body = updatePostBody(kind, scopeName, text);
+  const metadata = { kind: "ai_update", update: { id: u.id, kind, scope: scopeName, tasks: facts.tasks.length, readers: readerIds } };
   const posted = await insertConversationMessage({
     conversationId: u.conversationId,
     authorId: u.createdById,
@@ -399,21 +474,23 @@ export async function runTalkUpdate(args: {
     parentId: null,
     isCallCard: false,
     now,
+    // Only the people it was checked against are rung.
+    onlyUserIds: readerIds,
   });
-  await finish(u, runId, { status: "posted", messageId: posted.message.id, taskCount: tasks.length }, now);
+  await finish(u, runId, { status: "posted", messageId: posted.message.id, taskCount: facts.tasks.length }, now);
   await logActivity({
     type: "data.ai_update_posted",
     actorId: u.createdById,
     organizationId: u.organizationId,
-    description: `Posted a scheduled AI update (${KIND_LABEL[kind]}) from ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`,
+    description: `Posted a scheduled AI update (${KIND_LABEL[kind]}) from ${facts.tasks.length} ${facts.tasks.length === 1 ? "task" : "tasks"}`,
     targetId: u.conversationId,
     targetType: "conversation",
-    metadata: { updateId: u.id, runId, messageId: posted.message.id, trigger: args.trigger, taskCount: tasks.length },
+    metadata: { updateId: u.id, runId, messageId: posted.message.id, trigger: args.trigger, taskCount: facts.tasks.length },
     actorType: "agent",
     actorLabel: "Scheduled AI update",
     actingForId: u.createdById,
   });
-  return { status: "posted", messageId: posted.message.id, taskCount: tasks.length, runId: runId! };
+  return { status: "posted", messageId: posted.message.id, taskCount: facts.tasks.length, runId };
 }
 
 /**
@@ -501,16 +578,27 @@ export interface UpdateView {
   lastPostedAt: string | null;
   createdBy: { id: string; name: string };
   lastRun: { status: string; reason: RunReason | null; at: string; taskCount: number | null; trigger: string } | null;
-  /** Pause, resume, change the schedule, delete. */
+  /** Pause and remove: its creator, a Full holder, an org Owner or Admin; never an Agent account. */
   canManage: boolean;
-  /** Post now: only the person it posts as. */
+  /** Resume and change the schedule: only the person it posts as. */
+  canResume: boolean;
+  /** Post now: only the person it posts as, while they may post here. */
   canRunNow: boolean;
 }
 
 /** The updates of one conversation, as this viewer may see them. */
 export async function describeUpdates(
   rows: readonly UpdateRow[],
-  viewer: { userId: string; organizationId: string; manageAll: boolean; linkViewer: LinkViewer | null },
+  viewer: {
+    userId: string;
+    organizationId: string;
+    manageAll: boolean;
+    linkViewer: LinkViewer | null;
+    /** An Agent account manages nothing here. */
+    agent: boolean;
+    /** May this viewer post in the conversation now (not archived, role allows)? */
+    canPostHere: boolean;
+  },
 ): Promise<UpdateView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
@@ -555,8 +643,9 @@ export async function describeUpdates(
       lastRun: run
         ? { status: run.status, reason: (run.reason as RunReason | null) ?? null, at: run.startedAt.toISOString(), taskCount: run.taskCount, trigger: run.trigger }
         : null,
-      canManage: mine || viewer.manageAll,
-      canRunNow: mine && r.status === "active",
+      canManage: !viewer.agent && (mine || viewer.manageAll),
+      canResume: !viewer.agent && mine,
+      canRunNow: !viewer.agent && mine && r.status === "active" && viewer.canPostHere,
     });
   }
   return out;

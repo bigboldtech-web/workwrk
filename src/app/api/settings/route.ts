@@ -15,7 +15,7 @@ import {
 } from "@/lib/review-cadence";
 import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings";
 import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
-import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { mergeOrgSettingsSection, settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { lockOrgSettings } from "@/lib/access/access-grant-store";
 import { canManageProcess } from "@/lib/process-scope";
 import { freshDoorActor, settingsDoorAllows } from "@/lib/access/settings-door";
@@ -421,8 +421,10 @@ export async function PATCH(req: Request) {
         if (section === "users" && Array.isArray(d.allowedDomains)) {
           d.allowedDomains = [...new Set((d.allowedDomains as string[]).map((x) => normalizeDomain(x)).filter(Boolean))];
         }
-        const cur = currentSettings[section] && typeof currentSettings[section] === "object" ? currentSettings[section] : {};
-        await writeOrgSettingsKeys(orgId, { [section]: { ...cur, ...d } });
+        // Merged inside the database, in one statement: two saves of different
+        // keys of one section at the same moment (two switches on Settings >
+        // Data) both land, where a read-then-write here lost one of them.
+        await mergeOrgSettingsSection(orgId, section, d);
         changedKeys = Object.keys(d);
         break;
       }

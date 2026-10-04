@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
 import { canPost } from "@/lib/talk-access";
+import type { Prisma } from "@/generated/prisma";
+import { serveAiUpdate } from "@/lib/talk-updates";
 
 // Edit and delete your OWN messages. Deletes are soft (deletedAt): the
 // row keeps its place so threads and history stay coherent, and the body
@@ -37,12 +39,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!text) return jsonError("Message can't be empty", 400);
   if (text.length > MAX_BODY) return jsonError("Message is too long", 400);
 
+  // An AI update a person edits is no longer the AI's words (Batch 8): it
+  // stops saying so, and keeps its reader list, so what it was posted from
+  // still reaches only the people it was checked against.
+  const prior = await prisma.conversationMessage.findUnique({ where: { id: messageId }, select: { metadata: true } });
+  const priorMeta = prior?.metadata && typeof prior.metadata === "object" && !Array.isArray(prior.metadata) ? (prior.metadata as Record<string, unknown>) : null;
+  const edited = priorMeta?.kind === "ai_update" ? { ...priorMeta, kind: "ai_update_edited" } : null;
   const message = await prisma.conversationMessage.update({
     where: { id: messageId },
-    data: { body: text, editedAt: new Date() },
+    data: { body: text, editedAt: new Date(), ...(edited ? { metadata: edited as Prisma.InputJsonValue } : {}) },
     include: { author: { select: AUTHOR_SELECT } },
   });
-  return jsonSuccess({ message });
+  return jsonSuccess({ message: serveAiUpdate(message, userId) });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {

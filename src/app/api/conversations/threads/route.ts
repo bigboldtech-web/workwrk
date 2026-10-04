@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonSuccess } from "@/lib/api-helpers";
 import { talkGate } from "@/lib/talk-gate";
+import { aiUpdateHiddenFor } from "@/lib/talk-updates";
 
 // Threads I am in, for Talk home's Threads view (spec-talk section 2.1 Data).
 //
@@ -27,6 +28,7 @@ const MAX_PAGE = 100;
 type ThreadRow = {
   id: string;
   body: string;
+  metadata: unknown;
   authorId: string;
   createdAt: Date;
   deletedAt: Date | null;
@@ -79,6 +81,7 @@ export async function GET(req: NextRequest) {
     SELECT
       p.id                       AS "id",
       p.body                     AS "body",
+      p.metadata                 AS "metadata",
       p."authorId"               AS "authorId",
       p."createdAt"              AS "createdAt",
       p."deletedAt"              AS "deletedAt",
@@ -100,7 +103,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN "User" u           ON u.id = p."authorId"
     LEFT JOIN "ConversationMessage" r
       ON r."parentId" = p.id AND r."deletedAt" IS NULL
-    GROUP BY p.id, c.type, c.name, u."firstName", u."lastName", u.avatar, mc.last_read
+    GROUP BY p.id, p.metadata, c.type, c.name, u."firstName", u."lastName", u.avatar, mc.last_read
     ORDER BY MAX(r."createdAt") DESC NULLS LAST, p."createdAt" DESC
     LIMIT ${limit + 1} OFFSET ${offset}`;
 
@@ -110,7 +113,8 @@ export async function GET(req: NextRequest) {
       id: r.id,
       // A removed parent keeps its thread reachable but never leaks its text,
       // the same blanking the messages route does on every read path.
-      body: r.deletedAt ? "" : r.body,
+      // An AI update's words reach only the people it was checked against (Batch 8).
+      body: r.deletedAt || aiUpdateHiddenFor(r.metadata, userId) ? "" : r.body,
       authorId: r.authorId,
       createdAt: r.createdAt,
       deleted: Boolean(r.deletedAt),

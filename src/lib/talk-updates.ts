@@ -145,7 +145,10 @@ export function zonedDay(instant: Date, tz: string): string {
  */
 export function dueState(dueAt: Date | null, now: Date, tz: string): { day: string | null; overdue: boolean; soon: boolean } {
   if (!dueAt) return { day: null, overdue: false, soon: false };
-  const day = dueAt.toISOString().slice(0, 10);
+  // A due date is stored as midnight in the zone of whoever set it
+  // (src/lib/item-date.ts localDayIso), so its day is read in the update's
+  // zone, the team's, never as the UTC date of that instant.
+  const day = zonedDay(dueAt, tz);
   const today = zonedDay(now, tz);
   const [y, m, d] = today.split("-").map(Number);
   const horizon = new Date(Date.UTC(y, m - 1, d + 2)).toISOString().slice(0, 10);
@@ -153,16 +156,17 @@ export function dueState(dueAt: Date | null, now: Date, tz: string): { day: stri
 }
 
 /**
- * The window a run reports on: a weekly update the last 7 days; a standup
- * since the previous post, at least one day and at most three (Monday's
- * standup covers the weekend).
+ * The window a run reports on: since the previous post, at least one day,
+ * and at most the cadence's own span: three days for weekdays (Monday's
+ * covers the weekend), seven for weekly. A first post covers a day on
+ * weekdays and the whole week on weekly, whichever kind it is.
  */
-export function reportWindowStart(kind: TalkUpdateKind, now: Date, lastPostedAt: Date | null): Date {
+export function reportWindowStart(cadence: TalkUpdateCadence, now: Date, lastPostedAt: Date | null): Date {
   const day = 24 * 60 * 60 * 1000;
-  if (kind === "project") return new Date(now.getTime() - 7 * day);
-  const floor = now.getTime() - 3 * day;
+  const span = cadence === "weekly" ? 7 : 3;
+  const floor = now.getTime() - span * day;
   const ceiling = now.getTime() - day;
-  const since = lastPostedAt ? lastPostedAt.getTime() : ceiling;
+  const since = lastPostedAt ? lastPostedAt.getTime() : cadence === "weekly" ? floor : ceiling;
   return new Date(Math.min(ceiling, Math.max(floor, since)));
 }
 
@@ -182,6 +186,8 @@ export const RUN_REASONS = [
   "too_many_people",
   "scope_gone",
   "nothing_to_report",
+  "nothing_new",
+  "nothing_shared",
   "daily_limit",
   "not_configured",
   "not_ready",
@@ -189,8 +195,18 @@ export const RUN_REASONS = [
   "ai_unusable",
   "missed",
   "cooldown",
+  "error",
 ] as const;
 export type RunReason = (typeof RUN_REASONS)[number];
+
+/** Why THIS person cannot set an update up here, in words about them. */
+export const SETUP_TEXT = {
+  agent: "An agent account can't set up scheduled updates.",
+  archived: "This conversation is archived.",
+  cannot_post: "You can't post in this conversation, so you can't set up updates here.",
+  guests: "This conversation has guests, so scheduled updates can't post here.",
+  full: `A conversation holds at most ${MAX_UPDATES_PER_CONVERSATION} scheduled updates.`,
+} as const;
 
 /** Reasons that stop the update (paused) rather than skip one slot. */
 export const PAUSING_REASONS: ReadonlySet<RunReason> = new Set<RunReason>([
@@ -214,15 +230,59 @@ export const REASON_TEXT: Readonly<Record<RunReason, string>> = {
   guests: "This conversation has guests, so no update was posted.",
   too_many_people: `Updates post only where there are at most ${MAX_UPDATE_READERS} people.`,
   scope_gone: "The List or Space this reports on is gone, or the person who set this up can no longer open it.",
-  nothing_to_report: "Nothing to report: no task here is open to everyone in this conversation.",
+  nothing_to_report: "Nothing to report.",
+  nothing_new: "Nothing to report: no task here changed or is due soon.",
+  nothing_shared: "Nothing to report: none of the tasks that changed is open to everyone in this conversation.",
   daily_limit: "This workspace has used today's AI updates.",
   not_configured: "AI isn't set up for this workspace yet.",
   not_ready: "Scheduled updates aren't ready on this server yet.",
   ai_failed: "The AI service didn't answer.",
   ai_unusable: "The AI answer couldn't be posted.",
-  missed: "Skipped: the server was busy at the scheduled time.",
+  missed: "Skipped: the scheduler reached this more than three hours after its time.",
   cooldown: "Post now was used a moment ago. Try again in a few minutes.",
+  error: "Something went wrong while posting. Nothing was posted.",
 };
+
+// ── Who may read a posted update ───────────────────────────────────
+//
+// A post's tasks were checked against the people in the conversation WHEN
+// it was posted. Somebody added later, a member who was deactivated then and
+// is active again, and anyone who reads a channel after it was made public
+// were never checked, so the post keeps the list of who was (`update.readers`,
+// the person it posts as included) and its words reach only them, on every
+// read path: the feed, threads, search and the conversation list. Everyone
+// else sees that an AI update was posted, never what it said.
+
+/** The message kinds that carry an AI update's reader list. */
+export const AI_UPDATE_KINDS: ReadonlySet<string> = new Set(["ai_update", "ai_update_edited"]);
+/** What a reader outside the list receives in the update's place. */
+export const AI_UPDATE_HIDDEN_KIND = "ai_update_hidden";
+
+function obj(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+/** True when this viewer may not read this message's words (only AI updates are ever hidden). */
+export function aiUpdateHiddenFor(metadata: unknown, viewerId: string): boolean {
+  const m = obj(metadata);
+  if (typeof m.kind !== "string" || !AI_UPDATE_KINDS.has(m.kind)) return false;
+  const readers = obj(m.update).readers;
+  return !(Array.isArray(readers) && readers.includes(viewerId));
+}
+
+/**
+ * One message as this viewer may receive it. Not an AI update: unchanged.
+ * An AI update for one of its readers: unchanged except that the reader list
+ * itself is never sent. For anyone else: no words, and only the hidden kind.
+ */
+export function serveAiUpdate<T extends { body: string; metadata?: unknown }>(m: T, viewerId: string): T {
+  const meta = obj(m.metadata);
+  if (typeof meta.kind !== "string" || !AI_UPDATE_KINDS.has(meta.kind)) return m;
+  if (aiUpdateHiddenFor(meta, viewerId)) return { ...m, body: "", metadata: { kind: AI_UPDATE_HIDDEN_KIND } };
+  const update = { ...obj(meta.update) };
+  delete update.readers;
+  return { ...m, metadata: { ...meta, update } };
+}
 
 /** A private channel or a group chat, and why anything else is refused. */
 export function conversationProblem(c: { type: "DM" | "GROUP" | "CHANNEL"; restricted: boolean }): RunReason | null {
@@ -306,6 +366,10 @@ export function cleanUpdateAnswer(answer: string): string | null {
   t = t.replace(/^#{1,6}\s+.*\n+/, "");
   // An @ in front of a word would read as a mention that rings nobody.
   t = t.replace(/@(?=\w)/g, "");
+  // A link whose words differ from where it goes is the one thing a task
+  // title could plant in a post written under a colleague's name: its words
+  // stay, the hidden address goes. A bare address still shows itself.
+  t = t.replace(/!?\[([^\]]*)\]\(([^)]*)\)/g, "$1");
   if (t.length > MAX_POST_CHARS) {
     const at = t.lastIndexOf("\n", MAX_POST_CHARS);
     t = t.slice(0, at > MAX_POST_CHARS * 0.6 ? at : MAX_POST_CHARS).trimEnd();
@@ -313,7 +377,11 @@ export function cleanUpdateAnswer(answer: string): string | null {
   return t.trim() ? t.trim() : null;
 }
 
-/** The post: its own title line, then the AI's words. */
-export function updatePostBody(kind: TalkUpdateKind, scopeName: string, text: string): string {
-  return `**${KIND_LABEL[kind]}: ${scopeName.replace(/\*/g, "")}**\n${text}`;
+/**
+ * The post: its own title line, then the AI's words. The List's or Space's
+ * name is in the title only when everyone in the conversation can open it
+ * (null otherwise).
+ */
+export function updatePostBody(kind: TalkUpdateKind, scopeName: string | null, text: string): string {
+  return scopeName ? `**${KIND_LABEL[kind]}: ${scopeName.replace(/\*/g, "")}**\n${text}` : `**${KIND_LABEL[kind]}**\n${text}`;
 }

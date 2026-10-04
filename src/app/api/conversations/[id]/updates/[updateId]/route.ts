@@ -1,10 +1,12 @@
 // PATCH  /api/conversations/[id]/updates/[updateId]   pause, resume, or change the schedule
 // DELETE /api/conversations/[id]/updates/[updateId]   remove it (its posts stay)
 //
-// Who may manage an update: the person who set it up, a Full holder of the
-// conversation, or an org Owner or Admin who can read the conversation. The
-// kind and the List or Space never change: remove it and set up another.
-// Resuming moves it to its next instant from now, never a missed one.
+// Who may PAUSE or REMOVE an update: the person who set it up, a Full holder
+// of the conversation, or an org Owner or Admin who can read it; never an
+// Agent account. Who may RESUME it or CHANGE WHEN IT POSTS: only the person
+// it posts as, since every post is written as them. The kind and the List or
+// Space never change: remove it and set up another. Resuming moves it to its
+// next instant from now, never a missed one.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +14,8 @@ import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
 import { logActivity } from "@/lib/activity";
 import { memberViewer } from "@/lib/list-links-server";
+import { viewerFromSession } from "@/lib/access/viewer";
+import { canPost } from "@/lib/talk-access";
 import { nextTalkUpdateAt, scheduleProblem, talkUpdatePatchSchema } from "@/lib/talk-updates";
 import { describeUpdates, isMissingUpdatesTable, scheduleOf } from "@/lib/talk-updates-server";
 
@@ -22,6 +26,7 @@ async function load(req: { id: string; updateId: string }) {
   if (error) return { error } as const;
   const row = await prisma.talkUpdate.findFirst({ where: { id: req.updateId, conversationId: req.id, organizationId: ctx.gate.organizationId } });
   if (!row) return { error: jsonError("That update no longer exists.", 404) } as const;
+  if ((await viewerFromSession())?.isAgent) return { error: jsonError("An agent account can't change scheduled updates.", 403) } as const;
   const manageAll = ctx.role === "full" || ctx.gate.orgRole === "OWNER" || ctx.gate.orgRole === "ADMIN";
   if (row.createdById !== ctx.viewer.userId && !manageAll) {
     return { error: jsonError("Only the person who set this up, or someone with Full access here, can change it.", 403) } as const;
@@ -51,6 +56,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const now = new Date();
     const scheduleChanged = JSON.stringify(schedule) !== JSON.stringify(scheduleOf(row));
     const resumed = status === "active" && row.status !== "active";
+    // Every post is written as its creator: only they start it again or move it.
+    if ((resumed || scheduleChanged) && row.createdById !== ctx.viewer.userId) {
+      return jsonError("Only the person this update posts as can resume it or change when it posts.", 403);
+    }
     const updated = await prisma.talkUpdate.update({
       where: { id: row.id },
       data: {
@@ -70,7 +79,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       metadata: { updateId: row.id },
     });
     const me = await memberViewer(ctx.viewer.userId, ctx.gate.organizationId);
-    const [update] = await describeUpdates([updated], { userId: ctx.viewer.userId, organizationId: ctx.gate.organizationId, manageAll, linkViewer: me });
+    const [update] = await describeUpdates([updated], {
+      userId: ctx.viewer.userId,
+      organizationId: ctx.gate.organizationId,
+      manageAll,
+      linkViewer: me,
+      agent: false,
+      canPostHere: canPost(ctx.conversation, ctx.role) && !!me,
+    });
     return jsonSuccess({ update });
   } catch (err) {
     if (isMissingUpdatesTable(err)) return jsonError("Scheduled updates aren't ready on this server yet.", 503);
