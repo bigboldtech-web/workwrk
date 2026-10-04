@@ -499,6 +499,7 @@ export function BoardItemDetail({
                 connections={item.connections?.[f.key]}
                 mirror={item.mirrors?.[f.key]}
                 popover="absolute"
+                aiLayout="row"
                 onCommit={onCommitField ? (next) => onCommitField(f.key, next) : undefined}
                 onChange={(next) => onPatch({ metadataPatch: metadataPatch({ [f.key]: next }) })}
               />

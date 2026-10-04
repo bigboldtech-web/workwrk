@@ -10,6 +10,7 @@ import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-he
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MAX_INPUT_CHARS = 200_000;
 
@@ -33,6 +34,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const text = extractDocText(doc.content);
   const trimmed = text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text;
   if (!trimmed.trim()) return jsonError("doc has no text content yet", 422);
+
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no model call, as the switch's helper says ("Off hides every AI entry point").
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
 
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");

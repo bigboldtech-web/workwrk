@@ -231,6 +231,9 @@ export function isBuiltinShown(
 
 // ── FieldDef stored in Board.schema.fields ─────────────────────
 
+/** The colours a new choice cycles through (choice pills are data-coloured). */
+export const CHOICE_SWATCHES: readonly string[] = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#94a3b8"];
+
 export interface FieldChoice {
   value: string;
   label: string;
@@ -243,7 +246,10 @@ export interface FieldOptions {
   decimals?: number;            // NUMBER | MONEY | PERCENT
   formula?: string;             // FORMULA  (Phase 4)
   ratingMax?: number;           // RATING  (default 5)
-  prompt?: string;              // AI fields  (Phase 4)
+  prompt?: string;              // AI fields: the List's extra instruction (src/lib/ai-fields.ts)
+  aiInputs?: { description?: boolean; comments?: boolean; fields?: boolean }; // SUMMARY | SENTIMENT | CATEGORIZE: what a fill reads
+  language?: string;            // TRANSLATION: the target language (AI_LANGUAGES code)
+  translateFrom?: "title" | "description"; // TRANSLATION: what it translates
   // Phase 5b connect columns (a RELATIONSHIP in connect mode) and mirrors,
   // validated and read by src/lib/list-connect.ts.
   targetBoardIds?: string[];

@@ -28,13 +28,17 @@ export function isModelUnavailable(err: unknown): boolean {
 export async function createMessageWithFallback(
   client: Anthropic,
   params: Anthropic.MessageCreateParamsNonStreaming,
+  /** Request options (a timeout, retries), passed on only when given. */
+  options?: Anthropic.RequestOptions,
 ): Promise<Anthropic.Message> {
+  const send = (p: Anthropic.MessageCreateParamsNonStreaming) =>
+    options ? client.messages.create(p, options) : client.messages.create(p);
   try {
-    return await client.messages.create(params);
+    return await send(params);
   } catch (err) {
     if (isModelUnavailable(err) && params.model !== SAFE_FALLBACK_MODEL) {
       console.warn(`[ai-fallback] model "${params.model}" unavailable — retrying on ${SAFE_FALLBACK_MODEL}`);
-      return await client.messages.create({ ...params, model: SAFE_FALLBACK_MODEL });
+      return await send({ ...params, model: SAFE_FALLBACK_MODEL });
     }
     throw err;
   }

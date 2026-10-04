@@ -29,6 +29,7 @@ import {
 } from "@/lib/list-connect";
 import { checkConnectTargets, targetFieldMap } from "@/lib/list-connect-server";
 import { listReader } from "@/lib/list-links-server";
+import { isAiFieldType, normalizeAiFieldOptions } from "@/lib/ai-fields";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -116,6 +117,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }, {
       optionsFor: submitted
         ? (current, schema) => {
+            // Batch 8: an AI field's settings, cleaned and checked on the
+            // locked row's type (src/lib/ai-fields.ts).
+            if (isAiFieldType(current.type)) {
+              const ai = normalizeAiFieldOptions(current.type, submitted);
+              if (!ai.ok) throw new SchemaRefusal(400, { error: "invalid_options", issue: ai.issue });
+              return ai.options;
+            }
             if (current.type === "RELATIONSHIP") {
               const wasConnect = isConnectField(current);
               const nowConnect = Array.isArray(submitted.targetBoardIds);

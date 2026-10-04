@@ -47,8 +47,14 @@ describe("retention and data", () => {
     expect(retentionOf({ retention: { auditDays: 400 } }).auditDays).toBe(400);
   });
   it("turns self export and AI off only on an explicit false", () => {
-    expect(dataSettingsOf({})).toEqual({ selfExport: true, aiEnabled: true });
-    expect(dataSettingsOf({ data: { selfExport: false, aiEnabled: "no" } })).toEqual({ selfExport: false, aiEnabled: true });
+    expect(dataSettingsOf({})).toEqual({ selfExport: true, aiEnabled: true, aiFields: false, aiTalkUpdates: false });
+    expect(dataSettingsOf({ data: { selfExport: false, aiEnabled: "no" } })).toEqual({ selfExport: false, aiEnabled: true, aiFields: false, aiTalkUpdates: false });
+  });
+  it("turns the two AI opt-ins on only on an explicit true, and keeps them as stored", () => {
+    expect(dataSettingsOf({ data: { aiFields: "true", aiTalkUpdates: 1 } })).toMatchObject({ aiFields: false, aiTalkUpdates: false });
+    expect(dataSettingsOf({ data: { aiFields: true, aiTalkUpdates: true } })).toMatchObject({ aiFields: true, aiTalkUpdates: true });
+    // The page shows the stored choice; whether it runs also needs aiEnabled.
+    expect(dataSettingsOf({ data: { aiEnabled: false, aiFields: true } })).toMatchObject({ aiEnabled: false, aiFields: true });
   });
 });
 

@@ -161,6 +161,9 @@ export const retentionSectionSchema = z.strictObject({
 export const dataSectionSchema = z.strictObject({
   selfExport: z.boolean().optional(),
   aiEnabled: z.boolean().optional(),
+  // The two AI opt-ins (src/lib/ai/ai-features.ts), off unless true.
+  aiFields: z.boolean().optional(),
+  aiTalkUpdates: z.boolean().optional(),
 });
 
 /**

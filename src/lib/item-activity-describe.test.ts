@@ -75,6 +75,14 @@ describe("describeItemActivity wording", () => {
       .toBe("updated description");
   });
 
+  it("says when Fill with AI wrote the value", () => {
+    expect(describeItemActivity({ action: "FIELDS_UPDATED", meta: { fields: ["summary"], via: "ai" } }))
+      .toBe("filled summary with AI");
+    // A linked List's own field is named only to its readers (listFields).
+    expect(describeItemActivity({ action: "FIELDS_UPDATED", meta: { fields: [], via: "ai" } }))
+      .toBe("filled a field with AI");
+  });
+
   it("reports the subtasks a move carried with it", () => {
     expect(
       describeItemActivity({ action: "MOVED", meta: { subtasksMoved: 2, fromStatus: "TO_DO", toStatus: "TO_DO" } }),

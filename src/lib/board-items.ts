@@ -841,6 +841,12 @@ export interface UpdateBoardItemOptions {
    * so two writers of different keys can never lose each other's change.
    */
   metadataFn?: (stored: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /**
+   * Extra facts for the FIELDS_UPDATED activity row, for a write that is not
+   * a plain edit: { via: "ai" } when Fill with AI wrote the value (the
+   * Activity tab says so). Never names a value.
+   */
+  activityMeta?: Record<string, string>;
 }
 
 /** How many times a metadata write is recomputed when the row keeps moving under it. */
@@ -1083,7 +1089,7 @@ export async function updateBoardItem(
           itemId,
           actorId,
           action: "FIELDS_UPDATED",
-          meta: { fields: changed, ...(Object.keys(listFields).length ? { listFields } : {}) },
+          meta: { fields: changed, ...(Object.keys(listFields).length ? { listFields } : {}), ...(opts.activityMeta ?? {}) },
         });
       }
     }

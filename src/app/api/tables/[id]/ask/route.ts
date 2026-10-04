@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { tableReadableBy } from "@/lib/table-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MAX_ROWS = 300;
 const MAX_COLS = 40;
@@ -65,6 +66,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const sep = `| ${headers.map(() => "---").join(" | ")} |`;
   const lines = rows.map((r) => `| ${headers.map((_, i) => cell(r[i])).join(" | ")} |`);
   const tableMd = [head, sep, ...lines].join("\n");
+
+  // AI features turned off for the workspace (settings.data.aiEnabled):
+  // no model call, as the switch's helper says ("Off hides every AI entry point").
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
 
   const ai = await getAnthropicForOrg(orgId);
   try {

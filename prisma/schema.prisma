@@ -171,6 +171,8 @@ model Organization {
   automationWorkflows    AutomationWorkflow[]
   automationRuns         AutomationRun[]
   automationUsage        AutomationUsage[]
+  // Batch 8: the daily AI use guard rail (src/lib/ai-usage.ts)
+  aiUsageDays            AiUsageDay[]
   integrationConnections IntegrationConnection[]
   // 🆕 Comms Hub — team chat
   conversations          Conversation[]
@@ -6968,6 +6970,21 @@ model AppSuggestion {
 model AutomationCronTick {
   name       String   @id
   lastTickAt DateTime
+}
+
+/// One workspace's AI use in one UTC day, by kind ("field_fill"): the daily
+/// guard rail on cost. Written only by src/lib/ai-usage.ts claimAiUse, one
+/// atomic upsert that never takes `count` past the day's cap
+/// (prisma/sql/2026-10-04-ai-fields-and-updates.sql).
+model AiUsageDay {
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  day            DateTime     @db.Date
+  kind           String
+  count          Int          @default(0)
+  updatedAt      DateTime     @default(now())
+
+  @@id([organizationId, day, kind])
 }
 
 /// A person's grant on one table, canvas or form: the three node kinds that

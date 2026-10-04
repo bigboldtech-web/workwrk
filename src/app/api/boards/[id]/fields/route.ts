@@ -23,6 +23,7 @@ import { listReader } from "@/lib/list-links-server";
 import { checkConnectTargets, targetFieldMap } from "@/lib/list-connect-server";
 import { prisma } from "@/lib/prisma";
 import { redactFieldsForViewer } from "@/lib/board-items-view";
+import { isAiFieldType, normalizeAiFieldOptions } from "@/lib/ai-fields";
 
 const FIELD_TYPES = [
   "TEXT", "LONG_TEXT", "NUMBER", "DATE", "DATETIME",
@@ -130,6 +131,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           return v.options as FieldOptions;
         },
       });
+      return NextResponse.json({ field }, { status: 201 });
+    }
+
+    // ── Batch 8: an AI field keeps only the settings its type reads, each
+    // checked (src/lib/ai-fields.ts). Missing categories or a missing
+    // language are allowed: the field just cannot be filled until set up.
+    if (isAiFieldType(type)) {
+      const ai = normalizeAiFieldOptions(type, options ?? {});
+      if (!ai.ok) return NextResponse.json({ error: "invalid_options", issue: ai.issue }, { status: 400 });
+      const field = await addBoardField({ boardId: id, label: parsed.data.label, type, options: ai.options });
       return NextResponse.json({ field }, { status: 201 });
     }
 

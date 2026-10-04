@@ -18,7 +18,9 @@
 //   Retention & privacy  trash window (the trash-purge cron), the audit log
 //                        window (the audit-purge cron; unset keeps it
 //                        forever), AI features for everyone (read by every AI
-//                        entry point), and the org's own AI key (Enterprise
+//                        entry point), the two AI opt-ins (AI fields in
+//                        Lists, scheduled AI updates in Talk; off until
+//                        turned on) and the org's own AI key (Enterprise
 //                        byok flag)
 //   Trash                a link card to /trash
 //
@@ -329,7 +331,10 @@ function ImportTab({ flow, busy, onExport }: { flow: ReturnType<typeof usePeople
 
 /* ───────────────────────── Retention & privacy ───────────────────────── */
 
-type RetentionData = { retention: { trashDays: number; auditDays: number | null }; data: { aiEnabled: boolean } };
+type RetentionData = {
+  retention: { trashDays: number; auditDays: number | null };
+  data: { aiEnabled: boolean; aiFields?: boolean; aiTalkUpdates?: boolean };
+};
 
 function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const { toast } = useOsToast();
@@ -343,6 +348,8 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const [auditMode, setAuditMode] = useState<"forever" | "days" | null>(null);
   const [auditDays, setAuditDays] = useState<number | "" | null>(null);
   const [ai, setAi] = useState<boolean | null>(null);
+  const [aiFields, setAiFields] = useState<boolean | null>(null);
+  const [aiTalk, setAiTalk] = useState<boolean | null>(null);
   const [saved, setSaved] = useState<Record<string, number>>({});
   // A failed save keeps the write that failed, so Retry sends the person's
   // value again (the shown value has already fallen back to the stored one).
@@ -357,6 +364,8 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const mode = auditMode ?? (cur.retention.auditDays ? "days" : "forever");
   const auditShown = auditDays ?? cur.retention.auditDays ?? 365;
   const aiShown = ai ?? cur.data.aiEnabled;
+  const aiFieldsShown = aiFields ?? cur.data.aiFields === true;
+  const aiTalkShown = aiTalk ?? cur.data.aiTalkUpdates === true;
 
   const write = (key: string, run: () => Promise<{ ok: boolean; error?: string }>, revert: () => void) => {
     window.clearTimeout(timers.current[key]);
@@ -455,6 +464,27 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           savedAt={saved.ai}
           error={retryOf("ai")}
           control={<Switch checked={aiShown} aria-label="AI features for everyone" onChange={(v) => { setAi(v); write("ai", () => dataSec.save({ aiEnabled: v }), () => setAi(null)); }} />}
+        />
+        {/* The two opt-ins (src/lib/ai/ai-features.ts): off until turned on
+            here, and off whatever they say while the row above is off, so
+            the row shows that as text instead of a switch that does nothing. */}
+        <SettingsRow
+          id="data.aiFields"
+          label="AI fields in Lists"
+          helper="Summary, Sentiment, Categorize and Translation fields. A field is filled only when someone chooses Fill with AI, and the task's title, description, latest comments and field values are sent to the AI provider."
+          savedAt={saved.aiFields}
+          error={retryOf("aiFields")}
+          readOnlyValue={aiShown ? undefined : "Off while AI features are off"}
+          control={<Switch checked={aiFieldsShown} aria-label="AI fields in Lists" onChange={(v) => { setAiFields(v); write("aiFields", () => dataSec.save({ aiFields: v }), () => setAiFields(null)); }} />}
+        />
+        <SettingsRow
+          id="data.aiTalkUpdates"
+          label="Scheduled AI updates in Talk"
+          helper="A channel can post a daily standup or a weekly project update written by AI. It reads only tasks that everyone in the channel can open, and sends them to the AI provider on that schedule."
+          savedAt={saved.aiTalk}
+          error={retryOf("aiTalk")}
+          readOnlyValue={aiShown ? undefined : "Off while AI features are off"}
+          control={<Switch checked={aiTalkShown} aria-label="Scheduled AI updates in Talk" onChange={(v) => { setAiTalk(v); write("aiTalk", () => dataSec.save({ aiTalkUpdates: v }), () => setAiTalk(null)); }} />}
         />
       </SettingsCard>
       <ByokManager />

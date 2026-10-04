@@ -12,11 +12,12 @@
 // like a built-in (field-keys.ts ruleFieldIdOf). The built-in branches only
 // ever match the built-in; a field is always read from its own stored key.
 //
-// Pure: type-only imports, and field-keys.ts, which is pure too.
+// Pure: type-only imports, and field-keys.ts and ai-fields.ts, which are pure too.
 
 import type { BoardItemRow } from "@/lib/board-items-shared";
 import type { RowColor, RowColorRule } from "@/lib/list-comfort";
 import { fieldKeyOfId } from "@/lib/field-keys";
+import { aiValueSortKey } from "@/lib/ai-fields";
 
 export type FilterOperator =
   | "is"
@@ -64,7 +65,10 @@ function scalarFor(row: BoardItemRow, field: string): string {
     case "title": return row.title;
     default: {
       const v = row.metadata?.[fieldKeyOfId(field)];
-      return v == null ? "" : String(v);
+      if (v == null) return "";
+      // An AI value (Batch 8) filters by its words, never "[object Object]".
+      if (typeof v === "object" && !Array.isArray(v)) return aiValueSortKey(v) ?? "";
+      return String(v);
     }
   }
 }

@@ -137,11 +137,25 @@ export function retentionOf(settings: unknown): RetentionSettings {
 export interface DataSettings {
   selfExport: boolean;
   aiEnabled: boolean;
+  /** AI fields in Lists, off unless stored as true (src/lib/ai/ai-features.ts). */
+  aiFields: boolean;
+  /** Scheduled AI updates in Talk, off unless stored as true. */
+  aiTalkUpdates: boolean;
 }
 
+/**
+ * The stored values, defaults filled in. aiFields and aiTalkUpdates are the
+ * person's own choice as stored; whether the feature runs also needs
+ * aiEnabled (aiFieldsOn / aiTalkUpdatesOn), so the page can show both.
+ */
 export function dataSettingsOf(settings: unknown): DataSettings {
   const d = rec(rec(settings).data);
-  return { selfExport: d.selfExport !== false, aiEnabled: d.aiEnabled !== false };
+  return {
+    selfExport: d.selfExport !== false,
+    aiEnabled: d.aiEnabled !== false,
+    aiFields: d.aiFields === true,
+    aiTalkUpdates: d.aiTalkUpdates === true,
+  };
 }
 
 /* ───────────────────────── Members › Invite rules ───────────────────────── */
