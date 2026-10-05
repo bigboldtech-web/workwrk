@@ -288,6 +288,20 @@ function VoiceRecordButton({ onTranscript, onRecordingChange }: {
   );
 }
 
+/**
+ * What a refused AI summary says. The AI app off for this person (Settings >
+ * Apps & modules) and AI off for the workspace each say so; any other refusal
+ * that carries a sentence (the plan's AI limit, AI not set up on the server)
+ * shows that sentence; a bare code never reaches the toast.
+ */
+function aiSummaryRefusal(body: unknown): string {
+  const b = (body ?? {}) as { error?: unknown; message?: unknown };
+  if (b.error === "app_off") return "AI is turned off for you in this workspace. Ask an Admin.";
+  if (typeof b.message === "string" && b.message.trim()) return b.message;
+  if (typeof b.error === "string" && /\s/.test(b.error.trim())) return b.error;
+  return "AI service unavailable.";
+}
+
 function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (s: string) => void }) {
   const [generating, setGenerating] = useState(false);
   const { toast } = useOsToast();
@@ -303,9 +317,7 @@ function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (s: s
           type: "meeting_summary",
         }),
       });
-      // 403: the workspace has the AI app off for this person (Settings > Apps & modules).
-      if (res.status === 403) { toast("AI is turned off for you in this workspace. Ask an Admin."); return; }
-      if (!res.ok) { toast("AI service unavailable."); return; }
+      if (!res.ok) { toast(aiSummaryRefusal(await res.json().catch(() => null))); return; }
       const data = await res.json();
       const summary = data.response || data.data?.response || data.answer || "";
       if (summary) {

@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { uploadsDirForWrite } from "@/lib/local-uploads";
 
 /** Own photo always; someone else's only via the alignment ladder
  *  (org-wide levels, or a manager whose tree contains the target). */
@@ -41,10 +42,9 @@ export async function POST(
   // Save file
   const ext = file.type.split("/")[1] === "jpeg" ? "jpg" : file.type.split("/")[1];
   const filename = `avatar-${id}-${Date.now()}.${ext}`;
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
+  // Outside public/ (src/lib/local-uploads.ts): only the uploads route serves it.
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(uploadDir, filename), buffer);
+  await writeFile(path.join(await uploadsDirForWrite(), filename), buffer);
 
   const avatarUrl = `/api/uploads/${filename}`;
 

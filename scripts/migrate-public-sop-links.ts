@@ -44,7 +44,7 @@ interface OrgReport {
   organizationName: string;
   publicSops: number;
   before: string;
-  action: "flip" | "already" | "none";
+  action: "flip" | "already" | "kept" | "none";
   error?: string;
 }
 
@@ -54,7 +54,7 @@ interface Report {
   write: boolean;
   orgFilter: string | null;
   orgs: OrgReport[];
-  totals: { orgsRead: number; orgsWithPublicSops: number; orgsFlipped: number; orgsAlready: number; publicSops: number };
+  totals: { orgsRead: number; orgsWithPublicSops: number; orgsFlipped: number; orgsAlready: number; orgsKept: number; publicSops: number };
 }
 
 function readPublicLinks(settings: unknown): string {
@@ -68,14 +68,26 @@ async function migrateOrg(org: { id: string; name: string; settings: unknown }, 
   const r: OrgReport = { organizationId: org.id, organizationName: org.name, publicSops, before, action: "none" };
   if (publicSops === 0) return r;
   if (before === "view") { r.action = "already"; return r; }
-  // A one-time carry-over for workspaces from before the toggle existed: a
-  // workspace whose value is stored (it was set, by this script or by an
-  // Admin), or whose access settings an Admin has changed, is never changed.
-  // Without this, every deploy that ran it switched Public links back on for
-  // workspaces that had turned them off.
+  // A one-time carry-over for workspaces from before the toggle existed. A
+  // workspace where someone chose is KEPT as it is: an Admin changed its
+  // access settings (settings.updated.access), this script already set it
+  // (access.settings.migrated), or the repair put an Admin's Off back
+  // (access.settings.restored). Without this, every deploy that ran it
+  // switched Public links back on for workspaces that had turned them off.
+  // A stored value nobody chose is the access backfill's (scripts/
+  // access-backfill.ts writes the default block, Off included, only where no
+  // block was stored, and records access.migrated): that one is carried over.
+  // Any other stored value with no record of who set it is kept: never
+  // override what might be an Admin's Off.
+  const chosen = await prisma.activityLog.count({
+    where: { organizationId: org.id, type: { in: ["settings.updated.access", "access.settings.migrated", "access.settings.restored"] } },
+  });
+  if (chosen > 0) { r.action = "kept"; return r; }
   const stored = typeof (org.settings as { access?: { publicLinks?: unknown } } | null)?.access?.publicLinks === "string";
-  const touched = await prisma.activityLog.count({ where: { organizationId: org.id, type: { in: ["settings.updated.access", "access.settings.migrated"] } } });
-  if (stored || touched > 0) { r.action = "already"; return r; }
+  if (stored && (await prisma.activityLog.count({ where: { organizationId: org.id, type: "access.migrated" } })) === 0) {
+    r.action = "kept";
+    return r;
+  }
   r.action = "flip";
   if (!write) return r;
 
@@ -140,7 +152,7 @@ async function main() {
     write,
     orgFilter,
     orgs: [],
-    totals: { orgsRead: orgs.length, orgsWithPublicSops: 0, orgsFlipped: 0, orgsAlready: 0, publicSops: 0 },
+    totals: { orgsRead: orgs.length, orgsWithPublicSops: 0, orgsFlipped: 0, orgsAlready: 0, orgsKept: 0, publicSops: 0 },
   };
 
   for (const org of orgs) {
@@ -149,15 +161,16 @@ async function main() {
     if (r.publicSops > 0) report.totals.orgsWithPublicSops += 1;
     report.totals.publicSops += r.publicSops;
     if (r.action === "already") report.totals.orgsAlready += 1;
+    if (r.action === "kept") report.totals.orgsKept += 1;
     if (r.action === "flip" && write && !r.error) report.totals.orgsFlipped += 1;
   }
 
   const lines: string[] = [];
   lines.push(`migrate-public-sop-links ${write ? "WRITE" : "DRY RUN"} at ${report.ranAt} against ${report.database}`);
-  lines.push(`orgs read ${report.totals.orgsRead}, with public SOPs ${report.totals.orgsWithPublicSops}, already on view ${report.totals.orgsAlready}, ${write ? "flipped" : "would flip"} ${write ? report.totals.orgsFlipped : report.orgs.filter((o) => o.action === "flip").length}, public SOP links ${report.totals.publicSops}`);
+  lines.push(`orgs read ${report.totals.orgsRead}, with public SOPs ${report.totals.orgsWithPublicSops}, already on view ${report.totals.orgsAlready}, kept as the workspace set it ${report.totals.orgsKept}, ${write ? "flipped" : "would flip"} ${write ? report.totals.orgsFlipped : report.orgs.filter((o) => o.action === "flip").length}, public SOP links ${report.totals.publicSops}`);
   for (const o of report.orgs) {
     if (o.publicSops === 0) continue;
-    lines.push(`  ${o.organizationName} (${o.organizationId}): ${o.publicSops} public SOP(s), publicLinks was "${o.before}", ${o.action === "already" ? "already migrated" : write ? (o.error ? `FAILED: ${o.error}` : "flipped to view") : "would flip to view"}`);
+    lines.push(`  ${o.organizationName} (${o.organizationId}): ${o.publicSops} public SOP(s), publicLinks was "${o.before}", ${o.action === "already" ? "already on view" : o.action === "kept" ? "kept as the workspace set it" : write ? (o.error ? `FAILED: ${o.error}` : "flipped to view") : "would flip to view"}`);
   }
   const text = lines.join("\n");
   console.log(text);

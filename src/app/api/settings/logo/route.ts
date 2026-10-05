@@ -3,8 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logAuditEvent } from "@/lib/activity";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { uploadsDirForWrite } from "@/lib/local-uploads";
 
 const MAX_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
@@ -39,10 +40,8 @@ export async function POST(req: NextRequest) {
   const mimeToExt: Record<string, string> = { png: "png", jpeg: "jpg", webp: "webp", "svg+xml": "svg" };
   const ext = mimeToExt[file.type.split("/")[1]] || "png";
   const filename = `logo-${orgId}-${Date.now()}.${ext}`;
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  const filePath = path.join(uploadDir, filename);
-
-  await mkdir(uploadDir, { recursive: true });
+  // Outside public/ (src/lib/local-uploads.ts): only the uploads route serves it.
+  const filePath = path.join(await uploadsDirForWrite(), filename);
 
   const bytes = await file.arrayBuffer();
   await writeFile(filePath, Buffer.from(bytes));

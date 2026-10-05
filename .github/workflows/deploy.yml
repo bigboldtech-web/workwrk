@@ -83,11 +83,13 @@ jobs:
 
             # No data scripts run here any more. Two used to, on every deploy:
             # the legacy Task -> Item migration and the public SOP link
-            # carry-over. Both were one-time moves that had done their work,
-            # and re-running them changed data on every deploy (calendar
-            # events became tasks; Public links came back on where they had
-            # been turned off). They stay in scripts/ for a deliberate run by
-            # hand, and a deploy log never carries a per-company report.
+            # carry-over. Re-running them would change data on every deploy
+            # (calendar events became tasks; Public links came back on where
+            # they had been turned off), so the steps are removed. Both stay
+            # in scripts/ for a deliberate run by hand (scripts/MIGRATIONS.md,
+            # The approval gate, says how to check whether any run here ever
+            # reached the database), and a deploy log never carries a
+            # per-company report.
 
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.

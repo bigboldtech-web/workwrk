@@ -10,6 +10,7 @@ import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 
 /**
  * GET /api/v1/people
@@ -138,14 +139,14 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "departmentId is not a department of this workspace" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { email, organizationId: orgId },
-    select: { id: true },
-  });
-  if (existing) return Response.json({ error: "User already in this org" }, { status: 409 });
+  // In this workspace as their own account OR as a membership (someone who
+  // works in several workspaces is anchored in only one), any case of the
+  // address: what /join itself refuses, so no invitation is made that it
+  // would turn away.
+  if ((await alreadyInOrg(email, orgId)).member) return Response.json({ error: "User already in this org" }, { status: 409 });
   const now = new Date();
   const pending = await prisma.invitation.findFirst({
-    where: { email, organizationId: orgId, accepted: false, expiresAt: { gte: now } },
+    where: { email: { equals: email, mode: "insensitive" }, organizationId: orgId, accepted: false, expiresAt: { gte: now } },
     select: { id: true },
   });
   if (pending) return Response.json({ error: "An invitation to this email is already pending" }, { status: 409 });

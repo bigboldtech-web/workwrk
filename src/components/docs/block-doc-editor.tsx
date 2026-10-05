@@ -1351,11 +1351,24 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           onRestore={(p) => {
             setTitle(p.title);
             titleRef.current = p.title;
-            setBlocks(p.blocks);
+            // The draft's body is written only when it holds one. A draft made
+            // on an old-format doc has none (null) or, from before title-only
+            // saves, an empty one ([]) that would replace the old body for
+            // good; either way only the title is restored. Blocks are never
+            // set to null here, which would leave a block doc on its loading
+            // skeleton.
+            const body = Array.isArray(p.blocks) && (legacy === null || p.blocks.length > 0) ? p.blocks : null;
+            if (body === null) {
+              void persist(null, null, metaRef.current);
+              return;
+            }
+            // A conversion saved only in the draft replaces the old format.
+            if (legacy !== null) setLegacy(null);
+            setBlocks(body);
             setBnDoc(p.bnDoc);
             setMeta(p.meta);
             setRestoreNonce((n) => n + 1);
-            void persist(p.bnDoc, p.blocks, p.meta);
+            void persist(p.bnDoc, body, p.meta);
           }}
         />
       ) : null}
