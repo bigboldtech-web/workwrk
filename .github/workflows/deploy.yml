@@ -260,9 +260,10 @@ jobs:
             git merge-base --is-ancestor "$DEPLOY_SHA" origin/main 2>>/tmp/wd-git.log \
               || fail "$DEPLOY_SHA is not a commit on main" /tmp/wd-git.log
 
-            # A re-run of an older CI run starts this workflow for that older
-            # commit. Automatic deploys only ever go forward; going back is a
-            # manual run of this workflow with the sha.
+            # An automatic run whose commit is already live, or older: a
+            # deploy job that waited in the concurrency group while a newer
+            # commit went live. Automatic deploys only ever go forward; going
+            # back is a manual run of this workflow with the sha.
             if [ "${DEPLOY_EVENT:-}" = "workflow_run" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREV_SHA" 2>/dev/null; then
               echo "::notice::$DEPLOY_SHA is already live, or older than the live commit $PREV_SHA: nothing deployed. Going back is Actions > Deploy > Run workflow with the sha."
               STAGE=done
