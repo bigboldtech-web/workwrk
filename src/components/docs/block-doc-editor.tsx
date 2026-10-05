@@ -98,7 +98,7 @@ import { copyObjectLink, objectHrefNow, useObjectHref } from "@/components/layou
 import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
 import { safeUserHtml } from "@/lib/safe-html";
-import { draftBodyToRestore } from "@/lib/docs/draft-restore";
+import { draftRestorePlan } from "@/lib/docs/draft-restore";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker, keeps the doc page light + fast.
@@ -1352,17 +1352,25 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           onRestore={(p) => {
             setTitle(p.title);
             titleRef.current = p.title;
-            // The draft's body is written only when it holds one, judged from
-            // the draft itself (src/lib/docs/draft-restore.ts). Blocks are never
-            // set to null here, which would leave a block doc on its loading
-            // skeleton.
-            const body = draftBodyToRestore(p, legacy !== null);
-            if (body === null) {
+            // What the draft holds decides what comes back
+            // (src/lib/docs/draft-restore.ts): never an empty body it did not
+            // mean. Blocks are never set to null here, which would leave a
+            // block doc on its loading skeleton.
+            const plan = draftRestorePlan(p, legacy !== null, blocksRef.current !== null);
+            if (plan === "title-only") {
               void persist(null, null, metaRef.current);
+              return;
+            }
+            if (plan === "settings-only") {
+              // The title and page settings (icon, cover, options), over the
+              // body on screen.
+              setMeta(p.meta);
+              void persist(bnDocRef.current, blocksRef.current, p.meta);
               return;
             }
             // A conversion saved only in the draft replaces the old format.
             if (legacy !== null) setLegacy(null);
+            const body = p.blocks ?? [];
             setBlocks(body);
             setBnDoc(p.bnDoc);
             setMeta(p.meta);

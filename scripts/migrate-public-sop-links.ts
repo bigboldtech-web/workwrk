@@ -15,12 +15,17 @@
  * "every destination that works today keeps working" rule forbids.
  *
  * WHAT IT DOES. For every organization holding at least one PUBLISHED SOP
- * with a non-null `shareToken`, set `settings.access.publicLinks = "view"`,
- * leaving every other key of `settings` and of `settings.access` untouched,
- * and write one `access.settings.migrated` ActivityLog row naming the count,
- * so an admin who later turns the toggle off can see why it was on. Orgs with
- * no public SOP stay on the Off default. Orgs already on "view" are reported
- * as "already migrated" and not written.
+ * with a non-null `shareToken` WHERE NOBODY CHOSE, set
+ * `settings.access.publicLinks = "view"`, leaving every other key of
+ * `settings` and of `settings.access` untouched, and, when the workspace has
+ * a live person to name, write one `access.settings.migrated` ActivityLog row
+ * naming the count, so an admin who later turns the toggle off can see why it
+ * was on. A workspace where someone chose (a settings.updated.access,
+ * access.settings.migrated or access.settings.restored row), or whose stored
+ * value no access.migrated row from before Batch 11 explains, is reported as
+ * "kept as the workspace set it" and not written (migrateOrg says why). Orgs
+ * with no public SOP stay on the Off default. Orgs already on "view" are
+ * reported as "already on view" and not written.
  *
  * Idempotent (the marker read back is the value itself), one transaction per
  * org, a read-back assertion after the write, no source row is deleted or

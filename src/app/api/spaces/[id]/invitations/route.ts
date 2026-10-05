@@ -113,9 +113,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (inOrg.member) {
     return NextResponse.json(
       {
-        error: inOrg.inactive
-          ? "This person was in your workspace and is deactivated. Reactivate them from People, then add them to the Space."
-          : "This person is already in your workspace. Add them to the Space from the People tab instead.",
+        error: inOrg.removed
+          ? "This person was removed from your workspace. An Owner, an Admin or the People team can restore them from Directory, Removed, then add them to the Space."
+          : inOrg.inactive
+            ? "This person is deactivated in your workspace. An Owner or Admin can reactivate them in Settings, Members, then add them to the Space."
+            : inOrg.elsewhere
+              ? "This person is in your workspace but is working in another one right now, so the People tab cannot list them yet. Once they switch to this workspace, add them from the People tab."
+              : "This person is already in your workspace. Add them to the Space from the People tab instead.",
       },
       { status: 400 },
     );

@@ -176,7 +176,7 @@ is not the same as run in production**, which is the founder's step every time
 | ~~`migrate-legacy-tasks.ts`~~ **WRITTEN, Stage F** | every live `Task` and `TaskComment` into `Item` / `ItemUpdate` on the assignee's Personal list, with `metadata.legacyTaskId` and a `LegacyRedirect` row; rows synced from Google Calendar (`externalSource = 'GCAL'`) stay in `Task` on purpose, neither moved nor reported | work-home W4 | `LegacyRedirect` (shipped in `prisma/sql/2026-09-18-task-detail-phase2.sql`); every Personal list existing (the script creates a missing one); the consumer re-points, which shipped with it |
 | ~~`migrate-ideas.ts`~~ **WRITTEN, Stage F** | every `Idea` into an Item on the seeded Ideas list, with a `LegacyRedirect` row | work-home W5 | the Ideas list template (seeded: `list.ideas-board`); **must run before the `/ideas` 308**, or the redirect is a delete. The redirect is deliberately NOT in `next.config.ts` yet |
 | ~~`migrate-preference-keys.ts`~~ **WRITTEN, Stage F** | every `home.topPins` entry folded into the `favorite<Kind>Ids` array for its kind, so the rows behind the deleted top-pins strip become ordinary favorites | work-home W1 and W2 | the strict-schema keys existing (they do, as of Phase 2 Stage A); nothing else |
-| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken`, plus one `access.settings.migrated` audit row per org | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run by hand (the deploy ran it until Batch 11), see its section below |
+| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken` where nobody chose (the kept rule is in its section below), plus one `access.settings.migrated` audit row per org it writes | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run by hand (the deploy ran it until Batch 11), see its section below |
 
 ## Stage C: the two that are written, and what the founder has to do
 
@@ -541,8 +541,9 @@ none of them lands on a 410 or on a table nobody writes:
 
 ## `migrate-public-sop-links.ts` (Phase 3, process unit)
 
-Carries every existing public SOP link over access toggle 10. For each
-organization holding at least one PUBLISHED SOP with a `shareToken`, it sets
+Carries existing public SOP links over access toggle 10. For each
+organization holding at least one PUBLISHED SOP with a `shareToken`, except the
+workspaces it keeps (where someone chose, below), it sets
 `settings.access.publicLinks = "view"` and writes one `access.settings.migrated`
 ActivityLog row naming the count. Orgs with no public SOP stay on the Off
 default; orgs already on "view" are reported and not written. It ships with the
