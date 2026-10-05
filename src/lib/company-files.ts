@@ -63,7 +63,12 @@ export async function freeCompanyFiles(organizationId: string, stored: StoredFil
       if (ok) local += 1;
     }
     if (isS3Configured()) {
-      for (const prefix of ownedS3Prefixes(organizationId)) s3 += await deleteObjectsWithPrefix(prefix).catch(() => 0);
+      for (const prefix of ownedS3Prefixes(organizationId)) {
+        s3 += await deleteObjectsWithPrefix(prefix).catch((err) => {
+          console.error(`[company-files] ${prefix}:`, err instanceof Error ? err.message : String(err));
+          return 0;
+        });
+      }
     }
   } catch (err) {
     console.error(`[company-files] freeing ${organizationId}:`, err instanceof Error ? err.message : String(err));

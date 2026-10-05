@@ -806,7 +806,13 @@ export function CreateTaskModal() {
         try {
           const fd = new FormData();
           fd.append("file", file);
-          const up = await fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json());
+          const upRes = await fetch("/api/upload", { method: "POST", body: fd });
+          const up = await upRes.json().catch(() => null);
+          // A refused upload says why, and nothing is registered for it.
+          if (!upRes.ok || !up?.url) {
+            setNotice(typeof up?.error === "string" ? up.error : `Couldn't upload ${file.name}.`);
+            return;
+          }
           const s3KeyVal = typeof (up.s3Key ?? up.data?.s3Key) === "string" ? (up.s3Key ?? up.data?.s3Key) : null;
           const entry = await fetch("/api/files", {
             method: "POST",

@@ -53,6 +53,11 @@ export async function POST(req: NextRequest) {
     // The app sends the workspace its page belongs to (src/lib/tab-workspace.ts).
     const tab = req.headers.get("x-workspace-id");
     if (tab && tab !== orgId) {
+      // The session still names this tab's workspace but the person holds no
+      // place there any more (removed a moment ago): no reload helps.
+      if (ctx.sessionOrgId === tab) {
+        return NextResponse.json({ error: "You are no longer a member of this workspace." }, { status: 403 });
+      }
       return NextResponse.json({ error: "This tab belongs to another workspace. Reload it to upload here." }, { status: 409 });
     }
   }

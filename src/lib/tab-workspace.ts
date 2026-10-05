@@ -12,7 +12,7 @@
 // (src/app/(dashboard)/layout.tsx), so every upload control sends it without
 // each having to: it touches only same-origin requests to the upload routes,
 // adds the x-workspace-id header, and raises STALE_TAB_EVENT when a route
-// refuses the tab.
+// refuses the tab (TAB_OK_EVENT when one accepts it again).
 
 const UPLOAD_PATHS = new Set(["/api/upload", "/api/uploads/presign"]);
 
@@ -20,6 +20,10 @@ const UPLOAD_PATHS = new Set(["/api/upload", "/api/uploads/presign"]);
  *  shows a strip that says so, with Reload (src/components/layout/os/os-shell.tsx),
  *  whatever the control that tried the upload does with the answer. */
 export const STALE_TAB_EVENT = "workwrk:stale-tab";
+
+/** Raised when an upload from this tab is accepted again (the session is back
+ *  in this tab's workspace), so the strip goes. */
+export const TAB_OK_EVENT = "workwrk:tab-ok";
 
 let tabWorkspace: string | null = null;
 let installed = false;
@@ -47,6 +51,7 @@ export function setTabWorkspace(organizationId: string | null | undefined): void
     if (!headers.has("x-workspace-id")) headers.set("x-workspace-id", tabWorkspace);
     return original(input, { ...init, headers }).then((res) => {
       if (res.status === 409) window.dispatchEvent(new CustomEvent(STALE_TAB_EVENT));
+      else if (res.ok) window.dispatchEvent(new CustomEvent(TAB_OK_EVENT));
       return res;
     });
   };

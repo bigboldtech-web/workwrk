@@ -27,17 +27,18 @@ beforeEach(() => {
 
 describe("loadSuiteViewer: the workspace the session acts in", () => {
   it("is the anchored one when the session acts there", async () => {
-    expect(await loadSuiteViewer(session("orgB"))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN" });
+    expect(await loadSuiteViewer(session("orgB"))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN", sessionOrgId: "orgB" });
   });
   it("is the session's, with that membership's level, when acting elsewhere", async () => {
     memberships.set("u1:orgA", { role: "EMPLOYEE" });
     // An Admin at home is never an Admin of A because of it.
-    expect(await loadSuiteViewer(session("orgA"))).toEqual({ userId: "u1", orgId: "orgA", accessLevel: "EMPLOYEE" });
+    expect(await loadSuiteViewer(session("orgA"))).toEqual({ userId: "u1", orgId: "orgA", accessLevel: "EMPLOYEE", sessionOrgId: "orgA" });
   });
   it("comes home when there is no membership where the session acts", async () => {
-    expect(await loadSuiteViewer(session("orgA"))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN" });
+    // No place in the session's workspace: home, and the route can tell (sessionOrgId differs).
+    expect(await loadSuiteViewer(session("orgA"))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN", sessionOrgId: "orgA" });
   });
   it("comes home when the session names no workspace", async () => {
-    expect(await loadSuiteViewer(session(undefined))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN" });
+    expect(await loadSuiteViewer(session(undefined))).toEqual({ userId: "u1", orgId: "orgB", accessLevel: "COMPANY_ADMIN", sessionOrgId: null });
   });
 });

@@ -30,7 +30,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { BLOB_TRASH_TYPES, freeTrashStorage } from "@/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 import { cronRefusal } from "@/lib/cron-auth";
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         where: { ...where, entityType: { in: [...BLOB_TRASH_TYPES] } },
         select: { id: true, entityType: true, snapshot: true },
       });
-      for (const f of expiringFiles) await freeTrashStorage(f.entityType, f.snapshot, org.id, f.id);
+      await freeTrashStorageMany(expiringFiles, org.id);
 
       const res = await prisma.trashItem.deleteMany({ where });
       if (res.count > 0) purged.push({ organizationId: org.id, days, deleted: res.count });

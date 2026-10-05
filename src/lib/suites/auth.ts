@@ -32,8 +32,12 @@ export async function loadSuiteViewer(held?: Session | null) {
   // two workspaces on two devices had the docs, timers and uploads of one
   // workspace while every other route served the other, and an upload was
   // stamped with the wrong company.
-  const acting = await actingWorkspace(user, (session.user as { organizationId?: string }).organizationId);
-  return { userId: user.id, orgId: acting.organizationId, accessLevel: acting.accessLevel };
+  const sessionOrgId = (session.user as { organizationId?: string }).organizationId ?? null;
+  const acting = await actingWorkspace(user, sessionOrgId);
+  // sessionOrgId is the workspace the token names: it differs from orgId only
+  // when the person holds no place there any more (src/app/api/upload tells
+  // that apart from a tab left on another workspace).
+  return { userId: user.id, orgId: acting.organizationId, accessLevel: acting.accessLevel, sessionOrgId };
 }
 
 /** The viewer every suite route gates with. */
@@ -46,5 +50,5 @@ export async function resolveSuiteContext() {
       ? { error: NextResponse.json({ error: "no organization" }, { status: 400 }) }
       : { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   }
-  return { userId: viewer.userId, orgId: viewer.orgId, accessLevel: viewer.accessLevel };
+  return { userId: viewer.userId, orgId: viewer.orgId, accessLevel: viewer.accessLevel, sessionOrgId: viewer.sessionOrgId };
 }

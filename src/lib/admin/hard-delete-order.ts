@@ -16,9 +16,11 @@
 //
 // Deleting these parents first, each in its own statement in the same
 // transaction, lets their cascades finish before any account goes. The test
-// (hard-delete-order.test.ts) reads prisma/schema.prisma so that a new
-// restricting link deeper than one level cannot be added without a parent
-// here.
+// (hard-delete-order.test.ts) reads prisma/schema.prisma and fails on a
+// restricting link from a record below the first level to one the company's
+// delete removes unless its parent is here, on any restricting link into a
+// first parent's records from outside them (their own delete would fail),
+// and on a first parent whose company column is not organizationId.
 
 /** Deleted by organizationId, in this order, before the company row. */
 export const HARD_DELETE_FIRST = ["ReviewCycle", "Meeting", "Announcement", "Task", "JournalEntry"] as const;

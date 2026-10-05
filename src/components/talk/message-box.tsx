@@ -44,6 +44,7 @@ import { Dots } from "@/components/ui/dots";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { LinkPopover } from "@/components/ui/link-popover";
 import { dragHasFiles } from "@/lib/upload-dropped-files";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { TALK_FMTBAR_KEY, readTalkKey } from "@/components/talk/talk-keys";
 import type { ChatAttachment } from "@/components/talk/message-feed";
@@ -96,6 +97,11 @@ export function MessageBox({
 }) {
   const [input, setInput] = useState(initialValue);
   const [files, setFiles] = useState<File[]>([]);
+  // A message put back in the box after the server refused its upload (a tab
+  // that shows another workspace, say) lives only here: while it does, a
+  // reload or a leave asks first (the strip under the bar offers Reload).
+  const [refusedDraft, setRefusedDraft] = useState(false);
+  useDirtyGuard(refusedDraft && (input.trim() !== "" || files.length > 0));
   const [uploading, setUploading] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -246,6 +252,7 @@ export function MessageBox({
         // A refusal the server explains (this tab belongs to another
         // workspace, say) is said as it is: sending again cannot change it.
         const refused = e instanceof UploadRefused && e.status >= 400 && e.status < 500 && e.said ? e.said : null;
+        if (refused) setRefusedDraft(true);
         const kept = over > 0 ? ` The files are back in the box, except ${over} over the ${MAX_FILES}-file limit.` : " The files are back in the box.";
         onError(refused
           ? `Couldn't upload ${which}. ${refused}${kept}`
@@ -258,6 +265,7 @@ export function MessageBox({
       for (const f of batch) uploadedRef.current.delete(f);
     }
 
+    setRefusedDraft(false);
     onSend({ body, mentions, attachments });
   };
 

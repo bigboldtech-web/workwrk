@@ -47,7 +47,7 @@
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 import { WORKSPACE_ORPHAN_TABLES } from "../src/lib/admin/workspace-orphans";
 import { ACTION_LABEL } from "../src/lib/admin/staff-activity";
-import { BLOB_TRASH_TYPES, freeTrashStorage } from "../src/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "../src/lib/trash";
 import { deleteObjectsWithPrefix, isS3Configured } from "../src/lib/s3";
 import { ownedS3Prefixes } from "../src/lib/company-files";
 import path from "path";
@@ -160,7 +160,10 @@ async function main() {
           [...BLOB_TRASH_TYPES],
         );
         if (rows.length === 0) break;
-        for (const r of rows) await freeTrashStorage(r.entityType, r.snapshot, r.organizationId, r.id);
+        // Freed company by company: each check reads that company's rows once.
+        const byCompany = new Map<string, typeof rows>();
+        for (const r of rows) byCompany.set(r.organizationId, [...(byCompany.get(r.organizationId) ?? []), r]);
+        for (const [org, list] of byCompany) await freeTrashStorageMany(list, org);
         await prisma.trashItem.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
       }
     }

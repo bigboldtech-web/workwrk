@@ -7,7 +7,7 @@ import { unlink } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { isS3Configured, deleteObject } from "@/lib/s3";
-import { uploadedBy } from "@/lib/upload-stamp";
+import { stampOf, uploadedBy } from "@/lib/upload-stamp";
 import { TRASH_ROW_HREF, trashRowHref, type TrashTypeKey } from "@/lib/trash-view";
 import type { Prisma } from "@/generated/prisma";
 import { captureListLinks, listLinksAvailable, reconcileListLinks } from "@/lib/list-links-server";
@@ -81,48 +81,83 @@ export function ownedStoredFile(
   return null;
 }
 
-/** Whether another Files row (in any company) or another Trash row (a file, or a folder or Space that carries files) still names the stored file. */
-async function namedElsewhere(stored: string, fileId: unknown, trashItemId: string | undefined): Promise<boolean> {
-  const file = await prisma.fileEntry.findFirst({
-    where: { OR: [{ s3Key: stored }, { url: { contains: stored } }], ...(typeof fileId === "string" && fileId ? { NOT: { id: fileId } } : {}) },
-    select: { id: true },
-  });
-  if (file) return true;
-  const trash = await prisma.$queryRaw<{ n: bigint }[]>`
-    SELECT count(*)::bigint AS n FROM "TrashItem" t
-     WHERE t."entityType" = ANY(${[...FILE_HOLDING_TRASH_TYPES]}::text[])
-       AND position(${stored} in t."snapshot"::text) > 0
-       AND t."id" IS DISTINCT FROM ${trashItemId ?? null}`;
-  return Number(trash[0]?.n ?? 0) > 0;
+type FileRow = { url?: unknown; s3Key?: unknown; uploadedById?: unknown };
+
+/** A trashed row as the purges hand it over. */
+export interface TrashedForPurge {
+  id: string;
+  entityType: string;
+  snapshot: unknown;
 }
 
-// Best-effort: free the underlying file blob (local dev file or S3 object) so
-// storage is actually reclaimed on PERMANENT deletion, only when the trashed
-// row provably owns it (ownedStoredFile) and nothing else still names it.
-// Never throws.
-async function freeFileBlob(organizationId: string, row: { id?: unknown; url?: unknown; s3Key?: unknown; uploadedById?: unknown } | null | undefined, trashItemId?: string): Promise<void> {
-  const owned = ownedStoredFile(organizationId, row?.url, row?.s3Key, row?.uploadedById);
-  if (!owned) return;
-  try {
-    if (await namedElsewhere(owned.kind === "s3" ? owned.key : owned.name, row?.id, trashItemId)) return;
-    if (owned.kind === "local") await unlink(path.join(process.cwd(), "public", "uploads", owned.name)).catch(() => {});
-    else if (isS3Configured()) await deleteObject(owned.key).catch(() => {});
-  } catch { /* best-effort, purge proceeds regardless */ }
-}
-
-// Free any external storage a trashed item references (currently file blobs),
-// for the company the Trash row belongs to. Call before permanently deleting
-// a TrashItem, with its id (a row never counts as naming its own file).
-export async function freeTrashStorage(entityType: string, snapshot: unknown, organizationId: string, trashItemId?: string): Promise<void> {
+/** The Files rows a trashed row's snapshot carries, for freeing their files. */
+function filesOf(entityType: string, snapshot: unknown): FileRow[] {
   if (entityType === "file") {
-    const row = (snapshot as { row?: { id?: unknown; url?: unknown; s3Key?: unknown; uploadedById?: unknown } } | null)?.row;
-    await freeFileBlob(organizationId, row, trashItemId);
-    return;
+    const row = (snapshot as { row?: FileRow } | null)?.row;
+    return row ? [row] : [];
   }
-  if (entityType === "file_folder") {
-    const files = (snapshot as { children?: { files?: { id?: unknown; url?: unknown; s3Key?: unknown; uploadedById?: unknown }[] } } | null)?.children?.files ?? [];
-    for (const f of files) await freeFileBlob(organizationId, f, trashItemId);
-  }
+  if (entityType === "file_folder") return (snapshot as { children?: { files?: FileRow[] } } | null)?.children?.files ?? [];
+  return [];
+}
+
+/**
+ * The upload stamps (<id>-<stamp>, src/lib/upload-stamp.ts) that a row of
+ * this company still names, out of the ones asked about: any live Files row
+ * (the trashed row's own id included: a trash that never finished, or a
+ * restore, leaves it live), or a Trash row other than the ones being purged
+ * (a file, or a Folder or Space that carries files). Only this company's
+ * rows can name a stamped file, since POST /api/files refuses another
+ * company's keys and names, so one pass over its own rows answers for all
+ * of them, by the company indexes.
+ */
+async function stampsStillNamed(organizationId: string, stamps: string[], purging: string[]): Promise<Set<string>> {
+  if (stamps.length === 0) return new Set();
+  const rows = await prisma.$queryRaw<{ tok: string }[]>`
+    SELECT DISTINCT m[1] AS tok
+      FROM "FileEntry" f
+      CROSS JOIN LATERAL regexp_matches(coalesce(f."s3Key", '') || ' ' || f."url", '([a-f0-9]{24}-[a-f0-9]{16})', 'g') AS m
+     WHERE f."organizationId" = ${organizationId} AND m[1] = ANY(${stamps}::text[])
+    UNION
+    SELECT DISTINCT m[1]
+      FROM "TrashItem" t
+      CROSS JOIN LATERAL regexp_matches(t."snapshot"::text, '([a-f0-9]{24}-[a-f0-9]{16})', 'g') AS m
+     WHERE t."organizationId" = ${organizationId}
+       AND t."entityType" = ANY(${[...FILE_HOLDING_TRASH_TYPES]}::text[])
+       AND NOT (t."id" = ANY(${purging}::text[]))
+       AND m[1] = ANY(${stamps}::text[])`;
+  return new Set(rows.map((r) => r.tok));
+}
+
+/**
+ * Free the stored files the trashed rows being purged provably own
+ * (ownedStoredFile) and nothing else of the company still names, so storage
+ * is reclaimed on PERMANENT deletion. Call before deleting the TrashItem
+ * rows, with every row of the purge at once: the check reads the company's
+ * files and Trash once, not once per file. Best effort, never throws.
+ */
+export async function freeTrashStorageMany(items: readonly TrashedForPurge[], organizationId: string): Promise<void> {
+  try {
+    const owned: { stored: { kind: "local"; name: string } | { kind: "s3"; key: string }; stamp: string }[] = [];
+    for (const it of items) {
+      for (const f of filesOf(it.entityType, it.snapshot)) {
+        const stored = ownedStoredFile(organizationId, f.url, f.s3Key, f.uploadedById);
+        const parts = stored ? stampOf(stored.kind === "s3" ? stored.key : stored.name) : null;
+        if (stored && parts) owned.push({ stored, stamp: `${parts.id}-${parts.stamp}` });
+      }
+    }
+    if (owned.length === 0) return;
+    const named = await stampsStillNamed(organizationId, [...new Set(owned.map((o) => o.stamp))], items.map((i) => i.id));
+    for (const { stored, stamp } of owned) {
+      if (named.has(stamp)) continue;
+      if (stored.kind === "local") await unlink(path.join(process.cwd(), "public", "uploads", stored.name)).catch(() => {});
+      else if (isS3Configured()) await deleteObject(stored.key).catch(() => {});
+    }
+  } catch { /* best effort: the purge proceeds regardless */ }
+}
+
+/** One trashed row (Delete permanently): freeTrashStorageMany for it alone. */
+export async function freeTrashStorage(entityType: string, snapshot: unknown, organizationId: string, trashItemId: string): Promise<void> {
+  await freeTrashStorageMany([{ id: trashItemId, entityType, snapshot }], organizationId);
 }
 
 export const TRASH_LABEL: Record<TrashType, string> = {
@@ -951,6 +986,6 @@ export async function purgeExpiredTrash(organizationId: string): Promise<void> {
     where: { organizationId, deletedAt: { lt: cutoff }, entityType: { in: [...BLOB_TRASH_TYPES] } },
     select: { id: true, entityType: true, snapshot: true },
   });
-  for (const it of expiringFiles) await freeTrashStorage(it.entityType, it.snapshot, organizationId, it.id);
+  await freeTrashStorageMany(expiringFiles, organizationId);
   await prisma.trashItem.deleteMany({ where: { organizationId, deletedAt: { lt: cutoff } } });
 }

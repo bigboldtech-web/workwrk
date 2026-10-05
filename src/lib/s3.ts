@@ -130,15 +130,22 @@ export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
   const client = getS3Client();
   const Bucket = getBucket();
   let deleted = 0;
+  // DeleteObjects answers 200 even when some keys failed, naming them under
+  // Errors: those are counted apart, and the call throws once every page is
+  // done, so a caller that must stop on a failure (the purge script) does.
+  let failed = 0;
   let token: string | undefined;
   do {
     const page = await client.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
     const keys = (page.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k && k.startsWith(prefix));
     if (keys.length > 0) {
-      await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true } }));
-      deleted += keys.length;
+      const res = await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true } }));
+      const errors = res.Errors?.length ?? 0;
+      failed += errors;
+      deleted += keys.length - errors;
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
+  if (failed > 0) throw new Error(`${failed} objects under ${prefix} could not be deleted (${deleted} were)`);
   return deleted;
 }

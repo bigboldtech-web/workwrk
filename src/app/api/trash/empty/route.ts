@@ -10,7 +10,7 @@ import { z } from "zod";
 import { AccessError, requireCan } from "@/lib/access/gate";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
-import { BLOB_TRASH_TYPES, freeTrashStorage } from "@/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 
 const schema = z.object({ confirm: z.literal("DELETE") });
 
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       where: { organizationId: orgId, entityType: { in: [...BLOB_TRASH_TYPES] } },
       select: { id: true, entityType: true, snapshot: true },
     });
-    for (const f of files) await freeTrashStorage(f.entityType, f.snapshot, orgId, f.id);
+    await freeTrashStorageMany(files, orgId);
 
     const res = await prisma.trashItem.deleteMany({ where: { organizationId: orgId } });
     return jsonSuccess({ deleted: res.count });
