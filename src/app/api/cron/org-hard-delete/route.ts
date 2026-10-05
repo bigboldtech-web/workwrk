@@ -27,10 +27,10 @@ import { companyStoredFiles, freeCompanyFiles } from "@/lib/company-files";
  * lands between the read and the delete keeps the company (and its staff
  * audit rows untouched), and one that comes after finds it gone.
  *
- * ITS FILES GO TOO. The files it uploaded (on disk, or in S3 under
- * orgs/<id>/) are read before the transaction and freed only after it
- * commits (src/lib/company-files.ts), so a delete that rolls back loses
- * nothing. Its people's password reset rows, which hold their email
+ * ITS FILES GO TOO, where ownership is provable (src/lib/company-files.ts):
+ * in S3 everything under orgs/<id>/, on disk the names carrying its id or
+ * its people's. Freed only after the transaction commits, so a delete that
+ * rolls back loses nothing; never by a file reference, which a client chose. Its people's password reset rows, which hold their email
  * addresses and name no company, are deleted while their accounts still
  * exist to match them by.
  *

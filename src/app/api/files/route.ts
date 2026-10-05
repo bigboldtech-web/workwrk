@@ -225,6 +225,17 @@ export async function POST(req: NextRequest) {
       s3Key = (bucket && path.startsWith(bucket + "/") ? path.slice(bucket.length + 1) : path).slice(0, 512) || null;
     } catch { /* not a parsable URL — leave null */ }
   }
+  // A file is registered only into the company that stored it: an S3 key
+  // must sit under its own orgs/<id>/ prefix, and a disk name written with
+  // another company's id is refused. A link to someone else's file (seen on
+  // a share page, say) must never become this company's file to read, trash
+  // and delete for good.
+  if (s3Key && !s3Key.startsWith(`orgs/${orgId}/`)) return jsonError("That file was not uploaded to this workspace.", 400);
+  if (url.startsWith("/api/uploads/")) {
+    const name = url.split("/").pop() ?? "";
+    const foreign = /^(file|logo)-([a-z0-9]+)-/i.exec(name);
+    if (foreign && foreign[2] !== orgId) return jsonError("That file was not uploaded to this workspace.", 400);
+  }
   const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
   let spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
   const spaceFolderId = typeof body.spaceFolderId === "string" && body.spaceFolderId ? body.spaceFolderId : null;

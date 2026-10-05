@@ -86,7 +86,10 @@ export async function POST(req: NextRequest) {
   // Dev / single-instance fallback: write to public/uploads so the file
   // is reachable from the same Next server. Not production-grade — it
   // doesn't survive horizontal scaling — but keeps local dev frictionless.
-  const safeName = `file-${id}.${ext || "bin"}`;
+  // The company's id in the name is the proof it owns the file, read when the
+  // company is deleted for good and by Trash's permanent delete
+  // (ownedStoredFile in src/lib/trash.ts).
+  const safeName = `file-${orgId}-${id}.${ext || "bin"}`;
   const uploadDir = path.join(process.cwd(), "public", "uploads");
   await mkdir(uploadDir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());

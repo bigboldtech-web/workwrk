@@ -33,32 +33,63 @@ export type TrashType =
 /** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
 export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
 
-// Best-effort: free the underlying file blob (local dev file or S3 object) so
-// storage is actually reclaimed on PERMANENT deletion. Never throws.
-async function freeFileBlob(url: unknown): Promise<void> {
-  if (typeof url !== "string" || !url) return;
-  try {
-    if (url.startsWith("/api/uploads/")) {
-      const name = url.split("/").pop();
-      if (name) await unlink(path.join(process.cwd(), "public", "uploads", name)).catch(() => {});
-    } else if (/^https?:\/\//.test(url) && isS3Configured()) {
+/**
+ * A stored file this company provably owns, or null. A file's url and key on
+ * a FileEntry are whatever the client sent (POST /api/files keeps them), so a
+ * reference alone proves nothing: anyone who saw another company's link could
+ * register it, trash it and delete it permanently. Only two things are
+ * proof: an S3 key under the company's own prefix, orgs/<id>/ (every upload
+ * writes there), and a disk name written with the company's id
+ * (file-<id>-..., logo-<id>-...). A disk file from before names carried the
+ * id (file-<random>) proves nothing and is left in place: keeping a file
+ * too long is better than deleting another company's.
+ */
+export function ownedStoredFile(organizationId: string, url: unknown, s3Key?: unknown): { kind: "local"; name: string } | { kind: "s3"; key: string } | null {
+  if (!organizationId) return null;
+  const prefix = `orgs/${organizationId}/`;
+  if (typeof s3Key === "string" && s3Key) return s3Key.startsWith(prefix) ? { kind: "s3", key: s3Key } : null;
+  if (typeof url !== "string" || !url) return null;
+  if (url.startsWith("/api/uploads/")) {
+    const name = url.split("/").pop() ?? "";
+    const plain = /^[A-Za-z0-9._-]+$/.test(name) && !name.startsWith(".");
+    const owned = name.startsWith(`file-${organizationId}-`) || name.startsWith(`logo-${organizationId}-`);
+    return plain && owned ? { kind: "local", name } : null;
+  }
+  if (/^https?:\/\//.test(url)) {
+    try {
       const key = new URL(url).pathname.replace(/^\/+/, "");
-      if (key) await deleteObject(key).catch(() => {});
+      return key.startsWith(prefix) ? { kind: "s3", key } : null;
+    } catch {
+      return null;
     }
+  }
+  return null;
+}
+
+// Best-effort: free the underlying file blob (local dev file or S3 object) so
+// storage is actually reclaimed on PERMANENT deletion, only when this
+// company provably owns it (ownedStoredFile). Never throws.
+async function freeFileBlob(organizationId: string, url: unknown, s3Key?: unknown): Promise<void> {
+  const owned = ownedStoredFile(organizationId, url, s3Key);
+  if (!owned) return;
+  try {
+    if (owned.kind === "local") await unlink(path.join(process.cwd(), "public", "uploads", owned.name)).catch(() => {});
+    else if (isS3Configured()) await deleteObject(owned.key).catch(() => {});
   } catch { /* best-effort, purge proceeds regardless */ }
 }
 
-// Free any external storage a trashed item references (currently file blobs).
-// Call before permanently deleting a TrashItem.
-export async function freeTrashStorage(entityType: string, snapshot: unknown): Promise<void> {
+// Free any external storage a trashed item references (currently file blobs),
+// for the company the Trash row belongs to. Call before permanently deleting
+// a TrashItem.
+export async function freeTrashStorage(entityType: string, snapshot: unknown, organizationId: string): Promise<void> {
   if (entityType === "file") {
-    const url = (snapshot as { row?: { url?: unknown } } | null)?.row?.url;
-    await freeFileBlob(url);
+    const row = (snapshot as { row?: { url?: unknown; s3Key?: unknown } } | null)?.row;
+    await freeFileBlob(organizationId, row?.url, row?.s3Key);
     return;
   }
   if (entityType === "file_folder") {
-    const files = (snapshot as { children?: { files?: { url?: unknown }[] } } | null)?.children?.files ?? [];
-    for (const f of files) await freeFileBlob(f?.url);
+    const files = (snapshot as { children?: { files?: { url?: unknown; s3Key?: unknown }[] } } | null)?.children?.files ?? [];
+    for (const f of files) await freeFileBlob(organizationId, f?.url, f?.s3Key);
   }
 }
 
@@ -888,6 +919,6 @@ export async function purgeExpiredTrash(organizationId: string): Promise<void> {
     where: { organizationId, deletedAt: { lt: cutoff }, entityType: { in: [...BLOB_TRASH_TYPES] } },
     select: { entityType: true, snapshot: true },
   });
-  for (const it of expiringFiles) await freeTrashStorage(it.entityType, it.snapshot);
+  for (const it of expiringFiles) await freeTrashStorage(it.entityType, it.snapshot, organizationId);
   await prisma.trashItem.deleteMany({ where: { organizationId, deletedAt: { lt: cutoff } } });
 }

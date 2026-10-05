@@ -19,15 +19,20 @@
 // It touches ONLY rows whose organizationId names no Organization row (a row
 // with no organizationId, such as a global template, is never touched), in
 // batches of 5000, and prints counts only. WorkspaceDeletion is never
-// touched. Trashed files are freed (disk or S3) before their Trash rows go,
-// and with S3 configured everything under orgs/<id>/ of a company that no
-// longer exists is deleted. There is no undo: read the dry run first.
+// touched. Files go only where ownership is provable (src/lib/trash.ts
+// ownedStoredFile): with S3 configured, everything under orgs/<id>/ of a
+// company that no longer exists; on disk, file-<id>-* and logo-<id>-* of a
+// company that no longer exists and avatar-<id>-* of an account that no
+// longer exists. A disk upload from before names carried the id cannot be
+// traced and is left. There is no undo: read the dry run first.
 
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 import { WORKSPACE_ORPHAN_TABLES } from "../src/lib/admin/workspace-orphans";
 import { ACTION_LABEL } from "../src/lib/admin/staff-activity";
 import { BLOB_TRASH_TYPES, freeTrashStorage } from "../src/lib/trash";
 import { deleteObjectsWithPrefix, isS3Configured } from "../src/lib/s3";
+import path from "path";
+import { readdir, unlink } from "fs/promises";
 
 const prisma = scriptPrisma();
 const BATCH = 5000;
@@ -64,12 +69,12 @@ async function main() {
       // Free a trashed file before the row that names it goes, or nothing
       // will ever point at it again.
       for (;;) {
-        const rows = await prisma.$queryRawUnsafe<{ id: string; entityType: string; snapshot: unknown }[]>(
-          `SELECT t."id", t."entityType", t."snapshot" ${orphansOf("TrashItem")} AND t."entityType" = ANY($1::text[]) LIMIT ${BATCH}`,
+        const rows = await prisma.$queryRawUnsafe<{ id: string; entityType: string; snapshot: unknown; organizationId: string }[]>(
+          `SELECT t."id", t."entityType", t."snapshot", t."organizationId" ${orphansOf("TrashItem")} AND t."entityType" = ANY($1::text[]) LIMIT ${BATCH}`,
           [...BLOB_TRASH_TYPES],
         );
         if (rows.length === 0) break;
-        for (const r of rows) await freeTrashStorage(r.entityType, r.snapshot);
+        for (const r of rows) await freeTrashStorage(r.entityType, r.snapshot, r.organizationId);
         await prisma.trashItem.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
       }
     }
@@ -94,12 +99,32 @@ async function main() {
     console.log(write ? `S3: deleted ${objects} objects of ${goneCompanies.size} companies that no longer exist` : `S3: ${goneCompanies.size} companies that no longer exist would have orgs/<id>/ emptied`);
   }
 
+  // Disk files whose names say they belong to a company or an account that
+  // no longer exists (an id a row still has is never touched).
+  {
+    const dir = path.join(process.cwd(), "public", "uploads");
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const orgOf = (n: string) => /^(?:file|logo)-([a-z0-9]{20,})-/.exec(n)?.[1] ?? null;
+    const userOf = (n: string) => /^avatar-([a-z0-9]{20,})-/.exec(n)?.[1] ?? null;
+    const orgIds = [...new Set(names.map(orgOf).filter((x): x is string => !!x))];
+    const userIds = [...new Set(names.map(userOf).filter((x): x is string => !!x))];
+    const liveOrgs = new Set((await prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true } })).map((o) => o.id));
+    const liveUsers = new Set((await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true } })).map((u) => u.id));
+    const stranded = names.filter((n) => /^[A-Za-z0-9._-]+$/.test(n) && ((orgOf(n) && !liveOrgs.has(orgOf(n)!)) || (userOf(n) && !liveUsers.has(userOf(n)!))));
+    let removed = 0;
+    if (write) for (const n of stranded) removed += await unlink(path.join(dir, n)).then(() => 1, () => 0);
+    console.log(`Disk: ${stranded.length} files of companies or accounts that no longer exist${write ? `, ${removed} deleted` : ""}`);
+  }
+
   // Staff audit rows that still name a deleted company or a deleted account.
   const labels = JSON.stringify(ACTION_LABEL);
   const [{ n: staffRows }] = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(*)::bigint AS n FROM "StaffAction"
      WHERE ("targetCompanyId" IS NULL AND "action" LIKE 'admin.org.%' AND "targetLabel" IS DISTINCT FROM 'A deleted company')
-        OR ("action" = 'admin.access.denied' AND "actorUserId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "User" u WHERE u."id" = "StaffAction"."actorUserId"))`;
+        OR ("action" = 'admin.access.denied' AND "actorUserId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "User" u WHERE u."id" = "StaffAction"."actorUserId"))
+        OR ("action" = 'admin.code.refunded' AND "targetCompanyId" IS NULL
+            AND ((jsonb_typeof("before") = 'object' AND "before"->>'companyName' IS NOT NULL)
+              OR (jsonb_typeof("after") = 'object' AND "after"->>'companyName' IS NOT NULL)))`;
   if (write) {
     await prisma.$executeRaw`
       UPDATE "StaffAction"
@@ -109,6 +134,16 @@ async function main() {
              "before" = CASE WHEN jsonb_typeof("before") = 'object' THEN "before" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "before" END,
              "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "after" END
        WHERE "targetCompanyId" IS NULL AND "action" LIKE 'admin.org.%' AND "targetLabel" IS DISTINCT FROM 'A deleted company'`;
+    // A refund keeps its label (the code); its company's name goes.
+    await prisma.$executeRaw`
+      UPDATE "StaffAction"
+         SET "summary" = COALESCE(${labels}::jsonb ->> "action", 'Changed') || ' (the company was later deleted for good)',
+             "reason" = NULL,
+             "before" = CASE WHEN jsonb_typeof("before") = 'object' THEN "before" - 'companyName' ELSE "before" END,
+             "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'companyName' ELSE "after" END
+       WHERE "action" = 'admin.code.refunded' AND "targetCompanyId" IS NULL
+         AND ((jsonb_typeof("before") = 'object' AND "before"->>'companyName' IS NOT NULL)
+           OR (jsonb_typeof("after") = 'object' AND "after"->>'companyName' IS NOT NULL))`;
     await prisma.$executeRaw`
       UPDATE "StaffAction"
          SET "actorEmail" = 'a deleted account',
