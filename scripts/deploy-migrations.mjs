@@ -223,6 +223,14 @@ const SQL_MANIFEST = [
   // Batch 13 round 3: "AiFreeDay" (the daily ceiling on free AI) and
   // "AIQuery"."freeTier". Before the reload: every free AI claim reads both.
   "2026-10-06-ai-free-day.sql",
+  // AI teammates, Phase 1 (docs/plans/ai-teammates.md): nullable or defaulted
+  // columns on "Agent", "AgentRun", "AgentMemory", "ChatSession" and
+  // "ChatMessage", and the new "AgentAction", "AgentRoutine" and
+  // "AgentPersonSetting" tables. ADD COLUMN, CREATE TABLE and CREATE INDEX IF
+  // NOT EXISTS plus catalogue-guarded constraints (NOT VALID on the two chat
+  // tables). Before the reload: Prisma selects every column on a read with no
+  // select, and every Ask AI read touches ChatMessage.
+  "2026-10-06-ai-teammates.sql",
 ];
 
 /**

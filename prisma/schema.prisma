@@ -5197,15 +5197,43 @@ model Agent {
   createdById       String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+  /// AI teammates (prisma/sql/2026-10-06-ai-teammates.sql). Who may use it:
+  /// "WORKSPACE" (every member with the ai app, as every agent before this
+  /// column) or "PRIVATE" (only ownerId). A word, not an enum (CHECK in SQL).
+  visibility         String  @default("WORKSPACE")
+  /// The person a PRIVATE teammate belongs to. No relation on purpose: a person
+  /// who leaves deletes nothing; their teammate simply stops.
+  ownerId            String?
+  /// One of the eight user hues (design-system 1.7): sky | teal | moss | sand |
+  /// clay | rose | slate | stone. Null: the catalog hue, else the neutral tile.
+  hue                String?
+  /// Its managers' tightening only: { [toolName]: "ask" }. Never loosens: a
+  /// person's "always" is theirs alone (AgentPersonSetting).
+  approvalRules      Json    @default("{}")
+  /// The starter template key it was made from (src/lib/agents/templates.ts).
+  template           String?
+  /// The tools it may use, ToolName[]. Null: the legacy set (cross tools plus
+  /// the product's, src/lib/agents/tools.ts toolsForSession), exactly as before.
+  toolNames          Json?
+  /// The most AI questions it may use in a UTC calendar month, on top of the
+  /// plan's allowance and never instead of it. Null: no limit of its own.
+  monthlyQuestionCap Int?
 
   runs         AgentRun[]
   memories     AgentMemory[]
   chatSessions ChatSession[]
+  // AI teammates: the approval queue, the routines and each person's own
+  // settings (prisma/sql/2026-10-06-ai-teammates.sql).
+  actions        AgentAction[]
+  routines       AgentRoutine[]
+  personSettings AgentPersonSetting[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, status])
   @@index([productSlug])
   @@index([autonomousEnabled, nextRunAt])
+  @@index([organizationId, ownerId])
+  @@index([organizationId, visibility, status])
 }
 
 enum AgentStatus {
@@ -5228,11 +5256,25 @@ model AgentRun {
   tokensIn    Int?
   tokensOut   Int?
   costCents   Int?
+  /// AI teammates: the chat this turn belongs to, the routine that ran it, the
+  /// person it acted for, and the AIQuery it claimed (null once handed back,
+  /// so a teammate's monthly limit counts only kept questions).
+  /// prisma/sql/2026-10-06-ai-teammates.sql
+  sessionId   String?
+  routineId   String?
+  actingForId String?
+  questionId  String?
 
   @@index([agentId, startedAt])
   @@index([status])
+  @@index([sessionId, startedAt])
+  @@index([routineId, startedAt])
 }
 
+/// What a teammate remembers. scope "person" + scopeId = the person's userId
+/// (only that person's chats read it); scope "agent" + scopeId = the agent's
+/// id (everyone who uses it; written only by its managers). A row with a null
+/// scopeId is never read (src/lib/agents/memory.ts).
 model AgentMemory {
   id        String   @id @default(cuid())
   agentId   String
@@ -5243,9 +5285,115 @@ model AgentMemory {
   scopeId   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  /// Who saved it (no relation on purpose, like ownerId on Agent) and where it
+  /// was saved from. prisma/sql/2026-10-06-ai-teammates.sql
+  createdById String?
+  /// "chat" | "settings"
+  source      String?
 
   @@unique([agentId, scope, scopeId, key])
   @@index([agentId])
+}
+
+/// One thing an AI teammate did, or asked to do, that other people will see
+/// or that cannot be undone, and what happened to it. PENDING until the
+/// person it acts for decides; RUNNING while the tool runs (claimed by one
+/// compare-and-swap, so it never runs twice); then EXECUTED, FAILED, DENIED,
+/// EXPIRED or CANCELLED. `input` is the exact input that runs (cleaned before
+/// the person saw it); `editedInput` is their edit. `actingForId` has no
+/// relation on purpose. `organizationId` has no Prisma relation either: the
+/// SQL file creates its foreign key (ON DELETE CASCADE), so deleting the
+/// workspace still deletes its rows, and Organization needs no back field.
+/// prisma/sql/2026-10-06-ai-teammates.sql
+model AgentAction {
+  id             String    @id @default(cuid())
+  organizationId String
+  agentId        String
+  agent          Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  actingForId    String
+  sessionId      String?
+  runId          String?
+  routineId      String?
+  toolName       String
+  /// INTERNAL | OUTWARD | IRREVERSIBLE
+  risk           String
+  input          Json      @default("{}")
+  editedInput    Json?
+  preview        Json      @default("{}")
+  /// The target a scoped "Don't ask again" names ("conv:<id>").
+  targetKey      String?
+  /// One card groups the actions of one run and one tool.
+  groupKey       String?
+  /// PENDING | RUNNING | EXECUTED | FAILED | DENIED | EXPIRED | CANCELLED
+  status         String    @default("PENDING")
+  /// person | rule | expiry | system
+  decidedVia     String?
+  decidedById    String?
+  decidedAt      DateTime?
+  executedAt     DateTime?
+  result         Json?
+  error          String?
+  /// When the teammate was told the outcome.
+  reportedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([actingForId, status, createdAt])
+  @@index([agentId, status])
+  @@index([sessionId, createdAt])
+  @@index([status, expiresAt])
+  @@index([organizationId, createdAt])
+}
+
+/// A routine: one teammate run on a schedule for ONE person, its report posted
+/// into that person's chat with it. `actingForId` is who it works as,
+/// re-checked every run. `schedule` is read by computeNextRunAt (a CRON_TZ=
+/// cron, "hourly" or "every N hours"), at most once an hour. `nextRunAt` is
+/// claimed by compare-and-swap per due instant. `organizationId` carries the
+/// SQL file's foreign key and no Prisma relation, as on AgentAction.
+model AgentRoutine {
+  id             String    @id @default(cuid())
+  organizationId String
+  agentId        String
+  agent          Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  actingForId    String
+  name           String
+  prompt         String
+  schedule       String
+  /// "active" | "paused"
+  status         String    @default("active")
+  pausedReason   String?
+  nextRunAt      DateTime?
+  lastRunAt      DateTime?
+  lastRunId      String?
+  /// "SUCCEEDED" | "FAILED" | "SKIPPED"
+  lastStatus     String?
+  lastReason     String?
+  /// "chat" | "settings"
+  createdVia     String    @default("chat")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([status, nextRunAt])
+  @@index([agentId, actingForId])
+}
+
+/// One person's own settings for one teammate: approval choices only they can
+/// make ({ [tool or "tool:target"]: "ask" | "always" }) and the read cursor
+/// behind the unread dot.
+model AgentPersonSetting {
+  id            String    @id @default(cuid())
+  agentId       String
+  agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId        String
+  approvalRules Json      @default("{}")
+  lastReadAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  @@unique([agentId, userId])
+  @@index([userId])
 }
 
 model App {
@@ -6011,6 +6159,12 @@ model ChatSession {
   totalCostCents Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  /// Null: an Ask AI chat (every chat made before this column). "TEAMMATE":
+  /// the one chat a person has with an AI teammate. One live TEAMMATE chat per
+  /// (agentId, userId), by a PARTIAL unique index in
+  /// prisma/sql/2026-10-06-ai-teammates.sql, so it is not declared here. Ask AI
+  /// lists and routes skip TEAMMATE chats; the teammate routes read only them.
+  kind           String?
 
   messages ChatMessage[]
 
@@ -6034,6 +6188,13 @@ model ChatMessage {
   toolCalls    Json?
   finishReason String? // "stop_reason" from the SDK response
   createdAt    DateTime    @default(now())
+  /// Null: an ordinary turn (every message before this column). "EVENT": a
+  /// centred line in a teammate chat. "APPROVAL": a turn's approval card
+  /// (meta.actionIds; the card reads AgentAction live). "REPORT": a routine's
+  /// report (meta.routineId, routineName, runId, dueAt).
+  /// prisma/sql/2026-10-06-ai-teammates.sql
+  kind         String?
+  meta         Json?
 
   @@index([sessionId, createdAt])
 }
