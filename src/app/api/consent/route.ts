@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
+import { consentIdOf } from "@/lib/compliance/consent-id";
 
 const CONSENT_COOKIE = "wwrk_consent";
 const CONSENT_MAX_AGE = 60 * 60 * 24 * 180; // 6 months — GDPR/EDPB guidance
@@ -41,9 +42,9 @@ export async function POST(req: NextRequest) {
     userId = null;
   }
 
-  // Sessionless identifier — we use a random cookie token for anonymous visitors
-  const cookieToken =
-    req.cookies.get(CONSENT_COOKIE)?.value ?? crypto.randomUUID();
+  // Sessionless identifier: the random id the cookie already holds (its "t",
+  // never the whole cookie: src/lib/compliance/consent-id.ts), else a new one.
+  const cookieToken = consentIdOf(req.cookies.get(CONSENT_COOKIE)?.value) ?? crypto.randomUUID();
 
   const consent = {
     necessary: true, // always
@@ -108,7 +109,7 @@ export async function DELETE(req: NextRequest) {
     userId = null;
   }
 
-  const token = req.cookies.get(CONSENT_COOKIE)?.value;
+  const token = consentIdOf(req.cookies.get(CONSENT_COOKIE)?.value);
 
   try {
     await prisma.consentRecord.create({
