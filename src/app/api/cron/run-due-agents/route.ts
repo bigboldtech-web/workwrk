@@ -57,7 +57,7 @@ async function handle(req: Request) {
       .catch(() => {});
   }
 
-  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string }> = [];
+  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string; keySource?: "shared" | "byok" }> = [];
   for (const agent of runnable) {
     try {
       const result = await runAgentAutonomously({
@@ -70,6 +70,7 @@ async function handle(req: Request) {
         status: result.status,
         runId: result.runId,
         error: result.errorText,
+        keySource: result.keySource,
       });
     } catch (err) {
       fired.push({
@@ -85,11 +86,13 @@ async function handle(req: Request) {
     runs: fired,
     skippedAiOff: skipped,
   };
-  // Every run of the tick failed: the model is unreachable or its key is
-  // bad, which is the server's to fix (one agent's own failure among runs
-  // that worked is the workspace's, and stays in its run history).
-  const failed = fired.filter((r) => r.status === "FAILED").length;
-  return cronResult("run-due-agents", body, fired.length > 0 && failed === fired.length ? failed : 0);
+  // A failed tick is one where every run on WorkwrK's own AI key failed:
+  // the model is unreachable or that key is bad, which is the server's to
+  // fix. A run on a workspace's own key (BYOK) is that workspace's, and one
+  // agent's failure among runs that worked stays in its run history.
+  const ours = fired.filter((r) => r.keySource !== "byok");
+  const failed = ours.filter((r) => r.status === "FAILED").length;
+  return cronResult("run-due-agents", body, ours.length > 0 && failed === ours.length ? failed : 0);
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

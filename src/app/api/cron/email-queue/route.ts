@@ -21,8 +21,10 @@ import { cronJob, cronResult } from "@/lib/cron-result";
  * transport's timeouts rule out.
  *
  * Its own failure cannot reach anyone by email: the alert would go through
- * the queue that is failing. The uptime monitor on /api/health (which
- * answers 503 while email is stuck) is what watches it.
+ * the queue that is failing, so cronResult sends none for this job, and
+ * /api/health does not check email. The cron log shows each failed run, and a
+ * dead-man check on its crontab row (scripts/CRON-SETUP.md) is what tells
+ * someone.
  *
  * Guarded by the shared cron door (src/lib/cron-auth.ts): fail-closed.
  *

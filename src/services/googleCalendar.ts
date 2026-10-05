@@ -82,7 +82,15 @@ async function refreshAccessToken(refreshToken: string): Promise<{
       grant_type: "refresh_token",
     }),
   });
-  if (!res.ok) throw new Error(`Google token refresh failed: ${res.status}`);
+  if (!res.ok) {
+    // Google's own reason ("invalid_grant": this person revoked access or
+    // the token expired; "invalid_client": the app's own credentials are
+    // wrong), so a scheduled sync can tell one person's problem from the
+    // server's (src/app/api/cron/calendar-sync/route.ts).
+    const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    const reason = typeof body?.error === "string" ? body.error : null;
+    throw Object.assign(new Error(`Google token refresh failed: ${res.status}${reason ? ` (${reason})` : ""}`), { googleError: reason });
+  }
   return res.json();
 }
 

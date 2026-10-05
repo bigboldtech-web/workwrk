@@ -15,10 +15,12 @@ function getTransporter() {
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || "587"),
     secure: process.env.SMTP_PORT === "465",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+    // A login only when both are set: a relay that needs none (and still
+    // offers AUTH) failed every send when nodemailer tried empty ones.
+    auth:
+      process.env.SMTP_USER && process.env.SMTP_PASS
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
     // A mail server that stops answering fails a send in seconds, well
     // inside the claim's lease (processEmailQueue): nodemailer's own
     // defaults (two minutes to connect, ten of silence) let a batch outlast
@@ -196,11 +198,13 @@ const RETRY_DELAYS_MIN = [1, 5, 30, 120, 360];
 export const EMAIL_MAX_ATTEMPTS = RETRY_DELAYS_MIN.length + 1;
 // A claimed row holds its claim this long. A run that dies while sending (a
 // deploy's reload, a crash) leaves its rows SENDING; once the claim runs out
-// the next run takes them again, while they are still worth sending.
+// the next run takes them again, however old the row is (a backlog held
+// while mail was off is sent the day it comes on, and a reload mid-flush
+// must not lose it), until its last try. A row interrupted on its last try,
+// and a row left SENDING more than a day ago from before claims had a lease
+// (no nextAttemptAt), are closed as FAILED instead.
 const CLAIM_LEASE_MIN = 15;
-// A row still not sent a day after it was queued is closed as FAILED rather
-// than sent late: its links (resets, verifications) have long expired.
-const GIVE_UP_HOURS = 24;
+const LEGACY_SENDING_HOURS = 24;
 
 /** The wait before the next try, after `attempts` failed ones. */
 export function emailRetryDelayMs(attempts: number): number {
@@ -217,9 +221,10 @@ const UTC_NOW = `(now() AT TIME ZONE 'UTC')`;
 // Rows a run may claim: queued and due, or SENDING with the claim run out.
 const CLAIMABLE = `(
   ("status" = 'QUEUED' AND attempts < ${EMAIL_MAX_ATTEMPTS} AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${UTC_NOW}))
-  OR ("status" = 'SENDING' AND attempts < ${EMAIL_MAX_ATTEMPTS}
-      AND "createdAt" > ${UTC_NOW} - interval '${GIVE_UP_HOURS} hours'
-      AND COALESCE("nextAttemptAt", "createdAt" + interval '${CLAIM_LEASE_MIN} minutes') <= ${UTC_NOW})
+  OR ("status" = 'SENDING' AND attempts < ${EMAIL_MAX_ATTEMPTS} AND (
+        ("nextAttemptAt" IS NOT NULL AND "nextAttemptAt" <= ${UTC_NOW})
+        OR ("nextAttemptAt" IS NULL AND "createdAt" + interval '${CLAIM_LEASE_MIN} minutes' <= ${UTC_NOW}
+            AND "createdAt" > ${UTC_NOW} - interval '${LEGACY_SENDING_HOURS} hours')))
 )`;
 
 let warnedEmailOff = false;
@@ -255,17 +260,19 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
     return { sent: 0, retrying: 0, failed: 0, held };
   }
 
-  // Rows a run died on more than a day ago are closed, not sent late. Only
-  // rows whose claim has run out: a row queued a day ago that a live run is
-  // sending right now (a backlog sent the day mail is turned on) is that
-  // run's, and closing it mid-send cleared the content its next try needed.
-  const giveUpBefore = new Date(Date.now() - GIVE_UP_HOURS * 3_600_000);
+  // Rows nothing will take again are closed (the claim's rules above): ones
+  // interrupted on their last try, once that claim has run out (a live run
+  // sending a row right now is never touched), and ones left SENDING more
+  // than a day ago from before claims had a lease.
+  const legacyBefore = new Date(Date.now() - LEGACY_SENDING_HOURS * 3_600_000);
   const interrupted = {
     status: "SENDING" as const,
-    createdAt: { lt: giveUpBefore },
-    OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lt: new Date() } }],
+    OR: [
+      { attempts: { gte: EMAIL_MAX_ATTEMPTS }, nextAttemptAt: { lt: new Date() } },
+      { nextAttemptAt: null, createdAt: { lt: legacyBefore } },
+    ],
   };
-  const giveUp = { status: "FAILED" as const, error: "Interrupted while sending, and not sent within a day.", nextAttemptAt: null };
+  const giveUp = { status: "FAILED" as const, error: "Interrupted while sending, and not taken again.", nextAttemptAt: null };
   await prisma.emailLog.updateMany({ where: { ...interrupted, template: { in: [...SECRET_LINK_TEMPLATES] } }, data: { ...giveUp, html: null } });
   await prisma.emailLog.updateMany({ where: { ...interrupted, template: { notIn: [...SECRET_LINK_TEMPLATES] } }, data: giveUp });
 

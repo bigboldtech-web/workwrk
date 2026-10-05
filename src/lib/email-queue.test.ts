@@ -78,12 +78,18 @@ describe("processEmailQueue", () => {
     expect(writeWheres).toEqual([{ id: "a", status: "SENDING", attempts: 1 }]);
   });
 
-  it("gives up only on rows whose lease has run out, never on one a run is sending", async () => {
+  it("closes only rows nothing will take again: interrupted on the last try once that claim ran out, or left SENDING before claims had a lease", async () => {
     await processEmailQueue();
     expect(sweeps.length).toBeGreaterThan(0);
     for (const w of sweeps) {
       expect(w).toMatchObject({ status: "SENDING" });
-      expect(w.OR).toEqual([{ nextAttemptAt: null }, { nextAttemptAt: { lt: expect.any(Date) } }]);
+      expect(w.OR).toEqual([
+        { attempts: { gte: 6 }, nextAttemptAt: { lt: expect.any(Date) } },
+        { nextAttemptAt: null, createdAt: { lt: expect.any(Date) } },
+      ]);
+      // Never an age rule on a leased row: a backlog held while mail was off
+      // and interrupted mid-flush is taken again, however old it is.
+      expect(JSON.stringify(w)).not.toContain('"createdAt":{"lt"}');
     }
   });
 

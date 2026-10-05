@@ -70,7 +70,7 @@ reload.
 
 | Variable | What it does |
 | --- | --- |
-| `OPS_ALERT_EMAIL` | Where a failing scheduled job sends an alert (at most one per job in six hours). The email-queue job is the exception: its alert would wait in the queue that is failing, so the uptime monitor and the cron log watch it. Unset, failures only reach the logs. |
+| `OPS_ALERT_EMAIL` | Where a failing scheduled job sends an alert (at most one per job in six hours). The email-queue job is the exception: its alert would wait in the queue that is failing, so it sends none, and `/api/health` does not check email; the cron log and a dead-man check on its crontab row (CRON-SETUP) show it. Unset, failures only reach the logs. |
 | `AUDIT_SIGNING_KEY` | Signs audit log exports. Unset, they are signed with `CRON_SECRET`. |
 | `ANTHROPIC_API_KEY` | The AI features. Unset, they are unavailable. |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Calls and huddles in Talk. |

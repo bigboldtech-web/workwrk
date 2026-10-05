@@ -1,10 +1,11 @@
 name: Deploy
 
 # CD: when CI passes on a push to main, SSH to the aaPanel server and deploy
-# EXACTLY the commit CI passed: fetch it, install (only when the lockfile
+# the newest commit on main whose CI passed (a manual run: the sha it names,
+# which CI must have passed): fetch it, install (only when the lockfile
 # changed), apply the database migrations, build beside the live release,
 # swap the new build in, reload PM2, check the new release answers, and put
-# the previous build back if it does not.
+# back whatever it changed if anything fails.
 
 on:
   workflow_run:
@@ -20,18 +21,21 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Commit on main to deploy (empty: the latest). CI must have passed for it."
+        description: "Commit on main to deploy (empty: the newest commit on main whose CI passed). CI must have passed for it."
         required: false
         default: ""
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
 
 jobs:
   deploy:
     name: Deploy to aaPanel
     runs-on: ubuntu-latest
+    # On the JOB, not the workflow: a run whose job the condition below skips
+    # (a fork's pull request named main, a failed CI) never enters the group,
+    # so it can never replace a waiting deploy. Runs that do enter it are
+    # serialised, and the box itself also takes a lock (the script below).
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     # A CI run that passed on a PUSH to this repository's main. The branches
     # filter above matches the head branch NAME of the run that triggered it,
     # and for a pull request from a fork that is the fork's own branch: a fork
@@ -47,29 +51,47 @@ jobs:
       actions: read
       contents: read
     env:
-      # The commit CI passed, never "whatever main is when the deploy runs": a
-      # deploy waiting behind another one used to build a newer commit whose
-      # CI had not finished, and that commit stayed live if its CI then failed.
-      DEPLOY_SHA: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+      # A manual run's sha. Empty for an automatic run, which deploys the
+      # newest commit on main whose CI passed (the first step picks it).
+      REQUESTED_SHA: ${{ inputs.sha }}
     steps:
-      - name: Check CI passed for this commit
+      - name: Pick the commit, and check CI passed for it
+        id: pick
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$DEPLOY_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
-            echo "::error::'$DEPLOY_SHA' is not a full commit sha; give the 40-character sha."
-            exit 1
+          runs="repos/${{ github.repository }}/actions/workflows/ci.yml/runs"
+          if [ -n "${REQUESTED_SHA:-}" ]; then
+            sha="$REQUESTED_SHA"
+            if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::'$sha' is not a full commit sha; give the 40-character sha."
+              exit 1
+            fi
+            # A run of a PUSH to main only: a pull request's run tested a
+            # merge ref (that head merged into main at the time, or a fork's
+            # own ci.yml), never the commit itself.
+            n=$(gh api "$runs?head_sha=$sha&status=success&event=push&branch=main&per_page=1" --jq '.total_count')
+            if [ "${n:-0}" -lt 1 ]; then
+              echo "::error::CI has not passed on a push to main for $sha, so it is not deployed."
+              exit 1
+            fi
+          else
+            # The newest commit on main whose push CI passed, never the one a
+            # run happened to start for and never "whatever main is now". A
+            # re-run of an older CI run starts this workflow too, and GitHub
+            # keeps only one waiting run per concurrency group, so that run
+            # can replace the waiting deploy of a newer commit: picking the
+            # newest green commit here means the run that survives deploys
+            # it. A commit CI has not passed yet is never picked.
+            sha=$(gh api "$runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
+            if [ -z "$sha" ]; then
+              echo "::error::no CI run on main has passed, so nothing is deployed."
+              exit 1
+            fi
           fi
-          # A run of a PUSH to main only: a pull request's run tested a merge
-          # ref (that head merged into main at the time, or a fork's own
-          # ci.yml), never the commit itself.
-          n=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&status=success&event=push&branch=main&per_page=1" --jq '.total_count')
-          if [ "${n:-0}" -lt 1 ]; then
-            echo "::error::CI has not passed on a push to main for $DEPLOY_SHA, so it is not deployed."
-            exit 1
-          fi
-          echo "::notice::deploying $DEPLOY_SHA (CI passed)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::deploying $sha (CI passed)"
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -113,6 +135,16 @@ jobs:
               fi
               exit 1
             }
+
+            # ONE DEPLOY ON THE BOX AT A TIME. A job GitHub has ended
+            # (cancelled, timed out, connection lost) can leave its script
+            # running here, because the script ignores the hang-up so that it
+            # always puts back what it changed. The next deploy waits for it,
+            # then starts from what it left. PM2 is always called with this
+            # descriptor closed (9>&-), so a PM2 daemon started by a deploy
+            # can never hold the lock for good.
+            exec 9>/tmp/workwrk-deploy.lock
+            if ! flock -w 1800 9; then fail "another deploy was still running on the box after 30 minutes"; fi
 
             echo "::notice::preflight disk: $(df -h / | tail -1 | tr -s ' ')"
             echo "::notice::preflight inodes: $(df -i / | tail -1 | tr -s ' ')"
@@ -160,7 +192,7 @@ jobs:
                     mv .next-prev .next
                     put_back_packages
                     git reset --hard "$PREV_SHA" > /dev/null 2>&1
-                    pm2 reload workwrk --update-env > /tmp/wd-pm2-back.log 2>&1
+                    pm2 reload workwrk --update-env 9>&- > /tmp/wd-pm2-back.log 2>&1
                     if back=$(check_release "$OLD_BUILD" previous); then
                       echo "::error::the previous build ($OLD_BUILD, $PREV_SHA) is serving again. The failed one is in .next-failed"
                     else
@@ -223,9 +255,8 @@ jobs:
             # A re-run of an older CI run starts this workflow for that older
             # commit. Automatic deploys only ever go forward; going back is a
             # manual run of this workflow with the sha.
-            if [ "${DEPLOY_EVENT:-}" = "workflow_run" ] && [ "$DEPLOY_SHA" != "$PREV_SHA" ] \
-              && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREV_SHA" 2>/dev/null; then
-              echo "::notice::$DEPLOY_SHA is older than the live commit $PREV_SHA (a re-run of an older CI run): nothing deployed. Going back is Actions > Deploy > Run workflow with the sha."
+            if [ "${DEPLOY_EVENT:-}" = "workflow_run" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREV_SHA" 2>/dev/null; then
+              echo "::notice::$DEPLOY_SHA is already live, or older than the live commit $PREV_SHA: nothing deployed. Going back is Actions > Deploy > Run workflow with the sha."
               STAGE=done
               exit 0
             fi
@@ -235,8 +266,8 @@ jobs:
             # says so before touching anything.
             PKG=$(git show "$DEPLOY_SHA:package.json" 2>/dev/null || true)
             CFG=$(git show "$DEPLOY_SHA:next.config.ts" 2>/dev/null || true)
-            case "$PKG" in *'"deploy:migrate"'*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is the .next-prev swap by hand (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
-            case "$CFG" in *NEXT_DIST_DIR*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is the .next-prev swap by hand (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
+            case "$PKG" in *'"deploy:migrate"'*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is done by hand on the box (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
+            case "$CFG" in *NEXT_DIST_DIR*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is done by hand on the box (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
 
             STAGE=source
             git reset --hard "$DEPLOY_SHA" >> /tmp/wd-git.log 2>&1 || fail "git reset" /tmp/wd-git.log
@@ -295,7 +326,7 @@ jobs:
             mv .next-staging .next
 
             echo "==> Reloading PM2 process"
-            pm2 reload workwrk --update-env > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
+            pm2 reload workwrk --update-env 9>&- > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
 
             echo "==> Checking the new release at $BASE"
             if ! why=$(check_release "$NEW_BUILD"); then
@@ -321,4 +352,5 @@ jobs:
             echo "==> Deploy complete"
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SHA: ${{ steps.pick.outputs.sha }}
           DEPLOY_EVENT: ${{ github.event_name }}

@@ -64,7 +64,8 @@ Without `BACKUP_DATABASE_URL` it reads the `DATABASE_URL` line from the app's
 `.env` as text, the database the app serves.
 
 ```
-BACKUP_DATABASE_URL=<the app's DATABASE_URL>
+# Keep the quotes: a URL's ? and & would otherwise be read as shell syntax.
+BACKUP_DATABASE_URL="<the app's DATABASE_URL>"
 BACKUP_PASSPHRASE=<the passphrase>
 BACKUP_S3_BUCKET=<bucket>
 BACKUP_S3_REGION=<region>
@@ -98,25 +99,32 @@ the deploy never changes the root-owned copy.
 ## Do one test restore now, and after any change
 
 A backup nobody has restored is not a backup. On the server (or any machine
-with Postgres 16 tools and the passphrase), as root. The decrypted dump is
-every customer's data, so it is never written to disk: it streams straight
-into `pg_restore`, and the encrypted copy sits in a folder only root can
-read. `<app role>` is the database user in the app's `DATABASE_URL`.
+with Postgres 16 tools and the passphrase), as root. Run it as ONE block, in
+the parentheses: everything loaded from `/etc/workwrk-backup.env` stays
+inside it, so the passphrase and the bucket keys never stay in your shell
+(where a later `pm2 ... --update-env` would copy them into the app). The
+decrypted dump is every customer's data, so it is never written to disk: it
+streams straight into `pg_restore`, and the encrypted copy sits in a folder
+only root can read. `<app role>` is the database user in the app's
+`DATABASE_URL`.
 
 ```
-umask 077
-set -a && . /etc/workwrk-backup.env && set +a
-D=$(mktemp -d)
-cd /usr/local/lib/workwrk-backup
-node store.mjs list db/
-node store.mjs get db/<time>.dump.enc "$D/restore.dump.enc"
-sudo -u postgres createdb -O <app role> workwrk_restore_test
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/restore.dump.enc" \
-  | sudo -u postgres pg_restore --no-owner --no-privileges --role=<app role> -d workwrk_restore_test
-psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "User"'
-psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "Organization"'
-sudo -u postgres dropdb workwrk_restore_test
-rm -rf "$D"
+(
+  umask 077
+  export PATH="/www/server/nodejs/v20.20.0/bin:/www/server/pgsql/bin:$PATH"
+  set -a && . /etc/workwrk-backup.env && set +a
+  D=$(mktemp -d)
+  cd /usr/local/lib/workwrk-backup
+  node store.mjs list db/
+  node store.mjs get db/<time>.dump.enc "$D/restore.dump.enc"
+  sudo -u postgres createdb -O <app role> workwrk_restore_test
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/restore.dump.enc" \
+    | sudo -u postgres pg_restore --no-owner --no-privileges --role=<app role> -d workwrk_restore_test
+  psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "User"'
+  psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "Organization"'
+  sudo -u postgres dropdb workwrk_restore_test
+  rm -rf "$D"
+)
 ```
 
 The counts should match production's (run the same two queries against it).
@@ -125,7 +133,7 @@ They are read as the app's own database user on purpose: a restore owned by
 `/api/health` (which runs only `SELECT 1`) still answered 200. If the app's
 user may create databases, run every step as that user instead of
 `sudo -u postgres`. `psql` refuses Prisma's `?schema=` parameter: leave it off
-the URL.
+the URL. Use the newest dump's `<time>` from the list line.
 
 ## Restore after a disaster
 
@@ -133,25 +141,40 @@ the URL.
 2. If the server's disk is gone, recreate the app's `.env` from your password
    manager's copy (above) before anything else, with the same
    `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET`.
-3. Fetch the newest dump and restore it into a NEW database owned by the
-   app's user, exactly as the test restore does (`createdb -O <app role>
-   workwrk_restored`, then the `openssl ... | pg_restore ... --role=<app role>
-   -d workwrk_restored` line). Never restore over the damaged one: it may
-   still hold what you need.
+3. Restore the newest dump into a NEW database owned by the app's user: the
+   test restore's block, with `workwrk_restored` in place of
+   `workwrk_restore_test` and without its last two lines (keep the database).
+   Never restore over the damaged one: it may still hold what you need.
 4. Point `DATABASE_URL` in the app's `.env` at the restored database, and
    `DIRECT_URL` too if the `.env` sets it (migrations and the Prisma CLI use
    it first), and `BACKUP_DATABASE_URL` in `/etc/workwrk-backup.env`, so
    tonight's backup dumps the database the app now serves. Renaming the
-   databases instead covers all three. Then `pm2 start workwrk`.
+   databases instead covers all three. Then, from a fresh root shell (never
+   one the backup settings were loaded into), `pm2 start workwrk`.
 5. Check with the app's own user, not only `/api/health`: the two `psql`
    counts above against the restored database, then sign in and open a page
    with data on it.
-6. Uploads: fetch the newest `uploads/<time>.tar.gz.enc` into `$D`, then
-   `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/<file>" | tar -xzf - -C /www/wwwroot/workwrk.com`
-   (it holds `storage/uploads/` and, for an older backup, `public/uploads/`)
-   and `chown -R www:www /www/wwwroot/workwrk.com/storage`. Files restored into
-   `public/uploads` move to `storage/uploads` by themselves at the next start.
-7. `rm -rf "$D"`.
+6. Uploads, again as one block in parentheses:
+
+   ```
+   (
+     umask 077
+     export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
+     set -a && . /etc/workwrk-backup.env && set +a
+     D=$(mktemp -d)
+     cd /usr/local/lib/workwrk-backup
+     node store.mjs list uploads/
+     node store.mjs get uploads/<time>.tar.gz.enc "$D/uploads.tar.gz.enc"
+     openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/uploads.tar.gz.enc" \
+       | tar -xzf - -C /www/wwwroot/workwrk.com
+     rm -rf "$D"
+   )
+   chown -R www:www /www/wwwroot/workwrk.com/storage
+   ```
+
+   It holds `storage/uploads/` and, for an older backup, `public/uploads/`.
+   Files restored into `public/uploads` move to `storage/uploads` by
+   themselves at the next start.
 
 Everything written after the backup's time is lost; tell the customers whose
 workspaces changed in that window.

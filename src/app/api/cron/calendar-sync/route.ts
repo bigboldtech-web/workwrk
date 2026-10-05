@@ -20,11 +20,16 @@ async function handle(req: NextRequest) {
   }
 
   const result = await syncAllSubscriptions();
-  // Every subscription failed: Google refuses the app itself (a rotated
-  // client secret, a suspended project), which is the server's to fix. One
-  // person's revoked token among syncs that worked is theirs.
+  // A failed round is one where every subscription that could sync failed
+  // for a reason that is the server's to fix (Google refusing the app itself:
+  // a rotated client secret, a suspended project). A person who revoked
+  // access, or whose connection lost its token, is theirs to reconnect, and
+  // never counts: one such person, alone or among syncs that worked, must
+  // not page anyone every five minutes.
   const body = { ran: true, at: new Date().toISOString(), ...result };
-  return cronResult("calendar-sync", body, result.subscriptions > 0 && result.failed === result.subscriptions ? result.failed : 0);
+  const couldSync = result.subscriptions - result.personal;
+  const serverFailures = result.failed - result.personal;
+  return cronResult("calendar-sync", body, couldSync > 0 && serverFailures === couldSync ? serverFailures : 0);
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

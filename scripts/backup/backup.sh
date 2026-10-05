@@ -69,20 +69,21 @@ fi
 # to pg_dump in PGPASSWORD: a command line is visible to every account on
 # the server (ps), a process's environment only to its owner and root.
 PG_DUMP="${PG_DUMP:-pg_dump}"
-SPLIT=$(DB_URL="$DB_URL" node -e '
+# Two reads, each printing one value: a password that is empty (a socket or
+# trust login, or a ~/.pgpass) is then never confused with the URL.
+PG_URL=$(DB_URL="$DB_URL" node -e '
   const u = new URL(process.env.DB_URL);
-  const pw = decodeURIComponent(u.password);
   u.password = "";
   const keep = new URLSearchParams();
   for (const k of ["sslmode", "host"]) { const v = u.searchParams.get(k); if (v) keep.set(k, v); }
   const q = keep.toString();
   u.search = q ? "?" + q : "";
-  process.stdout.write(u.toString() + "\n" + pw);
+  process.stdout.write(u.toString());
 ' 2>/dev/null || true)
-if [ -n "$SPLIT" ]; then
-  PG_URL="${SPLIT%%$'\n'*}"
-  PGPASSWORD="${SPLIT#*$'\n'}"
-  export PGPASSWORD
+if [ -n "$PG_URL" ]; then
+  PW=$(DB_URL="$DB_URL" node -e 'process.stdout.write(decodeURIComponent(new URL(process.env.DB_URL).password))' 2>/dev/null || true)
+  if [ -n "$PW" ]; then export PGPASSWORD="$PW"; else unset PGPASSWORD; fi
+  unset PW
 else
   # A form the URL parser refuses (a socket with an empty host): pg_dump
   # reads it as it is, password and all.
@@ -95,7 +96,7 @@ else
   [ -z "$HOSTQ" ] || Q="${Q:+$Q&}host=$HOSTQ"
   [ -z "$Q" ] || PG_URL="$PG_URL?$Q"
 fi
-unset SPLIT DB_URL line
+unset DB_URL line
 
 STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
 WORK=$(mktemp -d "${TMPDIR:-/var/tmp}/workwrk-backup.XXXXXX")

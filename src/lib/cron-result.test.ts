@@ -59,6 +59,12 @@ describe("cronResult", () => {
     expect((await fine(new Request("https://app.example.test/api/cron/kpi-reminders", { method: "POST" }))).status).toBe(200);
   });
 
+  it("never queues an alert for the email-queue job, whose alert would wait in its own failing queue", async () => {
+    expect((await cronResult("email-queue", { held: 3 }, 3, 503)).status).toBe(503);
+    expect((await cronResult("email-queue", {}, 1)).status).toBe(500);
+    expect(state.queued).toEqual([]);
+  });
+
   it("does not alert again within six hours, or with no address set", async () => {
     state.recent = true;
     expect((await cronResult("email-queue", {}, 2)).status).toBe(500);

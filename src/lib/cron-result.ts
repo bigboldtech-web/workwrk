@@ -12,8 +12,8 @@
 // and, when OPS_ALERT_EMAIL is set, queues an email to that address: at most
 // one per job in six hours, so a job failing every minute does not flood the
 // inbox. The email-queue job's own failure cannot arrive that way (its alert
-// goes through the queue that is failing); the cron log and an uptime or
-// dead-man check watch it.
+// would wait in the queue that is failing), so it sends none; the cron log,
+// and a dead-man check on its crontab row, are what show it.
 //
 // Every /api/cron route is wrapped in cronJob, so a run that THROWS answers
 // 500 and alerts the same way, instead of Next's bare 500 that nobody hears.
@@ -47,6 +47,11 @@ export async function cronResult(job: string, body: object, failed: number, stat
 async function alertOps(job: string, failed: number) {
   const to = process.env.OPS_ALERT_EMAIL?.trim();
   if (!to) return;
+  // The email-queue job's alert would wait in the very queue that is failing
+  // or held: it can never arrive, and while mail is off it kept the queue
+  // non-empty, so the job answered 503 for ever and a burst of stale alerts
+  // went out the day mail came on. Its failures reach the log only.
+  if (job === "email-queue") return;
   const subject = `WorkwrK: the ${job} job failed`;
   const recent = await prisma.emailLog.findFirst({
     where: { template: ALERT_TEMPLATE, subject, createdAt: { gte: new Date(Date.now() - ALERT_EVERY_MS) } },
