@@ -16,8 +16,14 @@
 import { copyFile, constants, link, mkdir, readdir, readFile, stat, unlink } from "fs/promises";
 import path from "path";
 
-export const UPLOADS_DIR = path.join(process.cwd(), "storage", "uploads");
-export const LEGACY_UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
+// Runtime data, never part of the build: the turbopackIgnore comments keep
+// the build's file tracing out of them. Without them Turbopack traced the
+// WHOLE app directory from this file (every route that imports it), and on
+// the server that directory also holds the live build, the previous
+// packages and every stored file: the first deploy that built beside the
+// live release (Batch 12) failed in that trace.
+export const UPLOADS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "storage", "uploads");
+export const LEGACY_UPLOADS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "uploads");
 const BOTH = [UPLOADS_DIR, LEGACY_UPLOADS_DIR];
 
 /** A stored file's name: one path segment, no hidden file. */
