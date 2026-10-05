@@ -2201,6 +2201,11 @@ model AIQuery {
   /// one person gets across free workspaces (src/lib/ai-allowance.ts).
   /// prisma/sql/2026-10-06-ai-free-day.sql
   freeTier       Boolean      @default(false)
+  /// The UTC day whose use of the platform's free ceiling this question took
+  /// (AiFreeDay), so handing it back gives back exactly that use; null when it
+  /// took none (a paid workspace, or a free one made before the ceiling).
+  /// prisma/sql/2026-10-06-ai-free-day.sql
+  freeDay        DateTime?    @db.Date
   userId         String
   user           User         @relation(fields: [userId], references: [id])
   organizationId String

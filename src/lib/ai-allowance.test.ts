@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = { orgCreatedAt: null as Date | null, freeDayReleases: [] as string[], releasedFreeTier: false, autoReleases: 0, freeDayOk: true, freeDayClaims: [] as string[], personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
+const state = { orgCreatedAt: null as Date | null, freeDayReleases: [] as string[], today: "2026-10-06", stamps: {} as Record<string, string>, autoReleases: 0, freeDayOk: true, freeDayClaims: [] as string[], personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
 
 vi.mock("@/lib/ai-usage", () => ({
   claimAiUse: async (org: string, kind: string, cap: number) => {
@@ -38,21 +38,30 @@ vi.mock("@/lib/prisma", () => {
     const sql = strings.join("?");
     if (sql.includes('INSERT INTO "AiFreeDay"')) {
       state.freeDayClaims.push(String(values[0]));
-      return state.freeDayOk ? [{ count: 1 }] : [];
+      return state.freeDayOk ? [{ day: state.today }] : [];
     }
     if (sql.includes('"count" = "count" - 1')) {
-      state.freeDayReleases.push(String(values[0]));
+      // kind, then the day it gives back to.
+      state.freeDayReleases.push(`${String(values[0])} ${String(values[1])}`);
       return [{ count: 0 }];
     }
     if (sql.includes('"alertedAt"')) return [];
     if (sql.includes('DELETE FROM "AIQuery"')) {
-      state.deleted.push(String(values[0]));
-      return [{ freeTier: state.releasedFreeTier }];
+      // The row's own freeDay: the day the claim stamped on it, if any.
+      const id = String(values[0]);
+      state.deleted.push(id);
+      return [{ freeDay: state.stamps[id] ?? null }];
     }
     return state.orgFound ? [{ plan: state.plan, createdAt: state.orgCreatedAt }] : [];
   };
+  // The claim stamping the day whose use a question took.
+  const executeRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    if (strings.join("?").includes('SET "freeDay"')) state.stamps[String(values[1])] = String(values[0]);
+    return 1;
+  };
   const tx = {
     $queryRaw: queryRaw,
+    $executeRaw: executeRaw,
     aIQuery,
   };
   return {
@@ -79,7 +88,8 @@ beforeEach(() => {
   state.freeDayOk = true;
   state.freeDayClaims = [];
   state.freeDayReleases = [];
-  state.releasedFreeTier = false;
+  state.stamps = {};
+  state.today = "2026-10-06";
   state.autoReleases = 0;
   state.orgCreatedAt = null;
 });
@@ -91,6 +101,8 @@ describe("claimAiQuestion", () => {
     expect(r.ok).toBe(true);
     expect(state.created).toEqual([{ query: "Summarize a doc", userId: "u1", organizationId: "org", freeTier: true }]);
     expect(state.freeDayClaims).toEqual(["question"]);
+    // The day whose use it took is on the row.
+    expect(state.stamps).toEqual({ q1: "2026-10-06" });
   });
 
   it("refuses at the total, writes nothing, and says what to do", async () => {
@@ -141,15 +153,31 @@ describe("claimAiQuestion", () => {
     state.freeDayOk = false;
     expect((await claimAiQuestion("org-old", "u-old", "x")).ok).toBe(true);
     expect(state.freeDayClaims).toEqual([]);
+    expect(state.stamps).toEqual({});
   });
 
-  it("gives the ceiling's use back with a free question handed back, and not for a paid one", async () => {
-    state.releasedFreeTier = true;
-    await releaseAiQuestion("q-free");
-    expect(state.freeDayReleases).toEqual(["question"]);
-    state.releasedFreeTier = false;
-    await releaseAiQuestion("q-paid");
-    expect(state.freeDayReleases).toEqual(["question"]);
+  it("gives the ceiling's use back with a free question handed back, to the day it was taken from", async () => {
+    const r = await claimAiQuestion("org", "u1", "x");
+    expect(r.ok).toBe(true);
+    // The call fails after midnight UTC: the use goes back to the day it came from.
+    state.today = "2026-10-07";
+    if (r.ok) await releaseAiQuestion(r.id);
+    expect(state.freeDayReleases).toEqual(["question 2026-10-06"]);
+  });
+
+  it("gives nothing back for a question that took no use: one from a free workspace made before the ceiling, or a paid one", async () => {
+    // Before: every failed question in an older free workspace lowered the
+    // count new workspaces are held to, so the ceiling could be emptied.
+    state.orgCreatedAt = new Date("2026-09-01T00:00:00Z");
+    const old = await claimAiQuestion("org-old", "u-old", "x");
+    if (old.ok) await releaseAiQuestion(old.id);
+    state.orgCreatedAt = null;
+    state.plan = "GROWTH";
+    const paid = await claimAiQuestion("org-paid", "u-paid", "x");
+    if (paid.ok) await releaseAiQuestion(paid.id);
+    expect(old.ok && paid.ok).toBe(true);
+    expect(state.deleted).toHaveLength(2);
+    expect(state.freeDayReleases).toEqual([]);
   });
 
   it("never takes the free ceiling in a paid workspace", async () => {
