@@ -19,6 +19,7 @@ import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
 import { resolveDocLocation } from "@/lib/doc-location";
 import { readDocLock } from "@/lib/doc-lock";
+import { safeStoredContent } from "@/lib/safe-html";
 
 const putSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -406,7 +407,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const nextVersion = (last?.version ?? 0) + 1;
 
   const nextTitle = parsed.data.title ?? existing.title;
-  const nextContent = (parsed.data.content as object) ?? (existing.content as object);
+  // An old-format body is stored only with its HTML sanitized (src/lib/safe-html.ts).
+  const nextContent = parsed.data.content !== undefined ? safeStoredContent(parsed.data.content as object) : (existing.content as object);
 
   // Two writes in a transaction: snapshot the new version + update the
   // live Doc. If either fails, both roll back.

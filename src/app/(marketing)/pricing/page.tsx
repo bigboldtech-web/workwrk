@@ -375,7 +375,7 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
 
   return (
     <Page>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
 
       {/* 1. The claim. */}
       <Band air="hero" labelledBy="pricing-h1" still>

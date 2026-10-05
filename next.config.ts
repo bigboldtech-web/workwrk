@@ -84,6 +84,37 @@ const nextConfig: NextConfig = {
     turbopackFileSystemCacheForDev: process.env.WORKWRK_DEV_FS_CACHE !== "0",
   },
 
+  // Security headers on every response (both hosts). Production sent none: any
+  // page could be framed by another site (clickjacking), browsers could sniff
+  // a file's type, the full URL went out as the referrer, and nothing pinned
+  // HTTPS. Strict-Transport-Security has no includeSubDomains: it would also
+  // bind every other subdomain of the domain for a year, served or not.
+  // Framing is allowed only to this origin, except the embeds customers put on
+  // their own sites (/embed/tables, /embed/forms: the Copy embed code row).
+  // Camera, microphone and screen sharing stay open to this origin for calls
+  // (LiveKit runs in the page). No script CSP yet: user HTML is sanitized
+  // (src/lib/safe-html.ts), and a script policy needs nonces wired through
+  // the app before it can be switched on without breaking pages.
+  async headers() {
+    const common = [
+      { key: "Strict-Transport-Security", value: "max-age=31536000" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=()" },
+    ];
+    return [
+      { source: "/embed/:path*", headers: common },
+      {
+        source: "/((?!embed/).*)",
+        headers: [
+          ...common,
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
+      },
+    ];
+  },
+
   // Comms Hub was briefly shipped under /chat before the Room rename
   // stored notification links and bookmarks keep working.
   async redirects() {

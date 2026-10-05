@@ -97,6 +97,7 @@ import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-plac
 import { copyObjectLink, objectHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
 import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
+import { safeUserHtml } from "@/lib/safe-html";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker, keeps the doc page light + fast.
@@ -1472,7 +1473,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               {/* Converting rewrites the doc: never offered to someone whose save would be refused. */}
               {chromeEditable ? <button type="button" onClick={convertLegacy}>Convert to blocks</button> : null}
             </div>
-            <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
+            <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: safeUserHtml(legacy) }} />
           </div>
         ) : blocks === null ? (
           <div className="flex flex-col gap-3 py-4" aria-busy="true" aria-label="Loading">{["80%", "60%", "40%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}</div>

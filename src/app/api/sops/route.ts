@@ -8,6 +8,7 @@ import { parsePaginationParams } from "@/lib/pagination";
 import { sopVisibilityWhere, canWriteToFolder, descendantFolderIds } from "@/lib/sop-access";
 import { defaultContentForKind, getSopKind, isSopKind, kindWhere, sopTypeForKind, type SopKind } from "@/lib/sop-kind";
 import { parseSopsQuery, sopsOrderBy, sopsSearchWhere, viewStatusWhere, type SopsView } from "@/lib/sop-list";
+import { safeStoredContent } from "@/lib/safe-html";
 
 /**
  * GET /api/sops (spec-process section 2 `/sops` Data): the library, server
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
         category: source.category,
         subcategory: source.subcategory,
         sopType: source.sopType,
-        content: source.content as never,
+        content: safeStoredContent(source.content) as never,
         folderId: source.folderId,
         tags: source.tags,
         kraId: source.kraId,
@@ -220,7 +221,7 @@ export async function POST(req: NextRequest) {
   if (!SOP_TYPES.includes(resolvedType)) {
     return jsonError(`Invalid sopType "${body.sopType}". Expected WRITTEN, CHECKLIST, or RECORDED.`);
   }
-  const resolvedContent = content || (kind ? defaultContentForKind(kind) : defaultSOPContent(resolvedType));
+  const resolvedContent = safeStoredContent(content || (kind ? defaultContentForKind(kind) : defaultSOPContent(resolvedType)));
   const contentType =
     typeof resolvedContent === "object" && !Array.isArray(resolvedContent) && typeof (resolvedContent as { type?: unknown }).type === "string"
       ? ((resolvedContent as { type: string }).type)

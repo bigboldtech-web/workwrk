@@ -68,6 +68,14 @@ async function migrateOrg(org: { id: string; name: string; settings: unknown }, 
   const r: OrgReport = { organizationId: org.id, organizationName: org.name, publicSops, before, action: "none" };
   if (publicSops === 0) return r;
   if (before === "view") { r.action = "already"; return r; }
+  // A one-time carry-over for workspaces from before the toggle existed: a
+  // workspace whose value is stored (it was set, by this script or by an
+  // Admin), or whose access settings an Admin has changed, is never changed.
+  // Without this, every deploy that ran it switched Public links back on for
+  // workspaces that had turned them off.
+  const stored = typeof (org.settings as { access?: { publicLinks?: unknown } } | null)?.access?.publicLinks === "string";
+  const touched = await prisma.activityLog.count({ where: { organizationId: org.id, type: { in: ["settings.updated.access", "access.settings.migrated"] } } });
+  if (stored || touched > 0) { r.action = "already"; return r; }
   r.action = "flip";
   if (!write) return r;
 

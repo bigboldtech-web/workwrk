@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission, hasPermission } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
+import { safeStoredContent } from "@/lib/safe-html";
 
 interface RecordedStep {
   order: number;
@@ -71,7 +72,8 @@ export async function POST(req: NextRequest) {
   // extension uploaded to S3 it's null and `screenshotKey` holds the
   // object key. Read-side enrichment turns the key into a presigned
   // GET URL when serving the SOP.
-  const content = {
+  // Step descriptions come from the extension: stored only sanitized (src/lib/safe-html.ts).
+  const content = safeStoredContent({
     type: "recorded",
     ...(sessionId ? { clientSessionId: sessionId } : {}),
     steps: steps.map((step) => ({
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
       elementText: step.elementText,
       elementTag: step.elementTag,
     })),
-  };
+  });
 
   // Publishing is a separate capability from creating. Callers without
   // it still get their recording saved — as a DRAFT a publisher can
