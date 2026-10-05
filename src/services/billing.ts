@@ -70,7 +70,19 @@ export async function ensureStripeCustomer(params: {
     where: { organizationId: params.organizationId },
     select: { stripeCustomerId: true },
   });
-  if (existing?.stripeCustomerId) return existing.stripeCustomerId;
+  if (existing?.stripeCustomerId) {
+    // A stored customer Stripe does not hold (made under test keys before
+    // live ones, or deleted in the dashboard) is replaced, with an alert so a
+    // key mix-up can be undone; checkout reaches this only for a workspace
+    // with no live subscription, so a paying customer's id is never replaced.
+    try {
+      const held = await stripe.customers.retrieve(existing.stripeCustomerId);
+      if (!(held as { deleted?: boolean }).deleted) return existing.stripeCustomerId;
+    } catch (err) {
+      if (!noSuchCustomer(err)) throw err;
+    }
+    await billingAlert(params.organizationId, `The stored Stripe customer ${existing.stripeCustomerId} is not held by the current Stripe key (test mode, or deleted), so checkout made a new one.`);
+  }
 
   const customer = await stripe.customers.create({
     name: params.organizationName,
@@ -256,11 +268,18 @@ export async function createPortalSession(params: {
     select: { stripeCustomerId: true },
   });
   if (!sub?.stripeCustomerId) throw new Error("No Stripe customer on this org");
-  const portal = await stripe.billingPortal.sessions.create({
-    customer: sub.stripeCustomerId,
-    return_url: params.returnUrl,
-  });
-  return portal.url;
+  try {
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: sub.stripeCustomerId,
+      return_url: params.returnUrl,
+    });
+    return portal.url;
+  } catch (err) {
+    // Never cleared here: a wrong key on the server would unlink every
+    // paying customer.
+    if (noSuchCustomer(err)) throw new BillingRefusal("Stripe holds no billing account for this workspace. Email billing@workwrk.com.");
+    throw err;
+  }
 }
 
 /**

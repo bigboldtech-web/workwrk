@@ -7037,10 +7037,12 @@ model AutomationCronTick {
 /// across every free workspace (src/lib/ai-allowance.ts claimFreeDay).
 /// prisma/sql/2026-10-06-ai-free-day.sql
 model AiFreeDay {
-  day       DateTime @db.Date
+  day       DateTime  @db.Date
   kind      String
-  count     Int      @default(0)
-  updatedAt DateTime @default(now())
+  count     Int       @default(0)
+  updatedAt DateTime  @default(now())
+  /// When the ceiling was first reached that day (one alert per kind a day).
+  alertedAt DateTime?
 
   @@id([day, kind])
 }

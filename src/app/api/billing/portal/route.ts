@@ -5,7 +5,7 @@ import {
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
-import { createPortalSession, isBillingLive, ownReturnUrl } from "@/services/billing";
+import { BillingRefusal, createPortalSession, isBillingLive, ownReturnUrl } from "@/services/billing";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function POST(req: NextRequest) {
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     const url = await createPortalSession({ organizationId: orgId, returnUrl });
     return jsonSuccess({ url });
   } catch (err) {
+    if (err instanceof BillingRefusal) return jsonError(err.message, 409);
     const msg = err instanceof Error ? err.message : "Portal failed";
     return jsonError(msg, 500);
   }

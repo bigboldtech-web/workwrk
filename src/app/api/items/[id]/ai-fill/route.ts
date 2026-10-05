@@ -47,6 +47,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       onlyIfEmpty: parsed.data.onlyIfEmpty === true,
       expect: parsed.data && "expect" in parsed.data ? { value: parsed.data.expect ?? null } : null,
       plan: org.plan,
+      createdAt: org.createdAt,
     });
   } catch (err) {
     return itemServerError(err, `POST /api/items/${id}/ai-fill`);

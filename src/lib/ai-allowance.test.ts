@@ -5,12 +5,15 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = { freeDayOk: true, freeDayClaims: [] as string[], personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
+const state = { orgCreatedAt: null as Date | null, freeDayReleases: [] as string[], releasedFreeTier: false, autoReleases: 0, freeDayOk: true, freeDayClaims: [] as string[], personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
 
 vi.mock("@/lib/ai-usage", () => ({
   claimAiUse: async (org: string, kind: string, cap: number) => {
     state.autoClaims.push({ org, kind, cap });
     return state.autoAnswer;
+  },
+  releaseAiUse: async () => {
+    state.autoReleases += 1;
   },
 }));
 
@@ -32,11 +35,21 @@ vi.mock("@/lib/prisma", () => {
   };
   // The org row lock, or (a template with "AiFreeDay") the free day claim.
   const queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
-    if (strings.join("?").includes('"AiFreeDay"')) {
+    const sql = strings.join("?");
+    if (sql.includes('INSERT INTO "AiFreeDay"')) {
       state.freeDayClaims.push(String(values[0]));
       return state.freeDayOk ? [{ count: 1 }] : [];
     }
-    return state.orgFound ? [{ plan: state.plan }] : [];
+    if (sql.includes('"count" = "count" - 1')) {
+      state.freeDayReleases.push(String(values[0]));
+      return [{ count: 0 }];
+    }
+    if (sql.includes('"alertedAt"')) return [];
+    if (sql.includes('DELETE FROM "AIQuery"')) {
+      state.deleted.push(String(values[0]));
+      return [{ freeTier: state.releasedFreeTier }];
+    }
+    return state.orgFound ? [{ plan: state.plan, createdAt: state.orgCreatedAt }] : [];
   };
   const tx = {
     $queryRaw: queryRaw,
@@ -47,12 +60,12 @@ vi.mock("@/lib/prisma", () => {
       $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
       $queryRaw: queryRaw,
       aIQuery,
-      organization: { findUnique: async () => (state.orgFound ? { plan: state.plan } : null) },
+      organization: { findUnique: async () => (state.orgFound ? { plan: state.plan, createdAt: state.orgCreatedAt } : null) },
     },
   };
 });
 
-import { AI_ACTIONS_PER_MINUTE, AI_AUTO_PER_DAY, AI_AUTO_PER_MINUTE, aiAutoAllowed, callOrGiveBack, claimAiAction, claimAiQuestion } from "./ai-allowance";
+import { AI_ACTIONS_PER_MINUTE, AI_AUTO_PER_DAY, AI_AUTO_PER_MINUTE, aiAutoAllowed, callOrGiveBack, claimAiAction, claimAiQuestion, releaseAiQuestion } from "./ai-allowance";
 
 beforeEach(() => {
   state.plan = "STARTER";
@@ -65,6 +78,10 @@ beforeEach(() => {
   state.personal = 0;
   state.freeDayOk = true;
   state.freeDayClaims = [];
+  state.freeDayReleases = [];
+  state.releasedFreeTier = false;
+  state.autoReleases = 0;
+  state.orgCreatedAt = null;
 });
 
 describe("claimAiQuestion", () => {
@@ -117,6 +134,22 @@ describe("claimAiQuestion", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toMatch(/reached its limit for today across WorkwrK/);
     expect(state.created).toEqual([]);
+  });
+
+  it("never takes the free ceiling in a free workspace made before it", async () => {
+    state.orgCreatedAt = new Date("2026-09-01T00:00:00Z");
+    state.freeDayOk = false;
+    expect((await claimAiQuestion("org-old", "u-old", "x")).ok).toBe(true);
+    expect(state.freeDayClaims).toEqual([]);
+  });
+
+  it("gives the ceiling's use back with a free question handed back, and not for a paid one", async () => {
+    state.releasedFreeTier = true;
+    await releaseAiQuestion("q-free");
+    expect(state.freeDayReleases).toEqual(["question"]);
+    state.releasedFreeTier = false;
+    await releaseAiQuestion("q-paid");
+    expect(state.freeDayReleases).toEqual(["question"]);
   });
 
   it("never takes the free ceiling in a paid workspace", async () => {
@@ -195,6 +228,13 @@ describe("aiAutoAllowed", () => {
     expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
     state.autoAnswer = "not_ready";
     expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
+  });
+
+  it("takes the workspace's daily use first, and gives it back when the free ceiling refuses", async () => {
+    state.freeDayOk = false;
+    expect(await aiAutoAllowed("org", "auto-8")).toBe(false);
+    expect(state.autoClaims).toHaveLength(1);
+    expect(state.autoReleases).toBe(1);
   });
 
   it("takes nothing of the day on a workspace's own key (BYOK): it pays for its own calls", async () => {
