@@ -114,7 +114,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json(
       {
         error: inOrg.removed
-          ? "This person was removed from your workspace. An Owner, an Admin or the People team can restore them from Directory, Removed, then add them to the Space."
+          ? "This person was removed from your workspace. An Owner or an Admin can restore them from Directory, Removed, then add them to the Space."
           : inOrg.inactive
             ? "This person is deactivated in your workspace. An Owner or Admin can reactivate them in Settings, Members, then add them to the Space."
             : inOrg.elsewhere

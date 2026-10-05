@@ -18,8 +18,11 @@ describe("draftRestorePlan", () => {
   it("restores the title and page settings over the live body for a doc nobody has typed in", () => {
     // A new doc's icon or cover save: blocks [] and no BlockNote doc yet.
     expect(draftRestorePlan({ blocks: [], bnDoc: null }, false, true)).toBe("settings-only");
-    // A title-only draft from an old-format doc that was converted since.
-    expect(draftRestorePlan({ blocks: null, bnDoc: null }, false, true)).toBe("settings-only");
+  });
+
+  it("restores the title only for a title-only save's draft, even after the doc was converted", () => {
+    // Its request never carried page settings; restoring them would put stale ones back.
+    expect(draftRestorePlan({ blocks: null, bnDoc: null }, false, true)).toBe("title-only");
   });
 
   it("restores the title only while the old format is on screen, or nothing is loaded", () => {
