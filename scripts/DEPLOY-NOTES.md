@@ -1,7 +1,58 @@
 # Deploy notes
 
 Things the production environment must have that the code cannot check for
-itself. Read before a release that touches any of them.
+itself. Read before a release that touches any of them. The full list of
+variables and hosts is in `LAUNCH-CHECKLIST.md`.
+
+## How a release reaches the server (Batch 12)
+
+`.github/workflows/deploy.yml`, after CI passed on a push to `main`:
+
+1. It asks GitHub whether CI passed for that exact commit, and deploys that
+   commit, never "whatever main is now". A manual run (Actions > Deploy > Run
+   workflow) takes an optional commit sha and is held to the same check, so
+   going back to an earlier commit is a manual run with its sha.
+2. On the box: `git reset --hard <sha>`; `npm ci` only when
+   `package-lock.json` changed (the hash it last installed is in
+   `node_modules/.deploy-lock-hash`), otherwise `prisma generate`.
+3. `npm run deploy:migrate`: the SQL manifest and pending Prisma migrations,
+   each SQL file under a 5 second lock timeout, tried up to four times.
+4. `next build` into `.next-staging` (`NEXT_DIST_DIR`), while the server keeps
+   serving `.next`. A failed or killed build changes nothing that is live.
+5. `chown`, then `.next` becomes `.next-prev`, `.next-staging` becomes
+   `.next`, and `pm2 reload`.
+6. The check: `NEXTAUTH_URL/api/health` must name the new build within two
+   minutes, then `/login` and one of the build's scripts must answer 200. If
+   not, the deploy puts `.next-prev` back, resets the source to the previous
+   commit, reloads, checks the old build, and fails with the reason. The
+   build that failed stays in `.next-failed` to look at.
+
+Every failure prints its reason as an annotation (`::error::`), readable
+through the public API without the Actions log. `deploy-migrate.log` and
+`deploy-build.log` in the app directory keep the last run's output.
+
+To roll back by hand on the box, while `.next-prev` is there:
+`mv .next .next-failed && mv .next-prev .next && pm2 reload workwrk --update-env`.
+A manual Deploy run with the earlier commit's sha is the better way, since it
+also brings the source back.
+
+`NEXT_DIST_DIR` is for the deploy's build only. Never put it in `.env`: the
+server would then serve a folder the deploy does not swap.
+
+## Email and alerts
+
+Email goes out only when `EMAIL_ENABLED=true` and `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` are set: those are the only names the
+code reads (`src/lib/email.ts`). Without `EMAIL_ENABLED` in production the
+queue is held, nothing is marked sent, and `/api/cron/email-queue` answers 503
+every minute until mail is set up; then everything waiting goes out. A send
+that fails is tried again after 1, 5, 30, 120 and 360 minutes, then closed as
+FAILED. A row a crash or a reload interrupted mid-send is taken again 15
+minutes later, or closed as FAILED once it is a day old, rather than sent late.
+
+Every scheduled job that fails answers 500 (the cron log records it as a
+failure, `curl -fsS`) and, when `OPS_ALERT_EMAIL` is set, queues one email to
+that address at most every six hours per job (`src/lib/cron-result.ts`).
 
 ## The Staff console needs `ADMIN_HOST` in production
 

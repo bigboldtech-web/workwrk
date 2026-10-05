@@ -50,7 +50,7 @@ describe("processEmailQueue", () => {
   });
 
   it("does nothing when nothing is queued", async () => {
-    await expect(processEmailQueue()).resolves.toEqual({ sent: 0, failed: 0 });
+    await expect(processEmailQueue()).resolves.toEqual({ sent: 0, retrying: 0, failed: 0 });
     expect(written).toHaveLength(0);
   });
 });

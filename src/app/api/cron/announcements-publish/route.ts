@@ -4,6 +4,7 @@ import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronResult } from "@/lib/cron-result";
 
 /**
  * Cron — fires the notification + email fan-out for announcements
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
 
   let processed = 0;
   let totalNotified = 0;
+  let failed = 0;
 
   for (const a of due) {
     try {
@@ -116,6 +118,7 @@ export async function POST(req: NextRequest) {
       });
       processed += 1;
     } catch (err) {
+      failed += 1;
       console.error(`[announcements-publish] failed for ${a.id}:`, err);
       // Leave `notificationsSentAt` NULL so we retry next tick.
     }
@@ -125,10 +128,11 @@ export async function POST(req: NextRequest) {
     processEmailQueue().catch((err) => console.error("[announcements-publish] queue drain failed:", err));
   }
 
-  return Response.json({
-    ok: true,
+  return cronResult("announcements-publish", {
+    ok: failed === 0,
     scanned: due.length,
     processed,
+    failed,
     notified: totalNotified,
-  });
+  }, failed);
 }

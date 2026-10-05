@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { runDueReports } from "@/lib/reports/report-server";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronResult } from "@/lib/cron-result";
 
 /**
  * Cron endpoint: send the scheduled email reports that are due (gap 16).
@@ -23,5 +24,5 @@ export async function POST(req: NextRequest) {
   if (refused) return refused;
 
   const result = await runDueReports(new Date(), { limit: 25, budgetMs: 240_000 });
-  return Response.json(result);
+  return cronResult("report-schedules", result, "failed" in result ? result.failed : 0);
 }

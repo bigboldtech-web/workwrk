@@ -3,10 +3,10 @@
 // `Authorization: Bearer <secret>` (same as /api/cron/recurring-tasks), so every
 // WorkwrK cron can use one identical header. Register ~every 5 min.
 
-import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fireReminder } from "@/lib/reminders";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronResult } from "@/lib/cron-result";
 
 export async function POST(req: Request) {
   const refused = cronRefusal(req);
@@ -16,10 +16,11 @@ export async function POST(req: Request) {
     take: 500,
   });
   let fired = 0;
+  let failed = 0;
   for (const r of due) {
     // fireReminder claims PENDING → FIRED atomically; false = another worker
     // (the per-user ticker) beat us to this row.
-    try { if (await fireReminder(r)) fired++; } catch (e) { console.error("fireReminder failed", e); }
+    try { if (await fireReminder(r)) fired++; } catch (e) { failed++; console.error("fireReminder failed", e); }
   }
-  return NextResponse.json({ fired, scanned: due.length });
+  return cronResult("reminders", { fired, failed, scanned: due.length }, failed);
 }

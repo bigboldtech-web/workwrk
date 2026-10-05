@@ -8,6 +8,7 @@ import { freeCompanyFiles } from "@/lib/company-files";
 import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
 import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/company-notifications";
 import { HARD_DELETE_FIRST, isHardDeleteFirst } from "@/lib/admin/hard-delete-order";
+import { cronResult } from "@/lib/cron-result";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -304,13 +305,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return Response.json({
-    ok: true,
+  return cronResult("org-hard-delete", {
+    ok: failures.length === 0,
     scanned: candidates.length,
     eligible: due.length,
     deleted,
     // Restored between the read and the delete, so left alone.
     kept,
     failures,
-  });
+  }, failures.length);
 }

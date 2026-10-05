@@ -1,175 +1,113 @@
-# WorkwrK Launch Checklist
+# WorkwrK production setup
 
-Last updated: 2026-05-07.
-Owner: Ibrahim.
-Stack: aaPanel + Cloudflare DNS + PM2 + git-pull/npm-build/pm2-reload deploys.
+Last checked against the code: 2026-10-05.
 
-This is the only thing you need to do to take WorkwrK from
-"code-ready" to "strangers can use it." Code is shippable today;
-what's left is server config and packaging.
+What the live server must have, in one place. The detail lives in the files
+this one links to; where they say more, they win. Generate every secret on the
+server (`openssl rand -hex 32`) and never write a value into this repository:
+it is public.
 
-Each item is one of:
-- 🔴 **Blocker** — strangers can't use the app without this
-- 🟡 **Should-do** — fine to launch without, but ship within first week
-- 🟢 **Post-launch** — sometime in the first month
+- [scripts/DEPLOY-NOTES.md](scripts/DEPLOY-NOTES.md): how a release reaches
+  the server, the Staff console host, nginx, email, alerts.
+- [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md): the scheduled jobs, which
+  live in root's crontab (not the aaPanel Cron UI), and rotating `CRON_SECRET`.
+- [scripts/BACKUPS.md](scripts/BACKUPS.md): the nightly off-site backup and
+  how to restore it.
+- [scripts/MIGRATIONS.md](scripts/MIGRATIONS.md): data scripts, which are run
+  by hand, never by the deploy.
 
----
+## The hosts
 
-## What Claude finished for you
+| Host | Serves | Set by |
+| --- | --- | --- |
+| `workwrk.com` | The marketing site | `MARKETING_HOST` |
+| `app.workwrk.com` | The product | `APP_HOST`, `NEXTAUTH_URL`, `NEXT_PUBLIC_APP_URL` |
+| `admin.workwrk.com` | The Staff console | `ADMIN_HOST` |
 
-- ✅ **AppSumo redemption flow** — schema + migration deployed, customer `/redeem` page, staff `/admin/appsumo` bulk-import + filter + refund UI.
-- ✅ **Sandbox demo org seeded in prod** — 8 users, 4 SOPs, 2 KRAs, 4 KPIs, 3 cascaded OKRs. Reviewers log in as `admin@sandbox.workwrk.com` with the password the founder hands them (never written in this repository, which is public).
-- ✅ **Cron schedules documented** for aaPanel — see [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md).
-- ✅ **Marketing site verified** — `/privacy`, `/terms`, `/help-center`, `/compare`, all `/features/*` populated.
-- ✅ **Production secrets generated** (below).
-- ✅ Type-check + build clean.
+All three are one Node process (pm2 `workwrk`) behind nginx; `src/proxy.ts`
+splits them by the `Host` header, so nginx must forward it unchanged.
 
----
+Cloudflare stays **DNS only** (grey cloud) for all three. Proxying through
+Cloudflare makes every visitor's address Cloudflare's: the sign-in lockout,
+every per-address limit and the Staff console's IP log would all key on it.
+Turn the proxy on only after nginx sets `real_ip_header` and
+`set_real_ip_from` for Cloudflare's ranges (DEPLOY-NOTES, "The client
+address").
 
-## 🔴 Blockers — must do before public launch
+## Environment variables
 
-### 1. Rotate the Postgres DB password (5 min) — *do later, you said*
-- aaPanel → **PostgreSQL Manager** → **DB List** → **workwrk** → reset password
-- Update `DATABASE_URL` in `.env` (or aaPanel Node config)
-- `pm2 restart workwrk`
+They live in the app's `.env` on the server (`/www/wwwroot/workwrk.com/.env`).
+After a change: `pm2 reload workwrk --update-env`.
 
-### 2. Set production environment variables (10 min)
-SSH in and edit your `.env.production` (or use aaPanel Node config UI).
+### Required
 
-Add these (generate each secret on the server; NEVER write a value into this repository, which is public):
-```
-ADMIN_HOST=admin.workwrk.com
-APP_HOST=workwrk.com
-CUSTOM_DOMAINS_ENABLED=true
-CRON_SECRET=<generate: openssl rand -hex 32>
-SECRETS_ENCRYPTION_KEY=<generate: openssl rand -hex 32>
-```
+| Variable | Live value | What it does |
+| --- | --- | --- |
+| `DATABASE_URL` | the production Postgres URL | Everything. |
+| `NEXTAUTH_URL` | `https://app.workwrk.com` | Sign-in, links in emails, and the address the deploy checks a new release at. |
+| `NEXTAUTH_SECRET` | a secret | Signs sessions and upload names. Changing it signs everyone out. |
+| `NEXT_PUBLIC_APP_URL` | `https://app.workwrk.com` | Absolute links from the Staff console and the marketing site into the product. |
+| `APP_HOST` | `app.workwrk.com` | The product's host. Never the apex: with `HARD_HOST_SPLIT` on, an `APP_HOST` equal to `MARKETING_HOST` redirects every page to itself. |
+| `MARKETING_HOST` | `workwrk.com` | The marketing site's host. |
+| `ADMIN_HOST` | `admin.workwrk.com` | Puts the Staff console on its own host and hides it everywhere else (DEPLOY-NOTES). |
+| `HARD_HOST_SPLIT` | `true` | Product pages only on the app host, marketing pages only on the marketing host. |
+| `AUTH_EDGE_GATE` | `true` | A signed-out request for a product page goes to `/login` before the app loads. |
+| `ENFORCE_MFA_AT_LOGIN` | `true` | Asks everyone who turned on two-step verification for their code at sign in. |
+| `COOKIE_DOMAIN` | `.workwrk.com` | One sign-in for the app and Staff console hosts. |
+| `CRON_SECRET` | a secret | Every `/api/cron` job checks it; unset, they answer 503 and run nothing. The crontab reads it from `/etc/profile.d/workwrk.sh` (CRON-SETUP). |
+| `SECRETS_ENCRYPTION_KEY` | a 32-byte secret | Encrypts stored integration tokens and secrets. Rotate with `scripts/rotate-secrets-key.ts`, never by editing it alone. |
+| `EMAIL_ENABLED` | `true` | Without it no email leaves the server: in production the queue is held (nothing is marked sent) and the email-queue job answers 503. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | your mail provider's | How email is sent. Port `465` connects over TLS; on any other port the connection upgrades to TLS when the server offers it. |
+| `SMTP_FROM` | e.g. `WorkwrK <noreply@workwrk.com>` | The From address (that is the default). Publish SPF, DKIM and DMARC for its domain before launch, or mail lands in spam. |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` | your object store's | Files, attachments and Scribe screenshots (DEPLOYMENT.md). Without them uploads fall back to the server's own disk. |
 
-Verify these existing ones are also present:
-- `DATABASE_URL`
-- `NEXTAUTH_URL=https://workwrk.com`
-- `NEXTAUTH_SECRET`
-- `ANTHROPIC_API_KEY`
-- `S3_*` (for SOP screenshots)
-- Email provider creds (`SMTP_*` or `RESEND_API_KEY`)
+### Recommended
 
-Then: `pm2 restart workwrk` (replace `workwrk` with your actual PM2 process name; `pm2 ls` to find it).
+| Variable | What it does |
+| --- | --- |
+| `OPS_ALERT_EMAIL` | Where a failing scheduled job sends an alert (at most one per job in six hours). Unset, failures only reach the logs. |
+| `AUDIT_SIGNING_KEY` | Signs audit log exports. Unset, they are signed with `CRON_SECRET`. |
+| `ANTHROPIC_API_KEY` | The AI features. Unset, they are unavailable. |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Calls and huddles in Talk. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Sign in with Google, and Google Calendar connections. |
+| `STAFF_RUNBOOK_URL` | A link to your runbook in the Staff console. |
 
-### 3. Stripe configuration (30 min)
-Add to `.env.production`:
-```
-STRIPE_SECRET_KEY=<your live key, sk_live_...>
-STRIPE_WEBHOOK_SECRET=<from your Stripe webhook endpoint>
-STRIPE_PRICE_GROWTH_PER_USER=<price ID>
-STRIPE_PRICE_TEAM_FLAT=<price ID>
-STRIPE_PRICE_GROWTH_FLAT=<price ID>
-STRIPE_PRICE_SCALE_FLAT=<price ID>
-```
+### Billing (not live yet)
 
-In Stripe dashboard:
-1. **Developers → Webhooks → Add endpoint**
-2. URL: `https://workwrk.com/api/billing/webhook`
-3. Events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
-4. Copy the signing secret → that's `STRIPE_WEBHOOK_SECRET`
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_GROWTH_PER_USER`,
+`STRIPE_PRICE_TEAM_FLAT`, `STRIPE_PRICE_GROWTH_FLAT`,
+`STRIPE_PRICE_SCALE_FLAT`. Leave them unset until billing is fixed: the launch
+audit found that with Stripe configured, Plan & billing shows a Manage billing
+button that always fails, and nothing yet lets a workspace buy Growth.
 
-Restart PM2 after env change.
+### Switches, off unless you decide otherwise
 
-### 4. DNS + admin subdomain (Cloudflare + aaPanel) (15 min)
-**Cloudflare:**
-- Dashboard → `workwrk.com` → DNS → **Add Record**
-- Type: `A`, Name: `admin`, IPv4: `<your server's public IP>`, Proxy: orange-clouded ON (or off — your call)
+| Variable | Turns on |
+| --- | --- |
+| `ACCESS_V2_TABLES` | The new sharing tables (your decision; see the access plan). |
+| `SETTINGS_OWNER_SPLIT` | Billing, Security and API settings for Owners, and for the Admins given that scope. Off, every Admin opens them. |
+| `TALK_UPDATES_CRON` | Talk updates digests (`on`), with its crontab row (CRON-SETUP). |
+| `REPORT_SCHEDULE_CRON` | Scheduled email reports (`on`), with its crontab row (CRON-SETUP). |
+| `CUSTOM_DOMAINS_ENABLED` | A workspace's own domain pointing at the app. |
+| `MARKETING_GEO_HEADERS` | The marketing site's currency picked from the visitor's country header. |
 
-**aaPanel:**
-1. Website → **Add Site**: domain = `admin.workwrk.com`, point to the **same Node app directory** as `workwrk.com`, same port.
-   - Or: keep one Node app, add `admin.workwrk.com` as an additional domain on the existing site.
-2. SSL → **Let's Encrypt** → enable for `admin.workwrk.com`.
-3. Reverse Proxy → set up the same proxy as your main site (proxy to `127.0.0.1:<your-node-port>`).
+### Never set on the server
 
-The middleware reads the host header and routes `/admin` only when the host matches `ADMIN_HOST`. No code changes needed — both domains hit the same Node process, the middleware handles the split.
+- `PLATFORM_STAFF_BOOTSTRAP_EMAILS`: a local development convenience, ignored
+  in production. Staff are added from Staff console > Staff.
+- `NEXT_DIST_DIR`: the deploy sets it for the build only. Set in `.env`, the
+  server would serve a folder the deploy does not swap.
 
-### 5. Set up the cron jobs (10 min)
-Open [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md) and add the 7 cron entries in aaPanel's Cron Manager. Each is a one-line curl. Without these:
-- Emails queue but never send
-- OKR reminders never fire
-- Webhook retries don't happen
-- Calendar sync stops
+## Before you take strangers' money
 
-### 6. Smoke test as 4 different roles (45 min)
-**Don't skip this.** Use the seeded Sandbox org in prod:
-
-| URL | Login | Verify |
-|---|---|---|
-| `https://workwrk.com/login` | `admin@sandbox.workwrk.com` / `<the password the founder gave you>` (CEO/Admin) | Sees everything in sidebar; org-wide dashboard |
-| same | `engineering@sandbox.workwrk.com` / `<the password the founder gave you>` (Manager) | Sees AI / Tools / People / Process Runs / Analytics; team-scoped data |
-| same | `alex@sandbox.workwrk.com` / `<the password the founder gave you>` (Employee) | Does NOT see AI / Tools / People / Process Runs / Analytics / Onboarding / Talent / Assets / Integrations; personal-only dashboard |
-| same | Same Employee | `/sops` shows only assigned + folder-accessible SOPs; `/tasks` defaults to "My tasks" |
-
-If anything looks wrong, copy the URL + describe what you saw and I'll fix.
-
-### 7. Email deliverability (15 min)
-1. Trigger an invite: log in as Admin → People → Invite a real test address.
-2. Check inbox + spam folder.
-3. If hitting spam: set up SPF, DKIM, and DMARC records in Cloudflare for the sending domain. Most email providers (Resend, SendGrid, Postmark) give you the exact DNS rows to copy.
-
----
-
-## 🟡 Should-do — first week
-
-### 8. AppSumo deal terms + import codes
-The redemption flow is built. You need:
-- Decide tier counts (defaults built into the admin UI: T1 = Growth/5 seats, T2 = Scale/25 seats, T3 = Enterprise/unlimited).
-- Get codes from AppSumo merchant dashboard.
-- Visit `https://admin.workwrk.com/admin/appsumo` (after step 4) → **Bulk import** tab → paste codes → done.
-- Test by redeeming one code as a fresh test customer at `/redeem`.
-
-### 9. Demo collateral
-- 60–90s Loom showing: SOP creation → assignment → compliance.
-- Sandbox login published on marketing pages: `https://workwrk.com/demo` already exists — link it.
-- Help center: skim once for typos.
-
-### 10. G2 + AppSumo profile prep
-- Logo, screenshots, integrations, pricing all filled.
-- Comparison pages already live at `/compare`.
-- Seed 5+ G2 reviews from real customers.
-
-### 11. Customer support
-- Real `support@workwrk.com` inbox someone monitors.
-- The `?` icon in topbar already links to `/help-center`.
-
-### 12. Monitoring
-- Uptime: UptimeRobot free tier ping `https://workwrk.com/api/health` every 5 min.
-- Error tracking: Sentry isn't wired yet. Half-day to add if you want it.
-- aaPanel: enable email notifications on PM2 process crashes.
-
----
-
-## 🟢 Post-launch — first month
-
-- Founder analytics dashboard (MRR, signup funnel, churn) at `/admin/analytics`.
-- Lighthouse performance budget ≥ 80.
-- Mobile responsiveness audit.
-- Verify the daily `pg_dump` cron is producing backups in `/backups/pg/`; document the restore procedure.
-- More integrations.
-
----
-
-## Honest sequence to launch
-
-1. Steps 2 → 5 today (env, DNS, crons) — the app actually starts behaving like prod.
-2. Step 6 (smoke test as 4 roles) — surfaces UX bugs.
-3. Steps 3 + 7 (Stripe + email) — anything you can test from inside.
-4. Steps 8–11 (collateral) — what you need to list.
-
-Soft-launch to friendly customers any time after step 6 passes.
-List on G2 once steps 9–11 are done.
-List on AppSumo once step 8 is done.
-
-## File reference
-
-- [`scripts/CRON-SETUP.md`](scripts/CRON-SETUP.md) — exact aaPanel cron entries
-- [`scripts/seed-demo-org.ts`](scripts/seed-demo-org.ts) — sandbox seeder (already run)
-- [`vercel.json`](vercel.json) — **NOT USED** (kept as schedule reference)
-- [`src/app/api/appsumo/redeem/route.ts`](src/app/api/appsumo/redeem/route.ts) — customer redemption
-- [`src/app/(admin)/admin/appsumo/page.tsx`](src/app/(admin)/admin/appsumo/page.tsx) — staff bulk-import
-- [`src/lib/permissions.ts`](src/lib/permissions.ts) — permission matrix
-- [`src/middleware.ts`](src/middleware.ts) — admin host split + custom domain header
+- Backups: set up the nightly off-site backup and do one test restore
+  ([scripts/BACKUPS.md](scripts/BACKUPS.md)). Until then one disk failure
+  loses every customer's data.
+- Monitoring: point an uptime monitor (UptimeRobot, BetterStack) at
+  `https://app.workwrk.com/api/health` every five minutes, and set
+  `OPS_ALERT_EMAIL`.
+- Email: send yourself an invitation and a password reset, and check both
+  arrive outside spam.
+- Billing and AppSumo: not ready. Redeeming an AppSumo code does not grant its
+  plan yet, and Stripe should stay unset (above).
+- A real `support@workwrk.com` inbox someone reads.

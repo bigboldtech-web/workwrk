@@ -4,6 +4,7 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { shouldEmail } from "@/lib/notify-prefs";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronResult } from "@/lib/cron-result";
 
 /**
  * Cron — surfaces "you haven't checked in" nudges for OKR owners.
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
   let krsScanned = 0;
   let skippedNone = 0;
   let emailsSent = 0;
+  let emailsFailed = 0;
 
   // Owner lookups are cached per run — OKR.ownerId is a bare column (no
   // Prisma relation), so we resolve email + name once per owner, not per KR.
@@ -163,17 +165,19 @@ export async function POST(req: NextRequest) {
           emailsSent++;
         }
       } catch (err) {
+        emailsFailed++;
         console.error("[OKR reminders] Email escalation failed:", err);
       }
     }
   }
 
-  return Response.json({
+  return cronResult("okr-reminders", {
     ran: true,
     at: new Date().toISOString(),
     krsScanned,
     skippedNone,
     nudgesCreated,
     emailsSent,
-  });
+    emailsFailed,
+  }, emailsFailed);
 }
