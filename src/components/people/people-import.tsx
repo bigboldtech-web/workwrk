@@ -35,7 +35,24 @@ const STEP_INDEX: Record<ImportStep, number> = { upload: 0, map: 1, review: 2, d
 const STEP_WORD: Record<ImportStep, string> = { upload: "Upload", map: "Map columns", review: "Review", done: "Import" };
 
 type RowOutcome = { row: number; email: string; status: "ready" | "error" | "member" | "invited"; message?: string };
-type Summary = { total: number; ready: number; errors: number; members: number; invited: number; created?: number };
+type Summary = {
+  total: number;
+  ready: number;
+  errors: number;
+  members: number;
+  invited: number;
+  created?: number;
+  /** Seats free before this import (people and open invitations count). */
+  seatsFree?: number;
+  /** Set when the ready rows do not fit: the plan sentence. Nothing can be imported. */
+  seatProblem?: string;
+};
+
+/** Whether the staged rows can be imported: some are ready, and they fit in the seats. */
+export function importable(summary: Summary | null | undefined): number {
+  if (!summary || summary.seatProblem) return 0;
+  return summary.ready;
+}
 
 export interface PeopleImportState {
   step: ImportStep;
@@ -256,6 +273,7 @@ function ReviewStep({ flow, container }: { flow: PeopleImportFlow; container: "m
   return (
     <>
       <p className="text-row text-ink">{s.ready} ready · {s.errors} with errors · {s.members + s.invited} already members or invited</p>
+      {s.seatProblem ? <p role="alert" className="text-row text-danger-text">{s.seatProblem}</p> : null}
       <div className="max-h-[46vh] overflow-y-auto">
         <TableCard
           columns={columns}
@@ -267,7 +285,9 @@ function ReviewStep({ flow, container }: { flow: PeopleImportFlow; container: "m
             noun: "rows",
             from: s.total ? 1 : 0,
             to: staged.rows.length,
-            extra: <span>· {s.ready} {s.ready === 1 ? "row" : "rows"} will be invited, {s.total - s.ready} skipped</span>,
+            extra: s.seatProblem
+              ? <span>· nothing can be imported until there are seats for the {s.ready} ready {s.ready === 1 ? "row" : "rows"}</span>
+              : <span>· {s.ready} {s.ready === 1 ? "row" : "rows"} will be invited, {s.total - s.ready} skipped</span>,
           }}
         />
       </div>

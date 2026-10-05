@@ -4,8 +4,9 @@
 // `/settings/billing`, settings-architecture 5.14). Owner page (every Admin
 // until the Owner and Admin split). Honest states, never a button that fails:
 //
+//   Starter, checkout can open      [Upgrade to Growth] opens Stripe checkout,
+//                                   and a customer's past invoices are a link
 //   a Stripe customer, Stripe on    [Manage billing] is the page's one primary
-//   Starter, checkout can open      [Upgrade to Growth] opens Stripe checkout
 //   anything else                   "Billing is handled by our team" with a
 //                                   mailto line, and no blue button at all
 //
@@ -22,12 +23,15 @@ import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Summary = {
   plan: string;
   status: string;
   limits: { users: number; sops: number; ai: number };
   usage: { members: number; pendingInvites: number; sops: number; aiUsed: number };
+  /** People who hold a seat here through a membership (their account is another workspace's). */
+  fromOtherWorkspaces?: Array<{ id: string; name: string; email: string }>;
   billingLive: boolean;
   portalAvailable: boolean;
   stripeSubscribed: boolean;
@@ -68,6 +72,8 @@ function Meter({ label, used, limit, helper }: { label: string; used: number; li
 
 export default function BillingSettingsPage() {
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const [removing, setRemoving] = useState<string | null>(null);
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -120,16 +126,38 @@ export default function BillingSettingsPage() {
     void load();
   }, [code, redeeming, toast, load]);
 
+  // Free the seat of someone in through another workspace: they keep their
+  // own workspace, and lose this one.
+  const removeMembership = useCallback(async (p: { id: string; name: string }) => {
+    if (removing) return;
+    const ok = await confirm({
+      title: `Remove ${p.name} from this workspace?`,
+      description: "Their account belongs to another workspace, which they keep. They lose this workspace, and its seat is freed.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    setRemoving(p.id);
+    const r = await apiFetch(`/api/organization/memberships/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+    setRemoving(null);
+    if (!r.ok) { toast(r.error); return; }
+    toast(`${p.name} removed from this workspace`);
+    void load();
+  }, [removing, confirm, toast, load]);
+
   const status = data
     ? data.status === "TRIAL" && data.plan === "STARTER"
       ? FREE
       : STATUS[data.status] ?? { label: data.status, cls: "bg-hover text-ink-2" }
     : null;
   const upgrade = data?.upgrade ?? null;
-  const primary = data?.portalAvailable
-    ? { label: "Manage billing", onClick: () => { void portal(); }, busy: opening, icon: null }
-    : upgrade
-      ? { label: "Upgrade to Growth", onClick: () => { void checkout(upgrade); }, busy: opening, icon: null }
+  // Upgrade first: a checkout opened and left (or a subscription that ended)
+  // leaves a Stripe customer behind, and the portal cannot start a
+  // subscription, so preferring it hid the only way to buy Growth.
+  const primary = upgrade
+    ? { label: "Upgrade to Growth", onClick: () => { void checkout(upgrade); }, busy: opening, icon: null }
+    : data?.portalAvailable
+      ? { label: "Manage billing", onClick: () => { void portal(); }, busy: opening, icon: null }
       : undefined;
   const seatsUsed = data ? data.usage.members + data.usage.pendingInvites : 0;
   const seatsHelper = data
@@ -149,10 +177,20 @@ export default function BillingSettingsPage() {
               <span className="text-xl font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
               {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
-            {data.portalAvailable ? (
+            {data.stripeSubscribed && data.portalAvailable ? (
               <p className="text-sm text-ink-2">Change the plan, seats, payment method and invoices in the billing portal (Manage billing).</p>
             ) : upgrade ? (
-              <p className="text-sm text-ink-2">Growth adds Talk and Tables, up to 50 people, 20 SOPs and 500 AI questions. Upgrade to Growth opens checkout, where you choose the seats.</p>
+              <>
+                <p className="text-sm text-ink-2">Growth adds Talk and Tables, up to 50 people, 20 SOPs and 500 AI questions. Upgrade to Growth opens checkout, where you choose the seats.</p>
+                {data.portalAvailable ? (
+                  <p className="text-sm text-ink-2">
+                    Past invoices and the card on file are in the{" "}
+                    <button type="button" onClick={() => { void portal(); }} disabled={opening} className="font-medium text-brand-deep hover:underline disabled:text-ink-3">billing portal</button>.
+                  </p>
+                ) : null}
+              </>
+            ) : data.portalAvailable ? (
+              <p className="text-sm text-ink-2">Past invoices and the card on file are in the billing portal (Manage billing). To change the plan, email <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.</p>
             ) : (
               <p className="text-base text-ink">
                 Billing is handled by our team. Email{" "}
@@ -190,18 +228,42 @@ export default function BillingSettingsPage() {
               {redeemError ? (
                 <p id="appsumo-error" className="text-sm text-danger-text">{redeemError}</p>
               ) : (
-                <p id="appsumo-help" className="text-sm text-ink-2">A code moves this workspace onto the plan and seats it grants, for good.</p>
+                <p id="appsumo-help" className="text-sm text-ink-2">A code raises this workspace to the plan and seats it grants, for good, and never lowers either.</p>
               )}
             </SettingsCard>
           )}
           <SettingsCard title="Usage" id="billing.usage">
             <Meter label="Seats" used={seatsUsed} limit={data.limits.users} helper={seatsHelper} />
+            {data.fromOtherWorkspaces && data.fromOtherWorkspaces.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-sm text-ink-2">
+                  In through another workspace (their account is there, so Members does not list them; each holds a seat here):
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {data.fromOtherWorkspaces.map((p) => (
+                    <li key={p.id} className="flex min-h-8 items-center justify-between gap-3 text-sm">
+                      <span className="min-w-0 truncate text-ink">
+                        {p.name} <span className="text-ink-2">{p.email}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { void removeMembership(p); }}
+                        disabled={removing !== null}
+                        className="shrink-0 font-medium text-danger-text hover:underline disabled:text-ink-3"
+                      >
+                        {removing === p.id ? "Removing" : "Remove"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <Meter label="SOPs" used={data.usage.sops} limit={data.limits.sops} />
             <Meter
               label="AI questions used, in total"
               used={data.usage.aiUsed}
               limit={data.limits.ai}
-              helper="Every AI request counts: Ask AI messages, agent runs, and the AI actions in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder. One the AI could not answer does not. Fill with AI and Talk updates have their own daily limit."
+              helper="Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder count. A request that fails before the AI answers is not counted; an answer that could not be used still is. Suggestions nobody asked for (field suggestions and goal assessments) never count, run up to a daily total, and stop once the total here is used. Fill with AI and Talk updates have their own daily limit."
             />
           </SettingsCard>
         </SettingsCardStack>

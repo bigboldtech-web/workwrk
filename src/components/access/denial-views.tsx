@@ -253,6 +253,8 @@ export interface ModuleOffProps {
    * server would refuse.
    */
   needsUpgrade?: boolean;
+  /** May open Plan & billing and change the plan (with the Owner split on, not every Admin). Defaults to canEnable. */
+  canChangePlan?: boolean;
   /** Members: the admins to ask. */
   admins?: OrgAdmin[];
   /** What turning it on unlocks, when the layout knows ("3 channels"). */
@@ -260,19 +262,21 @@ export interface ModuleOffProps {
   back: BackTarget;
 }
 
-export function ModuleOff({ label, productSlug, canEnable, needsUpgrade = false, admins = [], unlocks, back }: ModuleOffProps) {
+export function ModuleOff({ label, productSlug, canEnable, needsUpgrade = false, canChangePlan = canEnable, admins = [], unlocks, back }: ModuleOffProps) {
   if (needsUpgrade) {
     return (
       <DenialBlock
         title={`${label} is included from the ${MODULE_FROM_PLAN} plan`}
         sentence={
-          canEnable
+          canChangePlan
             ? `Move this workspace to ${MODULE_FROM_PLAN} in Plan & billing to turn ${label} on for everyone.`
-            : `Ask an Owner or Admin to move this workspace to ${MODULE_FROM_PLAN}.`
+            : canEnable
+              ? `Ask an Owner to move this workspace to ${MODULE_FROM_PLAN}.`
+              : `Ask an Owner or Admin to move this workspace to ${MODULE_FROM_PLAN}.`
         }
         back={back}
         primary={
-          canEnable ? (
+          canChangePlan ? (
             <Link
               href="/settings/billing"
               className="os-chrome inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-base font-medium text-white hover:bg-[var(--os-brand-hover)]"

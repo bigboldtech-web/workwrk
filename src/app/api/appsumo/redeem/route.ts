@@ -4,6 +4,11 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { logActivity } from "@/lib/activity";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { rateLimit } from "@/lib/rate-limit-memory";
+import { lockWorkspaceSeats, seatUse } from "@/lib/seats";
+import { seatsAreUnlimited, UNLIMITED_SEATS } from "@/lib/admin/companies-list";
+import { PLAN_LIMITS } from "@/lib/plan-limits-data";
+import { subscriptionStillOpen } from "@/services/billing";
+import type { Plan } from "@/generated/prisma";
 
 /**
  * POST /api/appsumo/redeem
@@ -24,21 +29,36 @@ import { rateLimit } from "@/lib/rate-limit-memory";
  *   · Each code is single-use across the whole system, claimed in the same
  *     transaction that applies it: two workspaces redeeming one code at once
  *     cannot both get it.
- *   · We don't accept a code if the org already has a live Stripe
- *     subscription (active, trialing or past due): refund Stripe first, then
- *     redeem.
+ *   · We don't accept a code while the org has a Stripe subscription that can
+ *     still bill (active, trialing, past due, and, by Stripe's own status,
+ *     unpaid, incomplete or paused): cancel it first, then redeem.
+ *   · A code NEVER LOWERS what the workspace has: the plan becomes the higher
+ *     of its plan and the code's, the seats the larger of its seats now and
+ *     the code's (never fewer than free Starter's). A code that would add
+ *     nothing is refused before it is claimed, so it is not used up.
  *   · On success: the code is stamped with redeemedById + redeemedAt +
- *     redeemedByOrg, the Subscription carries the code's plan and seats
- *     (lifetime), and the WORKSPACE's own plan becomes the code's, which is
- *     what every limit reads (PLAN_LIMITS[Organization.plan]). It used to
- *     stay on Starter, so a redeemed code granted nothing but its seats. A
- *     free workspace (TRIAL) becomes ACTIVE; a suspended or cancelled one
- *     keeps its status (a code never reopens a workspace staff closed).
+ *     redeemedByOrg, the Subscription becomes the lifetime deal (a flat tier
+ *     with the seats, and no Stripe subscription: one that ended before is
+ *     unlinked, so nothing reads the code as a card subscription and no late
+ *     Stripe event can overwrite it; the Stripe customer is kept for its
+ *     invoices), and the WORKSPACE's own plan is set, which is what every
+ *     limit reads (PLAN_LIMITS[Organization.plan]). A free workspace (TRIAL)
+ *     becomes ACTIVE; a suspended or cancelled one keeps its status (a code
+ *     never reopens a workspace staff closed).
+ *   · A code this workspace redeemed before is not applied twice; its plan is
+ *     applied if the workspace is below it (codes redeemed before Batch 13
+ *     left the workspace on Starter).
  */
 const LIVE_STRIPE = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
 const PLAN_LABEL: Record<string, string> = { STARTER: "Starter", GROWTH: "Growth", SCALE: "Scale", ENTERPRISE: "Enterprise" };
+const PLAN_RANK: Record<string, number> = { STARTER: 0, GROWTH: 1, SCALE: 2, ENTERPRISE: 3 };
+const rank = (plan: string) => PLAN_RANK[plan] ?? 0;
+const seatWords = (n: number) => (n >= UNLIMITED_SEATS ? "unlimited seats" : `${n} seats`);
 
 class CodeTaken extends Error {}
+class AddsNothing extends Error {
+  constructor(readonly plan: string, readonly seats: number) { super("adds nothing"); }
+}
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -69,27 +89,49 @@ export async function POST(req: NextRequest) {
   }
   if (row.redeemedAt) {
     if (row.redeemedByOrg === orgId) {
+      // Redeemed here before: the code's plan, if the workspace is below it.
+      const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { plan: true, status: true } });
+      if (org && rank(String(org.plan)) < rank(String(row.plan))) {
+        await prisma.organization.updateMany({
+          where: { id: orgId, plan: org.plan },
+          data: { plan: row.plan, ...(String(org.status) === "TRIAL" ? { status: "ACTIVE" as const } : {}) },
+        });
+      }
       return jsonSuccess({ alreadyRedeemed: true, plan: row.plan, seats: row.seats });
     }
     return jsonError("This code has already been redeemed by another organization.", 409);
   }
 
-  // Refuse if there's a live Stripe sub: avoid double-billing.
+  // Refuse while a Stripe subscription can still bill: avoid double-billing.
+  // The row stores unpaid and paused as INCOMPLETE, so Stripe is asked.
   const existing = await prisma.subscription.findUnique({
     where: { organizationId: orgId },
-    select: { stripeSubscriptionId: true, status: true, plan: true },
+    select: { stripeSubscriptionId: true, status: true },
   });
-  if (existing?.stripeSubscriptionId && LIVE_STRIPE.has(String(existing.status))) {
-    return jsonError(
-      "Your organization has an active Stripe subscription. Cancel it first (Settings, Plan & billing, Manage billing) before redeeming an AppSumo code.",
-      409,
-    );
+  if (existing?.stripeSubscriptionId && String(existing.status) !== "CANCELED") {
+    const open = LIVE_STRIPE.has(String(existing.status)) || (await subscriptionStillOpen(existing.stripeSubscriptionId).catch(() => true));
+    if (open) {
+      return jsonError(
+        "Your organization has an active Stripe subscription. Cancel it first (Settings, Plan & billing, Manage billing) before redeeming an AppSumo code.",
+        409,
+      );
+    }
   }
 
-  // Apply atomically: the claim, the subscription and the workspace's plan.
+  // Apply atomically, under the workspace's seat lock: the claim, the
+  // subscription and the workspace's plan.
   let result: { sub: { plan: string; seats: number } };
   try {
     result = await prisma.$transaction(async (tx) => {
+      await lockWorkspaceSeats(tx, orgId);
+      const org = await tx.organization.findUnique({ where: { id: orgId }, select: { plan: true, status: true } });
+      if (!org) throw new CodeTaken();
+      const use = await seatUse(orgId, tx);
+      const codeSeats = seatsAreUnlimited(row.seats) ? UNLIMITED_SEATS : Math.max(row.seats, PLAN_LIMITS.STARTER.users);
+      const plan = rank(String(row.plan)) > rank(String(org.plan)) ? String(row.plan) : String(org.plan);
+      const seats = Math.max(use.limit, codeSeats);
+      if (plan === String(org.plan) && seats === use.limit) throw new AddsNothing(plan, use.limit);
+
       const claimed = await tx.appsumoCode.updateMany({
         where: { id: row.id, redeemedAt: null, refundedAt: null },
         data: {
@@ -100,38 +142,38 @@ export async function POST(req: NextRequest) {
       });
       if (claimed.count !== 1) throw new CodeTaken();
 
+      const lifetime = {
+        plan: plan as Plan,
+        status: "ACTIVE" as const,
+        billingMode: "FLAT_TIER" as const,
+        seats,
+        // AppSumo deals are lifetime → no Stripe period end. Set to
+        // far future so any "is active?" check stays positive.
+        stripeCurrentPeriodEnd: new Date("2099-12-31"),
+      };
       const sub = await tx.subscription.upsert({
         where: { organizationId: orgId },
-        update: {
-          plan: row.plan,
-          status: "ACTIVE",
-          billingMode: "FLAT_TIER",
-          seats: row.seats,
-          // AppSumo deals are lifetime → no Stripe period end. Set to
-          // far future so any "is active?" check stays positive.
-          stripeCurrentPeriodEnd: new Date("2099-12-31"),
-        },
-        create: {
-          organizationId: orgId,
-          plan: row.plan,
-          status: "ACTIVE",
-          billingMode: "FLAT_TIER",
-          seats: row.seats,
-          stripeCurrentPeriodEnd: new Date("2099-12-31"),
-        },
+        // A Stripe subscription that ended is unlinked (the customer stays).
+        update: { ...lifetime, stripeSubscriptionId: null, stripePriceId: null, canceledAt: null, trialEndsAt: null },
+        create: { organizationId: orgId, ...lifetime },
         select: { plan: true, seats: true },
       });
 
-      const org = await tx.organization.findUnique({ where: { id: orgId }, select: { status: true } });
       await tx.organization.update({
         where: { id: orgId },
-        data: { plan: row.plan, ...(String(org?.status) === "TRIAL" ? { status: "ACTIVE" as const } : {}) },
+        data: { plan: plan as Plan, ...(String(org.status) === "TRIAL" ? { status: "ACTIVE" as const } : {}) },
       });
 
       return { sub: { plan: String(sub.plan), seats: sub.seats } };
     });
   } catch (e) {
     if (e instanceof CodeTaken) return jsonError("This code has already been redeemed.", 409);
+    if (e instanceof AddsNothing) {
+      return jsonError(
+        `This code would add nothing: this workspace already has the ${PLAN_LABEL[e.plan] ?? e.plan} plan with ${seatWords(e.seats)}. It was not used, so it still works for another workspace.`,
+        409,
+      );
+    }
     throw e;
   }
 
@@ -139,7 +181,7 @@ export async function POST(req: NextRequest) {
     type: "appsumo_redeemed",
     actorId: userId,
     organizationId: orgId,
-    description: `Redeemed AppSumo Tier ${row.tier} code → ${PLAN_LABEL[String(row.plan)] ?? row.plan}, ${row.seats} seats`,
+    description: `Redeemed AppSumo Tier ${row.tier} code → ${PLAN_LABEL[result.sub.plan] ?? result.sub.plan}, ${seatWords(result.sub.seats)}`,
     targetId: row.id,
     targetType: "appsumo_code",
   });

@@ -24,7 +24,11 @@ class LastAdminError extends Error {
  *
  * Things we DO erase:
  *  - email, names, avatar, phone, date of birth, passwordHash
- *  - notifications, AI queries, idea votes/comments (freely deletable)
+ *  - notifications, idea votes/comments (freely deletable)
+ *  - the text of their AI questions and answers: each AIQuery row stays,
+ *    worded "Erased", because the row IS the plan's count of AI questions
+ *    used (src/lib/ai-allowance.ts); deleting it handed questions back, so
+ *    invite, ask, delete could run the AI on any plan without end
  *  - the IP address and user agent on the activity rows they authored
  *
  * Things we RETAIN:
@@ -113,7 +117,7 @@ export async function POST(req: NextRequest) {
       // 2) Hard-delete data that is safe to remove
       await Promise.all([
         tx.notification.deleteMany({ where: { userId } }),
-        tx.aIQuery.deleteMany({ where: { userId } }),
+        tx.aIQuery.updateMany({ where: { userId }, data: { query: "Erased", response: null } }),
         tx.ideaVote.deleteMany({ where: { userId } }),
         tx.ideaComment.deleteMany({ where: { userId } }),
         // Kept, with the network details cleared (see the header).

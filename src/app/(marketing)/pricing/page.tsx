@@ -217,7 +217,7 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "How does per-user billing work?",
-    a: `${GROWTH.name} is priced per member per month, billed annually. A member is anyone with an account on the workspace: the seat count the product enforces is the number of people in it, so that is the number the price is built on.`,
+    a: `${GROWTH.name} is priced per seat per month, billed annually, for the seats you choose at checkout. A seat is a person who can sign in, or an invitation that is still open; deactivated people and expired invitations do not count. To add people past the seats you bought, add seats in Settings, Plan & billing.`,
   },
   {
     q: "Which currencies do you price in?",

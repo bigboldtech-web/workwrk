@@ -148,8 +148,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // A new invitation and its security activity row land together: the row
   // is what credits the sender when the invitee accepts (A7). It takes a
   // seat, checked and taken under the workspace's lock (src/lib/seats.ts).
+  // An invitation still open is sent again with its time renewed to the
+  // full rule from now (it already holds its seat), so the email's "works
+  // for N days" is true: a reused one used to keep its old expiry, and one
+  // with two hours left was emailed as working for a day.
   const placed = existingInvite
-    ? existingInvite
+    ? await prisma.invitation.update({
+        where: { id: existingInvite.id },
+        data: { expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000) },
+        select: { id: true, token: true, expiresAt: true },
+      })
     : await prisma.$transaction(async (tx) => {
         await lockWorkspaceSeats(tx, c.organizationId);
         const seats = await seatsFor(c.organizationId, 1, tx);
@@ -189,14 +197,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { name: true },
   });
   try {
-    // An invitation already pending keeps its own expiry: the email says
-    // the days it has left.
-    const daysLeft = Math.max(1, Math.ceil((new Date(invitation.expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+    // New or renewed, the invitation works for the workspace's full rule.
     const { subject, html } = invitationTemplate({
       companyName: org?.name ?? "Your team",
       inviteLink: inviteUrl,
       accessLevel: "EMPLOYEE",
-      expiresInDays: daysLeft,
+      expiresInDays: expiryDays,
     });
     await sendEmail({
       to: email,
