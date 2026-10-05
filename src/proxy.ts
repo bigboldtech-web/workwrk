@@ -182,7 +182,10 @@ export async function proxy(req: NextRequest) {
         // (the emailed link opens on the app host, NEXTAUTH_URL).
         path === "/forgot-password" ||
         path.startsWith("/_next") ||
-        path === "/favicon.ico";
+        path === "/favicon.ico" ||
+        // Answers "Disallow: /" on this host (src/app/robots.ts), so crawlers
+        // get the refusal instead of a redirect to the console's sign-in.
+        path === "/robots.txt";
 
       if (!allowed) {
         const url = req.nextUrl.clone();

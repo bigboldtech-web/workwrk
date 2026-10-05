@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeStoredContent, safeUserHtml } from "./safe-html";
+import { safeUserHtml } from "./safe-html";
 
 // Payloads that ran through the old regex blocklist, and the usual others.
 const ATTACKS = [
@@ -57,29 +57,33 @@ describe("safeUserHtml", () => {
   });
 });
 
-describe("safeStoredContent", () => {
-  it("sanitizes every html and description that holds a tag, at any depth", () => {
-    const content = {
-      type: "steps",
-      html: `<p>ok</p><img/onerror=alert(1) src=x>`,
-      steps: [{ title: "<b>kept as typed</b>", description: `<svg/onload=alert(1)></svg><p>Step</p>` }],
-      sections: [{ steps: [{ description: `<a href="javascript:alert(1)">x</a>` }] }],
-      flow: { steps: [{ description: "<p onclick=alert(1)>Go</p>" }] },
-    };
-    const out = safeStoredContent(content);
-    const text = JSON.stringify(out).toLowerCase();
-    expect(text).not.toMatch(/onerror|onload|onclick|javascript:|<svg/);
-    expect(out.steps[0].title).toBe("<b>kept as typed</b>");
-    expect(out.steps[0].description).toContain("<p>Step</p>");
+describe("the editor's own structures", () => {
+  it("keeps task lists with their ticks, and no input but a checkbox", () => {
+    const html = `<ul data-type="taskList" class="rich-task-list"><li data-checked="true" data-type="taskItem" class="rich-task-item"><label><input type="checkbox" checked="checked"><span></span></label><div><p>Done</p></div></li></ul><input type="password" name="p"><input type="hidden" value="x">`;
+    const out = safeUserHtml(html);
+    expect(out).toContain('<ul data-type="taskList" class="rich-task-list">');
+    expect(out).toContain('<li data-checked="true" data-type="taskItem" class="rich-task-item">');
+    expect(out).toContain('<input type="checkbox" checked="checked" />');
+    expect(out).not.toMatch(/password|hidden/);
   });
 
-  it("drops the rest of a description after an unclosed dangerous element", () => {
-    expect(safeStoredContent({ description: `<svg/onload=alert(1)><p>after</p>` }).description).toBe("");
+  it("keeps resizable tables, highlights and aligned text", () => {
+    const html = `<table style="min-width: 75px"><colgroup><col style="width: 120px"></colgroup><tbody><tr><td colspan="1" rowspan="1" colwidth="120"><p>a</p></td></tr></tbody></table><mark data-color="#ffc078" style="background-color: #ffc078; color: inherit">hi</mark><p style="text-align: center">c</p>`;
+    const out = safeUserHtml(html);
+    expect(out).toContain('style="min-width:75px"');
+    expect(out).toContain('<col style="width:120px" />');
+    expect(out).toContain('colwidth="120"');
+    expect(out).toContain('data-color="#ffc078"');
+    expect(out).toContain("text-align:center");
   });
 
-  it("leaves plain text exactly as typed, and other values alone", () => {
-    const content = { steps: [{ description: "Use a < b and 3 > 2, then press Enter", order: 1, done: false }], type: "recorded" };
-    expect(safeStoredContent(content)).toEqual(content);
-    expect(safeStoredContent(null)).toBeNull();
+  it("never lets a style smuggle a URL or an expression", () => {
+    for (const bad of [`<td style="width: expression(alert(1))">x</td>`, `<col style="width: url(javascript:alert(1))">`, `<p style="min-width: 10px; background-image: url(x)">x</p>`]) {
+      expect(safeUserHtml(bad).toLowerCase()).not.toMatch(/expression|url\(|javascript/);
+    }
+  });
+
+  it("gives every link that opens elsewhere noopener", () => {
+    expect(safeUserHtml(`<a href="https://x.example" target="other">x</a>`)).toContain('rel="noopener noreferrer"');
   });
 });

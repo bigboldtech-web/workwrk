@@ -74,3 +74,23 @@ describe("proxy: sign-in routes with AUTH_EDGE_GATE and HARD_HOST_SPLIT on", () 
     expect(res.headers.get("location")).toBeNull();
   });
 });
+
+describe("proxy: the Staff console host", () => {
+  const saved = { ...process.env };
+  const ADMIN = "admin.workwrk.test";
+  beforeEach(() => {
+    process.env.ADMIN_HOST = ADMIN;
+    process.env.APP_HOST = APP;
+    process.env.MARKETING_HOST = MKT;
+  });
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it("serves robots.txt there (it turns every crawler away) and sends other pages to the console", async () => {
+    const robots = await proxy(req("/robots.txt", ADMIN));
+    expect(robots.headers.get("location")).toBeNull();
+    const page = await proxy(req("/pricing", ADMIN));
+    expect(new URL(page.headers.get("location")!).pathname).toBe("/admin");
+  });
+});

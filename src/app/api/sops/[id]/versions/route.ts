@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, isManager, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
-import { safeStoredContent } from "@/lib/safe-html";
 
 // GET: List all versions of an SOP
 export async function GET(
@@ -89,7 +88,7 @@ export async function POST(
     data: {
       title: version.title,
       description: version.description,
-      content: safeStoredContent(version.content) as Prisma.InputJsonValue,
+      content: version.content as Prisma.InputJsonValue,
       version: sop.version + 1,
     },
   });

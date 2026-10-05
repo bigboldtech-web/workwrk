@@ -95,12 +95,23 @@ const nextConfig: NextConfig = {
   // (LiveKit runs in the page). No script CSP yet: user HTML is sanitized
   // (src/lib/safe-html.ts), and a script policy needs nonces wired through
   // the app before it can be switched on without breaking pages.
+  //
+  // Uploaded files are the exception, and get the strictest policy there is:
+  // opened as a page of their own, an uploaded SVG or HTML file runs no
+  // script, submits no form, loads nothing from elsewhere and has no origin,
+  // so it can never act as the person viewing it. Images still show in the
+  // app (a policy on an image response does not apply to an <img>). These
+  // rules come after the general one: when two rules set a header, the last
+  // wins, and Next keeps these over any header a route sets itself.
   async headers() {
     const common = [
       { key: "Strict-Transport-Security", value: "max-age=31536000" },
       { key: "X-Content-Type-Options", value: "nosniff" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       { key: "Permissions-Policy", value: "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=()" },
+    ];
+    const uploads = [
+      { key: "Content-Security-Policy", value: "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'self'" },
     ];
     return [
       { source: "/embed/:path*", headers: common },
@@ -112,7 +123,23 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
         ],
       },
+      { source: "/api/uploads/:path*", headers: uploads },
+      { source: "/uploads/:path*", headers: uploads },
     ];
+  },
+
+  // Files in public/uploads are served by the uploads route, never straight
+  // from the folder. Next serves public/ by file extension from what is there
+  // when the server starts, so after a restart an uploaded .html file would
+  // open as a page; the route serves images as images and everything else as
+  // a download. Old logo links (/uploads/<name>, written before the route
+  // existed) keep working, through the route.
+  async rewrites() {
+    return {
+      beforeFiles: [{ source: "/uploads/:path*", destination: "/api/uploads/:path*" }],
+      afterFiles: [],
+      fallback: [],
+    };
   },
 
   // Comms Hub was briefly shipped under /chat before the Room rename

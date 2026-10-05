@@ -46,20 +46,24 @@ export async function POST(req: NextRequest) {
   const aiOff = await aiOffResponse(orgId);
   if (aiOff) return aiOff;
 
+  // The AI app open to this person: the rail's hide and floor and the Guest
+  // rule (Settings > Apps), which this route used to skip, for every kind of
+  // question.
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
+
   // A meeting summary (the AI summary button on a meeting) needs only the
   // notes the person sent: no workspace data goes into its prompt.
   if (body.type === "meeting_summary") return summarizeNotes(orgId, userId, query);
 
   // Everything below puts the whole workspace into the prompt: its people and
   // their levels, this period's performance scores with manager and peer
-  // ratings, named KPI readings, KRA assignments, every SOP and the latest
-  // meetings. So it answers only someone who may read all of that: the Owner,
-  // an Admin or the People team, with the AI app open to them (the rail's hide
-  // and floor and the Guest rule, which this route used to skip).
-  const gate = await requireApp("ai");
-  if ("error" in gate) return gate.error;
-  if (!isOwnerOrAdmin(gate.viewer) && gate.viewer.peopleTeam !== true) {
-    return jsonError("Questions about the whole workspace are for its Owner, Admins and People team.", 403);
+  // ratings, named KPI readings, KRA assignments, every SOP, drafts included,
+  // and the latest meetings. So it answers only someone who may read all of
+  // that: the Owner or an Admin. (Not the People team: SOPs and meetings
+  // follow their own sharing, which the People team does not get past.)
+  if (!isOwnerOrAdmin(gate.viewer)) {
+    return jsonError("Questions about the whole workspace are for its Owner and Admins.", 403);
   }
 
   // Gather comprehensive org context.

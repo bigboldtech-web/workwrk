@@ -34,7 +34,8 @@ export async function GET(req: Request) {
       version: "v1",
       description:
         "WorkwrK public REST API — programmatic access to the operating-system spine. " +
-        "Authenticate with `Authorization: Bearer wk_live_...`. Rate limits are enforced per key.",
+        "Authenticate with `Authorization: Bearer wk_live_...`. Rate limits are enforced per key. " +
+        "A signed-in session also works, for the workspace's Owner and Admins only.",
       contact: { name: "WorkwrK Developers", email: "developers@workwrk.com" },
     },
     servers: [{ url: `${base}/api/v1`, description: "Production" }],
@@ -189,6 +190,10 @@ export async function GET(req: Request) {
         },
         post: {
           summary: "Invite a person into the org",
+          description:
+            "Creates a pending invitation and returns its join link (`acceptUrl`) for you to send. " +
+            "Answers 409 when the email is already in the workspace or already invited. " +
+            "The email must use one of the workspace's invite domains, when it has any.",
           requestBody: {
             required: true,
             content: {
@@ -200,7 +205,12 @@ export async function GET(req: Request) {
                     email: { type: "string", format: "email" },
                     firstName: { type: "string" },
                     lastName: { type: "string" },
-                    accessLevel: { type: "string" },
+                    accessLevel: {
+                      type: "string",
+                      description:
+                        "Read only from a signed-in Owner's or Admin's session, and never above their own level. " +
+                        "With an API key the person is invited as an Employee and this field is ignored.",
+                    },
                     roleId: { type: "string" },
                     departmentId: { type: "string" },
                   },
@@ -382,6 +392,8 @@ export async function GET(req: Request) {
   const SCOPE_OF: Record<string, "READ" | "WRITE"> = {
     get: "READ", post: "WRITE", put: "WRITE", patch: "WRITE", delete: "WRITE",
   };
+  // Endpoints that need more than their method's scope.
+  const SCOPE_OVERRIDE: Record<string, "ADMIN"> = { "post /people": "ADMIN" };
   const errRef = (description: string) => ({
     description,
     content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
@@ -389,7 +401,7 @@ export async function GET(req: Request) {
 
   (spec.components as Record<string, unknown>).responses = {
     Unauthorized: errRef("Missing, malformed, revoked or unknown API key."),
-    Forbidden: errRef("The key is valid but lacks the scope this endpoint requires."),
+    Forbidden: errRef("The key lacks the scope this endpoint requires, or the signed-in person is not the workspace's Owner or an Admin."),
     RateLimited: errRef("Per-minute or per-day rate limit for this key exceeded."),
   };
 
@@ -406,7 +418,8 @@ export async function GET(req: Request) {
         "429": { $ref: "#/components/responses/RateLimited" },
       };
       // Surface the scope a key needs, so a reader never has to guess.
-      op.description = `${(op.description as string) ?? ""}\n\nRequires a key with the **${SCOPE_OF[method]}** scope (ADMIN satisfies every scope).`.trim();
+      const scope = SCOPE_OVERRIDE[`${method} ${path}`] ?? SCOPE_OF[method];
+      op.description = `${(op.description as string) ?? ""}\n\nRequires a key with the **${scope}** scope${scope === "ADMIN" ? "" : " (ADMIN satisfies every scope)"}.`.trim();
     }
   }
 

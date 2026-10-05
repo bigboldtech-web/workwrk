@@ -29,6 +29,19 @@ all seven of these rules, and a script that does not is not run:
 
 ## The approval gate
 
+**Amended again in Batch 11 (2026-10): the deploy no longer runs any data
+script.** Run on every release, `migrate-legacy-tasks.ts` also moved the
+Google Calendar events synced since the last deploy into tasks, and
+`migrate-public-sop-links.ts` switched Public links back to View only in
+workspaces whose Admin had turned them Off. Both steps are gone from
+`.github/workflows/deploy.yml`, the logs and markers below are no longer
+written, and both scripts are run by hand again, behind the gate like every
+other data migration. Each now also refuses what went wrong: the task
+migration skips calendar events, and the links migration skips any workspace
+whose Admin has set the toggle. `scripts/repair-deploy-data-steps.ts` sets
+the links back to Off where a re-run had overridden an Admin. The rest of this
+section is the history of the automatic run.
+
 **Amended 2026-09-19.** The founder delegated this explicitly ("You have to do
 it yourself. Do everything and push."), so `migrate-legacy-tasks.ts` now runs
 automatically in the deploy, and the gate below no longer blocks it. The gate
@@ -143,7 +156,7 @@ is not the same as run in production**, which is the founder's step every time
 | ~~`migrate-legacy-tasks.ts`~~ **WRITTEN, Stage F** | every live `Task` and `TaskComment` into `Item` / `ItemUpdate` on the assignee's Personal list, with `metadata.legacyTaskId` and a `LegacyRedirect` row | work-home W4 | `LegacyRedirect` (shipped in `prisma/sql/2026-09-18-task-detail-phase2.sql`); every Personal list existing (the script creates a missing one); the consumer re-points, which shipped with it |
 | ~~`migrate-ideas.ts`~~ **WRITTEN, Stage F** | every `Idea` into an Item on the seeded Ideas list, with a `LegacyRedirect` row | work-home W5 | the Ideas list template (seeded: `list.ideas-board`); **must run before the `/ideas` 308**, or the redirect is a delete. The redirect is deliberately NOT in `next.config.ts` yet |
 | ~~`migrate-preference-keys.ts`~~ **WRITTEN, Stage F** | every `home.topPins` entry folded into the `favorite<Kind>Ids` array for its kind, so the rows behind the deleted top-pins strip become ordinary favorites | work-home W1 and W2 | the strict-schema keys existing (they do, as of Phase 2 Stage A); nothing else |
-| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken`, plus one `access.settings.migrated` audit row per org | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run automatically by `.github/workflows/deploy.yml` between the build and the pm2 reload, see its section below |
+| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken`, plus one `access.settings.migrated` audit row per org | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run by hand (the deploy ran it until Batch 11), see its section below |
 
 ## Stage C: the two that are written, and what the founder has to do
 
@@ -513,17 +526,14 @@ change that makes `/share/sop/[token]` read the toggle, and it must be run
 BEFORE that build serves traffic, or every public SOP link answers "This link is
 no longer available" until it is.
 
-**When, exactly. The deploy now does this for you.**
-`.github/workflows/deploy.yml` runs the dry run and then the write between the
-successful build and the `pm2 reload`, in the same slot
-`migrate-legacy-tasks.ts` occupies. That window is the whole requirement: the
-old release is still the one answering, so the links never stop resolving. Its
-two logs land beside the build log on the box:
-`/www/wwwroot/workwrk.com/public-sop-links-dryrun.log` and
-`-write.log`. A failure there does not abort the deploy, so grep the job output
-for `PUBLIC-SOP-WRITE-FAILED` and, if it is there, run the write by hand from
-the deployed checkout. The commands below are that by-hand run, and are also
-how to verify what the deploy did.
+**When, exactly. By hand, again.** The deploy ran the dry run and the write
+between the build and the `pm2 reload` until Batch 11, and it ran them on
+every release, so a workspace whose Admin had turned Public links Off was
+switched back to View only by the next deploy. That step is gone (see The
+approval gate above): the toggle fold it existed for has shipped, and the
+script now skips any workspace whose Admin has set the toggle.
+`scripts/repair-deploy-data-steps.ts` undoes the re-runs. The commands below
+are the by-hand run.
 
 Running it earlier, from a separate checkout with the production
 `DATABASE_URL`, is also safe: the write only sets a JSON key the old code never

@@ -303,6 +303,8 @@ function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (s: s
           type: "meeting_summary",
         }),
       });
+      // 403: the workspace has the AI app off for this person (Settings > Apps & modules).
+      if (res.status === 403) { toast("AI is turned off for you in this workspace. Ask an Admin."); return; }
       if (!res.ok) { toast("AI service unavailable."); return; }
       const data = await res.json();
       const summary = data.response || data.data?.response || data.answer || "";

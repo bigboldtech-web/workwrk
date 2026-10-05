@@ -20,7 +20,6 @@ import { getEffectivePreferences } from "@/lib/preferences";
 import { matchesFilters, matchesView, parseDocsListQuery, slicePage, sortDocs, type DocsCandidate } from "@/lib/docs-list";
 import { resolveDocLocations } from "@/lib/doc-location";
 import { readDocLocks } from "@/lib/doc-lock";
-import { safeStoredContent } from "@/lib/safe-html";
 
 const createSchema = z.object({
   title: z.string().min(1).max(300),
@@ -344,7 +343,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: DOC_ANCHOR_REFUSAL, code: "invalid_anchor", message: DOC_ANCHOR_REFUSAL }, { status: 400 });
   }
 
-  const content = safeStoredContent((parsed.data.content as object) ?? {});
+  const content = (parsed.data.content as object) ?? {};
 
   // The placement rule (node-rules P1 and P3). A doc is made only where the
   // viewer can edit: Can edit or higher on its anchor (a Space, a Folder, a

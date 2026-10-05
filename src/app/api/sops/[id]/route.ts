@@ -10,7 +10,6 @@ import { canWriteToFolder, folderGrantRole, resolveSopViewerRole } from "@/lib/s
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
 import { getSopKind, getSopLayout } from "@/lib/sop-kind";
 import { moveToTrash } from "@/lib/trash";
-import { safeStoredContent } from "@/lib/safe-html";
 
 export async function GET(
   _req: NextRequest,
@@ -142,8 +141,7 @@ export async function PATCH(
   if (description !== undefined) data.description = description;
   if (category !== undefined) data.category = category;
   if (subcategory !== undefined) data.subcategory = subcategory;
-  // Stored only with its HTML sanitized (src/lib/safe-html.ts).
-  if (content !== undefined) data.content = safeStoredContent(content);
+  if (content !== undefined) data.content = content;
   if (tags !== undefined) {
     data.tags = Array.isArray(tags)
       ? Array.from(new Set(

@@ -212,10 +212,16 @@ export async function GET(req: Request) {
   // the migration never deletes its source rows (scripts/MIGRATIONS.md rule
   // 6), so a count of the table itself would never fall and the notice would
   // stand for ever. This one reaches zero the moment the org is migrated, and
-  // the notice disappears by itself.
+  // the notice disappears by itself. Events synced from Google Calendar are
+  // rows of the same table but not tasks: the migration leaves them where
+  // they are, so they are not counted either.
   const legacyTasksPromise = (async () => {
     const rows = await prisma.task.findMany({
-      where: { organizationId: u.organizationId, assigneeId: u.id },
+      where: {
+        organizationId: u.organizationId,
+        assigneeId: u.id,
+        OR: [{ externalSource: null }, { externalSource: { not: "GCAL" } }],
+      },
       select: { id: true },
       take: 500,
     });

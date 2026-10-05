@@ -5,6 +5,7 @@ import { prisma } from "./prisma";
 import { createHash, randomBytes } from "crypto";
 import { clientIpFromHeaders } from "./client-ip";
 import type { ApiKeyScope } from "@/generated/prisma";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 
 /**
  * API auth layer.
@@ -148,7 +149,12 @@ export async function authenticate(
     };
   }
 
-  // Session fallback — dashboard users testing the API from a browser.
+  // Session fallback: a workspace's Owner or Admin trying the API from a
+  // browser. Only them: the v1 routes answer for the whole workspace (every
+  // KPI reading, task and SOP draft) and write past the product's per-person
+  // rules (kudos in anyone's name, numbers for anyone), which suits an
+  // integration key and an Admin, never a member's own session. Read from the
+  // database now, so a demotion takes the API away at once.
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return authFail("Missing or invalid credentials. Send Authorization: Bearer <key>.");
@@ -160,18 +166,16 @@ export async function authenticate(
   };
   if (!user.organizationId) return authFail("Session missing organization");
 
-  const isAdmin =
-    user.accessLevel === "SUPER_ADMIN" || user.accessLevel === "COMPANY_ADMIN";
-  const scopes: ApiKeyScope[] = isAdmin ? ["READ", "WRITE", "ADMIN"] : ["READ", "WRITE"];
-  if (requiredScope && !scopesCover(scopes, requiredScope)) {
-    return authFail(`Session user lacks "${requiredScope}" scope`, 403);
+  const fresh = await freshWorkspaceActor(session);
+  if (!fresh.ok || !fresh.admin) {
+    return authFail("The API takes an API key (Authorization: Bearer <key>). A signed-in session works only for the workspace's Owner and Admins.", 403);
   }
   return {
     error: null,
     ctx: {
       organizationId: user.organizationId,
       userId: user.id,
-      scopes,
+      scopes: ["READ", "WRITE", "ADMIN"],
       via: "session",
     },
   };
