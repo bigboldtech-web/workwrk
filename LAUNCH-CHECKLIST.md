@@ -104,10 +104,12 @@ Before taking a real card:
 - **The customer portal is set up**, in test mode and again in live mode
   (Stripe dashboard, Settings, Billing, Customer portal), with payment method
   updates, invoice history, cancellation, and subscription updates with
-  quantity changes for the Growth price turned on. Until it is saved, Stripe
-  refuses to open the portal, so Manage billing fails; without quantity
-  changes, the seat sentences that say "add seats in Plan & billing (Manage
-  billing)" are false.
+  quantity changes for the Growth price turned on (no other prices: plan
+  changes go through billing@workwrk.com, as Plan & billing says). Until it
+  is saved, Stripe refuses to open the portal, so Manage billing fails;
+  without quantity changes, the seat sentences that say "add seats in Plan &
+  billing (Manage billing)" are false. A quantity lowered below the people
+  and open invitations in the workspace is put back up by the product.
 - **Stripe's failed-payment emails** (Settings, Billing, Subscriptions and
   emails) are on, so a customer whose card fails hears about it: the product
   itself sends none, it only moves a subscription that ends unpaid back to

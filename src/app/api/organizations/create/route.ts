@@ -5,15 +5,34 @@ import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-h
 import { logAuditEvent } from "@/lib/activity";
 import { seedOrgDefaults, seedStarterSpace } from "@/lib/org/seed-org-defaults";
 import { selfServeTrialEnd } from "@/lib/admin/trial-end";
+import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
+
+/** Workspaces one account may create from the menu in a day. */
+const WORKSPACES_PER_DAY = 3;
 
 // POST /api/organizations/create  { name }
 // Create a brand-new workspace (Organization) and make the caller its admin
 // (OrganizationMembership). The client then switches into it via
 // /api/me/switch-org. Mirrors the org setup in auth/register.
+//
+// LIMITED, like signing up: at most WORKSPACES_PER_DAY a day per account,
+// counted from the memberships it made today (they survive a restart), and
+// the sign-up's 10 an hour per address. Every new workspace is a free one, so
+// with no limit a script could make workspaces without end.
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const userId = getUserId(session);
+
+  const perAddress = rateLimit(`org-create:${ipFromRequest(req)}`, { max: 10, windowMs: 60 * 60 * 1000 });
+  if (!perAddress.ok) return jsonError("Too many workspaces made from this address. Try again in an hour.", 429);
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const madeToday = await prisma.organizationMembership.count({
+    where: { userId, role: "COMPANY_ADMIN", createdAt: { gt: since }, organization: { createdAt: { gt: since } } },
+  });
+  if (madeToday >= WORKSPACES_PER_DAY) {
+    return jsonError(`You can make ${WORKSPACES_PER_DAY} new workspaces a day. Try again tomorrow.`, 429);
+  }
 
   const body = await req.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";

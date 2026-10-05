@@ -7,7 +7,7 @@ import { rateLimit } from "@/lib/rate-limit-memory";
 import { lockWorkspaceSeats, seatUse } from "@/lib/seats";
 import { seatsAreUnlimited, UNLIMITED_SEATS } from "@/lib/admin/companies-list";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
-import { subscriptionStillOpen } from "@/services/billing";
+import { expireOpenCheckouts, openSubscriptionsOf, stripe } from "@/services/billing";
 import type { Plan } from "@/generated/prisma";
 
 /**
@@ -56,6 +56,7 @@ const rank = (plan: string) => PLAN_RANK[plan] ?? 0;
 const seatWords = (n: number) => (n >= UNLIMITED_SEATS ? "unlimited seats" : `${n} seats`);
 
 class CodeTaken extends Error {}
+class StripeArrived extends Error {}
 class AddsNothing extends Error {
   constructor(readonly plan: string, readonly seats: number) { super("adds nothing"); }
 }
@@ -103,19 +104,23 @@ export async function POST(req: NextRequest) {
   }
 
   // Refuse while a Stripe subscription can still bill: avoid double-billing.
-  // The row stores unpaid and paused as INCOMPLETE, so Stripe is asked.
+  // Stripe is asked, not the row (it stores unpaid and paused as INCOMPLETE,
+  // and a checkout paid a moment ago is in Stripe before our webhook has it),
+  // and a checkout still open is closed first, so none can be paid on top of
+  // the code.
   const existing = await prisma.subscription.findUnique({
     where: { organizationId: orgId },
-    select: { stripeSubscriptionId: true, status: true },
+    select: { stripeCustomerId: true, stripeSubscriptionId: true, status: true },
   });
-  if (existing?.stripeSubscriptionId && String(existing.status) !== "CANCELED") {
-    const open = LIVE_STRIPE.has(String(existing.status)) || (await subscriptionStillOpen(existing.stripeSubscriptionId).catch(() => true));
-    if (open) {
-      return jsonError(
-        "Your organization has an active Stripe subscription. Cancel it first (Settings, Plan & billing, Manage billing) before redeeming an AppSumo code.",
-        409,
-      );
-    }
+  const STRIPE_OPEN = "Your organization has an active Stripe subscription. Cancel it first (Settings, Plan & billing, Manage billing) before redeeming an AppSumo code.";
+  if (existing?.stripeCustomerId && stripe) {
+    const open = await expireOpenCheckouts(existing.stripeCustomerId)
+      .then(() => openSubscriptionsOf(existing.stripeCustomerId as string))
+      .catch(() => null);
+    if (open === null) return jsonError("Stripe could not be asked about this workspace's subscription. Try again in a minute.", 502);
+    if (open.length > 0) return jsonError(STRIPE_OPEN, 409);
+  } else if (existing?.stripeSubscriptionId && String(existing.status) !== "CANCELED") {
+    return jsonError(STRIPE_OPEN, 409);
   }
 
   // Apply atomically, under the workspace's seat lock: the claim, the
@@ -126,6 +131,10 @@ export async function POST(req: NextRequest) {
       await lockWorkspaceSeats(tx, orgId);
       const org = await tx.organization.findUnique({ where: { id: orgId }, select: { plan: true, status: true } });
       if (!org) throw new CodeTaken();
+      // A subscription that arrived since the check above (its webhook ran in
+      // between) wins: no code on top of a card subscription.
+      const now = await tx.subscription.findUnique({ where: { organizationId: orgId }, select: { stripeSubscriptionId: true, status: true } });
+      if (now?.stripeSubscriptionId && LIVE_STRIPE.has(String(now.status))) throw new StripeArrived();
       const use = await seatUse(orgId, tx);
       const codeSeats = seatsAreUnlimited(row.seats) ? UNLIMITED_SEATS : Math.max(row.seats, PLAN_LIMITS.STARTER.users);
       const plan = rank(String(row.plan)) > rank(String(org.plan)) ? String(row.plan) : String(org.plan);
@@ -168,6 +177,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     if (e instanceof CodeTaken) return jsonError("This code has already been redeemed.", 409);
+    if (e instanceof StripeArrived) return jsonError(STRIPE_OPEN, 409);
     if (e instanceof AddsNothing) {
       return jsonError(
         `This code would add nothing: this workspace already has the ${PLAN_LABEL[e.plan] ?? e.plan} plan with ${seatWords(e.seats)}. It was not used, so it still works for another workspace.`,

@@ -6,7 +6,7 @@ import {
   jsonError,
   jsonSuccess,
   } from "@/lib/api-helpers";
-import { createCheckoutSession, isBillingLive, ownReturnUrl, subscriptionStillOpen, type BillingKey } from "@/services/billing";
+import { BillingRefusal, createCheckoutSession, isBillingLive, ownReturnUrl, subscriptionStillOpen, type BillingKey } from "@/services/billing";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { seatUse } from "@/lib/seats";
 import { subscriptionSource } from "@/lib/admin/companies-list";
@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
     });
     return jsonSuccess({ url, sessionId });
   } catch (err) {
+    if (err instanceof BillingRefusal) return jsonError(err.message, 409);
     const msg = err instanceof Error ? err.message : "Failed to create checkout session";
     return jsonError(msg, 500);
   }

@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = { plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
+const state = { personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
 
 vi.mock("@/lib/ai-usage", () => ({
   claimAiUse: async (org: string, kind: string, cap: number) => {
@@ -16,7 +16,9 @@ vi.mock("@/lib/ai-usage", () => ({
 
 vi.mock("@/lib/prisma", () => {
   const aIQuery = {
-    count: async () => state.used,
+    // A count with a userId is the person's free questions across free
+    // workspaces; without, the workspace's own.
+    count: async (a?: { where?: { userId?: string } }) => (a?.where?.userId ? state.personal : state.used),
     create: async (a: { data: Record<string, unknown> }) => {
       state.created.push(a.data);
       state.used += 1;
@@ -51,6 +53,7 @@ beforeEach(() => {
   state.orgFound = true;
   state.autoAnswer = "ok";
   state.autoClaims = [];
+  state.personal = 0;
 });
 
 describe("claimAiQuestion", () => {
@@ -85,6 +88,21 @@ describe("claimAiQuestion", () => {
   it("refuses a workspace that does not exist", async () => {
     state.orgFound = false;
     expect((await claimAiQuestion("gone", "u1", "x")).ok).toBe(false);
+  });
+
+  it("refuses a person who has used the free questions one person gets across free workspaces, though this one has room", async () => {
+    state.used = 3;
+    state.personal = 50;
+    const r = await claimAiQuestion("org-new", "u-farm", "Ask AI message");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/one person gets across free workspaces/);
+    expect(state.created).toEqual([]);
+  });
+
+  it("does not count the person's free questions in a paid workspace", async () => {
+    state.plan = "GROWTH";
+    state.personal = 50;
+    expect((await claimAiQuestion("org", "u-paid", "x")).ok).toBe(true);
   });
 
   it("never refuses Enterprise, whose 99,999 means no limit, and still records the question", async () => {
@@ -150,6 +168,12 @@ describe("aiAutoAllowed", () => {
     expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
     state.autoAnswer = "not_ready";
     expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
+  });
+
+  it("takes nothing of the day on a workspace's own key (BYOK): it pays for its own calls", async () => {
+    state.plan = "ENTERPRISE";
+    expect(await aiAutoAllowed("org", "auto-7", "byok")).toBe(true);
+    expect(state.autoClaims).toEqual([]);
   });
 
   it("uses the plan's daily total, and runs for Enterprise however many questions it has used", async () => {

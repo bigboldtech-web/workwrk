@@ -28,7 +28,7 @@ import { invitationTemplate } from "@/lib/email-templates";
 import { logAuditEvent } from "@/lib/activity";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
-import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 
 export interface InvitationRequest {
   organizationId: string;
@@ -154,8 +154,12 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
   // too: while expired it held none.
   const placed = await prisma.$transaction(async (tx) => {
     await lockWorkspaceSeats(tx, orgId);
-    const seats = await seatsFor(orgId, 1, tx);
-    if (!seats.ok) return { kind: "refused", message: seats.message } as const;
+    // An address that already holds a seat here (a Space invitation, say)
+    // takes none more.
+    if (await seatsForAddress(orgId, email, tx, existingInvite?.id)) {
+      const seats = await seatsFor(orgId, 1, tx);
+      if (!seats.ok) return { kind: "refused", message: seats.message } as const;
+    }
     if (existingInvite) {
       const renewed = await tx.invitation.updateMany({
         where: { id: existingInvite.id, accepted: false, expiresAt: { lt: now } },

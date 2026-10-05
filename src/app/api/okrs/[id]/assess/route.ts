@@ -80,7 +80,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { pctTimeElapsed, daysLeft, isStale } = sig;
 
   const signals = {
-    title: okr.title,
+    // Cut here: the caller wrote the goal, so its size is ours to set. The
+    // prompt and the cache key are both bounded.
+    title: okr.title.slice(0, 200),
     level: okr.level,
     progressPercent: progress,
     measured,
@@ -90,7 +92,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     daysSinceLastCheckin: daysSinceCheckin,
     checkInIsStale: isStale,
     cadence: okr.checkInCadence,
-    keyResults: keyResults.map((kr) => ({ title: kr.title, progress: kr.progress, current: kr.currentValue, target: kr.targetValue, unit: kr.unit ?? null })),
+    keyResults: keyResults.slice(0, 20).map((kr) => ({ title: kr.title.slice(0, 200), progress: kr.progress, current: kr.currentValue, target: kr.targetValue, unit: kr.unit?.slice(0, 40) ?? null })),
     effort: { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt },
     verdict,
   };
@@ -119,11 +121,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // An assessment nobody asked for never spends one of the plan's AI
   // questions; the model writes it only while the workspace has some left
   // (src/lib/ai-allowance.ts), and the worked-out one stands otherwise.
-  if (!(await aiAutoAllowed(orgId, getUserId(session)))) return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });
+  if (!(await aiAutoAllowed(orgId, getUserId(session), ai.source))) return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });
 
   try {
     const message = await createMessageWithFallback(ai.client, {
-      model: modelFor(ai, "claude-sonnet-4-6"),
+      model: modelFor(ai, "claude-haiku-4-5"),
       max_tokens: 500,
       system: SYSTEM,
       messages: [{ role: "user", content: JSON.stringify(signals) }],
