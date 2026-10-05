@@ -187,7 +187,11 @@ async function apply(p: OrgBackfillPlan): Promise<{ ok: boolean; problems: strin
           targetType: "Organization",
           targetId: p.organizationId,
           description: `Access backfill: ${users} org roles, ${grants} grants, ${rf.count + rb.count} restricted, ${fs.count} findable, ${fills} owners filled.`,
-          metadata: JSON.parse(JSON.stringify({ preflight: p.preflight, deferredEveryone: p.deferredEveryone, writes: { users, grants, restrictedFolders: rf.count, restrictedBoards: rb.count, findable: fs.count, ownerFills: fills } })),
+          // publicLinksWritten: false says this run stored no Public links
+          // value (since Batch 11 the plan leaves them out), so the public
+          // SOP link carry-over never reads this row as the source of a
+          // stored value (scripts/migrate-public-sop-links.ts).
+          metadata: JSON.parse(JSON.stringify({ preflight: p.preflight, deferredEveryone: p.deferredEveryone, publicLinksWritten: false, writes: { users, grants, restrictedFolders: rf.count, restrictedBoards: rb.count, findable: fs.count, ownerFills: fills } })),
         },
       });
     });

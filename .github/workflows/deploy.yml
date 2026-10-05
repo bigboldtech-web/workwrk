@@ -93,6 +93,9 @@ jobs:
 
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
+            # Local files live in storage/uploads since Batch 11 (moved out
+            # of public/ at each start, one way): scripts/MIGRATIONS.md,
+            # "Local uploads", says how to go back to an older build.
             echo "==> Restoring ownership to www"
             chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}" > /tmp/wd-chown.log 2>&1 || fail "chown" /tmp/wd-chown.log
 

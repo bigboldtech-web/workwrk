@@ -6,9 +6,10 @@
 // the s3Key alongside the url; doc reads re-presign so the URL is
 // always fresh.
 //
-// Development fallback: when S3 isn't configured, writes to
-// public/uploads (same as the previous implementation) so dev still
-// works without setting AWS keys.
+// Local fallback: when object storage is not configured, or a write to it
+// fails, the file is written to storage/uploads (src/lib/local-uploads.ts),
+// outside public/, and served only by /api/uploads/[filename]. Before
+// Batch 11 it wrote to public/uploads.
 
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { NextRequest, NextResponse } from "next/server";

@@ -39,9 +39,12 @@ export async function POST(req: NextRequest) {
   if (rows.length > 1000) return err(400, "Up to 1,000 people per import");
 
   const orgId = ctx.organizationId;
-  const [org, members, pending, departments, roles, offices] = await Promise.all([
+  const [org, members, memberships, pending, departments, roles, offices] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true } }),
     prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
+    // People in this workspace through a membership (anchored in another):
+    // /join refuses them too, so a row for one is a member, not an invite.
+    prisma.organizationMembership.findMany({ where: { organizationId: orgId, user: { deletedAt: null } }, select: { user: { select: { email: true } } } }),
     // Only LIVE invitations block a row: a person whose invite expired can be
     // imported again (the expired row stays, untouched).
     prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } }, select: { email: true } }),
@@ -53,6 +56,7 @@ export async function POST(req: NextRequest) {
   const domain = (org?.domain?.trim() || me?.email.split("@")[1] || "").toLowerCase();
   const memberByEmail = new Map(members.map((m) => [m.email.toLowerCase(), m]));
   const invited = new Set(pending.map((p) => p.email.toLowerCase()));
+  const memberElsewhere = new Set(memberships.map((m) => m.user.email.toLowerCase()));
   const dept = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
   const role = new Map(roles.map((r) => [(r.title || "").trim().toLowerCase(), r.id]));
   const office = new Map<string, string>();
@@ -79,6 +83,7 @@ export async function POST(req: NextRequest) {
       outcomes.push({ row: rowNum, email, status: "member", message: existing.deletedAt ? "Removed member: restore them from the Directory" : "Already a member" });
       return;
     }
+    if (memberElsewhere.has(email)) { outcomes.push({ row: rowNum, email, status: "member", message: "Already a member" }); return; }
     if (invited.has(email)) { outcomes.push({ row: rowNum, email, status: "invited", message: "Already invited" }); return; }
     const deptName = s(r.department).toLowerCase();
     const titleName = s(r.jobTitle ?? r.role).toLowerCase();

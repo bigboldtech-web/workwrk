@@ -23,6 +23,7 @@ import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { recordSpaceInvite } from "@/lib/access/grants";
+import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 
 const schema = z.object({
   email: z.string().email(),
@@ -105,14 +106,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   const email = parsed.data.email.toLowerCase();
 
-  // Already in the org?
-  const existingUser = await prisma.user.findFirst({
-    where: { email, organizationId: c.organizationId, deletedAt: null },
-    select: { id: true },
-  });
-  if (existingUser) {
+  // Already in the workspace, as their own account or as a membership
+  // (someone who works in several is anchored in only one), deactivated or
+  // not: /join refuses every one of them, so no invitation is made for them.
+  const inOrg = await alreadyInOrg(email, c.organizationId);
+  if (inOrg.member) {
     return NextResponse.json(
-      { error: "This person is already in your org — add them from the People tab instead." },
+      {
+        error: inOrg.inactive
+          ? "This person was in your workspace and is deactivated. Reactivate them from People, then add them to the Space."
+          : "This person is already in your workspace. Add them to the Space from the People tab instead.",
+      },
       { status: 400 },
     );
   }
