@@ -165,7 +165,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
 
   async function trash() {
     onClose();
-    const ok = await confirm({ title: `Move "${name}" to Trash?`, description: `Restore within ${trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move "${name}" to Trash?`, description: "You can restore it from Trash.", destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "DELETE" });
     if (r.ok) {

@@ -5,7 +5,7 @@ import { clientIpFromHeaders } from "@/lib/client-ip";
 
 /** Current privacy-policy version. Bump whenever material terms change — all
  * users will be re-prompted to re-consent. */
-export const POLICY_VERSION = "2026-10-05";
+export const POLICY_VERSION = "2026-10-06";
 
 export interface VisitorGeo {
   country: string | null;

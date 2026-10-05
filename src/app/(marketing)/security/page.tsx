@@ -74,8 +74,8 @@ const CONTROLS: Array<{ title: string; body: string }> = [
     body: "A person sees the spaces, folders and lists they have been given. Administrators can narrow that further, and sharing is per entity rather than all or nothing.",
   },
   {
-    title: "Your data leaves with you",
-    body: "Export is available on every tier including the free one, any time. Deleted items go to Trash first, where an Owner or Admin can bring them back.",
+    title: "Export on every tier",
+    body: "Export people, Spaces, Lists and tasks, Docs, SOPs, Tables, Goals and review cycles any time, on every tier including the free one. Files, canvases, forms, chat, Doc comments and review answers are not in the export yet, so ask us for a copy before you delete a workspace. Deleted Spaces, Folders, Lists, tasks, Docs, canvases, tables, forms, files and SOPs go to Trash first, where an Owner or Admin can bring them back; a deleted goal is gone at once.",
   },
 ];
 

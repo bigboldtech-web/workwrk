@@ -757,9 +757,6 @@ function Ring({ percent }: { percent: number }) {
   );
 }
 
-/** Task, Owner: the Effort card under a goal. */
-const GOAL_EFFORT_COLS: MkColWidths = [null, 44];
-
 export function GoalDetailSurface({ percent }: { percent?: number }) {
   const { goal } = tuesday;
   const value = percent ?? goal.progressAfter;
@@ -788,16 +785,29 @@ export function GoalDetailSurface({ percent }: { percent?: number }) {
           <div style={{ marginBottom: 6 }}>
             <Meta>Effort</Meta>
           </div>
-          <MkTableCard columns={["Task", "Owner"]} widths={GOAL_EFFORT_COLS} footer={`${goal.effort.length} linked tasks`}>
-            {goal.effort.map((e) => (
-              <MkTableRow key={e.taskId} widths={GOAL_EFFORT_COLS} selected={e.taskId === tuesday.task.id}>
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {e.title}
-                </span>
-                <MkAvatar initials={castInitials(e.owner)} />
-              </MkTableRow>
+          {/* The product's Effort card (okrs/[id]/goal-effort.tsx): four
+              counts and who is driving it. It lists no tasks. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+            {([
+              ["Hours logged", `${goal.effortCounts.hoursLogged}h`],
+              ["Tasks done", String(goal.effortCounts.tasksDone)],
+              ["In progress", String(goal.effort.length)],
+              ["Last moved", goal.effortCounts.lastMoved],
+            ] as const).map(([label, value]) => (
+              <div key={label} style={{ border: "1px solid var(--os-line)", borderRadius: 6, padding: "8px 10px" }}>
+                <div style={{ fontSize: "var(--os-t-helper)", lineHeight: "var(--os-t-helper-lh)", color: "var(--os-ink-2)" }}>{label}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--os-ink)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+              </div>
             ))}
-          </MkTableCard>
+          </div>
+          <div style={{ marginTop: 10, marginBottom: 6 }}>
+            <Meta>Who&apos;s driving it</Meta>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[...new Set(goal.effort.map((e) => e.owner))].map((owner) => (
+              <MkAvatar key={owner} initials={castInitials(owner)} />
+            ))}
+          </div>
           <div style={{ marginTop: 8 }}>
             <MkChip tone="accent" icon={<Target size={12} strokeWidth={1.5} aria-hidden />}>
               {tuesday.kpi.name}: {tuesday.kpi.current} {tuesday.kpi.unit}, target {tuesday.kpi.target}

@@ -28,6 +28,7 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { apiFetch } from "@/lib/api-fetch";
 import { MoveFileDialog } from "./move-file-dialog";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 export interface FileMenuTarget {
   id: string;
@@ -120,7 +121,7 @@ export function FileRowMenu({ file, onClose, onChanged, onPreview }: {
   }
   async function trash() {
     onClose();
-    const ok = await confirm({ title: `Move "${file.name}" to Trash?`, description: `You can restore it for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move "${file.name}" to Trash?`, description: trashRestoreSentence(boot.org), destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const r = await apiFetch(`/api/files/${file.id}`, { method: "DELETE" });
     if (r.ok) { toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=file") } }); done("trashed"); }
@@ -198,7 +199,7 @@ export function FolderRowMenu({ folder, onClose, onChanged }: {
   }
   async function trash() {
     onClose();
-    const ok = await confirm({ title: `Move "${folder.name}" to Trash?`, description: `Everything inside goes with it. You can restore it for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move "${folder.name}" to Trash?`, description: `Everything inside goes with it. ${trashRestoreSentence(boot.org)}`, destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const r = await apiFetch(`/api/files/folders/${folder.id}`, { method: "DELETE" });
     if (r.ok) { toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=folder") } }); done("folder-trashed"); }

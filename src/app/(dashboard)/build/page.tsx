@@ -42,6 +42,7 @@ import {
   FIELD_TYPES, FIELD_TYPE_LABEL, blankDraft, draftFromGenerated, draftProblem, slugify, uniqueFieldKey,
   type AppDraft, type FieldType,
 } from "@/lib/build/app-draft";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type AppStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 type ApiApp = {
@@ -147,7 +148,7 @@ export default function BuildAppsPage() {
     void load();
   }
   async function remove(a: ApiApp) {
-    const ok = await confirm({ title: `Delete ${a.name}?`, description: `It moves to Trash with its rows. You can restore it from there for ${boot.org.trashDays} days.`, confirmLabel: "Delete", destructive: true });
+    const ok = await confirm({ title: `Delete ${a.name}?`, description: `It moves to Trash with its rows. ${trashRestoreSentence(boot.org)}`, confirmLabel: "Delete", destructive: true });
     if (!ok) return;
     const r = await apiFetch(`/api/build/apps/${a.slug}`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't delete the app", { tone: "danger" }); return; }

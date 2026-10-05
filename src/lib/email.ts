@@ -156,14 +156,22 @@ export function emailLogData(p: {
 // reminder digests, KPI and OKR reminders, announcements, reviews, reports)
 // queues through here, and none of them used to check, so a closed company's
 // people kept getting the monthly emails. A workspace that no longer exists
-// gets none either. Read once a minute per workspace, not once per email; a
-// failed read lets the email through, so a database blip never drops mail.
+// gets none either. A live answer is kept for a minute per workspace, not
+// read once per email; a closed one is read again every time, so a workspace
+// staff just reopened is never refused from the cache. A failed read lets the
+// email through, so a database blip never drops mail.
+//
+// ACCOUNT MAIL IS NOT THE WORKSPACE'S. A password reset and an address check
+// belong to the person, whose account outlives the workspace it is anchored
+// in: someone in two workspaces whose anchored one was closed must still be
+// able to reset a password and reach the other.
 const ORG_STATUS_TTL_MS = 60_000;
-const orgTakesMail = new Map<string, { ok: boolean; at: number }>();
+const orgTakesMail = new Map<string, number>();
+const ACCOUNT_TEMPLATES = new Set(["password-reset", "verify-email"]);
 
 async function workspaceTakesEmail(organizationId: string): Promise<boolean> {
-  const hit = orgTakesMail.get(organizationId);
-  if (hit && Date.now() - hit.at < ORG_STATUS_TTL_MS) return hit.ok;
+  const at = orgTakesMail.get(organizationId);
+  if (at !== undefined && Date.now() - at < ORG_STATUS_TTL_MS) return true;
   let ok = true;
   try {
     const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
@@ -172,7 +180,8 @@ async function workspaceTakesEmail(organizationId: string): Promise<boolean> {
     return true;
   }
   if (orgTakesMail.size > 5000) orgTakesMail.clear();
-  orgTakesMail.set(organizationId, { ok, at: Date.now() });
+  if (ok) orgTakesMail.set(organizationId, Date.now());
+  else orgTakesMail.delete(organizationId);
   return ok;
 }
 
@@ -186,7 +195,7 @@ export async function queueEmail({
   userId,
   category,
 }: QueueEmailParams): Promise<void> {
-  if (organizationId && !(await workspaceTakesEmail(organizationId))) {
+  if (organizationId && !ACCOUNT_TEMPLATES.has(template) && !(await workspaceTakesEmail(organizationId))) {
     if (IS_DEV) console.log(`[Email] Skipped (workspace suspended, cancelled or gone): ${template} → ${to}`);
     return;
   }

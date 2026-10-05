@@ -40,6 +40,7 @@ import { downloadUrl } from "@/lib/download";
 import { embedSnippet, objectLink } from "@/components/tables/object-share-dialog";
 import { currentOpenObject } from "@/components/layout/os/work-placement";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 export interface FormMenuTarget {
   id: string;
@@ -159,8 +160,8 @@ export function FormRowMenu({
     const ok = await confirm({
       title: `Move "${title}" to Trash?`,
       description: n > 0
-        ? `Its ${n.toLocaleString()} response${n === 1 ? "" : "s"} go with it. You can restore it from Trash for ${boot.org.trashDays} days.`
-        : `You can restore it from Trash for ${boot.org.trashDays} days.`,
+        ? `Its ${n.toLocaleString()} response${n === 1 ? "" : "s"} go with it. ${trashRestoreSentence(boot.org)}`
+        : trashRestoreSentence(boot.org),
       destructive: true,
       confirmLabel: "Move to Trash",
     });

@@ -134,8 +134,9 @@ server would then serve a folder the deploy does not swap.
 Email goes out when `EMAIL_ENABLED=true` and `SMTP_HOST` is set, plus
 `SMTP_USER` and `SMTP_PASS` for a mail server that needs a login (with
 neither set, no login is attempted). `SMTP_PORT` defaults to 587 and
-`SMTP_FROM` to `WorkwrK <noreply@workwrk.com>`. Those are the only names the
-code reads (`src/lib/email.ts`). Without `EMAIL_ENABLED` in production the
+`SMTP_FROM` to `WorkwrK <noreply@workwrk.com>`, and `EMAIL_REPLY_TO`, the
+Reply-To on every email, to `hello@workwrk.com`: replies go there, never to
+`SMTP_FROM`. Those are the only names the code reads (`src/lib/email.ts`). Without `EMAIL_ENABLED` in production the
 queue is held and nothing is marked sent; `/api/cron/email-queue` answers 503
 while any email is waiting, and once mail is set up everything waiting goes
 out. A send that fails is tried again after 1, 5, 30, 120 and 360 minutes,

@@ -290,7 +290,7 @@ export default function DocsPage() {
   async function bulkTrash() {
     const ids = selectedRows.filter((r) => r.canManage || (r.myRole === "edit" && r.ownerId === meId)).map((r) => r.id);
     if (ids.length === 0) { toast("You cannot move these docs to Trash"); return; }
-    const ok = await confirm({ title: `Move ${ids.length} doc${ids.length === 1 ? "" : "s"} to Trash?`, description: `You can restore them for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move ${ids.length} doc${ids.length === 1 ? "" : "s"} to Trash?`, description: "You can restore them from Trash.", destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "DELETE" })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;

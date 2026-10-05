@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Shield, Settings2, X } from "lucide-react";
 import { useConsent } from "./consent-provider";
-import type { ConsentState } from "@/lib/compliance/consent-client";
 
 /**
  * Geo-aware cookie consent banner.
@@ -73,15 +72,8 @@ function useReserveSpace(active: boolean) {
 }
 
 export function ConsentBanner() {
-  const { geo, showBanner, accept, acceptAll, rejectAll } = useConsent();
+  const { geo, showBanner, acceptAll } = useConsent();
   const [showDetails, setShowDetails] = useState(false);
-  const [prefs, setPrefs] = useState<ConsentState>({
-    necessary: true,
-    preferences: false,
-    analytics: false,
-    marketing: false,
-    doNotSell: false,
-  });
 
   const reserveRef = useReserveSpace(showBanner && !!geo);
 
@@ -105,7 +97,7 @@ export function ConsentBanner() {
               <div className="min-w-0 flex-1">
                 <p className="text-base font-semibold tracking-[-0.01em] text-zinc-900">
                   {isStrict
-                    ? "Your cookie choices"
+                    ? "Cookies on this site"
                     : isOptOut
                       ? "Your privacy choices"
                       : "Cookie notice"}
@@ -114,11 +106,11 @@ export function ConsentBanner() {
                   {/* Same promise, two lengths: the short one keeps the card
                       off the sign-in form on a phone. */}
                   <span className="sm:hidden">
-                    Essential cookies run the site. Optional ones only with your permission.
+                    Essential cookies only: no analytics, no advertising.
                   </span>
                   <span className="hidden sm:inline">
-                    We use essential cookies to run the site. With your permission we also
-                    remember your preferences. Nothing else: no analytics, no advertising.
+                    We use essential cookies to run the site, and remember the language and
+                    currency you pick. Nothing else: no analytics, no advertising.
                   </span>{" "}
                   <Link href="/cookies" className={LINK}>
                     Cookie policy
@@ -139,17 +131,15 @@ export function ConsentBanner() {
               </div>
             </div>
 
+            {/* One button in every region: the site sets no optional cookie
+                (/cookies), so there is nothing to accept or reject, only
+                something to read. Details lists what is set. */}
             <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:mt-4 sm:gap-2">
               <button type="button" className={BTN_SECONDARY} onClick={() => setShowDetails(true)}>
-                <Settings2 className="h-3.5 w-3.5" /> Customize
+                <Settings2 className="h-3.5 w-3.5" /> Details
               </button>
-              {isStrict && (
-                <button type="button" className={BTN_SECONDARY} onClick={rejectAll}>
-                  Reject all
-                </button>
-              )}
               <button type="button" className={`${BTN_SECONDARY} ml-auto`} onClick={acceptAll}>
-                {isStrict ? "Accept all" : "Got it"}
+                Got it
               </button>
             </div>
           </>
@@ -157,7 +147,7 @@ export function ConsentBanner() {
           <>
             <div className="mb-3.5 flex items-center justify-between">
               <p className="text-base font-semibold tracking-[-0.01em] text-zinc-900">
-                Manage cookie preferences
+                The cookies this site sets
               </p>
               <button
                 type="button"
@@ -175,40 +165,22 @@ export function ConsentBanner() {
                 checked
                 disabled
               />
-              <Row
-                title="Preferences"
-                description="Remember UI choices like theme, list layout, and dismissed tooltips."
-                checked={prefs.preferences}
-                onChange={(v) => setPrefs({ ...prefs, preferences: v })}
-              />
-              {/* No Analytics or Marketing rows: the site sets neither kind of
-                  cookie (/cookies section 4), so there is nothing to agree to. */}
+              {/* No Preferences, Analytics or Marketing rows: the site sets
+                  none of those (/cookies). The theme, list layout and other
+                  choices are saved with the account, not in a cookie, and
+                  nothing here ever read a Preferences answer. */}
+              <p className="text-sm text-zinc-500">
+                Nothing optional: no preference, analytics or advertising cookies, so there is nothing to turn on or
+                off.
+              </p>
             </div>
-            {/* Below sm the three buttons do not fit one row, so Reject all
-                and Accept all split the first row evenly (equal prominence)
-                and Save preferences takes the full second row. From sm up it
-                is the one row it always was. */}
             <div className="mt-4 flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
-                className={`${BTN_SECONDARY} flex-1 justify-center sm:flex-none`}
-                onClick={rejectAll}
-              >
-                Reject all
-              </button>
-              <button
-                type="button"
-                className={`${BTN_SECONDARY} order-last w-full justify-center sm:order-none sm:ml-auto sm:w-auto`}
-                onClick={() => accept(prefs)}
-              >
-                Save preferences
-              </button>
-              <button
-                type="button"
-                className={`${BTN_SECONDARY} flex-1 justify-center sm:flex-none`}
+                className={`${BTN_SECONDARY} ml-auto`}
                 onClick={acceptAll}
               >
-                Accept all
+                Got it
               </button>
             </div>
           </>

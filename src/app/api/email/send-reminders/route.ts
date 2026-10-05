@@ -18,17 +18,73 @@ import type { Prisma } from "@/generated/prisma";
 // email them anyway (queueEmail now refuses them too). Live people only: not
 // removed, not deactivated.
 //
-// HOW MUCH. Every read is per workspace, capped per workspace and per
-// digest, never per platform: one capped slice across every customer
-// covered only the companies with the oldest rows, and every other manager
-// silently got nothing. Done tasks are left out by the read itself (each
-// List's own done values), so finished work never fills a cap.
+// HOW MUCH. Every read is per workspace, and each workspace is read in full,
+// a page at a time: one capped slice across every customer covered only the
+// companies with the oldest rows, and a capped slice inside one workspace
+// did the same to its managers whose team's work was newer. A digest shows
+// the 50 oldest lines and says how many there are. Done tasks are left out by
+// the read itself (each List's own done values), so finished work never
+// fills a page.
+//
+// WHOSE MANAGER. A digest names one workspace's work, so it goes only to a
+// manager who is in that workspace (anchored there, or a member): a person's
+// manager is one field for every workspace they work in, and a client
+// workspace's task titles used to reach the manager in the agency.
 const LIVE_ORG = { status: { in: ["TRIAL", "ACTIVE"] as Array<"TRIAL" | "ACTIVE"> } };
 const LIVE_PERSON = { deletedAt: null, status: { not: "INACTIVE" as const } };
-/** Rows read per workspace for one job. */
-const PER_WORKSPACE = 2000;
+/** Rows read at a time. */
+const PAGE = 1000;
 /** Lines in one manager's digest (the oldest first). */
 const PER_DIGEST = 50;
+
+/**
+ * Every row of a read, a page at a time in the read's order (then by id), so
+ * no workspace is cut at a fixed number of rows.
+ */
+async function eachPage<T extends { id: string }>(
+  read: (page: { take: number; cursor?: { id: string }; skip?: number }) => Promise<T[]>,
+  onPage: (rows: T[]) => Promise<void> | void,
+): Promise<void> {
+  let cursor: string | null = null;
+  for (;;) {
+    const rows: T[] = await read({ take: PAGE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+    if (rows.length > 0) await onPage(rows);
+    if (rows.length < PAGE) return;
+    cursor = rows[rows.length - 1].id;
+  }
+}
+
+type DigestLine = { type: string; title: string; personName: string; daysOverdue: number };
+type DigestManager = { id: string; email: string; firstName: string };
+type ManagerFacts = DigestManager & { deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string }> };
+
+/** The manager fields a digest needs, with whether they are in `organizationId`. */
+function managerSelect(organizationId: string) {
+  return {
+    select: {
+      id: true, email: true, firstName: true, deletedAt: true, status: true, organizationId: true,
+      organizationMemberships: { where: { organizationId }, select: { id: true } },
+    },
+  } as const;
+}
+
+/** A live manager who is in this workspace, or null. */
+function digestManager(m: ManagerFacts | null | undefined, organizationId: string): DigestManager | null {
+  if (!m || m.deletedAt || m.status === "INACTIVE") return null;
+  if (m.organizationId !== organizationId && m.organizationMemberships.length === 0) return null;
+  return { id: m.id, email: m.email, firstName: m.firstName };
+}
+
+/** Lines kept per manager (the oldest, as rows arrive oldest first) and every line counted. */
+class Digests {
+  readonly byManager = new Map<string, { mgr: DigestManager; items: DigestLine[]; total: number }>();
+  add(mgr: DigestManager, line: DigestLine) {
+    const e = this.byManager.get(mgr.id) ?? { mgr, items: [], total: 0 };
+    e.total += 1;
+    if (e.items.length < PER_DIGEST) e.items.push(line);
+    this.byManager.set(mgr.id, e);
+  }
+}
 
 async function liveWorkspaceIds(): Promise<string[]> {
   return (await prisma.organization.findMany({ where: LIVE_ORG, select: { id: true } })).map((o) => o.id);
@@ -123,60 +179,60 @@ async function handle(req: NextRequest) {
     let assignments = 0;
     let digests = 0;
     for (const organizationId of await liveWorkspaceIds()) {
-      const overdueSops = await prisma.sOPAssignment.findMany({
-        where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON },
-        include: {
-          sop: { select: { title: true, organizationId: true } },
-          user: { select: { id: true, email: true, firstName: true, lastName: true,
-            manager: { select: { id: true, email: true, firstName: true, deletedAt: true, status: true } } } },
-        },
-        orderBy: { dueDate: "asc" },
-        take: PER_WORKSPACE,
-      });
-      if (overdueSops.length === 0) continue;
-      assignments += overdueSops.length;
-
-      // Notify users
-      await Promise.all(
-        overdueSops.map((a) => {
-          const days = Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000);
-          const { subject, html } = reminderTemplate({
-            itemType: "SOP", itemTitle: a.sop.title,
-            dueInfo: `overdue by ${days} day${days > 1 ? "s" : ""}`,
-            itemLink: `${baseUrl}/sops/my-sops`,
-          });
-          return sendEmail({ to: a.user.email, subject, html, template: "overdue-sop",
-            variables: { itemTitle: a.sop.title, daysOverdue: days },
-            organizationId: a.sop.organizationId, userId: a.user.id, category: "sop" })
-            .catch(() => {});
+      const digest = new Digests();
+      await eachPage(
+        (page) => prisma.sOPAssignment.findMany({
+          where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON },
+          include: {
+            sop: { select: { title: true, organizationId: true } },
+            user: { select: { id: true, email: true, firstName: true, lastName: true, manager: managerSelect(organizationId) } },
+          },
+          orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+          ...page,
         }),
+        async (overdueSops) => {
+          assignments += overdueSops.length;
+          // Notify users
+          await Promise.all(
+            overdueSops.map((a) => {
+              const days = Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000);
+              const { subject, html } = reminderTemplate({
+                itemType: "SOP", itemTitle: a.sop.title,
+                dueInfo: `overdue by ${days} day${days > 1 ? "s" : ""}`,
+                itemLink: `${baseUrl}/sops/my-sops`,
+              });
+              return sendEmail({ to: a.user.email, subject, html, template: "overdue-sop",
+                variables: { itemTitle: a.sop.title, daysOverdue: days },
+                organizationId: a.sop.organizationId, userId: a.user.id, category: "sop" })
+                .catch(() => {});
+            }),
+          );
+          for (const a of overdueSops) {
+            const mgr = digestManager(a.user.manager as ManagerFacts | null, organizationId);
+            if (!mgr) continue;
+            digest.add(mgr, {
+              type: "SOP", title: a.sop.title,
+              personName: `${a.user.firstName} ${a.user.lastName}`,
+              daysOverdue: Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000),
+            });
+          }
+        },
       );
 
       // Manager summary, one per manager in this company: each digest is
       // tagged with the company whose people it names, so it goes with that
       // company when it is deleted for good (/api/cron/org-hard-delete).
-      const mgrMap = new Map<string, { mgr: { id: string; email: string; firstName: string }; items: Array<{ type: string; title: string; personName: string; daysOverdue: number }> }>();
-      for (const a of overdueSops) {
-        const m = a.user.manager;
-        if (!m || m.deletedAt || m.status === "INACTIVE") continue;
-        if (!mgrMap.has(m.id)) mgrMap.set(m.id, { mgr: m, items: [] });
-        mgrMap.get(m.id)!.items.push({
-          type: "SOP", title: a.sop.title,
-          personName: `${a.user.firstName} ${a.user.lastName}`,
-          daysOverdue: Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000),
-        });
-      }
       await Promise.all(
-        Array.from(mgrMap.values()).map((e) => {
+        Array.from(digest.byManager.values()).map((e) => {
           const { subject, html } = overdueManagerTemplate({
-            managerName: e.mgr.firstName, items: e.items.slice(0, PER_DIGEST), dashboardLink: `${baseUrl}/home`,
+            managerName: e.mgr.firstName, items: e.items, total: e.total, dashboardLink: `${baseUrl}/home`,
           });
           return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
-            variables: { count: e.items.length }, organizationId, category: "reminder" })
+            variables: { count: e.total }, organizationId, category: "reminder" })
             .catch(() => {});
         }),
       );
-      digests += mgrMap.size;
+      digests += digest.byManager.size;
     }
     results.push(`Overdue SOPs: ${assignments} assignments, ${digests} manager digests`);
   }
@@ -188,57 +244,57 @@ async function handle(req: NextRequest) {
     // Phase 2 W4: Items, not the legacy `Task` table (scripts/migrate-legacy-
     // tasks.ts). "Overdue" is a due date in the past on a row whose status is
     // not one of its List's done values.
-    type OverdueLine = { type: string; title: string; personName: string; daysOverdue: number };
-    type Manager = { id: string; email: string; firstName: string };
     let tasks = 0;
     let digests = 0;
     for (const organizationId of await liveWorkspaceIds()) {
       const open = await openItemsOf(organizationId);
       if (!open.where.OR || (open.where.OR as unknown[]).length === 0) continue;
-      const overdueRows = await prisma.item.findMany({
-        where: { ...open.where, archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
-        select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
-        orderBy: { dueAt: "asc" },
-        take: PER_WORKSPACE,
-      });
-      const overdueTasks = overdueRows.filter((r) => !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status));
-      if (overdueTasks.length === 0) continue;
-      tasks += overdueTasks.length;
-      // `Item.ownerId` is a plain column, not a relation, so the people are
-      // read in one batch rather than per row.
-      const overdueOwners = await prisma.user.findMany({
-        where: { id: { in: Array.from(new Set(overdueTasks.map((t) => t.ownerId!))) }, ...LIVE_PERSON },
-        select: { id: true, email: true, firstName: true, lastName: true,
-          manager: { select: { id: true, email: true, firstName: true, deletedAt: true, status: true } } },
-      });
-      const ownerById = new Map(overdueOwners.map((u) => [u.id, u]));
+      const digest = new Digests();
+      await eachPage(
+        (page) => prisma.item.findMany({
+          where: { ...open.where, archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
+          select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
+          orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+          ...page,
+        }),
+        async (overdueRows) => {
+          const overdueTasks = overdueRows.filter((r) => !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status));
+          if (overdueTasks.length === 0) return;
+          tasks += overdueTasks.length;
+          // `Item.ownerId` is a plain column, not a relation, so the people
+          // are read in one batch per page rather than per row.
+          const overdueOwners = await prisma.user.findMany({
+            where: { id: { in: Array.from(new Set(overdueTasks.map((t) => t.ownerId!))) }, ...LIVE_PERSON },
+            select: { id: true, email: true, firstName: true, lastName: true, manager: managerSelect(organizationId) },
+          });
+          const ownerById = new Map(overdueOwners.map((u) => [u.id, u]));
+          for (const t of overdueTasks) {
+            const assignee = ownerById.get(t.ownerId!);
+            const mgr = assignee ? digestManager(assignee.manager as ManagerFacts | null, organizationId) : null;
+            if (!assignee || !mgr) continue;
+            digest.add(mgr, {
+              type: "Task", title: t.title,
+              personName: `${assignee.firstName} ${assignee.lastName}`,
+              daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
+            });
+          }
+        },
+      );
 
       // One digest per manager in this company, tagged with it (as above).
-      const mgrMap = new Map<string, { mgr: Manager; items: OverdueLine[] }>();
-      for (const t of overdueTasks) {
-        const assignee = ownerById.get(t.ownerId!);
-        const m = assignee?.manager;
-        if (!assignee || !m || m.deletedAt || m.status === "INACTIVE") continue;
-        if (!mgrMap.has(m.id)) mgrMap.set(m.id, { mgr: m, items: [] });
-        mgrMap.get(m.id)!.items.push({
-          type: "Task", title: t.title,
-          personName: `${assignee.firstName} ${assignee.lastName}`,
-          daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
-        });
-      }
       await Promise.all(
-        Array.from(mgrMap.values()).map((e) => {
+        Array.from(digest.byManager.values()).map((e) => {
           const { subject, html } = overdueManagerTemplate({
             // Phase 2 W4: /tasks/assigned-to-me is gone with the legacy task
             // grid. My work is the one list of everything assigned to a person.
-            managerName: e.mgr.firstName, items: e.items.slice(0, PER_DIGEST), dashboardLink: `${baseUrl}/my-work`,
+            managerName: e.mgr.firstName, items: e.items, total: e.total, dashboardLink: `${baseUrl}/my-work`,
           });
           return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
-            variables: { count: e.items.length }, organizationId, category: "reminder" })
+            variables: { count: e.total }, organizationId, category: "reminder" })
             .catch(() => {});
         }),
       );
-      digests += mgrMap.size;
+      digests += digest.byManager.size;
     }
     results.push(`Overdue tasks: ${tasks} tasks, ${digests} manager digests`);
   }
@@ -257,37 +313,43 @@ async function handle(req: NextRequest) {
     for (const organizationId of await liveWorkspaceIds()) {
       const open = await openItemsOf(organizationId);
       if (!open.where.OR || (open.where.OR as unknown[]).length === 0) continue;
-      // Phase 2 W4, as above: Items, not the legacy `Task` table.
-      const dueRows = await prisma.item.findMany({
-        where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null } },
-        select: { id: true, title: true, status: true, boardId: true, ownerId: true },
-        take: PER_WORKSPACE,
-      });
-      const dueToday = dueRows.filter(
-        (r): r is typeof r & { ownerId: string } =>
-          Boolean(r.ownerId) && !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status),
+      // Phase 2 W4, as above: Items, not the legacy `Task` table. Every
+      // row, a page at a time.
+      await eachPage(
+        (page) => prisma.item.findMany({
+          where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null } },
+          select: { id: true, title: true, status: true, boardId: true, ownerId: true },
+          orderBy: { id: "asc" },
+          ...page,
+        }),
+        async (dueRows) => {
+          const dueToday = dueRows.filter(
+            (r): r is typeof r & { ownerId: string } =>
+              Boolean(r.ownerId) && !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status),
+          );
+          if (dueToday.length === 0) return;
+          due += dueToday.length;
+          // Honor the "Due-date reminders" inbox toggle (batched, one query).
+          const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.ownerId), "due_reminders");
+          const toNotify = dueToday.filter((t) => wantsDue.has(t.ownerId));
+          if (toNotify.length > 0) {
+            await prisma.notification.createMany({
+              // The link names THE TASK, not a landing. It used to be the bare
+              // "/tasks", which is a 308 to /home since Phase 2 W4, so a
+              // notification that named one task in its message dropped the
+              // reader on Home with no way back to it.
+              data: toNotify.map((t) => ({
+                userId: t.ownerId,
+                type: "task_due_today",
+                title: "Task Due Today",
+                message: t.title,
+                link: `/item/${t.id}`,
+              })),
+            });
+            notified += toNotify.length;
+          }
+        },
       );
-      if (dueToday.length === 0) continue;
-      due += dueToday.length;
-      // Honor the "Due-date reminders" inbox toggle (batched, one query).
-      const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.ownerId), "due_reminders");
-      const toNotify = dueToday.filter((t) => wantsDue.has(t.ownerId));
-      if (toNotify.length > 0) {
-        await prisma.notification.createMany({
-          // The link names THE TASK, not a landing. It used to be the bare
-          // "/tasks", which is a 308 to /home since Phase 2 W4, so a
-          // notification that named one task in its message dropped the
-          // reader on Home with no way back to it.
-          data: toNotify.map((t) => ({
-            userId: t.ownerId,
-            type: "task_due_today",
-            title: "Task Due Today",
-            message: t.title,
-            link: `/item/${t.id}`,
-          })),
-        });
-        notified += toNotify.length;
-      }
     }
     results.push(`Tasks due today notifications: ${notified} (of ${due} due)`);
   }

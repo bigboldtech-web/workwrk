@@ -37,6 +37,7 @@ import { dispatchFilesChanged, downloadFile, isSummarizable } from "./file-row-m
 // stay canonical and every link is mapped into the section it is followed
 // in (src/lib/nav/object-href.ts).
 import { sectionHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 export interface PreviewFile {
   id: string;
@@ -155,7 +156,7 @@ export function FilePreviewDrawer({ fileId, initial, onClose, onChanged }: {
   }
   async function trash() {
     if (!file) return;
-    const ok = await confirm({ title: `Move "${file.name}" to Trash?`, description: `You can restore it for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move "${file.name}" to Trash?`, description: trashRestoreSentence(boot.org), destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const r = await apiFetch(`/api/files/${file.id}`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't move to Trash", { tone: "danger" }); return; }

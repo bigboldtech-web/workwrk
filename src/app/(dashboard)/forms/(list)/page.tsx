@@ -54,6 +54,7 @@ import { downloadUrl } from "@/lib/download";
 import type { FormStatus, FormsSort, ObjectListView } from "@/lib/tables-forms-list";
 import { cn } from "@/lib/utils";
 import { useRetiredView } from "@/components/layout/os/use-retired-view";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -324,7 +325,7 @@ export default function FormsPage() {
     const responses = pick.reduce((n, r) => n + r.responseCount, 0);
     const ok = await confirm({
       title: `Move ${pick.length} form${pick.length === 1 ? "" : "s"} to Trash?`,
-      description: `${responses ? `Their ${responses.toLocaleString()} response${responses === 1 ? "" : "s"} go with them. ` : ""}You can restore them for ${boot.org.trashDays} days.`,
+      description: `${responses ? `Their ${responses.toLocaleString()} response${responses === 1 ? "" : "s"} go with them. ` : ""}${trashRestoreSentence(boot.org, true)}`,
       destructive: true,
       confirmLabel: "Move to Trash",
     });

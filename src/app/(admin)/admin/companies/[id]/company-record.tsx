@@ -225,7 +225,7 @@ export function CompanyRecord({
   if (loadState === "missing") {
     return (
       <div className="p-6">
-        <OsEmptyView title="We couldn't find that company" hint="It may have been deleted by its own Owner, or the link is out of date.">
+        <OsEmptyView title="We couldn't find that company" hint="It may have been deleted, 30 days after it was cancelled here or by its own Owner, or the link is out of date.">
           <BackButton fallbackHref="/admin/companies" label="Companies" />
         </OsEmptyView>
       </div>
@@ -357,7 +357,7 @@ export function CompanyRecord({
               <UsageCard company={company} />
               <ActivityCard company={company} datePrefs={datePrefs} />
               <p className="text-sm text-ink-2">
-                There is no delete here. A workspace is deleted by its own Owner in Settings › Identity &amp; culture › Danger zone.
+                Setting a company to Cancelled here deletes it for good 30 days later, unless its status is changed before then. Its Owner can also delete it in Settings › Identity &amp; culture › Danger zone.
               </p>
             </>
           )}

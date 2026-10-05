@@ -156,9 +156,9 @@ export default function CookiesPage() {
           body: (
             <>
               <p>
-                Essential cookies are required for the service to work and cannot be disabled. Everything else is opt
-                in: you answer the banner on your first visit, and you can change the answer at any time by clearing
-                cookies and reloading.
+                Essential cookies are required for the service to work and cannot be disabled. The language and
+                currency cookies are set only when you pick a language or a currency. There is nothing optional to
+                opt in to, so the banner on your first visit is a notice, not a choice.
               </p>
               <p>
                 You can also block all cookies in your browser settings. The service will not work properly without
@@ -181,8 +181,8 @@ export default function CookiesPage() {
                 no retargeting pixel and no social network tracker on this site or in the product.
               </p>
               <p>
-                The banner asks only about preferences. If we ever add another kind of cookie, it gets a row in the
-                table above in the same release, and the banner asks you about it then.
+                The banner asks nothing, because the site sets nothing optional. If we ever add another kind of cookie,
+                it gets a row in the table above in the same release, and the banner asks you about it then.
               </p>
             </>
           ),

@@ -47,6 +47,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { CONTRACTS_SORTS, CONTRACTS_VIEWS, CONTRACTS_VIEW_LABEL, CONTRACT_STATUSES, CONTRACT_STATUS_COLOR, CONTRACT_STATUS_LABEL, contractsViewHref, parseContractsSort, parseContractsView, type ContractStatus, type ContractsView } from "@/lib/contracts";
 import { cn } from "@/lib/utils";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type Party = { id: string; name: string; email: string; role: string; status: string; userId: string | null; order: number };
 type Row = { id: string; title: string; status: ContractStatus; category: string | null; isTemplate: boolean; sourceType: string; sentAt: string | null; updatedAt: string; parties: Party[]; partyCount: number; signedCount: number; usedCount: number | null };
@@ -199,7 +200,7 @@ export function AgreementsClient() {
     if (ok) await patchRow(r, { action: "void" }, "Voided");
   };
   const archiveRow = async (r: Row) => {
-    const ok = await confirm({ title: `Move "${r.title}" to Trash?`, description: `You can restore it within ${boot.org.trashDays} days.`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: `Move "${r.title}" to Trash?`, description: `${trashRestoreSentence(boot.org)}`, confirmLabel: "Move to Trash", destructive: true });
     if (ok) await patchRow(r, { archived: true }, "Moved to Trash");
   };
   const deleteRow = async (r: Row) => {

@@ -344,6 +344,10 @@ type RetentionData = {
 function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const { toast } = useOsToast();
   const showUpcoming = useShowUpcoming();
+  // With the Trash purge on, the Trash window is enforced: its row is shown
+  // to everyone who may see Retention and says so. The audit row waits for
+  // its own job behind Show upcoming features.
+  const purges = !!useBoot().boot.org.trashPurges;
   const ret = useSettingsSection("retention", (b) => {
     const st = (b.settings ?? {}) as Partial<RetentionData>;
     return { retention: st.retention ?? { trashDays: 60, auditDays: null }, data: st.data ?? { aiEnabled: true } } as RetentionData;
@@ -399,13 +403,17 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           window. Both rows wait behind Show upcoming features and say so,
           until the founder installs the rows (settings spec, Data >
           Retention: "Not enforced yet"). Until TRASH_PURGE_CRON is on, the
-          Trash tab says deleted items stay until an admin deletes them. */}
-      {showUpcoming ? (
+          Trash tab says deleted items stay until an admin deletes them; once
+          it is on, the Trash row is out of Show upcoming and says it is
+          enforced. */}
+      {showUpcoming || purges ? (
         <SettingsCard wide="data.retention" title="Retention" id="data.retention">
           <SettingsRow
             id="data.retention.trashDays"
             label="Keep deleted items in Trash for"
-            helper="Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."
+            helper={purges
+              ? "Items in Trash are deleted for good after this many days, except Docs and canvases, which stay until an Owner or Admin deletes them."
+              : "Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."}
             savedAt={saved.trash}
             error={retryOf("trash")}
             readOnlyValue={canPurge ? undefined : `${cur.retention.trashDays} days`}
@@ -418,6 +426,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
                 }} />
             }
           />
+          {showUpcoming ? (
           <SettingsRow
             id="data.retention.auditDays"
             label="Keep the audit log for"
@@ -445,6 +454,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
               </span>
             }
           />
+          ) : null}
         </SettingsCard>
       ) : null}
       <ConfirmDialog
@@ -517,7 +527,7 @@ function TrashTab() {
       <div className="flex flex-col gap-2">
         <p className="text-base text-ink">
           {purges
-            ? `Deleted Spaces, Lists, Docs and tasks wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good.`
+            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs and canvases moved to Trash stay there until an Owner or Admin deletes them.`
             : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good."}
         </p>
         <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>

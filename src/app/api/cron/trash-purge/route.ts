@@ -33,7 +33,7 @@ import { prisma } from "@/lib/prisma";
 import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 import { cronRefusal } from "@/lib/cron-auth";
-import { trashPurgeOn } from "@/lib/purge-jobs";
+import { trashPurgeOn, trashPurgeSince } from "@/lib/purge-jobs";
 import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +54,10 @@ async function handle(req: NextRequest) {
   const purged: Array<{ organizationId: string; days: number; deleted: number }> = [];
   let orgs = 0;
   let cursor: string | undefined;
+  // A row's window starts no earlier than the day the purge was turned on
+  // (src/lib/purge-jobs.ts): until that day plus the window has passed,
+  // nothing in a workspace is old enough.
+  const since = trashPurgeSince();
 
   for (;;) {
     const page = await prisma.organization.findMany({
@@ -70,6 +74,7 @@ async function handle(req: NextRequest) {
       const settings = (org.settings ?? {}) as { retention?: { trashDays?: unknown } };
       const days = retentionDays(settings.retention?.trashDays);
       const cutoff = new Date(now - days * 86_400_000);
+      if (since && since.getTime() >= cutoff.getTime()) continue;
       const where = { organizationId: org.id, deletedAt: { lt: cutoff } };
 
       if (dryRun) {

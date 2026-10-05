@@ -13,6 +13,7 @@ import { AccessError, requireCan } from "@/lib/access/gate";
 import { jsonError } from "@/lib/api-helpers";
 import { readTrash } from "@/lib/trash-server";
 import { idsFromParam, sortFromParam, tabFromParam, trashCsv, typesFromParam, type TrashCsvRow } from "@/lib/trash-view";
+import { trashPurgeOn } from "@/lib/purge-jobs";
 
 /** One page is 200 rows; the export walks them all rather than truncating. */
 const PAGE = 200;
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
       cursor = page.nextCursor;
     }
 
-    return new Response(trashCsv(out, tab), {
+    return new Response(trashCsv(out, tab, { expires: trashPurgeOn() }), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="trash-${tab}.csv"`,

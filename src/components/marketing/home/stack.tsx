@@ -387,10 +387,10 @@ const ROWS: Array<{
   {
     eyebrow: "See where it stands",
     title: "Goals with their work beside them, not a status meeting",
-    body: "Link a goal to the work that delivers it and the goal shows that work, done and open, on its Effort card. Progress rolls up from its key results, KPI readings and child goals, so everyone reads the same number.",
+    body: "Link a goal to the work that delivers it and its Effort card counts that work: hours logged, tasks done and in progress. Progress rolls up from its key results, KPI readings and child goals, so everyone reads the same number.",
     points: [
       "OKRs, KRAs and KPIs with owners and cadences",
-      "The linked tasks on each goal's Effort card",
+      "Hours, and tasks done and in progress, on each goal's Effort card",
       "Reviews, one-to-ones and kudos on the same records",
     ],
     a11y: "A goal detail page with its progress ring and the work linked to it.",

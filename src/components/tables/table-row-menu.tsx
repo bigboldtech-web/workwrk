@@ -49,6 +49,7 @@ import { downloadUrl } from "@/lib/download";
 import { embedSnippet } from "./object-share-dialog";
 import { currentOpenObject } from "@/components/layout/os/work-placement";
 import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 export interface TableMenuTarget {
   id: string;
@@ -229,7 +230,7 @@ export function TableRowMenu({
     onClose();
     const ok = await confirm({
       title: `Move "${title}" to Trash?`,
-      description: `Its rows go with it. You can restore it from Trash for ${boot.org.trashDays} days.`,
+      description: `Its rows go with it. ${trashRestoreSentence(boot.org)}`,
       destructive: true,
       confirmLabel: "Move to Trash",
     });

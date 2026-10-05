@@ -55,6 +55,15 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
   // not listed until it is on.
   {
+    date: "2026-10-06",
+    title: "Plans that count what they promise",
+    items: [
+      { type: "improvement", text: "Seats and AI questions are counted the way the pricing page says: people who can sign in and open invitations hold the seats, and every AI request a person starts uses one of the plan's AI questions." },
+      { type: "fix", text: "An AppSumo code moves the workspace onto the plan and seats it grants, and never lowers either." },
+      { type: "fix", text: "A closed workspace no longer gets reminder emails, and the weekly digests reach every team in a large workspace." },
+    ],
+  },
+  {
     date: "2026-10-05",
     title: "Launch security, and a deletion that keeps its promise",
     items: [
@@ -67,7 +76,7 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
     date: "2026-10-04",
     title: "AI in Lists and Talk, and a public link for one task",
     items: [
-      { type: "feature", text: "AI fields in Lists, and scheduled AI updates in Talk channels, each turned on by the workspace." },
+      { type: "feature", text: "AI fields in Lists, turned on by the workspace." },
       { type: "feature", text: "A view-only public link for one task, where the workspace allows public links, and the workspace export carries the work." },
       { type: "feature", text: "Bird's eye shows linked tasks, gives a Folder its own view, and moves up and down in Focus." },
       { type: "improvement", text: "Drag tasks up and down to reorder them." },
@@ -107,7 +116,7 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
     date: "2026-09-26",
     title: "Tasks in more than one List",
     items: [
-      { type: "feature", text: "A task can live in more than one List, with connected and mirror columns, scheduled reports, dashboards and a Space Overview." },
+      { type: "feature", text: "A task can live in more than one List, with connected and mirror columns, dashboards and a Space Overview." },
     ],
   },
   {
@@ -193,7 +202,7 @@ export default function ChangelogPage() {
           down one page. The kind of change is now one grey word. */}
       <Band ground="quiet" labelledBy="log-list">
         <Eyebrow>The record</Eyebrow>
-        <Headline id="log-list">Each release day, newest first.</Headline>
+        <Headline id="log-list">Releases, newest first.</Headline>
         <ol className="ic-log">
           {ENTRIES.map((entry) => (
             <li key={entry.date}>

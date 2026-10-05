@@ -122,7 +122,7 @@ Before taking a real card:
 | `ACCESS_V2_TABLES` | The new sharing tables (your decision; see the access plan). |
 | `SETTINGS_OWNER_SPLIT` | Billing, Security and API settings for Owners, and for the Admins given that scope. Off, every Admin opens them. |
 | `TALK_UPDATES_CRON` | Talk updates digests (`on`), with its crontab row (CRON-SETUP). |
-| `TRASH_PURGE_CRON` | Trash empties itself after each workspace's window (`on`), with its crontab row, after a dry run (CRON-SETUP). Off, Trash shows no countdown and keeps everything. |
+| `TRASH_PURGE_CRON`, `TRASH_PURGE_SINCE` | Trash empties itself after each workspace's window (`on`, with `TRASH_PURGE_SINCE` set to the day you turn it on, YYYY-MM-DD), with its crontab row, after a dry run (CRON-SETUP). An item already in Trash starts its window on that day, so nothing is deleted for a full window. Off, Trash shows no countdown and keeps everything. |
 | `INBOX_AUTO_CLEAR_CRON` | Cleared Inbox items go after the days each person chose (`on`), with its crontab row, after a dry run (CRON-SETUP). Off, nobody is offered auto-clear. |
 | `REPORT_SCHEDULE_CRON` | Scheduled email reports (`on`), with its crontab row (CRON-SETUP). |
 | `CUSTOM_DOMAINS_ENABLED` | A workspace's own domain pointing at the app. |
@@ -154,4 +154,12 @@ Before taking a real card:
 - Plans are enforced now: a workspace already past its plan's people or AI
   questions (before Batch 13 nothing counted) keeps everyone it has, but
   cannot add people or ask the AI until it changes plan.
+- Companies cancelled from the Staff console before Batch 14 have no
+  deletion date, so nothing deletes them, and the privacy policy promises
+  deletion 30 days after closure only for those closed from 5 October 2026.
+  List them (read only, on the box): `SELECT id, name FROM "Organization"
+  WHERE status = 'CANCELLED' AND settings->>'scheduledHardDeleteAt' IS NULL;`.
+  For each one you decide to delete, set it to Suspended and then to
+  Cancelled on its company page: that writes the 30 day schedule and its
+  deletion record. Never a blind backfill.
 - A real inbox someone reads for `hello@workwrk.com` (every email's Reply-To, `EMAIL_REPLY_TO`) and `billing@workwrk.com` (Plan & billing names it).

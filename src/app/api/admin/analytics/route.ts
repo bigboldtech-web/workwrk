@@ -100,8 +100,11 @@ const DELETED_COMPANY = "A deleted company";
  * company's deletion cascades away (its actor is the Owner), so these rows
  * vanished from every range a month after the deletion.
  */
+/** A WorkspaceDeletion row a staff cancellation wrote (src/lib/admin/company-patch.ts), not an Owner's delete. */
+const STAFF_DELETION = /^wd_staff_/;
+
 async function ownerDeletionRows(
-  records: { organizationId: string; plan: string | null; requestedAt: Date }[],
+  records: { id: string; organizationId: string; plan: string | null; requestedAt: Date }[],
 ): Promise<Cancellation[]> {
   const newest = new Map<string, (typeof records)[number]>();
   for (const r of records) {
@@ -115,13 +118,17 @@ async function ownerDeletionRows(
   const byId = new Map(orgs.map((o) => [o.id, o]));
   return [...newest].map(([id, r]) => {
     const org = byId.get(id);
+    // Staff cancellations read as the console's "Workspace cancelled", the
+    // same id and kind as their StaffAction row, so the two are one line; and
+    // after the purge (which unlinks the StaffAction) it still says so.
+    const what = STAFF_DELETION.test(r.id) ? ("workspace" as const) : ("deleted" as const);
     if (!org) {
       return {
         id,
         name: DELETED_COMPANY,
         plan: r.plan,
         canceledAt: r.requestedAt.toISOString(),
-        what: "deleted" as const,
+        what,
         restored: false,
         gone: true,
       };
@@ -132,7 +139,7 @@ async function ownerDeletionRows(
       name: org.name,
       plan: org.plan as string,
       canceledAt: r.requestedAt.toISOString(),
-      what: "deleted" as const,
+      what,
       restored: !(org.status === "CANCELLED" && scheduled),
     };
   });
@@ -217,16 +224,19 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       where: { requestedAt: { gte: w.start, lte: now } },
       orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
       take: OWNER_DELETION_LOG_CAP,
-      select: { organizationId: true, plan: true, requestedAt: true },
+      select: { id: true, organizationId: true, plan: true, requestedAt: true },
     }),
     // The live schedule as well, so a deletion whose audit row failed to
     // write (logActivity never throws) is still counted. Still CANCELLED
-    // only: a restore clears the schedule.
+    // only: a restore clears the schedule. An Owner's deletion only (it names
+    // who): a staff cancellation leaves cancelledById empty and is read from
+    // its StaffAction and WorkspaceDeletion rows.
     prisma.$queryRaw<{ id: string; name: string; plan: string; cancelledAt: string }[]>`
       SELECT "id", "name", "plan"::text AS "plan", "settings"->>'cancelledAt' AS "cancelledAt"
       FROM "Organization"
       WHERE "status" = 'CANCELLED'
         AND "settings"->>'cancelledAt' IS NOT NULL
+        AND "settings"->>'cancelledById' IS NOT NULL
         AND "settings"->>'cancelledAt' >= ${w.start.toISOString()}
         AND "settings"->>'cancelledAt' <= ${now.toISOString()}
       ORDER BY "settings"->>'cancelledAt' DESC

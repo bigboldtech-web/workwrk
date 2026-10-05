@@ -1,6 +1,7 @@
 // queueEmail sends nothing to a workspace that is suspended, cancelled or
-// gone (src/lib/email.ts workspaceTakesEmail), and a failed status read never
-// drops mail.
+// gone (src/lib/email.ts workspaceTakesEmail), a failed status read never
+// drops mail, a person's own account mail always goes, and a reopened
+// workspace is never refused from the cache.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,5 +62,21 @@ describe("queueEmail and the workspace's status", () => {
     db.throwFor.add("o-flaky");
     await send("o-flaky");
     expect(db.created).toEqual(["o-flaky"]);
+  });
+
+  it("always sends a person's own account mail, whatever their anchored workspace's status", async () => {
+    db.status.set("o-closed", "SUSPENDED");
+    for (const template of ["password-reset", "verify-email"]) {
+      await queueEmail({ to: "p@example.test", subject: "S", html: "<p>x</p>", template, variables: {}, organizationId: "o-closed" });
+    }
+    expect(db.created).toEqual(["o-closed", "o-closed"]);
+  });
+
+  it("sends at once to a workspace staff reopen: a closed answer is never kept", async () => {
+    db.status.set("o-reopened", "SUSPENDED");
+    await send("o-reopened");
+    db.status.set("o-reopened", "ACTIVE");
+    await send("o-reopened");
+    expect(db.created).toEqual(["o-reopened"]);
   });
 });

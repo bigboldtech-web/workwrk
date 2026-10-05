@@ -255,9 +255,10 @@ export default function PrivacyPage() {
                   the nightly backup keeps at most 90 days
                   (scripts/backup/backup.sh BACKUP_KEEP_DAYS). */}
               <p>
-                Account data is retained for the life of your subscription. After termination, whether you delete the
-                workspace or we close it, we retain workspace data for 30 days (in case you reactivate), then permanently
-                delete it, with the files it stored. Some files uploaded before October 2026 were not recorded against
+                Account data is retained for the life of your subscription. After termination, when you delete the
+                workspace, or when we close it (a workspace we closed from 5 October 2026 on), we retain workspace data
+                for 30 days (in case you reactivate), then permanently delete it, with the files it stored. Some files
+                uploaded before 6 October 2026 were not recorded against
                 the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}
                 <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and we delete them by hand. Backups keep a
                 copy for at most 90 days, so a deleted workspace is gone from them within 90 days of its deletion.

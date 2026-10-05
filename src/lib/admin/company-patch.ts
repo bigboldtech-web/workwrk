@@ -27,6 +27,7 @@ import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions
 import { seatsAreUnlimited } from "@/lib/admin/companies-list";
 import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
+import { subscriptionStillOpen } from "@/services/billing";
 
 /** A company cancelled here is deleted this many days later, as an Owner's own delete is. */
 const STAFF_CANCEL_GRACE_DAYS = 30;
@@ -82,6 +83,27 @@ export type CompanyPatchField = "plan" | "status" | "feature" | "seats" | "modul
 export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<ApplyCompanyPatchResult> {
   const { id, patch, actor, ip } = input;
   const logged: LoggedStaffAction[] = [];
+
+  // A subscription stored as INCOMPLETE may be Stripe's unpaid or paused,
+  // which still raise invoices (the row stores those, and the dead
+  // incomplete_expired, the same way), so Stripe is asked before a company is
+  // set to Cancelled, outside the transaction. Refused unless Stripe says it
+  // has ended; refused too when Stripe cannot say.
+  if (patch.status === "CANCELLED") {
+    const sub = await prisma.subscription.findUnique({ where: { organizationId: id }, select: { stripeSubscriptionId: true, status: true } });
+    if (sub?.stripeSubscriptionId && String(sub.status) === "INCOMPLETE") {
+      const open = await subscriptionStillOpen(sub.stripeSubscriptionId).catch(() => null);
+      if (open !== false) {
+        return {
+          ok: false,
+          status: 409,
+          error: open === null
+            ? "Stripe could not be asked whether this company's subscription has ended. Check it in Stripe, cancel it there if it is still open, then set the company to Cancelled."
+            : "This company has a Stripe subscription that can still bill (unpaid or paused). Cancel it in Stripe first, then set it to Cancelled: a cancelled company is deleted in 30 days and must not be billed.",
+        };
+      }
+    }
+  }
 
   const result = await prisma.$transaction(
     async (tx) => {
@@ -312,6 +334,10 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           await writeOrgSettingsKeys(id, { cancelledAt: at.toISOString(), cancelledById: null, scheduledHardDeleteAt: scheduledFor.toISOString() }, tx);
           await tx.workspaceDeletion.create({
             data: {
+              // A staff cancellation's record: Staff Analytics reads the
+              // wd_staff_ prefix as "Workspace cancelled" (from the console),
+              // not "Deleted by its Owner", before and after the purge.
+              id: `wd_staff_${id}_${at.getTime()}`,
               organizationId: id,
               plan: org.plan,
               signedUpAt: org.createdAt,

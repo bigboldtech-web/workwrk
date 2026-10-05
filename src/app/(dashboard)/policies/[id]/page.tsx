@@ -56,6 +56,7 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { POLICY_STATUS_COLOR, POLICY_STATUS_LABEL, type PolicyStatus } from "@/lib/policies-list";
 import { deriveSopSaveState, nextRetryDelay } from "@/lib/sop-save-state";
 import { defaultAckDueDate } from "@/lib/process-settings";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type AudiencePerson = PersonRef & { assignmentId: string; status: string; dueDate: string | null; mandatory: boolean; department: string | null };
 interface Policy {
@@ -293,7 +294,7 @@ export default function PolicyDetailPage() {
   };
   const remove = async () => {
     if (!policy) return;
-    const ok = await confirm({ title: `Delete "${policy.title}"?`, description: `It moves to Trash and can be restored within ${boot.org.trashDays} days.`, confirmLabel: "Delete", destructive: true });
+    const ok = await confirm({ title: `Delete "${policy.title}"?`, description: `It moves to Trash. ${trashRestoreSentence(boot.org)}`, confirmLabel: "Delete", destructive: true });
     if (!ok) return;
     const r = await apiFetch(`/api/policies/${policy.id}`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't delete", { tone: "danger" }); return; }

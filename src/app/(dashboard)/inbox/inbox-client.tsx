@@ -71,7 +71,7 @@ export interface InboxOptions {
   /** "Show everything in Other": Other also lists the Primary rows. */
   showAll: boolean;
   sortNewest: boolean;
-  /** Days after which read rows are swept by the daily cron. Null = never. */
+  /** Days after a row was Cleared that the daily cron deletes it for good. Null = never. */
   autoClearDays: number | null;
   /**
    * Only the three tabs a person READS. Snoozed and Cleared are places rows go
@@ -631,7 +631,10 @@ export function InboxClient({
                 // (src/lib/purge-jobs.ts): a choice nothing acts on is a lie.
                 ...(autoClears
                   ? [{
-                      label: "Auto-clear read notifications",
+                      // What the job does: it deletes, for good, rows the
+                      // person already Cleared, that many days after (never
+                      // their read rows, which stay in Primary).
+                      label: "Delete cleared notifications",
                       options: [
                         { value: "clear:0", label: "Never" },
                         { value: "clear:7", label: "After 7 days" },

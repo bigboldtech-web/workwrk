@@ -204,7 +204,7 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
       // The export leaves out files, chat, canvases and forms (Settings >
       // Data says so), so the row names what it holds instead of
       // "everything".
-      ["Export people, tasks, Docs and Tables, any time", true, true, true],
+      ["Export people, tasks, Docs and Goals, any time", true, true, true],
     ],
   },
 ];
@@ -231,7 +231,7 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Can we leave, and take our data?",
-    a: "Yes, on every tier including the free one. Export is available any time, and deleted items go to Trash first, where an Owner or Admin can bring them back.",
+    a: "Yes, on every tier including the free one. Export people, Spaces, Lists and tasks, Docs, SOPs, Tables, Goals and review cycles any time, on every tier including the free one. Files, canvases, forms, chat, Doc comments and review answers are not in the export yet, so ask us for a copy before you delete a workspace. Deleted Spaces, Folders, Lists, tasks, Docs, canvases, tables, forms, files and SOPs go to Trash first, where an Owner or Admin can bring them back; a deleted goal is gone at once.",
   },
   {
     q: "Are Talk and Tables extra?",

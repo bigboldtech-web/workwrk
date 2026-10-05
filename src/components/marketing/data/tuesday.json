@@ -371,7 +371,12 @@
         "title": "Onboard Quayside Coffee",
         "owner": "maya"
       }
-    ]
+    ],
+    "effortCounts": {
+      "hoursLogged": 26,
+      "tasksDone": 4,
+      "lastMoved": "Today"
+    }
   },
   "thread": {
     "channel": "onboarding",

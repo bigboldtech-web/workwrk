@@ -58,7 +58,7 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
     data: { userId: r.userId, type: "reminder", title, message, link },
   });
   if (r.notifyEmail) {
-    const user = await prisma.user.findUnique({ where: { id: r.userId }, select: { email: true } });
+    const user = await prisma.user.findUnique({ where: { id: r.userId }, select: { email: true, organizationId: true } });
     if (user?.email) {
       // The branded template (white card, blue button to the page the
       // bell row opens), never bare HTML. The link is absolute: an email
@@ -74,7 +74,11 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
         subject,
         html,
         template: "reminder",
-        organizationId: r.organizationId ?? undefined,
+        // A task's reminder belongs to the task's workspace. A personal one
+        // belongs to the person: it goes with their workspace now (as the
+        // hard delete moves it there), so a workspace they made it in and
+        // that has since closed does not swallow it.
+        organizationId: (r.entityType ? r.organizationId : user.organizationId) ?? undefined,
       }).catch((e) => console.error("reminder email failed", e));
     }
   }

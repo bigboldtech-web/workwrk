@@ -54,6 +54,7 @@ import {
   type PoliciesView, type PolicyStatus,
 } from "@/lib/policies-list";
 import { cn } from "@/lib/utils";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type Row = {
   id: string; title: string; category: string | null; version: number; status: PolicyStatus; requiresAck: boolean;
@@ -190,7 +191,7 @@ export default function PoliciesPage() {
     toast("Policy archived"); bumpRowVersion("policies"); void load();
   };
   const remove = async (r: Row) => {
-    const ok = await confirm({ title: `Delete "${r.title}"?`, description: `It moves to Trash and can be restored within ${boot.org.trashDays} days.`, confirmLabel: "Delete", destructive: true });
+    const ok = await confirm({ title: `Delete "${r.title}"?`, description: `It moves to Trash. ${trashRestoreSentence(boot.org)}`, confirmLabel: "Delete", destructive: true });
     if (!ok) return;
     const res = await apiFetch(`/api/policies/${r.id}`, { method: "DELETE" });
     if (!res.ok) { toast(res.error || "Couldn't delete", { tone: "danger" }); return; }

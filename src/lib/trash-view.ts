@@ -301,16 +301,33 @@ export function csvCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-export function trashCsv(rows: readonly TrashCsvRow[], tab: TrashTab): string {
+/** `expires`: something empties Trash (src/lib/purge-jobs.ts); without it there is no Time left to state. */
+export function trashCsv(rows: readonly TrashCsvRow[], tab: TrashTab, opts: { expires?: boolean } = {}): string {
+  const timed = tab !== "archived" && opts.expires !== false;
   const head = tab === "archived"
     ? ["Name", "Type", "Location", "Archived by", "Archived"]
-    : ["Name", "Type", "Location", "Deleted by", "Deleted", "Time left"];
+    : ["Name", "Type", "Location", "Deleted by", "Deleted", ...(timed ? ["Time left"] : [])];
   const lines = [head.map(csvCell).join(",")];
   for (const r of rows) {
     const cells = tab === "archived"
       ? [r.name, r.type, r.location, r.deletedByName, r.deletedAt]
-      : [r.name, r.type, r.location, r.deletedByName, r.deletedAt, r.timeLeft];
+      : [r.name, r.type, r.location, r.deletedByName, r.deletedAt, ...(timed ? [r.timeLeft] : [])];
     lines.push(cells.map(csvCell).join(","));
   }
   return `${lines.join("\r\n")}\r\n`;
+}
+
+/**
+ * The sentence a Move to Trash confirm says about getting the item back. With
+ * the purge on (`trashPurges`, src/lib/purge-jobs.ts) Trash empties itself
+ * after the workspace's window, so the window is the promise; with it off
+ * nothing empties Trash, and a day count would promise a deletion that never
+ * comes. Docs and canvases are archived, never purged, so they say neither
+ * (they use "You can restore it from Trash.").
+ */
+export function trashRestoreSentence(org: { trashDays: number; trashPurges?: boolean }, many = false): string {
+  const them = many ? "them" : "it";
+  return org.trashPurges
+    ? `You can restore ${them} for ${org.trashDays} days.`
+    : `You can restore ${them} from Trash until an Owner or Admin deletes ${them} for good.`;
 }

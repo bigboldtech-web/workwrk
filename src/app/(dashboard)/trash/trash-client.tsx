@@ -690,8 +690,11 @@ export function TrashClient({
                     Next
                   </button>
                 </span>
+                {/* The window only while something empties Trash
+                    (src/lib/purge-jobs.ts): "Kept for 60 days" with nothing
+                    behind it promised a deletion that never came. */}
                 {tab === "deleted" && data ? (
-                  <span>Kept for {data.retentionDays} days</span>
+                  <span>{expires ? `Kept for ${data.retentionDays} days` : "Kept until an Owner or Admin deletes them"}</span>
                 ) : (
                   <span>Archived items never expire</span>
                 )}

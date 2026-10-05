@@ -289,11 +289,12 @@ function InboxTab() {
           {/* Offered only while the auto-clear job runs (src/lib/purge-jobs.ts). */}
           {autoClears ? (
             <SettingsRow
-              label="Clear read items after"
+              label="Delete cleared items after"
+              helper="Notifications you have cleared are deleted for good this many days after you cleared them. Read items stay until you clear them."
               {...row("view.clear")}
               control={
                 <PickerSelect
-                  label="Clear read items after"
+                  label="Delete cleared items after"
                   value={String(view.autoClearDays ?? "never")}
                   options={[
                     { value: "never", label: "Never" },

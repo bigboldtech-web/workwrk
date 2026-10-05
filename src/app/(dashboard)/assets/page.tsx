@@ -58,6 +58,7 @@ import { AssetFormDialog } from "./asset-form-dialog";
 import { AssignDialog } from "./assign-dialog";
 import { AssetRowMenu } from "./asset-row-menu";
 import { AssetDrawer } from "./asset-drawer";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 const NO_RIGHTS: AssetRights = { canEdit: false, canAssign: false, canDelete: false };
 
@@ -223,7 +224,7 @@ export default function AssetsPage() {
     if (op === "delete") {
       const ok = await confirm({
         title: `Delete ${ids.length} ${ids.length === 1 ? "asset" : "assets"}?`,
-        description: `They move to Trash. You can restore them from there for ${boot.org.trashDays} days.`,
+        description: `They move to Trash. ${trashRestoreSentence(boot.org, true)}`,
         confirmLabel: "Delete",
         destructive: true,
       });

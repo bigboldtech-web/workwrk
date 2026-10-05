@@ -24,6 +24,7 @@ import { useOrgCurrency } from "@/lib/org/use-org-currency";
 import { warrantyState } from "@/lib/assets/asset-view";
 import { CONDITION_LABEL, STATUS_LABEL, personName, statusColor, typeLabel, type ApiAsset, type AssetRights } from "./types";
 import { assetGlyph } from "./asset-glyph";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 export function AssetDrawer({ id, rights, onClose, onEdit, onAssign, onChanged }: {
   id: string | null;
@@ -63,7 +64,7 @@ export function AssetDrawer({ id, rights, onClose, onEdit, onAssign, onChanged }
     if (!asset) return;
     const ok = await confirm({
       title: `Delete ${asset.name}?`,
-      description: `It moves to Trash. You can restore it from there for ${boot.org.trashDays} days.`,
+      description: `It moves to Trash. ${trashRestoreSentence(boot.org)}`,
       confirmLabel: "Delete",
       destructive: true,
     });

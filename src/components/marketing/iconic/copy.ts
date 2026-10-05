@@ -164,14 +164,15 @@ export const LEGAL_COPY = {
     // section 3 says when content is sent on a schedule (Batch 8). 5 October
     // 2026 (Batch 14): demo and contact requests in section 1, what the
     // export holds in section 5, and deletion, older files and backups in
-    // section 6.
-    updated: "5 October 2026",
+    // section 6. 6 October 2026: section 6 says which closures are deleted
+    // after 30 days, and the older-files date.
+    updated: "6 October 2026",
   },
   terms: {
     eyebrow: "Terms",
     h1: "Terms of service.",
     sub: "The agreement between your organization and ours, as short as a contract can honestly be.",
-    updated: "5 October 2026",
+    updated: "6 October 2026",
   },
   cookies: {
     eyebrow: "Cookies",
@@ -185,7 +186,7 @@ export const LEGAL_COPY = {
     // carries the date it was written rather than the old one's. 5 October
     // 2026: section 4 no longer claims a recorded answer covers cookies added
     // later, and the banner asks only about preferences.
-    updated: "5 October 2026",
+    updated: "6 October 2026",
   },
 } as const;
 

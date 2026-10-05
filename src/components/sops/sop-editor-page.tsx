@@ -92,6 +92,7 @@ import { deriveSopSaveState, isMeaningfulFirstChange, nextRetryDelay } from "@/l
 import { runnableSteps } from "@/lib/sop-step-owner";
 import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-placement";
 import { copyObjectLink, objectHrefNow } from "@/components/layout/os/use-object-href";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -602,7 +603,7 @@ export function SopEditorPage({ sopId: initialSopId, kind: initialKind = "writte
   };
   const remove = async () => {
     if (!sop) return;
-    const ok = await confirm({ title: `Move "${sop.title || "Untitled SOP"}" to Trash?`, description: `You can restore it for ${boot.org.trashDays} days.`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: `Move "${sop.title || "Untitled SOP"}" to Trash?`, description: trashRestoreSentence(boot.org), confirmLabel: "Move to Trash", destructive: true });
     if (!ok) return;
     const r = await apiFetch(`/api/sops/${sop.id}`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't move it to Trash", { tone: "danger" }); return; }

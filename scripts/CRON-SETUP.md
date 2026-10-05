@@ -222,8 +222,12 @@ before that file is applied it answers 503 `not_ready` and does nothing.
 
 ## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
 
-`POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people
-who asked for it in Inbox options > "Auto-clear read notifications". It is the
+`POST /api/cron/inbox-auto-clear` deletes, for good, the notifications a person
+has already Cleared, the number of days after they cleared them that they chose
+in Inbox options > "Delete cleared notifications" (or My settings,
+Notifications, "Delete cleared items after"). It never touches read rows still
+in the Inbox. The first run deletes every Cleared row older than each person's
+choice at once. It is the
 one cron in this file that deletes user data, so it is listed separately and is
 not in the table above: adding the row is a deliberate decision, not a default.
 
@@ -242,7 +246,7 @@ nothing about what gets deleted.
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
-| Auto-clear read notifications | `15 4 * * *` (4:15 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/inbox-auto-clear` |
+| Delete cleared notifications (each person's chosen days after they cleared them) | `15 4 * * *` (4:15 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/inbox-auto-clear` |
 
 What it will and will not delete, all four of which are in the route:
 
@@ -316,10 +320,18 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 ```
 
 Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
-the schedule, AND set `TRASH_PURGE_CRON=on` in the app's `.env` (then
-`pm2 reload workwrk --update-env`). Until that switch is on, a real run answers
-`{ "ran": false, "skipped": ... }` and deletes nothing, and Trash shows no
-countdown (`src/lib/purge-jobs.ts`).
+the schedule, AND set `TRASH_PURGE_CRON=on` and `TRASH_PURGE_SINCE=<today, as
+YYYY-MM-DD>` in the app's `.env` (then `pm2 reload workwrk --update-env`). Until
+both are set, a real run answers `{ "ran": false, "skipped": ... }` and deletes
+nothing, and Trash shows no countdown (`src/lib/purge-jobs.ts`).
+
+**What the first runs delete: nothing for a whole window.** While the switch
+was off, Settings > Data told every workspace that Trash keeps everything, so
+an item deleted before `TRASH_PURGE_SINCE` starts its window on that day, not
+on its deletion: the first deletions happen a full window after the day you
+set (60 days by default), and Trash shows every item its time left from the
+day the switch goes on. Tell workspaces before you turn it on. A dry run with
+`TRASH_PURGE_SINCE` already set counts what the real runs would delete.
 
 
 ### Audit log retention (Phase 8, NOT INSTALLED)
