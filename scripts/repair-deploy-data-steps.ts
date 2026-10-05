@@ -1,9 +1,10 @@
-// Undo what a data script did when the deploy re-ran it on every release
-// (removed from .github/workflows/deploy.yml in Batch 11):
-// migrate-public-sop-links.ts switched Public links back to "View only" in
-// workspaces whose Admin had turned them Off. Here: every workspace whose
-// last access change by a person (settings.updated.access naming
-// publicLinks) was later overridden by the script's own
+// Undo what a data script did wherever the deploy's re-runs of it reached the
+// database (it ran on every release until Batch 11; no run is known to have
+// reached it, see scripts/MIGRATIONS.md, The approval gate, and then this
+// finds nothing): migrate-public-sop-links.ts switched Public links back to
+// "View only" in workspaces whose Admin had turned them Off. Here: every
+// workspace whose last access change by a person (settings.updated.access
+// naming publicLinks) was later overridden by the script's own
 // access.settings.migrated row, and that still reads "view", goes back to
 // Off, with an audit row that says why.
 //

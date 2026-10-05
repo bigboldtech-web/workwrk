@@ -142,7 +142,8 @@ jobs:
 
             # Additive SQL and pending Prisma migrations, each SQL file under
             # a lock timeout (scripts/deploy-migrations.mjs). Before the build:
-            # the new release reads what they add.
+            # the new release reads what they add. Schema only: no data script
+            # runs in a deploy (scripts/MIGRATIONS.md, The approval gate).
             echo "==> Database migrations"
             npm run deploy:migrate > "$APP/deploy-migrate.log" 2>&1 \
               || fail "database migrations (production stays on the release it is serving)" "$APP/deploy-migrate.log"

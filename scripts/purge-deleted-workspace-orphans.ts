@@ -50,8 +50,7 @@ import { ACTION_LABEL } from "../src/lib/admin/staff-activity";
 import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "../src/lib/trash";
 import { deleteObjectsWithPrefix, isS3Configured } from "../src/lib/s3";
 import { ownedS3Prefixes } from "../src/lib/company-files";
-import path from "path";
-import { readdir, unlink } from "fs/promises";
+import { deleteUpload, listUploads } from "../src/lib/local-uploads";
 
 const prisma = scriptPrisma();
 const BATCH = 5000;
@@ -178,10 +177,11 @@ async function main() {
 
 
   // Disk files whose names say they belong to a company or an account that
-  // no longer exists (an id a row still has is never touched).
+  // no longer exists (an id a row still has is never touched), in both
+  // places a local file can be (storage/uploads, and public/uploads for one
+  // not moved yet: src/lib/local-uploads.ts).
   {
-    const dir = path.join(process.cwd(), "public", "uploads");
-    const names = await readdir(dir).catch(() => [] as string[]);
+    const names = await listUploads();
     const orgOf = (n: string) => /^(?:file|logo)-([a-z0-9]{20,})-/.exec(n)?.[1] ?? null;
     const userOf = (n: string) => /^avatar-([a-z0-9]{20,})-/.exec(n)?.[1] ?? null;
     const orgIds = [...new Set(names.map(orgOf).filter((x): x is string => !!x))];
@@ -190,7 +190,7 @@ async function main() {
     const liveUsers = new Set((await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true } })).map((u) => u.id));
     const stranded = names.filter((n) => /^[A-Za-z0-9._-]+$/.test(n) && ((orgOf(n) && !liveOrgs.has(orgOf(n)!)) || (userOf(n) && !liveUsers.has(userOf(n)!))));
     let removed = 0;
-    if (write) for (const n of stranded) removed += await unlink(path.join(dir, n)).then(() => 1, () => 0);
+    if (write) for (const n of stranded) removed += (await deleteUpload(n)) ? 1 : 0;
     console.log(`Disk: ${stranded.length} files of companies or accounts that no longer exist${write ? `, ${removed} deleted` : ""}`);
   }
 

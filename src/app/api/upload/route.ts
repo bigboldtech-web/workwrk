@@ -12,8 +12,9 @@
 
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { uploadsDirForWrite } from "@/lib/local-uploads";
 import { randomBytes } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { isS3Configured, getBucket, getS3Client, presignGetUrl } from "@/lib/s3";
@@ -107,18 +108,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Dev / single-instance fallback: write to public/uploads so the file
-  // is reachable from the same Next server. Not production-grade — it
-  // doesn't survive horizontal scaling — but keeps local dev frictionless.
+  // Dev / single-instance fallback: write to storage/uploads, outside public/
+  // (src/lib/local-uploads.ts), served only by the uploads route. Not
+  // production-grade (it doesn't survive horizontal scaling), but it keeps
+  // uploads working when object storage is unset or failing.
   // The company's id in the name is the proof it owns the file, read when the
   // company is deleted for good (src/lib/company-files.ts); the stamp says who
   // uploaded it, read by Trash's permanent delete (ownedStoredFile in
   // src/lib/trash.ts).
   const safeName = `file-${orgId}-${stem}.${ext || "bin"}`;
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(uploadDir, safeName), buffer);
+  await writeFile(path.join(await uploadsDirForWrite(), safeName), buffer);
   return NextResponse.json({
     url: `/api/uploads/${safeName}`,
     s3Key: null,

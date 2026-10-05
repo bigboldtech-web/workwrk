@@ -111,7 +111,8 @@ export interface OrgBackfillPlan {
     cLevelLosesSettingsWrite: { id: string; name: string }[];
   };
   userUpdates: { id: string; orgRole: OrgRole; isAgent: boolean }[];
-  accessSettingsWrite: AccessSettings | null;
+  /** Without publicLinks: see where it is planned. */
+  accessSettingsWrite: Omit<AccessSettings, "publicLinks"> | null;
   peopleTeamSeed: string[] | null;
   restrictedFolders: string[];
   restrictedBoards: string[];
@@ -191,7 +192,14 @@ export function planOrgBackfill(s: BackfillSnapshot): OrgBackfillPlan {
   const stored = (s.settings as { access?: unknown } | null)?.access;
   const hasAccess = !!stored && typeof stored === "object";
   const parsed = parseAccessSettings(stored);
-  const accessSettingsWrite = hasAccess ? null : { ...TODAY_EQUIVALENT_ACCESS_SETTINGS };
+  // Public links are left out: a workspace the backfill writes keeps "not
+  // chosen" for them (read as the default, Off, exactly as before), so the
+  // one-time carry-over of pre-toggle public SOP links
+  // (scripts/migrate-public-sop-links.ts) can still tell a stored value, an
+  // Admin's choice, from a workspace nobody has chosen for.
+  const { publicLinks: _notChosen, ...todayWithoutPublicLinks } = TODAY_EQUIVALENT_ACCESS_SETTINGS;
+  void _notChosen;
+  const accessSettingsWrite = hasAccess ? null : { ...todayWithoutPublicLinks };
   const hrIds = live.filter((u) => u.accessLevel === "HR").map((u) => u.id);
   const peopleTeamSeed = parsed.peopleTeamUserIds.length === 0 && hrIds.length > 0 ? hrIds : null;
 

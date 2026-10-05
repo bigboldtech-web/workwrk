@@ -13,7 +13,7 @@ import { logAuditEvent } from "@/lib/activity";
 import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
-import { inviteSender } from "@/lib/auth/invite-facts.server";
+import { alreadyInOrg, inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
 
 export async function GET(req: Request) {
@@ -173,11 +173,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // Check if user already exists in org
-    const existingUser = await prisma.user.findFirst({
-      where: { email, organizationId: orgId },
-    });
-    if (existingUser) {
+    // Already in this workspace, as their own account or as a membership
+    // (someone who works in several is anchored in only one), any case of the
+    // address: what /join refuses, so no invitation is made that it would
+    // turn away.
+    if ((await alreadyInOrg(String(email), orgId)).member) {
       return NextResponse.json({ error: "User already exists in your organization" }, { status: 400 });
     }
 

@@ -138,12 +138,12 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // Files in public/uploads are served by the uploads route, never straight
-  // from the folder. Next serves public/ by file extension from what is there
-  // when the server starts, so after a restart an uploaded .html file would
-  // open as a page; the route serves images as images and everything else as
-  // a download. Old logo links (/uploads/<name>, written before the route
-  // existed) keep working, through the route.
+  // Old logo links (/uploads/<name>, written before the uploads route
+  // existed) keep working, through the route. The files themselves are no
+  // longer in public/ at all (src/lib/local-uploads.ts): Next serves public/
+  // by itself, by extension, and finds a file by its DECODED path while this
+  // rewrite and the header rules above match the path as sent, so an encoded
+  // /uploads%2F<name> reached the file with none of the route's protections.
   async rewrites() {
     return {
       beforeFiles: [{ source: "/uploads/:path*", destination: "/api/uploads/:path*" }],

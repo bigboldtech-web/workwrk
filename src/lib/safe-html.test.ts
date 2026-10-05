@@ -83,6 +83,15 @@ describe("the editor's own structures", () => {
     }
   });
 
+  it("keeps the link schemes the editor writes, and still drops the dangerous ones", () => {
+    for (const href of ["sms:+15551234567", "ftp://files.example/f.pdf", "ftps://files.example/f", "callto:+15551234567", "xmpp:ops@chat.example", "tel:+15551234567", "mailto:hr@acme.example"]) {
+      expect(safeUserHtml(`<a href="${href}">x</a>`), href).toContain(`href="${href}"`);
+    }
+    for (const bad of [`<a href="javascript:alert(1)">x</a>`, `<a href="data:text/html,x">x</a>`, `<a href="vbscript:x">x</a>`, `<a href="file:///etc/passwd">x</a>`]) {
+      expect(safeUserHtml(bad), bad).not.toContain("href");
+    }
+  });
+
   it("gives every link that opens elsewhere noopener", () => {
     expect(safeUserHtml(`<a href="https://x.example" target="other">x</a>`)).toContain('rel="noopener noreferrer"');
   });

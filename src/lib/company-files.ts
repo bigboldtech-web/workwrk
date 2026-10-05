@@ -29,8 +29,7 @@
 // files only after it commits, so a delete that rolls back loses nothing.
 // Best effort, never throws.
 
-import path from "path";
-import { readdir, unlink } from "fs/promises";
+import { deleteUpload, listUploads } from "@/lib/local-uploads";
 import { deleteObjectsWithPrefix, isS3Configured } from "@/lib/s3";
 
 export interface StoredFiles {
@@ -56,11 +55,9 @@ export async function freeCompanyFiles(organizationId: string, stored: StoredFil
   let local = 0;
   let s3 = 0;
   try {
-    const dir = path.join(process.cwd(), "public", "uploads");
-    const names = await readdir(dir).catch(() => [] as string[]);
-    for (const name of ownedDiskNames(names, organizationId, stored.userIds)) {
-      const ok = await unlink(path.join(dir, name)).then(() => true, () => false);
-      if (ok) local += 1;
+    // Both places a local file can be (src/lib/local-uploads.ts).
+    for (const name of ownedDiskNames(await listUploads(), organizationId, stored.userIds)) {
+      if (await deleteUpload(name)) local += 1;
     }
     if (isS3Configured()) {
       for (const prefix of ownedS3Prefixes(organizationId)) {

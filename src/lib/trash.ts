@@ -3,8 +3,7 @@
 // every existing list with no query changes. restoreFromTrash() re-creates it
 // from the snapshot. Items are purged 60 days after deletion.
 
-import { unlink } from "fs/promises";
-import path from "path";
+import { deleteUpload } from "@/lib/local-uploads";
 import { prisma } from "@/lib/prisma";
 import { isS3Configured, deleteObject } from "@/lib/s3";
 import { stampOf, uploadedBy } from "@/lib/upload-stamp";
@@ -149,7 +148,7 @@ export async function freeTrashStorageMany(items: readonly TrashedForPurge[], or
     const named = await stampsStillNamed(organizationId, [...new Set(owned.map((o) => o.stamp))], items.map((i) => i.id));
     for (const { stored, stamp } of owned) {
       if (named.has(stamp)) continue;
-      if (stored.kind === "local") await unlink(path.join(process.cwd(), "public", "uploads", stored.name)).catch(() => {});
+      if (stored.kind === "local") await deleteUpload(stored.name);
       else if (isS3Configured()) await deleteObject(stored.key).catch(() => {});
     }
   } catch { /* best effort: the purge proceeds regardless */ }

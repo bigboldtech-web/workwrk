@@ -65,7 +65,10 @@ const OPTIONS: sanitizeHtml.IOptions = {
       "min-width": WIDTH,
     },
   },
-  allowedSchemes: ["http", "https", "mailto", "tel"],
+  // The schemes the step editor's links accept (TipTap Link: ftp, ftps,
+  // mailto, tel, callto, sms, xmpp), so a "Text the on-call" sms: link still
+  // opens the phone. javascript:, data: and anything else lose the href.
+  allowedSchemes: ["http", "https", "mailto", "tel", "ftp", "ftps", "sms", "callto", "xmpp"],
   allowedSchemesByTag: { img: ["http", "https", "data"] },
   allowProtocolRelative: false,
   // Dropped with everything inside them, never kept as text.
