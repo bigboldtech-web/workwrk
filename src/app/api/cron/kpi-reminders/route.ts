@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron — nudges people who owe a KPI score. For every user with at least
@@ -21,7 +22,7 @@ import { cronRefusal } from "@/lib/cron-auth";
 
 const DEDUPE_DAYS = 6;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -80,3 +81,6 @@ export async function POST(req: NextRequest) {
     nudgesCreated,
   });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("kpi-reminders", handle);

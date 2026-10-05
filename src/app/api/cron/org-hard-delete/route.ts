@@ -8,6 +8,7 @@ import { freeCompanyFiles } from "@/lib/company-files";
 import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
 import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/company-notifications";
 import { HARD_DELETE_FIRST, isHardDeleteFirst } from "@/lib/admin/hard-delete-order";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -90,7 +91,7 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
 /** A deletion row this close to the schedule's cancelledAt is that deletion's row. */
 const SAME_DELETION_MS = 5 * 60 * 1000;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -304,13 +305,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return Response.json({
-    ok: true,
+  return cronResult("org-hard-delete", {
+    ok: failures.length === 0,
     scanned: candidates.length,
     eligible: due.length,
     deleted,
     // Restored between the read and the delete, so left alone.
     kept,
     failures,
-  });
+  }, failures.length);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("org-hard-delete", handle);

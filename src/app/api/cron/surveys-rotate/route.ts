@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Survey rotation + reminder cron.
@@ -228,13 +229,14 @@ async function sendReminders(survey: {
   return pending.length;
 }
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
   const now = new Date();
   const rotations: { closed: string; spawned?: string }[] = [];
   const reminderCounts: { surveyId: string; reminded: number }[] = [];
+  let failed = 0;
 
   // Pass 1: rotate expired
   const expired = await prisma.pulseSurvey.findMany({
@@ -249,6 +251,7 @@ export async function POST(req: NextRequest) {
     try {
       rotations.push(await rotateOne(s));
     } catch (err) {
+      failed += 1;
       console.error(`[surveys-rotate] failed to rotate ${s.id}:`, err);
     }
   }
@@ -271,17 +274,21 @@ export async function POST(req: NextRequest) {
     try {
       reminderCounts.push({ surveyId: s.id, reminded: await sendReminders(s) });
     } catch (err) {
+      failed += 1;
       console.error(`[surveys-rotate] failed to remind for ${s.id}:`, err);
     }
   }
 
-  return Response.json({
+  return cronResult("surveys-rotate", {
     ran: true,
     at: now.toISOString(),
     rotated: rotations.length,
     rotations,
     remindedSurveys: reminderCounts.length,
     reminders: reminderCounts,
-  });
+    failed,
+  }, failed);
 }
 
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("surveys-rotate", handle);

@@ -1,32 +1,102 @@
 name: Deploy
 
-# CD: on merge to main, wait for CI to pass, then SSH to the aaPanel server and
-# pull → install → build (build runs migrations via scripts/deploy-migrations.mjs)
-# → reload the PM2 process.
+# CD: when CI passes on a push to main, SSH to the aaPanel server and deploy
+# the newest commit on main whose CI passed (a manual run: the sha it names,
+# which CI must have passed): fetch it, install (only when the lockfile
+# changed), apply the database migrations, build beside the live release,
+# swap the new build in, reload PM2, check the new release answers, and put
+# back whatever it changed if anything fails.
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
-  # Manual trigger for when a CI run was lost to transient runner failures.
-  # ALWAYS prefer this over ad-hoc SSH deploys: the concurrency group below
-  # serializes it against auto-deploys (2026-08-07 outage: a raw SSH deploy
-  # raced the pipeline deploy in the same directory and took prod down).
+  # Manual trigger for when a CI run was lost to transient runner failures, or
+  # to go back to an earlier commit. It deploys only a commit CI passed (the
+  # first step checks). ALWAYS prefer this over ad-hoc SSH deploys: the
+  # concurrency group below serializes it against auto-deploys (2026-08-07
+  # outage: a raw SSH deploy raced the pipeline deploy in the same directory
+  # and took prod down).
   workflow_dispatch:
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+    inputs:
+      sha:
+        description: "Commit on main to deploy (empty: the newest commit on main whose CI passed). CI must have passed for it."
+        required: false
+        default: ""
 
 jobs:
   deploy:
     name: Deploy to aaPanel
     runs-on: ubuntu-latest
-    # Only deploy when the triggering CI run actually succeeded (manual
-    # workflow_dispatch runs have no workflow_run payload and always deploy).
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # On the JOB, not the workflow: a run whose job the condition below skips
+    # (a fork's pull request named main, a failed CI) never enters the group,
+    # so it can never replace a waiting deploy. Runs that do enter it are
+    # serialised, and the box itself also takes a lock (the script below).
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    # A CI run that passed on a PUSH to this repository's main, on its FIRST
+    # attempt. The branches filter above matches the head branch NAME of the
+    # run that triggered it, and for a pull request from a fork that is the
+    # fork's own branch: a fork whose branch is called main could otherwise
+    # rebuild production on every push to its pull request. A re-run of a CI
+    # run never deploys: it would deploy the newest green commit again, even
+    # one a manual run had just gone back from; a commit whose CI had to be
+    # re-run is deployed by the next push or a manual run.
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_branch == 'main' &&
+           github.event.workflow_run.run_attempt == 1 &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
+    permissions:
+      actions: read
+      contents: read
+    env:
+      # A manual run's sha. Empty for an automatic run, which deploys the
+      # newest commit on main whose CI passed (the first step picks it).
+      REQUESTED_SHA: ${{ inputs.sha }}
     steps:
+      - name: Pick the commit, and check CI passed for it
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs="repos/${{ github.repository }}/actions/workflows/ci.yml/runs"
+          if [ -n "${REQUESTED_SHA:-}" ]; then
+            sha="$REQUESTED_SHA"
+            if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::'$sha' is not a full commit sha; give the 40-character sha."
+              exit 1
+            fi
+            # A run of a PUSH to main only: a pull request's run tested a
+            # merge ref (that head merged into main at the time, or a fork's
+            # own ci.yml), never the commit itself.
+            n=$(gh api "$runs?head_sha=$sha&status=success&event=push&branch=main&per_page=1" --jq '.total_count')
+            if [ "${n:-0}" -lt 1 ]; then
+              echo "::error::CI has not passed on a push to main for $sha, so it is not deployed."
+              exit 1
+            fi
+          else
+            # The newest commit on main whose push CI passed, never the one a
+            # run happened to start for and never "whatever main is now". A
+            # re-run of an older CI run starts this workflow too, and GitHub
+            # keeps only one waiting run per concurrency group, so that run
+            # can replace the waiting deploy of a newer commit: picking the
+            # newest green commit here means the run that survives deploys
+            # it. A commit CI has not passed yet is never picked.
+            sha=$(gh api "$runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
+            if [ -z "$sha" ]; then
+              echo "::error::no CI run on main has passed, so nothing is deployed."
+              exit 1
+            fi
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::deploying $sha (CI passed)"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -34,16 +104,26 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          # Pass the deploy path into the remote script.
-          envs: DEPLOY_PATH
-          script_stop: true
+          # Pass the deploy path, the commit and what started the run into
+          # the remote script. NO script_stop: it makes the action add an
+          # "exit if the last command failed" check after every line, which
+          # fires on the first line of an else branch and of every function
+          # body (the failed test's status), so the deploy died at its first
+          # else with no reason printed. The script stops on its own errors
+          # (set -euo pipefail) and puts back what it changed (on_exit).
+          envs: DEPLOY_PATH,DEPLOY_SHA,DEPLOY_EVENT
+          # The build alone can take most of the action's default 10 minutes
+          # on the box; a timeout mid-build now leaves production as it was,
+          # but it should not cut a healthy deploy short.
+          command_timeout: 40m
           script: |
             set -euo pipefail
             # Non-interactive SSH has a minimal PATH; pin the aaPanel Node
             # install so node/npm/npx/pm2 resolve (they live here, not on the
             # default PATH).
             export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
-            cd "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+            APP="${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+            cd "$APP"
 
             # DIAGNOSTICS. Downloading an Actions log needs admin rights on the
             # repo, so a failing deploy shows only "exit code 1" to anyone
@@ -60,59 +140,229 @@ jobs:
               exit 1
             }
 
+            # ONE DEPLOY ON THE BOX AT A TIME. A job GitHub has ended
+            # (cancelled, timed out, connection lost) can leave its script
+            # running here, because the script ignores the hang-up so that it
+            # always puts back what it changed. The next deploy waits for it,
+            # then starts from what it left. PM2 is always called with this
+            # descriptor closed (9>&-), so a PM2 daemon started by a deploy
+            # can never hold the lock for good.
+            # In a directory only root can enter: a lock file other accounts
+            # could open would let any of them hold it and stop every deploy.
+            LOCK_DIR="${DEPLOY_LOCK_DIR:-/run/workwrk-deploy}"
+            install -d -m 700 "$LOCK_DIR" || fail "could not make the deploy lock directory $LOCK_DIR"
+            exec 9>"$LOCK_DIR/lock" || fail "could not open the deploy lock in $LOCK_DIR"
+            if ! flock -w 1800 9; then fail "another deploy was still running on the box after 30 minutes"; fi
+
             echo "::notice::preflight disk: $(df -h / | tail -1 | tr -s ' ')"
             echo "::notice::preflight inodes: $(df -i / | tail -1 | tr -s ' ')"
             echo "::notice::preflight node $(node -v 2>&1) npm $(npm -v 2>&1)"
             echo "::notice::preflight free: $(free -m 2>/dev/null | sed -n 2p | tr -s ' ' || echo n/a)"
 
-            echo "==> Fetching latest main"
+            # THE LIVE RELEASE STAYS WHOLE, WHATEVER STOPS THE DEPLOY. The
+            # server serves .next. Every step up to the swap writes somewhere
+            # else (the source tree, the packages only when the lockfile
+            # changed, the database with additive SQL the live release does
+            # not read, .next-staging), and on_exit puts back what the stage
+            # reached had changed:
+            #   source   the source tree back at the live commit, and the
+            #            live release's packages back if they were replaced;
+            #   swapped  the new build out (.next-failed), the previous one
+            #            back in, its packages and commit back, PM2 reloaded.
+            # It runs on every exit: a failed step, a failed check, and a
+            # session that ended mid-deploy (a cancelled job, the command
+            # timeout, a dropped connection), because SIGPIPE and SIGHUP are
+            # ignored and the next write to the gone session fails instead.
+            STAGE=start
+            PREV_SHA=""
+            OLD_BUILD=none
+            put_back_packages () {
+              if [ -d node_modules-prev ]; then
+                rm -rf node_modules-failed
+                if [ -d node_modules ]; then mv node_modules node_modules-failed; fi
+                mv node_modules-prev node_modules
+              fi
+            }
+            on_exit () {
+              rc=$?
+              trap - EXIT
+              set +e
+              case "$STAGE" in
+                source)
+                  put_back_packages
+                  git reset --hard "$PREV_SHA" > /dev/null 2>&1
+                  echo "::error::the source tree is back at $PREV_SHA, the commit the live build was made from; production did not change"
+                  ;;
+                swapped)
+                  if [ -d .next-prev ]; then
+                    rm -rf .next-failed
+                    if [ -d .next ]; then mv .next .next-failed; fi
+                    mv .next-prev .next
+                    put_back_packages
+                    git reset --hard "$PREV_SHA" > /dev/null 2>&1
+                    pm2 reload workwrk --update-env 9>&- > /tmp/wd-pm2-back.log 2>&1
+                    if back=$(check_release "$OLD_BUILD" previous); then
+                      echo "::error::the previous build ($OLD_BUILD, $PREV_SHA) is serving again. The failed one is in .next-failed"
+                    else
+                      echo "::error::the previous build was put back but does not pass its check either ($back): look at the box now"
+                    fi
+                  else
+                    echo "::error::there is no previous build to go back to: look at the box now"
+                  fi
+                  ;;
+              esac
+              exit "$rc"
+            }
+            trap on_exit EXIT
+            trap '' PIPE HUP
+
+            # The new release must answer. pm2 reload returns once the process
+            # is launched, so a release that crashed on boot or answered 500
+            # everywhere used to be reported "Deploy complete". Through the
+            # public address (NEXTAUTH_URL, the app host): /api/health must
+            # report the build, then /login and one of its scripts must load.
+            BASE=$(grep -E '^NEXTAUTH_URL=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true)
+            BASE="${BASE:-https://app.workwrk.com}"
+            check_release () {
+              # $1: the BUILD_ID that must be serving. $2 "previous": a build
+              # from before Batch 12, whose /api/health names no build, also
+              # passes on "status":"ok".
+              local want="$1" kind="${2:-}" body="" i
+              for i in $(seq 1 40); do
+                sleep 3
+                body=$(curl -fsS --max-time 5 "$BASE/api/health" 2>/dev/null || true)
+                case "$body" in
+                  *"\"build\":\"$want\""*) break ;;
+                  *"\"build\":"*) ;;
+                  *"\"status\":\"ok\""*) [ "$kind" = previous ] && break ;;
+                esac
+                body=""
+              done
+              [ -n "$body" ] || { echo "health never reported build $want"; return 1; }
+              local login chunk asset
+              login=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/login" || echo 000)
+              [ "$login" = "200" ] || { echo "/login answered $login"; return 1; }
+              chunk=$(cd .next/static/chunks 2>/dev/null && ls -1 -- *.js 2>/dev/null | head -1 || true)
+              if [ -n "$chunk" ]; then
+                asset=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/_next/static/chunks/$chunk" || echo 000)
+                [ "$asset" = "200" ] || { echo "a script of the build answered $asset"; return 1; }
+              fi
+              return 0
+            }
+
+            echo "==> Fetching $DEPLOY_SHA"
+            # The commit the LIVE build was made from: written beside each
+            # build since Batch 12 (a failed deploy leaves HEAD at its own
+            # commit, so HEAD alone can name a commit that never served).
+            PREV_SHA=$(cat .next/DEPLOY_SHA 2>/dev/null || git rev-parse HEAD)
+            OLD_BUILD=$(cat .next/BUILD_ID 2>/dev/null || echo none)
             git fetch --prune origin main > /tmp/wd-git.log 2>&1 || fail "git fetch" /tmp/wd-git.log
-            git reset --hard origin/main >> /tmp/wd-git.log 2>&1 || fail "git reset" /tmp/wd-git.log
+            git merge-base --is-ancestor "$DEPLOY_SHA" origin/main 2>>/tmp/wd-git.log \
+              || fail "$DEPLOY_SHA is not a commit on main" /tmp/wd-git.log
 
-            echo "==> Installing dependencies"
-            npm ci > /tmp/wd-npmci.log 2>&1 || fail "npm ci" /tmp/wd-npmci.log
+            # An automatic run whose commit is already live, or older: a
+            # deploy job that waited in the concurrency group while a newer
+            # commit went live. Automatic deploys only ever go forward; going
+            # back is a manual run of this workflow with the sha.
+            if [ "${DEPLOY_EVENT:-}" = "workflow_run" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREV_SHA" 2>/dev/null; then
+              echo "::notice::$DEPLOY_SHA is already live, or older than the live commit $PREV_SHA: nothing deployed. Going back is Actions > Deploy > Run workflow with the sha."
+              STAGE=done
+              exit 0
+            fi
 
-            # Build runs scripts/deploy-migrations.mjs (prisma migrate deploy
-            # with advisory-lock retry) + prisma generate + next build.
-            # Tee to a persistent log so a failed build is diagnosable over SSH
-            # even without the Actions logs. pipefail keeps the real exit code so
-            # script_stop still aborts the deploy (no pm2 reload) on failure.
-            echo "==> Building (includes DB migrations)"
-            npm run build > /www/wwwroot/workwrk.com/deploy-build.log 2>&1 \
-              || fail "npm run build (deploy-migrations + prisma generate + next build)" /www/wwwroot/workwrk.com/deploy-build.log
+            # A commit from before Batch 12 has no deploy:migrate step and
+            # builds into the live .next: this workflow cannot deploy it, and
+            # says so before touching anything.
+            PKG=$(git show "$DEPLOY_SHA:package.json" 2>/dev/null || true)
+            CFG=$(git show "$DEPLOY_SHA:next.config.ts" 2>/dev/null || true)
+            case "$PKG" in *'"deploy:migrate"'*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is done by hand on the box (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
+            case "$CFG" in *NEXT_DIST_DIR*) ;; *) fail "$DEPLOY_SHA is from before Batch 12, which this workflow cannot deploy. Going back that far is done by hand on the box (scripts/DEPLOY-NOTES.md, Going back)" ;; esac
 
-            # No data scripts run here any more. Two used to, on every deploy:
-            # the legacy Task -> Item migration and the public SOP link
-            # carry-over. Re-running them would change data on every deploy
-            # (calendar events became tasks; Public links came back on where
-            # they had been turned off), so the steps are removed. Both stay
-            # in scripts/ for a deliberate run by hand (scripts/MIGRATIONS.md,
-            # The approval gate, says how to check whether any run here ever
-            # reached the database), and a deploy log never carries a
-            # per-company report.
+            STAGE=source
+            git reset --hard "$DEPLOY_SHA" >> /tmp/wd-git.log 2>&1 || fail "git reset" /tmp/wd-git.log
 
-            # Build ran as root; the app runs as www. Hand ownership back so
-            # the runtime can read/write .next, node_modules, uploads, etc.
-            # Local files live in storage/uploads since Batch 11 (moved out
-            # of public/ at each start, one way): scripts/MIGRATIONS.md,
-            # "Local uploads", says how to go back to an older build.
+            # npm ci deletes node_modules before it installs, under the running
+            # server, which loads some modules only on first use. So it runs
+            # only when package-lock.json changed since the last install it
+            # did (the hash it leaves in node_modules); otherwise the client
+            # is regenerated for the new schema and the rest is kept. When it
+            # runs, the live release's packages are moved aside first, not
+            # deleted, so a deploy that stops puts them back (on_exit).
+            echo "==> Dependencies"
+            LOCK_HASH=$(sha256sum package-lock.json | cut -d' ' -f1)
+            if [ -d node_modules ] && [ "$(cat node_modules/.deploy-lock-hash 2>/dev/null || true)" = "$LOCK_HASH" ]; then
+              echo "::notice::package-lock.json unchanged; node_modules kept"
+              npx prisma generate > /tmp/wd-generate.log 2>&1 || fail "prisma generate" /tmp/wd-generate.log
+            else
+              rm -rf node_modules-prev node_modules-failed
+              if [ -d node_modules ]; then mv node_modules node_modules-prev; fi
+              npm ci > /tmp/wd-npmci.log 2>&1 || fail "npm ci" /tmp/wd-npmci.log
+              echo "$LOCK_HASH" > node_modules/.deploy-lock-hash
+            fi
+
+            # The additive SQL manifest, each file under a 5 second lock
+            # timeout and tried up to four times, then any pending Prisma
+            # migration through `prisma migrate deploy` (no lock timeout,
+            # tried three times; scripts/deploy-migrations.mjs). Before the
+            # build: the new release reads what they add. Schema only: no data
+            # script runs in a deploy (scripts/MIGRATIONS.md, The approval
+            # gate).
+            echo "==> Database migrations"
+            npm run deploy:migrate > "$APP/deploy-migrate.log" 2>&1 \
+              || fail "database migrations (production stays on the release it is serving)" "$APP/deploy-migrate.log"
+
+            # Beside the live build (NEXT_DIST_DIR, next.config.ts), so the
+            # server keeps serving .next for the whole build. Tee to a
+            # persistent log so a failed build is diagnosable over SSH.
+            echo "==> Building beside the live release"
+            rm -rf .next-staging
+            NEXT_DIST_DIR=.next-staging NODE_OPTIONS=--max-old-space-size=3072 npx next build > "$APP/deploy-build.log" 2>&1 \
+              || { rm -rf .next-staging; fail "next build (production stays on the release it is serving)" "$APP/deploy-build.log"; }
+            [ -s .next-staging/BUILD_ID ] || fail "the build finished without a BUILD_ID (production stays on the release it is serving)" "$APP/deploy-build.log"
+            NEW_BUILD=$(cat .next-staging/BUILD_ID)
+            echo "$DEPLOY_SHA" > .next-staging/DEPLOY_SHA
+
+            # Build ran as root; the app runs as www. Hand ownership back BEFORE
+            # the swap, so the gap between the swap and the reload is as short
+            # as two renames. Local files live in storage/uploads since Batch
+            # 11 (moved out of public/ at each start, one way):
+            # scripts/MIGRATIONS.md, "Local uploads", says how to go back to
+            # an older build.
             echo "==> Restoring ownership to www"
-            chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}" > /tmp/wd-chown.log 2>&1 || fail "chown" /tmp/wd-chown.log
+            chown -R www:www "$APP" > /tmp/wd-chown.log 2>&1 || fail "chown" /tmp/wd-chown.log
+
+            echo "==> Switching to build $NEW_BUILD (was $OLD_BUILD)"
+            rm -rf .next-prev .next-failed
+            STAGE=swapped
+            if [ -d .next ]; then mv .next .next-prev; fi
+            mv .next-staging .next
 
             echo "==> Reloading PM2 process"
-            pm2 reload workwrk --update-env > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
+            pm2 reload workwrk --update-env 9>&- > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
+
+            echo "==> Checking the new release at $BASE"
+            if ! why=$(check_release "$NEW_BUILD"); then
+              fail "the new release did not pass its check: $why"
+            fi
+            STAGE=done
+            # The release is live and answering: the packages it replaced
+            # are no longer needed.
+            rm -rf node_modules-prev node_modules-failed
 
             # If the build was killed by the kernel rather than exiting, the
             # `fail` handler above never runs and the whole session can die
             # with it, which is what "exit code 1 and no annotations" looked
             # like. Leave a breadcrumb the next run can read either way.
             echo "::notice::post-build free: $(free -m 2>/dev/null | sed -n 2p | tr -s ' ' || echo n/a)"
-            if dmesg 2>/dev/null | tail -40 | grep -qiE "out of memory|oom-killer|killed process"; then
+            if dmesg 2>/dev/null | tail -40 | grep -iE "out of memory|oom-killer|killed process" > /dev/null; then
               echo "::error::the kernel OOM killer fired during this deploy; see dmesg on the box"
               dmesg 2>/dev/null | grep -iE "out of memory|oom-killer|killed process" | tail -5 \
                 | while IFS= read -r l; do echo "::error::| $l"; done
             fi
 
+            echo "::notice::live: build $NEW_BUILD, commit $DEPLOY_SHA (previous build kept in .next-prev)"
             echo "==> Deploy complete"
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SHA: ${{ steps.pick.outputs.sha }}
+          DEPLOY_EVENT: ${{ github.event_name }}

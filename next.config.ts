@@ -18,10 +18,21 @@ const nextConfig: NextConfig = {
   // 2026-09-24, so every deploy would have failed deterministically. The box
   // rebuilds what CI already proved; it does not need to prove it again.
   //
-  // The one gap: a MANUAL workflow_dispatch deploy skips the CI check (see
-  // deploy.yml). That door exists for a CI run lost to a flaky runner, so run
-  // it only for a commit that has already passed CI.
+  // A MANUAL workflow_dispatch deploy is held to the same rule (deploy.yml,
+  // "Pick the commit, and check CI passed for it"): one given a sha deploys
+  // it only when CI passed on a push of that sha to main, and one without a
+  // sha deploys the newest commit on main whose CI passed.
   typescript: { ignoreBuildErrors: true },
+
+  // THE DEPLOY BUILDS BESIDE THE LIVE RELEASE. It sets NEXT_DIST_DIR to
+  // .next-staging, so the running server keeps serving .next, untouched, for
+  // the whole build, and a build that fails or is killed changes nothing; the
+  // new build is renamed to .next only after it finished (deploy.yml). It used
+  // to build in .next itself, which next build empties first, so every page
+  // load during a deploy got HTML whose scripts were gone, and a build that
+  // died left production with no build at all. Unset (every other build, and
+  // `next start`), it is .next.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
 
   // BUILD MEMORY. The production box has 3921 MB of RAM, and two deploys died
   // there without printing anything at all: not a build error, a kill. Next 16

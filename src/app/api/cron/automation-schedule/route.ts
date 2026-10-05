@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { processAutomationSchedules } from "@/lib/automation/schedule-server";
 import { noteScheduleTick } from "@/lib/automation/cron-tick-server";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron endpoint: fires the time triggers, "On a schedule" and "A task's date
@@ -17,10 +18,13 @@ import { cronRefusal } from "@/lib/cron-auth";
  * noteScheduleTick), which is how the builder knows the two time triggers
  * are live rather than published-and-never-firing.
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
   const result = await processAutomationSchedules();
   await noteScheduleTick();
   return Response.json({ ran: true, at: new Date().toISOString(), ...result });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("automation-schedule", handle);

@@ -12,13 +12,27 @@
 // session alive on the server, holding lock 72707369 forever, in
 // which case naive retries all fail the same way.
 //
-// Run with: node scripts/deploy-migrations.mjs
+// Run with: DEPLOY_MIGRATE=1 node scripts/deploy-migrations.mjs (the deploy
+// does, through `npm run deploy:migrate`).
 import { Client } from "pg";
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { spawnSync } from "child_process";
 import "dotenv/config";
 
 const PRISMA_LOCK_ID = 72707369;
+
+// It changes whatever database .env names, so it runs only when asked to by
+// name. It used to run inside `npm run build`: building a branch on a laptop
+// whose .env reached production applied that branch's SQL to production.
+if (process.env.DEPLOY_MIGRATE !== "1") {
+  console.error(
+    "deploy-migrations: not run. It changes the database that .env names, so it needs DEPLOY_MIGRATE=1 " +
+      "(the deploy sets it: npm run deploy:migrate). `npm run build` no longer runs it.",
+  );
+  process.exit(1);
+}
 
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
@@ -36,7 +50,8 @@ if (!url) {
 // product 500s. Applying them here closes that window, because this
 // script runs inside `npm run build`, before `next build` and therefore
 // before pm2 reloads onto the new release. A failure below exits non
-// zero, which aborts the build and leaves production on the old build.
+// zero, which stops the deploy before the new release is built, so
+// production stays on the release it is serving.
 //
 // EXPLICIT MANIFEST, not a directory glob. A glob would auto-apply
 // whatever happens to be in the folder, including files that are not
@@ -198,6 +213,9 @@ const SQL_MANIFEST = [
   // before the release that knows about it starts.
   "2026-10-05-workspace-deletion-and-trial-end.sql",
   "2026-10-05-membership-admin-scopes.sql",
+  // Batch 12: the email queue's retry and lease column. The queue's claim
+  // reads it on every send, so it must exist before the release serves.
+  "2026-10-05-email-retry.sql",
 ];
 
 /**
@@ -224,22 +242,59 @@ const SQL_MANIFEST = [
  * production stays on the previous release rather than meeting a database
  * that is missing what the new code needs.
  */
+//
+// A LOCK TIMEOUT ON EVERY FILE. Every file runs on every deploy, and
+// ALTER TABLE ... ADD COLUMN IF NOT EXISTS takes its table's ACCESS EXCLUSIVE
+// lock before it finds the column already there. With no timeout, a long
+// transaction on that table (the nightly backup, the hard delete at 03:30, a
+// long export) made the ALTER wait, and every query of the app on that table
+// (sign in on "User", every task read on "Item") queued behind it until the
+// other one ended. Now a file waits at most LOCK_TIMEOUT for each lock, and is
+// tried again a few times before the deploy stops.
+const LOCK_TIMEOUT = "5s";
+const LOCK_ATTEMPTS = 4;
+const LOCK_RETRY_MS = 10_000;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function applyHandWrittenSql() {
-  for (const name of SQL_MANIFEST) {
-    const file = `prisma/sql/${name}`;
-    if (!existsSync(file)) {
-      console.error(`deploy-migrations: ${file} is in the manifest but missing on disk`);
-      return false;
+  const scratch = mkdtempSync(join(tmpdir(), "deploy-sql-"));
+  try {
+    for (const name of SQL_MANIFEST) {
+      const file = `prisma/sql/${name}`;
+      if (!existsSync(file)) {
+        console.error(`deploy-migrations: ${file} is in the manifest but missing on disk`);
+        return false;
+      }
+      // The same file, with the timeout set first for its session.
+      const timed = join(scratch, name);
+      writeFileSync(timed, `SET lock_timeout = '${LOCK_TIMEOUT}';\n${readFileSync(file, "utf8")}`);
+      let applied = false;
+      for (let attempt = 1; attempt <= LOCK_ATTEMPTS && !applied; attempt++) {
+        console.log(`deploy-migrations: applying sql ${name}${attempt > 1 ? ` (attempt ${attempt}/${LOCK_ATTEMPTS})` : ""}`);
+        const r = spawnSync("npx", ["prisma", "db", "execute", "--file", timed], { encoding: "utf8" });
+        if (r.stdout) process.stdout.write(r.stdout);
+        if (r.stderr) process.stderr.write(r.stderr);
+        if (r.status === 0) { applied = true; break; }
+        const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+        const lockWait = /lock timeout|55P03/i.test(out);
+        if (!lockWait || attempt === LOCK_ATTEMPTS) {
+          console.error(
+            `deploy-migrations: ${name} FAILED (exit ${r.status})${lockWait ? `: a table it alters stayed locked for ${LOCK_ATTEMPTS} tries` : ""}. Stopping before the build.`,
+          );
+          return false;
+        }
+        console.log(`deploy-migrations: ${name} waited ${LOCK_TIMEOUT} for a lock; trying again in ${LOCK_RETRY_MS / 1000}s`);
+        sleepSync(LOCK_RETRY_MS);
+      }
+      console.log(`deploy-migrations: applied ${name}`);
     }
-    console.log(`deploy-migrations: applying sql ${name}`);
-    const r = spawnSync("npx", ["prisma", "db", "execute", "--file", file], { stdio: "inherit" });
-    if (r.status !== 0) {
-      console.error(`deploy-migrations: ${name} FAILED (exit ${r.status}). Aborting before the build.`);
-      return false;
-    }
-    console.log(`deploy-migrations: applied ${name}`);
+    return true;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  return true;
 }
 
 function runPrismaDeploy() {
@@ -303,10 +358,10 @@ async function runPrismaDeployWithRetry(attempts = 3, delayMs = 15_000) {
 }
 
 // Hand-written SQL first: the new release's code depends on these objects,
-// and `next build` runs after this script. Abort the whole build if any of
+// and the deploy builds it only after this script succeeds. Stop if any of
 // them fails rather than reloading onto a release the database cannot serve.
 if (!applyHandWrittenSql()) {
-  console.error("deploy-migrations: aborting the build; production stays on the previous release");
+  console.error("deploy-migrations: stopping the deploy; production stays on the release it is serving");
   process.exit(1);
 }
 

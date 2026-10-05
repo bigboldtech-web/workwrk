@@ -8,6 +8,7 @@ import {
 import type { AccessLevel } from "@/generated/prisma";
 import { parseAccessSettings } from "@/lib/access/settings";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron — auto-opens performance review cycles from each org's configured
@@ -28,7 +29,7 @@ import { cronRefusal } from "@/lib/cron-auth";
  *
  * Schedule: once a day. Guard with CRON_SECRET in production.
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -123,3 +124,6 @@ export async function POST(req: NextRequest) {
     created,
   });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("review-cycles", handle);

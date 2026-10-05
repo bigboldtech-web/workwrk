@@ -21,8 +21,9 @@ import { prisma } from "@/lib/prisma";
 import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
       .catch(() => {});
   }
 
-  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string }> = [];
+  const fired: Array<{ agentSlug: string; status: string; runId?: string; error?: string; keySource?: "shared" | "byok" }> = [];
   for (const agent of runnable) {
     try {
       const result = await runAgentAutonomously({
@@ -69,6 +70,7 @@ export async function POST(req: Request) {
         status: result.status,
         runId: result.runId,
         error: result.errorText,
+        keySource: result.keySource,
       });
     } catch (err) {
       fired.push({
@@ -79,13 +81,23 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({
+  const body = {
     firedCount: fired.length,
     runs: fired,
     skippedAiOff: skipped,
-  });
+  };
+  // A failed tick is one where every run on WorkwrK's own AI key failed:
+  // the model is unreachable or that key is bad, which is the server's to
+  // fix. A run on a workspace's own key (BYOK) is that workspace's, and one
+  // agent's failure among runs that worked stays in its run history.
+  const ours = fired.filter((r) => r.keySource !== "byok");
+  const failed = ours.filter((r) => r.status === "FAILED").length;
+  return cronResult("run-due-agents", body, ours.length > 0 && failed === ours.length ? failed : 0);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("run-due-agents", handle);
 
 // Vercel Cron sends GET, not POST — accept both so the same endpoint
 // works under any scheduler.
-export { POST as GET };
+export const GET = POST;

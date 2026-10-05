@@ -33,12 +33,28 @@ import {
 
 const INITIAL_WINDOW_DAYS = 30;
 
+/**
+ * A failure that is the person's to fix, not the server's: they revoked
+ * WorkwrK's access in Google, or their connection lost its token and must be
+ * made again.
+ */
+function failureIsPersonal(err: unknown): boolean {
+  const e = err as { googleError?: unknown; message?: unknown; status?: unknown } | null;
+  if (e?.googleError === "invalid_grant") return true;
+  // The calendar was deleted, or is no longer shared with them.
+  if (e?.status === 404) return true;
+  const msg = typeof e?.message === "string" ? e.message : "";
+  return msg.includes("user must reconnect") || msg.includes("No master subscription");
+}
+
 export async function syncAllSubscriptions(): Promise<{
   subscriptions: number;
   inserted: number;
   updated: number;
   deleted: number;
   failed: number;
+  /** Of the failed, those that are the person's to fix (a revoked or lost connection). */
+  personal: number;
 }> {
   const subs = await prisma.calendarSubscription.findMany({
     where: {
@@ -49,7 +65,7 @@ export async function syncAllSubscriptions(): Promise<{
     },
   });
 
-  let inserted = 0, updated = 0, deleted = 0, failed = 0;
+  let inserted = 0, updated = 0, deleted = 0, failed = 0, personal = 0;
 
   for (const sub of subs) {
     try {
@@ -59,11 +75,12 @@ export async function syncAllSubscriptions(): Promise<{
       deleted += stats.deleted;
     } catch (err: any) {
       failed++;
+      if (failureIsPersonal(err)) personal++;
       console.error(`[GCal sync] subscription ${sub.id} failed:`, err?.message ?? err);
     }
   }
 
-  return { subscriptions: subs.length, inserted, updated, deleted, failed };
+  return { subscriptions: subs.length, inserted, updated, deleted, failed, personal };
 }
 
 export async function syncOne(sub: CalendarSubscription): Promise<{
@@ -77,7 +94,8 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
   });
   if (!master) throw new Error("No master subscription with tokens");
 
-  const token = await ensureFreshToken(master);
+  let token = await ensureFreshToken(master);
+  let refreshed = false;
 
   // User's orgId for writing tasks.
   const user = await prisma.user.findUnique({
@@ -101,6 +119,15 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
     try {
       page = await listEvents(token, calendarId, { syncToken, pageToken, timeMin });
     } catch (err: any) {
+      // The stored token was refused before its expiry (the person revoked
+      // access, or Google ended the token): refresh once and try again, so
+      // the answer is Google's own reason (invalid_grant is the person's,
+      // invalid_client the server's).
+      if (err?.status === 401 && !refreshed) {
+        refreshed = true;
+        token = await ensureFreshToken(master, { force: true });
+        continue;
+      }
       if (err?.code === 410) {
         // Sync token expired — reset and let the next cron pass do a full resync.
         await prisma.calendarSubscription.update({

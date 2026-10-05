@@ -94,7 +94,7 @@ escalations pointed at work nobody could see.
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
-| Drain queued emails | `* * * * *` (every minute) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/email-queue` |
+| Drain queued emails | `* * * * *` (every minute) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/email-queue` (see the dead-man note below) |
 | Sync Google Calendar | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/calendar-sync` |
 | Retry failed webhooks | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/webhook-retry` |
 | Rate-limit cleanup | `0 3 * * *` (3 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/ratelimit-cleanup` |
@@ -111,6 +111,26 @@ escalations pointed at work nobody could see.
 | Hard-delete cancelled orgs (30-day grace) | `30 3 * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/org-hard-delete` |
 | Personal reminders fire (closed-app) | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/reminders` |
 | Purge table rows in Trash > 60 days | `45 3 * * *` (3:45 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/table-row-purge` |
+
+**Knowing when email stops (the email-queue row).** This job's own failure
+cannot email anyone (the alert would wait in the queue that is failing), and
+`/api/health` does not check email. So the job answers 503 while mail is held
+(off on the server, with email waiting), and 500 while mail is failing: a
+send failed in its own run, or, because most sends and their retries run in
+the request that queued them, an email that has already failed is waiting to
+try again, it was queued more than 30 minutes ago, and nothing at all was
+sent in the last 30 minutes (one bad address among mail that goes out never
+counts).
+
+To be told, add a dead-man check: create a check at healthchecks.io (or
+similar) with a period of 1 minute and a grace time of 15 minutes, and end
+the row with `&& curl -fsS -m 10 <the check's ping URL> > /dev/null`. The ping
+goes only when the job answered 2xx, so the check emails you once mail has
+been held or failing for 15 minutes, or the row stopped running. A single
+failed send misses one ping inside the grace time and never alerts. (A
+`|| curl <ping URL>/fail` leg is left out on purpose: it would mark the check
+down for every address a mail server rejects, and an alert that fires for
+every typo gets ignored.)
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.

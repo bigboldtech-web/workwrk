@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/format/date";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron: the "review closes in 3 days" nudge (spec-teams-performance
@@ -20,7 +21,7 @@ import { cronRefusal } from "@/lib/cron-auth";
  * change: the founder adds the row. Guarded by CRON_SECRET, and closed
  * when the secret is missing (src/lib/cron-auth.ts).
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -74,3 +75,6 @@ export async function POST(req: NextRequest) {
   }
   return Response.json({ ran: true, at: now.toISOString(), cycles: cycles.length, notified });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("review-closing", handle);

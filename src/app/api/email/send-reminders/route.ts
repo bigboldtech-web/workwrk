@@ -10,10 +10,11 @@ import { filterNotifyUsers } from "@/lib/notify-prefs";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -329,3 +330,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ success: true, results });
 }
+
+// Seven crontab rows call this route (scripts/CRON-SETUP.md), so it answers
+// a throw like every scheduled job: 500, a [cron-failure] line and the alert
+// (src/lib/cron-result.ts).
+export const POST = cronJob("send-reminders", handle);

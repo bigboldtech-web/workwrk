@@ -2376,6 +2376,10 @@ model EmailLog {
   status         EmailStatus @default(QUEUED)
   error          String?
   attempts       Int         @default(0)
+  /// QUEUED: when the next try is due (retries back off, src/lib/email.ts).
+  /// SENDING: when the run's claim runs out and another run may take it.
+  /// prisma/sql/2026-10-05-email-retry.sql
+  nextAttemptAt  DateTime?
   organizationId String?
   createdAt      DateTime    @default(now())
   sentAt         DateTime?

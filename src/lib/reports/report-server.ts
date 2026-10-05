@@ -367,6 +367,8 @@ export interface RunTotals {
   skippedInactive: number;
   targetUnavailable: number;
   deactivated: number;
+  /** Schedules that threw this run; each is tried again on the next run. */
+  failed: number;
 }
 
 /**
@@ -376,7 +378,7 @@ export interface RunTotals {
 export async function runDueReports(now: Date, opts: { limit: number; budgetMs: number }): Promise<RunTotals | { ran: true; skipped: "table_absent" }> {
   if (!(await reportTableAvailable())) return { ran: true, skipped: "table_absent" };
   const started = Date.now();
-  const totals: RunTotals = { ran: true, at: now.toISOString(), schedules: 0, queued: 0, skippedNoAccess: 0, skippedInactive: 0, targetUnavailable: 0, deactivated: 0 };
+  const totals: RunTotals = { ran: true, at: now.toISOString(), schedules: 0, queued: 0, skippedNoAccess: 0, skippedInactive: 0, targetUnavailable: 0, deactivated: 0, failed: 0 };
   let due: Array<{ id: string; nextRunAt: Date | null }>;
   try {
     due = await prisma.reportSchedule.findMany({
@@ -407,6 +409,7 @@ export async function runDueReports(now: Date, opts: { limit: number; budgetMs: 
     } catch (err) {
       // One schedule failing must not stop the others; its nextRunAt did not
       // move, so the next cron run tries it again.
+      totals.failed += 1;
       console.error(`[reports] schedule ${d.id} failed`, err);
     }
   }
