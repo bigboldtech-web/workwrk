@@ -45,12 +45,17 @@
 // platform's free uses of the day (AiFreeDay, FREE_AI_PER_DAY, set by env):
 // past it, free AI waits for the next UTC day, and what it can cost WorkwrK in
 // a day is bounded however many accounts are made. Paid workspaces never
-// touch it.
+// touch it, and neither do free workspaces made before the ceiling
+// (FREE_CEILING_FROM): that set is fixed and each is held to its own caps,
+// so the total stays bounded, and a ceiling drained by new sign-ups never
+// takes away AI a workspace already had. A use is given back when its call
+// gives nothing, and the first time a kind reaches the ceiling in a UTC day,
+// OPS_ALERT_EMAIL is told.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { rateLimit } from "@/lib/rate-limit-memory";
-import { claimAiUse } from "@/lib/ai-usage";
+import { claimAiUse, releaseAiUse } from "@/lib/ai-usage";
 
 const PLAN_LABEL: Record<string, string> = { STARTER: "Starter", GROWTH: "Growth", SCALE: "Scale", ENTERPRISE: "Enterprise" };
 
@@ -67,6 +72,15 @@ export type AiClaim =
   | { ok: false; message: string; limit: number; used: number };
 
 export type FreeKind = "question" | "auto" | "fill";
+
+/** Free workspaces made before this take no part in the ceiling (see above). */
+export const FREE_CEILING_FROM = new Date("2026-10-06T00:00:00Z");
+
+/** Whether a free workspace made at `createdAt` is under the platform's ceiling. */
+export function underFreeCeiling(createdAt: Date | string | null | undefined): boolean {
+  if (!createdAt) return true;
+  return new Date(createdAt).getTime() >= FREE_CEILING_FROM.getTime();
+}
 
 /** Free AI uses the whole platform may make in a UTC day, by kind (env, else these). */
 export function freeAiPerDay(kind: FreeKind, env: Record<string, string | undefined> = process.env): number {
@@ -96,11 +110,40 @@ export async function claimFreeDay(kind: FreeKind, db: Db = prisma, cap: number 
       DO UPDATE SET "count" = "AiFreeDay"."count" + 1, "updatedAt" = now() AT TIME ZONE 'UTC'
       WHERE "AiFreeDay"."count" < ${Math.floor(cap)}
       RETURNING "count"`;
-    return rows.length > 0;
+    if (rows.length > 0) return true;
+    await alertCeilingOnce(kind, db, cap);
+    return false;
   } catch (err) {
     console.error(`[ai-allowance] free day claim failed: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
     return false;
   }
+}
+
+/** Give one of the day's free uses back (the call it was taken for gave nothing). Never throws. */
+export async function releaseFreeDay(kind: FreeKind, db: Db = prisma): Promise<void> {
+  try {
+    await db.$queryRaw`
+      UPDATE "AiFreeDay" SET "count" = "count" - 1, "updatedAt" = now() AT TIME ZONE 'UTC'
+      WHERE "day" = (now() AT TIME ZONE 'UTC')::date AND "kind" = ${kind} AND "count" > 0
+      RETURNING "count"`;
+  } catch {
+    // A use not given back costs one use of the day, never anything more.
+  }
+}
+
+/** The first refusal of a kind in a UTC day tells OPS_ALERT_EMAIL (once, by a conditional stamp). */
+async function alertCeilingOnce(kind: FreeKind, db: Db, cap: number): Promise<void> {
+  const first = await db.$queryRaw<Array<{ kind: string }>>`
+    UPDATE "AiFreeDay" SET "alertedAt" = now() AT TIME ZONE 'UTC'
+    WHERE "day" = (now() AT TIME ZONE 'UTC')::date AND "kind" = ${kind} AND "alertedAt" IS NULL
+    RETURNING "kind"`.catch(() => []);
+  if (first.length === 0) return;
+  const what = `Free AI reached its ceiling for today: ${cap} free ${kind === "question" ? "questions" : kind === "auto" ? "automatic calls" : "fills"} across every free workspace made since ${FREE_CEILING_FROM.toISOString().slice(0, 10)}. New free workspaces are refused until 00:00 UTC. If this is growth, raise ${kind === "question" ? "FREE_AI_QUESTIONS_PER_DAY" : kind === "auto" ? "FREE_AI_AUTO_PER_DAY" : "FREE_AI_FILLS_PER_DAY"}; if it is a script, look at the day's new sign-ups.`;
+  console.error(`[ai-allowance] ${what}`);
+  const to = process.env.OPS_ALERT_EMAIL?.trim();
+  if (!to) return;
+  const { queueEmail } = await import("@/lib/email");
+  await queueEmail({ to, subject: "WorkwrK: free AI reached its daily ceiling", template: "ops-ai-ceiling", html: `<p>${what}</p>`, variables: { kind, cap } }).catch(() => {});
 }
 
 /** The sentence a workspace at its cap is shown. */
@@ -119,8 +162,8 @@ export function aiPersonCapMessage(limit: number): string {
 /** Claim one AI question for this workspace, or say why not. */
 export async function claimAiQuestion(organizationId: string, userId: string, query: string): Promise<AiClaim> {
   return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<{ plan: string | null }[]>`
-      SELECT "plan"::text AS plan FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+    const rows = await tx.$queryRaw<{ plan: string | null; createdAt: Date | null }[]>`
+      SELECT "plan"::text AS plan, "createdAt" FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
     if (rows.length === 0) return { ok: false as const, message: "Organization not found", limit: 0, used: 0 };
     const plan = rows[0].plan || "STARTER";
     const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
@@ -134,7 +177,9 @@ export async function claimAiQuestion(organizationId: string, userId: string, qu
       const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
       if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
       // In the same transaction: a refusal later rolls the day's use back.
-      if (!(await claimFreeDay("question", tx))) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
+      if (underFreeCeiling(rows[0].createdAt) && !(await claimFreeDay("question", tx))) {
+        return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
+      }
     }
     const row = await tx.aIQuery.create({
       data: { query: query.slice(0, 4000), userId, organizationId, freeTier },
@@ -161,7 +206,11 @@ export async function callOrGiveBack<T>(claimId: string, call: () => Promise<T>)
 
 /** Hand a claimed question back (the model failed, nothing was answered). */
 export async function releaseAiQuestion(id: string): Promise<void> {
-  await prisma.aIQuery.deleteMany({ where: { id } }).catch(() => {});
+  // A free question also gives back its use of the platform's ceiling: a
+  // call that failed before the model ran costs the day nothing.
+  const gone = await prisma.$queryRaw<Array<{ freeTier: boolean }>>`
+    DELETE FROM "AIQuery" WHERE "id" = ${id} RETURNING "freeTier"`.catch(() => []);
+  if (gone[0]?.freeTier) await releaseFreeDay("question");
 }
 
 /** Keep the answer with its question (the record /api/ai has always kept). */
@@ -229,13 +278,19 @@ export const AI_AUTO_PER_DAY: Record<string, number> = { STARTER: 100, GROWTH: 1
  */
 export async function aiAutoAllowed(organizationId: string, userId: string, keySource: "shared" | "byok" = "shared"): Promise<boolean> {
   if (!rateLimit(`ai-auto:${userId}`, { max: AI_AUTO_PER_MINUTE, windowMs: 60_000 }).ok) return false;
-  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { plan: true } });
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { plan: true, createdAt: true } });
   if (!org) return false;
   const plan = String(org.plan ?? "STARTER");
   const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
   if (aiIsCapped(limit) && (await aiQuestionsUsed(organizationId)) >= limit) return false;
   if (keySource === "byok") return true;
-  if (plan === "STARTER" && !(await claimFreeDay("auto"))) return false;
-  // Fails closed: "limit" past the day's total, "not_ready" without the table.
-  return (await claimAiUse(organizationId, "auto", AI_AUTO_PER_DAY[plan] ?? AI_AUTO_PER_DAY.STARTER)) === "ok";
+  // The workspace's own daily total first (fails closed: "limit" past it,
+  // "not_ready" without the table), then the platform's free ceiling, giving
+  // the workspace's use back when the ceiling refuses.
+  if ((await claimAiUse(organizationId, "auto", AI_AUTO_PER_DAY[plan] ?? AI_AUTO_PER_DAY.STARTER)) !== "ok") return false;
+  if (plan === "STARTER" && underFreeCeiling(org.createdAt) && !(await claimFreeDay("auto"))) {
+    await releaseAiUse(organizationId, "auto");
+    return false;
+  }
+  return true;
 }

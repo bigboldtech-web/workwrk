@@ -27,3 +27,7 @@ CREATE TABLE IF NOT EXISTS "AiFreeDay" (
 
 ALTER TABLE "AIQuery" ADD COLUMN IF NOT EXISTS "freeTier" BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS "AIQuery_userId_freeTier_idx" ON "AIQuery" ("userId", "freeTier");
+
+-- When the ceiling was first reached that day: OPS_ALERT_EMAIL is told once
+-- per kind per day (src/lib/ai-allowance.ts alertCeilingOnce).
+ALTER TABLE "AiFreeDay" ADD COLUMN IF NOT EXISTS "alertedAt" TIMESTAMP(3);
