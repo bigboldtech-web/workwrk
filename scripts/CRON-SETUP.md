@@ -253,8 +253,9 @@ only a choice made under "Delete cleared notifications"
 
 What it will and will not delete, all four of which are in the route:
 
-* **Opt-in per person.** `home.notifications.inboxView.autoClearDays` defaults
-  to `null`, which is "Never". Somebody with no stored value is never swept.
+* **Opt-in per person.** `home.notifications.inboxView.deleteClearedDays`
+  defaults to `null`, which is "Never". Somebody with no stored value is never
+  swept, and a value under the old `autoClearDays` is never read.
 * **Cleared rows only.** A row is swept only once its owner cleared it. Unread
   rows, and rows merely read, are never swept.
 * **Older than the number of days they chose**, and only 7, 14 or 30 — the
@@ -311,8 +312,13 @@ What it will and will not delete:
 * **Past that org's own window.** `settings.retention.trashDays`, defaulting to
   60 when it is unset or nonsense, and floored at one day so a stored zero can
   never purge something on the day it was deleted.
-* **Blobs first.** A trashed file's storage is freed before the row naming it
-  goes, so nothing is orphaned.
+* **Rows first, then their files.** The expired rows are deleted in one
+  statement that returns them, and only those rows' files are freed, so a
+  restore during the run never loses its files (a crash in between leaves a
+  file in storage, never a file lost). Files are freed when their stored name
+  proves the company and the uploader (`src/lib/upload-stamp.ts`); some older
+  uploads (`orgs/<id>/notes/`, `file-<random>`, before 6 October 2026) stay in
+  storage, and the privacy policy says we delete those by hand on request.
 
 **Dry run first, always.** `?dry=1` counts exactly what it would delete per org
 and deletes nothing:

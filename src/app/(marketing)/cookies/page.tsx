@@ -104,12 +104,14 @@ export default function CookiesPage() {
           body: (
             <>
             <p>
-              Cookies are small text files stored in your browser. Ours do two things: keep you logged in, and remember
-              the language and currency you picked. No analytics vendor, no ad network and no pixel runs on this site.
+              Cookies are small text files stored in your browser. Ours keep you logged in, remember the language and
+              currency you picked, and remember that you have seen the cookie notice. No analytics vendor, no ad network
+              and no pixel runs on this site.
             </p>
             <p>
               One thing is written on our side rather than yours. When you dismiss the cookie notice we keep a record that
-              it was shown, with the time, your country and region, your IP address and your browser's user agent string.
+              it was shown, with the time, your IP address and your browser's user agent string, and your country and region
+              when the request carries them.
               It does not follow what you read.
             </p>
             </>

@@ -138,9 +138,18 @@ describe("GET /api/admin/analytics, Owner deletions", () => {
   });
 
   it("keeps a company deleted for good, with its plan and no name", async () => {
-    records = [deletion("org-e", ago(2), "GROWTH")];
+    records = [{ ...deletion("org-e", ago(2), "GROWTH"), hardDeletedAt: ago(1) }];
     const rows = await cancellations();
     expect(rows).toEqual([expect.objectContaining({ id: "org-e", name: "A deleted company", plan: "GROWTH", what: "deleted", restored: false, gone: true })]);
+  });
+
+  it("reads an earlier, restored deletion of a company later deleted for good as restored", async () => {
+    records = [{ ...deletion("org-g", ago(3), "GROWTH"), id: "wd_staff_org-g_1", hardDeletedAt: ago(1) }, deletion("org-g", ago(10), "GROWTH")];
+    const rows = await cancellations();
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "org-g", what: "workspace", restored: false, gone: true }),
+      expect.objectContaining({ id: "org-g", what: "deleted", restored: true, gone: true }),
+    ]));
   });
 
   it("still counts a deletion whose record was never written", async () => {

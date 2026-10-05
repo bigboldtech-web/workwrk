@@ -104,7 +104,7 @@ const DELETED_COMPANY = "A deleted company";
 const STAFF_DELETION = /^wd_staff_/;
 
 async function ownerDeletionRows(
-  records: { id: string; organizationId: string; plan: string | null; requestedAt: Date }[],
+  records: { id: string; organizationId: string; plan: string | null; requestedAt: Date; hardDeletedAt?: Date | null }[],
 ): Promise<Cancellation[]> {
   // Staff cancellations read as the console's "Workspace cancelled", the same
   // id and kind as their StaffAction row, so the two are one line; and after
@@ -137,7 +137,9 @@ async function ownerDeletionRows(
         plan: r.plan,
         canceledAt: r.requestedAt.toISOString(),
         what,
-        restored: false,
+        // The record of the deletion that ran carries hardDeletedAt; an
+        // earlier one of the same company was restored before it.
+        restored: !r.hardDeletedAt,
         gone: true,
       };
     }
@@ -233,7 +235,7 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       where: { requestedAt: { gte: w.start, lte: now } },
       orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
       take: OWNER_DELETION_LOG_CAP,
-      select: { id: true, organizationId: true, plan: true, requestedAt: true },
+      select: { id: true, organizationId: true, plan: true, requestedAt: true, hardDeletedAt: true },
     }),
     // The live schedule as well, so a deletion whose audit row failed to
     // write (logActivity never throws) is still counted. Still CANCELLED
@@ -400,8 +402,10 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
         what: "subscription" as const,
         restored: r.status !== "CANCELED",
       })),
+      // A staff cancellation with its own deletion record (wd_staff_) is
+      // read from that record, which knows whether it was restored or purged.
       staffCancellations.flatMap((r) =>
-        r.targetCompany
+        r.targetCompany && !ownerDeleted.some((c) => c.what === "workspace" && c.id === r.targetCompany!.id)
           ? [
               {
                 id: r.targetCompany.id,

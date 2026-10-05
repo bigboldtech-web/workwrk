@@ -58,7 +58,7 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
     date: "2026-10-06",
     title: "Plans that count what they promise",
     items: [
-      { type: "improvement", text: "Seats and AI questions are counted the way the pricing page says: people who can sign in and open invitations hold the seats, and Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder use the plan's AI questions. Fill with AI and Talk updates have their own daily limit." },
+      { type: "improvement", text: "Seats and AI questions are counted the way the pricing page says: people who can sign in and open invitations hold the seats, and Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder use the plan's AI questions. Fill with AI and Talk updates have their own daily limit. On Starter, each person also has 50 questions in total across the free workspaces they are in." },
       { type: "fix", text: "An AppSumo code moves the workspace onto the plan and seats it grants, and never lowers either." },
       { type: "fix", text: "A closed workspace no longer gets reminder emails, and the weekly digests reach every team in a large workspace." },
     ],

@@ -412,7 +412,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
             id="data.retention.trashDays"
             label="Keep deleted items in Trash for"
             helper={purges
-              ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them."
+              ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them. Some files uploaded before 6 October 2026 stay in storage after they are deleted for good: email privacy@workwrk.com and we delete them by hand."
               : "Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."}
             savedAt={saved.trash}
             error={retryOf("trash")}
@@ -527,8 +527,8 @@ function TrashTab() {
       <div className="flex flex-col gap-2">
         <p className="text-base text-ink">
           {purges
-            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs, canvases and contracts moved to Trash stay there until an Owner or Admin deletes them.`
-            : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good."}
+            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs, canvases and contracts moved to Trash stay there until an Owner or Admin deletes them. Some files uploaded before 6 October 2026 stay in storage after they are deleted for good: email privacy@workwrk.com and we delete them by hand.`
+            : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good. Some files uploaded before 6 October 2026 stay in storage after they are deleted for good: email privacy@workwrk.com and we delete them by hand."}
         </p>
         <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>
         {i ? <p className="text-sm text-ink-2">{i.total}{i.capped ? "+" : ""} {i.total === 1 ? "item" : "items"} in Trash</p> : null}

@@ -125,8 +125,8 @@ export default function PrivacyPage() {
                   guess. */}
               <p>
                 <strong>Consent records.</strong> When you dismiss the cookie notice we keep a record that it was shown,
-                with the time, your country and region, your IP address and your user agent. It is kept whether or not
-                you have an account.
+                with the time, your IP address and your user agent, and your country and region when the request carries
+                them. It is kept whether or not you have an account.
               </p>
               {/* The demo form (/api/demo-request) emails what it collects
                   to the sales mailbox and stores nothing in the product; a
@@ -256,7 +256,7 @@ export default function PrivacyPage() {
                   (scripts/backup/backup.sh BACKUP_KEEP_DAYS). */}
               <p>
                 Account data is retained for the life of your subscription. After termination, when you delete the
-                workspace, or when we close it (a workspace we closed from 5 October 2026 on), we retain workspace data
+                workspace, or when we close it (a workspace we closed from 7 October 2026 on), we retain workspace data
                 for 30 days (in case you reactivate), then permanently delete it, with the files it stored. Some files
                 uploaded before 6 October 2026 were not recorded against
                 the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}

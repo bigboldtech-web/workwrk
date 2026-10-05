@@ -1234,13 +1234,13 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
     }
   }
 
-  const snap = await prisma.trashItem.findFirst({
-    where: { id: rowId, organizationId: orgId },
-    select: { id: true, entityType: true, snapshot: true },
-  });
-  if (!snap) return { ok: false, status: 404, message: "Not found" };
-  await freeTrashStorage(snap.entityType, snap.snapshot, orgId, snap.id);
-  await prisma.trashItem.delete({ where: { id: snap.id } });
+  // The row goes first and its files are freed only if this delete took it
+  // (a restore that committed first keeps them).
+  const gone = await prisma.$queryRaw<Array<{ id: string; entityType: string; snapshot: unknown }>>`
+    DELETE FROM "TrashItem" WHERE "id" = ${rowId} AND "organizationId" = ${orgId}
+    RETURNING "id", "entityType", "snapshot"`;
+  if (gone.length === 0) return { ok: false, status: 404, message: "Not found" };
+  await freeTrashStorage(gone[0].entityType, gone[0].snapshot, orgId, gone[0].id);
   return { ok: true };
 }
 
