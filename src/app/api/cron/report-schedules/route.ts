@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { runDueReports } from "@/lib/reports/report-server";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron endpoint: send the scheduled email reports that are due (gap 16).
@@ -18,11 +19,8 @@ import { runDueReports } from "@/lib/reports/report-server";
  * founder adds it; installing it also sets REPORT_SCHEDULE_CRON=on.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return Response.json({ error: "CRON_SECRET is not set" }, { status: 503 });
-  const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-  const provided = header?.replace(/^Bearer\s+/i, "");
-  if (provided !== cronSecret) return Response.json({ error: "Forbidden" }, { status: 403 });
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const result = await runDueReports(new Date(), { limit: 25, budgetMs: 240_000 });
   return Response.json(result);

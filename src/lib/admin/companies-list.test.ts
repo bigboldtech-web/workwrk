@@ -9,6 +9,7 @@ import {
   modulesFromSlugs,
   ownerIdsOf,
   parseCompanyListParams,
+  trialEndsWithinWhere,
   parseDay,
   parseList,
   seatsLabel,
@@ -52,9 +53,43 @@ describe("parseCompanyListParams", () => {
     expect(companyListQuery(p)).toBe("?view=trials&trial_ends=7d");
     expect(parseCompanyListParams(sp("trial_ends=30d")).trialEnds).toBeNull();
     const now = new Date("2026-09-29T00:00:00.000Z");
+    const window = { gte: now, lte: new Date("2026-10-06T00:00:00.000Z") };
+    // A self-serve end is a UTC calendar day: today through the seventh day, whole.
+    const dayWindow = { gte: new Date("2026-09-29T00:00:00.000Z"), lte: new Date("2026-10-06T23:59:59.999Z") };
     expect(companyFilterWhere(p, { now })).toEqual({
-      AND: [{ subscription: { is: { trialEndsAt: { gte: now, lte: new Date("2026-10-06T00:00:00.000Z") } } } }],
+      AND: [
+        {
+          OR: [
+            { subscription: { is: { trialEndsAt: window } } },
+            // A self-serve trial's own date, only where nothing else decides it.
+            {
+              status: "TRIAL",
+              trialEndsAt: dayWindow,
+              NOT: {
+                subscription: {
+                  is: {
+                    OR: [
+                      { trialEndsAt: { not: null } },
+                      { stripeSubscriptionId: { not: null } },
+                      { billingMode: "FLAT_TIER", stripeSubscriptionId: null },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
     });
+  });
+  it("still counts a self-serve trial on its last day after noon UTC, as its page reads 'ends today'", () => {
+    const now = new Date("2026-10-05T16:00:00.000Z");
+    const where = trialEndsWithinWhere(now) as { OR: Array<{ trialEndsAt?: { gte: Date; lte: Date } }> };
+    const selfServe = where.OR[1].trialEndsAt!;
+    const endsToday = new Date("2026-10-05T12:00:00.000Z");
+    expect(endsToday >= selfServe.gte && endsToday <= selfServe.lte).toBe(true);
+    // and a day already over is out
+    expect(new Date("2026-10-04T12:00:00.000Z") >= selfServe.gte).toBe(false);
   });
   it("counts the name search as a filter, so Clear all clears it", () => {
     expect(activeCompanyFilterCount(parseCompanyListParams(sp("search=acme")))).toBe(1);

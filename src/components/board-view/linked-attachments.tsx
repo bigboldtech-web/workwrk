@@ -521,7 +521,11 @@ function FileLinkSection({
       const fd = new FormData();
       fd.append("file", file);
       const upRes = await fetch("/api/upload", { method: "POST", body: fd });
-      if (!upRes.ok) return;
+      if (!upRes.ok) {
+        const said = (await upRes.json().catch(() => null)) as { error?: unknown } | null;
+        toast(typeof said?.error === "string" ? said.error : "Couldn't upload that file.");
+        return;
+      }
       const upData = await upRes.json();
       const s3KeyVal = typeof (upData.s3Key ?? upData.data?.s3Key) === "string" ? (upData.s3Key ?? upData.data?.s3Key) : null;
       const entryRes = await fetch("/api/files", {

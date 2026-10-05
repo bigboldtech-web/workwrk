@@ -44,9 +44,17 @@ import { Dots } from "@/components/ui/dots";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { LinkPopover } from "@/components/ui/link-popover";
 import { dragHasFiles } from "@/lib/upload-dropped-files";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { TALK_FMTBAR_KEY, readTalkKey } from "@/components/talk/talk-keys";
 import type { ChatAttachment } from "@/components/talk/message-feed";
+
+/** An upload the server answered with a refusal (status and its own sentence). */
+class UploadRefused extends Error {
+  constructor(name: string, readonly status: number, readonly said: string | null) {
+    super(name);
+  }
+}
 
 const MAX_FILES = 10;
 const MAX_FILE_MB = 25;
@@ -89,6 +97,11 @@ export function MessageBox({
 }) {
   const [input, setInput] = useState(initialValue);
   const [files, setFiles] = useState<File[]>([]);
+  // A message put back in the box after the server refused its upload (a tab
+  // that shows another workspace, say) lives only here: while it does, a
+  // reload or a leave asks first (the strip under the bar offers Reload).
+  const [refusedDraft, setRefusedDraft] = useState(false);
+  useDirtyGuard(refusedDraft && (input.trim() !== "" || files.length > 0));
   const [uploading, setUploading] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -204,7 +217,10 @@ export function MessageBox({
           const fd = new FormData();
           fd.append("file", f);
           const up = await fetch("/api/upload", { method: "POST", body: fd });
-          if (!up.ok) throw new Error(f.name);
+          if (!up.ok) {
+            const said = (await up.json().catch(() => null)) as { error?: unknown } | null;
+            throw new UploadRefused(f.name, up.status, typeof said?.error === "string" ? said.error : null);
+          }
           const u = await up.json();
           const url = u.url ?? u.data?.url;
           if (!url) throw new Error(f.name);
@@ -233,15 +249,23 @@ export function MessageBox({
         setInput((cur) => (cur ? `${body}\n${cur}` : body));
         const over = merged.length - MAX_FILES;
         const which = e instanceof Error && e.message ? `"${e.message}"` : "a file";
-        onError(over > 0
-          ? `Couldn't upload ${which}. The files are back in the box, except ${over} over the ${MAX_FILES}-file limit, press send to try again`
-          : `Couldn't upload ${which}, press send to try again`);
+        // A refusal the server explains (this tab belongs to another
+        // workspace, say) is said as it is: sending again cannot change it.
+        const refused = e instanceof UploadRefused && e.status >= 400 && e.status < 500 && e.said ? e.said : null;
+        if (refused) setRefusedDraft(true);
+        const kept = over > 0 ? ` The files are back in the box, except ${over} over the ${MAX_FILES}-file limit.` : " The files are back in the box.";
+        onError(refused
+          ? `Couldn't upload ${which}. ${refused}${kept}`
+          : over > 0
+            ? `Couldn't upload ${which}. The files are back in the box, except ${over} over the ${MAX_FILES}-file limit, press send to try again`
+            : `Couldn't upload ${which}, press send to try again`);
         return;
       }
       setUploading(false);
       for (const f of batch) uploadedRef.current.delete(f);
     }
 
+    setRefusedDraft(false);
     onSend({ body, mentions, attachments });
   };
 

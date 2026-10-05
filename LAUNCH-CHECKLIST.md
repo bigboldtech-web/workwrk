@@ -18,7 +18,7 @@ Each item is one of:
 ## What Claude finished for you
 
 - ✅ **AppSumo redemption flow** — schema + migration deployed, customer `/redeem` page, staff `/admin/appsumo` bulk-import + filter + refund UI.
-- ✅ **Sandbox demo org seeded in prod** — 8 users, 4 SOPs, 2 KRAs, 4 KPIs, 3 cascaded OKRs. Reviewers log in at `admin@sandbox.workwrk.com` / `demo-1234`.
+- ✅ **Sandbox demo org seeded in prod** — 8 users, 4 SOPs, 2 KRAs, 4 KPIs, 3 cascaded OKRs. Reviewers log in as `admin@sandbox.workwrk.com` with the password the founder hands them (never written in this repository, which is public).
 - ✅ **Cron schedules documented** for aaPanel — see [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md).
 - ✅ **Marketing site verified** — `/privacy`, `/terms`, `/help-center`, `/compare`, all `/features/*` populated.
 - ✅ **Production secrets generated** (below).
@@ -36,13 +36,13 @@ Each item is one of:
 ### 2. Set production environment variables (10 min)
 SSH in and edit your `.env.production` (or use aaPanel Node config UI).
 
-Add these:
+Add these (generate each secret on the server; NEVER write a value into this repository, which is public):
 ```
 ADMIN_HOST=admin.workwrk.com
 APP_HOST=workwrk.com
 CUSTOM_DOMAINS_ENABLED=true
-CRON_SECRET=b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1
-SECRETS_ENCRYPTION_KEY=e13f9e09c2096a2263b1cb3d7e0ae183a172be66c04e678759a2b446cdeedc68
+CRON_SECRET=<generate: openssl rand -hex 32>
+SECRETS_ENCRYPTION_KEY=<generate: openssl rand -hex 32>
 ```
 
 Verify these existing ones are also present:
@@ -99,9 +99,9 @@ Open [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md) and add the 7 cron entries i
 
 | URL | Login | Verify |
 |---|---|---|
-| `https://workwrk.com/login` | `admin@sandbox.workwrk.com` / `demo-1234` (CEO/Admin) | Sees everything in sidebar; org-wide dashboard |
-| same | `engineering@sandbox.workwrk.com` / `demo-1234` (Manager) | Sees AI / Tools / People / Process Runs / Analytics; team-scoped data |
-| same | `alex@sandbox.workwrk.com` / `demo-1234` (Employee) | Does NOT see AI / Tools / People / Process Runs / Analytics / Onboarding / Talent / Assets / Integrations; personal-only dashboard |
+| `https://workwrk.com/login` | `admin@sandbox.workwrk.com` / `<the password the founder gave you>` (CEO/Admin) | Sees everything in sidebar; org-wide dashboard |
+| same | `engineering@sandbox.workwrk.com` / `<the password the founder gave you>` (Manager) | Sees AI / Tools / People / Process Runs / Analytics; team-scoped data |
+| same | `alex@sandbox.workwrk.com` / `<the password the founder gave you>` (Employee) | Does NOT see AI / Tools / People / Process Runs / Analytics / Onboarding / Talent / Assets / Integrations; personal-only dashboard |
 | same | Same Employee | `/sops` shows only assigned + folder-accessible SOPs; `/tasks` defaults to "My tasks" |
 
 If anything looks wrong, copy the URL + describe what you saw and I'll fix.

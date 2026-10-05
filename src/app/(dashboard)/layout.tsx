@@ -28,6 +28,7 @@ import { Logo } from "@/components/brand/logo";
 import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/components/layout/os/session-expired-dialog";
 import { apiFetch } from "@/lib/api-fetch";
 import { currentLoginUrl } from "@/lib/session-expiry";
+import { setTabWorkspace } from "@/lib/tab-workspace";
 import "./os.css";
 
 // The boot ground is the navy chrome colour in every chrome variant
@@ -79,6 +80,8 @@ export default function DashboardLayout({
       // the wizard at /onboard is an offer, reached from /signup and from
       // the Workspace settings Overview card, never a redirect from here.
       // `setupCompleted` in the boot payload stays informational.
+      // Uploads from this tab name its workspace (src/lib/tab-workspace.ts).
+      setTabWorkspace(r.data.org?.id);
       setBoot(r.data);
     });
     return () => {

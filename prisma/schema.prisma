@@ -22,6 +22,12 @@ model Organization {
   settings  Json      @default("{}")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  /// When a self-serve trial ends, for WorkwrK staff only: the customer is not
+  /// shown it and nothing in the product changes on it. Signup sets it
+  /// (src/lib/admin/trial-end.ts); staff change it on the company page. A
+  /// Stripe trial's own date (Subscription.trialEndsAt) wins where there is one.
+  /// prisma/sql/2026-10-05-workspace-deletion-and-trial-end.sql
+  trialEndsAt DateTime?
 
   users                 User[]
   departments           Department[]
@@ -182,6 +188,34 @@ model Organization {
   workSchedule           WorkSchedule?
 
   @@index([slug])
+  @@index([trialEndsAt])
+}
+
+/// An Owner deleting their workspace, kept after the workspace is gone so the
+/// staff console's long-range numbers (cancellations, new companies, the
+/// funnel, retention cohorts) still count it. NO foreign keys (nothing
+/// cascades it) and NO names or people: the privacy policy deletes workspace
+/// data 30 days after termination, so this keeps an opaque company id, the
+/// plan, the dates and two yes/no facts. Written by /api/organizations/delete
+/// inside its own transaction; the hard-delete cron stamps hardDeletedAt and
+/// the two facts as they stood at the end.
+/// prisma/sql/2026-10-05-workspace-deletion-and-trial-end.sql
+model WorkspaceDeletion {
+  id               String    @id @default(cuid())
+  organizationId   String
+  plan             String?
+  /// When the company signed up (its createdAt), for growth and the cohorts.
+  signedUpAt       DateTime?
+  requestedAt      DateTime
+  hardDeletedAt    DateTime?
+  /// Set by the hard-delete cron: had it finished setup / created anything.
+  finishedSetup    Boolean?
+  createdSomething Boolean?
+  createdAt        DateTime  @default(now())
+
+  @@unique([organizationId, requestedAt])
+  @@index([requestedAt])
+  @@index([signedUpAt])
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -643,6 +677,11 @@ model OrganizationMembership {
   organization   Organization @relation("OrgMembershipOrg", fields: [organizationId], references: [id], onDelete: Cascade)
   role           AccessLevel  @default(EMPLOYEE)
   isPrimary      Boolean      @default(false)
+  /// The Admin scopes held in this workspace while the account is anchored
+  /// elsewhere (User.adminScopes are the anchored workspace's). A move keeps
+  /// them here and takes the target's (src/lib/access/workspace-anchor.ts).
+  /// prisma/sql/2026-10-05-membership-admin-scopes.sql
+  adminScopes    String[]     @default([])
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

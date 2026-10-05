@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron — fires the notification + email fan-out for announcements
@@ -23,14 +24,8 @@ import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@
  * /api/cron/* routes).
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const now = new Date();
   const due = await prisma.announcement.findMany({

@@ -29,6 +29,7 @@ import {
 } from "@/lib/admin/companies-list";
 import { planLabel, statusLabel } from "@/lib/staff-audit-helpers";
 import { MODULES } from "@/lib/modules";
+import { consoleTrialEnd } from "@/lib/admin/trial-end";
 
 /**
  * GET /api/admin/companies: the Companies list (spec-admin-backoffice 2.2).
@@ -71,6 +72,7 @@ const ROW_SELECT = {
   plan: true,
   status: true,
   createdAt: true,
+  trialEndsAt: true,
   subscription: {
     select: { stripeSubscriptionId: true, billingMode: true, status: true, seats: true, trialEndsAt: true },
   },
@@ -131,6 +133,14 @@ function shape(r: Row, owners: Map<string, number>) {
     ownerCount: owners.get(r.id) ?? 0,
     modules: modulesFromSlugs(r.productInstallations.map((i) => i.product.slug)),
     subscription: sub ? { source, status: sub.status, seats: sub.seats, trialEndsAt: sub.trialEndsAt } : null,
+    // The trial end staff read, by the console's one rule (Stripe's date, or
+    // the company's own self-serve date: src/lib/admin/trial-end.ts).
+    trialEndsAt:
+      consoleTrialEnd({
+        status: r.status,
+        trialEndsAt: r.trialEndsAt,
+        subscription: sub ? { stripeSubscriptionId: sub.stripeSubscriptionId, billingMode: sub.billingMode, trialEndsAt: sub.trialEndsAt } : null,
+      })?.at ?? null,
     seatsLabel: seatsLabel(sub, people),
     /** Legacy lifetime counts for Overview and Analytics until spec step 6. */
     _count: { users: people, tasks: r._count.tasks, sops: r._count.sops, reviewCycles: r._count.reviewCycles, kras: r._count.kras },
@@ -142,7 +152,8 @@ export type CompanyListRow = ReturnType<typeof shape>;
 function csvFor(rows: CompanyListRow[], truncated: boolean): NextResponse {
   const moduleLabel = (k: string) => MODULES.find((m) => m.appKey === k)?.label ?? k;
   const body = toCsv([
-    ["Company", "Company ID", "Slug", "Sign-in domain", "Plan", "Status", "People", "Seats", "Subscription", "Modules", "Owners", "Signed up"],
+    // "Trial ends" goes last, so a sheet built on the earlier columns keeps them.
+    ["Company", "Company ID", "Slug", "Sign-in domain", "Plan", "Status", "People", "Seats", "Subscription", "Modules", "Owners", "Signed up", "Trial ends"],
     ...rows.map((r) => [
       r.name,
       r.id,
@@ -156,6 +167,7 @@ function csvFor(rows: CompanyListRow[], truncated: boolean): NextResponse {
       r.modules.map(moduleLabel).join(" and "),
       r.ownerCount,
       new Date(r.createdAt).toISOString().slice(0, 10),
+      r.trialEndsAt ? new Date(r.trialEndsAt).toISOString().slice(0, 10) : "",
     ]),
   ]);
   const stamp = new Date().toISOString().slice(0, 10);

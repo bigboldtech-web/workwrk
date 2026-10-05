@@ -15,27 +15,30 @@
  * Usage:
  *   DATABASE_URL=... SEED_PASSWORD=... npx tsx scripts/seed-demo-org.ts
  *
- * Default password if SEED_PASSWORD is unset: "demo-1234". Reviewers
- * sign in with admin@sandbox.workwrk.com + that password.
+ * SEED_PASSWORD is REQUIRED and never printed (2026-10-05: the default this
+ * script used, printed and that LAUNCH-CHECKLIST.md published was in a
+ * public repository, and the Sandbox org it seeded is in production).
+ * Reviewers sign in with admin@sandbox.workwrk.com + the password the founder
+ * hands them.
  */
-import * as dotenv from "dotenv";
-dotenv.config();
-import { PrismaClient } from "../src/generated/prisma";
-import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
+import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 
-const connStr = process.env.DATABASE_URL;
-if (!connStr) throw new Error("DATABASE_URL is not set");
-const adapter = new PrismaPg({ connectionString: connStr });
-const prisma = new PrismaClient({ adapter });
+// DATABASE_URL and nothing else: no .env is read, so the database this
+// deletes and recreates the Sandbox in is the one the command names, printed
+// before anything is touched.
+const prisma = scriptPrisma();
 
 const ORG_NAME = "Sandbox";
 const ORG_SLUG = "sandbox";
-const PASSWORD = process.env.SEED_PASSWORD || "demo-1234";
+const PASSWORD = process.env.SEED_PASSWORD ?? "";
+if (PASSWORD.length < 12) {
+  throw new Error("Set SEED_PASSWORD (12 characters or more). It is never printed; hand it to reviewers yourself.");
+}
 
 async function main() {
+  console.log(`Database: ${databaseLabel()}`);
   console.log(`Seeding demo org "${ORG_NAME}"…`);
-  console.log(`Default password: ${PASSWORD}\n`);
 
   // Wipe any previous demo org for an idempotent re-seed.
   const existing = await prisma.organization.findUnique({ where: { slug: ORG_SLUG } });
@@ -282,7 +285,7 @@ async function main() {
   console.log(`  sales@sandbox.workwrk.com         · Priya (Sales Manager)`);
   console.log(`  alex@sandbox.workwrk.com          · Alex (Software Engineer)`);
   console.log(`  jordan@sandbox.workwrk.com        · Jordan (Account Executive)`);
-  console.log(`Password: ${PASSWORD}`);
+  console.log(`Password: the SEED_PASSWORD you set (never printed).`);
 }
 
 main()

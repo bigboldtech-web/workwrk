@@ -56,6 +56,9 @@ import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { MissionSplash } from "@/components/brand/mission-splash";
 import { isSettingsRoute, resolveCrumbFallback, resolveHub } from "@/lib/nav/route-hub";
 import { HUB_LABELS } from "@/lib/nav/labels";
+import { STALE_TAB_EVENT, TAB_OK_EVENT } from "@/lib/tab-workspace";
+import { leaveThen } from "@/lib/dirty-guard";
+import { useConfirm } from "@/components/ui/dialog-provider";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -213,6 +216,50 @@ function WorkspaceMoveStrip() {
 }
 
 /**
+ * "This tab still shows a workspace other than the one you are in now." The
+ * strip under the bar after an upload route refused this tab
+ * (src/lib/tab-workspace.ts): the session acts in another workspace than the
+ * one this tab booted in (a switch in another tab, or a move the session made
+ * for the person). It names no cause, since the refusal proves none, and goes
+ * again once an upload from this tab is accepted. Reload asks first while a
+ * call runs in this tab, and goes through the unsaved-work guard, so a
+ * message put back in its box after the refusal is not lost silently.
+ */
+function StaleTabStrip() {
+  const [stale, setStale] = useState(false);
+  const { activeCall } = useOsShell();
+  const confirm = useConfirm();
+  useEffect(() => {
+    const on = () => setStale(true);
+    const off = () => setStale(false);
+    window.addEventListener(STALE_TAB_EVENT, on);
+    window.addEventListener(TAB_OK_EVENT, off);
+    return () => {
+      window.removeEventListener(STALE_TAB_EVENT, on);
+      window.removeEventListener(TAB_OK_EVENT, off);
+    };
+  }, []);
+  if (!stale) return null;
+  const reload = async () => {
+    if (activeCall && !(await confirm({ title: "Reload this tab?", description: "Reloading ends the call in this tab.", confirmLabel: "Reload", destructive: true }))) return;
+    void leaveThen(() => window.location.reload());
+  };
+  return (
+    <div role="alert" className="os-chrome flex min-h-8 shrink-0 items-center gap-2 bg-warning-bg px-4 py-1 text-sm text-warning-text">
+      <AlertTriangle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 flex-1">This tab still shows a workspace other than the one you are in now. Reload it to upload here.</span>
+      <button
+        type="button"
+        onClick={() => void reload()}
+        className="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"
+      >
+        Reload
+      </button>
+    </div>
+  );
+}
+
+/**
  * The tablet overlay sidebar (768 to 1023): opened from the bar's Menu
  * button; a layer, so Esc closes it (spec-shell 1.16); closes on row click.
  */
@@ -312,6 +359,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       <div className="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-col">
         <OfflineStrip />
         <WorkspaceMoveStrip />
+        <StaleTabStrip />
         {!settingsMode ? <TopPinsStrip /> : null}
       </div>
       {settingsMode ? (

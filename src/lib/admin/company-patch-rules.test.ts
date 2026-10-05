@@ -79,6 +79,19 @@ describe("the server-side typed confirmation", () => {
   });
 });
 
+describe("trial end", () => {
+  it("takes a calendar day, or empty or null to clear it", () => {
+    expect(validateCompanyPatch({ trialEndsOn: "2026-10-19" })).toEqual({ ok: true, patch: { trialEndsOn: "2026-10-19" } });
+    expect(validateCompanyPatch({ trialEndsOn: null })).toEqual({ ok: true, patch: { trialEndsOn: null } });
+    expect(validateCompanyPatch({ trialEndsOn: "" })).toEqual({ ok: true, patch: { trialEndsOn: null } });
+  });
+  it("refuses anything that is not a real day", () => {
+    for (const trialEndsOn of ["2026-02-30", "2019-12-31", "2100-01-01", "2026-10-19T12:00:00Z", 20261019, "soon", true]) {
+      expect(validateCompanyPatch({ trialEndsOn })).toEqual({ ok: false, error: "The trial end must be a day from 2020 to 2099, or empty to clear it" });
+    }
+  });
+});
+
 describe("seats and modules", () => {
   it("accepts a whole seat count, and null or empty as unlimited (0)", () => {
     expect(validateCompanyPatch({ seats: 25 })).toEqual({ ok: true, patch: { seats: 25 } });

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/format/date";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron: the "review closes in 3 days" nudge (spec-teams-performance
@@ -16,19 +17,12 @@ import { formatDate } from "@/lib/format/date";
  * (today, tomorrow, or in N days).
  *
  * Schedule: daily at 8:30 (scripts/CRON-SETUP.md). NOT installed by this
- * change: the founder adds the row. Guarded by CRON_SECRET, and closed in
- * production when the secret is missing.
+ * change: the founder adds the row. Guarded by CRON_SECRET, and closed
+ * when the secret is missing (src/lib/cron-auth.ts).
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret && process.env.NODE_ENV === "production") {
-    return Response.json({ error: "CRON_SECRET is not set, so the cron endpoints are closed" }, { status: 503 });
-  }
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const now = new Date();
   const horizon = new Date(now.getTime() + 3 * 86_400_000);

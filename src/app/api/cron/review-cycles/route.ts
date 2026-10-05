@@ -7,6 +7,7 @@ import {
 } from "@/lib/review-cadence";
 import type { AccessLevel } from "@/generated/prisma";
 import { parseAccessSettings } from "@/lib/access/settings";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron — auto-opens performance review cycles from each org's configured
@@ -28,18 +29,8 @@ import { parseAccessSettings } from "@/lib/access/settings";
  * Schedule: once a day. Guard with CRON_SECRET in production.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  // Closed, not open, when the secret is missing in production.
-  if (!cronSecret && process.env.NODE_ENV === "production") {
-    return Response.json({ error: "CRON_SECRET is not set, so the cron endpoints are closed" }, { status: 503 });
-  }
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const now = new Date();
   // Cadences that map to a ReviewCycle (weekly is per-user, handled elsewhere).

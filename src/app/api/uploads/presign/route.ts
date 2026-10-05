@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
 
   const userId = (session.user as any).id as string;
   const orgId = getOrgId(session);
+  // A tab still showing another workspace than the session's (src/lib/tab-workspace.ts).
+  const tab = req.headers.get("x-workspace-id");
+  if (tab && tab !== orgId) {
+    return jsonError("This tab belongs to another workspace. Reload it to upload here.", 409);
+  }
 
   if (!checkRateLimit(userId)) {
     return jsonError("Too many uploads. Wait a minute and try again.", 429);

@@ -243,10 +243,11 @@ async function applyRoleChangeIn(
     data: { accessLevel: plan.level as never, orgRole: plan.afterRole, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
   });
   // The membership row for this workspace mirrors the role (the workspace
-  // switcher and the fallback out of a suspended workspace read it).
+  // switcher and the fallback out of a suspended workspace read it), and its
+  // scopes go with the role change as the account's do.
   await db.organizationMembership.updateMany({
     where: { userId: target.id, organizationId: input.organizationId },
-    data: { role: plan.level as never },
+    data: { role: plan.level as never, adminScopes: [] },
   });
   return {
     ok: true,

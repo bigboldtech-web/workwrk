@@ -1,0 +1,58 @@
+// The workspace this tab's page belongs to, sent with every upload.
+//
+// WHY. Every tab shares one session, and switching workspace in one tab moves
+// the session for all of them. A tab left open on the workspace the person
+// switched away from would file its uploads under the workspace the session
+// acts in now: one company's file stored under another company's prefix, and
+// lost when that other company is deleted for good (src/lib/company-files.ts).
+// So each tab tells /api/upload which workspace its page belongs to, and the
+// route refuses a mismatch ("Reload it to upload here").
+//
+// One wrapper around fetch, installed when the tab's boot payload arrives
+// (src/app/(dashboard)/layout.tsx), so every upload control sends it without
+// each having to: it touches only same-origin requests to the upload routes,
+// adds the x-workspace-id header, and raises STALE_TAB_EVENT when a route
+// refuses the tab (TAB_OK_EVENT when one accepts it again).
+
+const UPLOAD_PATHS = new Set(["/api/upload", "/api/uploads/presign"]);
+
+/** Raised on window when an upload route refuses this tab (409): the shell
+ *  shows a strip that says so, with Reload (src/components/layout/os/os-shell.tsx),
+ *  whatever the control that tried the upload does with the answer. */
+export const STALE_TAB_EVENT = "workwrk:stale-tab";
+
+/** Raised when an upload from this tab is accepted again (the session is back
+ *  in this tab's workspace), so the strip goes. */
+export const TAB_OK_EVENT = "workwrk:tab-ok";
+
+let tabWorkspace: string | null = null;
+let installed = false;
+
+/** Whether a request goes to one of this app's upload routes. */
+export function isUploadRequest(input: RequestInfo | URL, origin: string): boolean {
+  try {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url = new URL(href, origin);
+    return url.origin === origin && UPLOAD_PATHS.has(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Remember this tab's workspace, and start sending it with uploads. */
+export function setTabWorkspace(organizationId: string | null | undefined): void {
+  tabWorkspace = organizationId || null;
+  if (installed || typeof window === "undefined" || typeof window.fetch !== "function") return;
+  installed = true;
+  const original = window.fetch.bind(window);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!tabWorkspace || !isUploadRequest(input, window.location.origin)) return original(input, init);
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    if (!headers.has("x-workspace-id")) headers.set("x-workspace-id", tabWorkspace);
+    return original(input, { ...init, headers }).then((res) => {
+      if (res.status === 409) window.dispatchEvent(new CustomEvent(STALE_TAB_EVENT));
+      else if (res.ok) window.dispatchEvent(new CustomEvent(TAB_OK_EVENT));
+      return res;
+    });
+  };
+}

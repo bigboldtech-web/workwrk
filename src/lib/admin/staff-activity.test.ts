@@ -66,4 +66,13 @@ describe("plain words for before and after", () => {
     ]);
     expect(detailRows(null, null)).toEqual([]);
   });
+  it("shows a trial end as its UTC day, never a time in the viewer's zone", () => {
+    const zoned = (iso: string) => `zoned ${iso}`;
+    expect(plainValue("trialEndsAt", "2026-10-19T12:00:00.000Z", zoned)).toBe("2026-10-19");
+    expect(plainValue("trialEndsAt", null, zoned)).toBe("None");
+    expect(plainValue("cancelledAt", "2026-10-19T12:00:00.000Z", zoned)).toBe("zoned 2026-10-19T12:00:00.000Z");
+    expect(detailRows({ trialEndsAt: "2026-10-12T12:00:00.000Z" }, { trialEndsAt: "2026-10-19T12:00:00.000Z" }, { date: zoned })).toEqual([
+      { key: "trialEndsAt", label: "Trial end", before: "2026-10-12", after: "2026-10-19", changed: true },
+    ]);
+  });
 });

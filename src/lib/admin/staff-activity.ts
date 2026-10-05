@@ -24,6 +24,7 @@ export const ACTION_VIEW: Record<StaffActionKey, Exclude<ActivityView, "all">> =
   "admin.org.seats_changed": "companies",
   "admin.org.module_changed": "companies",
   "admin.org.feature_changed": "companies",
+  "admin.org.trial_end_changed": "companies",
   "admin.org.owner_set": "companies",
   "admin.staff.added": "staff",
   "admin.staff.removed": "staff",
@@ -39,6 +40,7 @@ export const ACTION_LABEL: Record<StaffActionKey, string> = {
   "admin.org.seats_changed": "Seats changed",
   "admin.org.module_changed": "Module turned on or off",
   "admin.org.feature_changed": "Enterprise add-on turned on or off",
+  "admin.org.trial_end_changed": "Trial end changed",
   "admin.org.owner_set": "Workspace Owner set",
   "admin.staff.added": "Staff added",
   "admin.staff.removed": "Staff removed",
@@ -142,6 +144,9 @@ export function plainValue(key: string, value: unknown, date?: DetailDateFormat)
   if (key === "plan" || key === "codePlan") return planLabel(String(value));
   if (key === "status") return statusLabel(String(value));
   if (key === "role") return roleWord(String(value));
+  // A trial end is a calendar day kept at noon UTC (src/lib/admin/trial-end.ts):
+  // its UTC day, as the company page and the summary give it, never a time.
+  if (key === "trialEndsAt" && typeof value === "string" && ISO_TIMESTAMP_RE.test(value)) return value.slice(0, 10);
   if (typeof value === "string" && ISO_TIMESTAMP_RE.test(value)) return date ? date(value) : value.slice(0, 10);
   if (typeof value === "object") {
     try {
@@ -195,6 +200,7 @@ const KEY_WORDS: Record<string, string> = {
   scheduledHardDeleteAt: "Deletion date",
   cancelledAt: "Cancelled",
   cancelledById: "Cancelled by",
+  trialEndsAt: "Trial end",
 };
 
 export function humanKey(k: string): string {

@@ -133,8 +133,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
   else if (age.kind === "ok") passwordLine = <span title={formatDateTitle(age.changedAt, prefs)}>Last changed {formatRelative(age.changedAt, prefs)}</span>;
 
   const mfaLine = me.mfaEnabled
-    ? me.policy.mfaRequired ? `On, using an authenticator app. Required by ${me.organization.name}` : "On, using an authenticator app"
-    : me.policy.mfaRequired ? <span className="text-warning-text">Off. Required by {me.organization.name}</span> : "Off";
+    ? me.policy.mfaRequired ? `On, using an authenticator app. Required by ${me.policy.mfaOrgName ?? me.organization.name}` : "On, using an authenticator app"
+    : me.policy.mfaRequired ? <span className="text-warning-text">Off. Required by {me.policy.mfaOrgName ?? me.organization.name}</span> : "Off";
   const who = me.email;
 
   return (

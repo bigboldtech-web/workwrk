@@ -43,6 +43,7 @@ import { hasClearedAt, isMissingClearedAtError, setClearedAtAvailable } from "@/
 // `Prisma` is imported as a VALUE here, not a type: `Prisma.DbNull` is the
 // only way to say "the JSON column is SQL NULL" in a filter.
 import { Prisma } from "@/generated/prisma";
+import { cronRefusal } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -53,18 +54,10 @@ const ALLOWED_DAYS = new Set([7, 14, 30]);
 const PAGE = 500;
 
 export async function POST(req: NextRequest) {
-  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
-  if (!cronSecret) {
-    // Refusing is the safe answer. A delete sweep that runs for anybody who
-    // can reach the URL is worse than a sweep that never runs.
-    return Response.json(
-      { error: "CRON_SECRET is not set; this route deletes rows and will not run without it." },
-      { status: 503 },
-    );
-  }
-  const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-  const provided = header?.replace(/^Bearer\s+/i, "");
-  if (provided !== cronSecret) return Response.json({ error: "Forbidden" }, { status: 403 });
+  // Refusing is the safe answer. A delete sweep that runs for anybody who
+  // can reach the URL is worse than a sweep that never runs.
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
   const now = Date.now();

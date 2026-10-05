@@ -32,12 +32,18 @@ export function FileDropZone({ spaceFolderId, spaceId, disabled, label }: FileDr
 
   const uploadAll = useCallback(async (list: FileList) => {
     let ok = 0;
+    // The first reason the server gave, said with the count.
+    let said: string | null = null;
     for (const f of Array.from(list)) {
       try {
         const fd = new FormData();
         fd.append("file", f);
         const up = await fetch("/api/upload", { method: "POST", body: fd });
-        if (!up.ok) continue;
+        if (!up.ok) {
+          const d = (await up.json().catch(() => null)) as { error?: unknown } | null;
+          if (!said && typeof d?.error === "string") said = d.error;
+          continue;
+        }
         const u = await up.json();
         const url = u.url ?? u.data?.url;
         if (!url) continue;
@@ -58,7 +64,7 @@ export function FileDropZone({ spaceFolderId, spaceId, disabled, label }: FileDr
         if (res.ok) ok += 1;
       } catch { /* per-file failure — the summary toast reports the count */ }
     }
-    toast(ok === list.length ? `${ok} file${ok === 1 ? "" : "s"} uploaded` : `${ok}/${list.length} files uploaded`);
+    toast(ok === list.length ? `${ok} file${ok === 1 ? "" : "s"} uploaded` : `${ok}/${list.length} files uploaded${said ? `. ${said}` : ""}`);
     window.dispatchEvent(new CustomEvent("workwrk:files-changed"));
   }, [spaceFolderId, spaceId, toast]);
 

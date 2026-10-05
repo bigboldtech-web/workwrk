@@ -21,6 +21,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { PersonRelation } from "./person-fields";
+import { levelHeldIn } from "@/lib/access/acting-workspace";
 
 export interface PeopleCtx {
   userId: string;
@@ -59,8 +60,10 @@ export async function peopleCtx(): Promise<PeopleCtx | null> {
  * Viewer), so every people rule reads one shape.
  */
 export async function peopleCtxForViewer(viewer: Viewer): Promise<PeopleCtx> {
-  const row = await prisma.user.findUnique({ where: { id: viewer.userId }, select: { accessLevel: true } });
-  const accessLevel = row?.accessLevel ?? "EMPLOYEE";
+  // The level held in the workspace this viewer acts in, never the anchored
+  // workspace's level there (src/lib/access/acting-workspace.ts): an Admin of
+  // a workspace they created is a Member where their membership says Member.
+  const accessLevel = (await levelHeldIn(viewer.userId, viewer.organizationId)) ?? "EMPLOYEE";
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
   const chain = new Set<string>(viewer.reportTree ?? []);
   const managerTier = legacyIsManagerLevel(accessLevel);

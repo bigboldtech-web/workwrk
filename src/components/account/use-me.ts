@@ -31,7 +31,9 @@ export interface MeRecord {
   office: { id: string; name: string } | null;
   manager: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
   organization: { id: string; name: string };
-  policy: { mfaRequired: boolean; passwordMaxAgeDays: number | null; password: PasswordPolicyView };
+  /** mfaRequired and mfaOrgName are the rule of the workspace this session
+   *  acts in; the password rules and expiry are the anchored workspace's. */
+  policy: { mfaRequired: boolean; mfaOrgName?: string; passwordMaxAgeDays: number | null; password: PasswordPolicyView };
 }
 
 export type MeState =

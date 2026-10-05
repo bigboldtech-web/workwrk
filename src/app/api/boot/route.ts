@@ -44,6 +44,7 @@ import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-le
 import { ownerSplitOn, scopeForOwnerPage, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
+import { levelHeldIn } from "@/lib/access/acting-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -373,7 +374,7 @@ export async function GET(req: NextRequest) {
       }),
       prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, deletedAt: true },
+        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, deletedAt: true, organizationId: true },
       }),
       getEffectivePreferences(userId, orgId),
       countsAndFacts(userId, orgId),
@@ -414,14 +415,18 @@ export async function GET(req: NextRequest) {
     // counts (spec 10 step 0 "People team = users at HR until toggle 6
     // exists"). Boot used to read a stale key alone, so an HR person's chrome
     // disagreed with every server gate that let them in.
+    // The level held in the workspace this session acts in, never the
+    // anchored workspace's level there (src/lib/access/acting-workspace.ts),
+    // so the chrome matches every gate.
+    const heldLevel = await levelHeldIn(userId, orgId, { organizationId: user.organizationId, accessLevel: user.accessLevel });
     const peopleTeam = peopleTeamOf({
       userId,
-      accessLevel: user.accessLevel ?? null,
+      accessLevel: heldLevel,
       configured: parseAccessSettings(settings.access).peopleTeamUserIds,
       tablesOn: accessV2Tables(),
     });
 
-    const accessLevel = user.accessLevel ?? null;
+    const accessLevel = heldLevel;
     const activeModules = new Set(prefs.modules.activeAppKeys);
     const railConfig = parseOrgAppsConfig(prefs.sidebar.apps);
     // The same resolver the client rail runs, over the pure catalog mirror

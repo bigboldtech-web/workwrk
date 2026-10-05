@@ -13,11 +13,15 @@ import {
 } from "./staff-audit-helpers";
 
 describe("action keys", () => {
-  it("is the spec's eleven keys, each once", () => {
-    expect(STAFF_ACTIONS).toHaveLength(11);
-    expect(new Set(STAFF_ACTIONS).size).toBe(11);
+  it("is the spec's eleven keys plus the staff-only trial end, each once", () => {
+    expect(STAFF_ACTIONS).toHaveLength(12);
+    expect(new Set(STAFF_ACTIONS).size).toBe(12);
     expect(STAFF_ACTIONS).toContain("admin.access.denied");
     expect(STAFF_ACTIONS).toContain("admin.org.owner_set");
+    expect(STAFF_ACTIONS).toContain("admin.org.trial_end_changed");
+  });
+  it("never tells the customer about a trial end, which only staff see", () => {
+    expect(tenantEventFor("admin.org.trial_end_changed", { trialEndsAt: null }, { trialEndsAt: "2026-10-19T12:00:00.000Z" })).toBeNull();
   });
 });
 

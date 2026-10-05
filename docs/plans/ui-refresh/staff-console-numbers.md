@@ -39,6 +39,10 @@ Stripe is asked at most once an hour; the Revenue card says when the figures are
 
 **Signup funnel** counts one group of companies, those that signed up in the range, through nested steps: finished setup; of those, created at least one SOP, KRA or task (board tasks included); of those, paying. No step can exceed the one above. The old funnel counted "created something" across every company in the product, so that step could be larger than the number who signed up.
 
+**Companies deleted for good** still count (2026-10-05). When an Owner deletes their workspace, a deletion record is written in the same step, with no name and no person, because the privacy policy deletes workspace data 30 days after termination. When the company is removed for good, its signup date and its two funnel steps (finished setup, created something) are kept on that record. So new companies, the signup funnel and the retention cohorts keep counting it where it signed up (as cancelled, never as active or paying), and Cancellations shows it as "A deleted company" with its plan. Before, every such company disappeared from every number the day it was removed, so a month's signups shrank and its retention rose.
+
+**Trials ending** (Overview, and the Trials view's "Ends in the next 7 days") counts a Stripe trial by Stripe's own date, and a self-serve trial by the date WorkwrK staff follow it up: 14 days after signup unless staff changed it on the company page. The customer is never shown that date and nothing changes for them on it. A company with a Stripe subscription or a lifetime deal is never counted as a trial ending, even while its status still reads Trial.
+
 **Busiest workspaces** counts recorded actions in the selected range only, by the same rule as Still active.
 
 **Plans** counts every company that is not cancelled, per plan. There is no revenue per plan, because Stripe does not know our plan names.

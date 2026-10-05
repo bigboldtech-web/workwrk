@@ -7,23 +7,27 @@ import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 
 /**
  * Schedule a tenant for deletion. Soft-delete with a 30-day grace
- * period — the org goes into status=CANCELLED, sign-in is blocked
+ * period: the org goes into status=CANCELLED, sign-in is blocked
  * (enforced in the auth layer), and a sibling cron will hard-delete
  * once the grace window elapses.
  *
  * Body: `{ confirmName: string, confirmPhrase: "DELETE" }`
- *   confirmName     — must equal the org name (case-sensitive)
- *   confirmPhrase   — must be the literal word "DELETE"
+ *   confirmName     must equal the org name (case-sensitive)
+ *   confirmPhrase   must be the literal word "DELETE"
  *
  * Required role: COMPANY_ADMIN or SUPER_ADMIN.
  *
  * Two-key confirm exists because tenant deletion is irreversible
- * after the 30-day window — one slip-up wipes everyone's data. The
+ * after the 30-day window: one slip-up wipes everyone's data. The
  * matching org name catches typos; the DELETE phrase catches "I
  * didn't realize that button was destructive."
  *
  * Logged as a critical audit event so the deletion is forensically
- * findable on review.
+ * findable on review. The hard delete removes every ActivityLog row of the
+ * company 30 days later (src/lib/admin/workspace-orphans.ts), so the deletion
+ * is ALSO written to WorkspaceDeletion, in the same transaction as the status:
+ * no name, no person and no foreign key, so the staff console's long-range
+ * cancellations still count it after the company is gone.
  */
 const GRACE_DAYS = 30;
 
@@ -52,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { id: true, name: true, status: true, settings: true },
+    select: { id: true, name: true, plan: true, status: true, settings: true, createdAt: true },
   });
   if (!org) return jsonError("Organization not found", 404);
 
@@ -80,12 +84,23 @@ export async function POST(req: NextRequest) {
     scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString(),
   };
 
-  // The status and the three deletion keys together; only those keys of the
-  // shared settings column are written, so no other writer's key is lost.
-  await prisma.$transaction(async (tx) => {
-    await tx.organization.update({ where: { id: orgId }, data: { status: "CANCELLED" } });
+  // The status, the three deletion keys and the deletion record together;
+  // only those keys of the shared settings column are written, so no other
+  // writer's key is lost. The status flip is a claim: of two presses at once
+  // (two tabs), one schedules the deletion and the other is told it is done.
+  const claimed = await prisma.$transaction(async (tx) => {
+    const flipped = await tx.organization.updateMany({
+      where: { id: orgId, status: { not: "CANCELLED" } },
+      data: { status: "CANCELLED" },
+    });
+    if (flipped.count !== 1) return false;
     await writeOrgSettingsKeys(orgId, deletionKeys, tx);
+    await tx.workspaceDeletion.create({ data: { organizationId: orgId, plan: org.plan, signedUpAt: org.createdAt, requestedAt: now } });
+    return true;
   });
+  if (!claimed) {
+    return jsonError("This organization is already scheduled for deletion. Use the Restore action to cancel.", 409);
+  }
 
   logAuditEvent({
     type: "organization_scheduled_deletion",
@@ -102,6 +117,6 @@ export async function POST(req: NextRequest) {
     status: "CANCELLED",
     scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString(),
     graceDays: GRACE_DAYS,
-    message: `Organization scheduled for deletion. You have ${GRACE_DAYS} days to cancel — call POST /api/organizations/restore to undo.`,
+    message: `Organization scheduled for deletion. You have ${GRACE_DAYS} days to cancel: call POST /api/organizations/restore to undo.`,
   });
 }

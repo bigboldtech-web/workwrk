@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomBytes } from "crypto";
 
@@ -116,4 +116,36 @@ export async function presignGetUrl(key: string, expiresInSeconds: number = 3600
 export async function deleteObject(key: string): Promise<void> {
   const command = new DeleteObjectCommand({ Bucket: getBucket(), Key: key });
   await getS3Client().send(command);
+}
+
+/**
+ * Delete every object under a prefix, a thousand at a time (the most one
+ * DeleteObjects request takes), and say how many went. For a company deleted
+ * for good, only the prefixes it provably owns (src/lib/company-files.ts
+ * ownedS3Prefixes), never `orgs/<id>/` as a whole. The prefix must end with
+ * "/" so `orgs/abc/` never reaches `orgs/abcd/`.
+ */
+export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
+  if (!prefix.endsWith("/") || prefix.length < 6) throw new Error(`Refusing to delete under the prefix "${prefix}"`);
+  const client = getS3Client();
+  const Bucket = getBucket();
+  let deleted = 0;
+  // DeleteObjects answers 200 even when some keys failed, naming them under
+  // Errors: those are counted apart, and the call throws once every page is
+  // done, so a caller that must stop on a failure (the purge script) does.
+  let failed = 0;
+  let token: string | undefined;
+  do {
+    const page = await client.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
+    const keys = (page.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k && k.startsWith(prefix));
+    if (keys.length > 0) {
+      const res = await client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true } }));
+      const errors = res.Errors?.length ?? 0;
+      failed += errors;
+      deleted += keys.length - errors;
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  if (failed > 0) throw new Error(`${failed} objects under ${prefix} could not be deleted (${deleted} were)`);
+  return deleted;
 }

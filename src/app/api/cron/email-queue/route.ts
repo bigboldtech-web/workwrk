@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { processEmailQueue } from "@/lib/email";
+import { cronRefusal } from "@/lib/cron-auth";
 
 /**
  * Cron endpoint — drains the EmailLog queue.
@@ -11,20 +12,16 @@ import { processEmailQueue } from "@/lib/email";
  * This cron is the safety net that guarantees every QUEUED email is sent.
  *
  * Runs frequently (every minute) because SMTP dispatch is the bottleneck,
- * not this endpoint. `processEmailQueue` atomically claims a batch via
- * `UPDATE ... RETURNING`, so concurrent cron invocations can't double-send.
+ * not this endpoint. `processEmailQueue` claims each row for one run only
+ * (FOR UPDATE SKIP LOCKED and a status re-check in one UPDATE), so runs that
+ * overlap, this cron's or the ones every sendEmail starts, never send an
+ * email twice.
  *
- * Guard with CRON_SECRET in production.
+ * Guarded by the shared cron door (src/lib/cron-auth.ts): fail-closed.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-    const provided = header?.replace(/^Bearer\s+/i, "");
-    if (provided !== cronSecret) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
   const result = await processEmailQueue();
   return Response.json({ ran: true, at: new Date().toISOString(), ...result });
 }

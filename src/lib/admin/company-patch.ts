@@ -25,6 +25,7 @@ import { setFeature } from "@/lib/enterprise-features";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions, type CompanyPatch } from "@/lib/admin/company-patch-rules";
 import { seatsAreUnlimited } from "@/lib/admin/companies-list";
+import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
 
 export {
@@ -66,7 +67,7 @@ export type ApplyCompanyPatchResult =
     }
   | { ok: false; status: 400 | 404 | 409; error: string };
 
-export type CompanyPatchField = "plan" | "status" | "feature" | "seats" | "module";
+export type CompanyPatchField = "plan" | "status" | "feature" | "seats" | "module" | "trialEnd";
 
 /**
  * Applies the patch in one transaction with one StaffAction row per changed
@@ -87,7 +88,16 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
       await tx.$queryRaw`SELECT "id" FROM "Organization" WHERE "id" = ${id} FOR UPDATE`;
       const org = await tx.organization.findUnique({
         where: { id },
-        select: { id: true, name: true, slug: true, plan: true, status: true, settings: true },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          plan: true,
+          status: true,
+          settings: true,
+          trialEndsAt: true,
+          subscription: { select: { stripeSubscriptionId: true, billingMode: true, trialEndsAt: true } },
+        },
       });
       if (!org) return null;
 
@@ -124,6 +134,17 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           : null;
       if (patch.seats !== undefined && !sub) {
         return { refused: "This company has no subscription, so there is no seat count to change." };
+      }
+      // A self-serve trial's end is the company's own only while nothing else
+      // decides it (src/lib/admin/trial-end.ts), judged on the status this
+      // same patch leaves. Refused before any write.
+      if (patch.trialEndsOn !== undefined) {
+        const why = trialEndRefusal({
+          status: patch.status ?? org.status,
+          trialEndsAt: org.trialEndsAt,
+          subscription: org.subscription,
+        });
+        if (why) return { refused: why };
       }
       // A module needs its Product row (seeded by scripts/seed-products.ts).
       // Missing on this server: say so and write nothing, never a 500.
@@ -313,6 +334,32 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
         );
         changed.push("status");
         status = patch.status;
+      }
+
+      if (patch.trialEndsOn !== undefined) {
+        const was = org.trialEndsAt;
+        const next = patch.trialEndsOn === null ? null : trialEndFromDay(patch.trialEndsOn);
+        if ((was?.getTime() ?? null) !== (next?.getTime() ?? null)) {
+          await tx.organization.update({ where: { id }, data: { trialEndsAt: next } });
+          const day = (d: Date | null) => (d ? trialEndDay(d) : "none");
+          logged.push(
+            await logStaffAction({
+              db: tx,
+              action: "admin.org.trial_end_changed",
+              actor,
+              ip,
+              targetCompanyId: id,
+              // No name in this row: while the company exists the audit
+              // page names it through the link, and once it is deleted for
+              // good nothing kept may name it.
+              targetLabel: null,
+              summary: next ? `Set the trial end from ${day(was)} to ${day(next)}` : `Cleared the trial end (was ${day(was)})`,
+              before: { trialEndsAt: was?.toISOString() ?? null },
+              after: { trialEndsAt: next?.toISOString() ?? null },
+            }),
+          );
+          changed.push("trialEnd");
+        }
       }
 
       return { changed, signedOut, company: { id: org.id, name: org.name, slug: org.slug, plan, status } };

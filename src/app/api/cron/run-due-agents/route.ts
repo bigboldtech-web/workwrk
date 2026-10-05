@@ -9,44 +9,22 @@
 // and fires `runAgentAutonomously` on each. Results are persisted as
 // AgentRun rows.
 //
-// Auth: this endpoint is meant to be called by external schedulers,
-// so we accept a shared secret via `Authorization: Bearer <secret>`
-// (env var `CRON_SECRET`). When the secret isn't set, only authed
-// admins can call it — so local dev works without extra setup.
+// Auth: the shared cron door (src/lib/cron-auth.ts): CRON_SECRET in
+// `x-cron-secret` or `Authorization: Bearer`, fail-closed, constant time.
+// It used to fall through to ANY signed-in admin when the header did not
+// match, and the query below is not scoped to one workspace, so a customer
+// workspace's admin could fire every workspace's due agents. Locally, set
+// CRON_SECRET for the dev server and send it.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
-
-const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
-
-async function authorize(req: Request): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    // Match the convention the rest of the WorkwrK cron endpoints use
-    // (see scripts/CRON-SETUP.md): a shared `x-cron-secret` header.
-    // Bearer is accepted as a fallback so the same endpoint also works
-    // under Vercel Cron, which sends `Authorization: Bearer <secret>`.
-    const cronHeader = req.headers.get("x-cron-secret") ?? "";
-    const bearer = req.headers.get("authorization") ?? "";
-    if (cronHeader === secret || bearer === `Bearer ${secret}`) return { ok: true };
-    // Fall through to session auth if neither header matched.
-  }
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return { ok: false, status: 401, error: "Unauthorized" };
-  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-  if (!ADMIN_LEVELS.has(accessLevel)) {
-    return { ok: false, status: 403, error: "Admin only" };
-  }
-  return { ok: true };
-}
+import { cronRefusal } from "@/lib/cron-auth";
 
 export async function POST(req: Request) {
-  const auth = await authorize(req);
-  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const now = new Date();
   const due = await prisma.agent.findMany({

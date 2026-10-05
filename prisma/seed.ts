@@ -1,16 +1,26 @@
-import * as dotenv from "dotenv";
-dotenv.config();
+// The local development seed: an "Acme Corp" workspace with people, KRAs and
+// SOPs. Rewritten 2026-10-05: it loaded .env through dotenv (on a laptop,
+// the production tunnel) and hard-coded the passwords it set, including the
+// one for a SUPER_ADMIN admin@workwrk.com, in a repository that is public.
+// Now it reads DATABASE_URL and nothing else (scripts/lib/script-prisma.ts),
+// says which database it is pointed at, and takes both passwords from the
+// environment without printing them:
+//
+//   DIRECT_URL= DATABASE_URL=<a LOCAL database> SEED_ADMIN_PASSWORD=<12+ chars> SEED_PASSWORD=<12+ chars> \
+//     npx tsx prisma/seed.ts
+//
+// Never point it at production, and never write a password into this file.
 
-import { PrismaClient } from "../src/generated/prisma";
-import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
+import { databaseLabel, scriptPrisma } from "../scripts/lib/script-prisma";
 
-const connStr = process.env.DATABASE_URL;
-if (!connStr) throw new Error("DATABASE_URL is not set");
-
-console.log("Connecting to:", connStr.replace(/:[^@]+@/, ":****@"));
-const adapter = new PrismaPg({ connectionString: connStr });
-const prisma = new PrismaClient({ adapter });
+const prisma = scriptPrisma();
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "";
+const PEOPLE_PASSWORD = process.env.SEED_PASSWORD ?? "";
+if (ADMIN_PASSWORD.length < 12 || PEOPLE_PASSWORD.length < 12) {
+  throw new Error("Set SEED_ADMIN_PASSWORD and SEED_PASSWORD (12 characters or more each). They are never printed.");
+}
+console.log(`Database: ${databaseLabel()}`);
 
 async function main() {
   console.log("Seeding database...");
@@ -64,8 +74,8 @@ async function main() {
   );
 
   const roleMap = Object.fromEntries(roles.map((r) => [r.title, r.id]));
-  const passwordHash = await bcrypt.hash("password123", 12);
-  const adminPasswordHash = await bcrypt.hash("WorkWrk@1212@WW", 12);
+  const passwordHash = await bcrypt.hash(PEOPLE_PASSWORD, 12);
+  const adminPasswordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
   // Create admin user
   const admin = await prisma.user.create({
@@ -176,9 +186,7 @@ async function main() {
   );
 
   console.log("Seed complete!");
-  console.log(`\nLogin credentials:`);
-  console.log(`  Email: admin@workwrk.com`);
-  console.log(`  Password: password123`);
+  console.log("Sign in as admin@workwrk.com with SEED_ADMIN_PASSWORD, or as anyone else with SEED_PASSWORD.");
 }
 
 main()

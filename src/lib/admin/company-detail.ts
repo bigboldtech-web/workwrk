@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { MODULES } from "@/lib/modules";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { deletionSchedule } from "@/lib/admin/company-patch-rules";
+import { consoleTrialEnd, trialEndRefusal } from "@/lib/admin/trial-end";
 import {
   LIVE_PERSON,
   ownerIdsOf,
@@ -146,6 +147,7 @@ export async function loadCompanyDetail(id: string) {
       status: true,
       settings: true,
       createdAt: true,
+      trialEndsAt: true,
       subscription: {
         select: {
           plan: true,
@@ -245,6 +247,20 @@ export async function loadCompanyDetail(id: string) {
         }
       : null,
     lifetimeCode: code ? { code: code.code, tier: code.tier, refunded: Boolean(code.refundedAt) } : null,
+    // When the trial ends, as staff read it (src/lib/admin/trial-end.ts):
+    // Stripe's date, or the company's own self-serve date, which only staff
+    // see. `editable` when that self-serve date is the one in force, or
+    // could be (on Trial with nothing else deciding it); `whyNot` otherwise.
+    trial: (() => {
+      const facts = {
+        status: org.status as string,
+        trialEndsAt: org.trialEndsAt,
+        subscription: sub ? { stripeSubscriptionId: sub.stripeSubscriptionId, billingMode: sub.billingMode as string, trialEndsAt: sub.trialEndsAt } : null,
+      };
+      const end = consoleTrialEnd(facts);
+      const whyNot = trialEndRefusal(facts);
+      return { endsAt: end?.at ?? null, source: end?.source ?? null, editable: whyNot === null, whyNot };
+    })(),
     modules: MODULES.map((m) => ({
       key: m.appKey,
       label: m.label,

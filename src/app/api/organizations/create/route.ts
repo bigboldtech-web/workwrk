@@ -4,6 +4,7 @@ import { slugify } from "@/lib/utils";
 import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { seedOrgDefaults, seedStarterSpace } from "@/lib/org/seed-org-defaults";
+import { selfServeTrialEnd } from "@/lib/admin/trial-end";
 
 // POST /api/organizations/create  { name }
 // Create a brand-new workspace (Organization) and make the caller its admin
@@ -36,7 +37,9 @@ export async function POST(req: NextRequest) {
 
   const org = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
-      data: { name, slug, status: "TRIAL" },
+      // trialEndsAt: when staff follow the trial up, never shown to the
+      // customer (src/lib/admin/trial-end.ts).
+      data: { name, slug, status: "TRIAL", trialEndsAt: selfServeTrialEnd(new Date()) },
     });
     // The same defaults a self-serve signup gets (settings-architecture
     // 11.1): departments, locale, password rules, access toggles, retention

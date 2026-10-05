@@ -24,6 +24,53 @@ Editing rules:
 
 The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 
+## One secret check for every job (2026-10-05)
+
+Every endpoint in this file checks the secret the same way
+(`src/lib/cron-auth.ts`): `x-cron-secret: <secret>` or
+`Authorization: Bearer <secret>`, compared in constant time. With
+`CRON_SECRET` unset or empty in the app's environment, every one answers 503
+and runs nothing; a missing or wrong secret is a 403 (a few answered 401
+before, and `curl -fsS` fails the same way on both). Before this, 11 of the
+`/api/cron` routes ran for anybody when the secret was unset and 4 more did
+outside production, three routes fell back to `NEXTAUTH_SECRET`, and
+`/api/cron/run-due-agents` let any signed-in workspace admin fire every
+workspace's agents. Production has the secret set, so no installed row
+changes. Locally, start the dev server with a `CRON_SECRET` and send it.
+
+## Rotating CRON_SECRET (do this now: the old value was public)
+
+Until 2026-10-05 this file and `LAUNCH-CHECKLIST.md` printed the production
+`CRON_SECRET` (and the checklist the `SECRETS_ENCRYPTION_KEY`), and the
+repository is public. Git history keeps them, so removing them from the files
+is not enough: anyone can still read them. With that value anybody can send
+every reminder email to every customer again and again, run the purge jobs,
+and forge a signed audit export. Replace it on the server:
+
+1. `openssl rand -hex 32` makes the new value.
+2. Replace the old value EVERYWHERE it lives, or the old one keeps working:
+   - every env file the app reads (`grep -l CRON_SECRET /www/wwwroot/workwrk.com/.env*`
+     lists them: `.env`, and any `.env.production` or `.env.production.local`);
+   - the aaPanel Node project's environment settings, if it is set there;
+   - `/etc/profile.d/workwrk.sh` (what the crontab rows read);
+   - any crontab or aaPanel cron row with the value typed in (`crontab -l | grep -c x-cron-secret`).
+3. Open a NEW SSH session (or `source /etc/profile.d/workwrk.sh`), so the shell
+   no longer holds the old value, then `pm2 reload workwrk --update-env` and
+   `pm2 save`, so a reboot does not bring the old environment back.
+4. Check both ways round:
+   `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "x-cron-secret: <the OLD value>" https://workwrk.com/api/cron/ratelimit-cleanup`
+   must answer 403. A 200 means the app still holds the old value (from the
+   shell or pm2's saved environment): repeat step 3 from a fresh shell. The
+   same request with the NEW value answers 200, and the next row in
+   `/var/log/workwrk-cron.log` succeeds.
+5. Set a separate `AUDIT_SIGNING_KEY` (also `openssl rand -hex 32`, in the same
+   places as step 2, then step 3 again): signed audit exports fall back to
+   `CRON_SECRET` without one.
+
+`SECRETS_ENCRYPTION_KEY` encrypts stored secrets (bring-your-own AI keys), so
+it is rotated with `scripts/rotate-secrets-key.ts`, which re-encrypts them:
+see that file's header.
+
 ## Removed: Task SLA check
 
 `*/15 * * * * curl ... /api/tasks/run-sla-check`: **delete this row from the
@@ -339,9 +386,9 @@ so they never double-fire.
 ## Digest emails — `/api/email/send-reminders`
 
 This one endpoint runs several distinct reminder jobs selected by a
-`type` in the **JSON body**, and it authenticates with
-`Authorization: Bearer $CRON_SECRET` (NOT the `x-cron-secret` header the
-jobs above use). Because a path-only cron (e.g. the reference
+`type` in the **JSON body**, and the rows below authenticate with
+`Authorization: Bearer $CRON_SECRET` (the shared check above also accepts
+the `x-cron-secret` header the other jobs use, so either works). Because a path-only cron (e.g. the reference
 `vercel.json`) can't send a body, register these as separate aaPanel
 rows, one per `type`:
 
@@ -361,19 +408,21 @@ and KPI emails **every day** it runs. Always pass one `type` per row.
 
 ## Where the cron secret comes from
 
-The same value that's in your env as `CRON_SECRET`. In the script
-above, `$CRON_SECRET` is a shell variable — for it to expand inside
+The same value that's in your env as `CRON_SECRET`. NEVER write its value in
+this file, or anywhere in this repository: the repository is public, and the
+value that used to be printed here had to be replaced (2026-10-05). In the
+script above, `$CRON_SECRET` is a shell variable — for it to expand inside
 the cron's environment you have **two options**:
 
 **Option A — inline the value in each cron script** (simplest):
 ```
-curl -fsS -X POST -H "x-cron-secret: b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1" https://workwrk.com/api/cron/email-queue
+curl -fsS -X POST -H "x-cron-secret: <the CRON_SECRET from the app's .env>" https://workwrk.com/api/cron/email-queue
 ```
 
 **Option B — export from /etc/profile.d** (if you want one place to update it):
 ```
 # /etc/profile.d/workwrk-secrets.sh
-export CRON_SECRET=b205e8314f25686b30892b1adb60e654e35a9c1e427a15da9d62fe4a6f322eb1
+export CRON_SECRET=<the CRON_SECRET from the app's .env>
 ```
 Then make sure aaPanel's cron runs with a login shell so /etc/profile.d
 is sourced. Many setups use a non-login shell, so Option A is safer.

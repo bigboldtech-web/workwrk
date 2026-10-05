@@ -64,9 +64,31 @@ export function companyViewWhere(view: CompanyView): Prisma.OrganizationWhereInp
 /** "Trial ends in the next 7 days": the one trial-end window the console asks about (Overview's Needs attention). */
 export const TRIAL_ENDS_DAYS = 7;
 
-/** A subscription trial that ends between now and `days` from now. */
+/**
+ * A trial that ends between now and `days` from now, by the console's one
+ * rule (consoleTrialEnd in src/lib/admin/trial-end.ts, which this mirrors):
+ * Stripe's own trial date wherever there is one; otherwise, for a company on
+ * TRIAL with neither a Stripe subscription nor a lifetime deal, the company's
+ * own self-serve date. A Stripe end is an instant, so its window is
+ * instants; a self-serve end is a UTC calendar day, so its window is whole
+ * UTC days, today through today + `days`: exactly the trials whose company
+ * page reads "(ends today)" to "(7 days)", at any hour.
+ */
 export function trialEndsWithinWhere(now: Date, days = TRIAL_ENDS_DAYS): Prisma.OrganizationWhereInput {
-  return { subscription: { is: { trialEndsAt: { gte: now, lte: new Date(now.getTime() + days * 24 * 60 * 60 * 1000) } } } };
+  const window = { gte: now, lte: new Date(now.getTime() + days * 24 * 60 * 60 * 1000) };
+  const today = now.toISOString().slice(0, 10);
+  const last = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const dayWindow = { gte: new Date(`${today}T00:00:00.000Z`), lte: new Date(`${last}T23:59:59.999Z`) };
+  return {
+    OR: [
+      { subscription: { is: { trialEndsAt: window } } },
+      {
+        status: "TRIAL",
+        trialEndsAt: dayWindow,
+        NOT: { subscription: { is: { OR: [{ trialEndsAt: { not: null } }, STRIPE_SUB, LIFETIME_SUB] } } },
+      },
+    ],
+  };
 }
 
 export const SUBSCRIPTION_FILTERS = ["stripe", "lifetime", "none", "past_due"] as const;

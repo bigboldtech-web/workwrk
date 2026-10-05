@@ -9,15 +9,13 @@ import {
 import { filterNotifyUsers } from "@/lib/notify-prefs";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
+import { cronRefusal } from "@/lib/cron-auth";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get("authorization");
-  const secret = process.env.CRON_SECRET || process.env.NEXTAUTH_SECRET;
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const { type } = await req.json().catch(() => ({ type: "all" }));
   const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
@@ -37,28 +35,38 @@ export async function POST(req: NextRequest) {
     const managers = await prisma.user.findMany({
       where: { deletedAt: null, directReports: { some: { deletedAt: null } } },
       select: {
-        id: true, email: true, firstName: true, organizationId: true,
-        directReports: { where: { deletedAt: null }, select: { firstName: true, lastName: true } },
+        id: true, email: true, firstName: true,
+        directReports: { where: { deletedAt: null }, select: { firstName: true, lastName: true, organizationId: true } },
       },
     });
 
+    // One reminder per manager and company, tagged with the company whose
+    // people it names (a manager's reports can sit in more than one), so it
+    // goes with that company when it is deleted for good.
+    const reminders = managers.flatMap((mgr) => {
+      const byCompany = new Map<string, string[]>();
+      for (const r of mgr.directReports) {
+        byCompany.set(r.organizationId, [...(byCompany.get(r.organizationId) ?? []), `${r.firstName} ${r.lastName}`]);
+      }
+      return [...byCompany].map(([organizationId, names]) => ({ mgr, organizationId, names }));
+    });
     await Promise.all(
-      managers
-        .filter((mgr) => mgr.directReports.length > 0)
-        .map((mgr) => {
-          const { subject, html } = evaluationReminderTemplate({
-            managerName: mgr.firstName,
-            teamMembers: mgr.directReports.map((r) => `${r.firstName} ${r.lastName}`),
-            month: `${lastMonth} ${year}`,
-            evaluationLink: `${baseUrl}/kra-kpi`,
-          });
-          return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
-            variables: { month: `${lastMonth} ${year}`, teamCount: mgr.directReports.length },
-            organizationId: mgr.organizationId, category: "reminder" })
-            .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
-        }),
+      reminders.map(({ mgr, organizationId, names }) => {
+        const { subject, html } = evaluationReminderTemplate({
+          managerName: mgr.firstName,
+          teamMembers: names,
+          month: `${lastMonth} ${year}`,
+          evaluationLink: `${baseUrl}/kra-kpi`,
+        });
+        return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
+          // byReportCompany marks a reminder sent one per company (the purge
+          // script deletes only the older ones, which lack it).
+          variables: { month: `${lastMonth} ${year}`, teamCount: names.length, byReportCompany: true },
+          organizationId, category: "reminder" })
+          .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
+      }),
     );
-    results.push(`Monthly evaluation: ${managers.length} managers`);
+    results.push(`Monthly evaluation: ${managers.length} managers, ${reminders.length} reminders`);
   }
 
   // ──────────────────────────────────────
@@ -91,13 +99,15 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    // Manager summary
-    const mgrMap = new Map<string, { mgr: any; items: any[] }>();
+    // Manager summary, one per manager and company: each digest is tagged
+    // with the company whose people it names, so it goes with that company
+    // when it is deleted for good (/api/cron/org-hard-delete).
+    const mgrMap = new Map<string, { mgr: any; organizationId: string; items: any[] }>();
     for (const a of overdueSops) {
       if (!a.user.manager) continue;
-      const mId = a.user.manager.id;
-      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: a.user.manager, items: [] });
-      mgrMap.get(mId)!.items.push({
+      const key = `${a.user.manager.id}:${a.sop.organizationId}`;
+      if (!mgrMap.has(key)) mgrMap.set(key, { mgr: a.user.manager, organizationId: a.sop.organizationId, items: [] });
+      mgrMap.get(key)!.items.push({
         type: "SOP", title: a.sop.title,
         personName: `${a.user.firstName} ${a.user.lastName}`,
         daysOverdue: Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000),
@@ -109,11 +119,11 @@ export async function POST(req: NextRequest) {
           managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/home`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
-          variables: { count: e.items.length }, category: "reminder" })
+          variables: { count: e.items.length }, organizationId: e.organizationId, category: "reminder" })
           .catch(() => {});
       }),
     );
-    results.push(`Overdue SOPs: ${overdueSops.length} users, ${mgrMap.size} managers`);
+    results.push(`Overdue SOPs: ${overdueSops.length} users, ${mgrMap.size} manager digests`);
   }
 
   // ──────────────────────────────────────
@@ -129,7 +139,7 @@ export async function POST(req: NextRequest) {
     // the read, over the Lists actually in play.
     const overdueRows = await prisma.item.findMany({
       where: { archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
-      select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
+      select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true, organizationId: true },
       orderBy: { dueAt: "asc" },
       take: 600,
     });
@@ -152,13 +162,14 @@ export async function POST(req: NextRequest) {
 
     type OverdueLine = { type: string; title: string; personName: string; daysOverdue: number };
     type Manager = { id: string; email: string; firstName: string };
-    const mgrMap = new Map<string, { mgr: Manager; items: OverdueLine[] }>();
+    // One digest per manager and company, tagged with that company (as above).
+    const mgrMap = new Map<string, { mgr: Manager; organizationId: string; items: OverdueLine[] }>();
     for (const t of overdueTasks) {
       const assignee = ownerById.get(t.ownerId!);
       if (!assignee?.manager) continue;
-      const mId = assignee.manager.id;
-      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: assignee.manager, items: [] });
-      mgrMap.get(mId)!.items.push({
+      const key = `${assignee.manager.id}:${t.organizationId}`;
+      if (!mgrMap.has(key)) mgrMap.set(key, { mgr: assignee.manager, organizationId: t.organizationId, items: [] });
+      mgrMap.get(key)!.items.push({
         type: "Task", title: t.title,
         personName: `${assignee.firstName} ${assignee.lastName}`,
         daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
@@ -172,11 +183,11 @@ export async function POST(req: NextRequest) {
           managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/my-work`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
-          variables: { count: e.items.length }, category: "reminder" })
+          variables: { count: e.items.length }, organizationId: e.organizationId, category: "reminder" })
           .catch(() => {});
       }),
     );
-    results.push(`Overdue tasks: ${overdueTasks.length} tasks, ${mgrMap.size} managers`);
+    results.push(`Overdue tasks: ${overdueTasks.length} tasks, ${mgrMap.size} manager digests`);
   }
 
   // ──────────────────────────────────────

@@ -30,25 +30,17 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { BLOB_TRASH_TYPES, freeTrashStorage } from "@/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
+import { cronRefusal } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
 const ORG_PAGE = 200;
 
 export async function POST(req: NextRequest) {
-  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
-  if (!cronSecret) {
-    return Response.json(
-      { error: "CRON_SECRET is not set; this route deletes rows and will not run without it." },
-      { status: 503 },
-    );
-  }
-  const header = req.headers.get("x-cron-secret") ?? req.headers.get("authorization");
-  if (header?.replace(/^Bearer\s+/i, "") !== cronSecret) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const refused = cronRefusal(req);
+  if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
   const now = Date.now();
@@ -81,9 +73,9 @@ export async function POST(req: NextRequest) {
 
       const expiringFiles = await prisma.trashItem.findMany({
         where: { ...where, entityType: { in: [...BLOB_TRASH_TYPES] } },
-        select: { entityType: true, snapshot: true },
+        select: { id: true, entityType: true, snapshot: true },
       });
-      for (const f of expiringFiles) await freeTrashStorage(f.entityType, f.snapshot);
+      await freeTrashStorageMany(expiringFiles, org.id);
 
       const res = await prisma.trashItem.deleteMany({ where });
       if (res.count > 0) purged.push({ organizationId: org.id, days, deleted: res.count });
