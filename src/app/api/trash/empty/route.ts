@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
     // is orphaned with no way left to find it.
     const files = await prisma.trashItem.findMany({
       where: { organizationId: orgId, entityType: { in: [...BLOB_TRASH_TYPES] } },
-      select: { entityType: true, snapshot: true },
+      select: { id: true, entityType: true, snapshot: true },
     });
-    for (const f of files) await freeTrashStorage(f.entityType, f.snapshot, orgId);
+    for (const f of files) await freeTrashStorage(f.entityType, f.snapshot, orgId, f.id);
 
     const res = await prisma.trashItem.deleteMany({ where: { organizationId: orgId } });
     return jsonSuccess({ deleted: res.count });

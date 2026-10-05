@@ -18,6 +18,7 @@ import { randomBytes } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { isS3Configured, getBucket, getS3Client, presignGetUrl } from "@/lib/s3";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { uploadStamp } from "@/lib/upload-stamp";
 import { prisma } from "@/lib/prisma";
 
 // The limit lives in src/lib/upload-limits.ts so the /files page prints the
@@ -33,6 +34,9 @@ export async function POST(req: NextRequest) {
   // the run's org. Only a live run (not completed, not cancelled) may upload.
   const runToken = formData.get("runToken");
   let orgId: string;
+  // Who uploads, for the stamp in the stored name (src/lib/upload-stamp.ts);
+  // a guest run has nobody, so its files carry no stamp.
+  let uploaderId: string | null = null;
   if (typeof runToken === "string" && runToken.length >= 8) {
     const run = await prisma.processRun.findUnique({ where: { shareToken: runToken }, select: { organizationId: true, status: true } });
     if (!run || run.status === "CANCELLED" || run.status === "COMPLETED") {
@@ -43,6 +47,14 @@ export async function POST(req: NextRequest) {
     const ctx = await resolveSuiteContext();
     if ("error" in ctx) return ctx.error;
     orgId = ctx.orgId;
+    uploaderId = ctx.userId;
+    // Every tab shares one session, so a tab still showing the workspace the
+    // person switched away from would file its upload under the other one.
+    // The app sends the workspace its page belongs to (src/lib/tab-workspace.ts).
+    const tab = req.headers.get("x-workspace-id");
+    if (tab && tab !== orgId) {
+      return NextResponse.json({ error: "This tab belongs to another workspace. Reload it to upload here." }, { status: 409 });
+    }
   }
 
   const file = formData.get("file") as File | null;
@@ -51,16 +63,18 @@ export async function POST(req: NextRequest) {
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
   const id = randomBytes(12).toString("hex");
+  const stamp = uploaderId ? uploadStamp(orgId, uploaderId, id) : null;
+  const stem = stamp ? `${id}-${stamp}` : id;
   const today = new Date().toISOString().slice(0, 10);
 
   // S3 path — org-scoped so per-org bucket policies remain an option.
-  // orgs/<id>/files/ is written only since uploads were stamped with the
-  // workspace they are for (the one the session acts in, or a run's own
-  // company), so deleting a company for good frees that prefix
+  // orgs/<id>/files/ is written only for the workspace a file is for: the one
+  // the session acts in and the uploading tab belongs to (the check above), or
+  // a run's own company. So deleting a company for good frees that prefix
   // (src/lib/company-files.ts). The older orgs/<id>/notes/ named the
   // uploader's home workspace instead, which proves nothing, and is left.
   if (isS3Configured()) {
-    const key = `orgs/${orgId}/files/${today}/${id}${ext ? "." + ext : ""}`;
+    const key = `orgs/${orgId}/files/${today}/${stem}${ext ? "." + ext : ""}`;
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
       await getS3Client().send(
@@ -92,9 +106,10 @@ export async function POST(req: NextRequest) {
   // is reachable from the same Next server. Not production-grade — it
   // doesn't survive horizontal scaling — but keeps local dev frictionless.
   // The company's id in the name is the proof it owns the file, read when the
-  // company is deleted for good and by Trash's permanent delete
-  // (ownedStoredFile in src/lib/trash.ts).
-  const safeName = `file-${orgId}-${id}.${ext || "bin"}`;
+  // company is deleted for good (src/lib/company-files.ts); the stamp says who
+  // uploaded it, read by Trash's permanent delete (ownedStoredFile in
+  // src/lib/trash.ts).
+  const safeName = `file-${orgId}-${stem}.${ext || "bin"}`;
   const uploadDir = path.join(process.cwd(), "public", "uploads");
   await mkdir(uploadDir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());

@@ -21,6 +21,7 @@ import { accessV2Tables } from "./flags";
 import { ownerIdsFor } from "../admin/company-detail";
 import { parseAccessSettings } from "./settings";
 import type { ActingAs, ObjectRole, Viewer, ViewerStatus } from "./types";
+import { levelHeldIn } from "./acting-workspace";
 
 /** Per-request memo of the expensive Viewer fields. */
 const MEMO = new WeakMap<object, Partial<Viewer>>();
@@ -118,6 +119,9 @@ export async function hydrate(
         adminScopes: true,
         // ACCESS_V2_TABLES: read only to narrow a Member to a Guest (org-role.ts).
         orgRole: true,
+        // Where the stored level applies: the level, scopes and org role on
+        // this row are the anchored workspace's, not another one's.
+        organizationId: true,
       },
     }),
     reportTreeFor(viewer.userId),
@@ -132,7 +136,11 @@ export async function hydrate(
   // A viewer built from a token with no accessLevel claim came in as GUEST.
   // The row is the authority, so re-derive from it; never the other way round,
   // which would let a stale token widen a demoted person's role.
-  const storedLevel = row?.accessLevel ?? null;
+  // The level held in THIS viewer's workspace (src/lib/access/acting-workspace.ts):
+  // a session acting outside the anchored workspace holds its membership's
+  // role there, never the anchored workspace's level, scopes or org role.
+  const anchoredHere = !!row && row.organizationId === viewer.organizationId;
+  const storedLevel = row ? await levelHeldIn(viewer.userId, viewer.organizationId, { organizationId: row.organizationId, accessLevel: row.accessLevel }) : null;
   const reDerived =
     opts.reDeriveOrgRole && storedLevel ? orgRoleOf({ accessLevel: storedLevel }) : null;
   // ACCESS_V2_TABLES (default OFF): the row's stored org role, which may only
@@ -140,8 +148,8 @@ export async function hydrate(
   let v2: Pick<Viewer, "orgRole" | "isAgent" | "adminScopes"> | null = null;
   if (accessV2Tables() && row && storedLevel) {
     const pick = orgRoleOf({ accessLevel: storedLevel }) === "ADMIN" ? (await ownerIdsFor(viewer.organizationId)).includes(viewer.userId) : false;
-    const role = effectiveOrgRole(storedLevel, pick, row.orgRole);
-    v2 = { orgRole: role, isAgent: effectiveIsAgent(storedLevel), adminScopes: effectiveAdminScopes(role, row.adminScopes) };
+    const role = effectiveOrgRole(storedLevel, pick, anchoredHere ? row.orgRole : null);
+    v2 = { orgRole: role, isAgent: effectiveIsAgent(storedLevel), adminScopes: effectiveAdminScopes(role, anchoredHere ? row.adminScopes : null) };
   }
 
   const extra: Partial<Viewer> = {

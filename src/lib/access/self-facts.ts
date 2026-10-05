@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf, orgRoleOf } from "./org-role";
 import type { OrgRole } from "./types";
+import { levelHeldIn } from "./acting-workspace";
 
 export interface SelfAccountFacts {
   orgRole: OrgRole;
@@ -80,10 +81,11 @@ export async function soleAdminWorkspaces(userId: string, db: Db = prisma): Prom
   return sole.sort();
 }
 
-export async function selfAccountFacts(userId: string, _organizationId: string): Promise<SelfAccountFacts | null> {
-  const me = await prisma.user.findUnique({ where: { id: userId }, select: { accessLevel: true } });
+export async function selfAccountFacts(userId: string, organizationId: string): Promise<SelfAccountFacts | null> {
+  const me = await prisma.user.findUnique({ where: { id: userId }, select: { accessLevel: true, organizationId: true } });
   if (!me) return null;
-  const level = me.accessLevel ?? null;
+  // The level held in the workspace asked about, never the anchored one's there.
+  const level = await levelHeldIn(userId, organizationId, me);
   const sole = await soleAdminWorkspaces(userId);
   return {
     orgRole: orgRoleOf({ accessLevel: level }),

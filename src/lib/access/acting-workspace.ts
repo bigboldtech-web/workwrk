@@ -34,3 +34,26 @@ export async function actingWorkspace(
   }
   return { organizationId: user.organizationId, accessLevel: user.accessLevel };
 }
+
+/**
+ * The level a person holds in ONE workspace, read fresh: their own level
+ * where they are anchored, the role their membership there holds anywhere
+ * else, and null where they hold neither. Never the anchored workspace's
+ * level in another one: a person who is an Admin of a workspace they just
+ * created, and works in a company where they are a Member, is a Member there.
+ * Pass the anchored row when the caller already read it.
+ */
+export async function levelHeldIn(
+  userId: string,
+  organizationId: string,
+  anchored?: { organizationId: string; accessLevel: AccessLevel } | null,
+): Promise<AccessLevel | null> {
+  const row = anchored ?? (await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true, accessLevel: true } }));
+  if (!row) return null;
+  if (row.organizationId === organizationId) return row.accessLevel;
+  const held = await prisma.organizationMembership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { role: true },
+  });
+  return held?.role ?? null;
+}

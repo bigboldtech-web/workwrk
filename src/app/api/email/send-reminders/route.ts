@@ -59,7 +59,9 @@ export async function POST(req: NextRequest) {
           evaluationLink: `${baseUrl}/kra-kpi`,
         });
         return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
-          variables: { month: `${lastMonth} ${year}`, teamCount: names.length },
+          // byReportCompany marks a reminder sent one per company (the purge
+          // script deletes only the older ones, which lack it).
+          variables: { month: `${lastMonth} ${year}`, teamCount: names.length, byReportCompany: true },
           organizationId, category: "reminder" })
           .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
       }),

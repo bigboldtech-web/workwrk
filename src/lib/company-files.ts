@@ -13,8 +13,9 @@
 // freed is what was stamped with the company's own id by code that knew the
 // company the file was for:
 //   S3       orgs/<id>/files/ (uploads, since they carry the workspace the
-//            session acts in) and orgs/<id>/scribe/ (Scribe screenshots,
-//            always keyed by the session's workspace)
+//            session acts in and the uploading tab belongs to, /api/upload)
+//            and orgs/<id>/scribe/ (Scribe screenshots, always keyed by the
+//            session's workspace)
 //   on disk  file-<id>-* (uploads), logo-<id>-* (its logos, old ones too)
 //            and avatar-<userId>-* for each person whose account goes with it
 // Older uploads are left in place: orgs/<id>/notes/ in S3 and file-<random>

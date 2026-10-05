@@ -73,9 +73,9 @@ export async function POST(req: NextRequest) {
 
       const expiringFiles = await prisma.trashItem.findMany({
         where: { ...where, entityType: { in: [...BLOB_TRASH_TYPES] } },
-        select: { entityType: true, snapshot: true },
+        select: { id: true, entityType: true, snapshot: true },
       });
-      for (const f of expiringFiles) await freeTrashStorage(f.entityType, f.snapshot, org.id);
+      for (const f of expiringFiles) await freeTrashStorage(f.entityType, f.snapshot, org.id, f.id);
 
       const res = await prisma.trashItem.deleteMany({ where });
       if (res.count > 0) purged.push({ organizationId: org.id, days, deleted: res.count });

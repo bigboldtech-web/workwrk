@@ -228,8 +228,10 @@ export async function POST(req: NextRequest) {
   // A file is registered only into the company that stored it: an S3 key
   // must sit under its own orgs/<id>/ prefix, and a disk name written with
   // another company's id is refused. A link to someone else's file (seen on
-  // a share page, say) must never become this company's file to read, trash
-  // and delete for good.
+  // a share page, say) must never become this company's file to read. And a
+  // registered key is never the row's to free on its own: Trash's permanent
+  // delete frees only a file /api/upload stamped for this row's own uploader
+  // that nothing else names (src/lib/trash.ts ownedStoredFile).
   if (s3Key && !s3Key.startsWith(`orgs/${orgId}/`)) return jsonError("That file was not uploaded to this workspace.", 400);
   if (url.startsWith("/api/uploads/")) {
     const name = url.split("/").pop() ?? "";

@@ -1233,7 +1233,7 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
     select: { id: true, entityType: true, snapshot: true },
   });
   if (!snap) return { ok: false, status: 404, message: "Not found" };
-  await freeTrashStorage(snap.entityType, snap.snapshot, orgId);
+  await freeTrashStorage(snap.entityType, snap.snapshot, orgId, snap.id);
   await prisma.trashItem.delete({ where: { id: snap.id } });
   return { ok: true };
 }

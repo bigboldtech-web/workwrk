@@ -1,4 +1,5 @@
-// Delete what companies deleted for good BEFORE 2026-10-05 left behind.
+// Delete what companies deleted for good BEFORE 2026-10-05 left behind, and
+// the email log rows written before emails carried the right company.
 //
 // Until Batch 9, the hard-delete cron deleted only the Organization row and
 // relied on cascades, but the tables in src/lib/admin/workspace-orphans.ts
@@ -16,10 +17,17 @@
 //   DIRECT_URL= DATABASE_URL=<the app's database> npx tsx scripts/purge-deleted-workspace-orphans.ts           # counts only
 //   DIRECT_URL= DATABASE_URL=<the app's database> npx tsx scripts/purge-deleted-workspace-orphans.ts --write   # deletes
 //
-// It touches ONLY rows whose organizationId names no Organization row (a row
-// with no organizationId, such as a global template, is never touched), in
-// batches of 5000, and prints counts only. WorkspaceDeletion is never
-// touched. Files go only where ownership is provable (src/lib/company-files.ts):
+// The table loop touches ONLY rows whose organizationId names no Organization
+// row (a row with no organizationId, such as a global template, is never
+// touched there), in batches of 5000, and prints counts only. The steps after
+// it also act on rows with no company: StaffAction rows still naming a deleted
+// company or account (scrubbed), password reset rows whose address no account
+// has, and FINISHED email log rows written before emails carried the right
+// company (manager digests and reminder emails with none; monthly evaluation
+// reminders without the per-company marker), whatever company received them.
+// WorkspaceDeletion is never touched. Trashed files of companies that no
+// longer exist are freed by Trash's own rule (src/lib/trash.ts: only a file
+// stamped for its uploader that nothing else names). Files go only where ownership is provable (src/lib/company-files.ts):
 // with S3 configured, orgs/<id>/scribe/ and orgs/<id>/files/ of a company
 // that no longer exists; on disk, file-<id>-* and logo-<id>-* of a company
 // that no longer exists and avatar-<id>-* of an account that no longer
@@ -76,7 +84,7 @@ async function main() {
           [...BLOB_TRASH_TYPES],
         );
         if (rows.length === 0) break;
-        for (const r of rows) await freeTrashStorage(r.entityType, r.snapshot, r.organizationId);
+        for (const r of rows) await freeTrashStorage(r.entityType, r.snapshot, r.organizationId, r.id);
         await prisma.trashItem.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
       }
     }
@@ -181,19 +189,20 @@ async function main() {
   // their reports'. Which company a given row named cannot be read back, so
   // every FINISHED one goes, whoever received it: each is the log of an email
   // delivered long ago. Queued mail and every other kind of row are never
-  // touched. (Evaluation reminders sent since the release carry the right
-  // company; the few sent between the deploy and this run go too, harmlessly.)
+  // touched, and neither is an evaluation reminder sent since the release
+  // (it carries the per-company marker byReportCompany), so a second run
+  // deletes nothing new.
   const [{ n: oldMail }] = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(*)::bigint AS n FROM "EmailLog" e
      WHERE e."status" IN ('SENT', 'FAILED')
        AND ((e."organizationId" IS NULL AND e."template" IN ('overdue-manager', 'overdue-tasks-manager', 'reminder'))
-         OR e."template" = 'evaluation-reminder')`;
+         OR (e."template" = 'evaluation-reminder' AND e."variables"->>'byReportCompany' IS NULL))`;
   if (write) {
     await prisma.$executeRaw`
       DELETE FROM "EmailLog" e
        WHERE e."status" IN ('SENT', 'FAILED')
          AND ((e."organizationId" IS NULL AND e."template" IN ('overdue-manager', 'overdue-tasks-manager', 'reminder'))
-           OR e."template" = 'evaluation-reminder')`;
+           OR (e."template" = 'evaluation-reminder' AND e."variables"->>'byReportCompany' IS NULL))`;
   }
   console.log(`EmailLog: ${Number(oldMail)} finished digests and reminders that carried no company or the wrong one${write ? ", deleted" : ""}`);
 
