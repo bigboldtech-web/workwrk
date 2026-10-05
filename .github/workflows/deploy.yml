@@ -240,9 +240,15 @@ jobs:
             # The new release must answer. pm2 reload returns once the process
             # is launched, so a release that crashed on boot or answered 500
             # everywhere used to be reported "Deploy complete". Through the
-            # public address (NEXTAUTH_URL, the app host): /api/health must
-            # report the build, then /login and one of its scripts must load.
-            BASE=$(grep -E '^NEXTAUTH_URL=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true)
+            # app's public address (BASE, below): /api/health must report the
+            # build, then /login and one of its scripts must load.
+            # The APP host: NEXT_PUBLIC_APP_URL, else NEXTAUTH_URL. On this
+            # box NEXTAUTH_URL is the marketing host, where the host split
+            # sends /login on to the app host (308), so the first check that
+            # read it there failed a good release and the release before it.
+            envval () { grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true; }
+            BASE=$(envval NEXT_PUBLIC_APP_URL)
+            BASE="${BASE:-$(envval NEXTAUTH_URL)}"
             BASE="${BASE:-https://app.workwrk.com}"
             check_release () {
               # $1: the BUILD_ID that must be serving. $2 "previous": a build
@@ -261,11 +267,13 @@ jobs:
               done
               [ -n "$body" ] || { echo "health never reported build $want"; return 1; }
               local login chunk asset
-              login=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/login" || echo 000)
+              # A redirect to the page's own host is followed: the answer that
+              # counts is the page's.
+              login=$(curl -sL --max-redirs 3 -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/login" || echo 000)
               [ "$login" = "200" ] || { echo "/login answered $login"; return 1; }
               chunk=$(cd .next/static/chunks 2>/dev/null && ls -1 -- *.js 2>/dev/null | head -1 || true)
               if [ -n "$chunk" ]; then
-                asset=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/_next/static/chunks/$chunk" || echo 000)
+                asset=$(curl -sL --max-redirs 3 -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/_next/static/chunks/$chunk" || echo 000)
                 [ "$asset" = "200" ] || { echo "a script of the build answered $asset"; return 1; }
               fi
               return 0
