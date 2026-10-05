@@ -32,7 +32,7 @@ import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type 
 import { loadWorld } from "./access/node-world";
 import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
-import { freeTrashStorage, restoreFromTrash } from "./trash";
+import { freeTrashStorage, NO_LONGER_IN_TRASH, restoreFromTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
   TRASH_TYPE_BY_KEY,
@@ -1030,7 +1030,8 @@ export async function restoreTrashRow(
     // into it a moment ago is part of what is restored.
     await restoreFromTrash(snap, { targetBoardId });
     return { ok: true };
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message === NO_LONGER_IN_TRASH) return { ok: false, status: 409, message: NO_LONGER_IN_TRASH };
     // The usual cause is a parent that is itself gone; the page prints the
     // same sentence on the row so this is the stale-tab path, not the norm.
     return { ok: false, status: 409, message: "Couldn't restore. The list or folder it lived in may be gone." };

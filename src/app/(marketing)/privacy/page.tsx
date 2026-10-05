@@ -256,7 +256,7 @@ export default function PrivacyPage() {
                   (scripts/backup/backup.sh BACKUP_KEEP_DAYS). */}
               <p>
                 Account data is retained for the life of your subscription. After termination, when you delete the
-                workspace, or when we close it (a workspace we closed from 7 October 2026 on), we retain workspace data
+                workspace, or when we close it (on or after the date at the top of this policy), we retain workspace data
                 for 30 days (in case you reactivate), then permanently delete it, with the files it stored. Some files
                 uploaded before 6 October 2026 were not recorded against
                 the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}

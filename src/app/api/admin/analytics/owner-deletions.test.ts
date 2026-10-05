@@ -16,7 +16,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Org = { id: string; name: string; plan: string; status: string; settings: Record<string, unknown> | null };
-type Rec = { organizationId: string; plan: string | null; requestedAt: Date };
+type Rec = { id?: string; organizationId: string; plan: string | null; requestedAt: Date; hardDeletedAt?: Date | null };
 type Gone = { organizationId: string; signedUpAt: Date | null; finishedSetup: boolean | null; createdSomething: boolean | null };
 
 let records: Rec[];

@@ -65,7 +65,7 @@ const COOKIES = [
   },
   {
     name: "wwrk_consent",
-    purpose: "Remembers that you have seen the cookie notice, so it is not shown again.",
+    purpose: "Remembers that you have seen the cookie notice, so it is not shown again, and holds the random id our record of it is filed under.",
     duration: "180 days",
     type: "Essential",
   },
