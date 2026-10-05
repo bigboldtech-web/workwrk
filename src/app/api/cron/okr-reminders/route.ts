@@ -4,7 +4,7 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { shouldEmail } from "@/lib/notify-prefs";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Cron — surfaces "you haven't checked in" nudges for OKR owners.
@@ -31,7 +31,7 @@ import { cronResult } from "@/lib/cron-result";
  * e.g. 09:00 UTC. Guard with CRON_SECRET in production (same pattern
  * as the email-queue cron).
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -181,3 +181,6 @@ export async function POST(req: NextRequest) {
     emailsFailed,
   }, emailsFailed);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("okr-reminders", handle);

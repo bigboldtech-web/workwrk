@@ -49,6 +49,12 @@ export interface RunResult {
    * scheduler does not count it as a failed run.
    */
   refused?: boolean;
+  /**
+   * Whose AI key the run used: WorkwrK's ("shared") or the workspace's own
+   * ("byok"). A run that failed on its own key is the workspace's to fix, so
+   * the scheduler never counts it as the server's failure.
+   */
+  keySource?: "shared" | "byok";
 }
 
 interface ToolCallLog {
@@ -346,5 +352,6 @@ export async function runAgentAutonomously(args: {
     durationMs,
     errorText: errorText ?? undefined,
     ...(claim.ok ? {} : { refused: true }),
+    keySource: resolved.source,
   };
 }

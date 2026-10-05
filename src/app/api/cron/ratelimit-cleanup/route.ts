@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron endpoint — trims stale rate-limit buckets.
@@ -23,7 +24,7 @@ import { cronRefusal } from "@/lib/cron-auth";
  *
  * Guard with CRON_SECRET in production.
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -46,3 +47,6 @@ export async function POST(req: NextRequest) {
     deleted: { minute: minutes.count, day: days.count },
   });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("ratelimit-cleanup", handle);

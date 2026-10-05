@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { processEmailQueue } from "@/lib/email";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Cron endpoint — drains the EmailLog queue.
@@ -14,9 +14,17 @@ import { cronResult } from "@/lib/cron-result";
  *
  * Runs frequently (every minute) because SMTP dispatch is the bottleneck,
  * not this endpoint. `processEmailQueue` claims each row for one run only
- * (FOR UPDATE SKIP LOCKED and a status re-check in one UPDATE), so runs that
- * overlap, this cron's or the ones every sendEmail starts, never send an
- * email twice.
+ * (FOR UPDATE SKIP LOCKED and a status re-check in one UPDATE) under a lease
+ * it renews before each send, and records a result only while it still holds
+ * the row, so runs that overlap, this cron's or the ones every sendEmail
+ * starts, send an email twice only if one send outlasts the lease, which the
+ * transport's timeouts rule out.
+ *
+ * Its own failure cannot reach anyone by email: the alert would go through
+ * the queue that is failing, so cronResult sends none for this job, and
+ * /api/health does not check email. The cron log shows each failed run, and a
+ * dead-man check on its crontab row (scripts/CRON-SETUP.md) is what tells
+ * someone.
  *
  * Guarded by the shared cron door (src/lib/cron-auth.ts): fail-closed.
  *
@@ -24,7 +32,7 @@ import { cronResult } from "@/lib/cron-result";
  * longer wait each time, up to EMAIL_MAX_ATTEMPTS) and 503 when production has
  * no mail transport, so the queue is held (src/lib/cron-result.ts).
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
   const result = await processEmailQueue();
@@ -32,3 +40,6 @@ export async function POST(req: NextRequest) {
   if (result.held) return cronResult("email-queue", { ...body, error: "Mail is off on this server (EMAIL_ENABLED is not \"true\"), so queued emails are held." }, result.held, 503);
   return cronResult("email-queue", body, result.retrying + result.failed);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("email-queue", handle);

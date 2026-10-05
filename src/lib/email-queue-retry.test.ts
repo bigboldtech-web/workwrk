@@ -27,6 +27,11 @@ vi.mock("@/lib/prisma", () => ({
       env.sql.push(sql);
       return claimed.map((r) => ({ id: r.id }));
     },
+    // The lease renewal before each send: this run still holds every row.
+    $executeRawUnsafe: async (sql: string) => {
+      env.sql.push(sql);
+      return 1;
+    },
     emailLog: {
       count: async () => 0,
       findMany: async () => claimed,

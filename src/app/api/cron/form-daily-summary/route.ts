@@ -5,6 +5,7 @@ import { dailySummaryInstalled, dailySummaryMessage } from "@/lib/forms/daily-su
 import { addressHref } from "@/lib/nav/object-href";
 import { usersWhoCanReadResponses } from "@/lib/access/node-access";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron endpoint: the form builder's "Send a daily summary instead" (spec-tables-
@@ -23,7 +24,7 @@ import { cronRefusal } from "@/lib/cron-auth";
  */
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   // Fail-closed: it writes notifications into people's inboxes, so with no
   // CRON_SECRET configured it answers 503 and sends nothing, rather than
   // running for anybody who can reach the URL.
@@ -64,3 +65,6 @@ export async function POST(req: NextRequest) {
   }
   return Response.json({ forms: formsSent, notified, since: since.toISOString() });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("form-daily-summary", handle);

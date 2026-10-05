@@ -94,7 +94,7 @@ escalations pointed at work nobody could see.
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
-| Drain queued emails | `* * * * *` (every minute) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/email-queue` |
+| Drain queued emails | `* * * * *` (every minute) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/email-queue` (see the dead-man note below) |
 | Sync Google Calendar | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/calendar-sync` |
 | Retry failed webhooks | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/webhook-retry` |
 | Rate-limit cleanup | `0 3 * * *` (3 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/ratelimit-cleanup` |
@@ -111,6 +111,14 @@ escalations pointed at work nobody could see.
 | Hard-delete cancelled orgs (30-day grace) | `30 3 * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/org-hard-delete` |
 | Personal reminders fire (closed-app) | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/reminders` |
 | Purge table rows in Trash > 60 days | `45 3 * * *` (3:45 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/table-row-purge` |
+
+**Knowing when email stops (the email-queue row).** This job's own failure
+cannot email anyone (the alert would wait in the queue that is failing), and
+`/api/health` does not check email. To be told, add a dead-man check: create
+a check at healthchecks.io (or similar) that expects a ping every few
+minutes, and end the row with `&& curl -fsS -m 10 <the check's ping URL> > /dev/null`.
+The ping goes only when the job answered 2xx, so the check emails you when
+mail is held, failing, or the row stopped running.
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.

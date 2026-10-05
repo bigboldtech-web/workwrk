@@ -34,12 +34,13 @@ import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 import { cronRefusal } from "@/lib/cron-auth";
 import { trashPurgeOn } from "@/lib/purge-jobs";
+import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
 
 const ORG_PAGE = 200;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -99,3 +100,6 @@ export async function POST(req: NextRequest) {
     purged,
   });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("trash-purge", handle);

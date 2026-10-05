@@ -92,7 +92,9 @@ nightly backup copies them (scripts/BACKUPS.md).
 Root's crontab on the server, one `curl` per job, every one checking
 `CRON_SECRET`: [scripts/CRON-SETUP.md](scripts/CRON-SETUP.md). `vercel.json`
 is reference only. A job that fails answers 500, which the cron log records
-as a failure, and emails `OPS_ALERT_EMAIL` when it is set.
+as a failure, and emails `OPS_ALERT_EMAIL` when it is set (scripts/DEPLOY-NOTES.md,
+"Email and alerts", says what counts as failed). The email-queue job's own
+failure cannot email anyone, since that email would wait in the failing queue.
 
 ## Backups
 
@@ -105,7 +107,8 @@ lost disk or a bad write.
 
 - Uptime: an uptime monitor on `https://app.workwrk.com/api/health`, which
   answers 503 when the database is unreachable and names the build it serves.
-- Scheduled jobs: `OPS_ALERT_EMAIL` (above).
+- Scheduled jobs: `OPS_ALERT_EMAIL` (above), and for the email-queue job the
+  cron log or a dead-man check on its row.
 - Error tracking: not wired yet.
 
 ## Google sign in and Calendar

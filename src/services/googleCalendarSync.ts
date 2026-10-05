@@ -33,12 +33,26 @@ import {
 
 const INITIAL_WINDOW_DAYS = 30;
 
+/**
+ * A failure that is the person's to fix, not the server's: they revoked
+ * WorkwrK's access in Google, or their connection lost its token and must be
+ * made again.
+ */
+function failureIsPersonal(err: unknown): boolean {
+  const e = err as { googleError?: unknown; message?: unknown } | null;
+  if (e?.googleError === "invalid_grant") return true;
+  const msg = typeof e?.message === "string" ? e.message : "";
+  return msg.includes("user must reconnect") || msg.includes("No master subscription");
+}
+
 export async function syncAllSubscriptions(): Promise<{
   subscriptions: number;
   inserted: number;
   updated: number;
   deleted: number;
   failed: number;
+  /** Of the failed, those that are the person's to fix (a revoked or lost connection). */
+  personal: number;
 }> {
   const subs = await prisma.calendarSubscription.findMany({
     where: {
@@ -49,7 +63,7 @@ export async function syncAllSubscriptions(): Promise<{
     },
   });
 
-  let inserted = 0, updated = 0, deleted = 0, failed = 0;
+  let inserted = 0, updated = 0, deleted = 0, failed = 0, personal = 0;
 
   for (const sub of subs) {
     try {
@@ -59,11 +73,12 @@ export async function syncAllSubscriptions(): Promise<{
       deleted += stats.deleted;
     } catch (err: any) {
       failed++;
+      if (failureIsPersonal(err)) personal++;
       console.error(`[GCal sync] subscription ${sub.id} failed:`, err?.message ?? err);
     }
   }
 
-  return { subscriptions: subs.length, inserted, updated, deleted, failed };
+  return { subscriptions: subs.length, inserted, updated, deleted, failed, personal };
 }
 
 export async function syncOne(sub: CalendarSubscription): Promise<{
