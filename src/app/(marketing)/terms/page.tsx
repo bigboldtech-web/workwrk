@@ -128,10 +128,11 @@ export default function TermsPage() {
                   nothing behind them in this repo. */}
               <p>
                 Paid plans are billed through our payment processor, at the price and billing period shown when you
-                subscribe. Once your workspace pays by card, changing the seat count (never below the people and open
-                invitations in it), updating the card and cancelling happen in that processor&apos;s portal, from
-                Settings, Plan &amp; billing. Changing the plan, and everything for a workspace that does not pay by
-                card, is done by writing to us at the address that page gives.
+                subscribe. Moving from Starter to Growth is done at checkout from Settings, Plan &amp; billing, and a
+                redeemed code moves the workspace to the plan it grants. Once your workspace pays by card, updating the
+                card, seeing invoices and cancelling happen in that processor&apos;s portal, from the same page. Changing
+                the seat count or any other plan change, and everything for a workspace that does not pay by card, is
+                done by writing to us at the address that page gives.
               </p>
               <p>
                 If a payment fails, our payment processor tries it again. If the subscription still ends unpaid, the

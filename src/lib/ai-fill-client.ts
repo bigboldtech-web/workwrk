@@ -25,6 +25,8 @@ export function aiFillMessage(status: number, body: unknown): { code: string; me
       return { code, message: "AI isn't available in this workspace right now.", stop: true };
     case "ai_daily_limit":
       return { code, message: "This workspace has used today's AI fills. More are available after midnight UTC.", stop: true };
+    case "ai_free_daily_limit":
+      return { code, message: "Free AI fills have reached their limit for today across WorkwrK. More are available after midnight UTC.", stop: true };
     case "ai_not_configured":
       return { code, message: "AI isn't set up for this workspace yet.", stop: true };
     case "not_ready":

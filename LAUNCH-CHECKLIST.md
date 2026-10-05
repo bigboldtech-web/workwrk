@@ -102,13 +102,13 @@ Before taking a real card:
   charges a buyer something the page never showed them.
 - **The customer portal is set up**, in test mode and again in live mode
   (Stripe dashboard, Settings, Billing, Customer portal), with payment method
-  updates, invoice history, cancellation, and subscription updates with
-  quantity changes for the Growth price turned on (no other prices: plan
-  changes go through billing@workwrk.com, as Plan & billing says). Until it
-  is saved, Stripe refuses to open the portal, so Manage billing fails;
-  without quantity changes, the seat sentences that say "add seats in Plan &
-  billing (Manage billing)" are false. A quantity lowered below the people
-  and open invitations in the workspace is put back up by the product.
+  updates, invoice history and cancellation turned on, and subscription
+  updates (seat quantity and plan changes) turned OFF: seats and plans change
+  through billing@workwrk.com, as Plan & billing and the seat sentences say,
+  and you set the new quantity in Stripe. Until the portal is saved, Stripe
+  refuses to open it, so Manage billing fails. If the quantity is ever
+  lowered below the people and open invitations in a workspace, the product
+  emails OPS_ALERT_EMAIL; it never changes a charge itself.
 - **Stripe's failed-payment emails** (Settings, Billing, Subscriptions and
   emails) are on, so a customer whose card fails hears about it: the product
   itself sends none, it only moves a subscription that ends unpaid back to

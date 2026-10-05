@@ -46,7 +46,7 @@ export interface SeatUse {
   /** The cap; UNLIMITED_SEATS (99,999) or more is no limit. */
   limit: number;
   plan: string;
-  /** The cap is per-person Stripe seats, so more can be bought in the billing portal. */
+  /** The cap is per-person Stripe seats, so more can be bought (by emailing billing@). */
   canBuyMore: boolean;
 }
 
@@ -120,7 +120,7 @@ export function seatCapMessage(use: SeatUse, adding: number): string {
   const label = PLAN_LABEL[use.plan] ?? use.plan;
   const used = use.members + use.pending;
   const tail = use.canBuyMore
-    ? "An Owner or Admin can add seats in Settings, Plan & billing (Manage billing)."
+    ? "An Owner or Admin can add seats by emailing billing@workwrk.com."
     : "An Owner or Admin can change the plan in Settings, Plan & billing.";
   if (adding > 1) return `This workspace has ${used} of its ${use.limit} seats in use (people and open invitations), so ${adding} more do not fit on the ${label} plan. ${tail}`;
   return `This workspace has used all ${use.limit} seats (people and open invitations) on the ${label} plan. ${tail}`;

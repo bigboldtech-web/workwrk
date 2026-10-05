@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = { personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
+const state = { freeDayOk: true, freeDayClaims: [] as string[], personal: 0, plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
 
 vi.mock("@/lib/ai-usage", () => ({
   claimAiUse: async (org: string, kind: string, cap: number) => {
@@ -30,13 +30,22 @@ vi.mock("@/lib/prisma", () => {
     },
     updateMany: async () => ({ count: 1 }),
   };
+  // The org row lock, or (a template with "AiFreeDay") the free day claim.
+  const queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    if (strings.join("?").includes('"AiFreeDay"')) {
+      state.freeDayClaims.push(String(values[0]));
+      return state.freeDayOk ? [{ count: 1 }] : [];
+    }
+    return state.orgFound ? [{ plan: state.plan }] : [];
+  };
   const tx = {
-    $queryRaw: async () => (state.orgFound ? [{ plan: state.plan }] : []),
+    $queryRaw: queryRaw,
     aIQuery,
   };
   return {
     prisma: {
       $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
+      $queryRaw: queryRaw,
       aIQuery,
       organization: { findUnique: async () => (state.orgFound ? { plan: state.plan } : null) },
     },
@@ -54,6 +63,8 @@ beforeEach(() => {
   state.autoAnswer = "ok";
   state.autoClaims = [];
   state.personal = 0;
+  state.freeDayOk = true;
+  state.freeDayClaims = [];
 });
 
 describe("claimAiQuestion", () => {
@@ -61,7 +72,8 @@ describe("claimAiQuestion", () => {
     state.used = 49;
     const r = await claimAiQuestion("org", "u1", "Summarize a doc");
     expect(r.ok).toBe(true);
-    expect(state.created).toEqual([{ query: "Summarize a doc", userId: "u1", organizationId: "org" }]);
+    expect(state.created).toEqual([{ query: "Summarize a doc", userId: "u1", organizationId: "org", freeTier: true }]);
+    expect(state.freeDayClaims).toEqual(["question"]);
   });
 
   it("refuses at the total, writes nothing, and says what to do", async () => {
@@ -97,6 +109,21 @@ describe("claimAiQuestion", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toMatch(/one person gets across free workspaces/);
     expect(state.created).toEqual([]);
+  });
+
+  it("refuses free AI past the platform's ceiling for the day, and writes nothing", async () => {
+    state.freeDayOk = false;
+    const r = await claimAiQuestion("org", "u-late", "Ask AI message");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/reached its limit for today across WorkwrK/);
+    expect(state.created).toEqual([]);
+  });
+
+  it("never takes the free ceiling in a paid workspace", async () => {
+    state.plan = "GROWTH";
+    state.freeDayOk = false;
+    expect((await claimAiQuestion("org", "u-paid2", "x")).ok).toBe(true);
+    expect(state.freeDayClaims).toEqual([]);
   });
 
   it("does not count the person's free questions in a paid workspace", async () => {

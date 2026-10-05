@@ -33,10 +33,19 @@
 //
 // FREE QUESTIONS ARE ALSO PER PERSON. In a Starter workspace a question also
 // counts against the person: everyone gets PLAN_LIMITS.STARTER.ai questions in
-// total across every free workspace they are in. The workspace's own count
-// starts at 0 in every new workspace, and anyone can make one from the
-// workspace menu, so without this a script could make workspace after
-// workspace and ask 50 more questions in each.
+// total across every free workspace they are in (AIQuery.freeTier). The
+// workspace's own count starts at 0 in every new workspace, and anyone can
+// make one from the workspace menu, so without this a script could make
+// workspace after workspace and ask 50 more questions in each.
+//
+// AND FREE AI HAS A DAILY CEILING ACROSS THE WHOLE PLATFORM. Anyone can also
+// sign up again with a new address, which brings a new person AND a new free
+// workspace, so caps per workspace and per person bound nothing in total.
+// Every free question, automatic call and Fill with AI also takes one of the
+// platform's free uses of the day (AiFreeDay, FREE_AI_PER_DAY, set by env):
+// past it, free AI waits for the next UTC day, and what it can cost WorkwrK in
+// a day is bounded however many accounts are made. Paid workspaces never
+// touch it.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
@@ -56,6 +65,43 @@ export function aiIsCapped(limit: number): boolean {
 export type AiClaim =
   | { ok: true; id: string }
   | { ok: false; message: string; limit: number; used: number };
+
+export type FreeKind = "question" | "auto" | "fill";
+
+/** Free AI uses the whole platform may make in a UTC day, by kind (env, else these). */
+export function freeAiPerDay(kind: FreeKind, env: Record<string, string | undefined> = process.env): number {
+  const raw = Number(env[kind === "question" ? "FREE_AI_QUESTIONS_PER_DAY" : kind === "auto" ? "FREE_AI_AUTO_PER_DAY" : "FREE_AI_FILLS_PER_DAY"]);
+  const fallback = kind === "question" ? 2_000 : 5_000;
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : fallback;
+}
+
+/** The sentence free AI past the platform's ceiling for the day is shown. */
+export const FREE_AI_DAY_MESSAGE = "Free AI has reached its limit for today across WorkwrK, and comes back tomorrow (UTC). A workspace on the Growth plan has its own questions: an Owner or Admin can change the plan in Settings, Plan & billing.";
+
+type Db = Pick<typeof prisma, "$queryRaw">;
+
+/**
+ * Take one of the platform's free uses of the day, in ONE statement (the
+ * upsert increments only below the cap, so two at once cannot both take the
+ * last). False past the ceiling, and when the table is missing (the SQL file
+ * not applied): fails closed, like the daily limits in src/lib/ai-usage.ts.
+ */
+export async function claimFreeDay(kind: FreeKind, db: Db = prisma, cap: number = freeAiPerDay(kind)): Promise<boolean> {
+  if (cap <= 0) return false;
+  try {
+    const rows = await db.$queryRaw<Array<{ count: number }>>`
+      INSERT INTO "AiFreeDay" ("day", "kind", "count", "updatedAt")
+      VALUES ((now() AT TIME ZONE 'UTC')::date, ${kind}, 1, now() AT TIME ZONE 'UTC')
+      ON CONFLICT ("day", "kind")
+      DO UPDATE SET "count" = "AiFreeDay"."count" + 1, "updatedAt" = now() AT TIME ZONE 'UTC'
+      WHERE "AiFreeDay"."count" < ${Math.floor(cap)}
+      RETURNING "count"`;
+    return rows.length > 0;
+  } catch (err) {
+    console.error(`[ai-allowance] free day claim failed: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+    return false;
+  }
+}
 
 /** The sentence a workspace at its cap is shown. */
 export function aiCapMessage(plan: string, limit: number): string {
@@ -82,13 +128,16 @@ export async function claimAiQuestion(organizationId: string, userId: string, qu
       const used = await tx.aIQuery.count({ where: { organizationId } });
       if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
     }
-    if (plan === "STARTER") {
+    const freeTier = plan === "STARTER";
+    if (freeTier) {
       const free = PLAN_LIMITS.STARTER.ai;
-      const mine = await tx.aIQuery.count({ where: { userId, organization: { plan: "STARTER" } } });
+      const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
       if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
+      // In the same transaction: a refusal later rolls the day's use back.
+      if (!(await claimFreeDay("question", tx))) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
     }
     const row = await tx.aIQuery.create({
-      data: { query: query.slice(0, 4000), userId, organizationId },
+      data: { query: query.slice(0, 4000), userId, organizationId, freeTier },
       select: { id: true },
     });
     return { ok: true as const, id: row.id };
@@ -159,8 +208,6 @@ export async function claimAiAction(organizationId: string, userId: string, what
 /** Automatic AI calls one person's pages may make in a minute. */
 export const AI_AUTO_PER_MINUTE = 20;
 
-/** Automatic AI calls one person's pages may make in a day, across every workspace (WorkwrK's key). */
-export const AI_AUTO_PER_PERSON_DAY = 300;
 
 /**
  * Automatic AI calls a workspace may make in a UTC day, by plan: the total
@@ -173,11 +220,12 @@ export const AI_AUTO_PER_DAY: Record<string, number> = { STARTER: 100, GROWTH: 1
  * Whether an AI call nobody asked for (a search summary, inbox or field
  * suggestions, a goal's assessment) may run: the workspace still has
  * questions left, and the person's pages are under their per-minute limit.
- * On WorkwrK's own key (`keySource` "shared") also under the person's daily
- * total and the workspace's, which this call then takes one of each; a
- * workspace's own key (BYOK) is its own bill, so no daily total applies.
- * It never spends a question. False: show the answer worked out without AI.
- * Callers resolve the key first (getAnthropicForOrg) and pass its source.
+ * On WorkwrK's own key (`keySource` "shared") also under the workspace's
+ * daily total, and in a free workspace the platform's free ceiling, which
+ * this call then takes one of each; a workspace's own key (BYOK) is its own
+ * bill, so no daily total applies. It never spends a question. False: show
+ * the answer worked out without AI. Callers resolve the key first
+ * (getAnthropicForOrg) and pass its source.
  */
 export async function aiAutoAllowed(organizationId: string, userId: string, keySource: "shared" | "byok" = "shared"): Promise<boolean> {
   if (!rateLimit(`ai-auto:${userId}`, { max: AI_AUTO_PER_MINUTE, windowMs: 60_000 }).ok) return false;
@@ -187,7 +235,7 @@ export async function aiAutoAllowed(organizationId: string, userId: string, keyS
   const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
   if (aiIsCapped(limit) && (await aiQuestionsUsed(organizationId)) >= limit) return false;
   if (keySource === "byok") return true;
-  if (!rateLimit(`ai-auto-day:${userId}`, { max: AI_AUTO_PER_PERSON_DAY, windowMs: 86_400_000 }).ok) return false;
+  if (plan === "STARTER" && !(await claimFreeDay("auto"))) return false;
   // Fails closed: "limit" past the day's total, "not_ready" without the table.
   return (await claimAiUse(organizationId, "auto", AI_AUTO_PER_DAY[plan] ?? AI_AUTO_PER_DAY.STARTER)) === "ok";
 }

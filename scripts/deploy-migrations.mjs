@@ -220,6 +220,9 @@ const SQL_MANIFEST = [
   // and the deleted workspace's Stripe ids on "WorkspaceDeletion". Before the
   // reload: Prisma selects every column on a read with no select.
   "2026-10-05-billing-events.sql",
+  // Batch 13 round 3: "AiFreeDay" (the daily ceiling on free AI) and
+  // "AIQuery"."freeTier". Before the reload: every free AI claim reads both.
+  "2026-10-06-ai-free-day.sql",
 ];
 
 /**
