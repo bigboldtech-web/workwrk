@@ -9,23 +9,41 @@ to a bucket that is not the app's own. Without this,
 the database and the local uploads exist only on the server's disk, and one
 disk failure loses every customer's data.
 
-Tested end to end on 2026-10-05 against a local database: dump, encrypt,
-store, fetch, decrypt and `pg_restore` into a scratch database gave the same
+Tested end to end on 2026-10-05 against a local database: the database URL
+read from an app `.env` as text (a line in it that would run a command did
+not run), dump with the password kept off the command line, encrypt, store,
+then decrypt straight into `pg_restore` in a scratch database gave the same
 211 tables and the same row counts; a wrong passphrase is refused.
 
 ## What you need first
 
 1. **A bucket somewhere else.** Another provider or at least another region
    than the server and the app's own bucket, with its own access key. Give the
-   key write and list on that bucket only. The strongest setup: a key that
-   cannot delete, a lifecycle rule on the bucket that expires objects after 30
-   days, and `BACKUP_PRUNE=off` (below), so not even root on the server can
-   remove old backups.
+   key read, write and list on that bucket (each upload is read back to check
+   its size, and a restore downloads), plus delete unless `BACKUP_PRUNE=off`.
+   A key without delete makes pruning fail loudly every night, by design.
 2. **A passphrase**, made once: `openssl rand -hex 32`. Store it in your
    password manager as well as on the server. Every backup is encrypted with
    it; without it, no backup can be read by anyone, you included.
-3. **Optional, a dead-man check**: a free check at healthchecks.io (or
-   similar) that expects a ping every day and emails you when one is missed.
+3. **A copy of the app's secrets, off the server.** The backup holds the
+   database and the uploads, not the app's `.env`. Keep at least
+   `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET` in the password manager next
+   to the passphrase, and update the copy at every rotation: a database
+   restored without its `SECRETS_ENCRYPTION_KEY` cannot read any workspace's
+   stored keys and tokens.
+4. **A dead-man check**: a free check at healthchecks.io (or similar) that
+   expects a ping every day and emails you when one is missed
+   (`BACKUP_PING_URL`). Required with the setup below, where nothing else
+   would notice that backups stopped.
+
+The strongest setup also protects the backups from someone who takes over
+the server, who can read the bucket key in `/etc/workwrk-backup.env`: turn
+on **versioning** for the backup bucket with a rule that expires noncurrent
+versions (keep the total under 90 days, the privacy policy's limit), or
+**Object Lock**, and give the key no delete right, a lifecycle rule that
+expires backups after 30 days, and `BACKUP_PRUNE=off`. Versioning or Object
+Lock is what stops an overwrite: without one of them, a key that can write
+can replace every old backup with an empty file.
 
 ## Install (once, as root on the server)
 
@@ -39,9 +57,14 @@ install -o root -g root -m 600 /www/wwwroot/workwrk.com/scripts/backup/store.mjs
 cd /usr/local/lib/workwrk-backup && /www/server/nodejs/v20.20.0/bin/npm install --no-save @aws-sdk/client-s3
 ```
 
-Then `/etc/workwrk-backup.env`, mode 600, owned by root:
+Then `/etc/workwrk-backup.env`, mode 600, owned by root. It names the
+database itself: the script never runs the app's `.env` (it belongs to `www`;
+running it as root would hand root to anything that can write as `www`).
+Without `BACKUP_DATABASE_URL` it reads the `DATABASE_URL` line from the app's
+`.env` as text, the database the app serves.
 
 ```
+BACKUP_DATABASE_URL=<the app's DATABASE_URL>
 BACKUP_PASSPHRASE=<the passphrase>
 BACKUP_S3_BUCKET=<bucket>
 BACKUP_S3_REGION=<region>
@@ -75,42 +98,60 @@ the deploy never changes the root-owned copy.
 ## Do one test restore now, and after any change
 
 A backup nobody has restored is not a backup. On the server (or any machine
-with Postgres 16 tools and the passphrase), as root:
+with Postgres 16 tools and the passphrase), as root. The decrypted dump is
+every customer's data, so it is never written to disk: it streams straight
+into `pg_restore`, and the encrypted copy sits in a folder only root can
+read. `<app role>` is the database user in the app's `DATABASE_URL`.
 
 ```
+umask 077
 set -a && . /etc/workwrk-backup.env && set +a
+D=$(mktemp -d)
 cd /usr/local/lib/workwrk-backup
 node store.mjs list db/
-node store.mjs get db/<time>.dump.enc /var/tmp/restore.dump.enc
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
-  -in /var/tmp/restore.dump.enc -out /var/tmp/restore.dump
-createdb workwrk_restore_test
-pg_restore --no-owner --no-privileges -d workwrk_restore_test /var/tmp/restore.dump
-psql -d workwrk_restore_test -c 'SELECT count(*) FROM "User"'
-psql -d workwrk_restore_test -c 'SELECT count(*) FROM "Organization"'
-dropdb workwrk_restore_test
-rm -f /var/tmp/restore.dump /var/tmp/restore.dump.enc
+node store.mjs get db/<time>.dump.enc "$D/restore.dump.enc"
+sudo -u postgres createdb -O <app role> workwrk_restore_test
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/restore.dump.enc" \
+  | sudo -u postgres pg_restore --no-owner --no-privileges --role=<app role> -d workwrk_restore_test
+psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "User"'
+psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "Organization"'
+sudo -u postgres dropdb workwrk_restore_test
+rm -rf "$D"
 ```
 
 The counts should match production's (run the same two queries against it).
-`createdb`, `psql` and `pg_restore` may need `-U <user>` and `-h 127.0.0.1`,
-or `sudo -u postgres`, depending on how Postgres was installed.
+They are read as the app's own database user on purpose: a restore owned by
+`postgres` with no grants would answer `postgres` and refuse the app, while
+`/api/health` (which runs only `SELECT 1`) still answered 200. If the app's
+user may create databases, run every step as that user instead of
+`sudo -u postgres`. `psql` refuses Prisma's `?schema=` parameter: leave it off
+the URL.
 
 ## Restore after a disaster
 
 1. Stop the app: `pm2 stop workwrk`.
-2. Fetch and decrypt the newest dump (above).
-3. Restore into a NEW database (`createdb workwrk_restored`, then
-   `pg_restore --no-owner --no-privileges -d workwrk_restored ...`). Never
-   restore over the damaged one: it may still hold what you need.
-4. Point `DATABASE_URL` in the app's `.env` at the restored database (or
-   rename the databases), then `pm2 start workwrk` and check
-   `https://app.workwrk.com/api/health`.
-5. Uploads: fetch and decrypt the newest `uploads/<time>.tar.gz.enc`, then
-   `openssl enc -d ... | tar -xzf - -C /www/wwwroot/workwrk.com` (it holds
-   `storage/uploads/` and, for an older backup, `public/uploads/`) and
-   `chown -R www:www /www/wwwroot/workwrk.com/storage`. Files restored into
+2. If the server's disk is gone, recreate the app's `.env` from your password
+   manager's copy (above) before anything else, with the same
+   `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET`.
+3. Fetch the newest dump and restore it into a NEW database owned by the
+   app's user, exactly as the test restore does (`createdb -O <app role>
+   workwrk_restored`, then the `openssl ... | pg_restore ... --role=<app role>
+   -d workwrk_restored` line). Never restore over the damaged one: it may
+   still hold what you need.
+4. Point `DATABASE_URL` in the app's `.env` at the restored database, and
+   `DIRECT_URL` too if the `.env` sets it (migrations and the Prisma CLI use
+   it first), and `BACKUP_DATABASE_URL` in `/etc/workwrk-backup.env`, so
+   tonight's backup dumps the database the app now serves. Renaming the
+   databases instead covers all three. Then `pm2 start workwrk`.
+5. Check with the app's own user, not only `/api/health`: the two `psql`
+   counts above against the restored database, then sign in and open a page
+   with data on it.
+6. Uploads: fetch the newest `uploads/<time>.tar.gz.enc` into `$D`, then
+   `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/<file>" | tar -xzf - -C /www/wwwroot/workwrk.com`
+   (it holds `storage/uploads/` and, for an older backup, `public/uploads/`)
+   and `chown -R www:www /www/wwwroot/workwrk.com/storage`. Files restored into
    `public/uploads` move to `storage/uploads` by themselves at the next start.
+7. `rm -rf "$D"`.
 
 Everything written after the backup's time is lost; tell the customers whose
 workspaces changed in that window.

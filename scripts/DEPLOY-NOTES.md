@@ -8,51 +8,81 @@ variables and hosts is in `LAUNCH-CHECKLIST.md`.
 
 `.github/workflows/deploy.yml`, after CI passed on a push to `main`:
 
-1. It asks GitHub whether CI passed for that exact commit, and deploys that
-   commit, never "whatever main is now". A manual run (Actions > Deploy > Run
-   workflow) takes an optional commit sha and is held to the same check, so
-   going back to an earlier commit is a manual run with its sha.
-2. On the box: `git reset --hard <sha>`; `npm ci` only when
-   `package-lock.json` changed (the hash it last installed is in
-   `node_modules/.deploy-lock-hash`), otherwise `prisma generate`.
+1. It asks GitHub whether CI passed on a push to `main` for that exact commit
+   (a pull request's run tested a merge ref, not the commit, and does not
+   count), and deploys that commit, never "whatever main is now". A manual run
+   (Actions > Deploy > Run workflow) takes an optional commit sha and is held
+   to the same check, so going back to an earlier commit is a manual run with
+   its sha. An automatic run never goes back: a re-run of an older CI run
+   stops with a notice when its commit is older than the live one.
+2. On the box, before anything changes: a commit from before Batch 12 is
+   refused (it has no `deploy:migrate` step and builds into the live
+   `.next`); going back that far is the swap by hand below. Then
+   `git reset --hard <sha>`; `npm ci` only when `package-lock.json` changed
+   (the hash it last installed is in `node_modules/.deploy-lock-hash`), with
+   the live release's packages moved to `node_modules-prev` first, not
+   deleted; otherwise `prisma generate`.
 3. `npm run deploy:migrate`: the SQL manifest and pending Prisma migrations,
    each SQL file under a 5 second lock timeout, tried up to four times.
 4. `next build` into `.next-staging` (`NEXT_DIST_DIR`), while the server keeps
-   serving `.next`. A failed or killed build changes nothing that is live.
+   serving `.next`, and the commit is written beside the build
+   (`.next/DEPLOY_SHA` once live). A failed or killed build changes nothing
+   that is live.
 5. `chown`, then `.next` becomes `.next-prev`, `.next-staging` becomes
    `.next`, and `pm2 reload`.
 6. The check: `NEXTAUTH_URL/api/health` must name the new build within two
-   minutes, then `/login` and one of the build's scripts must answer 200. If
-   not, the deploy puts `.next-prev` back, resets the source to the previous
-   commit, reloads, checks the old build, and fails with the reason. The
-   build that failed stays in `.next-failed` to look at.
+   minutes, then `/login` and one of the build's scripts must answer 200.
+
+Whatever stops a deploy, the script puts back what it had changed, through
+one exit handler: a failed step, a failed check, or an SSH session that ended
+(a cancelled job, the 40 minute timeout, a dropped connection: the script
+ignores the hang-up and the closed pipe, so it still reaches the handler).
+Before the swap that means the source back at the live commit (read from
+`.next/DEPLOY_SHA`) and the live packages back from `node_modules-prev`; after
+the swap, the new build moves to `.next-failed`, the previous one comes back
+with its packages and commit, PM2 reloads, and the previous build is checked
+(a build from before Batch 12, whose health names no build, passes on
+`"status":"ok"`). The deploy then fails with the reason.
 
 Every failure prints its reason as an annotation (`::error::`), readable
 through the public API without the Actions log. `deploy-migrate.log` and
 `deploy-build.log` in the app directory keep the last run's output.
 
 To roll back by hand on the box, while `.next-prev` is there:
-`mv .next .next-failed && mv .next-prev .next && pm2 reload workwrk --update-env`.
-A manual Deploy run with the earlier commit's sha is the better way, since it
-also brings the source back.
+`mv .next .next-failed && mv .next-prev .next && pm2 reload workwrk --update-env`
+(and `git reset --hard "$(cat .next/DEPLOY_SHA)"` when that file is there, so
+the source matches). A manual Deploy run with the earlier commit's sha is the
+better way for any commit from Batch 12 on, since it also brings the source
+and packages back.
 
 `NEXT_DIST_DIR` is for the deploy's build only. Never put it in `.env`: the
 server would then serve a folder the deploy does not swap.
 
 ## Email and alerts
 
-Email goes out only when `EMAIL_ENABLED=true` and `SMTP_HOST`, `SMTP_PORT`,
-`SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` are set: those are the only names the
-code reads (`src/lib/email.ts`). Without `EMAIL_ENABLED` in production the
-queue is held, nothing is marked sent, and `/api/cron/email-queue` answers 503
-every minute until mail is set up; then everything waiting goes out. A send
-that fails is tried again after 1, 5, 30, 120 and 360 minutes, then closed as
-FAILED. A row a crash or a reload interrupted mid-send is taken again 15
-minutes later, or closed as FAILED once it is a day old, rather than sent late.
+Email goes out when `EMAIL_ENABLED=true` and `SMTP_HOST` is set, plus
+`SMTP_USER` and `SMTP_PASS` for a mail server that needs a login.
+`SMTP_PORT` defaults to 587 and `SMTP_FROM` to `WorkwrK <noreply@workwrk.com>`.
+Those are the only names the code reads (`src/lib/email.ts`). Without
+`EMAIL_ENABLED` in production the queue is held and nothing is marked sent;
+`/api/cron/email-queue` answers 503 while any email is waiting, and once mail
+is set up everything waiting goes out. A send that fails is tried again after
+1, 5, 30, 120 and 360 minutes, then closed as FAILED. A row a crash or a
+reload interrupted mid-send is taken again once its 15 minute claim runs out,
+unless that was its sixth and last try: then it is not tried again, and is
+closed as FAILED a day after it was queued.
 
-Every scheduled job that fails answers 500 (the cron log records it as a
-failure, `curl -fsS`) and, when `OPS_ALERT_EMAIL` is set, queues one email to
-that address at most every six hours per job (`src/lib/cron-result.ts`).
+Every scheduled job answers 500 when it fails (the cron log records curl's
+failure, `curl -fsS`): a job that throws, and one whose run reports failures.
+Calendar sync and scheduled agents count as failed only when every
+subscription, or every run, of the round failed (a cause on the server's
+side, such as a revoked Google client or a bad AI key; one person's revoked
+token is theirs). A failing run logs `[cron-failure] <job>` in pm2's log and,
+when `OPS_ALERT_EMAIL` is set, queues one email to that address at most every
+six hours per job (`src/lib/cron-result.ts`). The email-queue job's own
+failure cannot reach anyone that way, since its alert would wait in the queue
+that is failing: the cron log and the uptime monitor (a dead-man check on that
+row, for one) are what show it.
 
 ## The Staff console needs `ADMIN_HOST` in production
 

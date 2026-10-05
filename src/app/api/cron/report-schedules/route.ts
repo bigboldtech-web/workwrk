@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { runDueReports } from "@/lib/reports/report-server";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Cron endpoint: send the scheduled email reports that are due (gap 16).
@@ -19,10 +19,13 @@ import { cronResult } from "@/lib/cron-result";
  * scripts/CRON-SETUP.md ("Scheduled email reports"), NOT INSTALLED until the
  * founder adds it; installing it also sets REPORT_SCHEDULE_CRON=on.
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
   const result = await runDueReports(new Date(), { limit: 25, budgetMs: 240_000 });
   return cronResult("report-schedules", result, "failed" in result ? result.failed : 0);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("report-schedules", handle);

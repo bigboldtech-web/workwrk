@@ -4,7 +4,7 @@ import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Cron — fires the notification + email fan-out for announcements
@@ -24,7 +24,7 @@ import { cronResult } from "@/lib/cron-result";
  * Guard with CRON_SECRET in production (same pattern as the other
  * /api/cron/* routes).
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -136,3 +136,6 @@ export async function POST(req: NextRequest) {
     notified: totalNotified,
   }, failed);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("announcements-publish", handle);

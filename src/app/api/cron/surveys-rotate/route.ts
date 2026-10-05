@@ -5,7 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * Survey rotation + reminder cron.
@@ -229,7 +229,7 @@ async function sendReminders(survey: {
   return pending.length;
 }
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -290,3 +290,5 @@ export async function POST(req: NextRequest) {
   }, failed);
 }
 
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("surveys-rotate", handle);

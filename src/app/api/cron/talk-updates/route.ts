@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { cronRefusal } from "@/lib/cron-auth";
 import { isMissingUpdatesTable, processDueTalkUpdates } from "@/lib/talk-updates-server";
+import { cronJob } from "@/lib/cron-result";
 
 /**
  * Cron endpoint: post the scheduled AI updates in Talk that are due (Batch 8).
@@ -19,7 +20,7 @@ import { isMissingUpdatesTable, processDueTalkUpdates } from "@/lib/talk-updates
  * scripts/CRON-SETUP.md ("Scheduled AI updates in Talk"), NOT INSTALLED
  * until the founder adds it; installing it also sets TALK_UPDATES_CRON=on.
  */
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
   try {
@@ -30,3 +31,6 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("talk-updates", handle);

@@ -37,13 +37,17 @@ address").
 ## Environment variables
 
 They live in the app's `.env` on the server (`/www/wwwroot/workwrk.com/.env`).
-After a change: `pm2 reload workwrk --update-env`.
+After a change: `pm2 reload workwrk --update-env`. A `NEXT_PUBLIC_` variable
+(`NEXT_PUBLIC_APP_URL`) is built into the release instead: a change to it
+takes effect at the next deploy (Actions > Deploy > Run workflow), not at a
+reload.
 
 ### Required
 
 | Variable | Live value | What it does |
 | --- | --- | --- |
-| `DATABASE_URL` | the production Postgres URL | Everything. |
+| `DATABASE_URL` | the production Postgres URL | Everything: the app reads only this one. |
+| `DIRECT_URL` | unset, or the same database | Optional. When set, migrations and the Prisma CLI use it instead of `DATABASE_URL`, so it must name the same database (after a restore, point both at the restored one). |
 | `NEXTAUTH_URL` | `https://app.workwrk.com` | Sign-in, links in emails, and the address the deploy checks a new release at. |
 | `NEXTAUTH_SECRET` | a secret | Signs sessions and upload names. Changing it signs everyone out. |
 | `NEXT_PUBLIC_APP_URL` | `https://app.workwrk.com` | Absolute links from the Staff console and the marketing site into the product. |
@@ -56,8 +60,9 @@ After a change: `pm2 reload workwrk --update-env`.
 | `COOKIE_DOMAIN` | `.workwrk.com` | One sign-in for the app and Staff console hosts. |
 | `CRON_SECRET` | a secret | Every `/api/cron` job checks it; unset, they answer 503 and run nothing. The crontab reads it from `/etc/profile.d/workwrk.sh` (CRON-SETUP). |
 | `SECRETS_ENCRYPTION_KEY` | a 32-byte secret | Encrypts stored integration tokens and secrets. Rotate with `scripts/rotate-secrets-key.ts`, never by editing it alone. |
-| `EMAIL_ENABLED` | `true` | Without it no email leaves the server: in production the queue is held (nothing is marked sent) and the email-queue job answers 503. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | your mail provider's | How email is sent. Port `465` connects over TLS; on any other port the connection upgrades to TLS when the server offers it. |
+| `EMAIL_ENABLED` | `true` | Without it no email leaves the server: in production the queue is held (nothing is marked sent) and the email-queue job answers 503 while any email is waiting. |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` | your mail provider's | How email is sent: the host always, the user and password for a mail server that needs a login. |
+| `SMTP_PORT` | `587` (the default) | Port `465` connects over TLS; on any other port the connection upgrades to TLS when the server offers it. |
 | `SMTP_FROM` | e.g. `WorkwrK <noreply@workwrk.com>` | The From address (that is the default). Publish SPF, DKIM and DMARC for its domain before launch, or mail lands in spam. |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` | your object store's | Files, attachments and Scribe screenshots (DEPLOYMENT.md). Without them uploads fall back to the server's own disk. |
 
@@ -65,7 +70,7 @@ After a change: `pm2 reload workwrk --update-env`.
 
 | Variable | What it does |
 | --- | --- |
-| `OPS_ALERT_EMAIL` | Where a failing scheduled job sends an alert (at most one per job in six hours). Unset, failures only reach the logs. |
+| `OPS_ALERT_EMAIL` | Where a failing scheduled job sends an alert (at most one per job in six hours). The email-queue job is the exception: its alert would wait in the queue that is failing, so the uptime monitor and the cron log watch it. Unset, failures only reach the logs. |
 | `AUDIT_SIGNING_KEY` | Signs audit log exports. Unset, they are signed with `CRON_SECRET`. |
 | `ANTHROPIC_API_KEY` | The AI features. Unset, they are unavailable. |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Calls and huddles in Talk. |

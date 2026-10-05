@@ -21,8 +21,9 @@ import { prisma } from "@/lib/prisma";
 import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -79,13 +80,21 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({
+  const body = {
     firedCount: fired.length,
     runs: fired,
     skippedAiOff: skipped,
-  });
+  };
+  // Every run of the tick failed: the model is unreachable or its key is
+  // bad, which is the server's to fix (one agent's own failure among runs
+  // that worked is the workspace's, and stays in its run history).
+  const failed = fired.filter((r) => r.status === "FAILED").length;
+  return cronResult("run-due-agents", body, fired.length > 0 && failed === fired.length ? failed : 0);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("run-due-agents", handle);
 
 // Vercel Cron sends GET, not POST — accept both so the same endpoint
 // works under any scheduler.
-export { POST as GET };
+export const GET = POST;
