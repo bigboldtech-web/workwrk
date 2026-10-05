@@ -115,8 +115,10 @@ at `billing@workwrk.com`, so make that a mailbox someone reads.
   ([scripts/BACKUPS.md](scripts/BACKUPS.md)). Until then one disk failure
   loses every customer's data.
 - Monitoring: point an uptime monitor (UptimeRobot, BetterStack) at
-  `https://app.workwrk.com/api/health` every five minutes, and set
-  `OPS_ALERT_EMAIL`.
+  `https://app.workwrk.com/api/health` every five minutes, set
+  `OPS_ALERT_EMAIL`, and add the dead-man check on the email-queue crontab
+  row ([scripts/CRON-SETUP.md](scripts/CRON-SETUP.md)): it is the only thing
+  that tells you email has stopped.
 - Email: send yourself an invitation and a password reset, and check both
   arrive outside spam.
 - Billing: with Stripe set (above), run one checkout and one cancellation in
