@@ -49,8 +49,9 @@
 // (FREE_CEILING_FROM): that set is fixed and each is held to its own caps,
 // so the total stays bounded, and a ceiling drained by new sign-ups never
 // takes away AI a workspace already had. A use is given back when its call
-// gives nothing, and the first time a kind reaches the ceiling in a UTC day,
-// OPS_ALERT_EMAIL is told.
+// gives nothing, to the day it was taken from and only when one was taken
+// (a question records that day, AIQuery.freeDay), and the first time a kind
+// reaches the ceiling in a UTC day, OPS_ALERT_EMAIL is told.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
@@ -97,34 +98,45 @@ type Db = Pick<typeof prisma, "$queryRaw">;
 /**
  * Take one of the platform's free uses of the day, in ONE statement (the
  * upsert increments only below the cap, so two at once cannot both take the
- * last). False past the ceiling, and when the table is missing (the SQL file
- * not applied): fails closed, like the daily limits in src/lib/ai-usage.ts.
+ * last). Returns the UTC day the use was taken from (YYYY-MM-DD), which a
+ * give-back names; null past the ceiling, and when the table is missing (the
+ * SQL file not applied): fails closed, like the daily limits in
+ * src/lib/ai-usage.ts.
  */
-export async function claimFreeDay(kind: FreeKind, db: Db = prisma, cap: number = freeAiPerDay(kind)): Promise<boolean> {
-  if (cap <= 0) return false;
+export async function takeFreeDay(kind: FreeKind, db: Db = prisma, cap: number = freeAiPerDay(kind)): Promise<string | null> {
+  if (cap <= 0) return null;
   try {
-    const rows = await db.$queryRaw<Array<{ count: number }>>`
+    const rows = await db.$queryRaw<Array<{ day: string }>>`
       INSERT INTO "AiFreeDay" ("day", "kind", "count", "updatedAt")
       VALUES ((now() AT TIME ZONE 'UTC')::date, ${kind}, 1, now() AT TIME ZONE 'UTC')
       ON CONFLICT ("day", "kind")
       DO UPDATE SET "count" = "AiFreeDay"."count" + 1, "updatedAt" = now() AT TIME ZONE 'UTC'
       WHERE "AiFreeDay"."count" < ${Math.floor(cap)}
-      RETURNING "count"`;
-    if (rows.length > 0) return true;
+      RETURNING "day"::text AS "day"`;
+    if (rows.length > 0) return rows[0].day;
     await alertCeilingOnce(kind, db, cap);
-    return false;
+    return null;
   } catch (err) {
     console.error(`[ai-allowance] free day claim failed: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
-    return false;
+    return null;
   }
 }
 
-/** Give one of the day's free uses back (the call it was taken for gave nothing). Never throws. */
-export async function releaseFreeDay(kind: FreeKind, db: Db = prisma): Promise<void> {
+/** Whether one of the day's free uses was taken (takeFreeDay, for a caller that never gives it back). */
+export async function claimFreeDay(kind: FreeKind, db: Db = prisma, cap: number = freeAiPerDay(kind)): Promise<boolean> {
+  return (await takeFreeDay(kind, db, cap)) !== null;
+}
+
+/**
+ * Give back a free use takeFreeDay took (the call it was taken for gave
+ * nothing), to the day it was taken from: a call that fails after midnight
+ * UTC never lowers the new day's count. Never throws.
+ */
+export async function releaseFreeDay(kind: FreeKind, day: string, db: Db = prisma): Promise<void> {
   try {
     await db.$queryRaw`
       UPDATE "AiFreeDay" SET "count" = "count" - 1, "updatedAt" = now() AT TIME ZONE 'UTC'
-      WHERE "day" = (now() AT TIME ZONE 'UTC')::date AND "kind" = ${kind} AND "count" > 0
+      WHERE "kind" = ${kind} AND "day" = ${day}::date AND "count" > 0
       RETURNING "count"`;
   } catch {
     // A use not given back costs one use of the day, never anything more.
@@ -172,19 +184,25 @@ export async function claimAiQuestion(organizationId: string, userId: string, qu
       if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
     }
     const freeTier = plan === "STARTER";
+    let freeDay: string | null = null;
     if (freeTier) {
       const free = PLAN_LIMITS.STARTER.ai;
       const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
       if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
-      // In the same transaction: a refusal later rolls the day's use back.
-      if (underFreeCeiling(rows[0].createdAt) && !(await claimFreeDay("question", tx))) {
-        return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
+      // In the same transaction, so an error below rolls the day's use back.
+      // A free workspace made before the ceiling takes no use (and so its
+      // question records no day, and gives nothing back).
+      if (underFreeCeiling(rows[0].createdAt)) {
+        freeDay = await takeFreeDay("question", tx);
+        if (!freeDay) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
       }
     }
     const row = await tx.aIQuery.create({
       data: { query: query.slice(0, 4000), userId, organizationId, freeTier },
       select: { id: true },
     });
+    // The day whose use it took: handing the question back gives back exactly that use.
+    if (freeDay) await tx.$executeRaw`UPDATE "AIQuery" SET "freeDay" = ${freeDay}::date WHERE "id" = ${row.id}`;
     return { ok: true as const, id: row.id };
   });
 }
@@ -206,11 +224,16 @@ export async function callOrGiveBack<T>(claimId: string, call: () => Promise<T>)
 
 /** Hand a claimed question back (the model failed, nothing was answered). */
 export async function releaseAiQuestion(id: string): Promise<void> {
-  // A free question also gives back its use of the platform's ceiling: a
-  // call that failed before the model ran costs the day nothing.
-  const gone = await prisma.$queryRaw<Array<{ freeTier: boolean }>>`
-    DELETE FROM "AIQuery" WHERE "id" = ${id} RETURNING "freeTier"`.catch(() => []);
-  if (gone[0]?.freeTier) await releaseFreeDay("question");
+  // A question that took a use of the platform's ceiling gives it back, to
+  // the day it took it from: a call that failed before the model ran costs
+  // the day nothing. One that took none (a paid workspace, or a free one made
+  // before the ceiling) has no day and gives nothing back, so a failure
+  // there can never lower the count new workspaces are held to. DELETE ...
+  // RETURNING: only the call that removed the row gives its use back.
+  const gone = await prisma.$queryRaw<Array<{ freeDay: string | null }>>`
+    DELETE FROM "AIQuery" WHERE "id" = ${id} RETURNING "freeDay"::text AS "freeDay"`.catch(() => []);
+  const day = gone[0]?.freeDay;
+  if (day) await releaseFreeDay("question", day);
 }
 
 /** Keep the answer with its question (the record /api/ai has always kept). */
