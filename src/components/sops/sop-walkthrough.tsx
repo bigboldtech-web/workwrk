@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, X, BookCopy } from "lucide-react";
+import { safeUserHtml } from "@/lib/safe-html";
 
 export type WalkthroughStep = {
   id: string;
@@ -159,7 +160,7 @@ export function SopWalkthrough({ sop, onClose }: Props) {
           {step.description && (
             <div
               className="sopwalk__desc"
-              dangerouslySetInnerHTML={{ __html: looksLikeHTML(step.description) ? step.description : escapeText(step.description) }}
+              dangerouslySetInnerHTML={{ __html: looksLikeHTML(step.description) ? safeUserHtml(step.description) : escapeText(step.description) }}
             />
           )}
         </div>

@@ -29,6 +29,39 @@ all seven of these rules, and a script that does not is not run:
 
 ## The approval gate
 
+**Amended again in Batch 11 (2026-10): the deploy no longer runs any data
+script.** The deploy ran `migrate-legacy-tasks.ts` and
+`migrate-public-sop-links.ts` on every release, and each run, wherever it
+reached the database, did harm: the task migration also moved the Google
+Calendar events synced since the last deploy into tasks, and the links
+migration switched Public links back to View only where an Admin had turned
+them Off. Both steps are gone from `.github/workflows/deploy.yml`, the logs
+and markers below are no longer written, and both scripts are run by hand
+again, behind the gate like every other data migration. Each now also refuses
+what went wrong: the task migration skips calendar events, and the links
+migration keeps every workspace where someone chose.
+
+**No run of either is known to have completed.** The deploy's shell exported
+only `PATH` and `DEPLOY_PATH`, neither script loads `.env`, and both stop at
+start with "DATABASE_URL is not set" when it is missing, which the step's
+`|| echo` let pass. Unless root's shell on the box exports `DATABASE_URL`,
+every run stopped there and wrote nothing: then no public SOP link minted
+before the toggle was carried over, and no legacy task was moved. Find out
+before anything else, on the box, from the app directory:
+
+```
+grep -l "DATABASE_URL is not set" legacy-tasks-write.log public-sop-links-write.log
+set -a && . ./.env && set +a
+DIRECT_URL= npx tsx scripts/migrate-public-sop-links.ts      # dry run
+DIRECT_URL= npx tsx scripts/migrate-legacy-tasks.ts          # dry run
+```
+
+Where a dry run reports work, run its `--write` (the sections below), the
+links carry-over BEFORE `scripts/access-backfill.ts --write`. Then
+`scripts/repair-deploy-data-steps.ts`, which finds nothing if no run ever
+reached the database. The rest of this section is the history of the
+automatic run.
+
 **Amended 2026-09-19.** The founder delegated this explicitly ("You have to do
 it yourself. Do everything and push."), so `migrate-legacy-tasks.ts` now runs
 automatically in the deploy, and the gate below no longer blocks it. The gate
@@ -140,10 +173,10 @@ is not the same as run in production**, which is the founder's step every time
 |---|---|---|---|
 | ~~`migrate-notification-types.ts`~~ **WRITTEN, Stage C** | `Notification.type` uppercase values (`KUDOS`, `SURVEY`, `REVIEW`, `POLICY`, `SOP`, `TASK_ESCALATED`) lowercased | work-home W2 | the write-time normalisation, which landed with it: all fourteen writers now store the lowercase form, so the script cannot re-run forever |
 | ~~`backfill-mentions.ts`~~ **WRITTEN, Stage C** | doc and SOP `EntityLink` mentions into `mention` notifications, `read = true` above 30 days old | work-home W2 | nothing; **this is what must run before `/me/mentions` can be redirected**, or those rows have no destination. The redirect is NOT in `next.config.ts` and `/api/me/mentions` is NOT deleted, precisely because the production run has not happened |
-| ~~`migrate-legacy-tasks.ts`~~ **WRITTEN, Stage F** | every live `Task` and `TaskComment` into `Item` / `ItemUpdate` on the assignee's Personal list, with `metadata.legacyTaskId` and a `LegacyRedirect` row | work-home W4 | `LegacyRedirect` (shipped in `prisma/sql/2026-09-18-task-detail-phase2.sql`); every Personal list existing (the script creates a missing one); the consumer re-points, which shipped with it |
+| ~~`migrate-legacy-tasks.ts`~~ **WRITTEN, Stage F** | every live `Task` and `TaskComment` into `Item` / `ItemUpdate` on the assignee's Personal list, with `metadata.legacyTaskId` and a `LegacyRedirect` row; rows synced from Google Calendar (`externalSource = 'GCAL'`) stay in `Task` on purpose, neither moved nor reported | work-home W4 | `LegacyRedirect` (shipped in `prisma/sql/2026-09-18-task-detail-phase2.sql`); every Personal list existing (the script creates a missing one); the consumer re-points, which shipped with it |
 | ~~`migrate-ideas.ts`~~ **WRITTEN, Stage F** | every `Idea` into an Item on the seeded Ideas list, with a `LegacyRedirect` row | work-home W5 | the Ideas list template (seeded: `list.ideas-board`); **must run before the `/ideas` 308**, or the redirect is a delete. The redirect is deliberately NOT in `next.config.ts` yet |
 | ~~`migrate-preference-keys.ts`~~ **WRITTEN, Stage F** | every `home.topPins` entry folded into the `favorite<Kind>Ids` array for its kind, so the rows behind the deleted top-pins strip become ordinary favorites | work-home W1 and W2 | the strict-schema keys existing (they do, as of Phase 2 Stage A); nothing else |
-| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken`, plus one `access.settings.migrated` audit row per org | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run automatically by `.github/workflows/deploy.yml` between the build and the pm2 reload, see its section below |
+| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken` where nobody chose (the kept rule is in its section below), plus one `access.settings.migrated` audit row per org it writes | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run by hand (the deploy ran it until Batch 11), see its section below |
 
 ## Stage C: the two that are written, and what the founder has to do
 
@@ -314,8 +347,11 @@ npx tsx scripts/migrate-legacy-tasks.ts --write
 
 ```sql
 -- Every legacy task has a forwarding address (or is on the unresolved list).
+-- Rows synced from Google Calendar are not tasks and are never moved, so they
+-- are left out: with them the count could never reach 0.
 SELECT count(*) FROM "Task" t
-  WHERE NOT EXISTS (
+  WHERE (t."externalSource" IS NULL OR t."externalSource" <> 'GCAL')
+    AND NOT EXISTS (
     SELECT 1 FROM "LegacyRedirect" r
      WHERE r."kind" = 'task' AND r."legacyId" = t."id"
        AND r."organizationId" = t."organizationId");
@@ -463,7 +499,8 @@ step. The file it would be, for the record, so nobody invents a different one:
 -- prisma/sql/YYYY-MM-DD-drop-legacy-tasks.sql  (NOT WRITTEN YET)
 -- Preconditions, ALL of them, verified before this is applied:
 --   1. migrate-legacy-tasks.ts has run in production for every workspace and
---      the first verification query above returns 0.
+--      the first verification query above (which leaves out the Google
+--      Calendar rows) returns 0.
 --   2. A full database backup exists and has been restored somewhere once.
 --   3. `grep -rn "prisma\.task\b\|prisma\.taskComment\|prisma\.taskLabel" src/`
 --      returns nothing.
@@ -504,8 +541,9 @@ none of them lands on a 410 or on a table nobody writes:
 
 ## `migrate-public-sop-links.ts` (Phase 3, process unit)
 
-Carries every existing public SOP link over access toggle 10. For each
-organization holding at least one PUBLISHED SOP with a `shareToken`, it sets
+Carries existing public SOP links over access toggle 10. For each
+organization holding at least one PUBLISHED SOP with a `shareToken`, except the
+workspaces it keeps (where someone chose, below), it sets
 `settings.access.publicLinks = "view"` and writes one `access.settings.migrated`
 ActivityLog row naming the count. Orgs with no public SOP stay on the Off
 default; orgs already on "view" are reported and not written. It ships with the
@@ -513,17 +551,23 @@ change that makes `/share/sop/[token]` read the toggle, and it must be run
 BEFORE that build serves traffic, or every public SOP link answers "This link is
 no longer available" until it is.
 
-**When, exactly. The deploy now does this for you.**
-`.github/workflows/deploy.yml` runs the dry run and then the write between the
-successful build and the `pm2 reload`, in the same slot
-`migrate-legacy-tasks.ts` occupies. That window is the whole requirement: the
-old release is still the one answering, so the links never stop resolving. Its
-two logs land beside the build log on the box:
-`/www/wwwroot/workwrk.com/public-sop-links-dryrun.log` and
-`-write.log`. A failure there does not abort the deploy, so grep the job output
-for `PUBLIC-SOP-WRITE-FAILED` and, if it is there, run the write by hand from
-the deployed checkout. The commands below are that by-hand run, and are also
-how to verify what the deploy did.
+**When, exactly. By hand, again, and BEFORE `scripts/access-backfill.ts
+--write`.** The deploy ran the dry run and the write between the build and the
+`pm2 reload` until Batch 11, on every release, so wherever a run reached the
+database a workspace whose Admin had turned Public links Off was switched back
+to View only by the next deploy; no run is known to have reached it (The
+approval gate above says how to check). That step is gone, and the script
+keeps every workspace where someone chose: an Admin changed its access
+settings (`settings.updated.access`), this script already set it
+(`access.settings.migrated`), or the repair restored an Admin's Off
+(`access.settings.restored`). A value the access backfill stored is not a
+choice (the backfill no longer stores Public links at all; one that already
+ran stored the default, Off, recorded as `access.migrated`; a backfill since
+Batch 11 marks its row `publicLinksWritten: false`, and such a row never counts),
+so it is carried
+over. Any other stored value with no record of who set it is kept.
+`scripts/repair-deploy-data-steps.ts` undoes re-runs that reached the
+database. The commands below are the by-hand run.
 
 Running it earlier, from a separate checkout with the production
 `DATABASE_URL`, is also safe: the write only sets a JSON key the old code never
@@ -538,8 +582,10 @@ Dry run first, on the production box:
 npx tsx scripts/migrate-public-sop-links.ts --report /tmp/public-sop-links-dryrun.txt
 ```
 
-Then the write, once the report reads as expected (the "would flip" count is the
-number of orgs with public SOPs that are still on "off"):
+Then the write, once the report reads as expected. "Would flip" counts the
+workspaces with public SOPs where nobody chose (no stored value, or only the
+backfill's); "kept as the workspace set it" counts those where someone did,
+and they are not written:
 
 ```
 npx tsx scripts/migrate-public-sop-links.ts --write --report /tmp/public-sop-links-write.txt
@@ -557,8 +603,39 @@ ORDER BY public_sops DESC;
 ```
 
 Every row with `public_sops > 0` must read `public_links = view` after the
-write, the per-org counts must match the report's, and a spot check of one live
-token in a flipped org opens the page rather than the 404.
+write, EXCEPT the workspaces the report lists as "kept as the workspace set
+it": those stay as they were (an Admin's Off is never overridden). The per-org
+counts must match the report's, and a spot check of one live token in a
+flipped org opens the page rather than the 404.
+
+## Local uploads: `storage/uploads` (Batch 11, one way)
+
+Since Batch 11, the files the app keeps on its own disk (workspace logos,
+avatars, and uploads made while object storage is unset or failing) live in
+`storage/uploads`, outside `public/`, and only the uploads route serves them
+(`src/lib/local-uploads.ts`). Next served `public/` by itself and looked a file
+up by its decoded path, past every header rule and rewrite, so an uploaded SVG
+or HTML file could open as a page of the app.
+
+Each server start moves whatever is in `public/uploads` across and logs
+`[uploads] moved N files out of public/uploads, M left where they are`. Left
+means a name `storage/uploads` already holds with other bytes, or something
+that is not a plain file; both stay untouched. Nothing is overwritten, and an
+old copy is removed only once the new one holds the same bytes.
+
+The move is ONE WAY. A build from before Batch 11 reads only `public/uploads`,
+so after deploying one (a revert, a manual deploy of an older commit), move the
+files back without overwriting and restart, or every logo, avatar and local
+attachment answers 404:
+
+```
+cd /www/wwwroot/workwrk.com
+for f in storage/uploads/*; do mv -n "$f" public/uploads/; done
+chown -R www:www public/uploads
+pm2 reload workwrk --update-env
+```
+
+Backups and a move to a new server must include `storage/`.
 
 ## `prisma/seed-templates.ts`: the eight built-in Doc templates (Phase 3, docs unit)
 
@@ -1396,7 +1473,11 @@ on write).
   reactivation writes its own audit row ("work handed over stays where it went").
 - The audit purge never deletes rows features read back: `weekly_review_decided`,
   `okr_created`, `user.invited`, `access.invited`, `access.matrix_retired`,
-  `access.migrated`, `audit.purged`, `terms.*`, `staff.*` (`src/lib/audit-retention.ts`).
+  `access.migrated`, `settings.updated.access`, `access.settings.migrated`,
+  `access.settings.restored`, `audit.purged`, `terms.*`, `staff.*`
+  (`src/lib/audit-retention.ts`). The three access rows were added in Batch 11:
+  the public SOP link carry-over reads them to tell an Admin's choice from a
+  value nobody chose.
   Both retention rows now sit behind Show upcoming features, captioned "Not enforced
   yet", until the two cron rows are installed.
 - The score-weights save merges into the stored weights, so the monthly performance
@@ -1473,12 +1554,15 @@ The nightly crontab row in `scripts/CRON-SETUP.md` gains `--sections legacy,node
 
 ### Step 4: `scripts/access-backfill.ts` (dry run by default)
 
+Run `scripts/migrate-public-sop-links.ts --write` first (its section above),
+if its dry run reports anything to flip.
+
 ```
 DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --out /tmp/backfill.json            # pre-flight + plan
 DIRECT_URL= DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" npx tsx scripts/access-backfill.ts --write --out /tmp/backfill.json    # after approval
 ```
 
-The pre-flight report is printed first, per workspace: the Owner(s) chosen (SUPER_ADMIN, else the earliest live COMPANY_ADMIN), every SUPER_ADMIN, every C-level/VP/Director whose report tree is not the whole workspace (default for them: the People team, D6), every Manager and Team lead with no reports, every ADMIN-scope API key whose creator is not an Owner or Admin, the C-level people who lose the settings write, and a workspace whose stored toggles read the two widening values. **The founder approves this report before `--write` in production.** A `--write` runs each workspace in one transaction with row-count assertions and one `access.migrated` activity row (the audit purge never deletes it); a failed assertion rolls that workspace back. A workspace with no admin at all is reported and skipped. It writes: `User.orgRole`/`isAgent` (the step-8 mirror; a later role change through membership.ts clears `orgRole` and `adminScopes`, and nothing reads `orgRole` at runtime: the Owner comes from the live pick), `settings.access` ONLY where absent and at TODAY'S enforced values (never the section 8 defaults, which would widen an existing workspace), the People team seeded with HR where empty, `restricted` (PRIVATE Folders and Lists) and `findable` (ORG Spaces), `ownerId` from the OWNER member row where null, and the USER-subject AccessGrant rows (SOPFolderAccess mapped; G5's explicit Full for the Space owner on every Private List). The EVERYONE rows (ORG Spaces and Lists, org-visible standalone Docs, org-wide Whiteboards, unscoped Tables) are counted and NOT written: the subject foreign key allows only a User until step 8's file replaces it, and until then the visibility columns grant exactly those rows. Local dry run 2026-09-30: 49 workspaces, 135 org roles to write, 0 grants, 12 workspaces with no admin (test fixtures). Local `--write` the same day: 37 workspaces written (each one transaction, assertions passed, `access.migrated` recorded), 12 skipped with no Owner; a second dry run plans 3 roles, all in the skipped workspaces (idempotent). Rollback: `UPDATE "User" SET "orgRole" = NULL`, `UPDATE "Space"/"Folder"/"Board" SET restricted = false, findable = false`; the settings.access written at today's values is behaviour-neutral and can stay.
+The pre-flight report is printed first, per workspace: the Owner(s) chosen (SUPER_ADMIN, else the earliest live COMPANY_ADMIN), every SUPER_ADMIN, every C-level/VP/Director whose report tree is not the whole workspace (default for them: the People team, D6), every Manager and Team lead with no reports, every ADMIN-scope API key whose creator is not an Owner or Admin, the C-level people who lose the settings write, and a workspace whose stored toggles read the two widening values. **The founder approves this report before `--write` in production.** A `--write` runs each workspace in one transaction with row-count assertions and one `access.migrated` activity row (the audit purge never deletes it); a failed assertion rolls that workspace back. A workspace with no admin at all is reported and skipped. It writes: `User.orgRole`/`isAgent` (the step-8 mirror; a later role change through membership.ts clears `orgRole` and `adminScopes`, and nothing reads `orgRole` at runtime: the Owner comes from the live pick), `settings.access` ONLY where absent and at TODAY'S enforced values (never the section 8 defaults, which would widen an existing workspace), Public links left out so they stay not chosen (Batch 11: the public SOP link carry-over must be able to tell an Admin's Off from nobody's), the People team seeded with HR where empty, `restricted` (PRIVATE Folders and Lists) and `findable` (ORG Spaces), `ownerId` from the OWNER member row where null, and the USER-subject AccessGrant rows (SOPFolderAccess mapped; G5's explicit Full for the Space owner on every Private List). The EVERYONE rows (ORG Spaces and Lists, org-visible standalone Docs, org-wide Whiteboards, unscoped Tables) are counted and NOT written: the subject foreign key allows only a User until step 8's file replaces it, and until then the visibility columns grant exactly those rows. Local dry run 2026-09-30: 49 workspaces, 135 org roles to write, 0 grants, 12 workspaces with no admin (test fixtures). Local `--write` the same day: 37 workspaces written (each one transaction, assertions passed, `access.migrated` recorded), 12 skipped with no Owner; a second dry run plans 3 roles, all in the skipped workspaces (idempotent). Rollback: `UPDATE "User" SET "orgRole" = NULL`, `UPDATE "Space"/"Folder"/"Board" SET restricted = false, findable = false`; the settings.access written at today's values is behaviour-neutral and can stay.
 
 **The org-wide tokenVersion bump (founder's step, after ACCESS_V2_TABLES is on):** `UPDATE "User" SET "tokenVersion" = "tokenVersion" + 1 WHERE "deletedAt" IS NULL;` so every session re-reads the row once (spec 10.1). It signs everyone out once; announce it. Rollback: none needed.
 

@@ -97,6 +97,8 @@ import { useWorkPlacement, useWorkTitle } from "@/components/layout/os/work-plac
 import { copyObjectLink, objectHrefNow, useObjectHref } from "@/components/layout/os/use-object-href";
 import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
+import { safeUserHtml } from "@/lib/safe-html";
+import { draftRestorePlan } from "@/lib/docs/draft-restore";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker, keeps the doc page light + fast.
@@ -137,7 +139,7 @@ type DocPayload = {
 };
 
 type DocLock = { byId: string; byName: string | null; at: string | null };
-type DraftPayload = { title: string; bnDoc: PartialBlock[] | null; blocks: Block[]; meta: DocMeta };
+type DraftPayload = { title: string; bnDoc: PartialBlock[] | null; blocks: Block[] | null; meta: DocMeta };
 
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
@@ -626,7 +628,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // completion fires the latest pending with the now-fresh ref.
   const saveInFlightRef = useRef(false);
   const pendingPersistRef = useRef<
-    null | { bnDoc: PartialBlock[] | null; blocks: Block[]; meta: DocMeta; excerpt?: string }
+    null | { bnDoc: PartialBlock[] | null; blocks: Block[] | null; meta: DocMeta; excerpt?: string }
   >(null);
 
   // Live refs so a title-triggered or debounced save always persists the LATEST
@@ -648,19 +650,26 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const blocksRef = useRef(blocks);
   const metaRef = useRef(meta);
   const myRoleRef = useRef(myRole);
+  const docLoadedRef = useRef(false);
   useEffect(() => {
     titleRef.current = title;
     bnDocRef.current = bnDoc;
     blocksRef.current = blocks;
     metaRef.current = meta;
     myRoleRef.current = myRole;
+    docLoadedRef.current = doc !== null;
   });
 
   // Persist accepts the full editor state: BlockNote doc (source of truth),
-  // legacy mirror (for chrome + legacy readers), and the doc meta.
+  // legacy mirror (for chrome + legacy readers), and the doc meta. No blocks
+  // (null) means the body this editor holds is not one it can write: a doc
+  // in the old rich-text format, shown read only until it is converted. Then
+  // only the title is sent and the server keeps the body as it is. (A rename,
+  // Cmd+S or a conflict's Dismiss used to send an empty body in its place,
+  // and the old body could not be restored from History.)
   const persist = useCallback(async (
     nextBnDoc: PartialBlock[] | null,
-    nextBlocks: Block[],
+    nextBlocks: Block[] | null,
     nextMeta: DocMeta,
     nextExcerpt?: string,
     attempt = 0,
@@ -694,17 +703,20 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     setSaveStatus("saving");
     if (attempt === 0) draftRef.current.write({ title: titleRef.current, bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta });
     try {
-      const text = (nextExcerpt ?? nextBlocks
-        .map((b) => "text" in b ? (b as { text: string }).text : "")
-        .filter(Boolean)
-        .join(" "))
-        .slice(0, 400);
-      const content: { bnDoc?: PartialBlock[]; blocks: Block[]; meta: DocMeta; version: 2 } = {
-        ...(nextBnDoc ? { bnDoc: nextBnDoc } : {}),
-        blocks: nextBlocks,
-        meta: nextMeta,
-        version: 2,
-      };
+      const body = nextBlocks === null ? {} : (() => {
+        const text = (nextExcerpt ?? nextBlocks
+          .map((b) => "text" in b ? (b as { text: string }).text : "")
+          .filter(Boolean)
+          .join(" "))
+          .slice(0, 400);
+        const content: { bnDoc?: PartialBlock[]; blocks: Block[]; meta: DocMeta; version: 2 } = {
+          ...(nextBnDoc ? { bnDoc: nextBnDoc } : {}),
+          blocks: nextBlocks,
+          meta: nextMeta,
+          version: 2,
+        };
+        return { content, excerpt: text || null };
+      })();
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
         // keepalive (first attempt only) lets a save-on-nav complete across the
@@ -715,8 +727,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: titleRef.current.trim() || "Untitled doc",
-          content,
-          excerpt: text || null,
+          ...body,
           knownUpdatedAt: lastUpdatedAtRef.current,
         }),
       });
@@ -873,7 +884,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // the two can never issue concurrent PUTs racing the same knownUpdatedAt
     // (the old independent title PUT is what silently 409-dropped note bodies).
     titleTimer.current = setTimeout(() => {
-      void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
+      void persist(bnDocRef.current, blocksRef.current, metaRef.current);
     }, 700);
   }
 
@@ -893,7 +904,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       titleRef.current = next;
       if (myRoleRef.current !== "edit" || lostAccessRef.current || !canSend(conflictHoldRef.current)) return false;
       if (titleTimer.current) { clearTimeout(titleTimer.current); titleTimer.current = null; }
-      await persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
+      await persist(bnDocRef.current, blocksRef.current, metaRef.current);
       // A 409 inside that save raised the hold: the peer's version won, the
       // new title is only in this editor, and the menu must not toast
       // "Renamed" over a server that kept the other person's title.
@@ -939,7 +950,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       if (!mod) return;
       const k = e.key.toLowerCase();
       if (k === "l" && !e.shiftKey) { e.preventDefault(); copyLink(); }
-      else if (k === "s" && !e.shiftKey) { e.preventDefault(); if (myRoleRef.current === "edit") void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current); }
+      // Not before the doc has loaded: the editor would send an empty title.
+      else if (k === "s" && !e.shiftKey) { e.preventDefault(); if (myRoleRef.current === "edit" && docLoadedRef.current) void persist(bnDocRef.current, blocksRef.current, metaRef.current); }
       else if (k === "d" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         void (async () => {
@@ -1330,7 +1342,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             conflictHoldRef.current = onDismissConflict();
             setConflict(false);
             setSaveStuck(null);
-            void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
+            void persist(bnDocRef.current, blocksRef.current, metaRef.current);
           }}
         />
       ) : null}
@@ -1340,11 +1352,30 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           onRestore={(p) => {
             setTitle(p.title);
             titleRef.current = p.title;
-            setBlocks(p.blocks);
+            // What the draft holds decides what comes back
+            // (src/lib/docs/draft-restore.ts): never an empty body it did not
+            // mean. Blocks are never set to null here, which would leave a
+            // block doc on its loading skeleton.
+            const plan = draftRestorePlan(p, legacy !== null, blocksRef.current !== null);
+            if (plan === "title-only") {
+              void persist(null, null, metaRef.current);
+              return;
+            }
+            if (plan === "settings-only") {
+              // The title and page settings (icon, cover, options), over the
+              // body on screen.
+              setMeta(p.meta);
+              void persist(bnDocRef.current, blocksRef.current, p.meta);
+              return;
+            }
+            // A conversion saved only in the draft replaces the old format.
+            if (legacy !== null) setLegacy(null);
+            const body = p.blocks ?? [];
+            setBlocks(body);
             setBnDoc(p.bnDoc);
             setMeta(p.meta);
             setRestoreNonce((n) => n + 1);
-            void persist(p.bnDoc, p.blocks, p.meta);
+            void persist(p.bnDoc, body, p.meta);
           }}
         />
       ) : null}
@@ -1472,7 +1503,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               {/* Converting rewrites the doc: never offered to someone whose save would be refused. */}
               {chromeEditable ? <button type="button" onClick={convertLegacy}>Convert to blocks</button> : null}
             </div>
-            <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
+            <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: safeUserHtml(legacy) }} />
           </div>
         ) : blocks === null ? (
           <div className="flex flex-col gap-3 py-4" aria-busy="true" aria-label="Loading">{["80%", "60%", "40%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}</div>

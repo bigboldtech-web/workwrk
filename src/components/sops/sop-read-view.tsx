@@ -37,6 +37,7 @@ import { Chip } from "@/components/ui/chip";
 import { checklistAsksFor, getSopKind, getSopLayout, type SopKind } from "@/lib/sop-kind";
 import { stepCreatesTask, stepJobTitle } from "@/lib/sop-step-owner";
 import { cn } from "@/lib/utils";
+import { safeUserHtml } from "@/lib/safe-html";
 
 export interface ReadStep {
   id?: string;
@@ -85,13 +86,9 @@ export interface SopReadSource {
   content: SopReadContent;
 }
 
-/** Strips scripts, styles, frames, inline handlers and javascript: URLs from stored HTML. */
+/** The stored HTML with only the allowed formatting left (src/lib/safe-html.ts). */
 export function safeHtml(html: string): string {
-  return (html || "")
-    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, "")
-    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?>/gi, "")
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/(href|src)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1="#"');
+  return safeUserHtml(html);
 }
 
 /** Old steps stored plain text; new ones store rich HTML. Both render. */

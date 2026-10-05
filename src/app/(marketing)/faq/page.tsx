@@ -91,7 +91,7 @@ export default function FaqPage() {
   };
   return (
     <Page>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
 
       {/* 1. The claim, alone. The questions used to open in the same band,
           so the first viewport carried a headline, a lede, a mailto and the

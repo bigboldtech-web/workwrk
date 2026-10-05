@@ -5,7 +5,8 @@ type Json = Prisma.InputJsonValue;
 
 interface LogActivityParams {
   type: string;
-  actorId: string;
+  /** Null for an action no person took (an API key, say: actorType and actorLabel then say who). */
+  actorId: string | null;
   organizationId: string;
   description: string;
   targetId?: string;

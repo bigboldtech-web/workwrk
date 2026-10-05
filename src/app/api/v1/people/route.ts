@@ -1,6 +1,16 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
+import crypto from "crypto";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { hasPermission } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
+import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
+import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 
 /**
  * GET /api/v1/people
@@ -65,10 +75,20 @@ export async function GET(req: NextRequest) {
  * Triggers invitation creation (does NOT create a fully-activated user
  * — that happens when they accept the invite). Returns the invitation
  * token + acceptance URL for admins who want to hand it over manually.
+ *
+ * Inviting someone opens the workspace to them, so this holds every rule of
+ * the Members invite (POST /api/invitations): an API key needs the ADMIN scope
+ * and invites at the Member level; a signed-in caller needs the people
+ * permission at the level the database has for them now, and an invitation
+ * carries no level above the one resolveInviteLevel allows. Every invitation
+ * keeps to the workspace's email domains, names only this workspace's role and
+ * department, carries a token from crypto.randomBytes, expires as Invite rules
+ * say, and is audited.
  */
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
   if (error || !ctx) return error!;
+  const orgId = ctx.organizationId;
 
   const body = (await req.json().catch(() => ({}))) as {
     email?: string;
@@ -78,30 +98,85 @@ export async function POST(req: NextRequest) {
     roleId?: string;
     departmentId?: string;
   };
-  if (!body.email) {
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!email || !email.includes("@")) {
     return Response.json({ error: "email required" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { email: body.email.toLowerCase(), organizationId: ctx.organizationId },
+  let level = "EMPLOYEE";
+  let inviterEmail: string | undefined;
+  if (ctx.via === "api_key") {
+    if (!ctx.scopes.includes("ADMIN")) {
+      return Response.json({ error: 'Inviting people needs a key with the "ADMIN" scope.' }, { status: 403 });
+    }
+  } else {
+    const session = await getServerSession(authOptions);
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) return Response.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    const freshSession = { ...session, user: { ...session!.user, accessLevel: fresh.level } };
+    if (!(await hasPermission(freshSession, "people", "create"))) {
+      return Response.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+    const levelCheck = resolveInviteLevel(fresh.level, body.accessLevel);
+    if (!levelCheck.ok) return Response.json({ error: levelCheck.error }, { status: levelCheck.status });
+    level = levelCheck.level || "EMPLOYEE";
+    inviterEmail = (session!.user as { email?: string }).email;
+  }
+
+  // The workspace's email domains, as the Members invite keeps them.
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { domain: true, settings: true } });
+  const rules = usersSettingsOf(org?.settings, org?.domain);
+  const allowedDomains = inviteDomainsOf(org?.settings, org?.domain, inviterEmail);
+  const inviteDomain = email.split("@")[1] ?? "";
+  if (allowedDomains.length > 0 && !allowedDomains.includes(inviteDomain)) {
+    return Response.json({ error: `Only ${allowedDomains.map((d) => `@${d}`).join(", ")} addresses can join this workspace` }, { status: 400 });
+  }
+  // A role or department of another workspace is never attached.
+  if (body.roleId && !(await prisma.role.count({ where: { id: body.roleId, organizationId: orgId } }))) {
+    return Response.json({ error: "roleId is not a role of this workspace" }, { status: 400 });
+  }
+  if (body.departmentId && !(await prisma.department.count({ where: { id: body.departmentId, organizationId: orgId } }))) {
+    return Response.json({ error: "departmentId is not a department of this workspace" }, { status: 400 });
+  }
+
+  // In this workspace as their own account OR as a membership (someone who
+  // works in several workspaces is anchored in only one), any case of the
+  // address: what /join itself refuses, so no invitation is made that it
+  // would turn away.
+  if ((await alreadyInOrg(email, orgId)).member) return Response.json({ error: "User already in this org" }, { status: 409 });
+  const now = new Date();
+  const pending = await prisma.invitation.findFirst({
+    where: { email: { equals: email, mode: "insensitive" }, organizationId: orgId, accepted: false, expiresAt: { gte: now } },
     select: { id: true },
   });
-  if (existing) return Response.json({ error: "User already in this org" }, { status: 409 });
+  if (pending) return Response.json({ error: "An invitation to this email is already pending" }, { status: 409 });
 
-  const token = Buffer.from(
-    `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  ).toString("base64url");
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7); // 7 days
-
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(now.getTime() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000);
+  const mirrorRole = orgRoleOf({ accessLevel: level });
   const invite = await prisma.invitation.create({
     data: {
-      email: body.email.toLowerCase(),
+      email,
       token,
       expiresAt,
-      organizationId: ctx.organizationId,
+      organizationId: orgId,
+      accessLevel: level as never,
+      orgRole: mirrorRole === "OWNER" ? "ADMIN" : mirrorRole,
+      isAgent: isAgentOf(level),
       roleId: body.roleId ?? null,
       departmentId: body.departmentId ?? null,
     },
+  });
+
+  logAuditEvent({
+    type: "user.invited",
+    actorId: ctx.via === "session" ? ctx.userId ?? null : null,
+    ...(ctx.via === "api_key" ? { actorType: "api_key", actorLabel: "API key" } : {}),
+    organizationId: orgId,
+    description: `Invited ${email} as ${level}`,
+    targetId: invite.id,
+    targetType: "Invitation",
+    metadata: { email, accessLevel: level, via: ctx.via, ...(ctx.apiKeyId ? { apiKeyId: ctx.apiKeyId } : {}) },
   });
 
   const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";

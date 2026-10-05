@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { headers } from "next/headers";
 
 const SITE = "https://workwrk.com";
 
@@ -22,7 +23,20 @@ const DISALLOW = ["/api/", "/dashboard/", "/admin/", "/setup/", "/dev/", "/404"]
  */
 const ALLOW = ["/", "/api/og/"];
 
-export default function robots(): MetadataRoute.Robots {
+/** A host name without its port, in lower case. */
+const bare = (h: string | null | undefined) => (h ?? "").trim().toLowerCase().split(":")[0];
+
+export default async function robots(): Promise<MetadataRoute.Robots> {
+  // The product and the Staff console have nothing to index, and the links
+  // people share from the product (/share, /forms, /embed) are unlisted on
+  // purpose: on those hosts every crawler is turned away. Reading the host
+  // makes this file answer per request instead of being cached once.
+  const host = bare((await headers()).get("host"));
+  const appHost = bare(process.env.APP_HOST);
+  const adminHost = bare(process.env.ADMIN_HOST);
+  if ((appHost && host === appHost) || (adminHost && host === adminHost)) {
+    return { rules: [{ userAgent: "*", disallow: "/" }] };
+  }
   return {
     rules: [
       {

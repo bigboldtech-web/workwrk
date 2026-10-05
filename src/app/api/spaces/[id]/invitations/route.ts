@@ -23,6 +23,7 @@ import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { recordSpaceInvite } from "@/lib/access/grants";
+import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 
 const schema = z.object({
   email: z.string().email(),
@@ -105,14 +106,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   const email = parsed.data.email.toLowerCase();
 
-  // Already in the org?
-  const existingUser = await prisma.user.findFirst({
-    where: { email, organizationId: c.organizationId, deletedAt: null },
-    select: { id: true },
-  });
-  if (existingUser) {
+  // Already in the workspace, as their own account or as a membership
+  // (someone who works in several is anchored in only one), deactivated or
+  // not: /join refuses every one of them, so no invitation is made for them.
+  const inOrg = await alreadyInOrg(email, c.organizationId);
+  if (inOrg.member) {
     return NextResponse.json(
-      { error: "This person is already in your org — add them from the People tab instead." },
+      {
+        error: inOrg.removed
+          ? "This person was removed from your workspace. An Owner or an Admin can restore them from Directory, Removed, then add them to the Space."
+          : inOrg.inactive
+            ? "This person is deactivated in your workspace. An Owner or Admin can reactivate them in Settings, Members, then add them to the Space."
+            : inOrg.elsewhere
+              ? "This person is in your workspace but is working in another one right now, so the People tab cannot list them yet. Once they switch to this workspace, add them from the People tab."
+              : "This person is already in your workspace. Add them to the Space from the People tab instead.",
+      },
       { status: 400 },
     );
   }

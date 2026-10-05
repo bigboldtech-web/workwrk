@@ -3,6 +3,7 @@ import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
+import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
@@ -44,6 +45,26 @@ export async function POST(req: NextRequest) {
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);
   if (aiOff) return aiOff;
+
+  // The AI app open to this person: the rail's hide and floor and the Guest
+  // rule (Settings > Apps), which this route used to skip, for every kind of
+  // question.
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
+
+  // A meeting summary (the AI summary button on a meeting) needs only the
+  // notes the person sent: no workspace data goes into its prompt.
+  if (body.type === "meeting_summary") return summarizeNotes(orgId, userId, query);
+
+  // Everything below puts the whole workspace into the prompt: its people and
+  // their levels, this period's performance scores with manager and peer
+  // ratings, named KPI readings, KRA assignments, every SOP, drafts included,
+  // and the latest meetings. So it answers only someone who may read all of
+  // that: the Owner or an Admin. (Not the People team: SOPs and meetings
+  // follow their own sharing, which the People team does not get past.)
+  if (!isOwnerOrAdmin(gate.viewer)) {
+    return jsonError("Questions about the whole workspace are for its Owner and Admins.", 403);
+  }
 
   // Gather comprehensive org context.
   // User list is capped at 100 — past that the LLM context wastes tokens on a
@@ -240,6 +261,30 @@ ${orgContext}`,
     },
   });
 
+  return jsonSuccess({ query, response });
+}
+
+/** The AI summary of a meeting's notes, from those notes alone. */
+async function summarizeNotes(orgId: string, userId: string, query: string) {
+  let response = "";
+  try {
+    const ai = await getAnthropicForOrg(orgId);
+    if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
+      return jsonError("AI is not set up on this server.", 503);
+    }
+    const message = await ai.client.messages.create({
+      model: modelFor(ai, "claude-sonnet-4-6"),
+      max_tokens: 1500,
+      system: "You turn raw meeting notes into clear Minutes of Meeting. Use only what the notes say; never invent attendees, decisions or owners. Be concise and professional.",
+      messages: [{ role: "user", content: query }],
+    });
+    const textBlock = message.content.find((b: { type: string }) => b.type === "text") as { text?: string } | undefined;
+    response = textBlock?.text ?? "";
+  } catch (err) {
+    console.error("AI meeting summary error:", err instanceof Error ? err.message : String(err));
+    return jsonError("Couldn't generate the summary. Try again in a moment.", 502);
+  }
+  await prisma.aIQuery.create({ data: { query, response, userId, organizationId: orgId } });
   return jsonSuccess({ query, response });
 }
 

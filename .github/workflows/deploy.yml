@@ -81,64 +81,21 @@ jobs:
             npm run build > /www/wwwroot/workwrk.com/deploy-build.log 2>&1 \
               || fail "npm run build (deploy-migrations + prisma generate + next build)" /www/wwwroot/workwrk.com/deploy-build.log
 
-            # Legacy Task -> Item data migration.
-            #
-            # WHY IT RUNS HERE. The release above deletes the seven /tasks/*
-            # pages, which were the only interface over the legacy Task table.
-            # Until this runs, those rows still exist but cannot be reached in
-            # the product. Running it between a successful build and the pm2
-            # reload closes that window: the build has already proved itself,
-            # and nothing is serving the new code yet.
-            #
-            # WHY IT IS SAFE TO RUN ON EVERY DEPLOY. The script is dry-run by
-            # default, so --write is deliberate. It works per organization in a
-            # transaction with row-count assertions, it is idempotent (guarded
-            # on LegacyRedirect plus metadata.legacyTaskId, so a second run
-            # reports "already migrated, 0 to write"), and it NEVER deletes or
-            # mutates a source row. Task and TaskComment stay readable.
-            #
-            # The dry run is printed first so the log always shows what the
-            # write was about to do, next to what it did.
-            #
-            # A failure here does NOT abort the deploy: the product is fully
-            # functional without it and only legacy rows stay unreachable,
-            # which is recoverable by re-running. Losing the reload over it
-            # would be the worse outcome, so it is `|| true` with a loud
-            # marker to grep for.
-            echo "==> Legacy task migration (dry run first)"
-            npx tsx scripts/migrate-legacy-tasks.ts 2>&1 | tee /www/wwwroot/workwrk.com/legacy-tasks-dryrun.log || echo "MIGRATION-DRYRUN-FAILED"
-            echo "==> Legacy task migration (write)"
-            npx tsx scripts/migrate-legacy-tasks.ts --write 2>&1 | tee /www/wwwroot/workwrk.com/legacy-tasks-write.log || echo "MIGRATION-WRITE-FAILED"
-
-            # Carry existing public SOP links over access toggle 10.
-            #
-            # WHY IT RUNS HERE, AND ONLY HERE. /share/sop/[token] now answers
-            # only while the org's settings.access.publicLinks is "view", and
-            # that toggle's default is Off. SOP.shareToken was minted before
-            # the toggle existed, so without this step every public SOP link
-            # in every org reads "This link is no longer available" the moment
-            # the new build serves traffic. spec-process section 4 step 8 says
-            # it ships with the page "never after it": between a successful
-            # build and the pm2 reload is exactly that window, because the old
-            # code is still the one answering.
-            #
-            # WHY IT IS SAFE ON EVERY DEPLOY. Dry-run by default, so --write is
-            # deliberate. It works per organization in a transaction, reads the
-            # value back as its own assertion, touches no key of settings other
-            # than access.publicLinks, counts SOP rows without changing one,
-            # and leaves an org with no public SOP on the Off default. A second
-            # run reports "already migrated" and writes nothing.
-            #
-            # A failure does NOT abort the deploy: it is recoverable by
-            # re-running, and losing the reload over it would be worse. Loud
-            # marker to grep for.
-            echo "==> Public SOP link carry-over (dry run first)"
-            npx tsx scripts/migrate-public-sop-links.ts 2>&1 | tee /www/wwwroot/workwrk.com/public-sop-links-dryrun.log || echo "PUBLIC-SOP-DRYRUN-FAILED"
-            echo "==> Public SOP link carry-over (write)"
-            npx tsx scripts/migrate-public-sop-links.ts --write 2>&1 | tee /www/wwwroot/workwrk.com/public-sop-links-write.log || echo "PUBLIC-SOP-WRITE-FAILED"
+            # No data scripts run here any more. Two used to, on every deploy:
+            # the legacy Task -> Item migration and the public SOP link
+            # carry-over. Re-running them would change data on every deploy
+            # (calendar events became tasks; Public links came back on where
+            # they had been turned off), so the steps are removed. Both stay
+            # in scripts/ for a deliberate run by hand (scripts/MIGRATIONS.md,
+            # The approval gate, says how to check whether any run here ever
+            # reached the database), and a deploy log never carries a
+            # per-company report.
 
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
+            # Local files live in storage/uploads since Batch 11 (moved out
+            # of public/ at each start, one way): scripts/MIGRATIONS.md,
+            # "Local uploads", says how to go back to an older build.
             echo "==> Restoring ownership to www"
             chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}" > /tmp/wd-chown.log 2>&1 || fail "chown" /tmp/wd-chown.log
 

@@ -216,7 +216,10 @@ async function main() {
  */
 async function migrateOrg(organizationId: string, organizationName: string, write: boolean): Promise<OrgReport | null> {
   const tasks = await prisma.task.findMany({
-    where: { organizationId },
+    // Never a Google Calendar event: the calendar sync keeps writing those as
+    // Task rows (the Calendar reads them there), and moving them made every
+    // synced event an open task. A bare `not` would drop the nulls.
+    where: { organizationId, OR: [{ externalSource: null }, { externalSource: { not: "GCAL" } }] },
     include: {
       labels: { include: { label: true } },
       comments: { orderBy: { createdAt: "asc" } },
