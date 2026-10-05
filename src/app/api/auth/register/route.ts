@@ -16,9 +16,10 @@ import { applySignupTemplate } from "@/lib/templates/apply-tuesday";
 import { selfServeTrialEnd } from "@/lib/admin/trial-end";
 
 // The Terms and Privacy Policy version a signup agrees to (the consent line
-// on /signup). Bumped when either document changes; recorded on the
-// `terms.accepted` ActivityLog row next to User.termsAcceptedAt.
-const TERMS_VERSION = "2026-09";
+// on /signup). Bumped when either document changes (the date of the newer
+// one's LEGAL_COPY `updated`); recorded on the `terms.accepted` ActivityLog
+// row next to User.termsAcceptedAt.
+const TERMS_VERSION = "2026-10-06";
 
 export async function POST(req: Request) {
   try {

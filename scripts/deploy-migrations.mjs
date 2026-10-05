@@ -216,6 +216,13 @@ const SQL_MANIFEST = [
   // Batch 12: the email queue's retry and lease column. The queue's claim
   // reads it on every send, so it must exist before the release serves.
   "2026-10-05-email-retry.sql",
+  // Batch 13: Subscription."stripeEventAt" (Stripe events applied in order)
+  // and the deleted workspace's Stripe ids on "WorkspaceDeletion". Before the
+  // reload: Prisma selects every column on a read with no select.
+  "2026-10-05-billing-events.sql",
+  // Batch 13 round 3: "AiFreeDay" (the daily ceiling on free AI) and
+  // "AIQuery"."freeTier". Before the reload: every free AI claim reads both.
+  "2026-10-06-ai-free-day.sql",
 ];
 
 /**

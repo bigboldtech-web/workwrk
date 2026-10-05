@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        await applySubscriptionEvent(event.data.object);
+        // The event's own time: an older event delivered late is skipped.
+        await applySubscriptionEvent(event.data.object, new Date(event.created * 1000));
         break;
 
       case "checkout.session.completed": {
@@ -46,8 +47,11 @@ export async function POST(req: NextRequest) {
           // Lazy-import to avoid the circular with `stripe`.
           const { stripe } = await import("@/services/billing");
           if (stripe) {
+            // Fetched now, so at least as new as this event: stamped with the
+            // event's time (Stripe's clock, never this server's, which may run
+            // ahead and would then skip the real events that follow).
             const sub = await stripe.subscriptions.retrieve(subId);
-            await applySubscriptionEvent(sub);
+            await applySubscriptionEvent(sub, new Date(event.created * 1000));
           }
         }
         break;

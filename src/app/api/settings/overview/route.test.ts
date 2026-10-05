@@ -29,6 +29,8 @@ const { prismaMock, orgRow } = vi.hoisted(() => {
       ),
     },
     invitation: model(),
+    organizationMembership: model(),
+    subscription: model(),
     department: model(),
     role: model(),
     office: model(),
@@ -38,6 +40,8 @@ const { prismaMock, orgRow } = vi.hoisted(() => {
     apiKey: model(),
     webhookSubscription: model(),
     activityLog: model(),
+    // The seat count's open-invitation query (src/lib/seats.ts).
+    $queryRaw: vi.fn(async () => [{ n: 0 }]),
   };
   return { prismaMock, orgRow };
 });

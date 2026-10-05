@@ -12,6 +12,9 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { AGENTS_BY_PRODUCT } from "@/lib/agents/catalog";
 import { settingsWriteGate } from "@/lib/access/settings-write";
+import { MODULE_BY_SLUG, moduleUpgradeSentence } from "@/lib/modules";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { moduleNeedsUpgradeFor } from "@/lib/module-plan.server";
 
 async function resolveOrgAndRole() {
   const session = await getServerSession(authOptions);
@@ -85,6 +88,14 @@ export async function POST(req: Request) {
   const product = await prisma.product.findUnique({ where: { slug: parsed.data.productSlug } });
   if (!product) {
     return NextResponse.json({ error: "product not found" }, { status: 404 });
+  }
+  // Talk and Tables are included from Growth (src/lib/modules.ts): a Starter
+  // workspace that never had the module is refused; one that had it keeps it.
+  if (await moduleNeedsUpgradeFor(ctx.orgId, product.slug)) {
+    return NextResponse.json(
+      { error: moduleUpgradeSentence(MODULE_BY_SLUG[product.slug].label, await sessionMayManageOwnerPage(ctx.session, "billing")), code: "plan_required" },
+      { status: 403 },
+    );
   }
 
   const installation = await prisma.productInstallation.upsert({

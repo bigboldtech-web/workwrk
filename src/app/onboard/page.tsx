@@ -66,6 +66,8 @@ interface Loaded {
   console: ConsoleState;
   departments: Dept[];
   modulesOn: Record<string, boolean>;
+  /** Included from Growth and never had here (src/lib/modules.ts): shown, not switchable. */
+  modulesLocked: Record<string, boolean>;
 }
 
 async function patchSettings(section: string, data: Record<string, unknown>): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
@@ -150,13 +152,17 @@ export default function OnboardPage() {
         const consoleState = readConsole({ console: s.settings?.console });
         let departments: Dept[] = [];
         const modulesOn: Record<string, boolean> = {};
+        const modulesLocked: Record<string, boolean> = {};
         if (isAdmin) {
-          const [dRes, mRes] = await Promise.all([fetch("/api/departments?withAccess=1", { cache: "no-store" }), fetch("/api/products/installations", { cache: "no-store" })]);
+          const [dRes, mRes] = await Promise.all([fetch("/api/departments?withAccess=1", { cache: "no-store" }), fetch("/api/products", { cache: "no-store" })]);
           if (!dRes.ok || !mRes.ok) throw new Error("lists");
           const d = (await dRes.json()) as { data?: Array<{ id: string; name: string; _count?: { members?: number }; goalCount?: number }> };
           departments = (d.data ?? []).map((x) => ({ id: x.id, name: x.name, members: x._count?.members ?? 0, goals: x.goalCount ?? 0 }));
-          const m = (await mRes.json()) as { installations?: Array<{ productSlug: string; status: string }> };
-          for (const i of m.installations ?? []) modulesOn[i.productSlug] = i.status === "ACTIVE";
+          const m = (await mRes.json()) as { products?: Array<{ slug: string; installation: { status: string } | null; needsUpgrade?: boolean }> };
+          for (const p of m.products ?? []) {
+            modulesOn[p.slug] = p.installation?.status === "ACTIVE";
+            if (p.needsUpgrade) modulesLocked[p.slug] = true;
+          }
         }
         if (!alive) return;
         // The same lock POST /api/invitations applies: the org's stored
@@ -170,6 +176,7 @@ export default function OnboardPage() {
           console: consoleState,
           departments,
           modulesOn,
+          modulesLocked,
         });
       } catch {
         if (alive) setLoadError("Couldn't open setup.");
@@ -958,31 +965,39 @@ function Wizard({ initial, startStep }: { initial: Loaded; startStep: Step }) {
           ) : null}
 
           {step === 4 ? (
-            <div className="wz-grid">
-              {MODULES.map((m) => {
-                const on = !!modulesOn[m.slug];
-                return (
-                  <div key={m.slug} className="wz-module">
-                    <span className="wz-module__icon">
-                      <m.Icon size={20} aria-hidden />
-                    </span>
-                    <span className="wz-module__text">
-                      <strong id={`mod-${m.slug}`}>{m.name}</strong>
-                      <span className="wa-help">{m.blurb}</span>
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={on}
-                      aria-labelledby={`mod-${m.slug}`}
-                      className="wz-switch"
-                      disabled={moduleBusy !== null}
-                      onClick={() => void toggleModule(m.slug, !on)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+            <>
+              <div className="wz-grid">
+                {MODULES.map((m) => {
+                  const on = !!modulesOn[m.slug];
+                  const locked = !!initial.modulesLocked[m.slug] && !on;
+                  return (
+                    <div key={m.slug} className="wz-module">
+                      <span className="wz-module__icon">
+                        <m.Icon size={20} aria-hidden />
+                      </span>
+                      <span className="wz-module__text">
+                        <strong id={`mod-${m.slug}`}>{m.name}</strong>
+                        <span className="wa-help">{locked ? `${m.blurb}. Included from the Growth plan.` : m.blurb}</span>
+                      </span>
+                      {locked ? null : (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={on}
+                          aria-labelledby={`mod-${m.slug}`}
+                          className="wz-switch"
+                          disabled={moduleBusy !== null}
+                          onClick={() => void toggleModule(m.slug, !on)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {MODULES.some((m) => initial.modulesLocked[m.slug] && !modulesOn[m.slug]) ? (
+                <p className="wa-help">Talk and Tables are included from the Growth plan. You can change the plan later in Workspace settings &gt; Plan &amp; billing.</p>
+              ) : null}
+            </>
           ) : null}
 
           {!online ? (

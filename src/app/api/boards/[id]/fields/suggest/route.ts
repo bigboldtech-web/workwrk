@@ -12,6 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { getBoardFields } from "@/lib/board-fields";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { prisma } from "@/lib/prisma";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
@@ -54,10 +55,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   // no model call, as the switch's helper says ("Off hides every AI entry point").
   // The panel asks on every visit, so it is told "no suggestions", never an error.
   if (await aiOffResponse(c.organizationId)) return NextResponse.json({ suggestions: [] });
+  // The panel asks on every visit: a key it cannot resolve is "no suggestions" too.
+  const resolved = await getAnthropicForOrg(c.organizationId).catch(() => null);
+  if (!resolved) return NextResponse.json({ suggestions: [] });
+  // Suggestions nobody asked for never spend one of the plan's AI questions;
+  // they run only while the workspace has some left, under the daily totals
+  // on WorkwrK's key (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(c.organizationId, c.userId, resolved.source))) return NextResponse.json({ suggestions: [] });
 
   try {
-    const { client, preferredModel } = await getAnthropicForOrg(c.organizationId);
-    const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");
+    const { client } = resolved;
+    const model = modelFor(resolved, "claude-haiku-4-5");
 
     const system = `You suggest useful custom FIELDS for a task list in a work-management tool (like ClickUp). Given the list's name and its existing fields, propose 4-5 NEW fields that would genuinely help this specific list. Output ONLY a JSON object — no prose, no markdown fences:
 { "suggestions": [ { "label": "string (≤40 chars)", "type": "TEXT"|"LONG_TEXT"|"NUMBER"|"DATE"|"DROPDOWN"|"MULTI_SELECT"|"CHECKBOX"|"LABELS"|"MONEY"|"PERCENT"|"RATING"|"USER"|"PEOPLE"|"URL"|"EMAIL"|"PHONE" } ] }

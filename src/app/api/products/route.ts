@@ -17,6 +17,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { legacySessionTiers } from "@/lib/access/legacy-session";
+import { MODULE_BY_SLUG, moduleNeedsUpgrade } from "@/lib/modules";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -25,7 +27,7 @@ export async function GET() {
   }
   const user = session.user as { organizationId?: string };
 
-  const [products, installations] = await Promise.all([
+  const [products, installations, org] = await Promise.all([
     prisma.product.findMany({
       orderBy: { displayOrder: "asc" },
       select: {
@@ -50,14 +52,28 @@ export async function GET() {
           select: { productId: true, status: true, installedAt: true },
         })
       : Promise.resolve([]),
+    user.organizationId
+      ? prisma.organization.findUnique({ where: { id: user.organizationId }, select: { plan: true } })
+      : Promise.resolve(null),
   ]);
   const byProduct = new Map(installations.map((i) => [i.productId, i]));
+  const plan = org?.plan ? String(org.plan) : "STARTER";
 
   return NextResponse.json({
     products: products.map(({ id, ...p }) => {
       const inst = byProduct.get(id);
-      return { ...p, installation: inst ? { status: inst.status, installedAt: inst.installedAt.toISOString() } : null };
+      return {
+        ...p,
+        installation: inst ? { status: inst.status, installedAt: inst.installedAt.toISOString() } : null,
+        // Talk and Tables on Starter, never had (src/lib/modules.ts): the
+        // switch would be refused, so the page shows the plan instead.
+        needsUpgrade: !!MODULE_BY_SLUG[p.slug] && moduleNeedsUpgrade(plan, !!inst),
+      };
     }),
+    plan,
     canManage: (await legacySessionTiers()).admin,
+    // Who may move the workspace to Growth (Plan & billing): with the Owner
+    // split on, not every Admin.
+    canChangePlan: await sessionMayManageOwnerPage(session, "billing"),
   });
 }

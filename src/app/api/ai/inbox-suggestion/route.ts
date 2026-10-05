@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { requireApp } from "@/lib/app-gate";
 
 /**
  * AI Inbox suggestions — Phase 6 v1.
@@ -18,10 +19,15 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
  * surfaces — callers are responsible for trimming items before posting.
  *
  * Bounded:
- *   • items[] capped at 20 — the inbox is a punch list, not a feed
- *   • response capped at ~700 tokens; we fail open with empty hints
+ *   • the AI app's own gate first (Guests, a hidden app, AI turned off)
+ *   • items[] capped at 20 (the inbox is a punch list, not a feed), and
+ *     every item's type and title at 200 characters, its context too
+ *   • response capped at ~700 tokens on the small model (unless the
+ *     workspace's own key prefers another); we fail open with empty hints
  *     so the inbox renders normally even if the model returns garbage
- *   • obeys the org's plan AI quota and BYOK if configured
+ *   • runs only while the workspace has AI questions left, under its daily
+ *     total of automatic calls, never spends a question
+ *     (src/lib/ai-allowance.ts), and uses BYOK if configured
  */
 
 type SuggestedAction = "approve" | "hold" | "reassign" | "do" | "review";
@@ -50,6 +56,8 @@ const VALID_ACTIONS: ReadonlySet<SuggestedAction> = new Set([
 ]);
 
 export async function POST(req: NextRequest) {
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
@@ -67,27 +75,28 @@ export async function POST(req: NextRequest) {
         return null;
       }
       return {
-        id: r.id,
-        type: r.type,
-        title: r.title,
+        id: r.id.slice(0, 200),
+        type: r.type.slice(0, 200),
+        title: r.title.slice(0, 200),
         context: typeof r.context === "string" ? r.context.slice(0, 200) : undefined,
-        link: typeof r.link === "string" ? r.link : undefined,
+        link: typeof r.link === "string" ? r.link.slice(0, 200) : undefined,
       };
     })
     .filter((x: InboxItemInput | null): x is InboxItemInput => x !== null);
   if (items.length === 0) return jsonSuccess({ suggestions: [] });
 
   const orgId = getOrgId(session);
-  const planCheck = await checkPlanLimit(orgId, "ai");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
-
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);
   if (aiOff) return aiOff;
 
   const resolved = await getAnthropicForOrg(orgId);
+  // Suggestions nobody asked for never spend one of the plan's AI questions;
+  // they run only while the workspace has some left, under the daily totals
+  // on WorkwrK's key (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(orgId, getUserId(session), resolved.source))) return jsonSuccess({ suggestions: [] });
   const ai = resolved.client;
-  const model = modelFor(resolved);
+  const model = modelFor(resolved, "claude-haiku-4-5");
 
   const itemList = items
     .map((it, i) =>

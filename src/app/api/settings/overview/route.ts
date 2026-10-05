@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { seatUse } from "@/lib/seats";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +8,6 @@ import { parseAccessSettings } from "@/lib/access/settings";
 import { roleCountsFor } from "@/lib/access/role-counts";
 import { MODULE_SLUGS } from "@/lib/modules";
 import { getReviewCadences } from "@/lib/review-cadence";
-import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import {
   MFA_AUDIENCE_LABELS,
   MONTH_NAMES,
@@ -96,9 +96,15 @@ async function overview() {
   const onCadences = (Object.keys(cadences) as (keyof typeof cadences)[]).filter((k) => cadences[k].enabled);
   const apps = ((pref?.sidebarDefault ?? {}) as { apps?: { hidden?: unknown[] } }).apps;
   const hidden = Array.isArray(apps?.hidden) ? apps!.hidden!.length : 0;
-  const seats = PLAN_LIMITS[String(org.plan)]?.users ?? null;
-  const ownerOk = await sessionMayManageOwnerPage(session);
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  // The billing tile shows what Plan & billing shows: the seats the cap
+  // counts (people plus open invitations, src/lib/seats.ts) and a Starter
+  // workspace's TRIAL status as free, which it is for good.
+  const seatsNow = await seatUse(orgId);
+  const seatsUsed = seatsNow.members + seatsNow.pending;
+  const planWord = cap(String(org.plan).toLowerCase());
+  const statusWord = String(org.status) === "TRIAL" && String(org.plan) === "STARTER" ? "free" : String(org.status).toLowerCase().replace(/_/g, " ");
+  const ownerOk = await sessionMayManageOwnerPage(session);
   // The People team count comes from roleCountsFor, the same count Structure,
   // Members and Access show: the saved list when there is one, else everyone
   // at HR, who hold People team powers today (peopleTeamOf in org-role.ts).
@@ -122,7 +128,7 @@ async function overview() {
     data: [`Trash kept ${retention.trashDays} days`, `Last export ${relative(lastExport?.createdAt ?? null)}`],
     audit: [plural(events7, "event") + " in the last 7 days", retention.auditDays ? `${retention.auditDays}-day window, not enforced yet` : "Kept forever"],
     api: [plural(keys, "active key"), plural(hooks, "webhook")],
-    billing: [`${cap(String(org.plan).toLowerCase())} · ${String(org.status).toLowerCase()}`, seats && seats < 99999 ? `${members} of ${seats} seats` : `${plural(members, "seat")} in use`],
+    billing: [`${planWord} · ${statusWord}`, seatsNow.limit < 99999 ? `${seatsUsed} of ${seatsNow.limit} seats` : `${plural(seatsUsed, "seat")} in use`],
   };
   // An Owner-only page an Admin cannot open (only with the split on).
   const ownerOnly = ownerOk ? [] : ["security", "api", "billing"];

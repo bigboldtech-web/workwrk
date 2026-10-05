@@ -20,24 +20,28 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonCard } from "@/components/ui/skeleton";
 
-type Product = { slug: string; tier: string; installation: { status: string } | null };
+type Product = { slug: string; tier: string; installation: { status: string } | null; needsUpgrade?: boolean };
 
 export function ModulesSection() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [canManage, setCanManage] = useState(false);
+  const [canChangePlan, setCanChangePlan] = useState(false);
+  const [plan, setPlan] = useState("STARTER");
   const [error, setError] = useState<string | null>(null);
   const [override, setOverride] = useState<Record<string, boolean>>({});
   const [asked, setAsked] = useState<{ requests: number; suggestions: number } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
-    const r = await apiFetch<{ products: Product[]; canManage: boolean }>("/api/products", { cache: "no-store" });
+    const r = await apiFetch<{ products: Product[]; canManage: boolean; canChangePlan?: boolean; plan?: string }>("/api/products", { cache: "no-store" });
     if (!r.ok) {
       setError(r.error);
       return;
     }
     setProducts(r.data.products);
     setCanManage(r.data.canManage);
+    setCanChangePlan(r.data.canChangePlan ?? r.data.canManage);
+    setPlan(r.data.plan ?? "STARTER");
     setOverride({});
   }, []);
 
@@ -94,7 +98,9 @@ export function ModulesSection() {
               module={m}
               on={isOn(m.productSlug)}
               canManage={canManage}
-              addOn={(bySlug.get(m.productSlug)?.tier ?? "PLUS") !== "FREE"}
+              canChangePlan={canChangePlan}
+              plan={plan}
+              needsUpgrade={bySlug.get(m.productSlug)?.needsUpgrade ?? false}
               onChanged={(on) => setOverride((o) => ({ ...o, [m.productSlug]: on }))}
             />
           ))}

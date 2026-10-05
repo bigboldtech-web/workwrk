@@ -33,6 +33,7 @@ import type { OrgAdmin } from "@/lib/access/admins";
 import { RequestAccessButton } from "./request-access-button";
 import { JoinChannelButton } from "./join-channel-button";
 import { ModuleOffSwitch } from "./module-off-switch";
+import { MODULE_FROM_PLAN } from "@/lib/modules";
 import { SettingsLink } from "./settings-link";
 
 export interface BackTarget {
@@ -246,6 +247,14 @@ export interface ModuleOffProps {
   productSlug: string;
   /** Owners and Admins: render the switch. */
   canEnable: boolean;
+  /**
+   * Starter, and the workspace never had the module (src/lib/modules.ts): it
+   * is included from Growth, so the page offers the plan, not a switch the
+   * server would refuse.
+   */
+  needsUpgrade?: boolean;
+  /** May open Plan & billing and change the plan (with the Owner split on, not every Admin). Defaults to canEnable. */
+  canChangePlan?: boolean;
   /** Members: the admins to ask. */
   admins?: OrgAdmin[];
   /** What turning it on unlocks, when the layout knows ("3 channels"). */
@@ -253,7 +262,34 @@ export interface ModuleOffProps {
   back: BackTarget;
 }
 
-export function ModuleOff({ label, productSlug, canEnable, admins = [], unlocks, back }: ModuleOffProps) {
+export function ModuleOff({ label, productSlug, canEnable, needsUpgrade = false, canChangePlan = canEnable, admins = [], unlocks, back }: ModuleOffProps) {
+  if (needsUpgrade) {
+    return (
+      <DenialBlock
+        title={`${label} is included from the ${MODULE_FROM_PLAN} plan`}
+        sentence={
+          canChangePlan
+            ? `Move this workspace to ${MODULE_FROM_PLAN} in Plan & billing to turn ${label} on for everyone.`
+            : canEnable
+              ? `Ask an Owner to move this workspace to ${MODULE_FROM_PLAN}.`
+              : `Ask an Owner or Admin to move this workspace to ${MODULE_FROM_PLAN}.`
+        }
+        back={back}
+        primary={
+          canChangePlan ? (
+            <Link
+              href="/settings/billing"
+              className="os-chrome inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-base font-medium text-white hover:bg-[var(--os-brand-hover)]"
+            >
+              See Plan &amp; billing
+            </Link>
+          ) : undefined
+        }
+      >
+        {canEnable ? null : <AdminAvatars admins={admins} />}
+      </DenialBlock>
+    );
+  }
   return (
     <DenialBlock
       title={`${label} is turned off`}

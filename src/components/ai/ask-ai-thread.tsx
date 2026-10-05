@@ -39,6 +39,8 @@ const ERROR_TEXT: Record<AiSendError, string> = {
   start_failed: "Couldn't start a chat.",
   agent_off: "That agent is not turned on, so this would be a plain Ask AI chat.",
   gone: "This chat was archived or removed, so your message wasn't sent.",
+  ai_limit: "This workspace has used all its AI questions. An Owner or Admin can change the plan in Settings, Plan & billing.",
+  rate_limited: "Too many AI requests at once. Wait a minute and try again.",
 };
 
 const OFFLINE_TEXT = "You're offline. Changes will save when you reconnect.";
@@ -131,8 +133,8 @@ export function AskAiThread({
 
   const errorRow = s.error ? (
     <div role="alert" className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-danger-text">
-      <span>{ERROR_TEXT[s.error]}</span>
-      {s.error === "agent_off" ? (
+      <span>{(s.error === "ai_limit" || s.error === "rate_limited") && s.errorText ? s.errorText : ERROR_TEXT[s.error]}</span>
+      {s.error === "ai_limit" ? null : s.error === "agent_off" ? (
         <Link href="/agents" className="font-medium underline underline-offset-2">See agents</Link>
       ) : s.error === "gone" ? (
         <button type="button" className="whitespace-nowrap font-medium underline underline-offset-2" onClick={() => newChat(true)}>

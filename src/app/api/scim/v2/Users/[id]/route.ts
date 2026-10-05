@@ -14,6 +14,7 @@ import { scimDeprovision, scimReactivated } from "@/lib/scim-deprovision";
 import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 
 export async function GET(
   req: NextRequest,
@@ -99,19 +100,31 @@ export async function PUT(
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  const updated = await prisma.user.update({
-    where: { id },
-    data,
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  // Reactivating someone takes a seat again (src/lib/seats.ts), checked and
+  // taken under the workspace's lock.
+  const placed = await prisma.$transaction(async (tx) => {
+    if (reactivating) {
+      await lockWorkspaceSeats(tx, auth.organizationId);
+      const seats = await seatsFor(auth.organizationId, 1, tx);
+      if (!seats.ok) return { refused: seats.message } as const;
+    }
+    const row = await tx.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return { updated: row } as const;
   });
+  if (placed.refused !== undefined) return scimError(403, placed.refused);
+  const updated = placed.updated;
   if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
@@ -202,19 +215,31 @@ export async function PATCH(
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  const updated = await prisma.user.update({
-    where: { id },
-    data,
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+  // Reactivating someone takes a seat again (src/lib/seats.ts), checked and
+  // taken under the workspace's lock.
+  const placed = await prisma.$transaction(async (tx) => {
+    if (reactivating) {
+      await lockWorkspaceSeats(tx, auth.organizationId);
+      const seats = await seatsFor(auth.organizationId, 1, tx);
+      if (!seats.ok) return { refused: seats.message } as const;
+    }
+    const row = await tx.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return { updated: row } as const;
   });
+  if (placed.refused !== undefined) return scimError(403, placed.refused);
+  const updated = placed.updated;
   if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }

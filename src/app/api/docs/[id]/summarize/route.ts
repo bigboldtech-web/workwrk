@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
@@ -43,12 +44,17 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");
 
-  const msg = await client.messages.create({
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, su.id, "Summarize a doc");
+  if (!claim.ok) return claim.response;
+  const msg = await callOrGiveBack(claim.id, () => client.messages.create({
     model,
     max_tokens: 600,
     system: "You summarize internal company docs for a workspace tool. Output a tight 3-6 sentence summary capturing: what the doc is about, the most important points, any action items. Plain prose, no headings, no bullet points.",
     messages: [{ role: "user", content: `Doc title: ${doc.title}\n\nContent:\n\n${trimmed}` }],
-  });
+  })).catch(() => null);
+  if (!msg) return jsonError("Couldn't reach the AI. Try again in a moment.", 502);
 
   const summary = msg.content
     .filter((b) => b.type === "text")

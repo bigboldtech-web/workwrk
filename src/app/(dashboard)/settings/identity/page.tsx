@@ -507,6 +507,7 @@ function DangerTab() {
       >
         <p>This schedules <span className="font-semibold">{orgName}</span> for deletion: every Space, List, task, doc, table and person in it.</p>
         <p className="text-ink-2">Everyone is signed out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>
+        <p className="text-ink-2">Until then, anyone whose only workspace this is cannot sign up again with the same address. A paid subscription is cancelled now, and restoring the workspace does not bring it back.</p>
       </ConfirmDialog>
     </SettingsCardStack>
   );

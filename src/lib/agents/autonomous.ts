@@ -24,8 +24,10 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { claimAiQuestion, releaseAiQuestion } from "@/lib/ai-allowance";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { isModuleActive } from "@/lib/entitlements";
 import { nextCronRun } from "@/lib/agents/cron";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -42,6 +44,12 @@ export interface RunResult {
   toolCallCount: number;
   durationMs: number;
   errorText?: string;
+  /**
+   * The run never reached the model: the workspace has used all its AI
+   * questions (src/lib/ai-allowance.ts). A plan limit, not a fault, so the
+   * scheduler does not count it as a failed run.
+   */
+  refused?: boolean;
   /**
    * Whose AI key the run used: WorkwrK's ("shared") or the workspace's own
    * ("byok"). A run that failed on its own key is the workspace's to fix, so
@@ -172,7 +180,7 @@ export async function runAgentAutonomously(args: {
     },
   });
 
-  const availableTools = toolsForSession({ agentProductSlug: agent.productSlug ?? null });
+  const availableTools = toolsForSession({ agentProductSlug: agent.productSlug ?? null, tablesOn: await isModuleActive(agent.organizationId, "workwrk-tables") });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
     description: t.description,
@@ -212,11 +220,16 @@ export async function runAgentAutonomously(args: {
   let totalTokensIn = 0;
   let totalTokensOut = 0;
   let finishReason: string | null = null;
-  let errorText: string | null = null;
+  // Each run is one of the plan's AI questions (src/lib/ai-allowance.ts),
+  // handed back when the model failed before doing anything. A workspace with
+  // none left records the run as failed, with the reason, and the schedule
+  // moves on to its next time.
+  const claim = await claimAiQuestion(agent.organizationId, actingUserId, "Agent run");
+  let errorText: string | null = claim.ok ? null : claim.message;
   const toolCallsLog: ToolCallLog[] = [];
 
   try {
-    for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+    for (let iter = 0; claim.ok && iter < MAX_TOOL_ITERATIONS; iter++) {
       const result: Anthropic.Message = await resolved.client.messages.create({
         model,
         max_tokens: 4096,
@@ -291,6 +304,8 @@ export async function runAgentAutonomously(args: {
   } catch (err) {
     errorText = err instanceof Error ? err.message : "Model request failed";
   }
+  // Nothing answered and nothing done: the question goes back.
+  if (claim.ok && errorText && !assistantText && toolCallsLog.length === 0) await releaseAiQuestion(claim.id);
 
   // Pricing approx — same numbers as the chat route.
   const costCents = totalTokensIn && totalTokensOut
@@ -337,6 +352,7 @@ export async function runAgentAutonomously(args: {
     toolCallCount: toolCallsLog.length,
     durationMs,
     errorText: errorText ?? undefined,
+    ...(claim.ok ? {} : { refused: true }),
     keySource: resolved.source,
   };
 }

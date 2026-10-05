@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { tableReadableBy } from "@/lib/table-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MAX_ROWS = 300;
@@ -73,8 +74,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (aiOff) return aiOff;
 
   const ai = await getAnthropicForOrg(orgId);
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), "Ask about a table");
+  if (!claim.ok) return claim.response;
   try {
-    const message = await ai.client.messages.create({
+    const message = await callOrGiveBack(claim.id, () => ai.client.messages.create({
       model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 900,
       system:
@@ -92,7 +97,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             `\n\n${tableMd}\n\nQuestion: ${question}`,
         },
       ],
-    });
+    }));
     const answer = message.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("\n")

@@ -10,7 +10,8 @@
 //   C  signed in as the invited address: one click, no password
 //   D  signed in as somebody else: log out first; nothing is posted
 // Failure screens replace the card at the same URL: invalid, used, expired
-// (with "Ask for a new invitation"), already a member, workspace closed.
+// (with "Ask for a new invitation"), already a member, workspace closed, no
+// free seat (the invitation keeps working once there is room).
 // After joining, a full document navigation to the `landing` the server
 // returned, so the session and the shell are built for the workspace joined.
 
@@ -40,7 +41,7 @@ interface InviteData extends InvitationFacts {
   alreadyInThisOrgInactive?: boolean;
 }
 
-type Failure = { code: "invalid" | "used" | "expired" | "member" | "closed" | "network"; organizationName?: string; expiresAt?: string; inviterName?: string | null; inactive?: boolean };
+type Failure = { code: "invalid" | "used" | "expired" | "member" | "closed" | "full" | "network"; organizationName?: string; expiresAt?: string; inviterName?: string | null; inactive?: boolean };
 
 type State = { kind: "loading" } | { kind: "failed"; failure: Failure } | { kind: "ready"; invite: InviteData };
 
@@ -79,7 +80,7 @@ export function JoinProvider({ token, children }: { token: string | null; childr
         setState({
           kind: "failed",
           failure: {
-            code: ["invalid", "used", "expired", "closed"].includes(code) ? code : "invalid",
+            code: ["invalid", "used", "expired", "closed", "full"].includes(code) ? code : "invalid",
             organizationName: typeof d.organizationName === "string" ? d.organizationName : undefined,
             expiresAt: typeof d.expiresAt === "string" ? d.expiresAt : undefined,
             inviterName: typeof d.inviterName === "string" ? d.inviterName : null,
@@ -230,6 +231,17 @@ function FailureCard({ failure, token }: { failure: Failure; token: string | nul
       <AuthCard drawing title={`${org} is not taking new members`} subtitle="The workspace is suspended or closed. Ask whoever invited you." footer={backToLogin} />
     );
   }
+  if (failure.code === "full") {
+    const who = failure.inviterName || "whoever invited you";
+    return (
+      <AuthCard
+        drawing
+        title={`${org} has no free seat right now`}
+        subtitle={`Ask ${who} to make room, or an Owner or Admin to change the plan. This invitation still works until it expires.`}
+        footer={backToLogin}
+      />
+    );
+  }
   return (
     <AuthCard
       drawing
@@ -317,6 +329,7 @@ export function JoinCard() {
       case "expired":
       case "invalid":
       case "closed":
+      case "full":
         setState({ kind: "failed", failure: { code: d.code, organizationName: org, inviterName: invite?.inviterName ?? null, expiresAt: invite?.expiresAt } });
         break;
       case "account_exists":

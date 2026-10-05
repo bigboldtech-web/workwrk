@@ -11,6 +11,7 @@ import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 
 /**
  * GET /api/v1/people
@@ -154,19 +155,29 @@ export async function POST(req: NextRequest) {
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000);
   const mirrorRole = orgRoleOf({ accessLevel: level });
-  const invite = await prisma.invitation.create({
-    data: {
-      email,
-      token,
-      expiresAt,
-      organizationId: orgId,
-      accessLevel: level as never,
-      orgRole: mirrorRole === "OWNER" ? "ADMIN" : mirrorRole,
-      isAgent: isAgentOf(level),
-      roleId: body.roleId ?? null,
-      departmentId: body.departmentId ?? null,
-    },
+  // The invitation takes a seat, checked and taken under the workspace's
+  // lock (src/lib/seats.ts).
+  const placed = await prisma.$transaction(async (tx) => {
+    await lockWorkspaceSeats(tx, orgId);
+    const seats = await seatsFor(orgId, 1, tx);
+    if (!seats.ok) return { refused: seats.message } as const;
+    const created = await tx.invitation.create({
+      data: {
+        email,
+        token,
+        expiresAt,
+        organizationId: orgId,
+        accessLevel: level as never,
+        orgRole: mirrorRole === "OWNER" ? "ADMIN" : mirrorRole,
+        isAgent: isAgentOf(level),
+        roleId: body.roleId ?? null,
+        departmentId: body.departmentId ?? null,
+      },
+    });
+    return { invite: created } as const;
   });
+  if ("refused" in placed) return Response.json({ error: placed.refused, code: "seat_limit" }, { status: 403 });
+  const invite = placed.invite;
 
   logAuditEvent({
     type: "user.invited",

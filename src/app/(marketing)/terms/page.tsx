@@ -29,7 +29,10 @@ export const metadata: Metadata = {
 //   and the same three claims were removed from /pricing in its own truth
 //   pass for the same reason. What is here now says what the product
 //   actually gives you, which is the portal and the ability to change or
-//   cancel in it.
+//   cancel in it. Batch 13 (2026-10-05): the portal opens only for a
+//   workspace with a Stripe customer, and a workspace without one is told to
+//   write to the billing mailbox (settings/billing/page.tsx), so the
+//   paragraph names both doors, and the page's own name.
 //
 //   Section 5 also carried a dunning schedule: suspended after 14 days,
 //   deleted after 60, with 30 days' notice. The 14 and the 60 appear nowhere
@@ -124,13 +127,17 @@ export default function TermsPage() {
                   credit and the renewal consent were three commitments with
                   nothing behind them in this repo. */}
               <p>
-                Paid plans are billed monthly or annually as selected, through our payment processor. Changing your
-                plan, changing your seat count, updating a card and cancelling are all done from Settings, Billing,
-                which opens that processor&apos;s portal.
+                Paid plans are billed through our payment processor, at the price and billing period shown when you
+                subscribe. Moving from Starter to Growth is done at checkout from Settings, Plan &amp; billing, and a
+                redeemed code moves the workspace to the plan it grants. Once your workspace pays by card, updating the
+                card, seeing invoices and cancelling happen in that processor&apos;s portal, from the same page. Changing
+                the seat count or any other plan change, and everything for a workspace that does not pay by card, is
+                done by writing to us at the address that page gives.
               </p>
               <p>
-                If a payment fails we will retry and contact you. A workspace is suspended before anything is deleted,
-                and section 9 says what happens to the data after that.
+                If a payment fails, our payment processor tries it again. If the subscription still ends unpaid, the
+                workspace moves back to the free Starter plan and keeps its people and its data: nothing is deleted
+                because a payment failed. Section 9 says what happens to the data when a workspace is deleted.
               </p>
             </>
           ),

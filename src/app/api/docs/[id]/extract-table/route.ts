@@ -9,15 +9,20 @@
 // with a list of features and owners). Best results when the doc has
 // structured content; bails with 422 if extraction yields nothing.
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { logActivity } from "@/lib/activity";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
+import { isModuleActive } from "@/lib/entitlements";
+import { moduleNeedsUpgradeFor } from "@/lib/module-plan.server";
+import { moduleUpgradeSentence } from "@/lib/modules";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 
 const COL_TYPES = ["short_text", "long_text", "number", "select", "date", "checkbox", "url", "email"] as const;
 const MAX_INPUT_CHARS = 100_000;
@@ -76,12 +81,30 @@ Rules:
 - Row keys MUST match column labels exactly.
 - If the doc isn't list-like, output: {"name":"","columns":[],"rows":[]}`;
 
-  const msg = await client.messages.create({
+  // The table lands in Tables. With Tables off nobody could open it (on
+  // Starter it cannot be turned on), so nothing is asked and no AI question
+  // is spent.
+  if (!(await isModuleActive(orgId, "workwrk-tables"))) {
+    const needsUpgrade = await moduleNeedsUpgradeFor(orgId, "workwrk-tables");
+    return NextResponse.json(
+      needsUpgrade
+        ? { error: moduleUpgradeSentence("Tables", await sessionMayManageOwnerPage(session, "billing")), code: "plan_required" }
+        : { error: "Tables is off in this workspace. An Owner or Admin can turn it on in Settings, Apps.", code: "module_off" },
+      { status: 403 },
+    );
+  }
+
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, userId, "Turn a doc into a table");
+  if (!claim.ok) return claim.response;
+  const msg = await callOrGiveBack(claim.id, () => client.messages.create({
     model,
     max_tokens: 4000,
     system,
     messages: [{ role: "user", content: `Doc title: ${doc.title}\n\nContent:\n\n${trimmed}` }],
-  });
+  })).catch(() => null);
+  if (!msg) return jsonError("Couldn't reach the AI. Try again in a moment.", 502);
 
   const raw = msg.content
     .filter((b) => b.type === "text")

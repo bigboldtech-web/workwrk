@@ -7,8 +7,9 @@
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const schema = z.object({
@@ -43,14 +44,18 @@ export async function POST(req: NextRequest) {
   if (aiOffAnswer) return aiOffAnswer;
   const resolved = await getAnthropicForOrg(orgId);
   const model = modelFor(resolved, "claude-haiku-4-5");
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), "Write with AI in a doc");
+  if (!claim.ok) return claim.response;
 
   try {
-    const msg = await resolved.client.messages.create({
+    const msg = await callOrGiveBack(claim.id, () => resolved.client.messages.create({
       model,
       max_tokens: 800,
       system: SYSTEMS[tone],
       messages: [{ role: "user", content: prompt }],
-    });
+    }));
     const text = msg.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { type: "text"; text: string }).text)

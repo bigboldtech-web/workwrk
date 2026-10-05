@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { requireBuild } from "@/lib/build/gate";
 import { z } from "zod";
 
@@ -65,14 +66,18 @@ export async function POST(req: Request) {
 
   const resolved = await getAnthropicForOrg(user.organizationId);
   const model = modelFor(resolved, MODEL);
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(c.orgId, c.userId, "Generate an app");
+  if (!claim.ok) return claim.response;
 
   try {
-    const result = await resolved.client.messages.create({
+    const result = await callOrGiveBack(claim.id, () => resolved.client.messages.create({
       model,
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: parsed.data.prompt }],
-    });
+    }));
 
     const text = result.content
       .filter((b) => b.type === "text")

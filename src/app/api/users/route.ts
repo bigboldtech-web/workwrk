@@ -1,8 +1,8 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
@@ -169,10 +169,6 @@ export async function POST(req: NextRequest) {
   if (!fresh.ok) return jsonError(fresh.error, fresh.status);
   if (!legacyIsManagerLevel(fresh.level)) return jsonError("Forbidden", 403);
 
-  // Plan limit enforcement
-  const planCheck = await checkPlanLimit(getOrgId(session), "users");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
-
   const body = await req.json();
   const { firstName, lastName, email, password, departmentId, roleId, accessLevel, managerId } = body;
 
@@ -205,24 +201,34 @@ export async function POST(req: NextRequest) {
   if (pwError) return jsonError(pwError);
   const passwordHash = await bcrypt.hash(password, 12);
 
-  const user = await prisma.user.create({
-    data: {
-      firstName,
-      lastName,
-      email,
-      passwordHash,
-      departmentId,
-      roleId,
-      accessLevel: level,
-      // The org-role mirror, written with the level (spec 10 step 0).
-      orgRole: orgRoleOf({ accessLevel: level }),
-      managerId,
-      organizationId: getOrgId(session),
-    },
-    // Never the password hash, MFA secrets or token version: the answer is
-    // what the person who added them may see.
-    select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, status: true, departmentId: true, roleId: true, managerId: true, organizationId: true, createdAt: true },
+  // The person takes a seat (src/lib/seats.ts), checked and taken under the
+  // workspace's lock so two adds at once cannot both take the last one.
+  const placed = await prisma.$transaction(async (tx) => {
+    await lockWorkspaceSeats(tx, getOrgId(session));
+    const seats = await seatsFor(getOrgId(session), 1, tx);
+    if (!seats.ok) return { refused: seats.message } as const;
+    const row = await tx.user.create({
+      data: {
+        firstName,
+        lastName,
+        email,
+        passwordHash,
+        departmentId,
+        roleId,
+        accessLevel: level,
+        // The org-role mirror, written with the level (spec 10 step 0).
+        orgRole: orgRoleOf({ accessLevel: level }),
+        managerId,
+        organizationId: getOrgId(session),
+      },
+      // Never the password hash, MFA secrets or token version: the answer is
+      // what the person who added them may see.
+      select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, status: true, departmentId: true, roleId: true, managerId: true, organizationId: true, createdAt: true },
+    });
+    return { user: row } as const;
   });
+  if (placed.refused !== undefined) return NextResponse.json({ error: placed.refused, code: "seat_limit" }, { status: 403 });
+  const user = placed.user;
 
   logActivity({
     type: "user_added",

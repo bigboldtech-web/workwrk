@@ -25,6 +25,8 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { isModuleActive } from "@/lib/entitlements";
+import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
@@ -58,9 +60,15 @@ async function ctxAndSession(sessionId: string) {
   if (!session?.user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   const userId = (session.user as { id?: string }).id;
   if (!userId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
+  // Only in the workspace the person is in now: a chat belongs to the
+  // workspace it was started in, and someone removed from that workspace
+  // must not keep spending its AI questions or writing into it through an
+  // old chat.
+  const orgId = (session.user as { organizationId?: string }).organizationId;
+  if (!orgId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
 
   const chat = await prisma.chatSession.findFirst({
-    where: { id: sessionId, userId, archivedAt: null },
+    where: { id: sessionId, userId, organizationId: orgId, archivedAt: null },
     include: {
       agent: {
         select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true },
@@ -121,6 +129,12 @@ export async function POST(req: Request) {
   const c = await ctxAndSession(parsed.data.sessionId);
   if ("error" in c) return c.error;
 
+  // One message is one of the plan's AI questions (src/lib/ai-allowance.ts):
+  // the person's per-minute limit, then the question claimed before anything
+  // is written, and handed back if the model fails.
+  const claim = await claimAiAction(c.chat.organizationId, c.userId, "Ask AI message");
+  if (!claim.ok) return claim.response;
+
   // 1. Persist user message + auto-title.
   const userMessage = await prisma.chatMessage.create({
     data: {
@@ -157,7 +171,7 @@ export async function POST(req: Request) {
   const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   const systemPrompt = contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt;
-  const availableTools = toolsForSession({ agentProductSlug: productScope });
+  const availableTools = toolsForSession({ agentProductSlug: productScope, tablesOn: await isModuleActive(c.chat.organizationId, "workwrk-tables") });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
     description: t.description,
@@ -178,6 +192,7 @@ export async function POST(req: Request) {
   let totalTokensOut = 0;
   let finishReason: string | null = null;
   let errorText: string | null = null;
+  let modelGaveNothing = false;
   const toolCallsLog: ToolCallLog[] = [];
 
   try {
@@ -289,10 +304,13 @@ export async function POST(req: Request) {
     }
   } catch (err) {
     errorText = err instanceof Error ? err.message : "Claude request failed";
+    // Nothing answered and nothing done: the question goes back.
+    modelGaveNothing = !assistantText && toolCallsLog.length === 0;
     if (!assistantText) {
       assistantText = `Sorry, I hit an error reaching the model.\n\n\`${errorText}\``;
     }
   }
+  if (modelGaveNothing) await releaseAiQuestion(claim.id);
 
   // 5. Persist assistant message.
   const assistantMessage = await prisma.chatMessage.create({

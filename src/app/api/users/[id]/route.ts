@@ -56,6 +56,7 @@ import { applyRoleChange, isLiveOwner, lockOrgRoles, roleChangeSentence, wouldRe
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -480,6 +481,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.tokenVersion = { increment: 1 };
   }
 
+  // Reactivating takes a seat again (src/lib/seats.ts): a deactivated person
+  // does not count against the plan, an active one does.
+  const reactivating = typeof data.status === "string" && data.status !== "INACTIVE" && target.status === "INACTIVE" && !target.deletedAt;
+
   if (Object.keys(data).length === 0 && !profilePatch && !roleNext) return err(400, "Nothing to change");
 
   // A role change or a deactivation changes who can do what: the actor is
@@ -499,6 +504,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     | { ok: true; roleChange: AppliedRoleChange | null; user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null };
   const outcome: Outcome = await prisma.$transaction(async (tx) => {
     if (roleNext || deactivating) await lockOrgRoles(tx, ctx.organizationId);
+    if (reactivating) {
+      await lockWorkspaceSeats(tx, ctx.organizationId);
+      const seats = await seatsFor(ctx.organizationId, 1, tx);
+      if (!seats.ok) return { ok: false, status: 403, error: seats.message, code: "seat_limit", fields: ["status"] };
+    }
     if (deactivating) {
       if (await isLiveOwner(ctx.organizationId, id, tx)) {
         const actorOwner = fresh?.ok === true && fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
@@ -621,7 +631,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
 
   if (restore) {
-    await prisma.user.update({ where: { id }, data: { deletedAt: null, status: "ACTIVE" } });
+    // A restored person takes a seat again (src/lib/seats.ts), checked and
+    // taken under the workspace's lock.
+    const refused = await prisma.$transaction(async (tx) => {
+      await lockWorkspaceSeats(tx, ctx.organizationId);
+      const seats = await seatsFor(ctx.organizationId, 1, tx);
+      if (!seats.ok) return seats.message;
+      await tx.user.update({ where: { id }, data: { deletedAt: null, status: "ACTIVE" } });
+      return null;
+    });
+    if (refused) return err(403, refused, { code: "seat_limit" });
     void logActivity({
       type: "user_restored",
       actorId: ctx.userId,

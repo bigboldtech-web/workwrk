@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 /** The parts of Organization.settings this prompt reads. */
@@ -92,8 +93,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), "Generate KRAs and KPIs");
+  if (!claim.ok) return claim.response;
+
   try {
-    const message = await ai.client.messages.create({
+    const message = await callOrGiveBack(claim.id, () => ai.client.messages.create({
       model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 3000,
       system: `You are an HR and performance management expert. Generate Key Result Areas (KRAs) and Key Performance Indicators (KPIs) for job roles.
@@ -142,7 +148,7 @@ Rules:
           content: `Generate KRAs and KPIs for the following job role:\n\nJob Title: ${jobTitle.trim()}\n${jobDescription?.trim() ? `\nJob Description: ${jobDescription.trim()}` : ""}`,
         },
       ],
-    });
+    }));
 
     const textBlock = message.content.find((b) => b.type === "text");
     const text = textBlock && textBlock.type === "text" ? textBlock.text : "";

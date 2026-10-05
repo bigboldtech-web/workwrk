@@ -5,7 +5,7 @@ import {
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
-import { createPortalSession, isBillingLive } from "@/services/billing";
+import { createPortalSession, isBillingLive, ownReturnUrl } from "@/services/billing";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function POST(req: NextRequest) {
@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = (await req.json().catch(() => ({}))) as { returnUrl?: string };
-  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const returnUrl = body.returnUrl ?? `${base}/settings`;
+  // Back to Plan & billing, or to the page asked for on this site only.
+  const returnUrl = ownReturnUrl(body.returnUrl, "/settings/billing");
 
   try {
     const url = await createPortalSession({ organizationId: orgId, returnUrl });

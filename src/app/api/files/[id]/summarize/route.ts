@@ -12,8 +12,10 @@
 import { NextRequest } from "next/server";
 import { withFreshFileUrl } from "@/lib/file-urls";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
+import { canReadFile } from "@/lib/file-access";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const MAX_INPUT_CHARS = 200_000;
@@ -26,9 +28,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const file = await prisma.fileEntry.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, name: true, mimeType: true, url: true, s3Key: true },
+    select: { id: true, name: true, mimeType: true, url: true, s3Key: true, spaceId: true, spaceFolderId: true, organizationId: true },
   });
   if (!file) return jsonError("not found", 404);
+  // The one read gate (src/lib/file-access.ts), as GET /api/files/[id]: a
+  // summary is the file's content, so only someone who can open the file
+  // gets one.
+  const userId = getUserId(session);
+  if (!(await canReadFile(file, userId, (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
 
   let text: string;
   try {
@@ -50,12 +57,17 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { client, preferredModel } = await getAnthropicForOrg(orgId);
   const model = modelFor({ client, source: "shared", preferredModel }, "claude-haiku-4-5");
 
-  const msg = await client.messages.create({
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, userId, "Summarize a file");
+  if (!claim.ok) return claim.response;
+  const msg = await callOrGiveBack(claim.id, () => client.messages.create({
     model,
     max_tokens: 600,
     system: "You summarize uploaded documents for a workspace tool. Output a tight 3-6 sentence summary capturing: what the document is, who it's for, the most important takeaways. Plain prose, no headings, no bullet points. If the text looks like raw OCR, do your best with what's there.",
     messages: [{ role: "user", content: `File name: ${file.name}\n\nContent:\n\n${trimmed}` }],
-  });
+  })).catch(() => null);
+  if (!msg) return jsonError("Couldn't reach the AI. Try again in a moment.", 502);
 
   const summary = msg.content
     .filter((b) => b.type === "text")

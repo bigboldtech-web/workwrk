@@ -1,8 +1,13 @@
 import { NextRequest } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { requireApp } from "@/lib/app-gate";
+
+/** Each text the caller sends is cut to this: a search query and a hit's title are short. */
+const FIELD_MAX = 200;
+const cut = (v: unknown): string => (typeof v === "string" ? v.slice(0, FIELD_MAX) : "");
 
 /**
  * Cmd-K AI summarization. Given a user's free-text query plus the
@@ -19,27 +24,31 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
  * palette.
  *
  * Bounded:
- *   • hits[] capped at 24 — anything longer is truncated server-side
- *   • response capped at ~180 tokens to keep latency tight
- *   • obeys the org's plan AI quota and BYOK if configured
+ *   • the AI app's own gate first (Guests, a hidden app, AI turned off)
+ *   • hits[] capped at 24, and the query and every hit's fields at 200
+ *     characters: the caller writes the prompt, so its size is ours to set
+ *   • response capped at ~180 tokens to keep latency tight, on the small
+ *     model unless the workspace's own key prefers another
+ *   • runs only while the workspace has AI questions left, under its daily
+ *     total of automatic calls, never spends a question
+ *     (src/lib/ai-allowance.ts), and uses BYOK if configured
  */
 export async function POST(req: NextRequest) {
+  const gate = await requireApp("ai");
+  if ("error" in gate) return gate.error;
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const body = await req.json().catch(() => null);
-  const query = typeof body?.query === "string" ? body.query.trim() : "";
-  const rawHits = Array.isArray(body?.hits) ? body.hits.slice(0, 24) : [];
+  const query = cut(body?.query).trim();
+  const rawHits: Array<{ title: string; subtitle: string; type: string; href: string }> = (Array.isArray(body?.hits) ? body.hits.slice(0, 24) : [])
+    .map((h: unknown) => {
+      const r = (h && typeof h === "object" ? h : {}) as Record<string, unknown>;
+      return { title: cut(r.title), subtitle: cut(r.subtitle), type: cut(r.type), href: cut(r.href) };
+    });
   if (!query) return jsonError("query is required");
 
-  const orgId = getOrgId(session);
-  const planCheck = await checkPlanLimit(orgId, "ai");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
-
-  // AI features turned off for the workspace (settings.data.aiEnabled).
-  const aiOff = await aiOffResponse(orgId);
-  if (aiOff) return aiOff;
-
+  // Nothing to summarise: no model call, so nothing of the day is taken.
   if (rawHits.length === 0) {
     return jsonSuccess({
       summary: "No matches yet. Try a person's name, an SOP title or an entity code.",
@@ -47,13 +56,22 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const orgId = getOrgId(session);
+  // AI features turned off for the workspace (settings.data.aiEnabled).
+  const aiOff = await aiOffResponse(orgId);
+  if (aiOff) return aiOff;
+
   const resolved = await getAnthropicForOrg(orgId);
+  // A summary nobody asked for never spends one of the plan's AI questions;
+  // it runs only while the workspace has some left, under the daily totals
+  // on WorkwrK's key (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(orgId, getUserId(session), resolved.source))) return jsonSuccess({ summary: null, suggestedHref: null });
   const ai = resolved.client;
-  const model = modelFor(resolved);
+  const model = modelFor(resolved, "claude-haiku-4-5");
 
   const hitList = rawHits
-    .map((h: { title?: string; subtitle?: string; type?: string; href?: string }, i: number) =>
-      `${i + 1}. [${h.type ?? "?"}] ${h.title ?? ""}${h.subtitle ? ` — ${h.subtitle}` : ""} → ${h.href ?? ""}`,
+    .map((h, i) =>
+      `${i + 1}. [${h.type || "?"}] ${h.title}${h.subtitle ? ` — ${h.subtitle}` : ""} → ${h.href}`,
     )
     .join("\n");
 
@@ -89,7 +107,7 @@ export async function POST(req: NextRequest) {
   if (m) {
     const idx = Number(m[1]) - 1;
     if (idx >= 0 && idx < rawHits.length) {
-      suggestedHref = rawHits[idx]?.href ?? null;
+      suggestedHref = rawHits[idx]?.href || null;
     }
     summary = raw.replace(/\s*>>>\s*\d+\s*$/, "").trim();
   }

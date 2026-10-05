@@ -6,8 +6,10 @@ import {
   jsonError,
   jsonSuccess,
   } from "@/lib/api-helpers";
-import { createCheckoutSession, isBillingLive, type BillingKey } from "@/services/billing";
+import { BillingRefusal, createCheckoutSession, isBillingLive, ownReturnUrl, subscriptionStillOpen, type BillingKey } from "@/services/billing";
 import { settingsWriteGate } from "@/lib/access/settings-write";
+import { seatUse } from "@/lib/seats";
+import { subscriptionSource } from "@/lib/admin/companies-list";
 
 type Body = {
   key?: BillingKey;
@@ -40,16 +42,31 @@ export async function POST(req: NextRequest) {
   if (!body.key || !VALID_KEYS.includes(body.key)) {
     return jsonError(`key must be one of: ${VALID_KEYS.join(", ")}`);
   }
-  const seats = Math.max(1, Math.floor(body.seats ?? 1));
-  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const successUrl = body.successUrl ?? `${base}/settings?billing=success`;
-  const cancelUrl = body.cancelUrl ?? `${base}/settings?billing=canceled`;
+  // The seats bought start at the seats in use, set here, never by the
+  // request: a request for 1 seat on a 10-person workspace would otherwise
+  // buy Growth for one person and keep all ten on it.
+  const use = await seatUse(orgId);
+  const seats = Math.max(1, use.members + use.pending, Math.floor(Number(body.seats) || 0));
+  // Back to Plan & billing, or to the page asked for on this site only.
+  const successUrl = ownReturnUrl(body.successUrl, "/settings/billing?billing=success");
+  const cancelUrl = ownReturnUrl(body.cancelUrl, "/settings/billing?billing=canceled");
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { name: true },
   });
   if (!org) return jsonError("Organization not found", 404);
+  // One subscription per workspace: a second checkout would bill twice. A
+  // row stored as INCOMPLETE may be Stripe's unpaid or paused, which still
+  // bill or come back, so Stripe is asked.
+  const current = await prisma.subscription.findUnique({ where: { organizationId: orgId }, select: { stripeSubscriptionId: true, status: true, billingMode: true, seats: true } });
+  if (current && subscriptionSource(current) === "lifetime" && ["ACTIVE", "TRIALING", "PAST_DUE"].includes(String(current.status))) {
+    return jsonError("This workspace has a lifetime plan from a code, which a card subscription would not change. Email billing@workwrk.com to change the plan.", 409);
+  }
+  if (current?.stripeSubscriptionId && String(current.status) !== "CANCELED") {
+    const live = ["ACTIVE", "TRIALING", "PAST_DUE"].includes(String(current.status)) || (await subscriptionStillOpen(current.stripeSubscriptionId).catch(() => true));
+    if (live) return jsonError("This workspace already has a subscription. Change it from Manage billing.", 409);
+  }
 
   const adminEmail = session.user.email;
   if (!adminEmail) return jsonError("Admin email missing from session");
@@ -66,6 +83,7 @@ export async function POST(req: NextRequest) {
     });
     return jsonSuccess({ url, sessionId });
   } catch (err) {
+    if (err instanceof BillingRefusal) return jsonError(err.message, 409);
     const msg = err instanceof Error ? err.message : "Failed to create checkout session";
     return jsonError(msg, 500);
   }

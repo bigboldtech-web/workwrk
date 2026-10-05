@@ -51,3 +51,26 @@ export const MODULE_BY_APP_KEY: Record<string, ModuleDef> = Object.fromEntries(
 export const MODULE_BY_SLUG: Record<string, ModuleDef> = Object.fromEntries(
   MODULES.map((m) => [m.productSlug, m]),
 );
+
+// ── Which plans include a module ───────────────────────────────────────
+// Talk and Tables are included from the Growth plan (pricing.json lists them
+// under premiumModules, fromTier "growth", and Starter's modules as false).
+// A Starter workspace that never had one cannot turn it on. One that had it,
+// on or off, keeps it: a plan rule never takes away what a workspace already
+// had (their channels and tables stay theirs to open).
+
+/** The plan a module is included from, as pricing names it. */
+export const MODULE_FROM_PLAN = "Growth";
+
+/** True when turning the module on needs a plan change first. */
+export function moduleNeedsUpgrade(plan: string | null | undefined, everInstalled: boolean): boolean {
+  return String(plan || "STARTER") === "STARTER" && !everInstalled;
+}
+
+/** The sentence for a module that needs a plan change. */
+export function moduleUpgradeSentence(label: string, canChangePlan: boolean): string {
+  return canChangePlan
+    ? `${label} is included from the ${MODULE_FROM_PLAN} plan. Change the plan in Settings, Plan & billing.`
+    : `${label} is included from the ${MODULE_FROM_PLAN} plan. Ask an Owner or Admin to change the plan.`;
+}
+
