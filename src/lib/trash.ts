@@ -908,12 +908,19 @@ export async function moveToTrash(
     // deleted in one transaction under row locks (Phase 5b, their links).
     // Drive folder: files and subfolders reference it with SetNull, so remove
     // the files, then every folder in the subtree, then the root, in one
-    // transaction. The ids come from the snapshot just captured.
+    // transaction. The ids come from the snapshot just captured, files too,
+    // as the Space folder above does: a file uploaded or moved into the
+    // folder after the capture is in no snapshot, so deleting by folder
+    // would lose it for good; left alone, its folder's SetNull keeps it at
+    // the Files root. A captured file moved out meanwhile stays where it was
+    // put (a restore skips the copy, and the purge frees no stored file a
+    // live row still names).
     case "file_folder": {
-      const snap = captured.snapshot as { children?: { folders?: Row[] } };
+      const snap = captured.snapshot as { children?: { folders?: Row[]; files?: Row[] } };
       const ids = [id, ...(snap.children?.folders ?? []).map((f) => f.id as string)];
+      const fileIds = (snap.children?.files ?? []).map((f) => f.id as string);
       await prisma.$transaction(async (tx) => {
-        await tx.fileEntry.deleteMany({ where: { folderId: { in: ids } } });
+        if (fileIds.length) await tx.fileEntry.deleteMany({ where: { id: { in: fileIds }, folderId: { in: ids } } });
         await tx.fileFolder.deleteMany({ where: { id: { in: ids } } });
       });
       break;

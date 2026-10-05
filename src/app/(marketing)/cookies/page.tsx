@@ -110,8 +110,8 @@ export default function CookiesPage() {
             </p>
             <p>
               One thing is written on our side rather than yours. When you dismiss the cookie notice we keep a record that
-              it was shown, with the time, your IP address and your browser's user agent string, and your country and region
-              when the request carries them.
+              it was shown, under the random id the wwrk_consent cookie holds, with the time, your IP address and your
+              browser's user agent string, and your country and region when the request carries them.
               It does not follow what you read.
             </p>
             </>

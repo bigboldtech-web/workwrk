@@ -125,8 +125,8 @@ export default function PrivacyPage() {
                   guess. */}
               <p>
                 <strong>Consent records.</strong> When you dismiss the cookie notice we keep a record that it was shown,
-                with the time, your IP address and your user agent, and your country and region when the request carries
-                them. It is kept whether or not you have an account.
+                under the random id the wwrk_consent cookie holds, with the time, your IP address and your user agent, and
+                your country and region when the request carries them. It is kept whether or not you have an account.
               </p>
               {/* The demo form (/api/demo-request) emails what it collects
                   to the sales mailbox and stores nothing in the product; a
@@ -253,10 +253,14 @@ export default function PrivacyPage() {
                   files the workspace provably stored (src/lib/company-files.ts)
                   and says plainly which older uploads it cannot tell apart;
                   the nightly backup keeps at most 90 days
-                  (scripts/backup/backup.sh BACKUP_KEEP_DAYS). */}
+                  (scripts/backup/backup.sh BACKUP_KEEP_DAYS). The closure date
+                  is the first full day the staff closure's schedule is live
+                  (Batch 14 deploys on 6 October 2026), named outright so it
+                  never moves with "Last updated"; LAUNCH-CHECKLIST.md names
+                  the same date for the closures made before it. */}
               <p>
                 Account data is retained for the life of your subscription. After termination, when you delete the
-                workspace, or when we close it (on or after the date at the top of this policy), we retain workspace data
+                workspace, or when we close it (from 7 October 2026), we retain workspace data
                 for 30 days (in case you reactivate), then permanently delete it, with the files it stored. Some files
                 uploaded before 6 October 2026 were not recorded against
                 the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}

@@ -165,7 +165,8 @@ export const LEGAL_COPY = {
     // 2026 (Batch 14): demo and contact requests in section 1, what the
     // export holds in section 5, and deletion, older files and backups in
     // section 6. 6 October 2026: section 6 says which closures are deleted
-    // after 30 days, and the older-files date.
+    // after 30 days (from a named date, not this one), and the older-files
+    // date; section 1 names the random id a consent record is filed under.
     updated: "6 October 2026",
   },
   terms: {
@@ -185,7 +186,8 @@ export const LEGAL_COPY = {
     // cookies this codebase actually sets. That is a new disclosure, so it
     // carries the date it was written rather than the old one's. 5 October
     // 2026: section 4 no longer claims a recorded answer covers cookies added
-    // later, and the banner asks only about preferences.
+    // later, and the banner asks only about preferences. 6 October 2026:
+    // section 1 names the random id a consent record is filed under.
     updated: "6 October 2026",
   },
 } as const;

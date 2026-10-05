@@ -166,7 +166,8 @@ Before taking a real card:
   cannot add people or ask the AI until it changes plan.
 - Companies cancelled from the Staff console before Batch 14 have no
   deletion date, so nothing deletes them, and the privacy policy promises
-  deletion 30 days after closure only for those closed from 7 October 2026.
+  deletion 30 days after closure only for those closed from 7 October 2026,
+  the date privacy section 6 names.
   List them (read only, on the box): `SELECT id, name FROM "Organization"
   WHERE status = 'CANCELLED' AND settings->>'scheduledHardDeleteAt' IS NULL;`.
   For each one you decide to delete, set it to Suspended and then to
