@@ -193,8 +193,9 @@ export default function TermsPage() {
                 accounts that violate these terms, with notice where possible.
               </p>
               <p>
-                On termination: live data is kept for 30 days so you can reactivate, then permanently deleted, and
-                backups keep a copy for at most 90 days.
+                On termination: live data is kept for 30 days so you can reactivate, then permanently deleted, except
+                some files uploaded before 6 October 2026, which we delete by hand when you ask (privacy policy,
+                section 6). Backups keep a copy for at most 90 days.
               </p>
             </>
           ),

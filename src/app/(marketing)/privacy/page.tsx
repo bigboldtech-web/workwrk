@@ -124,9 +124,9 @@ export default function PrivacyPage() {
                   account, which is the part a reader would not otherwise
                   guess. */}
               <p>
-                <strong>Consent records.</strong> When you answer the cookie banner we store your answer with the time,
-                your country and region, your IP address and your user agent, as proof of the choice. It is kept whether
-                or not you have an account.
+                <strong>Consent records.</strong> When you dismiss the cookie notice we keep a record that it was shown,
+                with the time, your country and region, your IP address and your user agent. It is kept whether or not
+                you have an account.
               </p>
               {/* The demo form (/api/demo-request) emails what it collects
                   to the sales mailbox and stores nothing in the product; a

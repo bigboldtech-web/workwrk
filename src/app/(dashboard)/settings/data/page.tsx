@@ -412,7 +412,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
             id="data.retention.trashDays"
             label="Keep deleted items in Trash for"
             helper={purges
-              ? "Items in Trash are deleted for good after this many days, except Docs and canvases, which stay until an Owner or Admin deletes them."
+              ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them."
               : "Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."}
             savedAt={saved.trash}
             error={retryOf("trash")}
@@ -527,7 +527,7 @@ function TrashTab() {
       <div className="flex flex-col gap-2">
         <p className="text-base text-ink">
           {purges
-            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs and canvases moved to Trash stay there until an Owner or Admin deletes them.`
+            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs, canvases and contracts moved to Trash stay there until an Owner or Admin deletes them.`
             : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good."}
         </p>
         <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>

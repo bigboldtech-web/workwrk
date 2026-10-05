@@ -54,7 +54,6 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { CONTRACT_STATUS_COLOR, CONTRACT_STATUS_LABEL, PARTY_STATUS_COLOR, PARTY_STATUS_LABEL, parseContractStatus, parsePartyStatus, partyHue, partyRoleLabel, partySendErrors, type PartyRole } from "@/lib/contracts";
 import { nextRetryDelay } from "@/lib/sop-save-state";
 import type { AutosaveStatus } from "@/hooks/use-autosave";
-import { trashRestoreSentence } from "@/lib/trash-view";
 
 type Party = BuilderParty & { email: string; status: string; token?: string; signedAt?: string | null; declinedAt?: string | null; userId?: string | null };
 interface Agreement {
@@ -317,7 +316,7 @@ export default function AgreementEditorPage() {
   };
   const archive = async () => {
     if (!ag) return;
-    const ok = await confirm({ title: "Move to Trash?", description: `${trashRestoreSentence(boot.org)}`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: "Move to Trash?", description: "You can restore it from Trash.", confirmLabel: "Move to Trash", destructive: true });
     if (!ok) return;
     const r = await apiFetch(`/api/agreements/${id}`, { method: "PATCH", json: { archived: true } });
     if (!r.ok) { toast(r.error || "Couldn't archive", { tone: "danger" }); return; }

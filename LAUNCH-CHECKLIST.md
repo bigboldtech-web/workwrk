@@ -161,7 +161,11 @@ Before taking a real card:
   deletion 30 days after closure only for those closed from 5 October 2026.
   List them (read only, on the box): `SELECT id, name FROM "Organization"
   WHERE status = 'CANCELLED' AND settings->>'scheduledHardDeleteAt' IS NULL;`.
-  For each one you decide to delete, set it to Suspended and then to
-  Cancelled on its company page: that writes the 30 day schedule and its
-  deletion record. Never a blind backfill.
+  Every one set to Cancelled on or after 5 October 2026 (the date is on its
+  status change in the company page's activity) MUST be set to Suspended and
+  then to Cancelled again once Batch 14 is live: the privacy policy promises
+  its deletion 30 days after closure, and only Batch 14 writes that schedule.
+  For the older ones, decide; for each one you decide to delete, do the same.
+  That writes the 30 day schedule and its deletion record. Never a blind
+  backfill.
 - A real inbox someone reads for `hello@workwrk.com` (every email's Reply-To, `EMAIL_REPLY_TO`) and `billing@workwrk.com` (Plan & billing names it).

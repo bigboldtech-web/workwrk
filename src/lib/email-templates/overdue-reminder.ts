@@ -24,7 +24,7 @@ export function overdueManagerTemplate(vars: OverdueManagerVars): { subject: str
   // A cut list says so: "the following items" over the 50 oldest read as
   // the whole team's work when there were more.
   const more = total > vars.items.length
-    ? `<p class="meta">Showing the ${vars.items.length} oldest of ${total}. The rest are on the dashboard.</p>`
+    ? `<p class="meta">Showing the ${vars.items.length} oldest of ${total}.</p>`
     : "";
 
   const html = baseLayout(`

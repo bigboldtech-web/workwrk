@@ -38,20 +38,33 @@ const PAGE = 1000;
 const PER_DIGEST = 50;
 
 /**
- * Every row of a read, a page at a time in the read's order (then by id), so
- * no workspace is cut at a fixed number of rows.
+ * Every row of a read, a page at a time, so no workspace is cut at a fixed
+ * number of rows. Keyset paging on the last row's own values, held here (the
+ * read turns `last` into "after it" in its order): a cursor re-reads the last
+ * row from the database, so a row that changed between two pages could end
+ * the read early or lose a row.
  */
-async function eachPage<T extends { id: string }>(
-  read: (page: { take: number; cursor?: { id: string }; skip?: number }) => Promise<T[]>,
+type PageRow = { id: string; dueAt?: Date | null; dueDate?: Date | null };
+
+async function eachPage<T extends PageRow>(
+  read: (page: { take: number; last: PageRow | null }) => Promise<T[]>,
   onPage: (rows: T[]) => Promise<void> | void,
 ): Promise<void> {
-  let cursor: string | null = null;
+  let last: PageRow | null = null;
   for (;;) {
-    const rows: T[] = await read({ take: PAGE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+    const rows: T[] = await read({ take: PAGE, last });
     if (rows.length > 0) await onPage(rows);
     if (rows.length < PAGE) return;
-    cursor = rows[rows.length - 1].id;
+    last = rows[rows.length - 1];
   }
+}
+
+/** "After this row" in an order of (a date, then id). */
+function afterRow(field: "dueAt" | "dueDate", last: PageRow | null) {
+  if (!last) return [];
+  const at = last[field];
+  if (!at) return [{ id: { gt: last.id } }];
+  return [{ OR: [{ [field]: { gt: at } }, { [field]: at, id: { gt: last.id } }] }];
 }
 
 type DigestLine = { type: string; title: string; personName: string; daysOverdue: number };
@@ -181,14 +194,14 @@ async function handle(req: NextRequest) {
     for (const organizationId of await liveWorkspaceIds()) {
       const digest = new Digests();
       await eachPage(
-        (page) => prisma.sOPAssignment.findMany({
-          where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON },
+        ({ take, last }) => prisma.sOPAssignment.findMany({
+          where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON, AND: afterRow("dueDate", last) as Prisma.SOPAssignmentWhereInput[] },
           include: {
             sop: { select: { title: true, organizationId: true } },
             user: { select: { id: true, email: true, firstName: true, lastName: true, manager: managerSelect(organizationId) } },
           },
           orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-          ...page,
+          take,
         }),
         async (overdueSops) => {
           assignments += overdueSops.length;
@@ -251,11 +264,11 @@ async function handle(req: NextRequest) {
       if (!open.where.OR || (open.where.OR as unknown[]).length === 0) continue;
       const digest = new Digests();
       await eachPage(
-        (page) => prisma.item.findMany({
-          where: { ...open.where, archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
+        ({ take, last }) => prisma.item.findMany({
+          where: { ...open.where, archivedAt: null, dueAt: { lt: now }, ownerId: { not: null }, AND: afterRow("dueAt", last) as Prisma.ItemWhereInput[] },
           select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
           orderBy: [{ dueAt: "asc" }, { id: "asc" }],
-          ...page,
+          take,
         }),
         async (overdueRows) => {
           const overdueTasks = overdueRows.filter((r) => !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status));
@@ -316,11 +329,11 @@ async function handle(req: NextRequest) {
       // Phase 2 W4, as above: Items, not the legacy `Task` table. Every
       // row, a page at a time.
       await eachPage(
-        (page) => prisma.item.findMany({
-          where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null } },
+        ({ take, last }) => prisma.item.findMany({
+          where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
           select: { id: true, title: true, status: true, boardId: true, ownerId: true },
           orderBy: { id: "asc" },
-          ...page,
+          take,
         }),
         async (dueRows) => {
           const dueToday = dueRows.filter(

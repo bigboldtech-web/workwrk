@@ -106,22 +106,30 @@ const STAFF_DELETION = /^wd_staff_/;
 async function ownerDeletionRows(
   records: { id: string; organizationId: string; plan: string | null; requestedAt: Date }[],
 ): Promise<Cancellation[]> {
+  // Staff cancellations read as the console's "Workspace cancelled", the same
+  // id and kind as their StaffAction row, so the two are one line; and after
+  // the purge (which unlinks the StaffAction) it still says so. One row per
+  // company AND kind (records come newest first), so an Owner's deletion and
+  // a staff cancellation in one range both stay; only the company's newest
+  // row of either kind can be the deletion still pending.
+  const kindOf = (r: (typeof records)[number]) => (STAFF_DELETION.test(r.id) ? ("workspace" as const) : ("deleted" as const));
   const newest = new Map<string, (typeof records)[number]>();
+  const newestOfCompany = new Map<string, (typeof records)[number]>();
   for (const r of records) {
-    if (!newest.has(r.organizationId)) newest.set(r.organizationId, r);
+    const key = `${r.organizationId}:${kindOf(r)}`;
+    if (!newest.has(key)) newest.set(key, r);
+    if (!newestOfCompany.has(r.organizationId)) newestOfCompany.set(r.organizationId, r);
   }
   if (newest.size === 0) return [];
   const orgs = await prisma.organization.findMany({
-    where: { id: { in: [...newest.keys()] } },
+    where: { id: { in: [...newestOfCompany.keys()] } },
     select: { id: true, name: true, plan: true, status: true, settings: true },
   });
   const byId = new Map(orgs.map((o) => [o.id, o]));
-  return [...newest].map(([id, r]) => {
+  return [...newest.values()].map((r) => {
+    const id = r.organizationId;
     const org = byId.get(id);
-    // Staff cancellations read as the console's "Workspace cancelled", the
-    // same id and kind as their StaffAction row, so the two are one line; and
-    // after the purge (which unlinks the StaffAction) it still says so.
-    const what = STAFF_DELETION.test(r.id) ? ("workspace" as const) : ("deleted" as const);
+    const what = kindOf(r);
     if (!org) {
       return {
         id,
@@ -134,13 +142,14 @@ async function ownerDeletionRows(
       };
     }
     const scheduled = !!(org.settings as { cancelledAt?: unknown } | null)?.cancelledAt;
+    const pending = org.status === "CANCELLED" && scheduled && newestOfCompany.get(id) === r;
     return {
       id,
       name: org.name,
       plan: org.plan as string,
       canceledAt: r.requestedAt.toISOString(),
       what,
-      restored: !(org.status === "CANCELLED" && scheduled),
+      restored: !pending,
     };
   });
 }

@@ -16,7 +16,7 @@ const DEFAULTS: InboxOptions = {
   groupByDate: true,
   showAll: false,
   sortNewest: true,
-  autoClearDays: null,
+  deleteClearedDays: null,
   defaultTab: "primary",
   mode: "inline",
 };
@@ -37,7 +37,7 @@ export default async function InboxPage() {
         groupByDate: stored.groupByDate ?? DEFAULTS.groupByDate,
         showAll: stored.showAll ?? DEFAULTS.showAll,
         sortNewest: stored.sortNewest ?? DEFAULTS.sortNewest,
-        autoClearDays: stored.autoClearDays ?? DEFAULTS.autoClearDays,
+        deleteClearedDays: stored.deleteClearedDays ?? DEFAULTS.deleteClearedDays,
         defaultTab: stored.defaultTab ?? DEFAULTS.defaultTab,
         mode: stored.mode === "fullscreen" ? "fullscreen" : DEFAULTS.mode,
       }}

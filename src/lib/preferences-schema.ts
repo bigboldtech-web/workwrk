@@ -140,9 +140,16 @@ export const inboxViewSchema = z.strictObject({
   groupByDate: z.boolean().optional(),
   sortNewest: z.boolean().optional(),
   /**
-   * Days after which READ rows are swept by the daily auto-clear cron
-   * (scripts/CRON-SETUP.md). `null` is "Never", which is the default: nothing
-   * deletes a person's notifications unless they asked for it.
+   * Days after a notification was CLEARED that the daily cron deletes it for
+   * good (scripts/CRON-SETUP.md), chosen under "Delete cleared
+   * notifications". `null` is "Never", the default: nothing deletes a
+   * person's notifications unless they asked for it.
+   */
+  deleteClearedDays: z.number().int().min(1).max(365).nullable().optional(),
+  /**
+   * Legacy: chosen under "Auto-clear read notifications", which described a
+   * different job. Accepted and NEVER acted on, so turning the job on deletes
+   * nothing for a choice made under the old words.
    */
   autoClearDays: z.number().int().min(1).max(365).nullable().optional(),
   /** Which tab the Inbox opens on. Only the three a person reads. */

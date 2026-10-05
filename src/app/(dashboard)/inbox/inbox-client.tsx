@@ -72,7 +72,7 @@ export interface InboxOptions {
   showAll: boolean;
   sortNewest: boolean;
   /** Days after a row was Cleared that the daily cron deletes it for good. Null = never. */
-  autoClearDays: number | null;
+  deleteClearedDays: number | null;
   /**
    * Only the three tabs a person READS. Snoozed and Cleared are places rows go
    * on their way out; opening the Inbox on one of them every morning is not a
@@ -606,7 +606,7 @@ export function InboxClient({
                 ...(options.showAll ? ["showAll"] : []),
                 `tab:${options.defaultTab}`,
                 `mode:${options.mode ?? "inline"}`,
-                `clear:${options.autoClearDays ?? 0}`,
+                `clear:${options.deleteClearedDays ?? 0}`,
               ]}
               sections={[
                 {
@@ -669,7 +669,7 @@ export function InboxClient({
                 }
                 if (value.startsWith("clear:")) {
                   const days = Number(value.slice(6));
-                  void saveOption({ autoClearDays: days > 0 ? days : null });
+                  void saveOption({ deleteClearedDays: days > 0 ? days : null });
                 }
               }}
             />

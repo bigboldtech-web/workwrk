@@ -322,8 +322,8 @@ export function trashCsv(rows: readonly TrashCsvRow[], tab: TrashTab, opts: { ex
  * the purge on (`trashPurges`, src/lib/purge-jobs.ts) Trash empties itself
  * after the workspace's window, so the window is the promise; with it off
  * nothing empties Trash, and a day count would promise a deletion that never
- * comes. Docs and canvases are archived, never purged, so they say neither
- * (they use "You can restore it from Trash.").
+ * comes. Docs, canvases and contracts are archived, never purged, so they say
+ * neither (they use "You can restore it from Trash.").
  */
 export function trashRestoreSentence(org: { trashDays: number; trashPurges?: boolean }, many = false): string {
   const them = many ? "them" : "it";

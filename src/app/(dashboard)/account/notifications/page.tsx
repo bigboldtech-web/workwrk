@@ -295,15 +295,15 @@ function InboxTab() {
               control={
                 <PickerSelect
                   label="Delete cleared items after"
-                  value={String(view.autoClearDays ?? "never")}
+                  value={String(view.deleteClearedDays ?? "never")}
                   options={[
                     { value: "never", label: "Never" },
                     { value: "7", label: "7 days" },
                     { value: "14", label: "14 days" },
                     { value: "30", label: "30 days" },
-                    ...(view.autoClearDays && ![7, 14, 30].includes(view.autoClearDays) ? [{ value: String(view.autoClearDays), label: `${view.autoClearDays} days` }] : []),
+                    ...(view.deleteClearedDays && ![7, 14, 30].includes(view.deleteClearedDays) ? [{ value: String(view.deleteClearedDays), label: `${view.deleteClearedDays} days` }] : []),
                   ]}
-                  onChange={(v) => setView("clear", { autoClearDays: v === "never" ? null : Number(v) })}
+                  onChange={(v) => setView("clear", { deleteClearedDays: v === "never" ? null : Number(v) })}
                 />
               }
             />

@@ -240,9 +240,12 @@ adding the row, and check the 503 is gone by running the dry run below.
 states (`prisma/sql/2026-09-18-notification-cleared-at.sql`). A row you have
 read still sits in your Primary tab where you can see it, so the sweep takes
 only rows you filed away with Clear. On a database that still predates the
-`clearedAt` column the route falls back to `read = true`, which was the same
-set of rows under the old semantics, so applying the SQL file late changes
-nothing about what gets deleted.
+`clearedAt` column the route deletes NOTHING and says so (`columnMissing` in
+its answer) until `prisma/sql/2026-09-18-notification-cleared-at.sql` is
+applied. Choices made under the old "Auto-clear read notifications" words
+(`inboxView.autoClearDays`) described another job and are never acted on:
+only a choice made under "Delete cleared notifications"
+(`inboxView.deleteClearedDays`) is.
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
@@ -346,10 +349,11 @@ entries went. It never deletes the rows features read back (weekly review
 decisions, goal creators, invitations, shares, the retired permissions grid,
 the access backfill's record, every change to the access switches and Public
 links, the public link carry-over's and repair's records, consent and staff
-rows: `src/lib/audit-retention.ts`). Until this row AND the
-trash-purge row are installed, both retention rows sit behind Show upcoming
-features on Data > Retention, captioned "Not enforced yet"; once both rows are
-in, move them out (data/page.tsx RetentionTab).
+rows: `src/lib/audit-retention.ts`). The Trash row of Data > Retention leaves
+Show upcoming features, with a helper saying it is enforced, as soon as
+`TRASH_PURGE_CRON` and `TRASH_PURGE_SINCE` are on. The audit row stays behind
+Show upcoming, captioned "Not enforced yet", until this row is installed; then
+move it out (data/page.tsx RetentionTab).
 
 | Job | Schedule | Command |
 |---|---|---|

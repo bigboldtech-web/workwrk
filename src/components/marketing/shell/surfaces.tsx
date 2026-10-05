@@ -791,7 +791,8 @@ export function GoalDetailSurface({ percent }: { percent?: number }) {
             {([
               ["Hours logged", `${goal.effortCounts.hoursLogged}h`],
               ["Tasks done", String(goal.effortCounts.tasksDone)],
-              ["In progress", String(goal.effort.length)],
+              // The story's task is done by 4:45, so it is not in progress.
+              ["In progress", String(goal.effort.filter((e) => e.taskId !== tuesday.task.id).length)],
               ["Last moved", goal.effortCounts.lastMoved],
             ] as const).map(([label, value]) => (
               <div key={label} style={{ border: "1px solid var(--os-line)", borderRadius: 6, padding: "8px 10px" }}>

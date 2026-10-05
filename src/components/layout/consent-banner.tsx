@@ -106,7 +106,7 @@ export function ConsentBanner() {
                   {/* Same promise, two lengths: the short one keeps the card
                       off the sign-in form on a phone. */}
                   <span className="sm:hidden">
-                    Essential cookies only: no analytics, no advertising.
+                    No analytics, no advertising cookies.
                   </span>
                   <span className="hidden sm:inline">
                     We use essential cookies to run the site, and remember the language and
@@ -160,8 +160,14 @@ export function ConsentBanner() {
             </div>
             <div className="flex flex-col gap-2">
               <Row
-                title="Strictly necessary"
-                description="Required for the site to work: login, security, language/currency preference. Cannot be disabled."
+                title="Essential"
+                description="Keeps you signed in, protects the sign-in form and remembers that you have seen this notice. Cannot be turned off."
+                checked
+                disabled
+              />
+              <Row
+                title="Language and currency"
+                description="Set only when you pick a language or a currency, to remember it."
                 checked
                 disabled
               />
@@ -170,8 +176,7 @@ export function ConsentBanner() {
                   choices are saved with the account, not in a cookie, and
                   nothing here ever read a Preferences answer. */}
               <p className="text-sm text-zinc-500">
-                Nothing optional: no preference, analytics or advertising cookies, so there is nothing to turn on or
-                off.
+                Nothing else: no analytics or advertising cookies, so there is nothing to turn on or off.
               </p>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-1.5 sm:gap-2">

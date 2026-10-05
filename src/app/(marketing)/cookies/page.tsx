@@ -65,7 +65,7 @@ const COOKIES = [
   },
   {
     name: "wwrk_consent",
-    purpose: "Records the cookie choice you made on the banner.",
+    purpose: "Remembers that you have seen the cookie notice, so it is not shown again.",
     duration: "180 days",
     type: "Essential",
   },
@@ -108,9 +108,9 @@ export default function CookiesPage() {
               the language and currency you picked. No analytics vendor, no ad network and no pixel runs on this site.
             </p>
             <p>
-              One thing is written on our side rather than yours. When you answer the cookie banner we store the answer
-              as proof of it, with the time, your country and region, your IP address and your browser's user agent
-              string. It records the choice you made; it does not follow what you read.
+              One thing is written on our side rather than yours. When you dismiss the cookie notice we keep a record that
+              it was shown, with the time, your country and region, your IP address and your browser's user agent string.
+              It does not follow what you read.
             </p>
             </>
           ),

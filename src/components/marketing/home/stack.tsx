@@ -227,7 +227,7 @@ const VIEWS: Array<{
     hub: "goals",
     breadcrumb: ["Goals", "Q3"],
     note: "OKRs, KRAs and KPIs whose progress rolls up from key results, KPI readings and child goals, with the work linked to each goal one click away.",
-    a11y: "A goal detail page with its progress ring and the linked work rolling up into it.",
+    a11y: "A goal detail page with its progress ring and the work linked to it.",
     canvas: <GoalDetailSurface />,
   },
 ];

@@ -30,8 +30,10 @@ export type TrashType =
   // Build app with its rows (App.ui.rows travels inside the row itself).
   | "tool" | "asset" | "app";
 
-/** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
-export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
+/** The trash kinds whose snapshot names file blobs (freed on permanent delete):
+ *  a file, a files folder, and a Space Folder or a Space with the files they
+ *  carry, so a purged Space's uploads do not outlive it. */
+export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder", "folder", "space"];
 
 /** Every trash kind whose snapshot holds Files rows that a restore brings back
  *  (a Space Folder and a Space carry their files too): a file one of them
@@ -95,7 +97,9 @@ function filesOf(entityType: string, snapshot: unknown): FileRow[] {
     const row = (snapshot as { row?: FileRow } | null)?.row;
     return row ? [row] : [];
   }
-  if (entityType === "file_folder") return (snapshot as { children?: { files?: FileRow[] } } | null)?.children?.files ?? [];
+  if (entityType === "file_folder" || entityType === "folder" || entityType === "space") {
+    return (snapshot as { children?: { files?: FileRow[] } } | null)?.children?.files ?? [];
+  }
   return [];
 }
 
