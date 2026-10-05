@@ -13,9 +13,7 @@
 
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile } from "fs/promises";
-import path from "path";
-import { uploadsDirForWrite } from "@/lib/local-uploads";
+import { writeUpload } from "@/lib/local-uploads";
 import { randomBytes } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { isS3Configured, getBucket, getS3Client, presignGetUrl } from "@/lib/s3";
@@ -119,7 +117,7 @@ export async function POST(req: NextRequest) {
   // src/lib/trash.ts).
   const safeName = `file-${orgId}-${stem}.${ext || "bin"}`;
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(await uploadsDirForWrite(), safeName), buffer);
+  await writeUpload(safeName, buffer);
   return NextResponse.json({
     url: `/api/uploads/${safeName}`,
     s3Key: null,

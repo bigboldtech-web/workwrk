@@ -63,9 +63,21 @@ jobs:
         id: pick
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # The CI run that started an automatic run; empty for a manual one.
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_NUM: ${{ github.event.workflow_run.run_number }}
         run: |
           set -euo pipefail
-          runs="repos/${{ github.repository }}/actions/workflows/ci.yml/runs"
+          runs="repos/$REPO/actions/workflows/ci.yml/runs"
+          # WHICH RUNS COUNT IS DECIDED HERE, from each run's own fields, and
+          # GitHub is asked with one filter only. Its list answers some filter
+          # combinations from an index it does not keep current: asked for
+          # branch=main, event=push and status=success together on 2026-10-05,
+          # it named a run from 2026-09-07 as the newest, so the first deploy
+          # of Batch 12 picked a month-old commit (the box refused it as older
+          # than the live one, so production did not change).
+          green='.conclusion == "success" and .event == "push" and .head_branch == "main" and .head_repository.full_name == $repo'
           if [ -n "${REQUESTED_SHA:-}" ]; then
             sha="$REQUESTED_SHA"
             if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
@@ -75,20 +87,29 @@ jobs:
             # A run of a PUSH to main only: a pull request's run tested a
             # merge ref (that head merged into main at the time, or a fork's
             # own ci.yml), never the commit itself.
-            n=$(gh api "$runs?head_sha=$sha&status=success&event=push&branch=main&per_page=1" --jq '.total_count')
+            n=$(gh api "$runs?head_sha=$sha&per_page=50" \
+              | jq -r --arg repo "$REPO" --arg sha "$sha" "[.workflow_runs[] | select(.head_sha == \$sha and $green)] | length")
             if [ "${n:-0}" -lt 1 ]; then
               echo "::error::CI has not passed on a push to main for $sha, so it is not deployed."
               exit 1
             fi
           else
-            # The newest commit on main whose push CI passed, never the one a
-            # run happened to start for and never "whatever main is now". A
-            # re-run of an older CI run starts this workflow too, and GitHub
-            # keeps only one waiting run per concurrency group, so that run
-            # can replace the waiting deploy of a newer commit: picking the
-            # newest green commit here means the run that survives deploys
-            # it. A commit CI has not passed yet is never picked.
-            sha=$(gh api "$runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
+            # The newest commit on main whose push CI passed, never "whatever
+            # main is now". GitHub keeps only one waiting run per concurrency
+            # group, so when CI runs finish out of order the run that survives
+            # can be an older commit's: picking the newest green commit here
+            # means it deploys the newest one. A commit CI has not passed yet
+            # is never picked.
+            newest=$(gh api "$runs?branch=main&per_page=100" \
+              | jq -r --arg repo "$REPO" "[.workflow_runs[] | select($green)] | first // empty | \"\\(.run_number) \\(.head_sha)\"")
+            num="${newest%% *}"
+            sha="${newest#* }"
+            # Never older than the CI run that started this one: if the list
+            # has not caught up with that run yet, its commit is the newest
+            # green one.
+            if [ -n "${TRIGGER_SHA:-}" ] && { [ -z "$newest" ] || [ "${TRIGGER_NUM:-0}" -gt "$num" ]; }; then
+              sha="$TRIGGER_SHA"
+            fi
             if [ -z "$sha" ]; then
               echo "::error::no CI run on main has passed, so nothing is deployed."
               exit 1
@@ -219,9 +240,15 @@ jobs:
             # The new release must answer. pm2 reload returns once the process
             # is launched, so a release that crashed on boot or answered 500
             # everywhere used to be reported "Deploy complete". Through the
-            # public address (NEXTAUTH_URL, the app host): /api/health must
-            # report the build, then /login and one of its scripts must load.
-            BASE=$(grep -E '^NEXTAUTH_URL=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true)
+            # app's public address (BASE, below): /api/health must report the
+            # build, then /login and one of its scripts must load.
+            # The APP host: NEXT_PUBLIC_APP_URL, else NEXTAUTH_URL. On this
+            # box NEXTAUTH_URL is the marketing host, where the host split
+            # sends /login on to the app host (308), so the first check that
+            # read it there failed a good release and the release before it.
+            envval () { grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true; }
+            BASE=$(envval NEXT_PUBLIC_APP_URL)
+            BASE="${BASE:-$(envval NEXTAUTH_URL)}"
             BASE="${BASE:-https://app.workwrk.com}"
             check_release () {
               # $1: the BUILD_ID that must be serving. $2 "previous": a build
@@ -240,11 +267,13 @@ jobs:
               done
               [ -n "$body" ] || { echo "health never reported build $want"; return 1; }
               local login chunk asset
-              login=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/login" || echo 000)
+              # A redirect to the page's own host is followed: the answer that
+              # counts is the page's.
+              login=$(curl -sL --max-redirs 3 -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/login" || echo 000)
               [ "$login" = "200" ] || { echo "/login answered $login"; return 1; }
               chunk=$(cd .next/static/chunks 2>/dev/null && ls -1 -- *.js 2>/dev/null | head -1 || true)
               if [ -n "$chunk" ]; then
-                asset=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/_next/static/chunks/$chunk" || echo 000)
+                asset=$(curl -sL --max-redirs 3 -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/_next/static/chunks/$chunk" || echo 000)
                 [ "$asset" = "200" ] || { echo "a script of the build answered $asset"; return 1; }
               fi
               return 0
