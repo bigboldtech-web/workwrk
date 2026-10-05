@@ -12,6 +12,12 @@
 //   access.matrix_retired   the only copy of the retired permissions grid
 //                           (/api/settings/matrix-export)
 //   access.migrated         the access backfill's record (scripts/MIGRATIONS.md)
+//   settings.updated.access an Admin's change to the access settings, and
+//   access.settings.migrated  the proof the public SOP link carry-over reads
+//   access.settings.restored  before it may turn Public links on: without
+//                           them an Admin's Off could not be told from a
+//                           value nobody chose (scripts/migrate-public-sop-links.ts,
+//                           scripts/repair-deploy-data-steps.ts)
 //   terms.*                 consent: which policy version a person accepted
 //   staff.*                 WorkwrK staff actions in this company (lib/staff-audit.ts)
 //   audit.purged            the purge's own record
@@ -24,6 +30,9 @@ export const AUDIT_PURGE_KEEP_TYPES: readonly string[] = [
   "access.invited",
   "access.matrix_retired",
   "access.migrated",
+  "settings.updated.access",
+  "access.settings.migrated",
+  "access.settings.restored",
   "audit.purged",
 ];
 export const AUDIT_PURGE_KEEP_PREFIXES: readonly string[] = ["terms.", "staff."];

@@ -74,19 +74,26 @@ async function migrateOrg(org: { id: string; name: string; settings: unknown }, 
   // (access.settings.migrated), or the repair put an Admin's Off back
   // (access.settings.restored). Without this, every deploy that ran it
   // switched Public links back on for workspaces that had turned them off.
-  // A stored value nobody chose is the access backfill's (scripts/
-  // access-backfill.ts writes the default block, Off included, only where no
-  // block was stored, and records access.migrated): that one is carried over.
-  // Any other stored value with no record of who set it is kept: never
-  // override what might be an Admin's Off.
+  // A stored value nobody chose is the access backfill's: before Batch 11 it
+  // wrote the default block, Off included, where no block was stored, and
+  // recorded access.migrated. That one is carried over. Since Batch 11 the
+  // backfill writes no Public links value and marks its row
+  // publicLinksWritten: false, so such a row is never the source. Any other
+  // stored value with no record of who set it is kept: never override what
+  // might be an Admin's Off. (The rows read here are never purged:
+  // src/lib/audit-retention.ts.)
   const chosen = await prisma.activityLog.count({
     where: { organizationId: org.id, type: { in: ["settings.updated.access", "access.settings.migrated", "access.settings.restored"] } },
   });
   if (chosen > 0) { r.action = "kept"; return r; }
   const stored = typeof (org.settings as { access?: { publicLinks?: unknown } } | null)?.access?.publicLinks === "string";
-  if (stored && (await prisma.activityLog.count({ where: { organizationId: org.id, type: "access.migrated" } })) === 0) {
-    r.action = "kept";
-    return r;
+  if (stored) {
+    const backfills = await prisma.activityLog.findMany({ where: { organizationId: org.id, type: "access.migrated" }, select: { metadata: true } });
+    const backfillStoredIt = backfills.some((b) => (b.metadata as { publicLinksWritten?: unknown } | null)?.publicLinksWritten !== false);
+    if (!backfillStoredIt) {
+      r.action = "kept";
+      return r;
+    }
   }
   r.action = "flip";
   if (!write) return r;

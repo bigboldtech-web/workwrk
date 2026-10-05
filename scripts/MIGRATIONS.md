@@ -561,7 +561,9 @@ settings (`settings.updated.access`), this script already set it
 (`access.settings.migrated`), or the repair restored an Admin's Off
 (`access.settings.restored`). A value the access backfill stored is not a
 choice (the backfill no longer stores Public links at all; one that already
-ran stored the default, Off, recorded as `access.migrated`), so it is carried
+ran stored the default, Off, recorded as `access.migrated`; a backfill since
+Batch 11 marks its row `publicLinksWritten: false`, and such a row never counts),
+so it is carried
 over. Any other stored value with no record of who set it is kept.
 `scripts/repair-deploy-data-steps.ts` undoes re-runs that reached the
 database. The commands below are the by-hand run.
@@ -604,6 +606,35 @@ write, EXCEPT the workspaces the report lists as "kept as the workspace set
 it": those stay as they were (an Admin's Off is never overridden). The per-org
 counts must match the report's, and a spot check of one live token in a
 flipped org opens the page rather than the 404.
+
+## Local uploads: `storage/uploads` (Batch 11, one way)
+
+Since Batch 11, the files the app keeps on its own disk (workspace logos,
+avatars, and uploads made while object storage is unset or failing) live in
+`storage/uploads`, outside `public/`, and only the uploads route serves them
+(`src/lib/local-uploads.ts`). Next served `public/` by itself and looked a file
+up by its decoded path, past every header rule and rewrite, so an uploaded SVG
+or HTML file could open as a page of the app.
+
+Each server start moves whatever is in `public/uploads` across and logs
+`[uploads] moved N files out of public/uploads, M left where they are`. Left
+means a name `storage/uploads` already holds with other bytes, or something
+that is not a plain file; both stay untouched. Nothing is overwritten, and an
+old copy is removed only once the new one holds the same bytes.
+
+The move is ONE WAY. A build from before Batch 11 reads only `public/uploads`,
+so after deploying one (a revert, a manual deploy of an older commit), move the
+files back without overwriting and restart, or every logo, avatar and local
+attachment answers 404:
+
+```
+cd /www/wwwroot/workwrk.com
+for f in storage/uploads/*; do mv -n "$f" public/uploads/; done
+chown -R www:www public/uploads
+pm2 reload workwrk --update-env
+```
+
+Backups and a move to a new server must include `storage/`.
 
 ## `prisma/seed-templates.ts`: the eight built-in Doc templates (Phase 3, docs unit)
 
@@ -1441,7 +1472,11 @@ on write).
   reactivation writes its own audit row ("work handed over stays where it went").
 - The audit purge never deletes rows features read back: `weekly_review_decided`,
   `okr_created`, `user.invited`, `access.invited`, `access.matrix_retired`,
-  `access.migrated`, `audit.purged`, `terms.*`, `staff.*` (`src/lib/audit-retention.ts`).
+  `access.migrated`, `settings.updated.access`, `access.settings.migrated`,
+  `access.settings.restored`, `audit.purged`, `terms.*`, `staff.*`
+  (`src/lib/audit-retention.ts`). The three access rows were added in Batch 11:
+  the public SOP link carry-over reads them to tell an Admin's choice from a
+  value nobody chose.
   Both retention rows now sit behind Show upcoming features, captioned "Not enforced
   yet", until the two cron rows are installed.
 - The score-weights save merges into the stored weights, so the monthly performance

@@ -3,7 +3,7 @@ import { auditPurgeMayDelete, auditPurgeWhere } from "./audit-retention";
 
 describe("audit retention keep list", () => {
   it("keeps the rows features read back", () => {
-    for (const t of ["weekly_review_decided", "okr_created", "user.invited", "access.invited", "access.matrix_retired", "terms.accepted", "staff.company.suspended", "audit.purged"]) {
+    for (const t of ["weekly_review_decided", "okr_created", "user.invited", "access.invited", "access.matrix_retired", "terms.accepted", "staff.company.suspended", "audit.purged", "settings.updated.access", "access.settings.migrated", "access.settings.restored"]) {
       expect(auditPurgeMayDelete(t)).toBe(false);
     }
   });

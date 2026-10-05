@@ -98,6 +98,7 @@ import { copyObjectLink, objectHrefNow, useObjectHref } from "@/components/layou
 import { useHubBack } from "@/components/layout/os/use-hub-back";
 import { canonicalHref } from "@/lib/nav/object-href";
 import { safeUserHtml } from "@/lib/safe-html";
+import { draftBodyToRestore } from "@/lib/docs/draft-restore";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker, keeps the doc page light + fast.
@@ -1351,13 +1352,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           onRestore={(p) => {
             setTitle(p.title);
             titleRef.current = p.title;
-            // The draft's body is written only when it holds one. A draft made
-            // on an old-format doc has none (null) or, from before title-only
-            // saves, an empty one ([]) that would replace the old body for
-            // good; either way only the title is restored. Blocks are never
+            // The draft's body is written only when it holds one, judged from
+            // the draft itself (src/lib/docs/draft-restore.ts). Blocks are never
             // set to null here, which would leave a block doc on its loading
             // skeleton.
-            const body = Array.isArray(p.blocks) && (legacy === null || p.blocks.length > 0) ? p.blocks : null;
+            const body = draftBodyToRestore(p, legacy !== null);
             if (body === null) {
               void persist(null, null, metaRef.current);
               return;
