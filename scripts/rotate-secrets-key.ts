@@ -13,8 +13,11 @@
 //      shell: pm2 reload workwrk --update-env && pm2 save. The app now writes
 //      with the new key and reads either (src/lib/secrets-crypto.ts).
 //   1b. PROVE THE RUNNING APP HOLDS THE NEW KEY: re-save one workspace's AI
-//      key in Settings > AI (your own workspace will do), so the app writes
-//      that row with the key it really has. --write refuses until at least one
+//      key in Settings > API & webhooks > AI keys, so the app writes that row
+//      with the key it really has. The tab is there only for a workspace with
+//      the Bring your own AI key add-on on (staff turn it on, with the
+//      Enterprise plan, on the company page; your own workspace will do), and
+//      the key must be typed in again, since the editor never shows it. --write refuses until at least one
 //      secret opens with the new key, because a stale process (pm2 keeps the
 //      environment it started with: `pm2 env <id>` shows it) would otherwise
 //      be left holding a key nothing is encrypted with. If there is no
@@ -36,7 +39,7 @@
 // pointed at, counts and row ids: never a key, and never a secret.
 //
 // WHAT IT COVERS: OrgSecret.encryptedKey (a workspace's own AI key, Settings
-// > AI).
+// > API & webhooks > AI keys).
 
 import type { Prisma } from "../src/generated/prisma";
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
@@ -71,7 +74,7 @@ async function main() {
   // the app's own proof that it holds it (step 1b).
   if (write && rows.length > 0 && !process.argv.includes("--app-holds-new-key") && !rows.some((r) => opens(r.encryptedKey, newKey) !== null)) {
     console.error(
-      "Nothing written: no stored secret opens with this new key yet, so the running app may not hold it. Re-save one workspace's AI key in Settings > AI (step 1b), or check `pm2 env <id>` and pass --app-holds-new-key.",
+      "Nothing written: no stored secret opens with this new key yet, so the running app may not hold it. Re-save one workspace's AI key in Settings > API & webhooks > AI keys (step 1b), or check `pm2 env <id>` and pass --app-holds-new-key.",
     );
     process.exit(1);
   }

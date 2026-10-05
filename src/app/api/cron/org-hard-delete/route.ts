@@ -4,6 +4,7 @@ import { cronRefusal } from "@/lib/cron-auth";
 import { CREATED_SOMETHING, SETUP_DONE } from "@/lib/admin/company-milestones";
 import { ACTION_LABEL } from "@/lib/admin/staff-activity";
 import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/workspace-orphans";
+import { companyStoredFiles, freeCompanyFiles } from "@/lib/company-files";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -25,6 +26,13 @@ import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/wor
  * still CANCELLED with the same schedule this run read, so a restore that
  * lands between the read and the delete keeps the company (and its staff
  * audit rows untouched), and one that comes after finds it gone.
+ *
+ * ITS FILES GO TOO. The files it uploaded (on disk, or in S3 under
+ * orgs/<id>/) are read before the transaction and freed only after it
+ * commits (src/lib/company-files.ts), so a delete that rolls back loses
+ * nothing. Its people's password reset rows, which hold their email
+ * addresses and name no company, are deleted while their accounts still
+ * exist to match them by.
  *
  * STAFF AUDIT ROWS KEEP NO NAMES. The rows about the company (StaffAction,
  * whose company link goes on delete) are kept, with their action, who did it
@@ -124,6 +132,8 @@ export async function POST(req: NextRequest) {
         prisma.organization.count({ where: { AND: [{ id: org.id }, CREATED_SOMETHING] } }).then((n) => n > 0),
       ]);
       const signedUp = new Date(org.createdAt).toISOString();
+      // What it stored, while the rows that name the files still exist.
+      const stored = await companyStoredFiles(org.id);
       const gone = await prisma.$transaction(
         async (tx) => {
           // 1. The company's row, locked while it is still due.
@@ -144,6 +154,31 @@ export async function POST(req: NextRequest) {
                    "after" = CASE WHEN jsonb_typeof("after") = 'object' THEN "after" - 'name' - 'email' - 'keptOwnerAccess' - 'companyName' ELSE "after" END,
                    "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
              WHERE "targetCompanyId" = ${org.id}
+               AND EXISTS (
+                     SELECT 1 FROM "Organization"
+                      WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+                   )`;
+          // 2b. A denied Staff console visit by one of its people keeps no
+          // email address, no account id and no address.
+          await tx.$executeRaw`
+            UPDATE "StaffAction"
+               SET "actorEmail" = 'a deleted account',
+                   "summary" = 'An account of a workspace later deleted for good tried to open the Staff console',
+                   "actorUserId" = NULL,
+                   "ip" = NULL,
+                   "updatedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
+             WHERE "action" = 'admin.access.denied'
+               AND "actorUserId" IN (SELECT "id" FROM "User" WHERE "organizationId" = ${org.id})
+               AND EXISTS (
+                     SELECT 1 FROM "Organization"
+                      WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
+                   )`;
+          // 2c. Its people's password reset rows (matched by email while the
+          // accounts exist; one also used by an account elsewhere is kept).
+          await tx.$executeRaw`
+            DELETE FROM "PasswordResetToken" t
+             WHERE EXISTS (SELECT 1 FROM "User" u WHERE u."organizationId" = ${org.id} AND lower(u."email") = lower(t."email"))
+               AND NOT EXISTS (SELECT 1 FROM "User" v WHERE v."organizationId" <> ${org.id} AND lower(v."email") = lower(t."email"))
                AND EXISTS (
                      SELECT 1 FROM "Organization"
                       WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
@@ -190,6 +225,8 @@ export async function POST(req: NextRequest) {
         { maxWait: 10_000, timeout: 30 * 60_000 },
       );
       if (gone === 1) {
+        // Committed: now its files can go (best effort, never throws).
+        await freeCompanyFiles(org.id, stored);
         deleted += 1;
         // The id only: the name is part of what was just deleted.
         console.info(`[org-hard-delete] deleted ${org.id}`);
