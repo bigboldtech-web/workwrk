@@ -648,14 +648,16 @@ function trialLine(at: string, datePrefs: ReturnType<typeof useConsole>["datePre
 
 /**
  * "(12 days)", "(1 day)", "(ends today)" or "(ended)". A self-serve end is a
- * calendar day, so it counts calendar days from today in the staff member's
- * own zone to that day; a Stripe end is an instant, counted in whole days left.
+ * UTC calendar day, so it counts UTC calendar days from today to that day,
+ * the same days Overview's "Trials end in the next 7 days" counts
+ * (trialEndsWithinWhere), at any hour; a Stripe end is an instant, counted in
+ * whole days left.
  */
 function trialLeft(at: string, datePrefs: ReturnType<typeof useConsole>["datePrefs"], day: boolean): string {
   const words = (n: number) => `(${n} ${n === 1 ? "day" : "days"})`;
   if (day) {
     const end = Date.parse(`${dayKey(at, trialPrefs(datePrefs))}T00:00:00Z`);
-    const today = Date.parse(`${dayKey(new Date(), datePrefs)}T00:00:00Z`);
+    const today = Date.parse(`${dayKey(new Date(), trialPrefs(datePrefs))}T00:00:00Z`);
     const days = Math.round((end - today) / 86_400_000);
     if (days < 0) return "(ended)";
     if (days === 0) return "(ends today)";

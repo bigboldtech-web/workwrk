@@ -12,6 +12,14 @@
 //      SECRETS_ENCRYPTION_KEY_PREVIOUS to the OLD one. Reload from a fresh
 //      shell: pm2 reload workwrk --update-env && pm2 save. The app now writes
 //      with the new key and reads either (src/lib/secrets-crypto.ts).
+//   1b. PROVE THE RUNNING APP HOLDS THE NEW KEY: re-save one workspace's AI
+//      key in Settings > AI (your own workspace will do), so the app writes
+//      that row with the key it really has. --write refuses until at least one
+//      secret opens with the new key, because a stale process (pm2 keeps the
+//      environment it started with: `pm2 env <id>` shows it) would otherwise
+//      be left holding a key nothing is encrypted with. If there is no
+//      workspace whose AI key you can re-save, check `pm2 env <id>` shows the
+//      new SECRETS_ENCRYPTION_KEY and pass --app-holds-new-key.
 //   2. Dry run, with the same two values: says how many secrets are on each
 //      key. Writes nothing.
 //        DIRECT_URL= DATABASE_URL=<the app's database> SECRETS_ENCRYPTION_KEY=<new> \
@@ -59,6 +67,14 @@ async function main() {
   console.log(`Database: ${databaseLabel()}`);
 
   const rows = await prisma.orgSecret.findMany({ select: { id: true, encryptedKey: true } });
+  // Before anything moves: some secret must already open with the new key,
+  // the app's own proof that it holds it (step 1b).
+  if (write && rows.length > 0 && !process.argv.includes("--app-holds-new-key") && !rows.some((r) => opens(r.encryptedKey, newKey) !== null)) {
+    console.error(
+      "Nothing written: no stored secret opens with this new key yet, so the running app may not hold it. Re-save one workspace's AI key in Settings > AI (step 1b), or check `pm2 env <id>` and pass --app-holds-new-key.",
+    );
+    process.exit(1);
+  }
   let onNew = 0;
   let moved = 0;
   const onOld: string[] = [];

@@ -23,9 +23,9 @@ import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
  * didn't realize that button was destructive."
  *
  * Logged as a critical audit event so the deletion is forensically
- * findable on review. The audit row goes with the Owner's User row when the
- * company is hard-deleted (ActivityLog.actor cascades), so the deletion is
- * ALSO written to WorkspaceDeletion, in the same transaction as the status:
+ * findable on review. The hard delete removes every ActivityLog row of the
+ * company 30 days later (src/lib/admin/workspace-orphans.ts), so the deletion
+ * is ALSO written to WorkspaceDeletion, in the same transaction as the status:
  * no name, no person and no foreign key, so the staff console's long-range
  * cancellations still count it after the company is gone.
  */

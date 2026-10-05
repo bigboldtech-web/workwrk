@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
 import { CREATED_SOMETHING, SETUP_DONE } from "@/lib/admin/company-milestones";
 import { ACTION_LABEL } from "@/lib/admin/staff-activity";
+import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/workspace-orphans";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -13,7 +14,12 @@ import { ACTION_LABEL } from "@/lib/admin/staff-activity";
  * Each company is deleted in its own transaction so a misbehaving cascade on
  * one tenant doesn't block the rest of the batch. The foreign keys to
  * Organization cascade in the database, so users, departments, tasks, etc.
- * go with it.
+ * go with it. WORKSPACE_ORPHAN_TABLES (src/lib/admin/workspace-orphans.ts) hold
+ * the company's own rows that NO foreign
+ * key ties to it (its activity log, agreements, call records, document
+ * snapshots, email log, templates, reminders, assessments, Trash and more):
+ * the same transaction deletes them by organizationId once the company is
+ * gone, or they would outlive it for good.
  *
  * THE DELETE IS CONDITIONAL. The transaction first locks the company's row,
  * still CANCELLED with the same schedule this run read, so a restore that
@@ -91,6 +97,12 @@ export async function POST(req: NextRequest) {
 
   // The sentence each kind of staff action reads as, once its company is gone.
   const labels = JSON.stringify(ACTION_LABEL);
+  // The orphan tables this database has (a name from the constant above,
+  // never from input, so it is safe to place in the statement).
+  const present = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT t.name FROM unnest(${[...WORKSPACE_ORPHAN_TABLES]}::text[]) AS t(name)
+     WHERE to_regclass(format('%I', t.name)) IS NOT NULL`;
+  const orphanTables = present.map((r) => r.name).filter(isWorkspaceOrphanTable);
 
   for (const org of due) {
     try {
@@ -142,6 +154,12 @@ export async function POST(req: NextRequest) {
              WHERE "id" = ${org.id}
                AND "status" = 'CANCELLED'
                AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}`;
+          // 3b. Once it is gone, its rows that no foreign key cascades to.
+          if (n === 1) {
+            for (const table of orphanTables) {
+              await tx.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "organizationId" = $1`, org.id);
+            }
+          }
           // 4. Only once the company is gone: stamp this deletion's row...
           await tx.$executeRaw`
             UPDATE "WorkspaceDeletion"
