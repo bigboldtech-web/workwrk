@@ -18,9 +18,10 @@ const nextConfig: NextConfig = {
   // 2026-09-24, so every deploy would have failed deterministically. The box
   // rebuilds what CI already proved; it does not need to prove it again.
   //
-  // A MANUAL workflow_dispatch deploy is held to the same rule: the deploy
-  // first asks GitHub whether CI passed for that exact commit, and stops if
-  // not (deploy.yml, "Check CI passed for this commit").
+  // A MANUAL workflow_dispatch deploy is held to the same rule (deploy.yml,
+  // "Pick the commit, and check CI passed for it"): one given a sha deploys
+  // it only when CI passed on a push of that sha to main, and one without a
+  // sha deploys the newest commit on main whose CI passed.
   typescript: { ignoreBuildErrors: true },
 
   // THE DEPLOY BUILDS BESIDE THE LIVE RELEASE. It sets NEXT_DIST_DIR to

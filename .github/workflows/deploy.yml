@@ -36,16 +36,20 @@ jobs:
     concurrency:
       group: deploy-production
       cancel-in-progress: false
-    # A CI run that passed on a PUSH to this repository's main. The branches
-    # filter above matches the head branch NAME of the run that triggered it,
-    # and for a pull request from a fork that is the fork's own branch: a fork
-    # whose branch is called main could otherwise rebuild production on every
-    # push to its pull request.
+    # A CI run that passed on a PUSH to this repository's main, on its FIRST
+    # attempt. The branches filter above matches the head branch NAME of the
+    # run that triggered it, and for a pull request from a fork that is the
+    # fork's own branch: a fork whose branch is called main could otherwise
+    # rebuild production on every push to its pull request. A re-run of a CI
+    # run never deploys: it would deploy the newest green commit again, even
+    # one a manual run had just gone back from; a commit whose CI had to be
+    # re-run is deployed by the next push or a manual run.
     if: >-
       ${{ github.event_name == 'workflow_dispatch' ||
           (github.event.workflow_run.conclusion == 'success' &&
            github.event.workflow_run.event == 'push' &&
            github.event.workflow_run.head_branch == 'main' &&
+           github.event.workflow_run.run_attempt == 1 &&
            github.event.workflow_run.head_repository.full_name == github.repository) }}
     permissions:
       actions: read
@@ -143,7 +147,11 @@ jobs:
             # then starts from what it left. PM2 is always called with this
             # descriptor closed (9>&-), so a PM2 daemon started by a deploy
             # can never hold the lock for good.
-            exec 9>/tmp/workwrk-deploy.lock
+            # In a directory only root can enter: a lock file other accounts
+            # could open would let any of them hold it and stop every deploy.
+            LOCK_DIR="${DEPLOY_LOCK_DIR:-/run/workwrk-deploy}"
+            install -d -m 700 "$LOCK_DIR" || fail "could not make the deploy lock directory $LOCK_DIR"
+            exec 9>"$LOCK_DIR/lock" || fail "could not open the deploy lock in $LOCK_DIR"
             if ! flock -w 1800 9; then fail "another deploy was still running on the box after 30 minutes"; fi
 
             echo "::notice::preflight disk: $(df -h / | tail -1 | tr -s ' ')"
@@ -252,9 +260,10 @@ jobs:
             git merge-base --is-ancestor "$DEPLOY_SHA" origin/main 2>>/tmp/wd-git.log \
               || fail "$DEPLOY_SHA is not a commit on main" /tmp/wd-git.log
 
-            # A re-run of an older CI run starts this workflow for that older
-            # commit. Automatic deploys only ever go forward; going back is a
-            # manual run of this workflow with the sha.
+            # An automatic run whose commit is already live, or older: a
+            # deploy job that waited in the concurrency group while a newer
+            # commit went live. Automatic deploys only ever go forward; going
+            # back is a manual run of this workflow with the sha.
             if [ "${DEPLOY_EVENT:-}" = "workflow_run" ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREV_SHA" 2>/dev/null; then
               echo "::notice::$DEPLOY_SHA is already live, or older than the live commit $PREV_SHA: nothing deployed. Going back is Actions > Deploy > Run workflow with the sha."
               STAGE=done
@@ -291,10 +300,13 @@ jobs:
               echo "$LOCK_HASH" > node_modules/.deploy-lock-hash
             fi
 
-            # Additive SQL and pending Prisma migrations, each SQL file under
-            # a lock timeout (scripts/deploy-migrations.mjs). Before the build:
-            # the new release reads what they add. Schema only: no data script
-            # runs in a deploy (scripts/MIGRATIONS.md, The approval gate).
+            # The additive SQL manifest, each file under a 5 second lock
+            # timeout and tried up to four times, then any pending Prisma
+            # migration through `prisma migrate deploy` (no lock timeout,
+            # tried three times; scripts/deploy-migrations.mjs). Before the
+            # build: the new release reads what they add. Schema only: no data
+            # script runs in a deploy (scripts/MIGRATIONS.md, The approval
+            # gate).
             echo "==> Database migrations"
             npm run deploy:migrate > "$APP/deploy-migrate.log" 2>&1 \
               || fail "database migrations (production stays on the release it is serving)" "$APP/deploy-migrate.log"

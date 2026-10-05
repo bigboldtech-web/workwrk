@@ -97,9 +97,12 @@ async function refreshAccessToken(refreshToken: string): Promise<{
 /** Reads the subscription's token; if expired (or expiring in <60s),
  *  refreshes and persists the new access token. Returns the fresh
  *  access token ready to use. */
-export async function ensureFreshToken(sub: CalendarSubscription): Promise<string> {
+export async function ensureFreshToken(sub: CalendarSubscription, opts: { force?: boolean } = {}): Promise<string> {
   const buffer = 60 * 1000; // 1 min
-  if (sub.accessToken && sub.expiresAt && sub.expiresAt.getTime() - Date.now() > buffer) {
+  // `force`: the stored token was just refused (401), so it is refreshed
+  // whatever its expiry says, which turns a revoked grant into Google's own
+  // invalid_grant answer.
+  if (!opts.force && sub.accessToken && sub.expiresAt && sub.expiresAt.getTime() - Date.now() > buffer) {
     return sub.accessToken;
   }
   if (!sub.refreshToken) throw new Error("No refresh token stored; user must reconnect");
@@ -186,7 +189,10 @@ export async function listEvents(
     err.code = 410;
     throw err;
   }
-  if (!res.ok) throw new Error(`List events failed: ${res.status}`);
+  // The status rides on the error: a 401 is retried with a fresh token and a
+  // 404 (the calendar deleted or no longer shared) is the person's to fix
+  // (src/services/googleCalendarSync.ts).
+  if (!res.ok) throw Object.assign(new Error(`List events failed: ${res.status}`), { status: res.status });
   const data = await res.json();
   return { items: data.items ?? [], nextPageToken: data.nextPageToken, nextSyncToken: data.nextSyncToken };
 }

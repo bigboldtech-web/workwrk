@@ -8,13 +8,15 @@ variables and hosts is in `LAUNCH-CHECKLIST.md`.
 
 `.github/workflows/deploy.yml`, after CI passed on a push to `main`:
 
-1. It picks the commit. An automatic run deploys the newest commit on `main`
-   whose CI passed on a push (a pull request's run tested a merge ref, not
-   the commit, and does not count), never "whatever main is now" and never an
-   older commit a re-run of an old CI run started it for. A manual run
-   (Actions > Deploy > Run workflow) takes an optional commit sha, held to the
-   same check. Only one deploy job runs at a time (the job's concurrency
-   group), and a job its condition skips never takes that slot.
+1. It picks the commit. An automatic run (CI passing on a push to `main`, on
+   its first attempt) deploys the newest commit on `main` whose CI passed on
+   a push (a pull request's run tested a merge ref, not the commit, and does
+   not count), never "whatever main is now". A RE-RUN of a CI run never
+   deploys: deploy that commit with a manual run, or let the next push carry
+   it. A manual run (Actions > Deploy > Run workflow) takes an optional commit
+   sha, held to the same check; without one it deploys the newest green
+   commit. Only one deploy job runs at a time (the job's concurrency group),
+   and a job its condition skips never takes that slot.
 2. On the box it waits for any earlier deploy's script still running there (a
    lock, up to 30 minutes), then, before anything changes: an automatic run
    whose commit is already live, or older, stops with a notice; a commit from
@@ -23,8 +25,10 @@ variables and hosts is in `LAUNCH-CHECKLIST.md`.
    only when `package-lock.json` changed (the hash it last installed is in
    `node_modules/.deploy-lock-hash`), with the live release's packages moved
    to `node_modules-prev` first, not deleted; otherwise `prisma generate`.
-3. `npm run deploy:migrate`: the SQL manifest and pending Prisma migrations,
-   each SQL file under a 5 second lock timeout, tried up to four times.
+3. `npm run deploy:migrate`: the additive SQL manifest, each file under a 5
+   second lock timeout and tried up to four times, then any pending Prisma
+   migration through `prisma migrate deploy` (no lock timeout, tried three
+   times).
 4. `next build` into `.next-staging` (`NEXT_DIST_DIR`), while the server keeps
    serving `.next`, and the commit is written beside the build
    (`.next/DEPLOY_SHA` once live). A failed or killed build changes nothing
@@ -54,28 +58,73 @@ through the public API without the Actions log. `deploy-migrate.log` and
 
 - **To any commit from Batch 12 on:** Actions > Deploy > Run workflow with
   that commit's sha. It brings back the build, the source and the packages,
-  and is checked like any deploy. This is the way.
-- **To the previous build, by hand, when Actions cannot run:** on the box, in
-  the app directory, while `.next-prev` is there:
+  and is checked like any deploy. This is the way. It lasts until the next
+  push to `main` is deployed, which deploys the newest green commit again: to
+  stay back, revert the bad commit on `main`, so its push ships the revert.
+- **By hand on the box, only when Actions cannot run.** As root. Each block
+  below is ONE command in parentheses that first takes the deploy's own lock,
+  so a deploy script still finishing on the box (its job ended, its script
+  carries on to put things back) can never undo it halfway, and a step that
+  fails ends it. `/run` is cleared at every boot, so the first line makes the
+  lock's directory.
+
+  The previous build, while `.next-prev` is there (`npm ci` runs only when
+  the two commits' `package-lock.json` differ: the live packages are then the
+  newer release's):
 
   ```
-  mv .next .next-failed && mv .next-prev .next
-  git reset --hard "$(cat .next/DEPLOY_SHA)"
-  # Only if package-lock.json differs between the two commits: the live
-  # packages are the newer release's, so install the older ones first.
-  npm ci
-  pm2 reload workwrk --update-env
+  install -d -m 700 /run/workwrk-deploy
+  (
+    cd /www/wwwroot/workwrk.com || exit 1
+    export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
+    flock -w 1800 9 || { echo "a deploy is still running on the box"; exit 1; }
+    [ -d .next-prev ] || { echo "no previous build to go back to"; exit 1; }
+    SHA=$(cat .next-prev/DEPLOY_SHA 2>/dev/null) || { echo "the previous build is from before Batch 12: use the next block"; exit 1; }
+    LOCK_CHANGED=$(git diff --quiet HEAD "$SHA" -- package-lock.json || echo yes)
+    rm -rf .next-failed
+    mv .next .next-failed && mv .next-prev .next || exit 1
+    git reset --hard "$SHA" || exit 1
+    if [ -n "$LOCK_CHANGED" ]; then npm ci || exit 1; fi
+    chown -R www:www /www/wwwroot/workwrk.com
+    pm2 reload workwrk --update-env 9>&-
+  ) 9>/run/workwrk-deploy/lock
   ```
 
-  (`.next/DEPLOY_SHA` exists for builds from Batch 12 on; for an older build,
-  reset to the commit it was built from.)
-- **To a commit from before Batch 12:** the workflow refuses it, and after two
-  deploys no build from before Batch 12 is left in `.next-prev`. It is a
-  build by hand on the box, with the site down while it builds: `git reset
-  --hard <sha>`, `npm ci`, `npx next build` (that commit's own build step also
-  runs its migrations), `pm2 reload workwrk --update-env`. Take the database
-  backup first; going back past a migration can leave columns the old code
-  does not expect.
+  A commit from before Batch 12 (the workflow refuses it, and after two
+  deploys no build from before Batch 12 is left in `.next-prev`): a build by
+  hand, with the site down while it builds, because that commit builds into
+  the live `.next`. Take the database backup first: going back past a
+  migration can leave columns the old code does not expect. That commit's
+  `.gitignore` does not hide the deploy's parked folders, so they are moved
+  out first (moved, not deleted: `.next-prev` is a way back if this build
+  fails), and the build gets the same 3 GB heap every build on this box needs:
+
+  ```
+  install -d -m 700 /run/workwrk-deploy /root/workwrk-parked
+  (
+    cd /www/wwwroot/workwrk.com || exit 1
+    export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
+    flock -w 1800 9 || { echo "a deploy is still running on the box"; exit 1; }
+    for d in .next-prev .next-failed .next-staging node_modules-prev node_modules-failed; do
+      if [ -e "$d" ]; then mv "$d" "/root/workwrk-parked/$d-$(date +%s)" || exit 1; fi
+    done
+    git reset --hard <sha> || exit 1
+    npm ci || exit 1
+    # npx next build, not npm run build: that commit's build script also
+    # runs its migrations.
+    NODE_OPTIONS=--max-old-space-size=3072 npx next build || exit 1
+    chown -R www:www /www/wwwroot/workwrk.com
+    pm2 reload workwrk --update-env 9>&-
+  ) 9>/run/workwrk-deploy/lock
+  ```
+
+  Until the build finishes the site is down. If it fails, run the block again
+  once the cause is fixed, or move the parked `.next-prev` back to `.next`
+  and go back to the commit it names, with the first block's `git reset` and
+  `npm ci` lines.
+
+  Run `pm2` from a fresh root shell, never one the backup settings were
+  loaded into (scripts/BACKUPS.md).
 
 `NEXT_DIST_DIR` is for the deploy's build only. Never put it in `.env`: the
 server would then serve a folder the deploy does not swap.
@@ -101,14 +150,23 @@ That includes `/api/email/send-reminders`, whose seven rows are scheduled
 jobs too. Calendar sync and scheduled agents count as failed only when every
 subscription, or every run, of the round failed for a reason on the server's
 side (Google refusing the app itself, or WorkwrK's own AI key failing); a
-person who revoked Google access, or a workspace's own AI key, is theirs to
-fix and never counts. A failing run logs `[cron-failure] <job>` in pm2's log
-and, when `OPS_ALERT_EMAIL` is set, queues one email to that address at most
-every six hours per job (`src/lib/cron-result.ts`). The email-queue job is
-the exception: its alert would wait in the queue that is failing, so it sends
-none, and `/api/health` does not check email either. What shows it failing
-is the cron log, and a dead-man check on its crontab row if you add one
-(scripts/CRON-SETUP.md, the email-queue row).
+person who revoked Google access, a calendar that was deleted or unshared
+(Google answers 404), or a workspace's own AI key, is theirs to fix and never
+counts. A token Google refuses before its expiry (401) is refreshed once and
+the sync tried again, so the round counts Google's own reason. A failing run
+logs `[cron-failure] <job>` in pm2's log and, when `OPS_ALERT_EMAIL` is set,
+queues one email to that address at most every six hours per job
+(`src/lib/cron-result.ts`).
+
+The email-queue job is the exception: its alert would wait in the queue that
+is failing, so it sends none, and `/api/health` does not check email either.
+Most sends and their retries run in the request that queued them, so this
+job also answers 500 when mail is failing between its own runs: an email that
+has already failed is waiting to try again, it was queued more than 30
+minutes ago, and nothing at all was sent in the last 30 minutes (one bad
+address among mail that goes out never counts). What shows it failing is the
+cron log, and the dead-man check on its crontab row (scripts/CRON-SETUP.md,
+the email-queue row), which is a launch step in `LAUNCH-CHECKLIST.md`.
 
 ## The Staff console needs `ADMIN_HOST` in production
 

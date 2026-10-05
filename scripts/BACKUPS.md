@@ -22,6 +22,8 @@ then decrypt straight into `pg_restore` in a scratch database gave the same
    key read, write and list on that bucket (each upload is read back to check
    its size, and a restore downloads), plus delete unless `BACKUP_PRUNE=off`.
    A key without delete makes pruning fail loudly every night, by design.
+   Keep the key in your password manager too: a restore on a new server needs
+   it (or a new key the provider issues for the same bucket).
 2. **A passphrase**, made once: `openssl rand -hex 32`. Store it in your
    password manager as well as on the server. Every backup is encrypted with
    it; without it, no backup can be read by anyone, you included.
@@ -30,7 +32,10 @@ then decrypt straight into `pg_restore` in a scratch database gave the same
    `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET` in the password manager next
    to the passphrase, and update the copy at every rotation: a database
    restored without its `SECRETS_ENCRYPTION_KEY` cannot read any workspace's
-   stored keys and tokens.
+   stored keys and tokens. When `SECRETS_ENCRYPTION_KEY` is rotated
+   (`scripts/rotate-secrets-key.ts`), keep the retired key too, dated, until
+   `BACKUP_KEEP_DAYS` after the rotation: every backup made before it holds the
+   secrets under the retired key (Restore after a disaster, step 4).
 4. **A dead-man check**: a free check at healthchecks.io (or similar) that
    expects a ping every day and emails you when one is missed
    (`BACKUP_PING_URL`). Required with the setup below, where nothing else
@@ -51,11 +56,15 @@ Root runs the backup, so root must own every file it runs: the app directory
 belongs to `www`, and anything `www` can change must never run as root.
 
 ```
+export PATH="/www/server/nodejs/v20.20.0/bin:/www/server/pgsql/bin:$PATH"
 install -d -o root -g root -m 700 /usr/local/lib/workwrk-backup
 install -o root -g root -m 700 /www/wwwroot/workwrk.com/scripts/backup/backup.sh /usr/local/lib/workwrk-backup/backup.sh
 install -o root -g root -m 600 /www/wwwroot/workwrk.com/scripts/backup/store.mjs /usr/local/lib/workwrk-backup/store.mjs
-cd /usr/local/lib/workwrk-backup && /www/server/nodejs/v20.20.0/bin/npm install --no-save @aws-sdk/client-s3
+cd /usr/local/lib/workwrk-backup && npm install --no-save @aws-sdk/client-s3
 ```
+
+(aaPanel's Node and Postgres tools are not on root's default `PATH`, hence the
+first line; `npm` itself starts with `#!/usr/bin/env node`.)
 
 Then `/etc/workwrk-backup.env`, mode 600, owned by root. It names the
 database itself: the script never runs the app's `.env` (it belongs to `www`;
@@ -102,11 +111,13 @@ A backup nobody has restored is not a backup. On the server (or any machine
 with Postgres 16 tools and the passphrase), as root. Run it as ONE block, in
 the parentheses: everything loaded from `/etc/workwrk-backup.env` stays
 inside it, so the passphrase and the bucket keys never stay in your shell
-(where a later `pm2 ... --update-env` would copy them into the app). The
-decrypted dump is every customer's data, so it is never written to disk: it
-streams straight into `pg_restore`, and the encrypted copy sits in a folder
-only root can read. `<app role>` is the database user in the app's
-`DATABASE_URL`.
+(where a later `pm2 ... --update-env` would copy them into the app), and a
+step that fails ends it before the next one runs. The decrypted dump is every
+customer's data, so it is never written to disk: it streams straight into
+`pg_restore`, and the encrypted copy sits in a folder only root can read.
+`<app role>` is the database user in the app's `DATABASE_URL`. The Postgres
+tools run through `sudo` by their full path: `sudo` replaces `PATH` with its
+own, which does not have aaPanel's.
 
 ```
 (
@@ -114,15 +125,15 @@ only root can read. `<app role>` is the database user in the app's
   export PATH="/www/server/nodejs/v20.20.0/bin:/www/server/pgsql/bin:$PATH"
   set -a && . /etc/workwrk-backup.env && set +a
   D=$(mktemp -d)
-  cd /usr/local/lib/workwrk-backup
+  cd /usr/local/lib/workwrk-backup || exit 1
   node store.mjs list db/
-  node store.mjs get db/<time>.dump.enc "$D/restore.dump.enc"
-  sudo -u postgres createdb -O <app role> workwrk_restore_test
+  node store.mjs get db/<time>.dump.enc "$D/restore.dump.enc" || exit 1
+  sudo -u postgres /www/server/pgsql/bin/createdb -O <app role> workwrk_restore_test || exit 1
   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in "$D/restore.dump.enc" \
-    | sudo -u postgres pg_restore --no-owner --no-privileges --role=<app role> -d workwrk_restore_test
+    | sudo -u postgres /www/server/pgsql/bin/pg_restore --no-owner --no-privileges --role=<app role> -d workwrk_restore_test
   psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "User"'
   psql "postgresql://<app role>:<password>@127.0.0.1:5432/workwrk_restore_test" -c 'SELECT count(*) FROM "Organization"'
-  sudo -u postgres dropdb workwrk_restore_test
+  sudo -u postgres /www/server/pgsql/bin/dropdb workwrk_restore_test
   rm -rf "$D"
 )
 ```
@@ -132,7 +143,9 @@ They are read as the app's own database user on purpose: a restore owned by
 `postgres` with no grants would answer `postgres` and refuse the app, while
 `/api/health` (which runs only `SELECT 1`) still answered 200. If the app's
 user may create databases, run every step as that user instead of
-`sudo -u postgres`. `psql` refuses Prisma's `?schema=` parameter: leave it off
+`sudo -u postgres`. If `createdb` says the database already exists (an
+earlier test that stopped partway), drop it with the block's `dropdb` line
+and run the block again. `psql` refuses Prisma's `?schema=` parameter: leave it off
 the URL. Use the newest dump's `<time>` from the list line.
 
 ## Restore after a disaster
@@ -140,17 +153,29 @@ the URL. Use the newest dump's `<time>` from the list line.
 1. Stop the app: `pm2 stop workwrk`.
 2. If the server's disk is gone, recreate the app's `.env` from your password
    manager's copy (above) before anything else, with the same
-   `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET`.
+   `SECRETS_ENCRYPTION_KEY` and `NEXTAUTH_SECRET`. On a new server, also redo
+   Install (above) and recreate `/etc/workwrk-backup.env`, with the passphrase
+   and the bucket key from your password manager: step 3 needs both.
 3. Restore the newest dump into a NEW database owned by the app's user: the
    test restore's block, with `workwrk_restored` in place of
-   `workwrk_restore_test` and without its last two lines (keep the database).
-   Never restore over the damaged one: it may still hold what you need.
+   `workwrk_restore_test` and without its `dropdb` line (keep the database;
+   its `rm -rf` line still removes the encrypted copy). Never restore over the
+   damaged one: it may still hold what you need. If `workwrk_restored` already
+   exists (it is the live database after an earlier restore, or a half-finished
+   attempt at this step), use a new name, such as `workwrk_restored_` and the
+   date, and drop a half-restored database before trying again.
 4. Point `DATABASE_URL` in the app's `.env` at the restored database, and
    `DIRECT_URL` too if the `.env` sets it (migrations and the Prisma CLI use
    it first), and `BACKUP_DATABASE_URL` in `/etc/workwrk-backup.env`, so
    tonight's backup dumps the database the app now serves. Renaming the
-   databases instead covers all three. Then, from a fresh root shell (never
-   one the backup settings were loaded into), `pm2 start workwrk`.
+   databases instead covers all three. A backup made before the last
+   rotation of `SECRETS_ENCRYPTION_KEY` holds its secrets under the retired
+   key: set that key as `SECRETS_ENCRYPTION_KEY_PREVIOUS` beside the current
+   one. Then, from a fresh root shell (never one the backup settings were
+   loaded into), `pm2 start workwrk`, and, for the older backup, move its
+   secrets to the current key with `scripts/rotate-secrets-key.ts` (its steps
+   2 to 4, with `--write --app-holds-new-key`, since no secret opens with the
+   current key yet) before removing the retired one.
 5. Check with the app's own user, not only `/api/health`: the two `psql`
    counts above against the restored database, then sign in and open a page
    with data on it.
