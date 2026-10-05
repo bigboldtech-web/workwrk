@@ -114,7 +114,15 @@ Before taking a real card:
   itself sends none, it only moves a subscription that ends unpaid back to
   Starter.
 - In test mode, run one checkout (check the amount shown is the page's, in
-  the buyer's currency), one seat change in the portal, and one cancellation.
+  the buyer's currency) and one cancellation in the portal, and set a new seat
+  quantity in the Stripe dashboard as you will when a customer emails.
+- **Free AI's daily ceiling** across every free workspace made from
+  6 October 2026 (`src/lib/ai-allowance.ts`): `FREE_AI_QUESTIONS_PER_DAY`
+  (default 2000), `FREE_AI_AUTO_PER_DAY` (5000) and `FREE_AI_FILLS_PER_DAY`
+  (5000). Past one, those workspaces' AI of that kind waits for 00:00 UTC, and
+  `OPS_ALERT_EMAIL` is told the first time each day: raise the number if it
+  is growth, look at the day's sign-ups if it is a script. Paid workspaces,
+  and free ones made before 6 October 2026, never touch it.
 
 ### Switches, off unless you decide otherwise
 
@@ -146,7 +154,7 @@ Before taking a real card:
   that tells you email has stopped.
 - Email: send yourself an invitation and a password reset, and check both
   arrive outside spam.
-- Billing: with Stripe set (above), the four steps under "Before taking a
+- Billing: with Stripe set (above), the steps under "Before taking a
   real card", in Stripe's test mode first. AppSumo: a code redeemed in
   Plan & billing raises the workspace to the plan and seats it grants, and
   never lowers either.

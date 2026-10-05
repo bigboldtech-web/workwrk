@@ -129,10 +129,10 @@ export default function TermsPage() {
               <p>
                 Paid plans are billed through our payment processor, at the price and billing period shown when you
                 subscribe. Moving from Starter to Growth is done at checkout from Settings, Plan &amp; billing, and a
-                redeemed code moves the workspace to the plan it grants. Once your workspace pays by card, updating the
-                card, seeing invoices and cancelling happen in that processor&apos;s portal, from the same page. Changing
-                the seat count or any other plan change, and everything for a workspace that does not pay by card, is
-                done by writing to us at the address that page gives.
+                redeemed code raises the workspace to the plan and seats it grants (it never lowers either). Once your
+                workspace pays by card, updating the card, seeing invoices and cancelling happen in that
+                processor&apos;s portal, from the same page. Changing the seat count or any other plan change, and
+                everything for a workspace that does not pay by card, is done by writing to us at billing@workwrk.com.
               </p>
               <p>
                 If a payment fails, our payment processor tries it again. If the subscription still ends unpaid, the

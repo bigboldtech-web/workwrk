@@ -39,7 +39,7 @@ import { fieldChanges } from "@/lib/automation/field-changes";
 import { createMessageWithFallback, getAnthropicForOrg, isAiConfigured, modelFor } from "@/lib/ai-client";
 import { aiFieldsOn } from "@/lib/ai/ai-features";
 import { claimAiUse, releaseAiUse } from "@/lib/ai-usage";
-import { claimFreeDay } from "@/lib/ai-allowance";
+import { claimFreeDay, releaseFreeDay, underFreeCeiling } from "@/lib/ai-allowance";
 import {
   aiFieldConfig,
   aiFieldNotReady,
@@ -91,9 +91,9 @@ function refuse(status: number, body: Record<string, unknown>): NextResponse {
 }
 
 /** Whether the workspace has turned AI fields on (and AI is on). */
-export async function orgAiFieldsState(organizationId: string): Promise<{ on: boolean; plan: string | null }> {
-  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true, plan: true } });
-  return { on: aiFieldsOn(org?.settings), plan: org ? String(org.plan) : null };
+export async function orgAiFieldsState(organizationId: string): Promise<{ on: boolean; plan: string | null; createdAt: Date | null }> {
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true, plan: true, createdAt: true } });
+  return { on: aiFieldsOn(org?.settings), plan: org ? String(org.plan) : null, createdAt: org?.createdAt ?? null };
 }
 
 export async function fillAiField(args: {
@@ -111,6 +111,8 @@ export async function fillAiField(args: {
    */
   expect: { value: unknown } | null;
   plan: string | null;
+  /** When the workspace was made: free workspaces made before the platform's ceiling take no part in it. */
+  createdAt?: Date | null;
 }): Promise<NextResponse> {
   const { c } = args;
 
@@ -186,7 +188,8 @@ export async function fillAiField(args: {
   if (claim === "not_ready") return refuse(503, { error: "not_ready" });
   // A free workspace also takes one of the platform's free fills of the day
   // (src/lib/ai-allowance.ts): past that ceiling, fills wait for tomorrow.
-  if (String(args.plan ?? "STARTER") === "STARTER" && !(await claimFreeDay("fill"))) {
+  const freeCeiling = String(args.plan ?? "STARTER") === "STARTER" && underFreeCeiling(args.createdAt);
+  if (freeCeiling && !(await claimFreeDay("fill"))) {
     await releaseAiUse(c.organizationId, "field_fill");
     return refuse(429, { error: "ai_free_daily_limit" });
   }
@@ -213,6 +216,7 @@ export async function fillAiField(args: {
     if (msg.stop_reason !== "end_turn" && msg.stop_reason !== "stop_sequence") return refuse(502, { error: "ai_unusable" });
   } catch (err) {
     await releaseAiUse(c.organizationId, "field_fill");
+    if (freeCeiling) await releaseFreeDay("fill");
     console.error(`[ai-fill] ${gate.item.id}/${field.key}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
     return refuse(502, { error: "ai_failed" });
   }
