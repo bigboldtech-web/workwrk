@@ -7,6 +7,7 @@ import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { actingWorkspace } from "@/lib/access/acting-workspace";
 
 /**
  * The session, then the DB user row: exactly what resolveSuiteContext has
@@ -26,22 +27,13 @@ export async function loadSuiteViewer(held?: Session | null) {
     select: { id: true, organizationId: true, accessLevel: true },
   });
   if (!user?.organizationId) return { error: "no organization" as const };
-  // The workspace this session is ACTING in, by the rule the jwt
-  // revalidation applies (src/lib/auth.ts): a token acting somewhere other
-  // than the anchored workspace reads its level from that workspace's
-  // membership row, and with no membership there it acts at home. Without
-  // this, a person signed in to two workspaces on two devices had the docs,
-  // timers and uploads of one workspace while every other route served the
-  // other, and an upload was stamped with the wrong company.
-  const acting = (session.user as { organizationId?: string }).organizationId;
-  if (acting && acting !== user.organizationId) {
-    const held = await prisma.organizationMembership.findUnique({
-      where: { userId_organizationId: { userId: user.id, organizationId: acting } },
-      select: { role: true },
-    });
-    if (held) return { userId: user.id, orgId: acting, accessLevel: held.role };
-  }
-  return { userId: user.id, orgId: user.organizationId, accessLevel: user.accessLevel };
+  // The workspace this session is ACTING in (src/lib/access/acting-workspace.ts,
+  // the rule the jwt revalidation applies). Without it, a person signed in to
+  // two workspaces on two devices had the docs, timers and uploads of one
+  // workspace while every other route served the other, and an upload was
+  // stamped with the wrong company.
+  const acting = await actingWorkspace(user, (session.user as { organizationId?: string }).organizationId);
+  return { userId: user.id, orgId: acting.organizationId, accessLevel: acting.accessLevel };
 }
 
 /** The viewer every suite route gates with. */

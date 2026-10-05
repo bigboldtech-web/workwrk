@@ -5,9 +5,9 @@
 // have no foreign key to Organization, so a deleted company's activity log,
 // agreements, call records, document snapshots, email log, templates,
 // reminders, assessments and Trash stayed for good, and so did its uploaded
-// files, its people's password reset rows, its manager digests (which carried
-// no company) and the names in staff audit rows, against the privacy policy's
-// promise to delete workspace data 30 days after termination. The cron now deletes all of it with the company; this removes
+// files, its people's password reset rows, the digests and reminders about it
+// (which carried no company) and the names in staff audit rows, against the
+// privacy policy's promise to delete workspace data 30 days after termination. The cron now deletes all of it with the company; this removes
 // what is already stranded.
 //
 // RUN IT ON THE SERVER, by the founder, AFTER the Batch 9 deploy (whose SQL
@@ -19,18 +19,20 @@
 // It touches ONLY rows whose organizationId names no Organization row (a row
 // with no organizationId, such as a global template, is never touched), in
 // batches of 5000, and prints counts only. WorkspaceDeletion is never
-// touched. Files go only where ownership is provable (src/lib/trash.ts
-// ownedStoredFile): with S3 configured, everything under orgs/<id>/ of a
-// company that no longer exists; on disk, file-<id>-* and logo-<id>-* of a
-// company that no longer exists and avatar-<id>-* of an account that no
-// longer exists. A disk upload from before names carried the id cannot be
-// traced and is left. There is no undo: read the dry run first.
+// touched. Files go only where ownership is provable (src/lib/company-files.ts):
+// with S3 configured, orgs/<id>/scribe/ and orgs/<id>/files/ of a company
+// that no longer exists; on disk, file-<id>-* and logo-<id>-* of a company
+// that no longer exists and avatar-<id>-* of an account that no longer
+// exists. Older uploads are left: orgs/<id>/notes/ in S3 (its key named the
+// uploader's home workspace, so it can hold a live company's files) and
+// file-<random> on disk. There is no undo: read the dry run first.
 
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 import { WORKSPACE_ORPHAN_TABLES } from "../src/lib/admin/workspace-orphans";
 import { ACTION_LABEL } from "../src/lib/admin/staff-activity";
 import { BLOB_TRASH_TYPES, freeTrashStorage } from "../src/lib/trash";
 import { deleteObjectsWithPrefix, isS3Configured } from "../src/lib/s3";
+import { ownedS3Prefixes } from "../src/lib/company-files";
 import path from "path";
 import { readdir, unlink } from "fs/promises";
 
@@ -92,11 +94,17 @@ async function main() {
     SELECT DISTINCT d."organizationId" AS id FROM "WorkspaceDeletion" d
      WHERE NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o."id" = d."organizationId")`) goneCompanies.add(r.id);
 
-  // Their files in S3, all under their own prefix.
+  // Their files in S3, under the prefixes only they could have written.
   if (isS3Configured()) {
     let objects = 0;
-    for (const id of goneCompanies) objects += write ? await deleteObjectsWithPrefix(`orgs/${id}/`).catch(() => 0) : 0;
-    console.log(write ? `S3: deleted ${objects} objects of ${goneCompanies.size} companies that no longer exist` : `S3: ${goneCompanies.size} companies that no longer exist would have orgs/<id>/ emptied`);
+    for (const id of goneCompanies) {
+      for (const prefix of ownedS3Prefixes(id)) objects += write ? await deleteObjectsWithPrefix(prefix).catch(() => 0) : 0;
+    }
+    console.log(
+      write
+        ? `S3: deleted ${objects} objects of ${goneCompanies.size} companies that no longer exist (orgs/<id>/scribe/ and files/; notes/ left)`
+        : `S3: ${goneCompanies.size} companies that no longer exist would have orgs/<id>/scribe/ and files/ emptied (notes/ is left)`,
+    );
   }
 
   // Disk files whose names say they belong to a company or an account that
@@ -166,25 +174,28 @@ async function main() {
   }
   console.log(`PasswordResetToken: ${Number(tokens)} rows of addresses no account has${write ? ", deleted" : ""}`);
 
-  // Manager digests sent before they carried a company (src/app/api/email/
-  // send-reminders): the manager's address and their reports' names, kept by
-  // no company. Only finished ones, and only to an address no account has, so
-  // queued mail and every other kind of email row are never touched.
-  const [{ n: digests }] = await prisma.$queryRaw<{ n: bigint }[]>`
+  // Emails written before they carried the company whose people and work they
+  // name (src/app/api/email/send-reminders, src/lib/reminders.ts): manager
+  // digests and reminder emails with no company, and monthly evaluation
+  // reminders, which were tagged with the manager's own workspace rather than
+  // their reports'. Which company a given row named cannot be read back, so
+  // every FINISHED one goes, whoever received it: each is the log of an email
+  // delivered long ago. Queued mail and every other kind of row are never
+  // touched. (Evaluation reminders sent since the release carry the right
+  // company; the few sent between the deploy and this run go too, harmlessly.)
+  const [{ n: oldMail }] = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(*)::bigint AS n FROM "EmailLog" e
-     WHERE e."organizationId" IS NULL
-       AND e."template" IN ('overdue-manager', 'overdue-tasks-manager')
-       AND e."status" IN ('SENT', 'FAILED')
-       AND NOT EXISTS (SELECT 1 FROM "User" u WHERE lower(u."email") = lower(e."to"))`;
+     WHERE e."status" IN ('SENT', 'FAILED')
+       AND ((e."organizationId" IS NULL AND e."template" IN ('overdue-manager', 'overdue-tasks-manager', 'reminder'))
+         OR e."template" = 'evaluation-reminder')`;
   if (write) {
     await prisma.$executeRaw`
       DELETE FROM "EmailLog" e
-       WHERE e."organizationId" IS NULL
-         AND e."template" IN ('overdue-manager', 'overdue-tasks-manager')
-         AND e."status" IN ('SENT', 'FAILED')
-         AND NOT EXISTS (SELECT 1 FROM "User" u WHERE lower(u."email") = lower(e."to"))`;
+       WHERE e."status" IN ('SENT', 'FAILED')
+         AND ((e."organizationId" IS NULL AND e."template" IN ('overdue-manager', 'overdue-tasks-manager', 'reminder'))
+           OR e."template" = 'evaluation-reminder')`;
   }
-  console.log(`EmailLog: ${Number(digests)} manager digests to addresses no account has${write ? ", deleted" : ""}`);
+  console.log(`EmailLog: ${Number(oldMail)} finished digests and reminders that carried no company or the wrong one${write ? ", deleted" : ""}`);
 
   console.log(write ? `Done: ${total} table rows found at the start.` : `Total: ${total} table rows. Run again with --write to delete them.`);
 }

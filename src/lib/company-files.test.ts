@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ownedDiskNames } from "./company-files";
+import { ownedDiskNames, ownedS3Prefixes } from "./company-files";
 import { ownedStoredFile } from "./trash";
 
 const ORG = "cmabc0000000000000000org1";
@@ -22,6 +22,19 @@ describe("ownedDiskNames", () => {
   });
   it("owns nothing without an id", () => {
     expect(ownedDiskNames([`file--x.pdf`, "avatar--1.png"], "", [""])).toEqual([]);
+  });
+});
+
+describe("ownedS3Prefixes", () => {
+  it("frees only the prefixes stamped with the company the file was for, never orgs/<id>/ whole", () => {
+    expect(ownedS3Prefixes(ORG)).toEqual([`orgs/${ORG}/files/`, `orgs/${ORG}/scribe/`]);
+    // orgs/<id>/notes/ named the uploader's home workspace: it can hold a live company's files.
+    expect(ownedS3Prefixes(ORG).some((p) => `orgs/${ORG}/notes/2026-10-01/x.pdf`.startsWith(p))).toBe(false);
+    expect(ownedS3Prefixes(ORG).some((p) => `orgs/${ORG}x/files/a.pdf`.startsWith(p))).toBe(false);
+  });
+  it("owns nothing without a plain id", () => {
+    expect(ownedS3Prefixes("")).toEqual([]);
+    expect(ownedS3Prefixes("a/../b")).toEqual([]);
   });
 });
 

@@ -186,8 +186,13 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
   let sent = 0;
   let failed = 0;
 
-  // Atomically claim a batch: update QUEUED → SENDING in one query to prevent
-  // concurrent processors from picking up the same emails (race condition fix).
+  // Claim a batch: QUEUED becomes SENDING in one statement, and each row is
+  // claimed by one run only. Every sendEmail starts a run, so runs overlap
+  // all the time (send-reminders queues hundreds at once). FOR UPDATE SKIP
+  // LOCKED makes a second run pass over the rows the first is claiming, and
+  // the outer status check makes it skip any row that was claimed while it
+  // waited; without both, two runs read the same ids and sent each email
+  // twice.
   // A claimed row can be deleted while it is sent (its company deleted for
   // good, /api/cron/org-hard-delete), so each write after the claim is an
   // updateMany: a row that is gone updates nothing, where update would throw
@@ -195,11 +200,12 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
   const claimed = await prisma.$queryRawUnsafe<{ id: string }[]>(`
     UPDATE "EmailLog"
     SET status = 'SENDING', attempts = attempts + 1
-    WHERE id IN (
+    WHERE status = 'QUEUED' AND id IN (
       SELECT id FROM "EmailLog"
       WHERE status = 'QUEUED' AND attempts < 3
       ORDER BY "createdAt" ASC
       LIMIT 20
+      FOR UPDATE SKIP LOCKED
     )
     RETURNING id
   `);

@@ -92,6 +92,17 @@ export function homesElsewhere(rows: readonly MembershipElsewhere[]): Map<string
   return new Map([...best].map(([userId, b]) => [userId, b.to]));
 }
 
+/** Thrown when someone who belongs to another workspace cannot be moved
+ *  into any of them, so their company is not deleted on this run. */
+export class AccountCannotMove extends Error {
+  constructor(readonly userIds: string[]) {
+    super(
+      `${userIds.length} account(s) here also belong to other workspaces, but each of those already has an account with the same email, so they cannot move there. Merge those accounts first; until then this company is kept. Account ids: ${userIds.join(", ")}`,
+    );
+    this.name = "AccountCannotMove";
+  }
+}
+
 /** Inside the transaction that deletes a company for good
  *  (/api/cron/org-hard-delete), before the delete: everyone whose home it is
  *  but who also belongs to another workspace is moved there, at the level
@@ -100,14 +111,28 @@ export function homesElsewhere(rows: readonly MembershipElsewhere[]): Map<string
  *  was: someone who deleted a test workspace while working in their company
  *  on another device would otherwise lose their account, their place in that
  *  company and what cascades from it there (their conversations, say).
- *  Returns how many moved. */
+ *
+ *  A workspace that already has an account with the same email cannot take
+ *  this one (an account is unique by email and workspace), so the next one
+ *  is tried. When none can, AccountCannotMove: deleting the account would
+ *  take what it did in those workspaces with it, so the company is kept
+ *  until the accounts are merged. Returns how many moved. */
 export async function moveHomesOutOf(organizationId: string, tx: Prisma.TransactionClient): Promise<number> {
   const rows = await tx.organizationMembership.findMany({
     where: { user: { organizationId }, organizationId: { not: organizationId } },
-    select: { userId: true, organizationId: true, role: true, organization: { select: { status: true } } },
+    select: { userId: true, organizationId: true, role: true, organization: { select: { status: true } }, user: { select: { email: true } } },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
-  const homes = homesElsewhere(rows.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status })));
+  if (rows.length === 0) return 0;
+  const sameEmail = await tx.user.findMany({
+    where: { OR: rows.map((r) => ({ organizationId: r.organizationId, email: r.user.email })) },
+    select: { organizationId: true, email: true },
+  });
+  const taken = new Set(sameEmail.map((u) => `${u.organizationId}\n${u.email}`));
+  const open = rows.filter((r) => !taken.has(`${r.organizationId}\n${r.user.email}`));
+  const homes = homesElsewhere(open.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status })));
+  const stuck = [...new Set(rows.map((r) => r.userId))].filter((id) => !homes.has(id));
+  if (stuck.length > 0) throw new AccountCannotMove(stuck);
   let moved = 0;
   for (const [userId, to] of homes) {
     if (await reanchorUser({ userId, to }, tx)) moved += 1;

@@ -1,6 +1,6 @@
 # Founder-endorsed visual reference: Zoho (CRM Leads list + Zoho One home)
 
-Date: 2026-09-11. The founder sent two Zoho screenshots with: "we were working on the UI part and I like this UI, this is from Zoho and this looks pretty clean." Treat this as the CURRENT visual preference. It does not replace the brand (blue #0073EA primary, YBRG only as semantic + the four dots, NO purple, no Zoho red/coral) but it tells us what "clean" means to him. The screenshots are on disk next to this file: `zoho-ref-1.jpg` (CRM Leads list inside Zoho One) and `zoho-ref-2.jpg` (Zoho One home). Read both images.
+Date: 2026-09-11. The founder sent two Zoho screenshots with: "we were working on the UI part and I like this UI, this is from Zoho and this looks pretty clean." Treat this as the CURRENT visual preference. It does not replace the brand (blue #0073EA primary, YBRG only as semantic + the four dots, NO purple, no Zoho red/coral) but it tells us what "clean" means to the founder. The two screenshots (`zoho-ref-1.jpg`, a CRM Leads list inside Zoho One, and `zoho-ref-2.jpg`, the Zoho One home) are no longer kept in the repository. The measurements below are the record of them.
 
 ## What is actually in the screenshots (measured from the 2940x1912 captures, values approximate)
 

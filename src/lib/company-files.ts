@@ -10,12 +10,18 @@
 // the client sent, so a reference proves nothing: freeing by reference would
 // let anyone delete another company's file by registering a link to it and
 // deleting their own workspace. So nothing is freed by reference. What is
-// freed is what the company's own id is written into:
-//   S3       everything under orgs/<id>/ (every upload route writes there)
+// freed is what was stamped with the company's own id by code that knew the
+// company the file was for:
+//   S3       orgs/<id>/files/ (uploads, since they carry the workspace the
+//            session acts in) and orgs/<id>/scribe/ (Scribe screenshots,
+//            always keyed by the session's workspace)
 //   on disk  file-<id>-* (uploads), logo-<id>-* (its logos, old ones too)
 //            and avatar-<userId>-* for each person whose account goes with it
-// A disk upload from before names carried the id (file-<random>) cannot be
-// traced to any company and is left in place: keeping a file too long is
+// Older uploads are left in place: orgs/<id>/notes/ in S3 and file-<random>
+// on disk. Their key named the uploader's HOME workspace (or nothing), not
+// the company the file was for, so a person working in one company while
+// anchored to another stored that company's files under the other's prefix:
+// sweeping it would delete a live company's files. Keeping a file too long is
 // better than deleting someone else's. The cron reads the accounts that go in
 // the delete's own transaction, after moving out everyone who also belongs
 // to another workspace (whose photo stays with their account); free the
@@ -29,6 +35,12 @@ import { deleteObjectsWithPrefix, isS3Configured } from "@/lib/s3";
 export interface StoredFiles {
   /** The accounts deleted with the company (their photos go with them). */
   userIds: string[];
+}
+
+/** The S3 prefixes a company provably owns (see the header): never orgs/<id>/ as a whole. */
+export function ownedS3Prefixes(organizationId: string): string[] {
+  if (!organizationId || !/^[A-Za-z0-9_-]+$/.test(organizationId)) return [];
+  return [`orgs/${organizationId}/files/`, `orgs/${organizationId}/scribe/`];
 }
 
 /** The disk names a company provably owns, out of a directory listing. */
@@ -49,7 +61,9 @@ export async function freeCompanyFiles(organizationId: string, stored: StoredFil
       const ok = await unlink(path.join(dir, name)).then(() => true, () => false);
       if (ok) local += 1;
     }
-    if (isS3Configured()) s3 += await deleteObjectsWithPrefix(`orgs/${organizationId}/`).catch(() => 0);
+    if (isS3Configured()) {
+      for (const prefix of ownedS3Prefixes(organizationId)) s3 += await deleteObjectsWithPrefix(prefix).catch(() => 0);
+    }
   } catch (err) {
     console.error(`[company-files] freeing ${organizationId}:`, err instanceof Error ? err.message : String(err));
   }

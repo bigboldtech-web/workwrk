@@ -17,6 +17,9 @@ function fmtDue(d: Date): string {
 type DueReminder = {
   id: string; userId: string; title: string; body: string | null; notifyEmail: boolean;
   entityType?: string | null; entityId?: string | null;
+  /** Its company: the email is tagged with it, so it goes with the company
+   *  when it is deleted for good (/api/cron/org-hard-delete). */
+  organizationId?: string | null;
 };
 
 /** Fire one due reminder exactly once. Returns false when another worker
@@ -71,6 +74,7 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
         subject,
         html,
         template: "reminder",
+        organizationId: r.organizationId ?? undefined,
       }).catch((e) => console.error("reminder email failed", e));
     }
   }

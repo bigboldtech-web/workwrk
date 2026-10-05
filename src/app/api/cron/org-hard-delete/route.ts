@@ -6,6 +6,7 @@ import { ACTION_LABEL } from "@/lib/admin/staff-activity";
 import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/workspace-orphans";
 import { freeCompanyFiles } from "@/lib/company-files";
 import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
+import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/company-notifications";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -35,13 +36,19 @@ import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
  * (src/lib/access/workspace-anchor.ts moveHomesOutOf), and only the rest go.
  *
  * ITS FILES GO TOO, where ownership is provable (src/lib/company-files.ts):
- * in S3 everything under orgs/<id>/, on disk the names carrying its id or
- * the ids of the accounts that go with it. Freed only after the transaction
- * commits, so a delete that rolls back loses nothing; never by a file
- * reference, which a client chose. Its people's password reset rows and the
- * emails to them that name no company (manager digests sent before they
- * carried one), which hold their addresses, are deleted while their accounts
- * still exist to match them by.
+ * in S3 orgs/<id>/files/ and orgs/<id>/scribe/, on disk the names carrying
+ * its id or the ids of the accounts that go with it. Older uploads
+ * (orgs/<id>/notes/, file-<random>) are left: their key named the uploader's
+ * home workspace, so it can hold a live company's files. Freed only after the
+ * transaction commits, so a delete that rolls back loses nothing; never by a
+ * file reference, which a client chose.
+ *
+ * AND WHAT NAMES ITS PEOPLE ELSEWHERE. Their password reset rows and the
+ * emails to them that name no company, which hold their addresses, are
+ * deleted while their accounts still exist to match them by. In the inboxes
+ * of the people who outlive it, the notifications whose link names one of its
+ * records go too (src/lib/admin/company-notifications.ts); one whose link
+ * names no record cannot be told apart from another workspace's and stays.
  *
  * STAFF AUDIT ROWS KEEP NO NAMES. The rows about the company (StaffAction,
  * whose company link goes on delete) are kept, with their action, who did it
@@ -120,6 +127,8 @@ export async function POST(req: NextRequest) {
     SELECT t.name FROM unnest(${[...WORKSPACE_ORPHAN_TABLES]}::text[]) AS t(name)
      WHERE to_regclass(format('%I', t.name)) IS NOT NULL`;
   const orphanTables = present.map((r) => r.name).filter(isWorkspaceOrphanTable);
+  // Every table whose rows belong to one company, for the notification sweep.
+  const ownedTables = await companyOwnedTables();
 
   for (const org of due) {
     try {
@@ -205,6 +214,10 @@ export async function POST(req: NextRequest) {
              WHERE e."organizationId" IS NULL
                AND EXISTS (SELECT 1 FROM "User" u WHERE u."organizationId" = ${org.id} AND lower(u."email") = lower(e."to"))
                AND NOT EXISTS (SELECT 1 FROM "User" v WHERE v."organizationId" <> ${org.id} AND lower(v."email") = lower(e."to"))`;
+          // 2e. Notifications about it in the inboxes of the people who
+          // outlive it (members anchored elsewhere, and everyone moved out in
+          // 1b), while its rows still exist to match the links against.
+          await deleteNotificationsAbout(tx, org.id, ownedTables);
           // 3. The company.
           const n = await tx.$executeRaw`
             DELETE FROM "Organization"

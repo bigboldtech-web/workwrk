@@ -77,6 +77,7 @@ import {
 import { accessGrantTableReady, readAccessModel } from "./access-grant-store";
 import { activityNodeRef } from "./access-activity";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
+import { actingWorkspace } from "./acting-workspace";
 import type { Viewer } from "./types";
 
 export { nodeCtxFromLevel };
@@ -86,9 +87,12 @@ export type { NodeCtx, NodeDecision, NodeRef, NodeRole, TreeRole };
 
 /**
  * The one place a route reads the session for node access. One extra User
- * read: the row's level and org are the authority (a stale token never
- * widens a demoted person), and a deleted or INACTIVE account is denied.
- * Null when signed out.
+ * read: the database is the authority (a stale token never widens a demoted
+ * person), and a deleted or INACTIVE account is denied. The workspace is the
+ * one the session acts in, at the level held there
+ * (src/lib/access/acting-workspace.ts), the same as every suite route and the
+ * engine's viewer: the anchor alone made a doc opened in the acting workspace
+ * answer 404 in its own sharing dialog. Null when signed out.
  */
 export async function nodeCtxFromSession(): Promise<NodeCtx | null> {
   const session = await getServerSession(authOptions);
@@ -99,7 +103,8 @@ export async function nodeCtxFromSession(): Promise<NodeCtx | null> {
     select: { organizationId: true, accessLevel: true, status: true, deletedAt: true },
   });
   if (!row) return null;
-  const ctx = nodeCtxFromLevel(u.id, row.organizationId ?? u.organizationId, row.accessLevel ?? u.accessLevel);
+  const acting = await actingWorkspace({ id: u.id, organizationId: row.organizationId, accessLevel: row.accessLevel }, u.organizationId);
+  const ctx = nodeCtxFromLevel(u.id, acting.organizationId, acting.accessLevel);
   ctx.denied = row.deletedAt != null || RULE_1_DENIED_STATUSES.has(String(row.status));
   return ctx;
 }

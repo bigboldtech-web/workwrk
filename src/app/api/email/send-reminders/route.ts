@@ -35,28 +35,36 @@ export async function POST(req: NextRequest) {
     const managers = await prisma.user.findMany({
       where: { deletedAt: null, directReports: { some: { deletedAt: null } } },
       select: {
-        id: true, email: true, firstName: true, organizationId: true,
-        directReports: { where: { deletedAt: null }, select: { firstName: true, lastName: true } },
+        id: true, email: true, firstName: true,
+        directReports: { where: { deletedAt: null }, select: { firstName: true, lastName: true, organizationId: true } },
       },
     });
 
+    // One reminder per manager and company, tagged with the company whose
+    // people it names (a manager's reports can sit in more than one), so it
+    // goes with that company when it is deleted for good.
+    const reminders = managers.flatMap((mgr) => {
+      const byCompany = new Map<string, string[]>();
+      for (const r of mgr.directReports) {
+        byCompany.set(r.organizationId, [...(byCompany.get(r.organizationId) ?? []), `${r.firstName} ${r.lastName}`]);
+      }
+      return [...byCompany].map(([organizationId, names]) => ({ mgr, organizationId, names }));
+    });
     await Promise.all(
-      managers
-        .filter((mgr) => mgr.directReports.length > 0)
-        .map((mgr) => {
-          const { subject, html } = evaluationReminderTemplate({
-            managerName: mgr.firstName,
-            teamMembers: mgr.directReports.map((r) => `${r.firstName} ${r.lastName}`),
-            month: `${lastMonth} ${year}`,
-            evaluationLink: `${baseUrl}/kra-kpi`,
-          });
-          return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
-            variables: { month: `${lastMonth} ${year}`, teamCount: mgr.directReports.length },
-            organizationId: mgr.organizationId, category: "reminder" })
-            .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
-        }),
+      reminders.map(({ mgr, organizationId, names }) => {
+        const { subject, html } = evaluationReminderTemplate({
+          managerName: mgr.firstName,
+          teamMembers: names,
+          month: `${lastMonth} ${year}`,
+          evaluationLink: `${baseUrl}/kra-kpi`,
+        });
+        return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
+          variables: { month: `${lastMonth} ${year}`, teamCount: names.length },
+          organizationId, category: "reminder" })
+          .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
+      }),
     );
-    results.push(`Monthly evaluation: ${managers.length} managers`);
+    results.push(`Monthly evaluation: ${managers.length} managers, ${reminders.length} reminders`);
   }
 
   // ──────────────────────────────────────

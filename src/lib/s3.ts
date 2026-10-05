@@ -121,8 +121,9 @@ export async function deleteObject(key: string): Promise<void> {
 /**
  * Delete every object under a prefix, a thousand at a time (the most one
  * DeleteObjects request takes), and say how many went. For a company deleted
- * for good: everything it uploaded lives under `orgs/<id>/`. The prefix must
- * end with "/" so `orgs/abc/` never reaches `orgs/abcd/`.
+ * for good, only the prefixes it provably owns (src/lib/company-files.ts
+ * ownedS3Prefixes), never `orgs/<id>/` as a whole. The prefix must end with
+ * "/" so `orgs/abc/` never reaches `orgs/abcd/`.
  */
 export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
   if (!prefix.endsWith("/") || prefix.length < 6) throw new Error(`Refusing to delete under the prefix "${prefix}"`);

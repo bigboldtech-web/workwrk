@@ -54,8 +54,13 @@ export async function POST(req: NextRequest) {
   const today = new Date().toISOString().slice(0, 10);
 
   // S3 path — org-scoped so per-org bucket policies remain an option.
+  // orgs/<id>/files/ is written only since uploads were stamped with the
+  // workspace they are for (the one the session acts in, or a run's own
+  // company), so deleting a company for good frees that prefix
+  // (src/lib/company-files.ts). The older orgs/<id>/notes/ named the
+  // uploader's home workspace instead, which proves nothing, and is left.
   if (isS3Configured()) {
-    const key = `orgs/${orgId}/notes/${today}/${id}${ext ? "." + ext : ""}`;
+    const key = `orgs/${orgId}/files/${today}/${id}${ext ? "." + ext : ""}`;
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
       await getS3Client().send(

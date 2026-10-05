@@ -38,11 +38,15 @@ export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
  * a FileEntry are whatever the client sent (POST /api/files keeps them), so a
  * reference alone proves nothing: anyone who saw another company's link could
  * register it, trash it and delete it permanently. Only two things are
- * proof: an S3 key under the company's own prefix, orgs/<id>/ (every upload
- * writes there), and a disk name written with the company's id
- * (file-<id>-..., logo-<id>-...). A disk file from before names carried the
- * id (file-<random>) proves nothing and is left in place: keeping a file
- * too long is better than deleting another company's.
+ * proof, together with the trashed row naming it: an S3 key under the
+ * company's own prefix, orgs/<id>/ (every upload writes there), and a disk
+ * name written with the company's id (file-<id>-..., logo-<id>-...). A row of
+ * this company names a key under its own prefix only when its own people
+ * uploaded it while working in it, so this is safe for the older
+ * orgs/<id>/notes/ keys too, which the hard delete leaves because the prefix
+ * alone proves nothing there (src/lib/company-files.ts). A disk file from
+ * before names carried the id (file-<random>) proves nothing and is left in
+ * place: keeping a file too long is better than deleting another company's.
  */
 export function ownedStoredFile(organizationId: string, url: unknown, s3Key?: unknown): { kind: "local"; name: string } | { kind: "s3"; key: string } | null {
   if (!organizationId) return null;
