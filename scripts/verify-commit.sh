@@ -163,4 +163,17 @@ NODE_OPTIONS=--max-old-space-size=3072 npx next build > /tmp/verify-build.log 2>
   echo "BUILD FAILED. Last 40 lines:"; sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-build.log | tail -40; exit 1;
 }
 [ -f .next/BUILD_ID ] || { echo "NO BUILD_ID despite exit 0"; exit 1; }
+# A WHOLE-PROJECT TRACE FAILS THE GATE, though Next calls it a warning. Here,
+# in a clean checkout, it only traces src, docs and scripts. On the server
+# the deploy builds beside the live release, so the same trace also walks
+# the live .next, node_modules-prev and every stored upload, and the first
+# Batch 12 deploy's build failed in it (src/lib/local-uploads.ts). Fix the
+# file the warning names: a static subfolder, or a turbopackIgnore comment
+# on a runtime data path.
+if grep -q "Encountered unexpected file in NFT list" /tmp/verify-build.log; then
+  echo "BUILD TRACES THE WHOLE PROJECT (fails on the server). The warning:"
+  sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-build.log | sed -n '/Encountered unexpected file in NFT list/,/^$/p' | head -30
+  sed 's/\x1b\[[0-9;]*m//g' /tmp/verify-build.log | sed -n '/Import trace:/,/^$/p' | head -12
+  exit 1
+fi
 echo "==> PASS  BUILD_ID $(cat .next/BUILD_ID)"

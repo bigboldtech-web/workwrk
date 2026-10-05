@@ -35,8 +35,11 @@ variables and hosts is in `LAUNCH-CHECKLIST.md`.
    that is live.
 5. `chown`, then `.next` becomes `.next-prev`, `.next-staging` becomes
    `.next`, and `pm2 reload`.
-6. The check: `NEXTAUTH_URL/api/health` must name the new build within two
-   minutes, then `/login` and one of the build's scripts must answer 200.
+6. The check, at the app's address (`NEXT_PUBLIC_APP_URL`, else
+   `NEXTAUTH_URL`): `/api/health` must name the new build within two minutes,
+   then `/login` and one of the build's scripts must answer 200, following a
+   redirect to their own host (on this box `NEXTAUTH_URL` is the marketing
+   host, which sends `/login` on to the app host).
 
 Whatever stops a deploy, the script puts back what it had changed, through
 one exit handler: a failed step, a failed check, or an SSH session that ended

@@ -13,12 +13,33 @@
 // Files written before the move are in public/uploads: the route reads both
 // places, every delete covers both, and moveLegacyUploads (once per server
 // start, src/instrumentation.ts) moves them across, never overwriting.
-import { copyFile, constants, link, mkdir, readdir, readFile, stat, unlink } from "fs/promises";
 import path from "path";
 
-export const UPLOADS_DIR = path.join(process.cwd(), "storage", "uploads");
-export const LEGACY_UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
+// RUNTIME DATA, NEVER PART OF THE BUILD. Turbopack's file tracing follows
+// every fs call it can see, and it read these (paths under process.cwd()
+// with a name only known at run time) as "any file under the app
+// directory": it traced the WHOLE directory from every route that imports
+// this file. On the server that directory also holds the live build, the
+// previous packages and every stored file, and the first deploy that built
+// beside the live release (Batch 12) failed in that trace. So the fs
+// functions are loaded here through an import the build does not follow
+// (turbopackIgnore), every file operation on a stored file happens in this
+// file, and scripts/verify-commit.sh fails a build that traces the whole
+// directory again.
+type Fs = typeof import("fs/promises");
+let fsLoaded: Promise<Fs> | null = null;
+function fs(): Promise<Fs> {
+  return (fsLoaded ??= import(/* turbopackIgnore: true */ "node:fs/promises") as Promise<Fs>);
+}
+
+export const UPLOADS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "storage", "uploads");
+export const LEGACY_UPLOADS_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "uploads");
 const BOTH = [UPLOADS_DIR, LEGACY_UPLOADS_DIR];
+
+/** A stored file's path in one of the two folders. */
+function inPlace(dir: string, name: string): string {
+  return path.join(/*turbopackIgnore: true*/ dir, name);
+}
 
 /** A stored file's name: one path segment, no hidden file. */
 export function isUploadName(name: string): boolean {
@@ -27,16 +48,23 @@ export function isUploadName(name: string): boolean {
 
 /** The directory new files are written to, created when missing. */
 export async function uploadsDirForWrite(): Promise<string> {
-  await mkdir(UPLOADS_DIR, { recursive: true });
+  await (await fs()).mkdir(UPLOADS_DIR, { recursive: true });
   return UPLOADS_DIR;
+}
+
+/** Write a new stored file (storage/uploads). The name is the caller's own, checked here. */
+export async function writeUpload(name: string, bytes: Uint8Array): Promise<void> {
+  if (!isUploadName(name)) throw new Error(`Not a stored file name: ${name}`);
+  await (await fs()).writeFile(inPlace(await uploadsDirForWrite(), name), bytes);
 }
 
 /** A stored file's bytes: storage/uploads, or public/uploads for one not moved yet. */
 export async function readUpload(name: string): Promise<Buffer | null> {
   if (!isUploadName(name)) return null;
+  const { readFile } = await fs();
   for (const dir of BOTH) {
     try {
-      return await readFile(path.join(dir, name));
+      return await readFile(inPlace(dir, name));
     } catch {
       // Not in this one.
     }
@@ -47,15 +75,17 @@ export async function readUpload(name: string): Promise<Buffer | null> {
 /** Delete a stored file wherever it is. True when a copy was removed. */
 export async function deleteUpload(name: string): Promise<boolean> {
   if (!isUploadName(name)) return false;
+  const { unlink } = await fs();
   let removed = false;
   for (const dir of BOTH) {
-    if (await unlink(path.join(dir, name)).then(() => true, () => false)) removed = true;
+    if (await unlink(inPlace(dir, name)).then(() => true, () => false)) removed = true;
   }
   return removed;
 }
 
 /** Every stored file's name, from both places, once each. */
 export async function listUploads(): Promise<string[]> {
+  const { readdir } = await fs();
   const names = new Set<string>();
   for (const dir of BOTH) {
     for (const n of await readdir(dir).catch(() => [] as string[])) if (isUploadName(n)) names.add(n);
@@ -70,14 +100,15 @@ export async function listUploads(): Promise<string[]> {
  * the same bytes. A file it cannot move is left where it is and counted.
  */
 export async function moveLegacyUploads(): Promise<{ moved: number; left: number }> {
+  const { copyFile, constants, link, mkdir, readdir, readFile, stat, unlink } = await fs();
   const names = await readdir(LEGACY_UPLOADS_DIR).catch(() => [] as string[]);
   if (names.length === 0) return { moved: 0, left: 0 };
   await mkdir(UPLOADS_DIR, { recursive: true });
   let moved = 0;
   let left = 0;
   for (const name of names) {
-    const from = path.join(LEGACY_UPLOADS_DIR, name);
-    const to = path.join(UPLOADS_DIR, name);
+    const from = inPlace(LEGACY_UPLOADS_DIR, name);
+    const to = inPlace(UPLOADS_DIR, name);
     try {
       if (!isUploadName(name) || !(await stat(from)).isFile()) {
         left += 1;
