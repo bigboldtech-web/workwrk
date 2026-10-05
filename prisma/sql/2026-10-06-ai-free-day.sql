@@ -31,3 +31,9 @@ CREATE INDEX IF NOT EXISTS "AIQuery_userId_freeTier_idx" ON "AIQuery" ("userId",
 -- When the ceiling was first reached that day: OPS_ALERT_EMAIL is told once
 -- per kind per day (src/lib/ai-allowance.ts alertCeilingOnce).
 ALTER TABLE "AiFreeDay" ADD COLUMN IF NOT EXISTS "alertedAt" TIMESTAMP(3);
+
+-- Round 5: the UTC day whose free use a question took, so a question handed
+-- back gives back that day's use and only when it took one (a free workspace
+-- made before the ceiling takes none; src/lib/ai-allowance.ts
+-- releaseAiQuestion). Older rows are null and give nothing back.
+ALTER TABLE "AIQuery" ADD COLUMN IF NOT EXISTS "freeDay" DATE;

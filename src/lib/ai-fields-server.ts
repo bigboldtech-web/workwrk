@@ -39,7 +39,7 @@ import { fieldChanges } from "@/lib/automation/field-changes";
 import { createMessageWithFallback, getAnthropicForOrg, isAiConfigured, modelFor } from "@/lib/ai-client";
 import { aiFieldsOn } from "@/lib/ai/ai-features";
 import { claimAiUse, releaseAiUse } from "@/lib/ai-usage";
-import { claimFreeDay, releaseFreeDay, underFreeCeiling } from "@/lib/ai-allowance";
+import { releaseFreeDay, takeFreeDay, underFreeCeiling } from "@/lib/ai-allowance";
 import {
   aiFieldConfig,
   aiFieldNotReady,
@@ -188,8 +188,10 @@ export async function fillAiField(args: {
   if (claim === "not_ready") return refuse(503, { error: "not_ready" });
   // A free workspace also takes one of the platform's free fills of the day
   // (src/lib/ai-allowance.ts): past that ceiling, fills wait for tomorrow.
+  // The day it was taken from is kept, so a failed call gives back that day's use.
   const freeCeiling = String(args.plan ?? "STARTER") === "STARTER" && underFreeCeiling(args.createdAt);
-  if (freeCeiling && !(await claimFreeDay("fill"))) {
+  const freeDay = freeCeiling ? await takeFreeDay("fill") : null;
+  if (freeCeiling && !freeDay) {
     await releaseAiUse(c.organizationId, "field_fill");
     return refuse(429, { error: "ai_free_daily_limit" });
   }
@@ -216,7 +218,7 @@ export async function fillAiField(args: {
     if (msg.stop_reason !== "end_turn" && msg.stop_reason !== "stop_sequence") return refuse(502, { error: "ai_unusable" });
   } catch (err) {
     await releaseAiUse(c.organizationId, "field_fill");
-    if (freeCeiling) await releaseFreeDay("fill");
+    if (freeDay) await releaseFreeDay("fill", freeDay);
     console.error(`[ai-fill] ${gate.item.id}/${field.key}: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`);
     return refuse(502, { error: "ai_failed" });
   }
