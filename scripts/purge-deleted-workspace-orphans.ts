@@ -12,10 +12,19 @@
 // what is already stranded.
 //
 // RUN IT ON THE SERVER, by the founder, AFTER the Batch 9 deploy (whose SQL
-// first records the old deletions in WorkspaceDeletion from these very rows):
+// first records the old deletions in WorkspaceDeletion from these very rows),
+// from the app's directory with the app's own environment loaded, so it sees
+// the app's database AND its file storage (S3_ACCESS_KEY_ID,
+// S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION, and S3_ENDPOINT where set):
 //
-//   DIRECT_URL= DATABASE_URL=<the app's database> npx tsx scripts/purge-deleted-workspace-orphans.ts           # counts only
-//   DIRECT_URL= DATABASE_URL=<the app's database> npx tsx scripts/purge-deleted-workspace-orphans.ts --write   # deletes
+//   cd /www/wwwroot/workwrk.com && set -a && . ./.env && set +a
+//   DIRECT_URL= npx tsx scripts/purge-deleted-workspace-orphans.ts           # counts only
+//   DIRECT_URL= npx tsx scripts/purge-deleted-workspace-orphans.ts --write   # deletes
+//
+// It prints the database and whether it can see S3 first. --write refuses
+// while S3 is not configured in the shell, because the rows that name a gone
+// company's files would go and its files in S3 could never be found again;
+// pass --no-s3 only on a server that keeps no files in S3.
 //
 // The table loop touches ONLY rows whose organizationId names no Organization
 // row (a row with no organizationId, such as a global template, is never
@@ -58,18 +67,85 @@ async function tableExists(table: string): Promise<boolean> {
 
 async function main() {
   const write = process.argv.includes("--write");
+  const noS3 = process.argv.includes("--no-s3");
   console.log(`Database: ${databaseLabel()}${write ? "" : " (dry run: nothing is deleted)"}`);
+  console.log(
+    isS3Configured()
+      ? "S3: configured, files of companies that no longer exist are included"
+      : "S3: NOT configured in this shell (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION), so nothing in S3 is touched",
+  );
+  if (write && !isS3Configured() && !noS3) {
+    console.error(
+      "Nothing written: load the app's environment first (set -a && . ./.env && set +a), or pass --no-s3 if this server keeps no files in S3. Deleting the rows without S3 would leave those companies' files in S3 with nothing left to find them by.",
+    );
+    process.exit(2);
+  }
+  // The companies that no longer exist, read BEFORE anything is deleted: the
+  // rows deleted below are, for a company deleted before its deletion was
+  // recorded, the only thing left that names it.
   const goneCompanies = new Set<string>();
-  let total = 0;
-
+  const present: string[] = [];
   for (const table of WORKSPACE_ORPHAN_TABLES) {
     if (!(await tableExists(table))) {
       console.log(`${table}: not in this database, skipped`);
       continue;
     }
+    present.push(table);
     for (const r of await prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT DISTINCT t."organizationId" AS id ${orphansOf(table)}`)) goneCompanies.add(r.id);
+  }
+  for (const r of await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT d."organizationId" AS id FROM "WorkspaceDeletion" d
+     WHERE NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o."id" = d."organizationId")`) goneCompanies.add(r.id);
+
+  // Their files in S3 first, under the prefixes only they could have written.
+  // If S3 does not answer, nothing else is written, so a second run still
+  // finds every company.
+  if (isS3Configured()) {
+    let objects = 0;
+    let failed = 0;
+    for (const id of goneCompanies) {
+      for (const prefix of ownedS3Prefixes(id)) {
+        if (!write) continue;
+        objects += await deleteObjectsWithPrefix(prefix).catch((err) => {
+          failed += 1;
+          console.error(`S3: could not empty ${prefix}: ${err instanceof Error ? err.message : String(err)}`);
+          return 0;
+        });
+      }
+    }
+    if (failed > 0) {
+      console.error(`Nothing else written: S3 did not answer for ${failed} prefixes. Run again once it does.`);
+      process.exit(1);
+    }
+    console.log(
+      write
+        ? `S3: deleted ${objects} objects of ${goneCompanies.size} companies that no longer exist (orgs/<id>/scribe/ and files/; notes/ left)`
+        : `S3: ${goneCompanies.size} companies that no longer exist would have orgs/<id>/scribe/ and files/ emptied (notes/ is left)`,
+    );
+  }
+
+  let total = 0;
+  for (const table of present) {
+    let moving = 0; // reminders a dry run counts as moving, not as deleted
+    if (table === "Reminder") {
+      // A personal reminder follows its person (they are listed and fired in
+      // every workspace): one not tied to a record, of someone whose account
+      // still exists, moves to where that person is now instead of going.
+      const [{ n: kept }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT count(*)::bigint AS n ${orphansOf("Reminder")} AND t."entityType" IS NULL AND EXISTS (SELECT 1 FROM "User" u WHERE u."id" = t."userId")`,
+      );
+      if (write && Number(kept) > 0) {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Reminder" t SET "organizationId" = u."organizationId" FROM "User" u
+            WHERE u."id" = t."userId" AND t."entityType" IS NULL AND t."organizationId" IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o."id" = t."organizationId")`,
+        );
+      }
+      console.log(`Reminder: ${Number(kept)} personal reminders of people who still have an account${write ? " moved to their current workspace" : " would move to their current workspace"}`);
+      if (!write) moving = Number(kept);
+    }
     const [{ n }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n ${orphansOf(table)}`);
-    const count = Number(n);
+    const count = Number(n) - moving;
     total += count;
     if (!write || count === 0) {
       console.log(`${table}: ${count} rows of companies that no longer exist`);
@@ -97,23 +173,6 @@ async function main() {
     console.log(`${table}: deleted ${count} (${deleted} in the last pass)`);
   }
 
-  // Companies already gone, also known from their deletion records.
-  for (const r of await prisma.$queryRaw<{ id: string }[]>`
-    SELECT DISTINCT d."organizationId" AS id FROM "WorkspaceDeletion" d
-     WHERE NOT EXISTS (SELECT 1 FROM "Organization" o WHERE o."id" = d."organizationId")`) goneCompanies.add(r.id);
-
-  // Their files in S3, under the prefixes only they could have written.
-  if (isS3Configured()) {
-    let objects = 0;
-    for (const id of goneCompanies) {
-      for (const prefix of ownedS3Prefixes(id)) objects += write ? await deleteObjectsWithPrefix(prefix).catch(() => 0) : 0;
-    }
-    console.log(
-      write
-        ? `S3: deleted ${objects} objects of ${goneCompanies.size} companies that no longer exist (orgs/<id>/scribe/ and files/; notes/ left)`
-        : `S3: ${goneCompanies.size} companies that no longer exist would have orgs/<id>/scribe/ and files/ emptied (notes/ is left)`,
-    );
-  }
 
   // Disk files whose names say they belong to a company or an account that
   // no longer exists (an id a row still has is never touched).

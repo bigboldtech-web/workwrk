@@ -677,6 +677,11 @@ model OrganizationMembership {
   organization   Organization @relation("OrgMembershipOrg", fields: [organizationId], references: [id], onDelete: Cascade)
   role           AccessLevel  @default(EMPLOYEE)
   isPrimary      Boolean      @default(false)
+  /// The Admin scopes held in this workspace while the account is anchored
+  /// elsewhere (User.adminScopes are the anchored workspace's). A move keeps
+  /// them here and takes the target's (src/lib/access/workspace-anchor.ts).
+  /// prisma/sql/2026-10-05-membership-admin-scopes.sql
+  adminScopes    String[]     @default([])
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

@@ -56,6 +56,7 @@ import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { MissionSplash } from "@/components/brand/mission-splash";
 import { isSettingsRoute, resolveCrumbFallback, resolveHub } from "@/lib/nav/route-hub";
 import { HUB_LABELS } from "@/lib/nav/labels";
+import { STALE_TAB_EVENT } from "@/lib/tab-workspace";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -213,6 +214,37 @@ function WorkspaceMoveStrip() {
 }
 
 /**
+ * "This tab belongs to another workspace." The strip under the bar after an
+ * upload route refused this tab (src/lib/tab-workspace.ts): the person
+ * switched workspace in another tab, so this one still shows the old
+ * workspace while the session acts in the new one. Every upload control in
+ * the tab ends here whatever it does with the answer itself, and Reload is
+ * the way out.
+ */
+function StaleTabStrip() {
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    const on = () => setStale(true);
+    window.addEventListener(STALE_TAB_EVENT, on);
+    return () => window.removeEventListener(STALE_TAB_EVENT, on);
+  }, []);
+  if (!stale) return null;
+  return (
+    <div role="alert" className="os-chrome flex min-h-8 shrink-0 items-center gap-2 bg-warning-bg px-4 py-1 text-sm text-warning-text">
+      <AlertTriangle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 flex-1">This tab still shows a workspace you switched away from in another tab. Reload it to upload here.</span>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"
+      >
+        Reload
+      </button>
+    </div>
+  );
+}
+
+/**
  * The tablet overlay sidebar (768 to 1023): opened from the bar's Menu
  * button; a layer, so Esc closes it (spec-shell 1.16); closes on row click.
  */
@@ -312,6 +344,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       <div className="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-col">
         <OfflineStrip />
         <WorkspaceMoveStrip />
+        <StaleTabStrip />
         {!settingsMode ? <TopPinsStrip /> : null}
       </div>
       {settingsMode ? (

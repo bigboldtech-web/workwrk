@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 // held there, and takes the target membership's own level.
 const calls: Array<{ op: string; args: unknown }> = [];
 let hasPrimary = false;
-let anchored: { organizationId: string; accessLevel: string } | null = null;
+let anchored: { organizationId: string; accessLevel: string; adminScopes?: string[] } | null = null;
+let targetScopes: string[] | null = null;
 const tx = {
   organizationMembership: {
     findFirst: async () => (hasPrimary ? { id: "m0" } : null),
+    findUnique: async () => (targetScopes ? { adminScopes: targetScopes } : null),
     upsert: async (args: unknown) => { calls.push({ op: "upsert", args }); return {}; },
   },
   user: {
@@ -32,6 +34,20 @@ describe("reanchorUser", () => {
     await reanchorUser({ userId: "u", to: { organizationId: "b", role: "EMPLOYEE" } });
     expect(calls[0]).toMatchObject({ args: { create: { role: "COMPANY_ADMIN", isPrimary: false } } });
     expect(calls[1]).toMatchObject({ args: { data: { organizationId: "b", accessLevel: "EMPLOYEE" } } });
+  });
+
+  it("keeps the Admin scopes with the workspace that granted them", async () => {
+    calls.length = 0; hasPrimary = true; targetScopes = null;
+    anchored = { organizationId: "a", accessLevel: "COMPANY_ADMIN", adminScopes: ["billing", "security"] };
+    await reanchorUser({ userId: "u", to: { organizationId: "b", role: "COMPANY_ADMIN" } });
+    expect(calls[0]).toMatchObject({ op: "upsert", args: { create: { organizationId: "a", adminScopes: ["billing", "security"] }, update: { adminScopes: ["billing", "security"] } } });
+    expect(calls[1]).toMatchObject({ op: "user.update", args: { data: { organizationId: "b", adminScopes: [] } } });
+    // Coming back takes the ones kept there.
+    calls.length = 0; targetScopes = ["billing"];
+    anchored = { organizationId: "b", accessLevel: "COMPANY_ADMIN", adminScopes: [] };
+    await reanchorUser({ userId: "u", to: { organizationId: "a", role: "COMPANY_ADMIN" } });
+    expect(calls[1]).toMatchObject({ op: "user.update", args: { data: { organizationId: "a", adminScopes: ["billing"] } } });
+    targetScopes = null;
   });
 
   it("does nothing when the person is already there", async () => {
@@ -80,12 +96,13 @@ describe("moveHomesOutOf", () => {
       organizationMembership: {
         findMany: async () => memberships.map((m) => ({ userId: m.userId, organizationId: m.organizationId, role: m.role, organization: { status: m.status }, user: { email: m.email } })),
         findFirst: async () => null,
+        findUnique: async () => null,
         upsert: async () => ({}),
       },
       user: {
         findMany: async ({ where }: { where: { OR: Array<{ organizationId: string; email: string }> } }) =>
           existing.filter((e) => where.OR.some((w) => w.organizationId === e.organizationId && w.email === e.email)),
-        findUnique: async ({ where }: { where: { id: string } }) => ({ organizationId: anchors.get(where.id) ?? "doomed", accessLevel: "EMPLOYEE" }),
+        findUnique: async ({ where }: { where: { id: string } }) => ({ organizationId: anchors.get(where.id) ?? "doomed", accessLevel: "EMPLOYEE", adminScopes: [] }),
         update: async ({ where, data }: { where: { id: string }; data: { organizationId: string; accessLevel: string } }) => {
           moves.push({ userId: where.id, to: data.organizationId, role: data.accessLevel });
           anchors.set(where.id, data.organizationId);

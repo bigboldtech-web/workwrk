@@ -21,16 +21,13 @@
  * Reviewers sign in with admin@sandbox.workwrk.com + the password the founder
  * hands them.
  */
-import * as dotenv from "dotenv";
-dotenv.config();
-import { PrismaClient } from "../src/generated/prisma";
-import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
+import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 
-const connStr = process.env.DATABASE_URL;
-if (!connStr) throw new Error("DATABASE_URL is not set");
-const adapter = new PrismaPg({ connectionString: connStr });
-const prisma = new PrismaClient({ adapter });
+// DATABASE_URL and nothing else: no .env is read, so the database this
+// deletes and recreates the Sandbox in is the one the command names, printed
+// before anything is touched.
+const prisma = scriptPrisma();
 
 const ORG_NAME = "Sandbox";
 const ORG_SLUG = "sandbox";
@@ -40,6 +37,7 @@ if (PASSWORD.length < 12) {
 }
 
 async function main() {
+  console.log(`Database: ${databaseLabel()}`);
   console.log(`Seeding demo org "${ORG_NAME}"…`);
 
   // Wipe any previous demo org for an idempotent re-seed.

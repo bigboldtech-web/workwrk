@@ -10,10 +10,16 @@
 //
 // One wrapper around fetch, installed when the tab's boot payload arrives
 // (src/app/(dashboard)/layout.tsx), so every upload control sends it without
-// each having to: it touches only same-origin requests to the upload routes
-// and only adds the x-workspace-id header.
+// each having to: it touches only same-origin requests to the upload routes,
+// adds the x-workspace-id header, and raises STALE_TAB_EVENT when a route
+// refuses the tab.
 
 const UPLOAD_PATHS = new Set(["/api/upload", "/api/uploads/presign"]);
+
+/** Raised on window when an upload route refuses this tab (409): the shell
+ *  shows a strip that says so, with Reload (src/components/layout/os/os-shell.tsx),
+ *  whatever the control that tried the upload does with the answer. */
+export const STALE_TAB_EVENT = "workwrk:stale-tab";
 
 let tabWorkspace: string | null = null;
 let installed = false;
@@ -39,6 +45,9 @@ export function setTabWorkspace(organizationId: string | null | undefined): void
     if (!tabWorkspace || !isUploadRequest(input, window.location.origin)) return original(input, init);
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     if (!headers.has("x-workspace-id")) headers.set("x-workspace-id", tabWorkspace);
-    return original(input, { ...init, headers });
+    return original(input, { ...init, headers }).then((res) => {
+      if (res.status === 409) window.dispatchEvent(new CustomEvent(STALE_TAB_EVENT));
+      return res;
+    });
   };
 }

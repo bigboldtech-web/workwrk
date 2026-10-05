@@ -34,6 +34,11 @@ export type TrashType =
 /** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
 export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
 
+/** Every trash kind whose snapshot holds Files rows that a restore brings back
+ *  (a Space Folder and a Space carry their files too): a file one of them
+ *  names is never freed while it is in Trash. */
+export const FILE_HOLDING_TRASH_TYPES: readonly string[] = ["file", "file_folder", "folder", "space"];
+
 /**
  * A stored file the trashed row provably owns, or null. A file's url and key
  * on a Files row are whatever the client sent (POST /api/files keeps them),
@@ -76,7 +81,7 @@ export function ownedStoredFile(
   return null;
 }
 
-/** Whether another Files row (in any company) or another Trash row still names the stored file. */
+/** Whether another Files row (in any company) or another Trash row (a file, or a folder or Space that carries files) still names the stored file. */
 async function namedElsewhere(stored: string, fileId: unknown, trashItemId: string | undefined): Promise<boolean> {
   const file = await prisma.fileEntry.findFirst({
     where: { OR: [{ s3Key: stored }, { url: { contains: stored } }], ...(typeof fileId === "string" && fileId ? { NOT: { id: fileId } } : {}) },
@@ -85,7 +90,7 @@ async function namedElsewhere(stored: string, fileId: unknown, trashItemId: stri
   if (file) return true;
   const trash = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(*)::bigint AS n FROM "TrashItem" t
-     WHERE t."entityType" = ANY(${[...BLOB_TRASH_TYPES]}::text[])
+     WHERE t."entityType" = ANY(${[...FILE_HOLDING_TRASH_TYPES]}::text[])
        AND position(${stored} in t."snapshot"::text) > 0
        AND t."id" IS DISTINCT FROM ${trashItemId ?? null}`;
   return Number(trash[0]?.n ?? 0) > 0;

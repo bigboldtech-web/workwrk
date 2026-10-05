@@ -7,6 +7,7 @@ import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/wor
 import { freeCompanyFiles } from "@/lib/company-files";
 import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
 import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/company-notifications";
+import { HARD_DELETE_FIRST, isHardDeleteFirst } from "@/lib/admin/hard-delete-order";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -129,6 +130,11 @@ export async function POST(req: NextRequest) {
   const orphanTables = present.map((r) => r.name).filter(isWorkspaceOrphanTable);
   // Every table whose rows belong to one company, for the notification sweep.
   const ownedTables = await companyOwnedTables();
+  // The records deleted before the company row (src/lib/admin/hard-delete-order.ts).
+  const firstPresent = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT t.name FROM unnest(${[...HARD_DELETE_FIRST]}::text[]) AS t(name)
+     WHERE to_regclass(format('%I', t.name)) IS NOT NULL`;
+  const firstTables = HARD_DELETE_FIRST.filter((t) => firstPresent.some((r) => r.name === t) && isHardDeleteFirst(t));
 
   for (const org of due) {
     try {
@@ -218,6 +224,29 @@ export async function POST(req: NextRequest) {
           // outlive it (members anchored elsewhere, and everyone moved out in
           // 1b), while its rows still exist to match the links against.
           await deleteNotificationsAbout(tx, org.id, ownedTables);
+          // 2f. Personal reminders follow their person: the ones made while
+          // working here by someone who outlives it (moved out in 1b, or
+          // anchored elsewhere) move to where that person is now, unless
+          // they are tied to one of its records; the rest go in 3b, and so do
+          // every reminder of an account that goes, wherever it was made.
+          await tx.$executeRaw`
+            UPDATE "Reminder" r
+               SET "organizationId" = u."organizationId"
+              FROM "User" u
+             WHERE r."organizationId" = ${org.id}
+               AND r."entityType" IS NULL
+               AND u."id" = r."userId"
+               AND u."organizationId" <> ${org.id}`;
+          await tx.$executeRaw`
+            DELETE FROM "Reminder" r
+             WHERE r."userId" IN (SELECT u."id" FROM "User" u WHERE u."organizationId" = ${org.id})`;
+          // 2g. The records that sit two or three cascades below it and have a
+          // restricting link to an account, each in its own statement: in the
+          // one DELETE below, the accounts' links would be checked before the
+          // deeper cascades reached them (src/lib/admin/hard-delete-order.ts).
+          for (const table of firstTables) {
+            await tx.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "organizationId" = $1`, org.id);
+          }
           // 3. The company.
           const n = await tx.$executeRaw`
             DELETE FROM "Organization"

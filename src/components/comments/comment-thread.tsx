@@ -289,7 +289,12 @@ export function CommentThread({
         const fd = new FormData();
         fd.append("file", file);
         const up = await fetch("/api/upload", { method: "POST", body: fd });
-        if (!up.ok) continue;
+        if (!up.ok) {
+          // Said, never dropped: the draft and the other files stay.
+          const said = (await up.json().catch(() => null)) as { error?: unknown } | null;
+          setPostError(typeof said?.error === "string" ? said.error : `Couldn't upload ${file.name}.`);
+          continue;
+        }
         const upData = await up.json();
         const s3Key = upData.s3Key ?? upData.data?.s3Key ?? null;
         const entry = await fetch("/api/files", {

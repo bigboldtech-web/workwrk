@@ -197,6 +197,7 @@ const SQL_MANIFEST = [
   // Organization column on a read with no select, so the column must exist
   // before the release that knows about it starts.
   "2026-10-05-workspace-deletion-and-trial-end.sql",
+  "2026-10-05-membership-admin-scopes.sql",
 ];
 
 /**

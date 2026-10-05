@@ -39,13 +39,20 @@ export function leavingIsPrimary(hasPrimary: boolean): boolean {
  *  not found), so nothing changed. */
 export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
   const run = async (tx: Db): Promise<boolean> => {
-    const now = await tx.user.findUnique({ where: { id: move.userId }, select: { organizationId: true, accessLevel: true } });
+    const now = await tx.user.findUnique({ where: { id: move.userId }, select: { organizationId: true, accessLevel: true, adminScopes: true } });
     if (!now || now.organizationId === move.to.organizationId) return false;
     const from = { organizationId: now.organizationId, accessLevel: now.accessLevel };
-    const primary = await tx.organizationMembership.findFirst({
-      where: { userId: move.userId, isPrimary: true },
-      select: { id: true },
-    });
+    const [primary, there] = await Promise.all([
+      tx.organizationMembership.findFirst({ where: { userId: move.userId, isPrimary: true }, select: { id: true } }),
+      tx.organizationMembership.findUnique({
+        where: { userId_organizationId: { userId: move.userId, organizationId: move.to.organizationId } },
+        select: { adminScopes: true },
+      }),
+    ]);
+    // The Admin scopes are a grant of one workspace: they stay on its
+    // membership, and the account takes the ones held where it goes
+    // (prisma/sql/2026-10-05-membership-admin-scopes.sql).
+    const leavingScopes = now.adminScopes ?? [];
     await tx.organizationMembership.upsert({
       where: { userId_organizationId: { userId: move.userId, organizationId: from.organizationId } },
       create: {
@@ -53,12 +60,13 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         organizationId: from.organizationId,
         role: from.accessLevel,
         isPrimary: leavingIsPrimary(!!primary),
+        adminScopes: leavingScopes,
       },
-      update: { role: from.accessLevel },
+      update: { role: from.accessLevel, adminScopes: leavingScopes },
     });
     await tx.user.update({
       where: { id: move.userId },
-      data: { organizationId: move.to.organizationId, accessLevel: move.to.role },
+      data: { organizationId: move.to.organizationId, accessLevel: move.to.role, adminScopes: there?.adminScopes ?? [] },
     });
     return true;
   };
