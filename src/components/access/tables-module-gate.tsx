@@ -18,6 +18,7 @@ import { listOrgAdmins } from "@/lib/access/admins";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { HUB_LABELS } from "@/lib/nav/labels";
 import { ModuleOff } from "./denial-views";
+import { moduleNeedsUpgradeFor } from "@/lib/module-plan.server";
 
 const MOD = MODULE_BY_SLUG["workwrk-tables"];
 
@@ -34,12 +35,16 @@ export async function tablesModuleOffView(user: { organizationId: string }): Pro
   // The role reads live in src/lib/access/page-viewer.ts, not here.
   if (await pageViewerIsGuest()) notFound();
   const canEnable = await pageViewerIsWorkspaceAdmin();
-  const admins = canEnable ? [] : await listOrgAdmins(user.organizationId);
+  const [admins, needsUpgrade] = await Promise.all([
+    canEnable ? Promise.resolve([]) : listOrgAdmins(user.organizationId),
+    moduleNeedsUpgradeFor(user.organizationId, MOD.productSlug),
+  ]);
   return (
     <ModuleOff
       label={MOD.label}
       productSlug={MOD.productSlug}
       canEnable={canEnable}
+      needsUpgrade={needsUpgrade}
       admins={admins}
       unlocks="tables"
       back={{ fallbackHref: WORK_HOME_HREF, label: HUB_LABELS.home }}

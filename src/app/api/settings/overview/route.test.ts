@@ -29,6 +29,8 @@ const { prismaMock, orgRow } = vi.hoisted(() => {
       ),
     },
     invitation: model(),
+    organizationMembership: model(),
+    subscription: model(),
     department: model(),
     role: model(),
     office: model(),

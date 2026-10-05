@@ -55,7 +55,7 @@ export function invitationTemplate(vars: InvitationVars): { subject: string; htm
     <p>${inviter ? `<span class="highlight">${inviter}</span> invited you` : "You are invited"} to join <span class="highlight">${company}</span> as ${article} <strong>${role}</strong>.</p>
     ${messageBlock}
     <p style="margin:24px 0 8px;">${emailButton(href, `Join ${company}`)}</p>
-    <p class="meta">This invitation works for ${days} days. If the button does not work, paste this link into your browser:<br/><span class="url" style="word-break:break-all;">${href}</span></p>
+    <p class="meta">This invitation works for ${days} ${days === 1 ? "day" : "days"}. If the button does not work, paste this link into your browser:<br/><span class="url" style="word-break:break-all;">${href}</span></p>
   `);
 
   return {

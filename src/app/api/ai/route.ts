@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { claimAiAction, recordAiAnswer, releaseAiQuestion } from "@/lib/ai-allowance";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
@@ -38,10 +38,6 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
 
-  // Plan limit enforcement
-  const planCheck = await checkPlanLimit(orgId, "ai");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
-
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);
   if (aiOff) return aiOff;
@@ -65,6 +61,11 @@ export async function POST(req: NextRequest) {
   if (!isOwnerOrAdmin(gate.viewer)) {
     return jsonError("Questions about the whole workspace are for its Owner and Admins.", 403);
   }
+
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), claimed only
+  // once every gate above has let the question through.
+  const claim = await claimAiAction(orgId, userId, query);
+  if (!claim.ok) return claim.response;
 
   // Gather comprehensive org context.
   // User list is capped at 100 — past that the LLM context wastes tokens on a
@@ -222,6 +223,8 @@ ${readableActivity.length > 0 ? readableActivity.map(a => `- [${a.createdAt.toIS
   messages.push({ role: "user", content: query });
 
   let response = "";
+  // The canned answer (no model reached) costs the workspace no question.
+  let modelAnswered = false;
 
   try {
     const ai = await getAnthropicForOrg(orgId);
@@ -245,31 +248,31 @@ ${orgContext}`,
 
       const textBlock = message.content.find((b: any) => b.type === "text");
       response = textBlock ? (textBlock as any).text : "I couldn't generate a response.";
+      modelAnswered = true;
     }
   } catch (err: any) {
     console.error("AI error:", err);
     response = generateFallbackResponse(query, users, departments, recentKPIs, sops);
   }
 
-  // Save the query
-  await prisma.aIQuery.create({
-    data: {
-      query,
-      response,
-      userId,
-      organizationId: orgId,
-    },
-  });
+  // The question and its answer stay on record; a canned answer hands the
+  // question back.
+  if (modelAnswered) await recordAiAnswer(claim.id, response);
+  else await releaseAiQuestion(claim.id);
 
   return jsonSuccess({ query, response });
 }
 
 /** The AI summary of a meeting's notes, from those notes alone. */
 async function summarizeNotes(orgId: string, userId: string, query: string) {
+  // One of the plan's AI questions, handed back when no summary comes out.
+  const claim = await claimAiAction(orgId, userId, query);
+  if (!claim.ok) return claim.response;
   let response = "";
   try {
     const ai = await getAnthropicForOrg(orgId);
     if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
+      await releaseAiQuestion(claim.id);
       return jsonError("AI is not set up on this server.", 503);
     }
     const message = await ai.client.messages.create({
@@ -282,9 +285,10 @@ async function summarizeNotes(orgId: string, userId: string, query: string) {
     response = textBlock?.text ?? "";
   } catch (err) {
     console.error("AI meeting summary error:", err instanceof Error ? err.message : String(err));
+    await releaseAiQuestion(claim.id);
     return jsonError("Couldn't generate the summary. Try again in a moment.", 502);
   }
-  await prisma.aIQuery.create({ data: { query, response, userId, organizationId: orgId } });
+  await recordAiAnswer(claim.id, response);
   return jsonSuccess({ query, response });
 }
 

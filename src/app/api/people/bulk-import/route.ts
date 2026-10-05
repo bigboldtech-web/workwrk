@@ -20,6 +20,8 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { IMPORT_TEMPLATE_CSV } from "@/lib/people/people-csv";
+import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = ctx.organizationId;
   const [org, members, memberships, pending, departments, roles, offices] = await Promise.all([
-    prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true } }),
+    prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true, settings: true } }),
     prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
     // People in this workspace through a membership (anchored in another):
     // /join refuses them too, so a row for one is a member, not an invite.
@@ -53,7 +55,10 @@ export async function POST(req: NextRequest) {
     prisma.office.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, city: true } }),
   ]);
   const me = members.find((m) => m.id === ctx.userId);
-  const domain = (org?.domain?.trim() || me?.email.split("@")[1] || "").toLowerCase();
+  // Every domain Members > Invite rules allows, as the invite dialog does
+  // (the workspace's own domain, or the inviter's, plus the extra ones).
+  const allowedDomains = inviteDomainsOf(org?.settings, org?.domain, me?.email);
+  const rules = usersSettingsOf(org?.settings, org?.domain);
   const memberByEmail = new Map(members.map((m) => [m.email.toLowerCase(), m]));
   const invited = new Set(pending.map((p) => p.email.toLowerCase()));
   const memberElsewhere = new Set(memberships.map((m) => m.user.email.toLowerCase()));
@@ -77,7 +82,9 @@ export async function POST(req: NextRequest) {
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail("email", "Not an email address");
     if (seen.has(email)) return fail("email", "This email is in the file twice");
     seen.add(email);
-    if (domain && email.split("@")[1] !== domain) return fail("email", `Only @${domain} addresses can join`);
+    if (allowedDomains.length > 0 && !allowedDomains.includes(email.split("@")[1] ?? "")) {
+      return fail("email", `Only ${allowedDomains.map((d) => `@${d}`).join(", ")} addresses can join`);
+    }
     const existing = memberByEmail.get(email);
     if (existing) {
       outcomes.push({ row: rowNum, email, status: "member", message: existing.deletedAt ? "Removed member: restore them from the Directory" : "Already a member" });
@@ -107,20 +114,31 @@ export async function POST(req: NextRequest) {
     ready.push({ email, firstName: s(r.firstName).slice(0, 80), lastName: s(r.lastName).slice(0, 80), phone, departmentId, roleId, officeId, managerId });
   });
 
+  // Each invitation takes a seat (src/lib/seats.ts). The dry run says whether
+  // the ready rows fit; the import itself takes them all or none, under the
+  // workspace's lock.
+  const seatCheck = await seatsFor(orgId, ready.length);
   const summary = {
     total: rows.length,
     ready: ready.length,
     errors: outcomes.filter((o) => o.status === "error").length,
     members: outcomes.filter((o) => o.status === "member").length,
     invited: outcomes.filter((o) => o.status === "invited").length,
+    seatsFree: Math.max(0, seatCheck.use.limit - seatCheck.use.members - seatCheck.use.pending),
+    ...(seatCheck.ok || ready.length === 0 ? {} : { seatProblem: seatCheck.message }),
   };
   if (dryRun) return NextResponse.json({ dryRun: true, summary, rows: outcomes });
   if (ready.length === 0) return err(400, "No rows are ready to import");
 
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  const created = await prisma.$transaction(
-    ready.map((r) =>
-      prisma.invitation.create({
+  // The link lives as long as Members > Invite rules says, and the email says so.
+  const expiresAt = new Date(Date.now() + rules.inviteExpiryDays * 24 * 60 * 60 * 1000);
+  const placed = await prisma.$transaction(async (tx) => {
+    await lockWorkspaceSeats(tx, orgId);
+    const seats = await seatsFor(orgId, ready.length, tx);
+    if (!seats.ok) return { refused: seats.message } as const;
+    const made = [];
+    for (const r of ready) {
+      made.push(await tx.invitation.create({
         data: {
           email: r.email,
           // Kept on the invitation so the invitee's form starts filled and the
@@ -138,9 +156,12 @@ export async function POST(req: NextRequest) {
           managerId: r.managerId,
         },
         select: { id: true, email: true, token: true },
-      }),
-    ),
-  );
+      }));
+    }
+    return { created: made } as const;
+  }, { timeout: 60_000 });
+  if (placed.refused !== undefined) return err(403, placed.refused);
+  const created = placed.created;
 
   // Emails go out after the rows exist; a failed send leaves a pending
   // invitation the Members page can resend, never a lost person.
@@ -148,7 +169,7 @@ export async function POST(req: NextRequest) {
   void (async () => {
     for (const inv of created) {
       try {
-        const { subject, html } = invitationTemplate({ companyName: org?.name || "Your team", inviteLink: `${baseUrl}/join?token=${inv.token}`, accessLevel: "EMPLOYEE" });
+        const { subject, html } = invitationTemplate({ companyName: org?.name || "Your team", inviteLink: `${baseUrl}/join?token=${inv.token}`, accessLevel: "EMPLOYEE", expiresInDays: rules.inviteExpiryDays });
         await sendEmail({ to: inv.email, subject, html, template: "invitation", variables: { companyName: org?.name }, organizationId: orgId, category: "invitation" });
       } catch (e) {
         console.error("[bulk-import] invitation email failed", e);

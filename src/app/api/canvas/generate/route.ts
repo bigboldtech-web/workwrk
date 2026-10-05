@@ -6,7 +6,8 @@
 // Returns { scene, title }.
 
 import { NextRequest } from "next/server";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import { specToScene, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { sequenceToScene, type SequenceSpec } from "@/lib/canvas/sequence";
@@ -110,14 +111,18 @@ export async function POST(req: NextRequest) {
     ? `CURRENT DIAGRAM:\n${JSON.stringify(priorSpec)}\n\nCHANGE REQUEST: ${prompt.trim()}`
     : prompt.trim();
   const userContent = forceType ? `${base}\n\nRender this as a "${forceType}" diagram (use that exact type).` : base;
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails (an answer that is not a diagram still counts).
+  const claim = await claimAiAction(orgId, getUserId(session), priorSpec ? "Change a whiteboard diagram" : "Draw a whiteboard diagram");
+  if (!claim.ok) return claim.response;
 
   try {
-    const message = await createMessageWithFallback(ai.client, {
+    const message = await callOrGiveBack(claim.id, () => createMessageWithFallback(ai.client, {
       model: modelFor(ai, "claude-sonnet-4-6"),
       max_tokens: 4000,
       system: SYSTEM,
       messages: [{ role: "user", content: userContent }],
-    });
+    }));
     const textBlock = message.content.find((b: { type: string }) => b.type === "text") as { text?: string } | undefined;
     const text = textBlock?.text ?? "";
     const match = text.match(/\{[\s\S]*\}/);

@@ -28,7 +28,7 @@ import type { ToolName } from "./tool-names";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
 import { sopVisibilityWhere } from "@/lib/sop-access";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
-import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { sendInvitation } from "@/lib/people/send-invitation.server";
 import { goalVisibilityOr } from "@/lib/goal-audience";
 import { goalRightsActor } from "@/lib/alignment-scope";
 import { mayEditGoal } from "@/lib/goals/goal-rights";
@@ -1047,7 +1047,7 @@ const createWorkspaceTool: ToolDefinition = {
 const invitePersonWithRole: ToolDefinition = {
   name: "invite_person_with_role",
   description:
-    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted, kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /join?token=… email flow.",
+    "Send an invitation to a new hire, exactly as Members does: the workspace's email domains, its invitation expiry and its seats apply, and the invitee gets the invitation email. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted; kraIds/sopIds are OPTIONAL explicit overrides, not requirements.",
   input_schema: {
     type: "object",
     properties: {
@@ -1057,10 +1057,10 @@ const invitePersonWithRole: ToolDefinition = {
       roleId: { type: "string" },
       managerId: { type: "string", description: "User id of the reporting manager." },
       officeId: { type: "string" },
-      kraIds: { type: "array", items: { type: "string" }, description: "KRA ids to assign on accept. Required, ≥ 1." },
-      sopIds: { type: "array", items: { type: "string" }, description: "SOP ids to assign on accept. Required, ≥ 1." },
+      kraIds: { type: "array", items: { type: "string" }, description: "Optional KRA ids to assign on accept, over the role's own." },
+      sopIds: { type: "array", items: { type: "string" }, description: "Optional SOP ids to assign on accept, over the role's own." },
     },
-    required: ["email", "kraIds", "sopIds"],
+    required: ["email"],
   },
   async handler(ctx, input) {
     // Same gate as POST /api/invitations (the People create permission), and
@@ -1073,66 +1073,39 @@ const invitePersonWithRole: ToolDefinition = {
     if (!level || !caller || !(await hasPermission(caller, "people", "create"))) {
       return { error: "You can't invite people. Ask an admin to send the invitation." };
     }
-    // The level follows the ONE invite rule (src/lib/access/invite-level.ts),
-    // the same as POST /api/invitations: at most the inviter's own rung,
-    // never an admin unless the inviter is one. A refused level is an
-    // error the model reports, never a silent downgrade.
-    const requested = String(input.accessLevel ?? "EMPLOYEE").toUpperCase();
-    const levelCheck = resolveInviteLevel(level, requested);
-    if (!levelCheck.ok) return { error: levelCheck.error };
-    const inviteLevel = levelCheck.level;
-    const email = String(input.email ?? "").trim();
-    if (!email.includes("@")) throw new Error("Valid email is required");
-    const kraIds = Array.isArray(input.kraIds) ? (input.kraIds as string[]) : [];
-    const sopIds = Array.isArray(input.sopIds) ? (input.sopIds as string[]) : [];
-    // kraIds/sopIds optional since 2026-08-27: the role carries the
-    // definition; explicit ids remain supported as overrides.
-
-    // Duplicates / existing-user check, same as POST /api/invitations.
-    const existingUser = await prisma.user.findFirst({
-      where: { email, organizationId: ctx.orgId },
-      select: { id: true },
+    // The ONE invitation path (src/lib/people/send-invitation.server.ts), the
+    // same as Members: the level rule (at most the inviter's own rung, never
+    // an admin unless the inviter is one; a refused level is an error the
+    // model reports, never a silent downgrade), the company-domain lock,
+    // the seat, the email with the workspace's real expiry, the audit row.
+    const me = await prisma.user.findFirst({
+      where: { id: ctx.userId, organizationId: ctx.orgId },
+      select: { email: true, firstName: true, lastName: true },
     });
-    if (existingUser) throw new Error("A user with this email already exists in this org");
-    const existingInvite = await prisma.invitation.findFirst({
-      where: { email, organizationId: ctx.orgId, accepted: false },
-      select: { id: true },
+    const outcome = await sendInvitation({
+      organizationId: ctx.orgId,
+      actor: { id: ctx.userId, level, email: me?.email ?? null, name: `${me?.firstName ?? ""} ${me?.lastName ?? ""}`.trim() || undefined },
+      email: String(input.email ?? "").trim(),
+      requestedLevel: String(input.accessLevel ?? "EMPLOYEE").toUpperCase(),
+      departmentId: input.departmentId,
+      roleId: input.roleId,
+      managerId: input.managerId,
+      officeId: input.officeId,
+      // kraIds/sopIds optional since 2026-08-27: the role carries the
+      // definition; explicit ids remain supported as overrides.
+      kraIds: input.kraIds,
+      sopIds: input.sopIds,
     });
-    if (existingInvite) throw new Error("There's already a pending invitation for this email");
-
-    // Cross-tenant safety on the KRA/SOP ids.
-    const kraCount = await prisma.kRA.count({ where: { id: { in: kraIds }, organizationId: ctx.orgId } });
-    if (kraCount !== kraIds.length) throw new Error("One or more KRAs don't belong to this org");
-    const sopCount = await prisma.sOP.count({ where: { id: { in: sopIds }, organizationId: ctx.orgId } });
-    if (sopCount !== sopIds.length) throw new Error("One or more SOPs don't belong to this org");
-
-    const crypto = await import("crypto");
-    const invitation = await prisma.invitation.create({
-      data: {
-        email,
-        accessLevel: inviteLevel as "EMPLOYEE",
-        token: crypto.randomBytes(32).toString("hex"),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        organizationId: ctx.orgId,
-        departmentId: (input.departmentId as string | undefined) ?? null,
-        roleId: (input.roleId as string | undefined) ?? null,
-        managerId: (input.managerId as string | undefined) ?? null,
-        officeId: (input.officeId as string | undefined) ?? null,
-        kraIds,
-        sopIds,
-      },
-      select: { id: true, email: true, token: true },
-    });
-
+    if (!outcome.ok) return { error: outcome.error };
     return {
       ok: true,
       invitation: {
-        id: invitation.id,
-        email: invitation.email,
-        // Token is sensitive, don't echo it back in chat. The email
-        // worker already includes the registration link.
-        registerLink: `/join?token=…`,
+        id: outcome.invitation.id,
+        email: outcome.invitation.email,
+        expiresAt: outcome.invitation.expiresAt.toISOString(),
       },
+      // The token never comes back here: it goes to the invitee by email.
+      note: "The invitation email is queued to the invitee. It also shows under Pending invites in Members, where it can be resent.",
     };
   },
 };

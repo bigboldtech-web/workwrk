@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
 import { parseScimFilter, scimList, userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 
 // Sentinel passwordHash for SCIM-provisioned users. Not a valid
 // bcrypt shape, so any bcrypt.compare() against it returns false —
@@ -129,7 +130,15 @@ export async function POST(req: NextRequest) {
   // users sign in via SAML, not local auth. NextAuth's Credentials
   // path refuses login when password is null, so the only working
   // entry path is the SAML / OIDC flow.
-  const created = await prisma.user.create({
+  // An active person takes a seat (src/lib/seats.ts), checked and taken
+  // under the workspace's lock; one provisioned as inactive takes none.
+  const placed = await prisma.$transaction(async (tx) => {
+    if (active) {
+      await lockWorkspaceSeats(tx, auth.organizationId);
+      const seats = await seatsFor(auth.organizationId, 1, tx);
+      if (!seats.ok) return { refused: seats.message } as const;
+    }
+    return { created: await tx.user.create({
     data: {
       organizationId: auth.organizationId,
       email,
@@ -152,7 +161,10 @@ export async function POST(req: NextRequest) {
       createdAt: true,
       updatedAt: true,
     },
+  }) } as const;
   });
+  if (placed.refused !== undefined) return scimError(403, placed.refused);
+  const created = placed.created;
 
   return scimResponse(userToScim({ ...created, externalId: null }), 201);
 }

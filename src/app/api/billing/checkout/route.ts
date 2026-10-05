@@ -6,7 +6,7 @@ import {
   jsonError,
   jsonSuccess,
   } from "@/lib/api-helpers";
-import { createCheckoutSession, isBillingLive, type BillingKey } from "@/services/billing";
+import { createCheckoutSession, isBillingLive, ownReturnUrl, type BillingKey } from "@/services/billing";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 
 type Body = {
@@ -40,16 +40,21 @@ export async function POST(req: NextRequest) {
   if (!body.key || !VALID_KEYS.includes(body.key)) {
     return jsonError(`key must be one of: ${VALID_KEYS.join(", ")}`);
   }
-  const seats = Math.max(1, Math.floor(body.seats ?? 1));
-  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const successUrl = body.successUrl ?? `${base}/settings?billing=success`;
-  const cancelUrl = body.cancelUrl ?? `${base}/settings?billing=canceled`;
+  const seats = Math.max(1, Math.floor(Number(body.seats) || 1));
+  // Back to Plan & billing, or to the page asked for on this site only.
+  const successUrl = ownReturnUrl(body.successUrl, "/settings/billing?billing=success");
+  const cancelUrl = ownReturnUrl(body.cancelUrl, "/settings/billing?billing=canceled");
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { name: true },
   });
   if (!org) return jsonError("Organization not found", 404);
+  // One subscription per workspace: a second checkout would bill twice.
+  const current = await prisma.subscription.findUnique({ where: { organizationId: orgId }, select: { stripeSubscriptionId: true, status: true } });
+  if (current?.stripeSubscriptionId && ["ACTIVE", "TRIALING", "PAST_DUE"].includes(String(current.status))) {
+    return jsonError("This workspace already has a subscription. Change it from Manage billing.", 409);
+  }
 
   const adminEmail = session.user.email;
   if (!adminEmail) return jsonError("Admin email missing from session");

@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
@@ -37,6 +38,11 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), "Draft the company profile");
+  if (!claim.ok) return claim.response;
+
   try {
     let context = "";
     if (companyName) context += `Company Name: ${companyName}\n`;
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
     if (currentVision) context += `Current Vision: ${currentVision}\n`;
     if (currentValues?.length > 0) context += `Current Values: ${currentValues.join(", ")}\n`;
 
-    const message = await ai.client.messages.create({
+    const message = await callOrGiveBack(claim.id, () => ai.client.messages.create({
       model: modelFor(ai, "claude-haiku-4-5-20251001"),
       max_tokens: 1500,
       system: `You are a business strategy expert. Generate a professional company profile based on the information provided.
@@ -74,7 +80,7 @@ Rules:
       messages: [
         { role: "user", content: `Generate a company profile:\n\n${context}` },
       ],
-    });
+    }));
 
     const textBlock = message.content.find((b: any) => b.type === "text");
     const text = textBlock ? (textBlock as any).text : "";

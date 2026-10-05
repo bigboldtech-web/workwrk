@@ -5,8 +5,9 @@
 // expects, caller can pipe straight through to create the form.
 
 import { NextRequest } from "next/server";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 const FIELD_TYPES = ["short_text", "long_text", "number", "email", "url", "date", "select", "multi_select", "checkbox"] as const;
@@ -58,12 +59,17 @@ export async function POST(req: NextRequest) {
 
 Design 3-8 fields appropriate for the purpose. Use specific, plain-language labels. Mark a field required only if it's truly essential. For select / multi_select, provide 3-6 realistic options.`;
 
-  const msg = await client.messages.create({
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), "Generate a form");
+  if (!claim.ok) return claim.response;
+  const msg = await callOrGiveBack(claim.id, () => client.messages.create({
     model,
     max_tokens: 1500,
     system,
     messages: [{ role: "user", content: `Form purpose: ${prompt}` }],
-  });
+  })).catch(() => null);
+  if (!msg) return jsonError("Couldn't reach the AI. Try again in a moment.", 502);
 
   const text = msg.content
     .filter((b) => b.type === "text")

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 /**
@@ -21,7 +21,8 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
  * Bounded:
  *   • hits[] capped at 24 — anything longer is truncated server-side
  *   • response capped at ~180 tokens to keep latency tight
- *   • obeys the org's plan AI quota and BYOK if configured
+ *   • runs only while the workspace has AI questions left, never spends
+ *     one (src/lib/ai-allowance.ts), and uses BYOK if configured
  */
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -33,8 +34,9 @@ export async function POST(req: NextRequest) {
   if (!query) return jsonError("query is required");
 
   const orgId = getOrgId(session);
-  const planCheck = await checkPlanLimit(orgId, "ai");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
+  // A summary nobody asked for never spends one of the plan's AI questions;
+  // it runs only while the workspace has some left (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(orgId, getUserId(session)))) return jsonSuccess({ summary: null, suggestedHref: null });
 
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);

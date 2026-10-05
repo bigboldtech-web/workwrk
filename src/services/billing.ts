@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import type { Plan, SubscriptionStatus } from "@/generated/prisma";
+import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 
 /**
  * Billing service — thin wrapper around Stripe.
@@ -42,6 +43,11 @@ const priceCatalog: Record<BillingKey, string | undefined> = {
 /** Every configured WorkwrK price id (the Staff console counts only these subscriptions as ours). */
 export function workwrkPriceIds(): string[] {
   return Object.values(priceCatalog).filter((v): v is string => !!v);
+}
+
+/** Whether a price is set up for this key (an unset one makes checkout throw). */
+export function priceConfigured(key: BillingKey): boolean {
+  return Boolean(priceCatalog[key]);
 }
 
 export function getPriceId(key: BillingKey): string {
@@ -111,10 +117,21 @@ export async function createCheckoutSession(params: {
   });
   const priceId = getPriceId(params.key);
 
+  const quantity = Math.max(1, params.seats);
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: priceId, quantity: Math.max(1, params.seats) }],
+    line_items: [
+      {
+        price: priceId,
+        quantity,
+        // A per-person price lets the buyer choose the seats at checkout,
+        // from the seats already in use up to Growth's people limit.
+        ...(params.key === "growth-per-user"
+          ? { adjustable_quantity: { enabled: true, minimum: quantity, maximum: Math.max(quantity, PLAN_LIMITS.GROWTH.users) } }
+          : {}),
+      },
+    ],
     success_url: params.successUrl,
     cancel_url: params.cancelUrl,
     allow_promotion_codes: true,
@@ -130,6 +147,23 @@ export async function createCheckoutSession(params: {
     },
   });
   return { url: session.url, sessionId: session.id };
+}
+
+/**
+ * Where Stripe sends the person back to: the address asked for when it is on
+ * this site, else this site's own page. Never another site (Stripe would
+ * redirect a signed-in admin wherever the request said).
+ */
+export function ownReturnUrl(candidate: unknown, fallbackPath: string): string {
+  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  const fallback = new URL(fallbackPath, base).toString();
+  if (typeof candidate !== "string" || !candidate) return fallback;
+  try {
+    const url = new URL(candidate, base);
+    return url.origin === new URL(base).origin ? url.toString() : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -191,7 +225,24 @@ function priceIdToPlan(priceId: string): { plan: Plan; billingMode: "PER_USER" |
   return { plan: "GROWTH", billingMode: "PER_USER" };
 }
 
-export async function applySubscriptionEvent(sub: Stripe.Subscription) {
+// What a Stripe status means for the workspace's own plan, the one every
+// limit reads (PLAN_LIMITS[Organization.plan]):
+//   paying (active, trialing, past_due)   the price's plan;
+//   ended (canceled, unpaid, incomplete_expired, paused)   back to Starter:
+//     a cancelled subscription used to leave the workspace on Growth for
+//     good, because every event mirrored the price's plan whatever its status;
+//   incomplete   nothing changes: the first payment has not gone through.
+const PAYING = new Set<string>(["active", "trialing", "past_due"]);
+const ENDED = new Set<string>(["canceled", "unpaid", "incomplete_expired", "paused"]);
+
+/**
+ * Apply a subscription's state. `eventAt` is when Stripe created the event
+ * that carried it (Stripe's clock, never this server's): Stripe
+ * delivers events out of order and retries them for days, so a state older
+ * than the one already applied is skipped (Subscription.stripeEventAt), in
+ * one conditional write, so two deliveries at once cannot interleave either.
+ */
+export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: Date = new Date()) {
   const orgId = sub.metadata?.organizationId;
   if (!orgId) return;
   const item = sub.items.data[0];
@@ -209,19 +260,29 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription) {
     stripeCurrentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
     trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
+    stripeEventAt: eventAt,
   };
-  await prisma.subscription.upsert({
-    where: { organizationId: orgId },
-    create: {
-      organizationId: orgId,
-      stripeCustomerId: typeof sub.customer === "string" ? sub.customer : sub.customer.id,
-      ...data,
-    },
-    update: data,
-  });
-  // Mirror `plan` onto the Organization for lightweight feature gating.
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: { plan: mapped.plan },
+  await prisma.$transaction(async (tx) => {
+    const applied = await tx.subscription.updateMany({
+      where: { organizationId: orgId, OR: [{ stripeEventAt: null }, { stripeEventAt: { lte: eventAt } }] },
+      data,
+    });
+    if (applied.count === 0) {
+      const exists = await tx.subscription.findUnique({ where: { organizationId: orgId }, select: { id: true } });
+      // A newer state is already applied: this event is older news.
+      if (exists) return;
+      await tx.subscription.create({
+        data: {
+          organizationId: orgId,
+          stripeCustomerId: typeof sub.customer === "string" ? sub.customer : sub.customer.id,
+          ...data,
+        },
+      });
+    }
+    if (PAYING.has(sub.status)) {
+      await tx.organization.update({ where: { id: orgId }, data: { plan: mapped.plan } });
+    } else if (ENDED.has(sub.status)) {
+      await tx.organization.update({ where: { id: orgId }, data: { plan: "STARTER" } });
+    }
   });
 }

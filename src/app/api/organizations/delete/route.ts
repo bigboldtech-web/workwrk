@@ -4,6 +4,7 @@ import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/works
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { stripe } from "@/services/billing";
 
 /**
  * Schedule a tenant for deletion. Soft-delete with a 30-day grace
@@ -27,8 +28,16 @@ import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
  * company 30 days later (src/lib/admin/workspace-orphans.ts), so the deletion
  * is ALSO written to WorkspaceDeletion, in the same transaction as the status:
  * no name, no person and no foreign key, so the staff console's long-range
- * cancellations still count it after the company is gone.
+ * cancellations still count it after the company is gone. It also keeps the
+ * company's Stripe ids, the only link to the customer in Stripe once the hard
+ * delete takes the Subscription row (refunds, disputes).
+ *
+ * A live Stripe subscription is cancelled FIRST, so a deleted workspace is
+ * never billed again; if it cannot be cancelled (Stripe refuses, or Stripe is
+ * not configured on this server), nothing is deleted and the answer says why.
+ * Restoring the workspace later does not bring the subscription back.
  */
+const LIVE_STRIPE = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
 const GRACE_DAYS = 30;
 
 interface OrgSettingsWithDeletion {
@@ -75,6 +84,25 @@ export async function POST(req: NextRequest) {
     return jsonError("Type the word DELETE in the confirm box to proceed.");
   }
 
+  // Billing stops before the workspace goes.
+  const sub = await prisma.subscription.findUnique({
+    where: { organizationId: orgId },
+    select: { stripeCustomerId: true, stripeSubscriptionId: true, status: true },
+  });
+  let subscriptionCancelled = false;
+  if (sub?.stripeSubscriptionId && LIVE_STRIPE.has(String(sub.status))) {
+    if (!stripe) {
+      return jsonError("This workspace has a paid subscription that cannot be cancelled from here. Email billing@workwrk.com to cancel it, then delete the workspace.", 409);
+    }
+    try {
+      await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
+      subscriptionCancelled = true;
+    } catch (err) {
+      console.error("[delete-org] Stripe cancel failed:", err instanceof Error ? err.message : err);
+      return jsonError("The paid subscription could not be cancelled, so nothing was deleted. Try again, or cancel it in Settings, Plan & billing, Manage billing first.", 502);
+    }
+  }
+
   const now = new Date();
   const scheduledHardDeleteAt = new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000);
 
@@ -95,7 +123,16 @@ export async function POST(req: NextRequest) {
     });
     if (flipped.count !== 1) return false;
     await writeOrgSettingsKeys(orgId, deletionKeys, tx);
-    await tx.workspaceDeletion.create({ data: { organizationId: orgId, plan: org.plan, signedUpAt: org.createdAt, requestedAt: now } });
+    await tx.workspaceDeletion.create({
+      data: {
+        organizationId: orgId,
+        plan: org.plan,
+        signedUpAt: org.createdAt,
+        requestedAt: now,
+        stripeCustomerId: sub?.stripeCustomerId ?? null,
+        stripeSubscriptionId: sub?.stripeSubscriptionId ?? null,
+      },
+    });
     return true;
   });
   if (!claimed) {
@@ -109,7 +146,7 @@ export async function POST(req: NextRequest) {
     description: `Scheduled organization "${org.name}" for deletion on ${scheduledHardDeleteAt.toISOString().slice(0, 10)} (${GRACE_DAYS}-day grace).`,
     targetId: orgId,
     targetType: "organization",
-    metadata: { graceDays: GRACE_DAYS, scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString() },
+    metadata: { graceDays: GRACE_DAYS, scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString(), subscriptionCancelled },
     severity: "critical",
   });
 
@@ -117,6 +154,7 @@ export async function POST(req: NextRequest) {
     status: "CANCELLED",
     scheduledHardDeleteAt: scheduledHardDeleteAt.toISOString(),
     graceDays: GRACE_DAYS,
-    message: `Organization scheduled for deletion. You have ${GRACE_DAYS} days to cancel: call POST /api/organizations/restore to undo.`,
+    subscriptionCancelled,
+    message: `Organization scheduled for deletion. You have ${GRACE_DAYS} days to cancel: call POST /api/organizations/restore to undo.${subscriptionCancelled ? " The paid subscription was cancelled; restoring does not bring it back." : ""}`,
   });
 }

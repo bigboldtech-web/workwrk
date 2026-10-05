@@ -6,7 +6,8 @@
 // how it works or review it as a staff architect. Returns { text } (markdown).
 
 import { NextRequest } from "next/server";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import type { CanvasScene, CanvasElement } from "@/lib/canvas/scene";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
@@ -85,14 +86,18 @@ export async function POST(req: NextRequest) {
   if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
     return jsonError("AI isn't configured for this workspace yet. Add an API key in Settings to use Explain / Critique.");
   }
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, getUserId(session), action === "critique" ? "Critique a whiteboard" : "Explain a whiteboard");
+  if (!claim.ok) return claim.response;
 
   try {
-    const message = await createMessageWithFallback(ai.client, {
+    const message = await callOrGiveBack(claim.id, () => createMessageWithFallback(ai.client, {
       model: modelFor(ai, "claude-sonnet-4-6"),
       max_tokens: 1200,
       system: action === "critique" ? CRITIQUE : EXPLAIN,
       messages: [{ role: "user", content: describeScene(scene) }],
-    });
+    }));
     const textBlock = message.content.find((b: { type: string }) => b.type === "text") as { text?: string } | undefined;
     const text = (textBlock?.text ?? "").trim();
     if (!text) return jsonError("The AI didn't return anything. Try again.");

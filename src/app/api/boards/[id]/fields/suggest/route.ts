@@ -12,6 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { getBoardFields } from "@/lib/board-fields";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { prisma } from "@/lib/prisma";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
@@ -54,6 +55,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   // no model call, as the switch's helper says ("Off hides every AI entry point").
   // The panel asks on every visit, so it is told "no suggestions", never an error.
   if (await aiOffResponse(c.organizationId)) return NextResponse.json({ suggestions: [] });
+  // Suggestions nobody asked for never spend one of the plan's AI questions;
+  // they run only while the workspace has some left (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(c.organizationId, c.userId))) return NextResponse.json({ suggestions: [] });
 
   try {
     const { client, preferredModel } = await getAnthropicForOrg(c.organizationId);

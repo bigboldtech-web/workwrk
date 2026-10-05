@@ -9,6 +9,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
@@ -57,9 +58,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (aiOffAnswer) return aiOffAnswer;
   const resolved = await getAnthropicForOrg(orgId);
   const model = modelFor(resolved, "claude-haiku-4-5");
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, userId, "Ask about a doc");
+  if (!claim.ok) return claim.response;
 
   try {
-    const msg = await resolved.client.messages.create({
+    const msg = await callOrGiveBack(claim.id, () => resolved.client.messages.create({
       model,
       max_tokens: 1000,
       system:
@@ -72,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ...history.map((m) => ({ role: m.role, content: m.content })),
         { role: "user" as const, content: question },
       ],
-    });
+    }));
     const answer = msg.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { type: "text"; text: string }).text)

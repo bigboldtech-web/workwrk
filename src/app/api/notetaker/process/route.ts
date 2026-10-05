@@ -17,6 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -83,13 +84,18 @@ export async function POST(req: Request) {
     ? `Hint: ${parsed.data.hint}\n\n--- TRANSCRIPT ---\n${parsed.data.transcript}`
     : parsed.data.transcript;
 
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(user.organizationId, userId, "Process meeting notes");
+  if (!claim.ok) return claim.response;
+
   try {
-    const result = await resolved.client.messages.create({
+    const result = await callOrGiveBack(claim.id, () => resolved.client.messages.create({
       model,
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
-    });
+    }));
 
     const text = result.content
       .filter((b) => b.type === "text")

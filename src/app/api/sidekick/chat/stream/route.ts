@@ -30,6 +30,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
@@ -120,6 +121,12 @@ export async function POST(req: Request) {
   if (c.status === 401) return new Response("unauthorized", { status: 401 });
   if (c.status === 404) return new Response("session not found", { status: 404 });
 
+  // One message is one of the plan's AI questions (src/lib/ai-allowance.ts):
+  // the person's per-minute limit, then the question claimed before anything
+  // is written, and handed back if the model fails.
+  const claim = await claimAiAction(c.chat.organizationId, c.userId, "Ask AI message");
+  if (!claim.ok) return claim.response;
+
   // 1. Persist user message + auto-title (sync, happens before stream opens).
   const userMessage = await prisma.chatMessage.create({
     data: { sessionId: c.chat.id, role: "USER", content: parsed.data.message },
@@ -197,6 +204,7 @@ export async function POST(req: Request) {
       let totalTokensOut = 0;
       let finishReason: string | null = null;
       let errorText: string | null = null;
+      let modelGaveNothing = false;
       const toolCallsLog: ToolCallLog[] = [];
 
       try {
@@ -324,11 +332,15 @@ export async function POST(req: Request) {
         }
       } catch (err) {
         errorText = err instanceof Error ? err.message : "Claude request failed";
+        // Nothing answered and nothing done: the question goes back to the
+        // workspace's allowance.
+        modelGaveNothing = !assistantText && toolCallsLog.length === 0;
         if (!assistantText) {
           assistantText = `Sorry, I hit an error reaching the model.\n\n\`${errorText}\``;
         }
         send({ type: "error", message: errorText });
       }
+      if (modelGaveNothing) await releaseAiQuestion(claim.id);
 
       // 5. Persist assistant message + usage telemetry.
       const assistantMessage = await prisma.chatMessage.create({

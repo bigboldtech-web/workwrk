@@ -10,12 +10,13 @@
 import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { computeGoalEffort } from "@/lib/goal-effort";
 import { verdictForGoal, verdictNarrative } from "@/lib/goal-verdict";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 
 type AiVerdictReply = { headline?: string; reasons?: string[]; recommendation?: string };
@@ -115,6 +116,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (hit && Date.now() - hit.at < AI_TTL_MS) {
     return jsonSuccess({ ...base, ...heuristic, ...hit.reply, verdict, source: "ai" });
   }
+  // An assessment nobody asked for never spends one of the plan's AI
+  // questions; the model writes it only while the workspace has some left
+  // (src/lib/ai-allowance.ts), and the worked-out one stands otherwise.
+  if (!(await aiAutoAllowed(orgId, getUserId(session)))) return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });
 
   try {
     const message = await createMessageWithFallback(ai.client, {

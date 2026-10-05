@@ -33,6 +33,7 @@ import { listOrgAdmins } from "@/lib/access/admins";
 import { AppOff, ModuleOff } from "@/components/access";
 import { parseOrgAppsConfig } from "@/lib/rail-apps";
 import { getEffectivePreferences } from "@/lib/preferences";
+import { moduleNeedsUpgradeFor } from "@/lib/module-plan.server";
 
 const MOD = MODULE_BY_SLUG["workwrk-talk"];
 const BACK = { fallbackHref: "/announcements", label: "Announcements" } as const;
@@ -47,12 +48,16 @@ export default async function TalkModuleLayout({ children }: { children: React.R
   // to somebody whose answer is the Modules page would be the wrong door.
   if (!(await isModuleActive(user.organizationId, MOD.productSlug))) {
     if (isGuest) notFound();
-    const admins = canEnable ? [] : await listOrgAdmins(user.organizationId);
+    const [admins, needsUpgrade] = await Promise.all([
+      canEnable ? Promise.resolve([]) : listOrgAdmins(user.organizationId),
+      moduleNeedsUpgradeFor(user.organizationId, MOD.productSlug),
+    ]);
     return (
       <ModuleOff
         label={MOD.label}
         productSlug={MOD.productSlug}
         canEnable={canEnable}
+        needsUpgrade={needsUpgrade}
         admins={admins}
         unlocks="channels, direct messages and calls"
         back={BACK}

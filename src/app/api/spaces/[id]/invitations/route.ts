@@ -24,6 +24,8 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { recordSpaceInvite } from "@/lib/access/grants";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { usersSettingsOf } from "@/lib/settings/org-policy";
 
 const schema = z.object({
   email: z.string().email(),
@@ -137,17 +139,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, token: true, expiresAt: true },
   });
 
+  // How long it works: the workspace's own rule (Members > Invite rules >
+  // Invitation expiry), the same as every other invitation, and the email
+  // says that number.
+  const orgRules = await prisma.organization.findUnique({ where: { id: c.organizationId }, select: { settings: true, domain: true } });
+  const expiryDays = usersSettingsOf(orgRules?.settings, orgRules?.domain).inviteExpiryDays;
+
   // A new invitation and its security activity row land together: the row
-  // is what credits the sender when the invitee accepts (A7).
-  const invitation = existingInvite
+  // is what credits the sender when the invitee accepts (A7). It takes a
+  // seat, checked and taken under the workspace's lock (src/lib/seats.ts).
+  const placed = existingInvite
     ? existingInvite
     : await prisma.$transaction(async (tx) => {
+        await lockWorkspaceSeats(tx, c.organizationId);
+        const seats = await seatsFor(c.organizationId, 1, tx);
+        if (!seats.ok) return { refused: seats.message };
         const created = await tx.invitation.create({
           data: {
             email,
             accessLevel: "EMPLOYEE",
             token: crypto.randomBytes(32).toString("hex"),
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
             organizationId: c.organizationId,
             spaceId,
             spaceRole: parsed.data.spaceRole,
@@ -164,6 +176,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
         return created;
       });
+  if ("refused" in placed) return NextResponse.json({ error: placed.refused, code: "seat_limit" }, { status: 403 });
+  const invitation = placed;
 
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const inviteUrl = `${baseUrl}/join?token=${invitation.token}`;
@@ -175,10 +189,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { name: true },
   });
   try {
+    // An invitation already pending keeps its own expiry: the email says
+    // the days it has left.
+    const daysLeft = Math.max(1, Math.ceil((new Date(invitation.expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
     const { subject, html } = invitationTemplate({
       companyName: org?.name ?? "Your team",
       inviteLink: inviteUrl,
       accessLevel: "EMPLOYEE",
+      expiresInDays: daysLeft,
     });
     await sendEmail({
       to: email,

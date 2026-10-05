@@ -10,6 +10,11 @@
 // Everyone else: a status line where the switch would be ("On", or "Off ·
 // ask an admin"), never a disabled switch.
 //
+// The badge says which plans include it (src/lib/modules.ts): "Included in
+// your plan" from Growth, "Included from Growth" on Starter. A Starter
+// workspace that never had the module gets the plan instead of a switch the
+// server would refuse; one that had it keeps its switch.
+//
 // The word "install" does not appear: a module is turned on or off.
 
 import { useState } from "react";
@@ -20,7 +25,7 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
-import type { ModuleDef } from "@/lib/modules";
+import { MODULE_FROM_PLAN, type ModuleDef } from "@/lib/modules";
 
 const ICON: Record<string, LucideIcon> = { chat: MessageCircle, tables: Table2 };
 const OPEN_HREF: Record<string, string> = { chat: "/tlk", tables: "/tables" };
@@ -33,14 +38,17 @@ export function ModuleCard({
   module: m,
   on,
   canManage,
-  addOn,
+  plan,
+  needsUpgrade,
   onChanged,
 }: {
   module: ModuleDef;
   on: boolean;
   canManage: boolean;
-  /** true when the module is an add-on rather than part of every plan. */
-  addOn: boolean;
+  /** The workspace's plan (GET /api/products). */
+  plan: string;
+  /** Starter and never had it: turning it on needs a plan change first. */
+  needsUpgrade: boolean;
   onChanged: (on: boolean) => void;
 }) {
   const confirm = useConfirm();
@@ -66,7 +74,7 @@ export function ModuleCard({
     setBusy(false);
     if (!r.ok) {
       onChanged(!next);
-      toast(`Couldn't turn ${m.label} ${next ? "on" : "off"}`, { tone: "danger" });
+      toast(r.code === "plan_required" ? r.error : `Couldn't turn ${m.label} ${next ? "on" : "off"}`, { tone: "danger" });
       return;
     }
     window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.prefsChanged, { detail: { source: "marketplace" } }));
@@ -84,7 +92,7 @@ export function ModuleCard({
           <div className="flex items-center gap-2">
             <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">{m.label}</h3>
             <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-hover px-2 text-xs font-medium text-ink-2">
-              {addOn ? "Add-on" : "Included in your plan"}
+              {String(plan || "STARTER") === "STARTER" ? `Included from ${MODULE_FROM_PLAN}` : "Included in your plan"}
             </span>
           </div>
           <p className="mt-0.5 text-sm text-ink-2">Competes with {m.competesWith}</p>
@@ -92,7 +100,16 @@ export function ModuleCard({
         </div>
       </div>
       <div className="mt-auto flex min-h-8 items-center gap-3">
-        {canManage ? (
+        {needsUpgrade && !on ? (
+          canManage ? (
+            <span className="text-sm text-ink-2">
+              On the {MODULE_FROM_PLAN} plan.{" "}
+              <Link href="/settings/billing" className="font-medium text-brand-deep hover:underline">Plan &amp; billing</Link>
+            </span>
+          ) : (
+            <span className="text-sm text-ink-2">On the {MODULE_FROM_PLAN} plan · ask an admin</span>
+          )
+        ) : canManage ? (
           <label className="inline-flex items-center gap-2 text-sm font-medium text-ink">
             <Switch checked={on} onChange={(v) => void flip(v)} disabled={busy} aria-label={`${m.label} ${on ? "on" : "off"}`} />
             {on ? "On" : "Off"}

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { checkPlanLimit } from "@/lib/plan-limits";
+import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
+import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 
 /**
@@ -78,8 +78,9 @@ export async function POST(req: NextRequest) {
   if (items.length === 0) return jsonSuccess({ suggestions: [] });
 
   const orgId = getOrgId(session);
-  const planCheck = await checkPlanLimit(orgId, "ai");
-  if (!planCheck.allowed) return jsonError(planCheck.message, 403);
+  // Suggestions nobody asked for never spend one of the plan's AI questions;
+  // they run only while the workspace has some left (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(orgId, getUserId(session)))) return jsonSuccess({ suggestions: [] });
 
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);

@@ -14,6 +14,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { logActivity } from "@/lib/activity";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
@@ -76,12 +77,17 @@ Rules:
 - Row keys MUST match column labels exactly.
 - If the doc isn't list-like, output: {"name":"","columns":[],"rows":[]}`;
 
-  const msg = await client.messages.create({
+  // One of the plan's AI questions (src/lib/ai-allowance.ts), handed back if
+  // the model fails.
+  const claim = await claimAiAction(orgId, userId, "Turn a doc into a table");
+  if (!claim.ok) return claim.response;
+  const msg = await callOrGiveBack(claim.id, () => client.messages.create({
     model,
     max_tokens: 4000,
     system,
     messages: [{ role: "user", content: `Doc title: ${doc.title}\n\nContent:\n\n${trimmed}` }],
-  });
+  })).catch(() => null);
+  if (!msg) return jsonError("Couldn't reach the AI. Try again in a moment.", 502);
 
   const raw = msg.content
     .filter((b) => b.type === "text")

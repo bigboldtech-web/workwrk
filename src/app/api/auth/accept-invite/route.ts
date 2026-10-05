@@ -43,6 +43,7 @@ import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor } from "@/l
 import { appBaseUrl } from "@/lib/auth/send-verification";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
+import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +110,12 @@ export async function GET(req: NextRequest) {
 
   const [placement, account, inOrg] = await Promise.all([invitePlacement(inv), liveAccountFor(inv.email), alreadyInOrg(inv.email, inv.organizationId)]);
   const orgRole = inviteOrgRole(inv.accessLevel);
+  // A workspace with no free seat says so before the form (src/lib/seats.ts);
+  // the invitation keeps working once there is room.
+  if (!inOrg.member) {
+    const fits = await personFitsOnAccept(inv.organizationId);
+    if (!fits.ok) return fail("full", 409, fits.message, { organizationName: orgName, inviterName: sender.inviterName });
+  }
 
   return NextResponse.json(
     {
@@ -218,6 +225,17 @@ async function claimInvitation(tx: Tx, id: string): Promise<boolean> {
 }
 
 class ClaimLost extends Error {}
+class NoSeat extends Error {}
+
+/**
+ * Take the workspace's seat lock, then check the person still fits (the
+ * plan may have been lowered since the invitation went out). Throws NoSeat.
+ */
+async function seatOrThrow(tx: Tx, organizationId: string): Promise<void> {
+  await lockWorkspaceSeats(tx, organizationId);
+  const fits = await personFitsOnAccept(organizationId, tx);
+  if (!fits.ok) throw new NoSeat(fits.message);
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -257,6 +275,7 @@ export async function POST(req: NextRequest) {
 
       try {
         await prisma.$transaction(async (tx) => {
+          await seatOrThrow(tx, inv.organizationId);
           if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
           await tx.organizationMembership.upsert({
             where: { userId_organizationId: { userId: me.id, organizationId: inv.organizationId } },
@@ -270,6 +289,7 @@ export async function POST(req: NextRequest) {
         });
       } catch (e) {
         if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
+        if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
         throw e;
       }
 
@@ -309,6 +329,7 @@ export async function POST(req: NextRequest) {
 
     try {
       await prisma.$transaction(async (tx) => {
+        await seatOrThrow(tx, inv.organizationId);
         if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
         const user = await tx.user.create({
           data: {
@@ -333,6 +354,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (e) {
       if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
+      if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
       throw e;
     }
 

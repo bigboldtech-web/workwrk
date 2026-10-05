@@ -72,13 +72,19 @@ After a change: `pm2 reload workwrk --update-env`.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Sign in with Google, and Google Calendar connections. |
 | `STAFF_RUNBOOK_URL` | A link to your runbook in the Staff console. |
 
-### Billing (not live yet)
+### Billing
 
-`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_GROWTH_PER_USER`,
-`STRIPE_PRICE_TEAM_FLAT`, `STRIPE_PRICE_GROWTH_FLAT`,
-`STRIPE_PRICE_SCALE_FLAT`. Leave them unset until billing is fixed: the launch
-audit found that with Stripe configured, Plan & billing shows a Manage billing
-button that always fails, and nothing yet lets a workspace buy Growth.
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_GROWTH_PER_USER`
+(and `STRIPE_PRICE_TEAM_FLAT`, `STRIPE_PRICE_GROWTH_FLAT`,
+`STRIPE_PRICE_SCALE_FLAT` only if you sell those prices). With the secret key
+and the Growth per-person price set, Plan & billing offers Upgrade to Growth
+to a workspace on Starter (Stripe checkout, where the buyer chooses the
+seats), and Manage billing once a workspace has a Stripe customer. Point the
+Stripe webhook at `https://app.workwrk.com/api/billing/webhook` for
+`customer.subscription.created`, `.updated`, `.deleted` and
+`checkout.session.completed`: a subscription that ends moves the workspace
+back to Starter. Unset, Plan & billing says billing is handled by your team
+at `billing@workwrk.com`, so make that a mailbox someone reads.
 
 ### Switches, off unless you decide otherwise
 
@@ -108,6 +114,10 @@ button that always fails, and nothing yet lets a workspace buy Growth.
   `OPS_ALERT_EMAIL`.
 - Email: send yourself an invitation and a password reset, and check both
   arrive outside spam.
-- Billing and AppSumo: not ready. Redeeming an AppSumo code does not grant its
-  plan yet, and Stripe should stay unset (above).
+- Billing: with Stripe set (above), run one checkout and one cancellation in
+  Stripe's test mode before taking real cards. AppSumo: a code redeemed in
+  Plan & billing moves the workspace onto the plan and seats it grants.
+- Plans are enforced now: a workspace already past its plan's people or AI
+  questions (before Batch 13 nothing counted) keeps everyone it has, but
+  cannot add people or ask the AI until it changes plan.
 - A real `support@workwrk.com` inbox someone reads.

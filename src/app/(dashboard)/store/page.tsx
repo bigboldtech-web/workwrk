@@ -33,7 +33,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { MODULES } from "@/lib/modules";
 import { appAudienceAllows } from "@/lib/nav/app-audience";
 
-type Product = { slug: string; tier: string; installation: { status: string } | null };
+type Product = { slug: string; tier: string; installation: { status: string } | null; needsUpgrade?: boolean };
 type Tab = "all" | "on" | "off";
 
 export default function MarketplacePage() {
@@ -42,17 +42,19 @@ export default function MarketplacePage() {
   const { askAiVisible } = useOsShell();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [canManage, setCanManage] = useState(false);
+  const [plan, setPlan] = useState("STARTER");
   const [error, setError] = useState<string | null>(null);
   const [override, setOverride] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState<Tab>("all");
   const [suggestOpen, setSuggestOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const r = await apiFetch<{ products: Product[]; canManage: boolean }>("/api/products", { cache: "no-store" });
+    const r = await apiFetch<{ products: Product[]; canManage: boolean; plan?: string }>("/api/products", { cache: "no-store" });
     if (!r.ok) { setError(r.error); return; }
     setError(null);
     setProducts(r.data.products);
     setCanManage(r.data.canManage);
+    setPlan(r.data.plan ?? "STARTER");
     setOverride({});
   }, []);
   useEffect(() => {
@@ -98,7 +100,8 @@ export default function MarketplacePage() {
                 module={m}
                 on={isOn(m.productSlug)}
                 canManage={canManage}
-                addOn={(bySlug.get(m.productSlug)?.tier ?? "PLUS") !== "FREE"}
+                plan={plan}
+                needsUpgrade={bySlug.get(m.productSlug)?.needsUpgrade ?? false}
                 onChanged={(on) => setOverride((o) => ({ ...o, [m.productSlug]: on }))}
               />
             ))}
