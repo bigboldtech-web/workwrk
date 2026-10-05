@@ -86,15 +86,15 @@ export async function POST(req: NextRequest) {
   if (items.length === 0) return jsonSuccess({ suggestions: [] });
 
   const orgId = getOrgId(session);
-  // Suggestions nobody asked for never spend one of the plan's AI questions;
-  // they run only while the workspace has some left (src/lib/ai-allowance.ts).
-  if (!(await aiAutoAllowed(orgId, getUserId(session)))) return jsonSuccess({ suggestions: [] });
-
   // AI features turned off for the workspace (settings.data.aiEnabled).
   const aiOff = await aiOffResponse(orgId);
   if (aiOff) return aiOff;
 
   const resolved = await getAnthropicForOrg(orgId);
+  // Suggestions nobody asked for never spend one of the plan's AI questions;
+  // they run only while the workspace has some left, under the daily totals
+  // on WorkwrK's key (src/lib/ai-allowance.ts).
+  if (!(await aiAutoAllowed(orgId, getUserId(session), resolved.source))) return jsonSuccess({ suggestions: [] });
   const ai = resolved.client;
   const model = modelFor(resolved, "claude-haiku-4-5");
 

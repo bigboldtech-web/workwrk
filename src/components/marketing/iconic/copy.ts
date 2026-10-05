@@ -168,7 +168,7 @@ export const LEGAL_COPY = {
     eyebrow: "Terms",
     h1: "Terms of service.",
     sub: "The agreement between your organization and ours, as short as a contract can honestly be.",
-    updated: "5 October 2026",
+    updated: "6 October 2026",
   },
   cookies: {
     eyebrow: "Cookies",

@@ -24,7 +24,7 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { recordSpaceInvite } from "@/lib/access/grants";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
-import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 import { usersSettingsOf } from "@/lib/settings/org-policy";
 
 const schema = z.object({
@@ -160,8 +160,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       })
     : await prisma.$transaction(async (tx) => {
         await lockWorkspaceSeats(tx, c.organizationId);
-        const seats = await seatsFor(c.organizationId, 1, tx);
-        if (!seats.ok) return { refused: seats.message };
+        // An address that already holds a seat here (a workspace invitation
+        // still open) takes none more.
+        if (await seatsForAddress(c.organizationId, email, tx)) {
+          const seats = await seatsFor(c.organizationId, 1, tx);
+          if (!seats.ok) return { refused: seats.message };
+        }
         const created = await tx.invitation.create({
           data: {
             email,

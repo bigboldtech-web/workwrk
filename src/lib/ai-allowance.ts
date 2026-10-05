@@ -30,6 +30,13 @@
 // NO LIMIT. A plan whose AI limit is UNLIMITED_AI or more (Enterprise) has no
 // cap, as Plan & billing says ("no limit"): its questions are still recorded,
 // never refused.
+//
+// FREE QUESTIONS ARE ALSO PER PERSON. In a Starter workspace a question also
+// counts against the person: everyone gets PLAN_LIMITS.STARTER.ai questions in
+// total across every free workspace they are in. The workspace's own count
+// starts at 0 in every new workspace, and anyone can make one from the
+// workspace menu, so without this a script could make workspace after
+// workspace and ask 50 more questions in each.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
@@ -55,6 +62,14 @@ export function aiCapMessage(plan: string, limit: number): string {
   return `This workspace has used all ${limit} AI questions on the ${PLAN_LABEL[plan] ?? plan} plan. An Owner or Admin can change the plan in Settings, Plan & billing.`;
 }
 
+/**
+ * The sentence a person at the free questions they get across free
+ * workspaces is shown.
+ */
+export function aiPersonCapMessage(limit: number): string {
+  return `You have used all ${limit} AI questions one person gets across free workspaces. On the Growth plan a workspace has ${PLAN_LIMITS.GROWTH.ai} of its own: an Owner or Admin can change the plan in Settings, Plan & billing.`;
+}
+
 /** Claim one AI question for this workspace, or say why not. */
 export async function claimAiQuestion(organizationId: string, userId: string, query: string): Promise<AiClaim> {
   return prisma.$transaction(async (tx) => {
@@ -66,6 +81,11 @@ export async function claimAiQuestion(organizationId: string, userId: string, qu
     if (aiIsCapped(limit)) {
       const used = await tx.aIQuery.count({ where: { organizationId } });
       if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
+    }
+    if (plan === "STARTER") {
+      const free = PLAN_LIMITS.STARTER.ai;
+      const mine = await tx.aIQuery.count({ where: { userId, organization: { plan: "STARTER" } } });
+      if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
     }
     const row = await tx.aIQuery.create({
       data: { query: query.slice(0, 4000), userId, organizationId },
@@ -139,6 +159,9 @@ export async function claimAiAction(organizationId: string, userId: string, what
 /** Automatic AI calls one person's pages may make in a minute. */
 export const AI_AUTO_PER_MINUTE = 20;
 
+/** Automatic AI calls one person's pages may make in a day, across every workspace (WorkwrK's key). */
+export const AI_AUTO_PER_PERSON_DAY = 300;
+
 /**
  * Automatic AI calls a workspace may make in a UTC day, by plan: the total
  * bound on what nobody asked for, which never spends a question. Past it the
@@ -149,17 +172,22 @@ export const AI_AUTO_PER_DAY: Record<string, number> = { STARTER: 100, GROWTH: 1
 /**
  * Whether an AI call nobody asked for (a search summary, inbox or field
  * suggestions, a goal's assessment) may run: the workspace still has
- * questions left, the person's pages are under their per-minute limit, and
- * the workspace is under its daily total, which this call then takes one of.
+ * questions left, and the person's pages are under their per-minute limit.
+ * On WorkwrK's own key (`keySource` "shared") also under the person's daily
+ * total and the workspace's, which this call then takes one of each; a
+ * workspace's own key (BYOK) is its own bill, so no daily total applies.
  * It never spends a question. False: show the answer worked out without AI.
+ * Callers resolve the key first (getAnthropicForOrg) and pass its source.
  */
-export async function aiAutoAllowed(organizationId: string, userId: string): Promise<boolean> {
+export async function aiAutoAllowed(organizationId: string, userId: string, keySource: "shared" | "byok" = "shared"): Promise<boolean> {
   if (!rateLimit(`ai-auto:${userId}`, { max: AI_AUTO_PER_MINUTE, windowMs: 60_000 }).ok) return false;
   const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { plan: true } });
   if (!org) return false;
   const plan = String(org.plan ?? "STARTER");
   const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
   if (aiIsCapped(limit) && (await aiQuestionsUsed(organizationId)) >= limit) return false;
+  if (keySource === "byok") return true;
+  if (!rateLimit(`ai-auto-day:${userId}`, { max: AI_AUTO_PER_PERSON_DAY, windowMs: 86_400_000 }).ok) return false;
   // Fails closed: "limit" past the day's total, "not_ready" without the table.
   return (await claimAiUse(organizationId, "auto", AI_AUTO_PER_DAY[plan] ?? AI_AUTO_PER_DAY.STARTER)) === "ok";
 }

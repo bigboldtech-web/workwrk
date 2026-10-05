@@ -23,7 +23,6 @@ import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { useConfirm } from "@/components/ui/dialog-provider";
 
 type Summary = {
   plan: string;
@@ -31,10 +30,11 @@ type Summary = {
   limits: { users: number; sops: number; ai: number };
   usage: { members: number; pendingInvites: number; sops: number; aiUsed: number };
   /** People who hold a seat here through a membership (their account is another workspace's). */
-  fromOtherWorkspaces?: Array<{ id: string; name: string; email: string }>;
+  fromOtherWorkspaces?: Array<{ id: string; name: string; email: string; isOwner?: boolean }>;
   billingLive: boolean;
   portalAvailable: boolean;
   stripeSubscribed: boolean;
+  paymentPending?: boolean;
   upgrade: { key: string; seats: number } | null;
 };
 
@@ -72,8 +72,6 @@ function Meter({ label, used, limit, helper }: { label: string; used: number; li
 
 export default function BillingSettingsPage() {
   const { toast } = useOsToast();
-  const confirm = useConfirm();
-  const [removing, setRemoving] = useState<string | null>(null);
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -90,6 +88,22 @@ export default function BillingSettingsPage() {
   useEffect(() => {
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
+  }, [load]);
+
+  // Back from a paid checkout (?billing=success) before the payment's event
+  // has landed: the page says the payment was received, reads the summary
+  // again for a minute, and offers no second Upgrade meanwhile.
+  const [paid, setPaid] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("billing") !== "success") return;
+    const start = setTimeout(() => setPaid(true), 0);
+    let n = 0;
+    const t = setInterval(() => {
+      n += 1;
+      void load();
+      if (n >= 20) clearInterval(t);
+    }, 3000);
+    return () => { clearTimeout(start); clearInterval(t); };
   }, [load]);
 
   const portal = useCallback(async () => {
@@ -126,31 +140,13 @@ export default function BillingSettingsPage() {
     void load();
   }, [code, redeeming, toast, load]);
 
-  // Free the seat of someone in through another workspace: they keep their
-  // own workspace, and lose this one.
-  const removeMembership = useCallback(async (p: { id: string; name: string }) => {
-    if (removing) return;
-    const ok = await confirm({
-      title: `Remove ${p.name} from this workspace?`,
-      description: "Their account belongs to another workspace, which they keep. They lose this workspace, and its seat is freed.",
-      confirmLabel: "Remove",
-      destructive: true,
-    });
-    if (!ok) return;
-    setRemoving(p.id);
-    const r = await apiFetch(`/api/organization/memberships/${encodeURIComponent(p.id)}`, { method: "DELETE" });
-    setRemoving(null);
-    if (!r.ok) { toast(r.error); return; }
-    toast(`${p.name} removed from this workspace`);
-    void load();
-  }, [removing, confirm, toast, load]);
-
   const status = data
     ? data.status === "TRIAL" && data.plan === "STARTER"
       ? FREE
       : STATUS[data.status] ?? { label: data.status, cls: "bg-hover text-ink-2" }
     : null;
-  const upgrade = data?.upgrade ?? null;
+  const waitingForPayment = paid && !!data && data.plan === "STARTER" && !data.stripeSubscribed;
+  const upgrade = waitingForPayment ? null : (data?.upgrade ?? null);
   // Upgrade first: a checkout opened and left (or a subscription that ended)
   // leaves a Stripe customer behind, and the portal cannot start a
   // subscription, so preferring it hid the only way to buy Growth.
@@ -177,8 +173,15 @@ export default function BillingSettingsPage() {
               <span className="text-xl font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
               {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
-            {data.stripeSubscribed && data.portalAvailable ? (
-              <p className="text-sm text-ink-2">Change the plan, seats, payment method and invoices in the billing portal (Manage billing).</p>
+            {waitingForPayment ? (
+              <p role="status" className="text-sm text-ink-2">Payment received. The plan changes here as soon as the payment is confirmed; this page updates by itself.</p>
+            ) : data.paymentPending ? (
+              <p className="text-sm text-ink-2">This workspace&apos;s subscription has a payment that is pending or failed. Manage billing shows it and lets you pay or cancel.</p>
+            ) : data.stripeSubscribed && data.portalAvailable ? (
+              <p className="text-sm text-ink-2">
+                Change the seats (never below the people and open invitations here) or the card, see invoices, or cancel, in the billing portal (Manage billing). To change the plan, email{" "}
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+              </p>
             ) : upgrade ? (
               <>
                 <p className="text-sm text-ink-2">Growth adds Talk and Tables, up to 50 people, 20 SOPs and 500 AI questions. Upgrade to Growth opens checkout, where you choose the seats.</p>
@@ -237,7 +240,10 @@ export default function BillingSettingsPage() {
             {data.fromOtherWorkspaces && data.fromOtherWorkspaces.length > 0 ? (
               <div className="flex flex-col gap-1.5">
                 <p className="text-sm text-ink-2">
-                  In through another workspace (their account is there, so Members does not list them; each holds a seat here):
+                  In through another workspace: their account belongs to another workspace, so Members does not list
+                  them, and each holds a seat here. Removing them from this page is not built yet: to free one of these
+                  seats, email{" "}
+                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
                 </p>
                 <ul className="flex flex-col gap-1">
                   {data.fromOtherWorkspaces.map((p) => (
@@ -245,14 +251,7 @@ export default function BillingSettingsPage() {
                       <span className="min-w-0 truncate text-ink">
                         {p.name} <span className="text-ink-2">{p.email}</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => { void removeMembership(p); }}
-                        disabled={removing !== null}
-                        className="shrink-0 font-medium text-danger-text hover:underline disabled:text-ink-3"
-                      >
-                        {removing === p.id ? "Removing" : "Remove"}
-                      </button>
+                      {p.isOwner ? <span className="shrink-0 text-ink-2">Owner</span> : null}
                     </li>
                   ))}
                 </ul>

@@ -81,6 +81,13 @@ describe("seatLimit", () => {
     expect(seatLimit("SCALE", live(1, "FLAT_TIER", "sub_1"))).toEqual({ limit: 200, canBuyMore: false });
   });
 
+  it("uses seats bought in Stripe only while the workspace is on the plan they were bought for", () => {
+    const sub = { seats: 12, status: "ACTIVE", billingMode: "PER_USER", stripeSubscriptionId: "sub_1" };
+    expect(seatLimit("GROWTH", { ...sub, plan: "GROWTH" })).toEqual({ limit: 12, canBuyMore: true });
+    // Staff moved the subscriber to Enterprise: Enterprise's people limit, nothing to buy.
+    expect(seatLimit("ENTERPRISE", { ...sub, plan: "GROWTH" }).canBuyMore).toBe(false);
+  });
+
   it("a lifetime (AppSumo) subscription's seats are the cap, and more are not bought in the portal", () => {
     expect(seatLimit("GROWTH", live(25, "FLAT_TIER", null))).toEqual({ limit: 25, canBuyMore: false });
     // Never fewer than free Starter's 10: a 5-seat code does not take seats away.

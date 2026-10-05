@@ -14,7 +14,7 @@ import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
-import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 
 export async function GET(req: Request) {
   try {
@@ -249,8 +249,10 @@ export async function PATCH(req: Request) {
   const outcome = await prisma.$transaction(async (tx) => {
     if (revived) {
       await lockWorkspaceSeats(tx, orgId);
-      const seats = await seatsFor(orgId, 1, tx);
-      if (!seats.ok) return { refused: seats.message } as const;
+      if (await seatsForAddress(orgId, inv.email, tx, inv.id)) {
+        const seats = await seatsFor(orgId, 1, tx);
+        if (!seats.ok) return { refused: seats.message } as const;
+      }
     }
     const claimed = await tx.invitation.updateMany({
       where: { id: inv.id, organizationId: orgId, accepted: false },

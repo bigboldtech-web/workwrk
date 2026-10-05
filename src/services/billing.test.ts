@@ -20,7 +20,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    $queryRaw: async () => [{ plan: db.orgPlan }],
+    $queryRaw: async () => [{ plan: db.orgPlan, status: db.orgStatus }],
     subscription: {
       findUnique: async () => db.row,
       update: async (a: { data: Record<string, unknown> }) => {
@@ -158,6 +158,25 @@ describe("applySubscriptionEvent", () => {
     await applySubscriptionEvent(sub("canceled"), new Date("2026-10-05T11:00:00Z"));
     expect(db.orgPlan).toBe("ENTERPRISE");
     expect(db.orgWrites.filter((w) => "plan" in w)).toEqual([]);
+  });
+
+  it("keeps on the row the plan Stripe now gives while staff hold another, so a later subscription applies", async () => {
+    db.orgPlan = "ENTERPRISE";
+    db.row = tracked({ plan: "GROWTH", status: "ACTIVE", stripeSubscriptionId: "sub_1" });
+    await applySubscriptionEvent(sub("canceled"), AT);
+    expect(db.row?.plan).toBe("STARTER");
+    expect(db.orgPlan).toBe("ENTERPRISE");
+    // The contract ends: staff set Starter, and the Owner buys Growth.
+    db.orgPlan = "STARTER";
+    await applySubscriptionEvent(sub("active", "sub_2"), new Date("2026-10-06T10:00:00Z"));
+    expect(db.orgPlan).toBe("GROWTH");
+  });
+
+  it("applies nothing to a workspace that is being deleted", async () => {
+    db.orgStatus = "CANCELLED";
+    expect(await applySubscriptionEvent(sub("active"), AT)).toBe("closed");
+    expect(db.subWrites).toEqual([]);
+    expect(db.orgWrites).toEqual([]);
   });
 
   it("applies a new subscription bought after a cancelled one", async () => {

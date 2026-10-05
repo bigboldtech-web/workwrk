@@ -128,9 +128,10 @@ export default function TermsPage() {
                   nothing behind them in this repo. */}
               <p>
                 Paid plans are billed through our payment processor, at the price and billing period shown when you
-                subscribe. Changing your plan or your seat count, updating a card and cancelling start from Settings,
-                Plan &amp; billing: in that processor&apos;s portal once your workspace pays by card, and otherwise by
-                writing to us at the address that page gives.
+                subscribe. Once your workspace pays by card, changing the seat count (never below the people and open
+                invitations in it), updating the card and cancelling happen in that processor&apos;s portal, from
+                Settings, Plan &amp; billing. Changing the plan, and everything for a workspace that does not pay by
+                card, is done by writing to us at the address that page gives.
               </p>
               <p>
                 If a payment fails, our payment processor tries it again. If the subscription still ends unpaid, the

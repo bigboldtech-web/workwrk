@@ -125,8 +125,13 @@ export async function createCheckoutSession(params: {
       organizationName: params.organizationName,
       adminEmail: params.adminEmail,
     }, tx);
-    const open = await client.checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
-    for (const old of open.data) await client.checkout.sessions.expire(old.id);
+    await expireOpenCheckouts(customerId);
+    // Stripe knows of a paid checkout before our webhook does (the buyer is
+    // sent back to Plan & billing at once): a second checkout is refused on
+    // what Stripe holds, not only on the row.
+    if ((await openSubscriptionsOf(customerId)).length > 0) {
+      throw new BillingRefusal("This workspace already has a subscription. Change it from Manage billing.");
+    }
     const session = await client.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -157,6 +162,23 @@ export async function createCheckoutSession(params: {
     });
     return { url: session.url, sessionId: session.id };
   }, { maxWait: 10_000, timeout: 30_000 });
+}
+
+/** A billing action refused for a reason the person can read (the routes answer 409 with it). */
+export class BillingRefusal extends Error {}
+
+/** Close every checkout still open for this Stripe customer, so none of them can be paid. */
+export async function expireOpenCheckouts(customerId: string): Promise<void> {
+  if (!stripe) throw new Error("Stripe not configured");
+  const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 50 });
+  for (const s of open.data) await stripe.checkout.sessions.expire(s.id);
+}
+
+/** The customer's subscriptions that can still bill or come back, by Stripe's own status. */
+export async function openSubscriptionsOf(customerId: string): Promise<string[]> {
+  if (!stripe) throw new Error("Stripe not configured");
+  const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 });
+  return list.data.filter((x) => STILL_OPEN.has(x.status)).map((x) => x.id);
 }
 
 // Stripe statuses under which a subscription can still bill or come back:
@@ -274,7 +296,30 @@ const PAYING = new Set<string>(["active", "trialing", "past_due"]);
 const ENDED = new Set<string>(["canceled", "unpaid", "incomplete_expired", "paused"]);
 const LIVE_ROW = new Set<string>(["ACTIVE", "TRIALING", "PAST_DUE"]);
 
-export type SubscriptionEventResult = "applied" | "older" | "lifetime" | "duplicate";
+export type SubscriptionEventResult = "applied" | "older" | "lifetime" | "duplicate" | "closed";
+
+/**
+ * A billing event a person has to act on (a charge to refund, a seat count put
+ * back): kept in the workspace's audit log, and emailed to OPS_ALERT_EMAIL
+ * when it is set, never only a server log line.
+ */
+async function billingAlert(organizationId: string | null, what: string): Promise<void> {
+  console.error(`[billing] ${what}`);
+  if (organizationId) {
+    const { logActivity } = await import("@/lib/activity");
+    await logActivity({ type: "billing_alert", actorId: null, actorType: "system", actorLabel: "Billing", organizationId, description: what.slice(0, 500), targetType: "subscription", severity: "warning" });
+  }
+  const to = process.env.OPS_ALERT_EMAIL?.trim();
+  if (!to) return;
+  const [{ queueEmail }, { escapeHtml }] = await Promise.all([import("@/lib/email"), import("@/lib/email-templates/escape")]);
+  await queueEmail({
+    to,
+    subject: "WorkwrK: a billing event needs a person",
+    template: "ops-billing-alert",
+    html: `<p>${escapeHtml(what)}</p><p>Workspace: <code>${escapeHtml(organizationId ?? "deleted")}</code>. ${new Date().toISOString()}</p>`,
+    variables: { organizationId },
+  }).catch(() => {});
+}
 
 /**
  * Apply a subscription's state. `eventAt` is when Stripe created the event
@@ -284,13 +329,24 @@ export type SubscriptionEventResult = "applied" | "older" | "lifetime" | "duplic
  * workspace's row is locked first, so two deliveries at once apply one after
  * the other.
  *
- * Never applied:
- *   - to a lifetime deal (an AppSumo code: no Stripe subscription, a flat
- *     tier, live), which no Stripe event may overwrite;
- *   - for a second subscription while the row follows another one that is
- *     still live: two checkouts opened at once and both paid. The second is
- *     cancelled at once, so the customer is never billed twice, and logged so
- *     its first payment can be refunded.
+ * The row's plan is ALWAYS the plan Stripe now gives (the price's plan while
+ * paying, Starter once ended, unchanged while the first payment is
+ * incomplete); the workspace's own plan follows it only while the two are the
+ * same, so a plan staff set, or a code gave, is not Stripe's to change.
+ *
+ * Never applied, and stopped in Stripe when it is paying (an alert says to
+ * refund what it took):
+ *   - a subscription for a lifetime deal (an AppSumo code: no Stripe
+ *     subscription, a flat tier, live), which no Stripe event may overwrite;
+ *   - a second subscription while the row follows another one that is still
+ *     live;
+ *   - a subscription for a workspace that is deleted, or being deleted.
+ * Checkout refuses a second subscription first (it asks Stripe), so these
+ * are the backstop.
+ *
+ * Seats bought are never fewer than the seats in use: a paying per-person
+ * subscription lowered below the people and open invitations (in the billing
+ * portal) is put back up to them.
  */
 export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: Date = new Date()): Promise<SubscriptionEventResult | undefined> {
   const orgId = sub.metadata?.organizationId;
@@ -312,10 +368,11 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
     stripeEventAt: eventAt,
   };
+  const paying = PAYING.has(sub.status);
   const result = await prisma.$transaction(async (tx): Promise<SubscriptionEventResult> => {
-    const org = await tx.$queryRaw<{ plan: string | null }[]>`
-      SELECT "plan"::text AS plan FROM "Organization" WHERE id = ${orgId} FOR UPDATE`;
-    if (org.length === 0) return "older";
+    const org = await tx.$queryRaw<{ plan: string | null; status: string | null }[]>`
+      SELECT "plan"::text AS plan, "status"::text AS status FROM "Organization" WHERE id = ${orgId} FOR UPDATE`;
+    if (org.length === 0 || String(org[0].status) === "CANCELLED") return "closed";
     const row = await tx.subscription.findUnique({
       where: { organizationId: orgId },
       select: { plan: true, status: true, billingMode: true, stripeSubscriptionId: true, stripeEventAt: true },
@@ -326,14 +383,13 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
       // A newer state is already applied: this event is older news.
       if (row.stripeEventAt && row.stripeEventAt > eventAt) return "older";
     }
-    // The row's plan is the plan Stripe last gave the workspace (a workspace
-    // with no row has only the plan it signed up on). Stripe changes the
-    // workspace's plan only while that is still its plan.
     const orgPlan = String(org[0].plan ?? "STARTER");
+    // The plan Stripe last gave (a workspace with no row: the plan it signed
+    // up on), and the plan it gives now.
     const stripesPlan = row ? String(row.plan) : orgPlan;
+    const givesNow = (paying ? mapped.plan : ENDED.has(sub.status) ? "STARTER" : stripesPlan) as Plan;
     const owned = orgPlan === stripesPlan;
-    const nextPlan = !owned ? null : PAYING.has(sub.status) ? mapped.plan : ENDED.has(sub.status) ? ("STARTER" as Plan) : null;
-    const rowData = { ...data, plan: (nextPlan ?? stripesPlan) as Plan };
+    const rowData = { ...data, plan: givesNow };
     if (row) {
       await tx.subscription.update({ where: { organizationId: orgId }, data: rowData });
     } else {
@@ -345,15 +401,39 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
         },
       });
     }
-    if (nextPlan) await tx.organization.update({ where: { id: orgId }, data: { plan: nextPlan } });
-    if (PAYING.has(sub.status)) {
+    if (owned && givesNow !== orgPlan) await tx.organization.update({ where: { id: orgId }, data: { plan: givesNow } });
+    if (paying) {
       await tx.organization.updateMany({ where: { id: orgId, status: "TRIAL" }, data: { status: "ACTIVE" } });
     }
     return "applied";
   });
-  if (result === "duplicate" && PAYING.has(sub.status) && stripe) {
-    await stripe.subscriptions.cancel(sub.id);
-    console.error(`[billing] a second subscription (${sub.id}) for workspace ${orgId} was cancelled: the workspace already pays through another one. Refund its first payment in Stripe.`);
+
+  if (result !== "applied" && result !== "older" && paying) {
+    const why = result === "lifetime"
+      ? "the workspace has a lifetime plan from a code"
+      : result === "duplicate"
+        ? "the workspace already pays through another subscription"
+        : "the workspace is deleted or being deleted";
+    try {
+      const stopped = await stopSubscription(sub.id);
+      if (stopped === "cancelled") await billingAlert(result === "closed" ? null : orgId, `A card subscription (${sub.id}) was cancelled because ${why}. Refund what it charged in Stripe (customer ${typeof sub.customer === "string" ? sub.customer : sub.customer.id}).`);
+    } catch (err) {
+      await billingAlert(result === "closed" ? null : orgId, `A card subscription (${sub.id}) should be cancelled because ${why}, and cancelling it failed (${err instanceof Error ? err.message : String(err)}). Cancel and refund it in Stripe.`);
+    }
+  }
+
+  // Seats bought never fall below the seats in use.
+  if (result === "applied" && paying && mapped.billingMode === "PER_USER" && item?.id && stripe) {
+    const { seatUse } = await import("@/lib/seats");
+    const use = await seatUse(orgId);
+    const floor = Math.max(1, use.members + use.pending);
+    if (seats < floor) {
+      try {
+        await stripe.subscriptions.update(sub.id, { items: [{ id: item.id, quantity: floor }], proration_behavior: "create_prorations" });
+      } catch (err) {
+        await billingAlert(orgId, `The seats on subscription ${sub.id} were lowered to ${seats}, below the ${floor} in use, and putting them back failed (${err instanceof Error ? err.message : String(err)}). Set the quantity to ${floor} in Stripe.`);
+      }
+    }
   }
   return result;
 }

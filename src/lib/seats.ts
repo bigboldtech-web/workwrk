@@ -50,7 +50,8 @@ export interface SeatUse {
   canBuyMore: boolean;
 }
 
-type SubFacts = { seats: number; status: string; billingMode: string; stripeSubscriptionId: string | null };
+/** `plan`: the plan the subscription gives (the row's), when known. */
+type SubFacts = { seats: number; status: string; billingMode: string; stripeSubscriptionId: string | null; plan?: string | null };
 
 /** The cap for a plan and its subscription (see THE LIMIT above). */
 export function seatLimit(plan: string, sub: SubFacts | null): { limit: number; canBuyMore: boolean } {
@@ -60,7 +61,11 @@ export function seatLimit(plan: string, sub: SubFacts | null): { limit: number; 
   if (source === "lifetime") {
     return { limit: seatsAreUnlimited(sub.seats) ? UNLIMITED_SEATS : Math.max(sub.seats, PLAN_LIMITS.STARTER.users), canBuyMore: false };
   }
-  if (source === "stripe" && sub.billingMode === "PER_USER" && sub.seats > 0) {
+  // Seats bought in Stripe are the cap only while the workspace is on the
+  // plan they were bought for: staff moving a subscriber to another plan
+  // (Enterprise, say) gives that plan's people limit, never "buy more Growth
+  // seats".
+  if (source === "stripe" && sub.billingMode === "PER_USER" && sub.seats > 0 && (!sub.plan || sub.plan === plan)) {
     return sub.seats >= UNLIMITED_SEATS ? { limit: UNLIMITED_SEATS, canBuyMore: false } : { limit: sub.seats, canBuyMore: true };
   }
   return { limit: planLimit, canBuyMore: false };
@@ -102,11 +107,11 @@ export async function seatUse(organizationId: string, db: Db = prisma): Promise<
     openInvitedAddresses(organizationId, db),
     db.subscription.findUnique({
       where: { organizationId },
-      select: { seats: true, status: true, billingMode: true, stripeSubscriptionId: true },
+      select: { seats: true, status: true, billingMode: true, stripeSubscriptionId: true, plan: true },
     }),
   ]);
   const plan = String(org?.plan ?? "STARTER");
-  const cap = seatLimit(plan, sub ? { seats: sub.seats, status: String(sub.status), billingMode: String(sub.billingMode), stripeSubscriptionId: sub.stripeSubscriptionId } : null);
+  const cap = seatLimit(plan, sub ? { seats: sub.seats, status: String(sub.status), billingMode: String(sub.billingMode), stripeSubscriptionId: sub.stripeSubscriptionId, plan: sub.plan ? String(sub.plan) : null } : null);
   return { members: anchored + viaMembership, pending, limit: cap.limit, plan, canBuyMore: cap.canBuyMore };
 }
 
@@ -142,6 +147,26 @@ export async function personFitsOnAccept(organizationId: string, db: Db = prisma
   const use = await seatUse(organizationId, db);
   if (use.members + 1 <= use.limit) return { ok: true };
   return { ok: false, message: `This workspace has no free seat for you right now. Ask whoever invited you to make room, or an Owner or Admin to change the plan.` };
+}
+
+/**
+ * The seats one more invitation for this address takes: none when the address
+ * already holds one here (another invitation still open, or a live person,
+ * anchored or through a membership, any case of the address), else one. The
+ * count holds each address once, so a second invitation for it adds nothing
+ * and is never refused at the cap. `exceptInvitationId`: the row being renewed.
+ */
+export async function seatsForAddress(organizationId: string, email: string, db: Db = prisma, exceptInvitationId?: string): Promise<0 | 1> {
+  const address = { equals: email.trim(), mode: "insensitive" as const };
+  const live = { deletedAt: null, status: { not: "INACTIVE" as const } };
+  const [invited, anchored, member] = await Promise.all([
+    db.invitation.count({
+      where: { organizationId, accepted: false, expiresAt: { gt: new Date() }, email: address, ...(exceptInvitationId ? { id: { not: exceptInvitationId } } : {}) },
+    }),
+    db.user.count({ where: { organizationId, email: address, ...live } }),
+    db.organizationMembership.count({ where: { organizationId, user: { email: address, ...live } } }),
+  ]);
+  return invited + anchored + member > 0 ? 0 : 1;
 }
 
 /** Take the workspace's row lock inside a transaction, so seat checks there run one at a time. */

@@ -65,9 +65,15 @@ async function ctxAndSession(sessionId: string) {
   if (!session?.user) return { status: 401 as const };
   const userId = (session.user as { id?: string }).id;
   if (!userId) return { status: 401 as const };
+  // Only in the workspace the person is in now: a chat belongs to the
+  // workspace it was started in, and someone removed from that workspace
+  // must not keep spending its AI questions or writing into it through an
+  // old chat.
+  const orgId = (session.user as { organizationId?: string }).organizationId;
+  if (!orgId) return { status: 401 as const };
 
   const chat = await prisma.chatSession.findFirst({
-    where: { id: sessionId, userId, archivedAt: null },
+    where: { id: sessionId, userId, organizationId: orgId, archivedAt: null },
     include: {
       agent: {
         select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true },

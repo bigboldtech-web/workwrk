@@ -4,7 +4,7 @@ import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/works
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
-import { stopSubscription } from "@/services/billing";
+import { expireOpenCheckouts, openSubscriptionsOf, stopSubscription, stripe } from "@/services/billing";
 
 /**
  * Schedule a tenant for deletion. Soft-delete with a 30-day grace
@@ -90,20 +90,24 @@ export async function POST(req: NextRequest) {
     where: { organizationId: orgId },
     select: { stripeCustomerId: true, stripeSubscriptionId: true, status: true },
   });
-  // Every subscription not stored as CANCELED is checked with Stripe: the row
-  // stores unpaid and paused as INCOMPLETE, and an unpaid subscription keeps
-  // raising an invoice every period. One Stripe already ended is passed by.
+  // Stripe is asked, not the row: every checkout still open for the customer
+  // is closed (one paid after the delete would bill a deleted workspace), and
+  // every subscription Stripe still holds open (active, trialing, past due,
+  // unpaid, incomplete or paused) is cancelled, the one the row follows and
+  // any other. One Stripe already ended is passed by.
   let subscriptionCancelled = false;
-  if (sub?.stripeSubscriptionId && String(sub.status) !== "CANCELED") {
+  if (sub?.stripeCustomerId && stripe) {
     try {
-      subscriptionCancelled = (await stopSubscription(sub.stripeSubscriptionId)) === "cancelled";
-    } catch (err) {
-      if (err instanceof Error && err.message === "Stripe not configured") {
-        return jsonError("This workspace has a paid subscription that cannot be cancelled from here. Email billing@workwrk.com to cancel it, then delete the workspace.", 409);
+      await expireOpenCheckouts(sub.stripeCustomerId);
+      for (const id of await openSubscriptionsOf(sub.stripeCustomerId)) {
+        if ((await stopSubscription(id)) === "cancelled") subscriptionCancelled = true;
       }
+    } catch (err) {
       console.error("[delete-org] Stripe cancel failed:", err instanceof Error ? err.message : err);
       return jsonError("The paid subscription could not be cancelled, so nothing was deleted. Try again, or cancel it in Settings, Plan & billing, Manage billing first.", 502);
     }
+  } else if (sub?.stripeSubscriptionId && String(sub.status) !== "CANCELED") {
+    return jsonError("This workspace has a paid subscription that cannot be cancelled from here. Email billing@workwrk.com to cancel it, then delete the workspace.", 409);
   }
 
   const now = new Date();
