@@ -61,31 +61,34 @@ through the public API without the Actions log. `deploy-migrate.log` and
   and is checked like any deploy. This is the way. It lasts until the next
   push to `main` is deployed, which deploys the newest green commit again: to
   stay back, revert the bad commit on `main`, so its push ships the revert.
-- **By hand on the box, only when Actions cannot run.** Every block below is
-  ONE command in parentheses that first takes the deploy's own lock, so a
-  deploy script still finishing on the box (its job ended, its script
-  carries on to put things back) can never undo it halfway. In the app
-  directory, as root.
+- **By hand on the box, only when Actions cannot run.** As root. Each block
+  below is ONE command in parentheses that first takes the deploy's own lock,
+  so a deploy script still finishing on the box (its job ended, its script
+  carries on to put things back) can never undo it halfway, and a step that
+  fails ends it. `/run` is cleared at every boot, so the first line makes the
+  lock's directory.
 
-  The previous build, while `.next-prev` is there:
+  The previous build, while `.next-prev` is there (`npm ci` runs only when
+  the two commits' `package-lock.json` differ: the live packages are then the
+  newer release's):
 
   ```
+  install -d -m 700 /run/workwrk-deploy
   (
+    cd /www/wwwroot/workwrk.com || exit 1
+    export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
     flock -w 1800 9 || { echo "a deploy is still running on the box"; exit 1; }
     [ -d .next-prev ] || { echo "no previous build to go back to"; exit 1; }
+    SHA=$(cat .next-prev/DEPLOY_SHA 2>/dev/null) || { echo "the previous build is from before Batch 12: use the next block"; exit 1; }
+    LOCK_CHANGED=$(git diff --quiet HEAD "$SHA" -- package-lock.json || echo yes)
     rm -rf .next-failed
-    mv .next .next-failed && mv .next-prev .next
-    git reset --hard "$(cat .next/DEPLOY_SHA)"
-    # Only if package-lock.json differs between the two commits: the live
-    # packages are the newer release's, so install the older ones first.
-    npm ci
+    mv .next .next-failed && mv .next-prev .next || exit 1
+    git reset --hard "$SHA" || exit 1
+    if [ -n "$LOCK_CHANGED" ]; then npm ci || exit 1; fi
     chown -R www:www /www/wwwroot/workwrk.com
     pm2 reload workwrk --update-env 9>&-
   ) 9>/run/workwrk-deploy/lock
   ```
-
-  (`.next/DEPLOY_SHA` exists for builds from Batch 12 on; for an older build,
-  reset to the commit it was built from.)
 
   A commit from before Batch 12 (the workflow refuses it, and after two
   deploys no build from before Batch 12 is left in `.next-prev`): a build by
@@ -93,25 +96,32 @@ through the public API without the Actions log. `deploy-migrate.log` and
   the live `.next`. Take the database backup first: going back past a
   migration can leave columns the old code does not expect. That commit's
   `.gitignore` does not hide the deploy's parked folders, so they are moved
-  out first (moved, not deleted: `.next-prev` is the way back if this build
+  out first (moved, not deleted: `.next-prev` is a way back if this build
   fails), and the build gets the same 3 GB heap every build on this box needs:
 
   ```
+  install -d -m 700 /run/workwrk-deploy /root/workwrk-parked
   (
+    cd /www/wwwroot/workwrk.com || exit 1
+    export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
     flock -w 1800 9 || { echo "a deploy is still running on the box"; exit 1; }
-    install -d -m 700 /root/workwrk-parked
     for d in .next-prev .next-failed .next-staging node_modules-prev node_modules-failed; do
-      [ -e "$d" ] && mv "$d" "/root/workwrk-parked/$d-$(date +%s)"
+      if [ -e "$d" ]; then mv "$d" "/root/workwrk-parked/$d-$(date +%s)" || exit 1; fi
     done
-    git reset --hard <sha>
-    npm ci
+    git reset --hard <sha> || exit 1
+    npm ci || exit 1
     # npx next build, not npm run build: that commit's build script also
     # runs its migrations.
-    NODE_OPTIONS=--max-old-space-size=3072 npx next build
+    NODE_OPTIONS=--max-old-space-size=3072 npx next build || exit 1
     chown -R www:www /www/wwwroot/workwrk.com
     pm2 reload workwrk --update-env 9>&-
   ) 9>/run/workwrk-deploy/lock
   ```
+
+  Until the build finishes the site is down. If it fails, run the block again
+  once the cause is fixed, or move the parked `.next-prev` back to `.next`
+  and go back to the commit it names, with the first block's `git reset` and
+  `npm ci` lines.
 
   Run `pm2` from a fresh root shell, never one the backup settings were
   loaded into (scripts/BACKUPS.md).
