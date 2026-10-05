@@ -39,6 +39,7 @@ import { fieldChanges } from "@/lib/automation/field-changes";
 import { createMessageWithFallback, getAnthropicForOrg, isAiConfigured, modelFor } from "@/lib/ai-client";
 import { aiFieldsOn } from "@/lib/ai/ai-features";
 import { claimAiUse, releaseAiUse } from "@/lib/ai-usage";
+import { claimFreeDay } from "@/lib/ai-allowance";
 import {
   aiFieldConfig,
   aiFieldNotReady,
@@ -183,6 +184,12 @@ export async function fillAiField(args: {
   const claim = await claimAiUse(c.organizationId, "field_fill", cap);
   if (claim === "limit") return refuse(429, { error: "ai_daily_limit", limit: cap });
   if (claim === "not_ready") return refuse(503, { error: "not_ready" });
+  // A free workspace also takes one of the platform's free fills of the day
+  // (src/lib/ai-allowance.ts): past that ceiling, fills wait for tomorrow.
+  if (String(args.plan ?? "STARTER") === "STARTER" && !(await claimFreeDay("fill"))) {
+    await releaseAiUse(c.organizationId, "field_fill");
+    return refuse(429, { error: "ai_free_daily_limit" });
+  }
 
   // ── 5. The model ─────────────────────────────────────────────────
   const request = buildFillRequest(config, facts, sourceText);

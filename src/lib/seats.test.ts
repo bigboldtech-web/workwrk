@@ -143,6 +143,6 @@ describe("seatCapMessage", () => {
   });
 
   it("points a per-person plan at buying seats", () => {
-    expect(seatCapMessage({ members: 12, pending: 0, limit: 12, plan: "GROWTH", canBuyMore: true }, 1)).toMatch(/can add seats in Settings, Plan & billing \(Manage billing\)\.$/);
+    expect(seatCapMessage({ members: 12, pending: 0, limit: 12, plan: "GROWTH", canBuyMore: true }, 1)).toMatch(/can add seats by emailing billing@workwrk\.com\.$/);
   });
 });

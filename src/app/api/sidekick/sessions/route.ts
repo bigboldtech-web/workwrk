@@ -16,9 +16,13 @@ async function ctx() {
   if (!session?.user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
   const userId = (session.user as { id?: string }).id;
   if (!userId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true } });
-  if (!user?.organizationId) return { error: NextResponse.json({ error: "no organization" }, { status: 400 }) };
-  return { userId: user.id, orgId: user.organizationId };
+  // The workspace this device is acting in (the session's), the same one the
+  // chat routes open a chat in: the account's anchor can differ (another
+  // device switched it), and a chat made in the anchor would then never open
+  // here.
+  const orgId = (session.user as { organizationId?: string }).organizationId;
+  if (!orgId) return { error: NextResponse.json({ error: "no organization" }, { status: 400 }) };
+  return { userId, orgId };
 }
 
 /**

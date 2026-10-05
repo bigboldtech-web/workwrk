@@ -2197,6 +2197,10 @@ model AIQuery {
   id             String       @id @default(cuid())
   query          String
   response       String?
+  /// Asked in a free (Starter) workspace: counts toward the free questions
+  /// one person gets across free workspaces (src/lib/ai-allowance.ts).
+  /// prisma/sql/2026-10-06-ai-free-day.sql
+  freeTier       Boolean      @default(false)
   userId         String
   user           User         @relation(fields: [userId], references: [id])
   organizationId String
@@ -2205,6 +2209,7 @@ model AIQuery {
 
   @@index([organizationId])
   @@index([userId])
+  @@index([userId, freeTier])
 }
 
 // ==========================================
@@ -7028,6 +7033,18 @@ model AutomationCronTick {
 /// guard rail on cost. Written only by src/lib/ai-usage.ts claimAiUse, one
 /// atomic upsert that never takes `count` past the day's cap
 /// (prisma/sql/2026-10-04-ai-fields-and-updates.sql).
+/// The platform's daily ceiling on free AI: one row per UTC day and kind,
+/// across every free workspace (src/lib/ai-allowance.ts claimFreeDay).
+/// prisma/sql/2026-10-06-ai-free-day.sql
+model AiFreeDay {
+  day       DateTime @db.Date
+  kind      String
+  count     Int      @default(0)
+  updatedAt DateTime @default(now())
+
+  @@id([day, kind])
+}
+
 model AiUsageDay {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

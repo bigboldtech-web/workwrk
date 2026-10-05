@@ -217,7 +217,7 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "How does per-user billing work?",
-    a: `${GROWTH.name} is priced per seat per month, billed annually, for the seats you choose at checkout. A seat is a person who can sign in, or an invitation that is still open; deactivated people and expired invitations do not count. To add people past the seats you bought, add seats in Settings, Plan & billing.`,
+    a: `${GROWTH.name} is priced per seat per month, billed annually, for the seats you choose at checkout. A seat is a person who can sign in, or an invitation that is still open; deactivated people and expired invitations do not count. To add people past the seats you bought, email billing@workwrk.com to add seats.`,
   },
   {
     q: "Which currencies do you price in?",

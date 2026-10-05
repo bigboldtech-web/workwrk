@@ -94,6 +94,7 @@ export default function BillingSettingsPage() {
   // has landed: the page says the payment was received, reads the summary
   // again for a minute, and offers no second Upgrade meanwhile.
   const [paid, setPaid] = useState(false);
+  const [stillWaiting, setStillWaiting] = useState(false);
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("billing") !== "success") return;
     const start = setTimeout(() => setPaid(true), 0);
@@ -101,7 +102,7 @@ export default function BillingSettingsPage() {
     const t = setInterval(() => {
       n += 1;
       void load();
-      if (n >= 20) clearInterval(t);
+      if (n >= 20) { clearInterval(t); setStillWaiting(true); }
     }, 3000);
     return () => { clearTimeout(start); clearInterval(t); };
   }, [load]);
@@ -145,7 +146,9 @@ export default function BillingSettingsPage() {
       ? FREE
       : STATUS[data.status] ?? { label: data.status, cls: "bg-hover text-ink-2" }
     : null;
-  const waitingForPayment = paid && !!data && data.plan === "STARTER" && !data.stripeSubscribed;
+  // Only for a workspace that has been to checkout (it has a Stripe customer):
+  // the address bar alone says nothing.
+  const waitingForPayment = paid && !!data && data.portalAvailable && data.plan === "STARTER" && !data.stripeSubscribed;
   const upgrade = waitingForPayment ? null : (data?.upgrade ?? null);
   // Upgrade first: a checkout opened and left (or a subscription that ended)
   // leaves a Stripe customer behind, and the portal cannot start a
@@ -174,12 +177,16 @@ export default function BillingSettingsPage() {
               {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
             {waitingForPayment ? (
-              <p role="status" className="text-sm text-ink-2">Payment received. The plan changes here as soon as the payment is confirmed; this page updates by itself.</p>
+              <p role="status" className="text-sm text-ink-2">
+                {stillWaiting
+                  ? "The payment has not been confirmed yet. Reload this page in a few minutes; if the plan still has not changed, email billing@workwrk.com."
+                  : "Payment received. The plan changes here as soon as the payment is confirmed; this page updates by itself for a minute."}
+              </p>
             ) : data.paymentPending ? (
               <p className="text-sm text-ink-2">This workspace&apos;s subscription has a payment that is pending or failed. Manage billing shows it and lets you pay or cancel.</p>
             ) : data.stripeSubscribed && data.portalAvailable ? (
               <p className="text-sm text-ink-2">
-                Change the seats (never below the people and open invitations here) or the card, see invoices, or cancel, in the billing portal (Manage billing). To change the plan, email{" "}
+                Update the card, see invoices, or cancel, in the billing portal (Manage billing). To change the seats or the plan, email{" "}
                 <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
               </p>
             ) : upgrade ? (

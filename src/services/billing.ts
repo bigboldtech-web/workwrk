@@ -167,18 +167,38 @@ export async function createCheckoutSession(params: {
 /** A billing action refused for a reason the person can read (the routes answer 409 with it). */
 export class BillingRefusal extends Error {}
 
+/**
+ * A customer Stripe does not hold (one made in test mode before live keys,
+ * or deleted in the dashboard): it has nothing open, so the caller goes on
+ * instead of refusing on every try.
+ */
+function noSuchCustomer(err: unknown): boolean {
+  const e = err as { type?: string; code?: string; param?: string } | null;
+  return !!e && e.code === "resource_missing" && (e.param === "customer" || e.type === "StripeInvalidRequestError");
+}
+
 /** Close every checkout still open for this Stripe customer, so none of them can be paid. */
 export async function expireOpenCheckouts(customerId: string): Promise<void> {
   if (!stripe) throw new Error("Stripe not configured");
-  const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 50 });
-  for (const s of open.data) await stripe.checkout.sessions.expire(s.id);
+  try {
+    const open = await stripe.checkout.sessions.list({ customer: customerId, status: "open", limit: 50 });
+    for (const s of open.data) await stripe.checkout.sessions.expire(s.id);
+  } catch (err) {
+    if (noSuchCustomer(err)) return;
+    throw err;
+  }
 }
 
 /** The customer's subscriptions that can still bill or come back, by Stripe's own status. */
 export async function openSubscriptionsOf(customerId: string): Promise<string[]> {
   if (!stripe) throw new Error("Stripe not configured");
-  const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 });
-  return list.data.filter((x) => STILL_OPEN.has(x.status)).map((x) => x.id);
+  try {
+    const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 });
+    return list.data.filter((x) => STILL_OPEN.has(x.status)).map((x) => x.id);
+  } catch (err) {
+    if (noSuchCustomer(err)) return [];
+    throw err;
+  }
 }
 
 // Stripe statuses under which a subscription can still bill or come back:
@@ -340,13 +360,15 @@ async function billingAlert(organizationId: string | null, what: string): Promis
  *     subscription, a flat tier, live), which no Stripe event may overwrite;
  *   - a second subscription while the row follows another one that is still
  *     live;
- *   - a subscription for a workspace that is deleted, or being deleted.
+ *   - a PAYING subscription for a workspace that is gone, or being deleted
+ *     (cancelled, with its deletion scheduled). Every other event for such a
+ *     workspace (the cancellation its own deletion made, say) is applied as
+ *     usual, so a workspace restored within the 30 days reads true.
  * Checkout refuses a second subscription first (it asks Stripe), so these
  * are the backstop.
  *
- * Seats bought are never fewer than the seats in use: a paying per-person
- * subscription lowered below the people and open invitations (in the billing
- * portal) is put back up to them.
+ * Seats bought below the seats in use (someone lowered the quantity in
+ * Stripe) raise an alert; nothing here changes what a card is charged.
  */
 export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: Date = new Date()): Promise<SubscriptionEventResult | undefined> {
   const orgId = sub.metadata?.organizationId;
@@ -370,9 +392,12 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
   };
   const paying = PAYING.has(sub.status);
   const result = await prisma.$transaction(async (tx): Promise<SubscriptionEventResult> => {
-    const org = await tx.$queryRaw<{ plan: string | null; status: string | null }[]>`
-      SELECT "plan"::text AS plan, "status"::text AS status FROM "Organization" WHERE id = ${orgId} FOR UPDATE`;
-    if (org.length === 0 || String(org[0].status) === "CANCELLED") return "closed";
+    const org = await tx.$queryRaw<{ plan: string | null; status: string | null; deleting: boolean }[]>`
+      SELECT "plan"::text AS plan, "status"::text AS status,
+             ("settings"->>'scheduledHardDeleteAt') IS NOT NULL AS deleting
+      FROM "Organization" WHERE id = ${orgId} FOR UPDATE`;
+    if (org.length === 0) return "closed";
+    if (paying && String(org[0].status) === "CANCELLED" && org[0].deleting) return "closed";
     const row = await tx.subscription.findUnique({
       where: { organizationId: orgId },
       select: { plan: true, status: true, billingMode: true, stripeSubscriptionId: true, stripeEventAt: true },
@@ -422,17 +447,14 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
     }
   }
 
-  // Seats bought never fall below the seats in use.
-  if (result === "applied" && paying && mapped.billingMode === "PER_USER" && item?.id && stripe) {
+  // Seats bought below the seats in use: a person decides (the customer may
+  // be removing people, staff may have set the plan), nothing here charges.
+  if (result === "applied" && paying && mapped.billingMode === "PER_USER") {
     const { seatUse } = await import("@/lib/seats");
-    const use = await seatUse(orgId);
-    const floor = Math.max(1, use.members + use.pending);
-    if (seats < floor) {
-      try {
-        await stripe.subscriptions.update(sub.id, { items: [{ id: item.id, quantity: floor }], proration_behavior: "create_prorations" });
-      } catch (err) {
-        await billingAlert(orgId, `The seats on subscription ${sub.id} were lowered to ${seats}, below the ${floor} in use, and putting them back failed (${err instanceof Error ? err.message : String(err)}). Set the quantity to ${floor} in Stripe.`);
-      }
+    const use = await seatUse(orgId).catch(() => null);
+    const inUse = use ? use.members + use.pending : 0;
+    if (use && seats < inUse) {
+      await billingAlert(orgId, `Subscription ${sub.id} now pays for ${seats} seats while ${inUse} are in use (people and open invitations). Agree the seats with the customer and set the quantity in Stripe.`);
     }
   }
   return result;

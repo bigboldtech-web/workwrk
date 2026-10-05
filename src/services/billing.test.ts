@@ -13,6 +13,7 @@ type Row = { plan: string; status: string; billingMode: string; stripeSubscripti
 const db = vi.hoisted(() => ({
   orgPlan: "STARTER" as string,
   orgStatus: "TRIAL" as string,
+  orgDeleting: false,
   row: null as Row | null,
   subWrites: [] as Array<{ kind: "update" | "create"; data: Record<string, unknown> }>,
   orgWrites: [] as Array<Record<string, unknown>>,
@@ -20,7 +21,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    $queryRaw: async () => [{ plan: db.orgPlan, status: db.orgStatus }],
+    $queryRaw: async () => [{ plan: db.orgPlan, status: db.orgStatus, deleting: db.orgDeleting }],
     subscription: {
       findUnique: async () => db.row,
       update: async (a: { data: Record<string, unknown> }) => {
@@ -72,6 +73,7 @@ const tracked = (over: Partial<Row> = {}): Row => ({ plan: "STARTER", status: "T
 beforeEach(() => {
   db.orgPlan = "STARTER";
   db.orgStatus = "TRIAL";
+  db.orgDeleting = false;
   // The row checkout leaves before payment (ensureStripeCustomer).
   db.row = tracked();
   db.subWrites.length = 0;
@@ -172,11 +174,22 @@ describe("applySubscriptionEvent", () => {
     expect(db.orgPlan).toBe("GROWTH");
   });
 
-  it("applies nothing to a workspace that is being deleted", async () => {
+  it("applies no payment to a workspace that is being deleted", async () => {
     db.orgStatus = "CANCELLED";
+    db.orgDeleting = true;
     expect(await applySubscriptionEvent(sub("active"), AT)).toBe("closed");
     expect(db.subWrites).toEqual([]);
     expect(db.orgWrites).toEqual([]);
+  });
+
+  it("applies the cancellation its own deletion made, so a restore within the 30 days reads true", async () => {
+    db.orgStatus = "CANCELLED";
+    db.orgDeleting = true;
+    db.orgPlan = "GROWTH";
+    db.row = tracked({ plan: "GROWTH", status: "ACTIVE", stripeSubscriptionId: "sub_1" });
+    expect(await applySubscriptionEvent(sub("canceled"), AT)).toBe("applied");
+    expect(db.row?.status).toBe("CANCELED");
+    expect(db.orgPlan).toBe("STARTER");
   });
 
   it("applies a new subscription bought after a cancelled one", async () => {
