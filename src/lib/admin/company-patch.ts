@@ -27,6 +27,10 @@ import { confirmMatches, deletionSchedule, FEATURE_LABELS, statusRevokesSessions
 import { seatsAreUnlimited } from "@/lib/admin/companies-list";
 import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
+import { subscriptionStillOpen } from "@/services/billing";
+
+/** A company cancelled here is deleted this many days later, as an Owner's own delete is. */
+const STAFF_CANCEL_GRACE_DAYS = 30;
 
 export {
   VALID_PLANS,
@@ -80,6 +84,27 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   const { id, patch, actor, ip } = input;
   const logged: LoggedStaffAction[] = [];
 
+  // A subscription stored as INCOMPLETE may be Stripe's unpaid or paused,
+  // which still raise invoices (the row stores those, and the dead
+  // incomplete_expired, the same way), so Stripe is asked before a company is
+  // set to Cancelled, outside the transaction. Refused unless Stripe says it
+  // has ended; refused too when Stripe cannot say.
+  if (patch.status === "CANCELLED") {
+    const sub = await prisma.subscription.findUnique({ where: { organizationId: id }, select: { stripeSubscriptionId: true, status: true } });
+    if (sub?.stripeSubscriptionId && String(sub.status) === "INCOMPLETE") {
+      const open = await subscriptionStillOpen(sub.stripeSubscriptionId).catch(() => null);
+      if (open !== false) {
+        return {
+          ok: false,
+          status: 409,
+          error: open === null
+            ? "Stripe could not be asked whether this company's subscription has ended. Check it in Stripe, cancel it there if it is still open, then set the company to Cancelled."
+            : "This company has a Stripe subscription that can still bill (unpaid or paused). Cancel it in Stripe first, then set it to Cancelled: a cancelled company is deleted in 30 days and must not be billed.",
+        };
+      }
+    }
+  }
+
   const result = await prisma.$transaction(
     async (tx) => {
       // Row lock first: two staff members saving the same company at once
@@ -96,7 +121,8 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           status: true,
           settings: true,
           trialEndsAt: true,
-          subscription: { select: { stripeSubscriptionId: true, billingMode: true, trialEndsAt: true } },
+          createdAt: true,
+          subscription: { select: { stripeSubscriptionId: true, stripeCustomerId: true, status: true, billingMode: true, trialEndsAt: true } },
         },
       });
       if (!org) return null;
@@ -122,6 +148,17 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           });
           if (self) return { refused: SELF_LOCKOUT };
         }
+      }
+      // A cancelled company is deleted 30 days later (below), so it must not
+      // go on being billed: a live Stripe subscription is cancelled in Stripe
+      // first (this console never calls Stripe).
+      if (
+        patch.status === "CANCELLED" &&
+        org.status !== "CANCELLED" &&
+        org.subscription?.stripeSubscriptionId &&
+        ["ACTIVE", "TRIALING", "PAST_DUE"].includes(String(org.subscription.status))
+      ) {
+        return { refused: "This company has a live Stripe subscription. Cancel it in Stripe first, then set it to Cancelled: a cancelled company is deleted in 30 days and must not be billed." };
       }
 
       // Seats live on the subscription: with no subscription there is no
@@ -159,6 +196,7 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
       const changed: CompanyPatchField[] = [];
       let signedOut = 0;
       let moved = 0;
+      let scheduledFor: Date | null = null;
       let plan: string = org.plan;
       let status: string = org.status;
 
@@ -273,17 +311,41 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
       if (patch.status && patch.status !== org.status) {
         await tx.organization.update({ where: { id }, data: { status: patch.status } });
 
-        // The self-service deletion schedule (cancelledAt, cancelledById,
+        // The deletion schedule (cancelledAt, cancelledById,
         // scheduledHardDeleteAt, read by /api/cron/org-hard-delete) never
         // survives a staff status change. Leaving CANCELLED clears it, the
         // same as /api/organizations/restore, so a stale past date can never
-        // purge a company the next time it is cancelled. Entering CANCELLED
-        // from the console schedules nothing: nothing in this console deletes
-        // a company (spec-admin-backoffice 2.2, 2.3 item 8); a workspace is
-        // deleted only by its own Owner.
+        // purge a company the next time it is cancelled.
+        //
+        // Entering CANCELLED schedules the same deletion an Owner's own
+        // delete does, 30 days out, with its WorkspaceDeletion record: the
+        // privacy policy promises a terminated workspace's data is deleted 30
+        // days later, and a company cancelled here (a contract ended, terms
+        // broken) used to be kept forever. cancelledById stays empty: no
+        // person of the workspace asked. Setting any other status within the
+        // 30 days cancels it, as before.
         const deletion = deletionSchedule(org.settings);
         if (deletion) {
           await writeOrgSettingsKeys(id, { cancelledAt: null, cancelledById: null, scheduledHardDeleteAt: null }, tx);
+        }
+        if (patch.status === "CANCELLED") {
+          const at = new Date();
+          scheduledFor = new Date(at.getTime() + STAFF_CANCEL_GRACE_DAYS * 86_400_000);
+          await writeOrgSettingsKeys(id, { cancelledAt: at.toISOString(), cancelledById: null, scheduledHardDeleteAt: scheduledFor.toISOString() }, tx);
+          await tx.workspaceDeletion.create({
+            data: {
+              // A staff cancellation's record: Staff Analytics reads the
+              // wd_staff_ prefix as "Workspace cancelled" (from the console),
+              // not "Deleted by its Owner", before and after the purge.
+              id: `wd_staff_${id}_${at.getTime()}`,
+              organizationId: id,
+              plan: org.plan,
+              signedUpAt: org.createdAt,
+              requestedAt: at,
+              stripeCustomerId: org.subscription?.stripeCustomerId ?? null,
+              stripeSubscriptionId: org.subscription?.stripeSubscriptionId ?? null,
+            },
+          });
         }
 
         if (statusRevokesSessions(patch.status)) {
@@ -327,9 +389,9 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
             targetLabel: org.name,
             summary: `Set ${org.name} from ${statusLabel(org.status)} to ${statusLabel(patch.status)}${
               statusRevokesSessions(patch.status) ? `, signing out ${signedOut} ${signedOut === 1 ? "person" : "people"}` : ""
-            }${moved > 0 ? ` (${moved} more moved to another workspace they belong to)` : ""}${deletion?.scheduledHardDeleteAt ? `, and cancelled the deletion scheduled for ${deletion.scheduledHardDeleteAt.slice(0, 10)}` : ""}`,
+            }${moved > 0 ? ` (${moved} more moved to another workspace they belong to)` : ""}${deletion?.scheduledHardDeleteAt ? `, and cancelled the deletion scheduled for ${deletion.scheduledHardDeleteAt.slice(0, 10)}` : ""}${scheduledFor ? `; its data is deleted for good on ${scheduledFor.toISOString().slice(0, 10)} unless it is set back before then` : ""}`,
             before: { status: org.status, ...(deletion ? { deletionSchedule: deletion } : {}) },
-            after: { status: patch.status, signedOut, movedToOtherWorkspace: moved },
+            after: { status: patch.status, signedOut, movedToOtherWorkspace: moved, ...(scheduledFor ? { scheduledHardDeleteAt: scheduledFor.toISOString() } : {}) },
           }),
         );
         changed.push("status");

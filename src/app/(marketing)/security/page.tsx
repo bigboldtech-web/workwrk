@@ -33,7 +33,7 @@ import { OG_DEFAULT_IMAGE, OG_DEFAULT_TWITTER_IMAGE } from "@/components/marketi
 export const metadata: Metadata = {
   title: "Security",
   description:
-    "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope.",
+    "The account controls that ship today: multi factor authentication at login, idle session expiry, a block on repeated failed sign ins, hashed reset tokens, a security activity log, and access by role and scope.",
   alternates: { canonical: "https://workwrk.com/security" },
   // Per page social text. The root layout's og:description is the
   // pre-refresh positioning ("Replaces 15 tools. Built for Indian SMBs"),
@@ -41,10 +41,10 @@ export const metadata: Metadata = {
   // has fourteen categories, the hero eyebrow reads fourteen and the share
   // card counts fourteen. A page that does not set its own inherits the
   // wrong number and the wrong positioning.
-  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Security", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope." },
+  openGraph: { images: [OG_DEFAULT_IMAGE], title: "Security", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, a block on repeated failed sign ins, hashed reset tokens, a security activity log, and access by role and scope." },
   // The root layout's twitter:description still reads "Replaces 15 tools",
   // which collides with the fourteen this site counts everywhere else.
-  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, lockout after repeated failures, hashed reset tokens, a security activity log, and access by role and scope." },
+  twitter: { images: [OG_DEFAULT_TWITTER_IMAGE], card: "summary_large_image", description: "The account controls that ship today: multi factor authentication at login, idle session expiry, a block on repeated failed sign ins, hashed reset tokens, a security activity log, and access by role and scope." },
 };
 
 /** Each control names something in the product a customer can go and see. */
@@ -55,11 +55,11 @@ const CONTROLS: Array<{ title: string; body: string }> = [
   },
   {
     title: "Sessions that expire",
-    body: "A session ends after a period of inactivity, and signing out everywhere ends every session on every device at once.",
+    body: "A session ends after a period of inactivity, and signing out everywhere ends this session at once and every other one within five minutes.",
   },
   {
-    title: "Lockout after repeated failures",
-    body: "Repeated failed sign in attempts lock the account rather than letting a list of passwords be tried against it.",
+    title: "A block on repeated failed sign ins",
+    body: "Repeated failed sign in attempts to one account from one network address are blocked for at least 15 minutes, so a list of passwords cannot be run against it from there.",
   },
   {
     title: "Password reset tokens, stored hashed",
@@ -74,8 +74,8 @@ const CONTROLS: Array<{ title: string; body: string }> = [
     body: "A person sees the spaces, folders and lists they have been given. Administrators can narrow that further, and sharing is per entity rather than all or nothing.",
   },
   {
-    title: "Your data leaves with you",
-    body: "Export is available on every tier including the free one, any time. Deleted items sit in a trash window before they go.",
+    title: "Export on every tier",
+    body: "Export people, Spaces, Lists and tasks, Docs, SOPs, Tables, Goals and review cycles any time, on every tier including the free one. Files, canvases, forms, chat, Doc comments and review answers are not in the export yet, so ask us for a copy before you delete a workspace. Deleted Spaces, Folders, Lists, tasks, Docs, canvases, tables, forms, files and SOPs go to Trash first, where an Owner or Admin can bring them back; a deleted goal is gone at once.",
   },
 ];
 

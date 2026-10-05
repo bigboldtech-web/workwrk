@@ -124,9 +124,18 @@ export default function PrivacyPage() {
                   account, which is the part a reader would not otherwise
                   guess. */}
               <p>
-                <strong>Consent records.</strong> When you answer the cookie banner we store your answer with the time,
-                your country and region, your IP address and your user agent, as proof of the choice. It is kept whether
-                or not you have an account.
+                <strong>Consent records.</strong> When you dismiss the cookie notice we keep a record that it was shown,
+                under the random id the wwrk_consent cookie holds, with the time, your IP address and your user agent, and
+                your country and region when the request carries them. It is kept whether or not you have an account.
+              </p>
+              {/* The demo form (/api/demo-request) emails what it collects
+                  to the sales mailbox and stores nothing in the product; a
+                  prospect who never signs up was told nothing about it. */}
+              <p>
+                <strong>Demo and contact requests.</strong> When you ask for a demo or write to us, we receive what you
+                send: for a demo, your name, work email, company, team size, industry and what you want to see. It goes
+                by email to our sales mailbox and is used only to answer you; it is not stored in the product. Email{" "}
+                <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and we delete it.
               </p>
             </>
           ),
@@ -225,8 +234,10 @@ export default function PrivacyPage() {
                 ask you to justify the request.
               </p>
               <p>
-                Two of these you do not need us for: a workspace administrator can export all workspace data and can
-                delete it, from inside the product, without contacting anyone.
+                Two of these you do not need us for: a workspace administrator can export the workspace&apos;s people,
+                tasks, Docs, SOPs, Tables, Goals and review cycles, and can delete the workspace, from inside the
+                product, without contacting anyone. Files and attachments, images inside Docs, canvases, forms, chat,
+                Doc comments and review answers are not in the export yet; ask us for a copy of those.
               </p>
             </>
           ),
@@ -236,10 +247,25 @@ export default function PrivacyPage() {
           title: "6. Retention",
           body: (
             <>
+              {/* Batch 14: a workspace closed by WorkwrK staff is now deleted
+                  on the same 30 day schedule as one its Owner deletes
+                  (src/lib/admin/company-patch.ts); the hard delete frees the
+                  files the workspace provably stored (src/lib/company-files.ts)
+                  and says plainly which older uploads it cannot tell apart;
+                  the nightly backup keeps at most 90 days
+                  (scripts/backup/backup.sh BACKUP_KEEP_DAYS). The closure date
+                  is the first full day the staff closure's schedule is live
+                  (Batch 14 deploys on 6 October 2026), named outright so it
+                  never moves with "Last updated"; LAUNCH-CHECKLIST.md names
+                  the same date for the closures made before it. */}
               <p>
-                Account data is retained for the life of your subscription. After termination, we retain workspace data
-                for 30 days (in case you reactivate), then permanently delete. Backups are purged 90 days after
-                deletion.
+                Account data is retained for the life of your subscription. After termination, when you delete the
+                workspace, or when we close it (from 7 October 2026), we retain workspace data
+                for 30 days (in case you reactivate), then permanently delete it, with the files it stored. Some files
+                uploaded before 6 October 2026 were not recorded against
+                the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}
+                <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and we delete them by hand. Backups keep a
+                copy for at most 90 days, so a deleted workspace is gone from them within 90 days of its deletion.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>

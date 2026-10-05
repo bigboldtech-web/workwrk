@@ -157,7 +157,7 @@
       ],
       "surface": "goal-detail",
       "tourLine": "Goals: the ring moved at 4:45 because the work moved.",
-      "tourLineFallback": "Goals: the task lands on the goal's Effort card, and the ring moves with the KPI reading.",
+      "tourLineFallback": "Goals: the Effort card counts the work, and the ring moves with the KPI reading.",
       "tourLineStop": 5,
       "features": "OKRs, KRAs, KPIs, the on track verdict."
     }
@@ -371,7 +371,12 @@
         "title": "Onboard Quayside Coffee",
         "owner": "maya"
       }
-    ]
+    ],
+    "effortCounts": {
+      "hoursLogged": 26,
+      "tasksDone": 4,
+      "lastMoved": "Today"
+    }
   },
   "thread": {
     "channel": "onboarding",
@@ -590,7 +595,7 @@
       {
         "time": "4:45",
         "label": "KPI +1, Goal 64 percent, On track",
-        "labelFallback": "Done, on the goal's Effort card, goal 64 percent",
+        "labelFallback": "Done, counted on the goal's Effort card, goal 64 percent",
         "stop": 5,
         "modules": [
           "Goals"
@@ -759,9 +764,9 @@
         "mechanism": "Completing the task writes the KPI record, which moves goal progress, with the Effort card and the on track verdict beside it",
         "shipped": false,
         "status": "The Effort card from linked KRA tasks, goal rollups and the deterministic on track verdict all ship. Completing a task writes no KPI record: every KPIRecord in the repo comes from a person or an external door, so the ring does not move by itself.",
-        "fallbackNarration": "The task lands on the goal's Effort card the moment it is linked. The KPI reading is recorded by whoever owns it, and the ring moves with the reading."
+        "fallbackNarration": "The goal's Effort card counts the task once its List or KRA is linked to the goal. The KPI reading is recorded by whoever owns it, and the ring moves with the reading."
       },
-      "trailFallback": "4:45 Done, and on the goal's Effort card. Goal 64 percent, on track"
+      "trailFallback": "4:45 Done, and counted on the goal's Effort card. Goal 64 percent, on track"
     },
     {
       "n": 6,
@@ -877,7 +882,7 @@
       "headline": "Every task moves a goal.",
       "narration": "Done at 4:45. The KPI records. The ring moves to 64 percent.",
       "stop": 5,
-      "fallbackNarration": "Done at 4:45, and on the goal's Effort card. The KPI reading is recorded by its owner, and the ring moves with it."
+      "fallbackNarration": "Done at 4:45, and counted on the goal's Effort card. The KPI reading is recorded by its owner, and the ring moves with it."
     },
     {
       "n": 8,

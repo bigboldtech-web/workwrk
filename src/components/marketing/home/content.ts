@@ -57,7 +57,7 @@ export interface FaqEntry {
  * Question 6 is the one that used to carry six certification badges, an
  * uptime SLA and a four hour breach notification time, none of which this
  * repo can evidence. It now lists the controls that are actually in the
- * code: MFA at login, idle session expiry, lockout after repeated failures,
+ * code: MFA at login, idle session expiry, a block on repeated failed sign ins,
  * hashed reset tokens, an audit log, roles and scoped visibility. The
  * certification sentence appears only when a flag says the certificate
  * exists.
@@ -102,7 +102,7 @@ export function faqEntries(): FaqEntry[] {
       q: "Do managers need training?",
       a: [
         "The product is one rail, one sidebar and one top bar, and every page is the same three rows: a title, its saved views, one toolbar.",
-        "The surfaces on this page are the real ones, drawn from the same components, so what you have read here is what you open.",
+        "The screens shown across this site are drawn to match the shipped interface, so what you see here is what you open.",
       ],
     },
     {
@@ -122,7 +122,7 @@ export function faqEntries(): FaqEntry[] {
       q: "Where is our data, who can see it, and is it secure?",
       a: [
         "Access is by role and by scope: a person sees the spaces, folders and lists they have been given, and admins can narrow that further.",
-        "On the account itself: multi factor authentication at login, sessions that expire when idle, lockout after repeated failed attempts, password reset tokens stored hashed, and an audit log of security events.",
+        "On the account itself: multi factor authentication at login, sessions that expire when idle, repeated failed sign ins to one account from one network address blocked for at least 15 minutes, password reset tokens stored hashed, and an audit log of security events.",
         certs.length > 0
           ? `We hold ${certs.join(" and ")}.`
           : "We hold no third party security certification yet. When we do, it will be named here with its report available, and not before.",
@@ -131,7 +131,7 @@ export function faqEntries(): FaqEntry[] {
     {
       q: "What happens to our data if we leave?",
       a: [
-        "You export it, any time, on every tier including the free one. Deleted items sit in a trash window before they go.",
+        "Export people, Spaces, Lists and tasks, Docs, SOPs, Tables, Goals and review cycles any time, on every tier including the free one. Files, canvases, forms, chat, Doc comments and review answers are not in the export yet, so ask us for a copy before you delete a workspace. Deleted Spaces, Folders, Lists, tasks, Docs, canvases, tables, forms, files and SOPs go to Trash first, where an Owner or Admin can bring them back; a deleted goal is gone at once.",
         `There is no contract to get out of on ${starter.name}: it is free for up to ${starterSeatCap} people, with no card on file.`,
       ],
     },

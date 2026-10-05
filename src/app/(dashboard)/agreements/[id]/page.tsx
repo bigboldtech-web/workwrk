@@ -316,7 +316,7 @@ export default function AgreementEditorPage() {
   };
   const archive = async () => {
     if (!ag) return;
-    const ok = await confirm({ title: "Move to Trash?", description: `You can restore it within ${boot.org.trashDays} days.`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: "Move to Trash?", description: "You can restore it from Trash.", confirmLabel: "Move to Trash", destructive: true });
     if (!ok) return;
     const r = await apiFetch(`/api/agreements/${id}`, { method: "PATCH", json: { archived: true } });
     if (!r.ok) { toast(r.error || "Couldn't archive", { tone: "danger" }); return; }

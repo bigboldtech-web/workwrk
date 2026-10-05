@@ -2,7 +2,7 @@
 //
 // Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/inbox, Data):
 // "`DELETE /api/notifications { allRead: true, olderThanDays }` for auto-clear
-// (a daily cron row reads `inboxView.autoClearDays`; documented in
+// (a daily cron row reads `inboxView.deleteClearedDays`; documented in
 // `scripts/CRON-SETUP.md`)".
 //
 // THIS ROUTE DELETES USER DATA, so every line of it is a narrowing:
@@ -13,7 +13,7 @@
 //      how it ships in .env, so an anonymous POST ran the sweep across every
 //      org. Every other cron here inherits the same guard, but they send mail;
 //      this is the first one that destroys rows, so inheriting is not enough.
-//   1. It is OPT-IN, per person. The default for `autoClearDays` is null,
+//   1. It is OPT-IN, per person. The default for `deleteClearedDays` is null,
 //      which means Never, and a person with no stored value is never swept.
 //      Nothing is deleted because a cron ran; it is deleted because somebody
 //      picked "After 30 days" in their own Inbox options.
@@ -44,6 +44,7 @@ import { hasClearedAt, isMissingClearedAtError, setClearedAtAvailable } from "@/
 // only way to say "the JSON column is SQL NULL" in a filter.
 import { Prisma } from "@/generated/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
+import { inboxAutoClearOn } from "@/lib/purge-jobs";
 import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,11 @@ async function handle(req: NextRequest) {
   if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
+  // Clears for real only once it is turned on (src/lib/purge-jobs.ts), when
+  // the Inbox also starts offering auto-clear; a dry run always reports.
+  if (!dryRun && !inboxAutoClearOn()) {
+    return Response.json({ ran: false, skipped: "INBOX_AUTO_CLEAR_CRON is not on. A dry run (?dry=1) still reports what would be cleared." });
+  }
   const now = Date.now();
   const swept: Array<{ userId: string; days: number; deleted: number }> = [];
   let seen = 0;
@@ -85,8 +91,11 @@ async function handle(req: NextRequest) {
     cursor = prefs[prefs.length - 1].userId;
 
     for (const row of prefs) {
-      const home = row.home as { notifications?: { inboxView?: { autoClearDays?: unknown } } } | null;
-      const raw = home?.notifications?.inboxView?.autoClearDays;
+      // Only a choice made under "Delete cleared notifications": one made
+      // under the old "Auto-clear read notifications" words (autoClearDays)
+      // described another job and is never acted on.
+      const home = row.home as { notifications?: { inboxView?: { deleteClearedDays?: unknown } } } | null;
+      const raw = home?.notifications?.inboxView?.deleteClearedDays;
       const days = typeof raw === "number" ? Math.trunc(raw) : null;
       // null, 0, a negative, or a number nobody could have chosen: not swept.
       if (days === null || !ALLOWED_DAYS.has(days)) {

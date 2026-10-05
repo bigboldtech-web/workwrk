@@ -226,7 +226,7 @@ export default function CanvasesPage() {
   async function bulkTrash() {
     const ids = selectedRows.filter((r) => isAdmin || r.ownerId === meId).map((r) => r.id);
     if (ids.length === 0) { toast("You cannot move these canvases to Trash"); return; }
-    const ok = await confirm({ title: `Move ${ids.length} canvas${ids.length === 1 ? "" : "es"} to Trash?`, description: `Restore within ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move ${ids.length} canvas${ids.length === 1 ? "" : "es"} to Trash?`, description: "You can restore them from Trash.", destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/whiteboards/${id}`, { method: "DELETE" })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;

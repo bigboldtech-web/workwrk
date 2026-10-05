@@ -65,7 +65,7 @@ const COOKIES = [
   },
   {
     name: "wwrk_consent",
-    purpose: "Records the cookie choice you made on the banner.",
+    purpose: "Remembers that you have seen the cookie notice, so it is not shown again, and holds the random id our record of it is filed under.",
     duration: "180 days",
     type: "Essential",
   },
@@ -104,13 +104,15 @@ export default function CookiesPage() {
           body: (
             <>
             <p>
-              Cookies are small text files stored in your browser. Ours do two things: keep you logged in, and remember
-              the language and currency you picked. No analytics vendor, no ad network and no pixel runs on this site.
+              Cookies are small text files stored in your browser. Ours keep you logged in, remember the language and
+              currency you picked, and remember that you have seen the cookie notice. No analytics vendor, no ad network
+              and no pixel runs on this site.
             </p>
             <p>
-              One thing is written on our side rather than yours. When you answer the cookie banner we store the answer
-              as proof of it, with the time, your country and region, your IP address and your browser's user agent
-              string. It records the choice you made; it does not follow what you read.
+              One thing is written on our side rather than yours. When you dismiss the cookie notice we keep a record that
+              it was shown, under the random id the wwrk_consent cookie holds, with the time, your IP address and your
+              browser's user agent string, and your country and region when the request carries them.
+              It does not follow what you read.
             </p>
             </>
           ),
@@ -156,9 +158,9 @@ export default function CookiesPage() {
           body: (
             <>
               <p>
-                Essential cookies are required for the service to work and cannot be disabled. Everything else is opt
-                in: you answer the banner on your first visit, and you can change the answer at any time by clearing
-                cookies and reloading.
+                Essential cookies are required for the service to work and cannot be disabled. The language and
+                currency cookies are set only when you pick a language or a currency. There is nothing optional to
+                opt in to, so the banner on your first visit is a notice, not a choice.
               </p>
               <p>
                 You can also block all cookies in your browser settings. The service will not work properly without
@@ -181,9 +183,8 @@ export default function CookiesPage() {
                 no retargeting pixel and no social network tracker on this site or in the product.
               </p>
               <p>
-                The banner still asks, because the record of your answer is what lets us add one later without asking
-                you again to catch up. If we ever do add one, it gets a row in the table above in the same release, and
-                the banner will be asking about something real.
+                The banner asks nothing, because the site sets nothing optional. If we ever add another kind of cookie,
+                it gets a row in the table above in the same release, and the banner asks you about it then.
               </p>
             </>
           ),

@@ -32,7 +32,7 @@ import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type 
 import { loadWorld } from "./access/node-world";
 import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
-import { freeTrashStorage, restoreFromTrash } from "./trash";
+import { freeTrashStorage, NO_LONGER_IN_TRASH, restoreFromTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
   TRASH_TYPE_BY_KEY,
@@ -46,6 +46,7 @@ import {
   type TrashTab,
   type TrashTypeKey,
 } from "./trash-view";
+import { trashClockStart, trashPurgeOn } from "@/lib/purge-jobs";
 
 export interface TrashRow {
   id: string;
@@ -389,8 +390,11 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
   }
   const names = await loadNames(ids);
 
+  // Nothing expires while nothing empties Trash (src/lib/purge-jobs.ts), and
+  // a row's window starts no earlier than the day the purge was turned on.
+  const purges = trashPurgeOn();
   const soon = (r: RawRow): boolean =>
-    query.tab === "deleted" && isExpiringSoon(daysLeft(r.deletedAt, days));
+    purges && query.tab === "deleted" && isExpiringSoon(daysLeft(trashClockStart(r.deletedAt), days));
 
   const q = query.q?.trim().toLowerCase() ?? "";
   const filtered = visible.filter((r) => {
@@ -457,7 +461,9 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
             { id: r.deletedById ?? "", name: r.deletedByName, firstName: r.deletedByName, lastName: null, avatar: null }
           : null,
       deletedAt: r.deletedAt.toISOString(),
-      daysLeft: query.tab === "archived" ? null : daysLeft(r.deletedAt, days),
+      // No countdown while nothing empties Trash (src/lib/purge-jobs.ts):
+      // "N days left" promised a deletion that never came.
+      daysLeft: query.tab === "archived" || !purges ? null : daysLeft(trashClockStart(r.deletedAt), days),
       restorable: !parentGone && !blocked,
       // A task is the one row that can be re-homed: its snapshot carries a
       // boardId, and any List the viewer may write to will hold it. An
@@ -1024,7 +1030,8 @@ export async function restoreTrashRow(
     // into it a moment ago is part of what is restored.
     await restoreFromTrash(snap, { targetBoardId });
     return { ok: true };
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message === NO_LONGER_IN_TRASH) return { ok: false, status: 409, message: NO_LONGER_IN_TRASH };
     // The usual cause is a parent that is itself gone; the page prints the
     // same sentence on the row so this is the stale-tab path, not the norm.
     return { ok: false, status: 409, message: "Couldn't restore. The list or folder it lived in may be gone." };
@@ -1228,13 +1235,13 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
     }
   }
 
-  const snap = await prisma.trashItem.findFirst({
-    where: { id: rowId, organizationId: orgId },
-    select: { id: true, entityType: true, snapshot: true },
-  });
-  if (!snap) return { ok: false, status: 404, message: "Not found" };
-  await freeTrashStorage(snap.entityType, snap.snapshot, orgId, snap.id);
-  await prisma.trashItem.delete({ where: { id: snap.id } });
+  // The row goes first and its files are freed only if this delete took it
+  // (a restore that committed first keeps them).
+  const gone = await prisma.$queryRaw<Array<{ id: string; entityType: string; snapshot: unknown }>>`
+    DELETE FROM "TrashItem" WHERE "id" = ${rowId} AND "organizationId" = ${orgId}
+    RETURNING "id", "entityType", "snapshot"`;
+  if (gone.length === 0) return { ok: false, status: 404, message: "Not found" };
+  await freeTrashStorage(gone[0].entityType, gone[0].snapshot, orgId, gone[0].id);
   return { ok: true };
 }
 

@@ -56,6 +56,7 @@ import { FILE_TYPE_BUCKETS, fileTypeBucket, fileTypeLabel, type FilesSort, type 
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { formatBytes } from "@/lib/format/date";
 import { cn } from "@/lib/utils";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -305,7 +306,7 @@ export default function FilesPage() {
   }
   async function bulkTrash() {
     const ids = [...selected];
-    const ok = await confirm({ title: `Move ${ids.length} file${ids.length === 1 ? "" : "s"} to Trash?`, description: `You can restore them for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    const ok = await confirm({ title: `Move ${ids.length} file${ids.length === 1 ? "" : "s"} to Trash?`, description: `${trashRestoreSentence(boot.org, true)}`, destructive: true, confirmLabel: "Move to Trash" });
     if (!ok) return;
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/files/${id}`, { method: "DELETE" })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;

@@ -24,16 +24,17 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) return jsonError("Type DELETE to confirm.", 400);
 
     const orgId = viewer.organizationId;
-    // Free the blobs before the rows that name them are gone, or the storage
-    // is orphaned with no way left to find it.
-    const files = await prisma.trashItem.findMany({
-      where: { organizationId: orgId, entityType: { in: [...BLOB_TRASH_TYPES] } },
-      select: { id: true, entityType: true, snapshot: true },
-    });
-    await freeTrashStorageMany(files, orgId);
-
-    const res = await prisma.trashItem.deleteMany({ where: { organizationId: orgId } });
-    return jsonSuccess({ deleted: res.count });
+    // The rows go first, in one statement that returns them, and only the
+    // files of what it returned are freed (as the nightly purge does): a
+    // restore that commits first keeps its files, and a row trashed while
+    // this runs is not taken.
+    const gone = await prisma.$queryRaw<Array<{ id: string; entityType: string; snapshot: unknown }>>`
+      DELETE FROM "TrashItem"
+      WHERE "organizationId" = ${orgId}
+      RETURNING "id", "entityType",
+        CASE WHEN "entityType" = ANY(${[...BLOB_TRASH_TYPES]}::text[]) THEN "snapshot" ELSE NULL END AS "snapshot"`;
+    await freeTrashStorageMany(gone.filter((r) => r.snapshot !== null), orgId);
+    return jsonSuccess({ deleted: gone.length });
   } catch (e) {
     if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);
     throw e;

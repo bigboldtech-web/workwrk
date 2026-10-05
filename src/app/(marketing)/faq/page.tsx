@@ -99,7 +99,7 @@ export default function FaqPage() {
       <Band air="hero" labelledBy="faq-h1" still>
         <Eyebrow>FAQ</Eyebrow>
         <Claim id="faq-h1">Straight answers, including the noes.</Claim>
-        <Sub>These are the same answers the home page gives, from the same file, so the two cannot drift apart.</Sub>
+        <Sub>Every answer is checked against what the product does today.</Sub>
       </Band>
 
       {/* 2. The questions. */}

@@ -222,8 +222,12 @@ before that file is applied it answers 503 `not_ready` and does nothing.
 
 ## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
 
-`POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people
-who asked for it in Inbox options > "Auto-clear read notifications". It is the
+`POST /api/cron/inbox-auto-clear` deletes, for good, the notifications a person
+has already Cleared, the number of days after they cleared them that they chose
+in Inbox options > "Delete cleared notifications" (or My settings,
+Notifications, "Delete cleared items after"). It never touches read rows still
+in the Inbox. The first run deletes every Cleared row older than each person's
+choice at once. It is the
 one cron in this file that deletes user data, so it is listed separately and is
 not in the table above: adding the row is a deliberate decision, not a default.
 
@@ -236,18 +240,22 @@ adding the row, and check the 503 is gone by running the dry run below.
 states (`prisma/sql/2026-09-18-notification-cleared-at.sql`). A row you have
 read still sits in your Primary tab where you can see it, so the sweep takes
 only rows you filed away with Clear. On a database that still predates the
-`clearedAt` column the route falls back to `read = true`, which was the same
-set of rows under the old semantics, so applying the SQL file late changes
-nothing about what gets deleted.
+`clearedAt` column the route deletes NOTHING and says so (`columnMissing` in
+its answer) until `prisma/sql/2026-09-18-notification-cleared-at.sql` is
+applied. Choices made under the old "Auto-clear read notifications" words
+(`inboxView.autoClearDays`) described another job and are never acted on:
+only a choice made under "Delete cleared notifications"
+(`inboxView.deleteClearedDays`) is.
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
-| Auto-clear read notifications | `15 4 * * *` (4:15 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/inbox-auto-clear` |
+| Delete cleared notifications (each person's chosen days after they cleared them) | `15 4 * * *` (4:15 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/inbox-auto-clear` |
 
 What it will and will not delete, all four of which are in the route:
 
-* **Opt-in per person.** `home.notifications.inboxView.autoClearDays` defaults
-  to `null`, which is "Never". Somebody with no stored value is never swept.
+* **Opt-in per person.** `home.notifications.inboxView.deleteClearedDays`
+  defaults to `null`, which is "Never". Somebody with no stored value is never
+  swept, and a value under the old `autoClearDays` is never read.
 * **Cleared rows only.** A row is swept only once its owner cleared it. Unread
   rows, and rows merely read, are never swept.
 * **Older than the number of days they chose**, and only 7, 14 or 30 — the
@@ -266,7 +274,11 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 ```
 
 Read the JSON (`peopleWithPreference`, `peopleSwept`, `deleted`, `detail`) and
-only then add the schedule.
+only then add the schedule, AND set `INBOX_AUTO_CLEAR_CRON=on` in the app's `.env`
+(then `pm2 reload workwrk --update-env`). Until that switch is on, a real run
+answers `{ "ran": false, "skipped": ... }` and clears nothing, and the Inbox
+options and My settings, Notifications offer no auto-clear at all
+(`src/lib/purge-jobs.ts`), so nobody is shown a choice nothing acts on.
 
 ## Trash retention purge (NOT INSTALLED: the founder adds this row)
 
@@ -279,9 +291,10 @@ user data, so it is listed separately and is not in the table above.
 opening it at once destroyed them twice, and a workspace nobody visited kept
 deleted rows forever because the clock only ticked when somebody looked. A read
 must not delete, so the read stopped deleting and this row is what carries the
-retention promise instead. **Until this row is installed nothing is ever purged
-and the 60-day promise on the page is not kept** — that is the one thing to
-know before deciding whether to add it.
+retention promise instead. **Until this row is installed and its switch is on,
+nothing is ever purged**, and since Batch 14 the product says so: Trash shows
+no "Time left" column, filter or sort, and Settings, Data says deleted items
+stay until an Owner or Admin deletes them for good.
 
 **It is fail-closed.** With `CRON_SECRET` empty or unset the route answers 503
 and purges nothing.
@@ -299,8 +312,16 @@ What it will and will not delete:
 * **Past that org's own window.** `settings.retention.trashDays`, defaulting to
   60 when it is unset or nonsense, and floored at one day so a stored zero can
   never purge something on the day it was deleted.
-* **Blobs first.** A trashed file's storage is freed before the row naming it
-  goes, so nothing is orphaned.
+* **Rows first, then their files.** The expired rows are deleted in one
+  statement that returns them, and only those rows' files are freed, so a
+  restore during the run never loses its files (a crash in between leaves a
+  file in storage, never a file lost). Only Files rows are freed (a trashed
+  file or files folder, and the files a deleted Space or Folder carries), and
+  only when their stored name proves the company and the uploader
+  (`src/lib/upload-stamp.ts`); uploads inside other content (images in Docs),
+  and some older uploads (`orgs/<id>/notes/`, `file-<random>`, before
+  6 October 2026), stay in storage, and the privacy policy says we delete
+  those by hand on request.
 
 **Dry run first, always.** `?dry=1` counts exactly what it would delete per org
 and deletes nothing:
@@ -311,7 +332,18 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 ```
 
 Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
-the schedule.
+the schedule, AND set `TRASH_PURGE_CRON=on` and `TRASH_PURGE_SINCE=<today, as
+YYYY-MM-DD>` in the app's `.env` (then `pm2 reload workwrk --update-env`). Until
+both are set, a real run answers `{ "ran": false, "skipped": ... }` and deletes
+nothing, and Trash shows no countdown (`src/lib/purge-jobs.ts`).
+
+**What the first runs delete: nothing for a whole window.** While the switch
+was off, Settings > Data told every workspace that Trash keeps everything, so
+an item deleted before `TRASH_PURGE_SINCE` starts its window on that day, not
+on its deletion: the first deletions happen a full window after the day you
+set (60 days by default), and Trash shows every item its time left from the
+day the switch goes on. Tell workspaces before you turn it on. A dry run with
+`TRASH_PURGE_SINCE` already set counts what the real runs would delete.
 
 
 ### Audit log retention (Phase 8, NOT INSTALLED)
@@ -326,10 +358,11 @@ entries went. It never deletes the rows features read back (weekly review
 decisions, goal creators, invitations, shares, the retired permissions grid,
 the access backfill's record, every change to the access switches and Public
 links, the public link carry-over's and repair's records, consent and staff
-rows: `src/lib/audit-retention.ts`). Until this row AND the
-trash-purge row are installed, both retention rows sit behind Show upcoming
-features on Data > Retention, captioned "Not enforced yet"; once both rows are
-in, move them out (data/page.tsx RetentionTab).
+rows: `src/lib/audit-retention.ts`). The Trash row of Data > Retention leaves
+Show upcoming features, with a helper saying it is enforced, as soon as
+`TRASH_PURGE_CRON` and `TRASH_PURGE_SINCE` are on. The audit row stays behind
+Show upcoming, captioned "Not enforced yet", until this row is installed; then
+move it out (data/page.tsx RetentionTab).
 
 | Job | Schedule | Command |
 |---|---|---|

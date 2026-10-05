@@ -51,6 +51,82 @@ const TYPE_META: Record<EntryType, { label: string }> = {
 };
 
 const ENTRIES: readonly { date: string; version?: string; title: string; items: readonly { type: EntryType; text: string }[] }[] = [
+  // From main's merges since 2026-09-21. A release still behind a switch
+  // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
+  // not listed until it is on.
+  {
+    date: "2026-10-06",
+    title: "Plans that count what they promise",
+    items: [
+      { type: "improvement", text: "Seats and AI questions are counted the way the pricing page says: people who can sign in and open invitations hold the seats, and Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder use the plan's AI questions. Fill with AI and Talk updates have their own daily limit. On Starter, each person also has 50 free questions in total, counted across every free workspace they asked them in." },
+      { type: "fix", text: "An AppSumo code moves the workspace onto the plan and seats it grants, and never lowers either." },
+      { type: "fix", text: "A closed workspace no longer gets reminder emails, and the weekly digests reach every team in a large workspace." },
+    ],
+  },
+  {
+    date: "2026-10-05",
+    title: "Launch security, and a deletion that keeps its promise",
+    items: [
+      { type: "security", text: "Rich text that people write is cleaned where it is shown, and uploaded files are served from outside the site's public folder." },
+      { type: "security", text: "Security headers on every page." },
+      { type: "fix", text: "A deleted workspace's data is removed for good 30 days later, as the privacy policy says." },
+    ],
+  },
+  {
+    date: "2026-10-04",
+    title: "AI in Lists and Talk, and a public link for one task",
+    items: [
+      { type: "feature", text: "AI fields in Lists, turned on by the workspace." },
+      { type: "feature", text: "A view-only public link for one task, where the workspace allows public links, and the workspace export carries the work." },
+      { type: "feature", text: "Bird's eye shows linked tasks, gives a Folder its own view, and moves up and down in Focus." },
+      { type: "improvement", text: "Drag tasks up and down to reorder them." },
+    ],
+  },
+  {
+    date: "2026-10-03",
+    title: "Access and correctness",
+    items: [
+      { type: "fix", text: "People pickers list the whole company, not only your own team." },
+      { type: "fix", text: "Fixes across access, Talk and the interface, found in the launch review." },
+    ],
+  },
+  {
+    date: "2026-10-01",
+    title: "Settings and sign-in",
+    items: [
+      { type: "improvement", text: "Workspace settings, My settings, the sign-in screens and the access screens move onto the new frame." },
+    ],
+  },
+  {
+    date: "2026-09-29",
+    title: "People",
+    items: [
+      { type: "improvement", text: "The Directory, org chart, My team, workload, goals and KPIs, reviews, talent, candor, surveys and kudos move onto the new frame." },
+    ],
+  },
+  {
+    date: "2026-09-27",
+    title: "Share anything from its menu",
+    items: [
+      { type: "feature", text: "Share a Space, Folder, List or doc from its own menu. The person sees what you shared and the path to it, nothing more." },
+      { type: "improvement", text: "AI, automation and add-ons move onto the new frame." },
+    ],
+  },
+  {
+    date: "2026-09-26",
+    title: "Tasks in more than one List",
+    items: [
+      { type: "feature", text: "A task can live in more than one List, with connected and mirror columns, dashboards and a Space Overview." },
+    ],
+  },
+  {
+    date: "2026-09-25",
+    title: "Bird's eye",
+    items: [
+      { type: "feature", text: "Bird's eye: a whole Space at a glance, one column per List." },
+      { type: "improvement", text: "Board is every List's default view, and any view can be pinned as the default." },
+    ],
+  },
   {
     date: "2026-09-21",
     title: "The interface refresh reaches Knowledge",
@@ -126,7 +202,7 @@ export default function ChangelogPage() {
           down one page. The kind of change is now one grey word. */}
       <Band ground="quiet" labelledBy="log-list">
         <Eyebrow>The record</Eyebrow>
-        <Headline id="log-list">Every release, with its date.</Headline>
+        <Headline id="log-list">Releases, newest first.</Headline>
         <ol className="ic-log">
           {ENTRIES.map((entry) => (
             <li key={entry.date}>

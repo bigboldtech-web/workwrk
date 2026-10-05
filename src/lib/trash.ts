@@ -30,8 +30,10 @@ export type TrashType =
   // Build app with its rows (App.ui.rows travels inside the row itself).
   | "tool" | "asset" | "app";
 
-/** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
-export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
+/** The trash kinds whose snapshot names file blobs (freed on permanent delete):
+ *  a file, a files folder, and a Space Folder or a Space with the files they
+ *  carry, so a purged Space's uploads do not outlive it. */
+export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder", "folder", "space"];
 
 /** Every trash kind whose snapshot holds Files rows that a restore brings back
  *  (a Space Folder and a Space carry their files too): a file one of them
@@ -95,7 +97,9 @@ function filesOf(entityType: string, snapshot: unknown): FileRow[] {
     const row = (snapshot as { row?: FileRow } | null)?.row;
     return row ? [row] : [];
   }
-  if (entityType === "file_folder") return (snapshot as { children?: { files?: FileRow[] } } | null)?.children?.files ?? [];
+  if (entityType === "file_folder" || entityType === "folder" || entityType === "space") {
+    return (snapshot as { children?: { files?: FileRow[] } } | null)?.children?.files ?? [];
+  }
   return [];
 }
 
@@ -231,7 +235,7 @@ type TrashDb = Pick<
 const asData = (r: unknown): any => r;
 
 /** The client a hierarchy restore writes through: its transaction. */
-type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow">;
+type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow">;
 
 type Entry = {
   /** `db` is the client to read through: the transaction, for the types
@@ -276,9 +280,9 @@ const createFoldersParentsFirst = (rows: Row[], db: RestoreDb = prisma) =>
   createTreeParentsFirst(rows, "parentFolderId", (batch) =>
     db.folder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
 
-const createDriveFoldersParentsFirst = (rows: Row[]) =>
+const createDriveFoldersParentsFirst = (rows: Row[], db: RestoreDb = prisma) =>
   createTreeParentsFirst(rows, "parentId", (batch) =>
-    prisma.fileFolder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
+    db.fileFolder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
 
 // Every descendant drive folder of a FileFolder (BFS, parents before children).
 async function captureDriveFolderSubtree(rootId: string): Promise<Row[]> {
@@ -416,18 +420,18 @@ const REGISTRY: Record<TrashType, Entry> = {
       const row = await prisma.fileEntry.findUnique({ where: { id } });
       return row ? { label: row.name || "File", snapshot: { row } } : null;
     },
-    restore: async (s) => {
+    restore: async (s, db = prisma) => {
       // P3: a file in a Space folder comes back in the folder's Space as the
       // folder is NOW. A folder moved to another Space since used to bring the
       // file back with the old Space under a folder of the new one.
       const row = { ...(s.row as Record<string, unknown>) };
       const folderId = typeof row.spaceFolderId === "string" ? row.spaceFolderId : null;
       if (folderId) {
-        const folder = await prisma.folder.findUnique({ where: { id: folderId }, select: { spaceId: true } });
+        const folder = await db.folder.findUnique({ where: { id: folderId }, select: { spaceId: true } });
         if (!folder) throw new Error("The folder this file lived in is gone.");
         row.spaceId = folder.spaceId;
       }
-      await prisma.fileEntry.create({ data: asData(row) });
+      await db.fileEntry.create({ data: asData(row) });
     },
   },
   policy: {
@@ -743,12 +747,12 @@ const REGISTRY: Record<TrashType, Entry> = {
         snapshot: { row, children: { folders, files: files as unknown as Row[] } },
       };
     },
-    restore: async (s) => {
-      await prisma.fileFolder.create({ data: asData(s.row) });
+    restore: async (s, db = prisma) => {
+      await db.fileFolder.create({ data: asData(s.row) });
       const folders = s.children?.folders ?? [];
-      if (folders.length) await createDriveFoldersParentsFirst(folders);
+      if (folders.length) await createDriveFoldersParentsFirst(folders, db);
       const files = s.children?.files ?? [];
-      if (files.length) await prisma.fileEntry.createMany({ data: asData(files), skipDuplicates: true });
+      if (files.length) await db.fileEntry.createMany({ data: asData(files), skipDuplicates: true });
     },
   },
 };
@@ -904,12 +908,19 @@ export async function moveToTrash(
     // deleted in one transaction under row locks (Phase 5b, their links).
     // Drive folder: files and subfolders reference it with SetNull, so remove
     // the files, then every folder in the subtree, then the root, in one
-    // transaction. The ids come from the snapshot just captured.
+    // transaction. The ids come from the snapshot just captured, files too,
+    // as the Space folder above does: a file uploaded or moved into the
+    // folder after the capture is in no snapshot, so deleting by folder
+    // would lose it for good; left alone, its folder's SetNull keeps it at
+    // the Files root. A captured file moved out meanwhile stays where it was
+    // put (a restore skips the copy, and the purge frees no stored file a
+    // live row still names).
     case "file_folder": {
-      const snap = captured.snapshot as { children?: { folders?: Row[] } };
+      const snap = captured.snapshot as { children?: { folders?: Row[]; files?: Row[] } };
       const ids = [id, ...(snap.children?.folders ?? []).map((f) => f.id as string)];
+      const fileIds = (snap.children?.files ?? []).map((f) => f.id as string);
       await prisma.$transaction(async (tx) => {
-        await tx.fileEntry.deleteMany({ where: { folderId: { in: ids } } });
+        if (fileIds.length) await tx.fileEntry.deleteMany({ where: { id: { in: fileIds }, folderId: { in: ids } } });
         await tx.fileFolder.deleteMany({ where: { id: { in: ids } } });
       });
       break;
@@ -962,7 +973,7 @@ export async function restoreFromTrash(
     await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ organizationId: string; snapshot: unknown }>>`
         SELECT "organizationId", snapshot FROM "TrashItem" WHERE id = ${item.id} FOR UPDATE`;
-      if (locked.length === 0) throw new Error("This item is no longer in Trash.");
+      if (locked.length === 0) throw new Error(NO_LONGER_IN_TRASH);
       const stored = locked[0].snapshot as Snapshot | null;
       const snapshot = (target ? retargetTaskSnapshot(stored, target, { fromKeys }) : stored) as Snapshot;
       await entry.restore(snapshot, tx);
@@ -973,9 +984,27 @@ export async function restoreFromTrash(
     }, { timeout: 60_000, maxWait: 10_000 });
     return;
   }
+  if (type === "file" || type === "file_folder") {
+    // Under the Trash row's lock, in one transaction, like the hierarchy
+    // types: a purge (or Empty trash, or Delete permanently) that reaches
+    // this row meanwhile waits and then finds it gone, so it never frees the
+    // stored files of a file being brought back; one that came first leaves
+    // nothing to restore.
+    await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ snapshot: unknown }>>`
+        SELECT snapshot FROM "TrashItem" WHERE id = ${item.id} FOR UPDATE`;
+      if (locked.length === 0) throw new Error(NO_LONGER_IN_TRASH);
+      await entry.restore(locked[0].snapshot as Snapshot, tx);
+      await tx.trashItem.delete({ where: { id: item.id } });
+    }, { timeout: 60_000, maxWait: 10_000 });
+    return;
+  }
   await entry.restore(item.snapshot as Snapshot);
   await prisma.trashItem.delete({ where: { id: item.id } });
 }
+
+/** What a restore throws when the row was taken first (a purge, or another person's restore). */
+export const NO_LONGER_IN_TRASH = "This item is no longer in Trash.";
 
 // Permanently delete trash older than 60 days for an org, freeing file blobs.
 export async function purgeExpiredTrash(organizationId: string): Promise<void> {

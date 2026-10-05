@@ -323,10 +323,11 @@ const providers = [
         throw new Error("This workspace is suspended. Please contact WorkwrK support.");
       }
       if (org.status === "CANCELLED") {
-        // Only an Owner's own deletion (Settings > Danger zone) schedules a
-        // purge, recorded as settings.scheduledHardDeleteAt. A workspace
-        // cancelled from the Staff console schedules nothing, so its members
-        // are never told their data is about to be deleted.
+        // An Owner's own deletion (Settings > Danger zone) and a cancellation
+        // from the Staff console both schedule the purge 30 days out,
+        // recorded as settings.scheduledHardDeleteAt, and the sign-in says
+        // when. A workspace closed with no date (from before Batch 14) says
+        // only that it is closed.
         const st = (org.settings && typeof org.settings === "object" && !Array.isArray(org.settings) ? org.settings : {}) as Record<string, unknown>;
         const purgeAt = typeof st.scheduledHardDeleteAt === "string" ? new Date(st.scheduledHardDeleteAt) : null;
         if (purgeAt && !Number.isNaN(purgeAt.getTime())) {

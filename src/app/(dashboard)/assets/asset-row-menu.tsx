@@ -25,6 +25,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { apiFetch } from "@/lib/api-fetch";
 import { STATUS_LABEL, personName, statusColor, type ApiAsset, type AssetStatus, type AssetRights } from "./types";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 // Statuses a person can set directly. ASSIGNED comes from assigning someone.
 const DIRECT_STATUSES: AssetStatus[] = ["AVAILABLE", "IN_REPAIR", "RETIRED", "LOST"];
@@ -80,7 +81,7 @@ export function AssetRowMenu({ asset, rights, onEdit, onAssign, onOpen, onChange
     close();
     const ok = await confirm({
       title: `Delete ${asset.name}?`,
-      description: `It moves to Trash. You can restore it from there for ${boot.org.trashDays} days.`,
+      description: `It moves to Trash. ${trashRestoreSentence(boot.org)}`,
       destructive: true,
       confirmLabel: "Delete",
     });

@@ -33,6 +33,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/lib/api-fetch";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -131,7 +132,7 @@ export default function BuildAppPage() {
     if (!app) return;
     const ok = await confirm({
       title: `Delete ${app.name}?`,
-      description: `It moves to Trash with its rows. You can restore it from there for ${boot.org.trashDays} days.`,
+      description: `It moves to Trash with its rows. ${trashRestoreSentence(boot.org)}`,
       confirmLabel: "Delete",
       destructive: true,
     });

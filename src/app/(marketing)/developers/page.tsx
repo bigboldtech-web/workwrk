@@ -72,7 +72,7 @@ const FACTS: readonly { title: string; body: string }[] = [
   },
   {
     title: "CSV, both directions",
-    body: "Import into a table from a spreadsheet, and export activity, compliance, people, reviews and the whole of your own data.",
+    body: "Import into a table from a spreadsheet, and export activity, compliance, people, reviews and your workspace's tasks, Docs, Tables and Goals (files, chat and canvases are not in the export yet).",
   },
   {
     title: "No GraphQL",

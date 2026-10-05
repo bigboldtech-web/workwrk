@@ -32,6 +32,11 @@ function getTransporter() {
 }
 
 const FROM_ADDRESS = process.env.SMTP_FROM || "WorkwrK <noreply@workwrk.com>";
+// Where a reply to any email goes. The From address is a no-reply one, while
+// the welcome email says "Reply to this email": without a Reply-To a new
+// customer's first question went to a mailbox nobody reads. The default is
+// the site's general mailbox (src/components/marketing/config.ts mailboxes).
+const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "hello@workwrk.com";
 
 // ==========================================
 // Preference Types
@@ -146,6 +151,40 @@ export function emailLogData(p: {
   };
 }
 
+// No email goes to a workspace that is suspended or cancelled: its people
+// cannot sign in, and a cancelled one is being deleted. Every mailer (the
+// reminder digests, KPI and OKR reminders, announcements, reviews, reports)
+// queues through here, and none of them used to check, so a closed company's
+// people kept getting the monthly emails. A workspace that no longer exists
+// gets none either. A live answer is kept for a minute per workspace, not
+// read once per email; a closed one is read again every time, so a workspace
+// staff just reopened is never refused from the cache. A failed read lets the
+// email through, so a database blip never drops mail.
+//
+// ACCOUNT MAIL IS NOT THE WORKSPACE'S. A password reset and an address check
+// belong to the person, whose account outlives the workspace it is anchored
+// in: someone in two workspaces whose anchored one was closed must still be
+// able to reset a password and reach the other.
+const ORG_STATUS_TTL_MS = 60_000;
+const orgTakesMail = new Map<string, number>();
+const ACCOUNT_TEMPLATES = new Set(["password-reset", "verify-email"]);
+
+async function workspaceTakesEmail(organizationId: string): Promise<boolean> {
+  const at = orgTakesMail.get(organizationId);
+  if (at !== undefined && Date.now() - at < ORG_STATUS_TTL_MS) return true;
+  let ok = true;
+  try {
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
+    ok = !!org && org.status !== "SUSPENDED" && org.status !== "CANCELLED";
+  } catch {
+    return true;
+  }
+  if (orgTakesMail.size > 5000) orgTakesMail.clear();
+  if (ok) orgTakesMail.set(organizationId, Date.now());
+  else orgTakesMail.delete(organizationId);
+  return ok;
+}
+
 export async function queueEmail({
   to,
   subject,
@@ -156,6 +195,10 @@ export async function queueEmail({
   userId,
   category,
 }: QueueEmailParams): Promise<void> {
+  if (organizationId && !ACCOUNT_TEMPLATES.has(template) && !(await workspaceTakesEmail(organizationId))) {
+    if (IS_DEV) console.log(`[Email] Skipped (workspace suspended, cancelled or gone): ${template} → ${to}`);
+    return;
+  }
   // Check preferences if userId and category provided
   if (userId && category) {
     const allowed = await shouldSendEmail(userId, category);
@@ -363,6 +406,7 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
 
       await transporter.sendMail({
         from: FROM_ADDRESS,
+        replyTo: REPLY_TO,
         to: email.to,
         subject: email.subject,
         html: email.html || renderFromLog(email),

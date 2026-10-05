@@ -26,6 +26,7 @@ import { redirect } from "next/navigation";
 import { gatePage } from "@/lib/access/gate";
 import { resolveTrashTab, typeFromParam } from "@/lib/trash-view";
 import { TrashClient } from "./trash-client";
+import { trashPurgeOn } from "@/lib/purge-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,7 @@ export default async function TrashPage({
       initialType={typeFromParam(sp.type)}
       initialQuery={sp.q ?? ""}
       canPurge={viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN"}
+      expires={trashPurgeOn()}
     />
   );
 }

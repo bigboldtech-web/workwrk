@@ -54,6 +54,7 @@ import {
   SOPS_GROUPS, SOPS_PAGE_SIZES, SOPS_SORTS, SOPS_VIEW_LABEL, SOPS_VIEWS, activeSopsFilterCount, parseSopsGroup, parseSopsQuery, type SopsGroup, type SopsView,
 } from "@/lib/sop-list";
 import { cn } from "@/lib/utils";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -251,7 +252,7 @@ export default function SopsPage() {
   const deleteRows = async (list: SopRow[]) => {
     const ids = list.filter(canDeleteRow).map((r) => r.id);
     if (!ids.length) { toast("You cannot delete these SOPs"); return; }
-    const ok = await confirm({ title: ids.length === 1 ? `Move "${list[0].title || "Untitled SOP"}" to Trash?` : `Move ${ids.length} SOPs to Trash?`, description: `You can restore them for ${boot.org.trashDays} days.`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: ids.length === 1 ? `Move "${list[0].title || "Untitled SOP"}" to Trash?` : `Move ${ids.length} SOPs to Trash?`, description: `${trashRestoreSentence(boot.org, ids.length !== 1)}`, confirmLabel: "Move to Trash", destructive: true });
     if (!ok) return;
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/sops/${id}`, { method: "DELETE" })));
     const failed = results.filter((x) => x.status === "rejected" || !x.value.ok).length;

@@ -71,8 +71,8 @@ export interface InboxOptions {
   /** "Show everything in Other": Other also lists the Primary rows. */
   showAll: boolean;
   sortNewest: boolean;
-  /** Days after which read rows are swept by the daily cron. Null = never. */
-  autoClearDays: number | null;
+  /** Days after a row was Cleared that the daily cron deletes it for good. Null = never. */
+  deleteClearedDays: number | null;
   /**
    * Only the three tabs a person READS. Snoozed and Cleared are places rows go
    * on their way out; opening the Inbox on one of them every morning is not a
@@ -149,7 +149,8 @@ export function InboxClient({
   const pathname = usePathname();
   const params = useSearchParams();
   const { patchPrefs, layerCount } = useOsShell();
-  const { refreshCounts } = useBoot();
+  const { refreshCounts, boot } = useBoot();
+  const autoClears = !!boot.org.inboxAutoClears;
   const { toast } = useOsToast();
 
   const tabParam = params.get("tab");
@@ -605,7 +606,7 @@ export function InboxClient({
                 ...(options.showAll ? ["showAll"] : []),
                 `tab:${options.defaultTab}`,
                 `mode:${options.mode ?? "inline"}`,
-                `clear:${options.autoClearDays ?? 0}`,
+                `clear:${options.deleteClearedDays ?? 0}`,
               ]}
               sections={[
                 {
@@ -626,15 +627,22 @@ export function InboxClient({
                   label: "Default tab",
                   options: INBOX_TABS.slice(0, 3).map((t) => ({ value: `tab:${t.key}`, label: t.label })),
                 },
-                {
-                  label: "Auto-clear read notifications",
-                  options: [
-                    { value: "clear:0", label: "Never" },
-                    { value: "clear:7", label: "After 7 days" },
-                    { value: "clear:14", label: "After 14 days" },
-                    { value: "clear:30", label: "After 30 days" },
-                  ],
-                },
+                // Offered only while the auto-clear job runs
+                // (src/lib/purge-jobs.ts): a choice nothing acts on is a lie.
+                ...(autoClears
+                  ? [{
+                      // What the job does: it deletes, for good, rows the
+                      // person already Cleared, that many days after (never
+                      // their read rows, which stay in Primary).
+                      label: "Delete cleared notifications",
+                      options: [
+                        { value: "clear:0", label: "Never" },
+                        { value: "clear:7", label: "After 7 days" },
+                        { value: "clear:14", label: "After 14 days" },
+                        { value: "clear:30", label: "After 30 days" },
+                      ],
+                    }]
+                  : []),
               ]}
               footer={
                 <button
@@ -661,7 +669,7 @@ export function InboxClient({
                 }
                 if (value.startsWith("clear:")) {
                   const days = Number(value.slice(6));
-                  void saveOption({ autoClearDays: days > 0 ? days : null });
+                  void saveOption({ deleteClearedDays: days > 0 ? days : null });
                 }
               }}
             />

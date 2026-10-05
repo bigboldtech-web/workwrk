@@ -33,6 +33,7 @@ import { prisma } from "@/lib/prisma";
 import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 import { cronRefusal } from "@/lib/cron-auth";
+import { trashPurgeOn, trashPurgeSince } from "@/lib/purge-jobs";
 import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
@@ -44,10 +45,19 @@ async function handle(req: NextRequest) {
   if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
+  // Deletes for real only once it is turned on (src/lib/purge-jobs.ts),
+  // when Trash also starts showing its countdown; a dry run always reports.
+  if (!dryRun && !trashPurgeOn()) {
+    return Response.json({ ran: false, skipped: "TRASH_PURGE_CRON is not on. A dry run (?dry=1) still reports what would be deleted." });
+  }
   const now = Date.now();
   const purged: Array<{ organizationId: string; days: number; deleted: number }> = [];
   let orgs = 0;
   let cursor: string | undefined;
+  // A row's window starts no earlier than the day the purge was turned on
+  // (src/lib/purge-jobs.ts): until that day plus the window has passed,
+  // nothing in a workspace is old enough.
+  const since = trashPurgeSince();
 
   for (;;) {
     const page = await prisma.organization.findMany({
@@ -64,6 +74,7 @@ async function handle(req: NextRequest) {
       const settings = (org.settings ?? {}) as { retention?: { trashDays?: unknown } };
       const days = retentionDays(settings.retention?.trashDays);
       const cutoff = new Date(now - days * 86_400_000);
+      if (since && since.getTime() >= cutoff.getTime()) continue;
       const where = { organizationId: org.id, deletedAt: { lt: cutoff } };
 
       if (dryRun) {
@@ -72,14 +83,20 @@ async function handle(req: NextRequest) {
         continue;
       }
 
-      const expiringFiles = await prisma.trashItem.findMany({
-        where: { ...where, entityType: { in: [...BLOB_TRASH_TYPES] } },
-        select: { id: true, entityType: true, snapshot: true },
-      });
-      await freeTrashStorageMany(expiringFiles, org.id);
-
-      const res = await prisma.trashItem.deleteMany({ where });
-      if (res.count > 0) purged.push({ organizationId: org.id, days, deleted: res.count });
+      // The rows go FIRST, in one statement that returns them, and only the
+      // files of what it returned are freed: a restore that commits first
+      // leaves nothing for this to return (its files stay), and one that
+      // comes later finds the row gone. Freeing first let a restore during a
+      // long freeing loop bring a Space back with its files deleted. (A crash
+      // between the two leaves a file in storage, never a file lost.)
+      const gone = await prisma.$queryRaw<Array<{ id: string; entityType: string; snapshot: unknown }>>`
+        DELETE FROM "TrashItem"
+        WHERE "organizationId" = ${org.id}
+          AND "deletedAt" < (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})
+        RETURNING "id", "entityType",
+          CASE WHEN "entityType" = ANY(${[...BLOB_TRASH_TYPES]}::text[]) THEN "snapshot" ELSE NULL END AS "snapshot"`;
+      await freeTrashStorageMany(gone.filter((r) => r.snapshot !== null), org.id);
+      if (gone.length > 0) purged.push({ organizationId: org.id, days, deleted: gone.length });
     }
 
     if (page.length < ORG_PAGE) break;

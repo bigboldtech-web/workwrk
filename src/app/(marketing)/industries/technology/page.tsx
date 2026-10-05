@@ -45,7 +45,7 @@ export default function TechnologyIndustryPage() {
         { title: "Role ladders that own things", body: "A role definition carries its result areas, the processes it owns and what it escalates, so a level is a job rather than a title." },
         { title: "Measures with owners", body: "Each KPI has a target, a direction and the person who records the reading. No metric without a name against it." },
         { title: "Processes that stay current", body: "Four kinds of process doc with version history and an acknowledgement list, which is what a runbook needs to be trusted." },
-        { title: "Goals that read the work", body: "Cascade, rollup and a computed on track verdict, with the linked tasks visible on the goal as the effort behind it." },
+        { title: "Goals that read the work", body: "Cascade, rollup and a computed on track verdict, with the linked work counted on the goal as the effort behind it." },
         { title: "A v1 API", body: "People, tasks, processes, result areas, KPIs and readings, with an OpenAPI document. Build the connection your stack needs; none ships." },
         { title: "The conversation on the work", body: "Channels, calls and comments attached to the task, so a decision survives the thread it was made in." },
       ]}

@@ -161,8 +161,13 @@ export const LEGAL_COPY = {
     // embeddings sentence were all removed as unevidenced. A reader and a
     // regulator both read this field as the date the disclosure in force was
     // written, so it moves whenever the document does. 4 October 2026:
-    // section 3 says when content is sent on a schedule (Batch 8).
-    updated: "4 October 2026",
+    // section 3 says when content is sent on a schedule (Batch 8). 5 October
+    // 2026 (Batch 14): demo and contact requests in section 1, what the
+    // export holds in section 5, and deletion, older files and backups in
+    // section 6. 6 October 2026: section 6 says which closures are deleted
+    // after 30 days (from a named date, not this one), and the older-files
+    // date; section 1 names the random id a consent record is filed under.
+    updated: "6 October 2026",
   },
   terms: {
     eyebrow: "Terms",
@@ -179,8 +184,11 @@ export const LEGAL_COPY = {
     // The previous six rows (ww_session, ww_csrf, ww_preferences, ww_attrib,
     // ww_consent, _ga) were invented and were replaced wholesale with the six
     // cookies this codebase actually sets. That is a new disclosure, so it
-    // carries the date it was written rather than the old one's.
-    updated: "22 September 2026",
+    // carries the date it was written rather than the old one's. 5 October
+    // 2026: section 4 no longer claims a recorded answer covers cookies added
+    // later, and the banner asks only about preferences. 6 October 2026:
+    // section 1 names the random id a consent record is filed under.
+    updated: "6 October 2026",
   },
 } as const;
 

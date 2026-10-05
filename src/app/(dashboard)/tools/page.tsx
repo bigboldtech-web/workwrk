@@ -57,6 +57,7 @@ import { ShareDialog } from "@/components/access/share-dialog";
 import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
 import { formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 type Person = { id: string; name: string; avatar?: string | null };
 type ToolRow = {
@@ -197,7 +198,7 @@ export default function ToolsPage() {
     if (op === "delete") {
       const ok = await confirm({
         title: `Delete ${ids.length} ${ids.length === 1 ? "tool" : "tools"}?`,
-        description: `They move to Trash with their saved logins and shares. Restore them from Trash within ${boot.org.trashDays} days to bring all of it back.`,
+        description: `They move to Trash with their saved logins and shares, and restoring them brings all of it back. ${trashRestoreSentence(boot.org, true)}`,
         confirmLabel: "Delete",
         destructive: true,
       });
@@ -237,7 +238,7 @@ export default function ToolsPage() {
   async function rowDelete(t: ToolRow) {
     const ok = await confirm({
       title: `Delete ${t.name}?`,
-      description: `It moves to Trash with its saved login and its shares, and the people it was shared with lose it. Restore it from Trash within ${boot.org.trashDays} days to bring all of it back.`,
+      description: `It moves to Trash with its saved login and its shares, and the people it was shared with lose it. Restoring it brings all of it back. ${trashRestoreSentence(boot.org)}`,
       confirmLabel: "Delete",
       destructive: true,
     });
@@ -551,7 +552,7 @@ function ToolDrawer({ id, shareOpen, onClose, onChanged }: { id: string | null; 
     if (!tool) return;
     const ok = await confirm({
       title: `Delete ${tool.name}?`,
-      description: `It moves to Trash with its saved login and its shares, and the people it was shared with lose it. Restore it from Trash within ${boot.org.trashDays} days to bring all of it back.`,
+      description: `It moves to Trash with its saved login and its shares, and the people it was shared with lose it. Restoring it brings all of it back. ${trashRestoreSentence(boot.org)}`,
       confirmLabel: "Delete",
       destructive: true,
     });

@@ -24,6 +24,19 @@ type DueReminder = {
 
 /** Fire one due reminder exactly once. Returns false when another worker
  *  (ticker vs cron) already claimed it — nothing was sent in that case. */
+const LIVE_STATUS = new Set(["TRIAL", "ACTIVE"]);
+
+/** The workspace a personal reminder's email goes under (see fireReminder). */
+export function personalReminderWorkspace(
+  user: { organizationId: string; organization: { status: string } | null; organizationMemberships: Array<{ organizationId: string; organization: { status: string } | null }> },
+  madeIn: string | null,
+): string {
+  const held = new Map<string, string>([[user.organizationId, String(user.organization?.status ?? "")]]);
+  for (const m of user.organizationMemberships) held.set(m.organizationId, String(m.organization?.status ?? ""));
+  const order = [user.organizationId, ...(madeIn && held.has(madeIn) ? [madeIn] : []), ...user.organizationMemberships.map((m) => m.organizationId)];
+  return order.find((id) => LIVE_STATUS.has(held.get(id) ?? "")) ?? user.organizationId;
+}
+
 export async function fireReminder(r: DueReminder): Promise<boolean> {
   // Claim first: only the worker that flips PENDING → FIRED sends anything.
   const claim = await prisma.reminder.updateMany({
@@ -58,7 +71,15 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
     data: { userId: r.userId, type: "reminder", title, message, link },
   });
   if (r.notifyEmail) {
-    const user = await prisma.user.findUnique({ where: { id: r.userId }, select: { email: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: r.userId },
+      select: {
+        email: true,
+        organizationId: true,
+        organization: { select: { status: true } },
+        organizationMemberships: { select: { organizationId: true, organization: { select: { status: true } } } },
+      },
+    });
     if (user?.email) {
       // The branded template (white card, blue button to the page the
       // bell row opens), never bare HTML. The link is absolute: an email
@@ -74,7 +95,12 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
         subject,
         html,
         template: "reminder",
-        organizationId: r.organizationId ?? undefined,
+        // A task's reminder belongs to the task's workspace. A personal one
+        // belongs to the person: it goes under the first live workspace they
+        // are in (their anchor, the one it was made in if they are still
+        // there, then any other), so a closed workspace swallows it only when
+        // every workspace they have is closed.
+        organizationId: (r.entityType ? r.organizationId : personalReminderWorkspace(user, r.organizationId ?? null)) ?? undefined,
       }).catch((e) => console.error("reminder email failed", e));
     }
   }

@@ -23,12 +23,12 @@ export default function OkrsFeaturePage() {
       hubSlug="goals"
       eyebrow="Goals"
       title="The goal reads its own work."
-      lede="The progress ring is computed from tasks you can open, not from a number somebody typed in on a Friday."
+      lede="Progress rolls up from key results, KPI readings and child goals, and the goal's Effort card counts the work linked to it: hours logged, tasks done and in progress, and who is driving it."
       capabilities={[
         { title: "Three levels", body: "Company, team and personal, with the same shape at each level so a cascade is a link rather than a retyping." },
         { title: "Rollup", body: "A parent goal's progress is computed from its key results and its children. Nobody maintains a second number." },
         { title: "A verdict, not a vote", body: "On track, at risk or off track is derived from progress against time elapsed, the same way for every goal." },
-        { title: "Effort panel", body: "The tasks linked through the KRA show up on the goal as the work that is actually moving it, without anyone attaching them by hand." },
+        { title: "Effort panel", body: "The tasks linked through the KRA are counted on the goal, hours logged, tasks done and in progress, with the people driving them, without anyone attaching them by hand." },
         { title: "Owned by a person", body: "A goal has an owner and a department. What a role owns is the KRA, and the two are linked rather than confused." },
         { title: "Check-ins", body: "Update a key result with a note and the history stays on it, so the story of the quarter is readable after it." },
       ]}
@@ -39,7 +39,7 @@ export default function OkrsFeaturePage() {
       faq={[
         { q: "Who can set a goal for someone else?", a: "A manager assigns goals down their own reporting line. Everyone can see the company goals." },
         { q: "Does progress update itself?", a: "Rollup and the verdict are computed. A key result's own value is updated by its owner, or moves with the KPI reading it is tied to." },
-        { q: "Can I see which tasks moved a goal?", a: "Yes. The effort panel lists the linked work with its owner, which is the audit of the quarter most teams never had." },
+        { q: "Can I see the work behind a goal?", a: "Yes. The Effort card counts the linked tasks and names who is driving them, and Linked work opens each List, Space or KRA the goal is linked to." },
       ]}
     />
   );

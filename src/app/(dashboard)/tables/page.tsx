@@ -56,6 +56,7 @@ import type { ObjectListView, TablesSort } from "@/lib/tables-forms-list";
 import { cn } from "@/lib/utils";
 import { NotFoundView } from "@/components/access/not-found-view";
 import { commonMoveDestinations, type CommonDestinations } from "@/lib/work/bulk-destinations";
+import { trashRestoreSentence } from "@/lib/trash-view";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -302,7 +303,7 @@ export default function TablesPage() {
     const skipped = from.length - ids.length;
     const ok = await confirm({
       title: `Move ${ids.length} table${ids.length === 1 ? "" : "s"} to Trash?`,
-      description: `Their rows go with them. You can restore them for ${boot.org.trashDays} days.${skipped ? ` ${skipped} you did not make stay where they are.` : ""}`,
+      description: `Their rows go with them. ${trashRestoreSentence(boot.org, true)}${skipped ? ` ${skipped} you did not make stay where they are.` : ""}`,
       destructive: true,
       confirmLabel: "Move to Trash",
     });

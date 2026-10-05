@@ -101,7 +101,9 @@ export interface HomePref {
       showAll?: boolean;
       groupByDate?: boolean;
       sortNewest?: boolean;
-      /** Days after which read rows are auto-cleared; null = never. */
+      /** Days after a row was cleared that the cron deletes it; null = never. */
+      deleteClearedDays?: number | null;
+      /** Legacy (the old "Auto-clear read" words): accepted, never acted on. */
       autoClearDays?: number | null;
       defaultTab?: "primary" | "other" | "mentions";
       /** Legacy, accepted and ignored: two modes that rendered one list. */

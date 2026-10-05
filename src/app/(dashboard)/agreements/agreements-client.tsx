@@ -199,7 +199,7 @@ export function AgreementsClient() {
     if (ok) await patchRow(r, { action: "void" }, "Voided");
   };
   const archiveRow = async (r: Row) => {
-    const ok = await confirm({ title: `Move "${r.title}" to Trash?`, description: `You can restore it within ${boot.org.trashDays} days.`, confirmLabel: "Move to Trash", destructive: true });
+    const ok = await confirm({ title: `Move "${r.title}" to Trash?`, description: "You can restore it from Trash.", confirmLabel: "Move to Trash", destructive: true });
     if (ok) await patchRow(r, { archived: true }, "Moved to Trash");
   };
   const deleteRow = async (r: Row) => {

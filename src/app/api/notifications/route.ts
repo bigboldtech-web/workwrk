@@ -420,8 +420,8 @@ function collectIds(body: Record<string, unknown>): string[] {
  *   { id }                          one row
  *   { ids: [] }                     a batch
  *   { allRead: true }               every CLEARED row
- *   { allRead: true, olderThanDays} the auto-clear sweep the daily cron runs,
- *                                   reading `inboxView.autoClearDays`
+ *   { allRead: true, olderThanDays} the clean-up the daily cron runs,
+ *                                   reading `inboxView.deleteClearedDays`
  *
  * "allRead" keeps its name because callers send it, but it sweeps rows the
  * person CLEARED, not rows they merely read. Now that those are two states, a
@@ -448,7 +448,7 @@ export async function DELETE(req: NextRequest) {
     let olderThanDays: number | null = typeof body.olderThanDays === "number" ? body.olderThanDays : null;
     if (olderThanDays === null && organizationId) {
       const prefs = await getEffectivePreferences(userId, organizationId).catch(() => null);
-      const stored = (prefs?.home?.notifications?.inboxView as { autoClearDays?: number } | undefined)?.autoClearDays;
+      const stored = (prefs?.home?.notifications?.inboxView as { deleteClearedDays?: number } | undefined)?.deleteClearedDays;
       olderThanDays = typeof stored === "number" && stored > 0 ? stored : null;
     }
     const r = await withClearedAtFallback(() => {

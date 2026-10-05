@@ -62,13 +62,14 @@ describe("the consent banner is held to the marketing copy rules", () => {
 
   it("would be caught if the old heading came back", () => {
     // Proves the scan is live: the pre-fix heading is a finding.
-    const old = source.replace('"Your cookie choices"', '"We use cookies — your choice"');
+    const old = source.replace('"Cookies on this site"', '"We use cookies — your choice"');
+    expect(old).not.toBe(source);
     expect(findings(old, FILE).some((f) => f.startsWith("no-em-dash"))).toBe(true);
   });
 
   it("paints no filled blue button beside the page's own primary", () => {
-    // Accept all is a secondary at equal prominence with Reject all
-    // (OPT_IN_STRICT), and the page already has its one blue primary.
+    // Got it is a secondary (there is no choice to weigh: the site sets
+    // nothing optional), and the page already has its one blue primary.
     expect(source).not.toMatch(/BTN_PRIMARY/);
     expect(source).not.toMatch(/\bbg-brand\b(?!-)/);
   });

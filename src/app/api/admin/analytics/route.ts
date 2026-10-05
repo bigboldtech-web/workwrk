@@ -100,40 +100,58 @@ const DELETED_COMPANY = "A deleted company";
  * company's deletion cascades away (its actor is the Owner), so these rows
  * vanished from every range a month after the deletion.
  */
+/** A WorkspaceDeletion row a staff cancellation wrote (src/lib/admin/company-patch.ts), not an Owner's delete. */
+const STAFF_DELETION = /^wd_staff_/;
+
 async function ownerDeletionRows(
-  records: { organizationId: string; plan: string | null; requestedAt: Date }[],
+  records: { id: string; organizationId: string; plan: string | null; requestedAt: Date; hardDeletedAt?: Date | null }[],
 ): Promise<Cancellation[]> {
+  // Staff cancellations read as the console's "Workspace cancelled", the same
+  // id and kind as their StaffAction row, so the two are one line; and after
+  // the purge (which unlinks the StaffAction) it still says so. One row per
+  // company AND kind (records come newest first), so an Owner's deletion and
+  // a staff cancellation in one range both stay; only the company's newest
+  // row of either kind can be the deletion still pending.
+  const kindOf = (r: (typeof records)[number]) => (STAFF_DELETION.test(r.id) ? ("workspace" as const) : ("deleted" as const));
   const newest = new Map<string, (typeof records)[number]>();
+  const newestOfCompany = new Map<string, (typeof records)[number]>();
   for (const r of records) {
-    if (!newest.has(r.organizationId)) newest.set(r.organizationId, r);
+    const key = `${r.organizationId}:${kindOf(r)}`;
+    if (!newest.has(key)) newest.set(key, r);
+    if (!newestOfCompany.has(r.organizationId)) newestOfCompany.set(r.organizationId, r);
   }
   if (newest.size === 0) return [];
   const orgs = await prisma.organization.findMany({
-    where: { id: { in: [...newest.keys()] } },
+    where: { id: { in: [...newestOfCompany.keys()] } },
     select: { id: true, name: true, plan: true, status: true, settings: true },
   });
   const byId = new Map(orgs.map((o) => [o.id, o]));
-  return [...newest].map(([id, r]) => {
+  return [...newest.values()].map((r) => {
+    const id = r.organizationId;
     const org = byId.get(id);
+    const what = kindOf(r);
     if (!org) {
       return {
         id,
         name: DELETED_COMPANY,
         plan: r.plan,
         canceledAt: r.requestedAt.toISOString(),
-        what: "deleted" as const,
-        restored: false,
+        what,
+        // The record of the deletion that ran carries hardDeletedAt; an
+        // earlier one of the same company was restored before it.
+        restored: !r.hardDeletedAt,
         gone: true,
       };
     }
     const scheduled = !!(org.settings as { cancelledAt?: unknown } | null)?.cancelledAt;
+    const pending = org.status === "CANCELLED" && scheduled && newestOfCompany.get(id) === r;
     return {
       id,
       name: org.name,
       plan: org.plan as string,
       canceledAt: r.requestedAt.toISOString(),
-      what: "deleted" as const,
-      restored: !(org.status === "CANCELLED" && scheduled),
+      what,
+      restored: !pending,
     };
   });
 }
@@ -217,16 +235,19 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
       where: { requestedAt: { gte: w.start, lte: now } },
       orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
       take: OWNER_DELETION_LOG_CAP,
-      select: { organizationId: true, plan: true, requestedAt: true },
+      select: { id: true, organizationId: true, plan: true, requestedAt: true, hardDeletedAt: true },
     }),
     // The live schedule as well, so a deletion whose audit row failed to
     // write (logActivity never throws) is still counted. Still CANCELLED
-    // only: a restore clears the schedule.
+    // only: a restore clears the schedule. An Owner's deletion only (it names
+    // who): a staff cancellation leaves cancelledById empty and is read from
+    // its StaffAction and WorkspaceDeletion rows.
     prisma.$queryRaw<{ id: string; name: string; plan: string; cancelledAt: string }[]>`
       SELECT "id", "name", "plan"::text AS "plan", "settings"->>'cancelledAt' AS "cancelledAt"
       FROM "Organization"
       WHERE "status" = 'CANCELLED'
         AND "settings"->>'cancelledAt' IS NOT NULL
+        AND "settings"->>'cancelledById' IS NOT NULL
         AND "settings"->>'cancelledAt' >= ${w.start.toISOString()}
         AND "settings"->>'cancelledAt' <= ${now.toISOString()}
       ORDER BY "settings"->>'cancelledAt' DESC
@@ -381,8 +402,10 @@ async function computeAnalytics(range: AnalyticsRange, now: Date) {
         what: "subscription" as const,
         restored: r.status !== "CANCELED",
       })),
+      // A staff cancellation with its own deletion record (wd_staff_) is
+      // read from that record, which knows whether it was restored or purged.
       staffCancellations.flatMap((r) =>
-        r.targetCompany
+        r.targetCompany && !ownerDeleted.some((c) => c.what === "workspace" && c.id === r.targetCompany!.id)
           ? [
               {
                 id: r.targetCompany.id,

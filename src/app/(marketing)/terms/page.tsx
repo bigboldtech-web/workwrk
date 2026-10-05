@@ -188,12 +188,15 @@ export default function TermsPage() {
           body: (
             <>
               <p>
-                You can cancel at any time from Settings, Billing. We can suspend or terminate accounts that violate
-                these terms, with notice where possible.
+                Cancelling a paid plan from Settings, Plan &amp; billing (section 5) moves the workspace to the free
+                Starter plan and deletes nothing. To end the service, an Owner or Admin deletes the workspace in
+                Settings, Identity &amp; culture, Danger zone, or asks us to close it. We can suspend or terminate
+                accounts that violate these terms, with notice where possible.
               </p>
               <p>
-                On termination: live data is preserved for 30 days so you can reactivate, and backups are purged 90 days
-                after deletion.
+                On termination: live data is kept for 30 days so you can reactivate, then permanently deleted, except
+                some files uploaded before 6 October 2026, which we delete by hand when you ask (privacy policy,
+                section 6). Backups keep a copy for at most 90 days.
               </p>
             </>
           ),

@@ -63,6 +63,7 @@ import {
   type MuteChoice,
   type TaskInboxKey,
 } from "@/lib/account/notification-presets";
+import { useBoot } from "@/components/layout/os/boot-context";
 
 const TABS: readonly SettingsTab[] = settingsTabs("account/notifications");
 
@@ -219,6 +220,7 @@ function QuietCard() {
 function InboxTab() {
   const { prefs } = useOsShell();
   const { write, row } = useRowWrites();
+  const autoClears = !!useBoot().boot.org.inboxAutoClears;
   const inbox = prefs.home.notifications?.inbox ?? {};
   const view = prefs.home.notifications?.inboxView ?? {};
   const preset = presetOf(inbox);
@@ -284,24 +286,28 @@ function InboxTab() {
         <div>
           <SettingsRow label="Group by date" {...row("view.group")} control={<Switch checked={view.groupByDate !== false} onChange={(v) => setView("group", { groupByDate: v })} aria-label="Group by date" />} />
           <SettingsRow label="Show everything in Other" helper="Other also lists what is in Primary" {...row("view.all")} control={<Switch checked={view.showAll === true} onChange={(v) => setView("all", { showAll: v })} aria-label="Show everything in Other" />} />
-          <SettingsRow
-            label="Clear read items after"
-            {...row("view.clear")}
-            control={
-              <PickerSelect
-                label="Clear read items after"
-                value={String(view.autoClearDays ?? "never")}
-                options={[
-                  { value: "never", label: "Never" },
-                  { value: "7", label: "7 days" },
-                  { value: "14", label: "14 days" },
-                  { value: "30", label: "30 days" },
-                  ...(view.autoClearDays && ![7, 14, 30].includes(view.autoClearDays) ? [{ value: String(view.autoClearDays), label: `${view.autoClearDays} days` }] : []),
-                ]}
-                onChange={(v) => setView("clear", { autoClearDays: v === "never" ? null : Number(v) })}
-              />
-            }
-          />
+          {/* Offered only while the auto-clear job runs (src/lib/purge-jobs.ts). */}
+          {autoClears ? (
+            <SettingsRow
+              label="Delete cleared items after"
+              helper="Notifications you have cleared are deleted for good this many days after you cleared them. Read items stay until you clear them."
+              {...row("view.clear")}
+              control={
+                <PickerSelect
+                  label="Delete cleared items after"
+                  value={String(view.deleteClearedDays ?? "never")}
+                  options={[
+                    { value: "never", label: "Never" },
+                    { value: "7", label: "7 days" },
+                    { value: "14", label: "14 days" },
+                    { value: "30", label: "30 days" },
+                    ...(view.deleteClearedDays && ![7, 14, 30].includes(view.deleteClearedDays) ? [{ value: String(view.deleteClearedDays), label: `${view.deleteClearedDays} days` }] : []),
+                  ]}
+                  onChange={(v) => setView("clear", { deleteClearedDays: v === "never" ? null : Number(v) })}
+                />
+              }
+            />
+          ) : null}
           <SettingsRow
             label="Open on"
             {...row("view.tab")}

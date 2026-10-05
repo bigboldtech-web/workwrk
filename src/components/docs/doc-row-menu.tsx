@@ -341,7 +341,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     onClose();
     const ok = await confirm({
       title: `Move "${title}" to Trash?`,
-      description: `You can restore it for ${trashDays} days.`,
+      description: "You can restore it from Trash.",
       destructive: true,
       confirmLabel: "Move to Trash",
     });

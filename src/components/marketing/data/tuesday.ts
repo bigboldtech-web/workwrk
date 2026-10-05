@@ -288,7 +288,10 @@ export interface TuesdayFixture {
     progressAfter: number;
     verdict: string;
     verdictSource: string;
+    /** The open tasks linked to the goal, with their owners. */
     effort: Array<{ taskId: string; title: string; owner: string }>;
+    /** The rest of the Effort card's counts (the product's GoalEffort: hours logged, tasks done, last moved). */
+    effortCounts: { hoursLogged: number; tasksDone: number; lastMoved: string };
   };
   thread: {
     channel: string;
