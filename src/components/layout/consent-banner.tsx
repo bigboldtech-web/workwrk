@@ -117,8 +117,8 @@ export function ConsentBanner() {
                     Essential cookies run the site. Optional ones only with your permission.
                   </span>
                   <span className="hidden sm:inline">
-                    We use essential cookies to run the site. With your permission we also use
-                    optional cookies for preferences, analytics, and marketing.
+                    We use essential cookies to run the site. With your permission we also
+                    remember your preferences. Nothing else: no analytics, no advertising.
                   </span>{" "}
                   <Link href="/cookies" className={LINK}>
                     Cookie policy
@@ -181,18 +181,8 @@ export function ConsentBanner() {
                 checked={prefs.preferences}
                 onChange={(v) => setPrefs({ ...prefs, preferences: v })}
               />
-              <Row
-                title="Analytics"
-                description="Help us understand how the product is used so we can improve it. No personally identifiable data is sent to third parties without your consent."
-                checked={prefs.analytics}
-                onChange={(v) => setPrefs({ ...prefs, analytics: v })}
-              />
-              <Row
-                title="Marketing"
-                description="Used to measure ad performance and show relevant product updates. Off by default."
-                checked={prefs.marketing}
-                onChange={(v) => setPrefs({ ...prefs, marketing: v })}
-              />
+              {/* No Analytics or Marketing rows: the site sets neither kind of
+                  cookie (/cookies section 4), so there is nothing to agree to. */}
             </div>
             {/* Below sm the three buttons do not fit one row, so Reject all
                 and Accept all split the first row evenly (equal prominence)

@@ -181,9 +181,8 @@ export default function CookiesPage() {
                 no retargeting pixel and no social network tracker on this site or in the product.
               </p>
               <p>
-                The banner still asks, because the record of your answer is what lets us add one later without asking
-                you again to catch up. If we ever do add one, it gets a row in the table above in the same release, and
-                the banner will be asking about something real.
+                The banner asks only about preferences. If we ever add another kind of cookie, it gets a row in the
+                table above in the same release, and the banner asks you about it then.
               </p>
             </>
           ),

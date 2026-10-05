@@ -45,6 +45,7 @@ import { ownerSplitOn, scopeForOwnerPage, sessionMayManageOwnerPage } from "@/li
 import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { inboxAutoClearOn, trashPurgeOn } from "@/lib/purge-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -201,6 +202,13 @@ export interface BootPayload {
     aiFields?: boolean;
     /** The workspace turned on scheduled AI updates in Talk; sent only while on. */
     aiTalkUpdates?: boolean;
+    /**
+     * The clean-up jobs that are installed (src/lib/purge-jobs.ts): Trash
+     * shows a countdown, and the Inbox offers auto-clear, only while its job
+     * runs. Sent only while on; absent reads as off.
+     */
+    trashPurges?: boolean;
+    inboxAutoClears?: boolean;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -499,6 +507,8 @@ export async function GET(req: NextRequest) {
         ...(accessV2Tables() ? { objectShare: true } : {}),
         ...(aiFieldsOn(settings) ? { aiFields: true } : {}),
         ...(aiTalkUpdatesOn(settings) ? { aiTalkUpdates: true } : {}),
+        ...(trashPurgeOn() ? { trashPurges: true } : {}),
+        ...(inboxAutoClearOn() ? { inboxAutoClears: true } : {}),
       },
       counts: cf.counts,
       timer,

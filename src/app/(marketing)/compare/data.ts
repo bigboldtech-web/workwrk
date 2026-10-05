@@ -104,7 +104,7 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     slug: null,
     name: "Lattice",
     boughtFor: "Performance reviews, one to ones and engagement surveys.",
-    ours: "Reviews here sit on the same data as the work: the KPI records and the KRA result are already on the timeline, because the tasks that moved them are in the same system.",
+    ours: "Reviews here sit on the same data as the work: the KPI records and the KRA result are already on the timeline, and the tasks linked to them are in the same system.",
     theirs: "If you want performance reviews alone, on top of a stack you are keeping, a dedicated review tool is a smaller thing to buy and to learn.",
     disconnected: ["task", "sop", "doc", "table-row"],
     disconnectedLede:

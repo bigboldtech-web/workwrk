@@ -102,7 +102,7 @@ export function faqEntries(): FaqEntry[] {
       q: "Do managers need training?",
       a: [
         "The product is one rail, one sidebar and one top bar, and every page is the same three rows: a title, its saved views, one toolbar.",
-        "The surfaces on this page are the real ones, drawn from the same components, so what you have read here is what you open.",
+        "The screens shown across this site are drawn to match the shipped interface, so what you see here is what you open.",
       ],
     },
     {
@@ -131,7 +131,7 @@ export function faqEntries(): FaqEntry[] {
     {
       q: "What happens to our data if we leave?",
       a: [
-        "You export it, any time, on every tier including the free one. Deleted items sit in a trash window before they go.",
+        "You export it, any time, on every tier including the free one. Deleted items go to Trash first, where an Owner or Admin can bring them back.",
         `There is no contract to get out of on ${starter.name}: it is free for up to ${starterSeatCap} people, with no card on file.`,
       ],
     },

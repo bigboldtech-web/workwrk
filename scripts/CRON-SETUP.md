@@ -246,7 +246,11 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 ```
 
 Read the JSON (`peopleWithPreference`, `peopleSwept`, `deleted`, `detail`) and
-only then add the schedule.
+only then add the schedule, AND set `INBOX_AUTO_CLEAR_CRON=on` in the app's `.env`
+(then `pm2 reload workwrk --update-env`). Until that switch is on, a real run
+answers `{ "ran": false, "skipped": ... }` and clears nothing, and the Inbox
+options and My settings, Notifications offer no auto-clear at all
+(`src/lib/purge-jobs.ts`), so nobody is shown a choice nothing acts on.
 
 ## Trash retention purge (NOT INSTALLED: the founder adds this row)
 
@@ -259,9 +263,10 @@ user data, so it is listed separately and is not in the table above.
 opening it at once destroyed them twice, and a workspace nobody visited kept
 deleted rows forever because the clock only ticked when somebody looked. A read
 must not delete, so the read stopped deleting and this row is what carries the
-retention promise instead. **Until this row is installed nothing is ever purged
-and the 60-day promise on the page is not kept** — that is the one thing to
-know before deciding whether to add it.
+retention promise instead. **Until this row is installed and its switch is on,
+nothing is ever purged**, and since Batch 14 the product says so: Trash shows
+no "Time left" column, filter or sort, and Settings, Data says deleted items
+stay until an Owner or Admin deletes them for good.
 
 **It is fail-closed.** With `CRON_SECRET` empty or unset the route answers 503
 and purges nothing.
@@ -291,7 +296,10 @@ curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
 ```
 
 Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
-the schedule.
+the schedule, AND set `TRASH_PURGE_CRON=on` in the app's `.env` (then
+`pm2 reload workwrk --update-env`). Until that switch is on, a real run answers
+`{ "ran": false, "skipped": ... }` and deletes nothing, and Trash shows no
+countdown (`src/lib/purge-jobs.ts`).
 
 
 ### Audit log retention (Phase 8, NOT INSTALLED)

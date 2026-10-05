@@ -71,12 +71,14 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
 
       // No valid record — banner behaviour depends on regime.
       if (g.regime === "NOTICE_ONLY") {
-        // Informational banner; can auto-enable preferences + analytics since
-        // local law allows, but still show dismissible notice.
+        // Informational banner; preferences are on since local law allows,
+        // but still show a dismissible notice. Never analytics or marketing:
+        // the site sets neither (/cookies section 4), so nothing records a
+        // consent to them.
         setConsent({
           necessary: true,
           preferences: true,
-          analytics: true,
+          analytics: false,
           marketing: false,
           doNotSell: false,
         });
@@ -109,12 +111,15 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  // "Accept all" accepts what the site asks about: preferences. Analytics and
+  // marketing stay off because the site sets no such cookie, and a recorded
+  // yes to them would be consent to processing nobody has described.
   const acceptAll = useCallback(
     () =>
       accept({
         preferences: true,
-        analytics: true,
-        marketing: true,
+        analytics: false,
+        marketing: false,
         doNotSell: false,
       }),
     [accept],

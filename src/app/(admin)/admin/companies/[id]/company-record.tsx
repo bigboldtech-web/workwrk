@@ -72,7 +72,7 @@ export interface CompanyRecordData {
   people: number;
   owners: { id: string; name: string; email: string }[];
   /** The Owner's own scheduled deletion, when one is set (Settings > Danger zone). */
-  deletion: { scheduledFor: string; requestedAt: string | null } | null;
+  deletion: { scheduledFor: string; requestedAt: string | null; byOwner: boolean } | null;
   counts: Record<"people" | "spaces" | "lists" | "tasks" | "docs" | "sops" | "kras" | "kpis" | "reviews", number> & {
     tables: number | null;
     talkChannels: number | null;
@@ -305,12 +305,15 @@ export function CompanyRecord({
                     setPendingStatus(next);
                     return;
                   }
-                  // Leaving Cancelled clears the Owner's own scheduled
-                  // deletion (company-patch.ts), so say so before it happens.
+                  // Leaving Cancelled clears the scheduled deletion
+                  // (company-patch.ts), so say so before it happens.
                   if (company.deletion) {
+                    const on = formatDate(company.deletion.scheduledFor, datePrefs, "date");
                     setConfirm({
                       title: `Set ${company.name} to ${statusLabel(next)}?`,
-                      body: `Its Owner scheduled this workspace for deletion on ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}. Setting it to ${statusLabel(next)} cancels that deletion and lets everyone sign in again. Tell the Owner if they still want it deleted.`,
+                      body: company.deletion.byOwner
+                        ? `Its Owner scheduled this workspace for deletion on ${on}. Setting it to ${statusLabel(next)} cancels that deletion and lets everyone sign in again. Tell the Owner if they still want it deleted.`
+                        : `This workspace is to be deleted on ${on}, because it was set to Cancelled here. Setting it to ${statusLabel(next)} cancels that deletion and lets everyone sign in again.`,
                       confirmLabel: `Set to ${statusLabel(next)}`,
                       run: async () => { await patch("status", { status: next }); },
                     });
@@ -418,17 +421,21 @@ function statusConfirm(
   datePrefs: ReturnType<typeof useConsole>["datePrefs"],
 ): TypedConfirmRequest | null {
   if (!next) return null;
-  // A staff change of status clears the Owner's own deletion schedule
-  // (company-patch.ts); the confirm says so when there is one.
+  // A staff change of status clears a deletion schedule (company-patch.ts);
+  // the confirm says so when there is one.
   const undoes = company.deletion
-    ? ` This also cancels the deletion its Owner scheduled for ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}.`
+    ? company.deletion.byOwner
+      ? ` This also cancels the deletion its Owner scheduled for ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}.`
+      : ` This also cancels the deletion scheduled for ${formatDate(company.deletion.scheduledFor, datePrefs, "date")}.`
     : "";
+  // Setting Cancelled schedules the deletion 30 days out (company-patch.ts).
+  const deleteOn = formatDate(new Date(Date.now() + 30 * 86_400_000).toISOString(), datePrefs, "date");
   return {
     title: next === "SUSPENDED" ? `Suspend ${company.name}?` : `Set ${company.name} to Cancelled?`,
     body:
       next === "SUSPENDED"
         ? `Nobody there can sign in, and everyone signed in now is signed out within five minutes. Nothing is deleted, and you can set this back to Active at any time.${undoes}`
-        : `Nobody there can sign in, and everyone signed in now is signed out within five minutes. Members are told the workspace is closed and to contact WorkwrK support. Nothing is deleted and no deletion is scheduled: this console never deletes a company. Set it back to Active to restore it at any time.${undoes}`,
+        : `Nobody there can sign in, and everyone signed in now is signed out within five minutes. Members are told the workspace is closed and when it is deleted. Its data is deleted for good on ${deleteOn}, 30 days from now, as the privacy policy promises; set it back to Active before then to keep it.${undoes}`,
     note: "Anyone who also belongs to another WorkwrK workspace keeps working in that one.",
     match: company.name,
     matchLabel: "the company name",
@@ -605,7 +612,7 @@ function PlanCard({
         hint={
           company.deletion ? (
             <span className="text-danger-text">
-              Its Owner scheduled this workspace for deletion on {formatDate(company.deletion.scheduledFor, datePrefs, "date")}. Any status change here cancels that deletion.
+              {company.deletion.byOwner ? "Its Owner scheduled this workspace for deletion" : "Set to Cancelled here, so it is deleted"} on {formatDate(company.deletion.scheduledFor, datePrefs, "date")}. Any status change here cancels that deletion.
             </span>
           ) : undefined
         }

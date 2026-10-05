@@ -23,7 +23,7 @@ export default function OkrsFeaturePage() {
       hubSlug="goals"
       eyebrow="Goals"
       title="The goal reads its own work."
-      lede="The progress ring is computed from tasks you can open, not from a number somebody typed in on a Friday."
+      lede="Progress rolls up from key results, KPI readings and child goals, and the tasks behind a goal sit on its Effort card, one click away."
       capabilities={[
         { title: "Three levels", body: "Company, team and personal, with the same shape at each level so a cascade is a link rather than a retyping." },
         { title: "Rollup", body: "A parent goal's progress is computed from its key results and its children. Nobody maintains a second number." },

@@ -49,6 +49,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
 import { PeopleImport, usePeopleImport } from "@/components/people/people-import";
@@ -397,8 +398,8 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           and audit-purge, NOT INSTALLED), so nothing is deleted on either
           window. Both rows wait behind Show upcoming features and say so,
           until the founder installs the rows (settings spec, Data >
-          Retention: "Not enforced yet"). Deleted items still wait in Trash
-          for the window the Trash tab names. */}
+          Retention: "Not enforced yet"). Until TRASH_PURGE_CRON is on, the
+          Trash tab says deleted items stay until an admin deletes them. */}
       {showUpcoming ? (
         <SettingsCard wide="data.retention" title="Retention" id="data.retention">
           <SettingsRow
@@ -499,6 +500,9 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
 /* ───────────────────────── Trash ───────────────────────── */
 
 function TrashTab() {
+  // Trash empties itself only once its purge job runs (src/lib/purge-jobs.ts):
+  // until then it promises no window it does not keep.
+  const purges = !!useBoot().boot.org.trashPurges;
   const [info, setInfo] = useState<{ total: number; capped: boolean; retentionDays: number } | null | "error">(null);
   useEffect(() => {
     const t = setTimeout(() => {
@@ -511,7 +515,11 @@ function TrashTab() {
     <section className="flex max-w-[760px] items-start gap-4 rounded-lg border border-line bg-raised p-6">
       <DotsArt arrangement="stack" size={96} />
       <div className="flex flex-col gap-2">
-        <p className="text-base text-ink">Deleted Spaces, Lists, Docs and tasks wait in Trash{i ? ` for ${i.retentionDays} days` : ""}.</p>
+        <p className="text-base text-ink">
+          {purges
+            ? `Deleted Spaces, Lists, Docs and tasks wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good.`
+            : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good."}
+        </p>
         <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>
         {i ? <p className="text-sm text-ink-2">{i.total}{i.capped ? "+" : ""} {i.total === 1 ? "item" : "items"} in Trash</p> : null}
       </div>

@@ -44,6 +44,7 @@ import { hasClearedAt, isMissingClearedAtError, setClearedAtAvailable } from "@/
 // only way to say "the JSON column is SQL NULL" in a filter.
 import { Prisma } from "@/generated/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
+import { inboxAutoClearOn } from "@/lib/purge-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,11 @@ export async function POST(req: NextRequest) {
   if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
+  // Clears for real only once it is turned on (src/lib/purge-jobs.ts), when
+  // the Inbox also starts offering auto-clear; a dry run always reports.
+  if (!dryRun && !inboxAutoClearOn()) {
+    return Response.json({ ran: false, skipped: "INBOX_AUTO_CLEAR_CRON is not on. A dry run (?dry=1) still reports what would be cleared." });
+  }
   const now = Date.now();
   const swept: Array<{ userId: string; days: number; deleted: number }> = [];
   let seen = 0;

@@ -185,12 +185,12 @@ export default function TermsPage() {
           body: (
             <>
               <p>
-                You can cancel at any time from Settings, Billing. We can suspend or terminate accounts that violate
-                these terms, with notice where possible.
+                You can cancel at any time from Settings, Plan &amp; billing, as section 5 describes. We can suspend or
+                terminate accounts that violate these terms, with notice where possible.
               </p>
               <p>
-                On termination: live data is preserved for 30 days so you can reactivate, and backups are purged 90 days
-                after deletion.
+                On termination: live data is kept for 30 days so you can reactivate, then permanently deleted, and
+                backups keep a copy for at most 90 days.
               </p>
             </>
           ),

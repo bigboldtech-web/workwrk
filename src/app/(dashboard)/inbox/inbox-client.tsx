@@ -149,7 +149,8 @@ export function InboxClient({
   const pathname = usePathname();
   const params = useSearchParams();
   const { patchPrefs, layerCount } = useOsShell();
-  const { refreshCounts } = useBoot();
+  const { refreshCounts, boot } = useBoot();
+  const autoClears = !!boot.org.inboxAutoClears;
   const { toast } = useOsToast();
 
   const tabParam = params.get("tab");
@@ -626,15 +627,19 @@ export function InboxClient({
                   label: "Default tab",
                   options: INBOX_TABS.slice(0, 3).map((t) => ({ value: `tab:${t.key}`, label: t.label })),
                 },
-                {
-                  label: "Auto-clear read notifications",
-                  options: [
-                    { value: "clear:0", label: "Never" },
-                    { value: "clear:7", label: "After 7 days" },
-                    { value: "clear:14", label: "After 14 days" },
-                    { value: "clear:30", label: "After 30 days" },
-                  ],
-                },
+                // Offered only while the auto-clear job runs
+                // (src/lib/purge-jobs.ts): a choice nothing acts on is a lie.
+                ...(autoClears
+                  ? [{
+                      label: "Auto-clear read notifications",
+                      options: [
+                        { value: "clear:0", label: "Never" },
+                        { value: "clear:7", label: "After 7 days" },
+                        { value: "clear:14", label: "After 14 days" },
+                        { value: "clear:30", label: "After 30 days" },
+                      ],
+                    }]
+                  : []),
               ]}
               footer={
                 <button

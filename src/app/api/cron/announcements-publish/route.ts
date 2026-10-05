@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
     where: {
       publishedAt: { lte: now, not: null },
       notificationsSentAt: null,
+      // Live workspaces only: a suspended or cancelled one's people cannot
+      // sign in, so its announcements wait, unsent, until it is restored.
+      organization: { status: { in: ["TRIAL", "ACTIVE"] } },
     },
     select: {
       id: true,

@@ -23,6 +23,11 @@ function getTransporter() {
 }
 
 const FROM_ADDRESS = process.env.SMTP_FROM || "WorkwrK <noreply@workwrk.com>";
+// Where a reply to any email goes. The From address is a no-reply one, while
+// the welcome email says "Reply to this email": without a Reply-To a new
+// customer's first question went to a mailbox nobody reads. The default is
+// the site's general mailbox (src/components/marketing/config.ts mailboxes).
+const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "hello@workwrk.com";
 
 // ==========================================
 // Preference Types
@@ -137,6 +142,31 @@ export function emailLogData(p: {
   };
 }
 
+// No email goes to a workspace that is suspended or cancelled: its people
+// cannot sign in, and a cancelled one is being deleted. Every mailer (the
+// reminder digests, KPI and OKR reminders, announcements, reviews, reports)
+// queues through here, and none of them used to check, so a closed company's
+// people kept getting the monthly emails. A workspace that no longer exists
+// gets none either. Read once a minute per workspace, not once per email; a
+// failed read lets the email through, so a database blip never drops mail.
+const ORG_STATUS_TTL_MS = 60_000;
+const orgTakesMail = new Map<string, { ok: boolean; at: number }>();
+
+async function workspaceTakesEmail(organizationId: string): Promise<boolean> {
+  const hit = orgTakesMail.get(organizationId);
+  if (hit && Date.now() - hit.at < ORG_STATUS_TTL_MS) return hit.ok;
+  let ok = true;
+  try {
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
+    ok = !!org && org.status !== "SUSPENDED" && org.status !== "CANCELLED";
+  } catch {
+    return true;
+  }
+  if (orgTakesMail.size > 5000) orgTakesMail.clear();
+  orgTakesMail.set(organizationId, { ok, at: Date.now() });
+  return ok;
+}
+
 export async function queueEmail({
   to,
   subject,
@@ -147,6 +177,10 @@ export async function queueEmail({
   userId,
   category,
 }: QueueEmailParams): Promise<void> {
+  if (organizationId && !(await workspaceTakesEmail(organizationId))) {
+    if (IS_DEV) console.log(`[Email] Skipped (workspace suspended, cancelled or gone): ${template} → ${to}`);
+    return;
+  }
   // Check preferences if userId and category provided
   if (userId && category) {
     const allowed = await shouldSendEmail(userId, category);
@@ -312,6 +346,7 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
 
       await transporter.sendMail({
         from: FROM_ADDRESS,
+        replyTo: REPLY_TO,
         to: email.to,
         subject: email.subject,
         html: email.html || renderFromLog(email),

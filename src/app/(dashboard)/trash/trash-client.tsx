@@ -106,11 +106,14 @@ export function TrashClient({
   initialType,
   initialQuery,
   canPurge,
+  expires,
 }: {
   initialTab: TrashTab;
   initialType: TrashTypeKey | null;
   initialQuery: string;
   canPurge: boolean;
+  /** Trash empties itself after its window (src/lib/purge-jobs.ts); until then no countdown is shown. */
+  expires: boolean;
 }) {
   const datePrefs = useDatePrefs();
   const { toast } = useOsToast();
@@ -395,8 +398,9 @@ export function TrashClient({
               selected={sort}
               sections={[{
                 options: TRASH_SORTS
-                  // Time left means nothing where nothing expires.
-                  .filter((s) => !(tab === "archived" && s.value === "expiry"))
+                  // Time left means nothing where nothing expires: the Archived
+                  // tab, and all of Trash until its purge job runs.
+                  .filter((s) => !((tab === "archived" || !expires) && s.value === "expiry"))
                   .map((s) => ({ value: s.value, label: tab === "archived" && s.value === "recent" ? "Archived (newest)" : s.label })),
               }]}
               onSelect={(v) => { setSortOpen(false); setSort(v as TrashSort); setCursor(0); }}
@@ -471,9 +475,10 @@ export function TrashClient({
                 ))}
               </FilterGroup>
             ) : null}
-            {/* Nothing on the Archived tab expires, so the group is absent
-                there rather than offered as a filter that matches nothing. */}
-            {tab === "deleted" && matchesField("Under 7 days left", filterSearch) ? (
+            {/* Nothing on the Archived tab expires, and nothing in Trash does
+                until its purge job runs, so the group is absent there rather
+                than offered as a filter for a deletion that never comes. */}
+            {tab === "deleted" && expires && matchesField("Under 7 days left", filterSearch) ? (
               <FilterGroup label="Time left">
                 <FilterRow
                   label="Under 7 days left"
@@ -575,7 +580,7 @@ export function TrashClient({
                   <span className="w-44 shrink-0">Location</span>
                   <span className="w-40 shrink-0">{tab === "archived" ? "Archived by" : "Deleted by"}</span>
                   <span className="w-24 shrink-0">{tab === "archived" ? "Archived" : "Deleted"}</span>
-                  {tab === "deleted" ? <span className="w-24 shrink-0">Time left</span> : null}
+                  {tab === "deleted" && expires ? <span className="w-24 shrink-0">Time left</span> : null}
                   <span className="w-28 shrink-0" />
                 </div>
 
@@ -618,7 +623,7 @@ export function TrashClient({
                         ) : null}
                       </span>
                       <span className="w-24 shrink-0 text-xs text-ink-2">{relativeDate(r.deletedAt, datePrefs)}</span>
-                      {tab === "deleted" ? (
+                      {tab === "deleted" && expires ? (
                         <span className={`inline-flex w-24 shrink-0 items-center gap-1 text-xs ${soon ? "text-danger-text" : "text-ink-2"}`}>
                           {soon ? <CircleAlert className="h-3 w-3 shrink-0" aria-hidden /> : null}
                           {r.daysLeft} day{r.daysLeft === 1 ? "" : "s"}

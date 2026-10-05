@@ -46,6 +46,7 @@ import {
   type TrashTab,
   type TrashTypeKey,
 } from "./trash-view";
+import { trashPurgeOn } from "@/lib/purge-jobs";
 
 export interface TrashRow {
   id: string;
@@ -457,7 +458,9 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
             { id: r.deletedById ?? "", name: r.deletedByName, firstName: r.deletedByName, lastName: null, avatar: null }
           : null,
       deletedAt: r.deletedAt.toISOString(),
-      daysLeft: query.tab === "archived" ? null : daysLeft(r.deletedAt, days),
+      // No countdown while nothing empties Trash (src/lib/purge-jobs.ts):
+      // "N days left" promised a deletion that never came.
+      daysLeft: query.tab === "archived" || !trashPurgeOn() ? null : daysLeft(r.deletedAt, days),
       restorable: !parentGone && !blocked,
       // A task is the one row that can be re-homed: its snapshot carries a
       // boardId, and any List the viewer may write to will hold it. An

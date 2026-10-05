@@ -59,6 +59,7 @@ After a change: `pm2 reload workwrk --update-env`.
 | `EMAIL_ENABLED` | `true` | Without it no email leaves the server: in production the queue is held (nothing is marked sent) and the email-queue job answers 503. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | your mail provider's | How email is sent. Port `465` connects over TLS; on any other port the connection upgrades to TLS when the server offers it. |
 | `SMTP_FROM` | e.g. `WorkwrK <noreply@workwrk.com>` | The From address (that is the default). Publish SPF, DKIM and DMARC for its domain before launch, or mail lands in spam. |
+| `EMAIL_REPLY_TO` | `hello@workwrk.com` (the default) | Where a reply to any email goes: the welcome email asks people to reply, so it must be a mailbox someone reads. |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` | your object store's | Files, attachments and Scribe screenshots (DEPLOYMENT.md). Without them uploads fall back to the server's own disk. |
 
 ### Recommended
@@ -93,6 +94,8 @@ at `billing@workwrk.com`, so make that a mailbox someone reads.
 | `ACCESS_V2_TABLES` | The new sharing tables (your decision; see the access plan). |
 | `SETTINGS_OWNER_SPLIT` | Billing, Security and API settings for Owners, and for the Admins given that scope. Off, every Admin opens them. |
 | `TALK_UPDATES_CRON` | Talk updates digests (`on`), with its crontab row (CRON-SETUP). |
+| `TRASH_PURGE_CRON` | Trash empties itself after each workspace's window (`on`), with its crontab row, after a dry run (CRON-SETUP). Off, Trash shows no countdown and keeps everything. |
+| `INBOX_AUTO_CLEAR_CRON` | Cleared Inbox items go after the days each person chose (`on`), with its crontab row, after a dry run (CRON-SETUP). Off, nobody is offered auto-clear. |
 | `REPORT_SCHEDULE_CRON` | Scheduled email reports (`on`), with its crontab row (CRON-SETUP). |
 | `CUSTOM_DOMAINS_ENABLED` | A workspace's own domain pointing at the app. |
 | `MARKETING_GEO_HEADERS` | The marketing site's currency picked from the visitor's country header. |
@@ -120,4 +123,4 @@ at `billing@workwrk.com`, so make that a mailbox someone reads.
 - Plans are enforced now: a workspace already past its plan's people or AI
   questions (before Batch 13 nothing counted) keeps everyone it has, but
   cannot add people or ask the AI until it changes plan.
-- A real `support@workwrk.com` inbox someone reads.
+- A real inbox someone reads for `hello@workwrk.com` (every email's Reply-To, `EMAIL_REPLY_TO`) and `billing@workwrk.com` (Plan & billing names it).

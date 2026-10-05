@@ -224,11 +224,12 @@ export async function loadCompanyDetail(id: string) {
     plan: org.plan,
     status: org.status,
     createdAt: org.createdAt,
-    // The Owner's own scheduled deletion (Settings > Danger zone), so staff
-    // can see what a status change away from Cancelled would undo.
+    // The scheduled deletion, so staff can see what a status change away
+    // from Cancelled would undo: the Owner's own (Settings > Danger zone,
+    // cancelledById set) or one a cancellation in this console scheduled.
     deletion: (() => {
       const d = deletionSchedule(org.settings);
-      return d?.scheduledHardDeleteAt ? { scheduledFor: d.scheduledHardDeleteAt, requestedAt: d.cancelledAt } : null;
+      return d?.scheduledHardDeleteAt ? { scheduledFor: d.scheduledHardDeleteAt, requestedAt: d.cancelledAt, byOwner: !!d.cancelledById } : null;
     })(),
     // Only the two add-ons that do something. Custom domain is not sent: its
     // stored value is left in place, unread (spec 2.3 card 4).

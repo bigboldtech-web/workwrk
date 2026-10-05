@@ -201,7 +201,10 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
     // beside each one, which is what the tick was standing in for.
     rows: [
       ["Email support", true, true, true],
-      ["Export everything, any time", true, true, true],
+      // The export leaves out files, chat, canvases and forms (Settings >
+      // Data says so), so the row names what it holds instead of
+      // "everything".
+      ["Export people, tasks, Docs and Tables, any time", true, true, true],
     ],
   },
 ];
@@ -228,7 +231,7 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Can we leave, and take our data?",
-    a: "Yes, on every tier including the free one. Export is available any time, and deleted items sit in a trash window before they go.",
+    a: "Yes, on every tier including the free one. Export is available any time, and deleted items go to Trash first, where an Owner or Admin can bring them back.",
   },
   {
     q: "Are Talk and Tables extra?",

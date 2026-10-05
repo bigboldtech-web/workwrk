@@ -33,6 +33,7 @@ import { prisma } from "@/lib/prisma";
 import { BLOB_TRASH_TYPES, freeTrashStorageMany } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 import { cronRefusal } from "@/lib/cron-auth";
+import { trashPurgeOn } from "@/lib/purge-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,11 @@ export async function POST(req: NextRequest) {
   if (refused) return refused;
 
   const dryRun = req.nextUrl.searchParams.get("dry") === "1";
+  // Deletes for real only once it is turned on (src/lib/purge-jobs.ts),
+  // when Trash also starts showing its countdown; a dry run always reports.
+  if (!dryRun && !trashPurgeOn()) {
+    return Response.json({ ran: false, skipped: "TRASH_PURGE_CRON is not on. A dry run (?dry=1) still reports what would be deleted." });
+  }
   const now = Date.now();
   const purged: Array<{ organizationId: string; days: number; deleted: number }> = [];
   let orgs = 0;

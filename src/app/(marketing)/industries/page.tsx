@@ -37,7 +37,7 @@ const INDUSTRIES: readonly { slug: string; name: string; body: string }[] = [
   {
     slug: "technology",
     name: "Technology",
-    body: "Roles that own result areas, measures with a named owner, and goals that read the work underneath them.",
+    body: "Roles that own result areas, measures with a named owner, and goals with the work behind them one click away.",
   },
   {
     slug: "healthcare",

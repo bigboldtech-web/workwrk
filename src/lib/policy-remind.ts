@@ -58,7 +58,8 @@ export async function remindPolicyAssignees(opts: { orgId: string; policyId: str
  * nobody is nudged twice for one deadline).
  */
 export async function remindPolicyAssignmentsDue(now = new Date()): Promise<{ orgs: number; reminded: number }> {
-  const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
+  // Live workspaces only: a suspended or cancelled one's people cannot sign in.
+  const orgs = await prisma.organization.findMany({ where: { status: { in: ["TRIAL", "ACTIVE"] } }, select: { id: true, settings: true } });
   let orgCount = 0, reminded = 0;
   for (const org of orgs) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

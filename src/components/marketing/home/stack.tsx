@@ -68,9 +68,12 @@ function Hero() {
     <Section py="md" pb="none">
       <Container>
         <div className="mk-hero-stack">
-          <Link href="/changelog" className="mk-pill">
-            <span className="mk-pill__tag">New</span>
-            Talk, Tables and the AI sidekick are live
+          {/* To /product, which shows all three: the changelog starts after
+              they shipped, so the pill pointed at a page that never named
+              them. */}
+          <Link href="/product" className="mk-pill">
+            <span className="mk-pill__tag">Live</span>
+            Talk, Tables and Ask AI, in one workspace
           </Link>
 
           <h1 className="mk-hero-stack__h1">The work platform your whole company can run on</h1>
@@ -223,7 +226,7 @@ const VIEWS: Array<{
   {
     hub: "goals",
     breadcrumb: ["Goals", "Q3"],
-    note: "OKRs, KRAs and KPIs that read from the work underneath them, so progress is a consequence of what moved rather than a number somebody typed.",
+    note: "OKRs, KRAs and KPIs whose progress rolls up from key results, KPI readings and child goals, with the work linked to each goal one click away.",
     a11y: "A goal detail page with its progress ring and the linked work rolling up into it.",
     canvas: <GoalDetailSurface />,
   },
@@ -258,7 +261,7 @@ function Breadth() {
           <p className="mk-eyebrow">One workspace</p>
           <h2 className="mk-head__h2">Seven products your team already pays for, in one</h2>
           <p className="mk-head__sub">
-            Each of these is the shipped interface, not a picture of it. Pick one.
+            Each of these is drawn to match the shipped interface. Pick one.
           </p>
         </div>
         <SurfaceTabs tabs={tabs} />
@@ -383,14 +386,14 @@ const ROWS: Array<{
   },
   {
     eyebrow: "See where it stands",
-    title: "Goals that read from the work, not from a status meeting",
-    body: "Link a goal to the work that delivers it and the progress is a consequence of what actually moved. The number stops being somebody's estimate of the number.",
+    title: "Goals with their work beside them, not a status meeting",
+    body: "Link a goal to the work that delivers it and the goal shows that work, done and open, on its Effort card. Progress rolls up from its key results, KPI readings and child goals, so everyone reads the same number.",
     points: [
       "OKRs, KRAs and KPIs with owners and cadences",
-      "Progress rolls up from the linked tasks underneath",
+      "The linked tasks on each goal's Effort card",
       "Reviews, one-to-ones and kudos on the same records",
     ],
-    a11y: "A goal detail page with a progress ring and the work rolling up into it.",
+    a11y: "A goal detail page with its progress ring and the work linked to it.",
     hub: "goals",
     breadcrumb: ["Goals", "Q3"],
     canvas: <GoalDetailSurface />,
@@ -451,8 +454,8 @@ function UseCases() {
 
 const FACTS: Array<[string, string]> = [
   ["Multi-factor authentication", "Required at sign in, per workspace policy."],
-  ["Session control", "Sessions expire on inactivity, and signing out everywhere ends every session on every device at once."],
-  ["Brute-force lockout", "Repeated failed sign ins lock the account rather than letting a list of passwords be tried against it."],
+  ["Session control", "Sessions expire on inactivity, and signing out everywhere ends every other session within five minutes."],
+  ["Sign-in throttle", "Repeated failed sign ins to one account from one network address are blocked for at least 15 minutes."],
   ["Password reset tokens", "Stored hashed, single use, and time limited."],
   ["Security activity log", "Sign ins, password changes, MFA changes and session revocations, readable by the account holder."],
   ["Access by role and scope", "Permissions resolve per space, per folder, per list and per board, and a guest sees only what they were given."],
