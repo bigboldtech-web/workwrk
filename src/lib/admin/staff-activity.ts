@@ -144,6 +144,9 @@ export function plainValue(key: string, value: unknown, date?: DetailDateFormat)
   if (key === "plan" || key === "codePlan") return planLabel(String(value));
   if (key === "status") return statusLabel(String(value));
   if (key === "role") return roleWord(String(value));
+  // A trial end is a calendar day kept at noon UTC (src/lib/admin/trial-end.ts):
+  // its UTC day, as the company page and the summary give it, never a time.
+  if (key === "trialEndsAt" && typeof value === "string" && ISO_TIMESTAMP_RE.test(value)) return value.slice(0, 10);
   if (typeof value === "string" && ISO_TIMESTAMP_RE.test(value)) return date ? date(value) : value.slice(0, 10);
   if (typeof value === "object") {
     try {
@@ -197,6 +200,7 @@ const KEY_WORDS: Record<string, string> = {
   scheduledHardDeleteAt: "Deletion date",
   cancelledAt: "Cancelled",
   cancelledById: "Cancelled by",
+  trialEndsAt: "Trial end",
 };
 
 export function humanKey(k: string): string {

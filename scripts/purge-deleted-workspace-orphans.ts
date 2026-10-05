@@ -5,9 +5,9 @@
 // have no foreign key to Organization, so a deleted company's activity log,
 // agreements, call records, document snapshots, email log, templates,
 // reminders, assessments and Trash stayed for good, and so did its uploaded
-// files, its people's password reset rows and the names in staff audit rows,
-// against the privacy policy's promise to delete workspace data 30 days after
-// termination. The cron now deletes all of it with the company; this removes
+// files, its people's password reset rows, its manager digests (which carried
+// no company) and the names in staff audit rows, against the privacy policy's
+// promise to delete workspace data 30 days after termination. The cron now deletes all of it with the company; this removes
 // what is already stranded.
 //
 // RUN IT ON THE SERVER, by the founder, AFTER the Batch 9 deploy (whose SQL
@@ -165,6 +165,26 @@ async function main() {
        WHERE NOT EXISTS (SELECT 1 FROM "User" u WHERE lower(u."email") = lower(t."email"))`;
   }
   console.log(`PasswordResetToken: ${Number(tokens)} rows of addresses no account has${write ? ", deleted" : ""}`);
+
+  // Manager digests sent before they carried a company (src/app/api/email/
+  // send-reminders): the manager's address and their reports' names, kept by
+  // no company. Only finished ones, and only to an address no account has, so
+  // queued mail and every other kind of email row are never touched.
+  const [{ n: digests }] = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM "EmailLog" e
+     WHERE e."organizationId" IS NULL
+       AND e."template" IN ('overdue-manager', 'overdue-tasks-manager')
+       AND e."status" IN ('SENT', 'FAILED')
+       AND NOT EXISTS (SELECT 1 FROM "User" u WHERE lower(u."email") = lower(e."to"))`;
+  if (write) {
+    await prisma.$executeRaw`
+      DELETE FROM "EmailLog" e
+       WHERE e."organizationId" IS NULL
+         AND e."template" IN ('overdue-manager', 'overdue-tasks-manager')
+         AND e."status" IN ('SENT', 'FAILED')
+         AND NOT EXISTS (SELECT 1 FROM "User" u WHERE lower(u."email") = lower(e."to"))`;
+  }
+  console.log(`EmailLog: ${Number(digests)} manager digests to addresses no account has${write ? ", deleted" : ""}`);
 
   console.log(write ? `Done: ${total} table rows found at the start.` : `Total: ${total} table rows. Run again with --write to delete them.`);
 }

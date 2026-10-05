@@ -89,13 +89,15 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    // Manager summary
-    const mgrMap = new Map<string, { mgr: any; items: any[] }>();
+    // Manager summary, one per manager and company: each digest is tagged
+    // with the company whose people it names, so it goes with that company
+    // when it is deleted for good (/api/cron/org-hard-delete).
+    const mgrMap = new Map<string, { mgr: any; organizationId: string; items: any[] }>();
     for (const a of overdueSops) {
       if (!a.user.manager) continue;
-      const mId = a.user.manager.id;
-      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: a.user.manager, items: [] });
-      mgrMap.get(mId)!.items.push({
+      const key = `${a.user.manager.id}:${a.sop.organizationId}`;
+      if (!mgrMap.has(key)) mgrMap.set(key, { mgr: a.user.manager, organizationId: a.sop.organizationId, items: [] });
+      mgrMap.get(key)!.items.push({
         type: "SOP", title: a.sop.title,
         personName: `${a.user.firstName} ${a.user.lastName}`,
         daysOverdue: Math.floor((now.getTime() - new Date(a.dueDate!).getTime()) / 86400000),
@@ -107,11 +109,11 @@ export async function POST(req: NextRequest) {
           managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/home`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
-          variables: { count: e.items.length }, category: "reminder" })
+          variables: { count: e.items.length }, organizationId: e.organizationId, category: "reminder" })
           .catch(() => {});
       }),
     );
-    results.push(`Overdue SOPs: ${overdueSops.length} users, ${mgrMap.size} managers`);
+    results.push(`Overdue SOPs: ${overdueSops.length} users, ${mgrMap.size} manager digests`);
   }
 
   // ──────────────────────────────────────
@@ -127,7 +129,7 @@ export async function POST(req: NextRequest) {
     // the read, over the Lists actually in play.
     const overdueRows = await prisma.item.findMany({
       where: { archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
-      select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
+      select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true, organizationId: true },
       orderBy: { dueAt: "asc" },
       take: 600,
     });
@@ -150,13 +152,14 @@ export async function POST(req: NextRequest) {
 
     type OverdueLine = { type: string; title: string; personName: string; daysOverdue: number };
     type Manager = { id: string; email: string; firstName: string };
-    const mgrMap = new Map<string, { mgr: Manager; items: OverdueLine[] }>();
+    // One digest per manager and company, tagged with that company (as above).
+    const mgrMap = new Map<string, { mgr: Manager; organizationId: string; items: OverdueLine[] }>();
     for (const t of overdueTasks) {
       const assignee = ownerById.get(t.ownerId!);
       if (!assignee?.manager) continue;
-      const mId = assignee.manager.id;
-      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: assignee.manager, items: [] });
-      mgrMap.get(mId)!.items.push({
+      const key = `${assignee.manager.id}:${t.organizationId}`;
+      if (!mgrMap.has(key)) mgrMap.set(key, { mgr: assignee.manager, organizationId: t.organizationId, items: [] });
+      mgrMap.get(key)!.items.push({
         type: "Task", title: t.title,
         personName: `${assignee.firstName} ${assignee.lastName}`,
         daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
@@ -170,11 +173,11 @@ export async function POST(req: NextRequest) {
           managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/my-work`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
-          variables: { count: e.items.length }, category: "reminder" })
+          variables: { count: e.items.length }, organizationId: e.organizationId, category: "reminder" })
           .catch(() => {});
       }),
     );
-    results.push(`Overdue tasks: ${overdueTasks.length} tasks, ${mgrMap.size} managers`);
+    results.push(`Overdue tasks: ${overdueTasks.length} tasks, ${mgrMap.size} manager digests`);
   }
 
   // ──────────────────────────────────────

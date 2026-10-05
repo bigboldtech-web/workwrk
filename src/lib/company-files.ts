@@ -16,24 +16,19 @@
 //            and avatar-<userId>-* for each person whose account goes with it
 // A disk upload from before names carried the id (file-<random>) cannot be
 // traced to any company and is left in place: keeping a file too long is
-// better than deleting someone else's. Read the people before the delete
-// (they go with it); free the files only after it commits, so a delete that
-// rolls back loses nothing. Best effort, never throws.
+// better than deleting someone else's. The cron reads the accounts that go in
+// the delete's own transaction, after moving out everyone who also belongs
+// to another workspace (whose photo stays with their account); free the
+// files only after it commits, so a delete that rolls back loses nothing.
+// Best effort, never throws.
 
 import path from "path";
 import { readdir, unlink } from "fs/promises";
-import { prisma } from "@/lib/prisma";
 import { deleteObjectsWithPrefix, isS3Configured } from "@/lib/s3";
 
 export interface StoredFiles {
-  /** The accounts whose home is this company (their photos go with them). */
+  /** The accounts deleted with the company (their photos go with them). */
   userIds: string[];
-}
-
-/** Read while the company's rows still exist. */
-export async function companyStoredFiles(organizationId: string): Promise<StoredFiles> {
-  const users = await prisma.user.findMany({ where: { organizationId }, select: { id: true } });
-  return { userIds: users.map((u) => u.id) };
 }
 
 /** The disk names a company provably owns, out of a directory listing. */

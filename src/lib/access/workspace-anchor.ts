@@ -1,6 +1,8 @@
 // Moving a person from one workspace to another: the org switcher
-// (POST /api/me/switch-org) and the sign-in and session fallbacks that move
-// someone out of a suspended or cancelled workspace (src/lib/auth.ts).
+// (POST /api/me/switch-org), the sign-in and session fallbacks that move
+// someone out of a suspended or cancelled workspace (src/lib/auth.ts), and
+// the hard delete, which moves out everyone who also belongs elsewhere
+// before their home is deleted for good (moveHomesOutOf).
 //
 // Two things went wrong before. The person's access level (one column on
 // User, meaning their level in the workspace they are anchored to) was
@@ -62,4 +64,53 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
   };
   if (db && db !== prisma) return run(db);
   return prisma.$transaction(async (tx) => run(tx));
+}
+
+/** Which of the other workspaces a person belongs to is worth moving into
+ *  when their home is deleted for good: a working one first, else one that is
+ *  suspended or closed, which may yet come back. Any of them keeps the
+ *  account; deleting it would take everything it did there with it. */
+const KEEP_RANK: Record<string, number> = { ACTIVE: 0, TRIAL: 0, SUSPENDED: 1, CANCELLED: 2 };
+
+export interface MembershipElsewhere {
+  userId: string;
+  organizationId: string;
+  role: AccessLevel;
+  /** That workspace's status. */
+  status: string;
+}
+
+/** Per person, the membership to move into: the best status, and within it
+ *  the first in the order given (primary first, then oldest, as sign-in picks). */
+export function homesElsewhere(rows: readonly MembershipElsewhere[]): Map<string, Reanchor["to"]> {
+  const best = new Map<string, { rank: number; to: Reanchor["to"] }>();
+  for (const r of rows) {
+    const rank = KEEP_RANK[r.status] ?? 3;
+    const had = best.get(r.userId);
+    if (!had || rank < had.rank) best.set(r.userId, { rank, to: { organizationId: r.organizationId, role: r.role } });
+  }
+  return new Map([...best].map(([userId, b]) => [userId, b.to]));
+}
+
+/** Inside the transaction that deletes a company for good
+ *  (/api/cron/org-hard-delete), before the delete: everyone whose home it is
+ *  but who also belongs to another workspace is moved there, at the level
+ *  held there, so their account outlives it. The delete cascades every User
+ *  anchored to the company, and the anchor is only where the person last
+ *  was: someone who deleted a test workspace while working in their company
+ *  on another device would otherwise lose their account, their place in that
+ *  company and what cascades from it there (their conversations, say).
+ *  Returns how many moved. */
+export async function moveHomesOutOf(organizationId: string, tx: Prisma.TransactionClient): Promise<number> {
+  const rows = await tx.organizationMembership.findMany({
+    where: { user: { organizationId }, organizationId: { not: organizationId } },
+    select: { userId: true, organizationId: true, role: true, organization: { select: { status: true } } },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+  });
+  const homes = homesElsewhere(rows.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status })));
+  let moved = 0;
+  for (const [userId, to] of homes) {
+    if (await reanchorUser({ userId, to }, tx)) moved += 1;
+  }
+  return moved;
 }

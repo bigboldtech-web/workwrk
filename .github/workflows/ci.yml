@@ -58,6 +58,12 @@ jobs:
       - name: Every schema column has a migration that creates it
         run: node scripts/check-schema-sql.mjs
 
+      # Nothing a person uploads belongs in this repository. The .gitignore
+      # rule does not untrack a file added before it, so this fails the build
+      # if any file under public/uploads is tracked.
+      - name: No uploaded file is committed
+        run: test -z "$(git ls-files public/uploads)" || { echo "Uploaded files are committed:"; git ls-files public/uploads; exit 1; }
+
       # THE TYPE CHECK LIVES HERE, NOT IN THE PRODUCTION BUILD.
       #
       # next.config.ts sets typescript.ignoreBuildErrors, so `next build` on

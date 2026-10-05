@@ -188,6 +188,10 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
 
   // Atomically claim a batch: update QUEUED → SENDING in one query to prevent
   // concurrent processors from picking up the same emails (race condition fix).
+  // A claimed row can be deleted while it is sent (its company deleted for
+  // good, /api/cron/org-hard-delete), so each write after the claim is an
+  // updateMany: a row that is gone updates nothing, where update would throw
+  // out of the loop and leave the rest of the batch stuck in SENDING.
   const claimed = await prisma.$queryRawUnsafe<{ id: string }[]>(`
     UPDATE "EmailLog"
     SET status = 'SENDING', attempts = attempts + 1
@@ -223,7 +227,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
         }
         console.log(`================================\n`);
 
-        await prisma.emailLog.update({
+        await prisma.emailLog.updateMany({
           where: { id: email.id },
           data: closedRowData(email.template, { status: "SENT", sentAt: new Date() }),
         });
@@ -238,7 +242,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
         html: email.html || renderFromLog(email),
       });
 
-      await prisma.emailLog.update({
+      await prisma.emailLog.updateMany({
         where: { id: email.id },
         data: closedRowData(email.template, { status: "SENT", sentAt: new Date() }),
       });
@@ -246,7 +250,7 @@ export async function processEmailQueue(): Promise<{ sent: number; failed: numbe
     } catch (err: any) {
       console.error(`[Email] Failed to send to ${email.to}:`, err.message);
       const newStatus = email.attempts >= 3 ? "FAILED" : "QUEUED";
-      await prisma.emailLog.update({
+      await prisma.emailLog.updateMany({
         where: { id: email.id },
         data: newStatus === "FAILED" ? closedRowData(email.template, { status: newStatus, error: err.message }) : { status: newStatus, error: err.message },
       });

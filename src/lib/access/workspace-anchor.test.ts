@@ -17,7 +17,7 @@ const tx = {
 };
 vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } }));
 
-import { leavingIsPrimary, reanchorUser } from "./workspace-anchor";
+import { homesElsewhere, leavingIsPrimary, reanchorUser, type MembershipElsewhere } from "./workspace-anchor";
 
 describe("reanchorUser", () => {
   it("keeps the workspace left as a primary membership at the level held there, and takes the target's level", async () => {
@@ -40,5 +40,32 @@ describe("reanchorUser", () => {
     expect(calls).toHaveLength(0);
     expect(leavingIsPrimary(false)).toBe(true);
     expect(leavingIsPrimary(true)).toBe(false);
+  });
+});
+
+describe("homesElsewhere", () => {
+  const m = (userId: string, organizationId: string, status: string, role: MembershipElsewhere["role"] = "EMPLOYEE"): MembershipElsewhere => ({ userId, organizationId, role, status });
+
+  it("moves a person into a working workspace before a suspended or closed one, whatever the order", () => {
+    const homes = homesElsewhere([m("u", "closed", "CANCELLED"), m("u", "held", "SUSPENDED"), m("u", "live", "ACTIVE", "MANAGER")]);
+    expect(homes.get("u")).toEqual({ organizationId: "live", role: "MANAGER" });
+  });
+
+  it("keeps the order given within a status (primary first, then oldest)", () => {
+    const homes = homesElsewhere([m("u", "first", "TRIAL"), m("u", "second", "ACTIVE")]);
+    expect(homes.get("u")?.organizationId).toBe("first");
+  });
+
+  it("still keeps an account whose only other workspace is suspended or closed", () => {
+    expect(homesElsewhere([m("u", "held", "SUSPENDED")]).get("u")?.organizationId).toBe("held");
+    expect(homesElsewhere([m("v", "closed", "CANCELLED")]).get("v")?.organizationId).toBe("closed");
+  });
+
+  it("takes each person's own role there, and leaves out people with nowhere else", () => {
+    const homes = homesElsewhere([m("a", "x", "ACTIVE", "COMPANY_ADMIN"), m("b", "x", "ACTIVE", "EMPLOYEE")]);
+    expect(homes.get("a")?.role).toBe("COMPANY_ADMIN");
+    expect(homes.get("b")?.role).toBe("EMPLOYEE");
+    expect(homes.has("c")).toBe(false);
+    expect(homesElsewhere([]).size).toBe(0);
   });
 });

@@ -4,7 +4,8 @@ import { cronRefusal } from "@/lib/cron-auth";
 import { CREATED_SOMETHING, SETUP_DONE } from "@/lib/admin/company-milestones";
 import { ACTION_LABEL } from "@/lib/admin/staff-activity";
 import { WORKSPACE_ORPHAN_TABLES, isWorkspaceOrphanTable } from "@/lib/admin/workspace-orphans";
-import { companyStoredFiles, freeCompanyFiles } from "@/lib/company-files";
+import { freeCompanyFiles } from "@/lib/company-files";
+import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -27,12 +28,20 @@ import { companyStoredFiles, freeCompanyFiles } from "@/lib/company-files";
  * lands between the read and the delete keeps the company (and its staff
  * audit rows untouched), and one that comes after finds it gone.
  *
+ * ACCOUNTS THAT BELONG ELSEWHERE STAY. The delete cascades every account
+ * anchored to the company, and the anchor is only where its person last was.
+ * So first, in the same transaction, everyone who also belongs to another
+ * workspace is moved there at the level held there
+ * (src/lib/access/workspace-anchor.ts moveHomesOutOf), and only the rest go.
+ *
  * ITS FILES GO TOO, where ownership is provable (src/lib/company-files.ts):
  * in S3 everything under orgs/<id>/, on disk the names carrying its id or
- * its people's. Freed only after the transaction commits, so a delete that
- * rolls back loses nothing; never by a file reference, which a client chose. Its people's password reset rows, which hold their email
- * addresses and name no company, are deleted while their accounts still
- * exist to match them by.
+ * the ids of the accounts that go with it. Freed only after the transaction
+ * commits, so a delete that rolls back loses nothing; never by a file
+ * reference, which a client chose. Its people's password reset rows and the
+ * emails to them that name no company (manager digests sent before they
+ * carried one), which hold their addresses, are deleted while their accounts
+ * still exist to match them by.
  *
  * STAFF AUDIT ROWS KEEP NO NAMES. The rows about the company (StaffAction,
  * whose company link goes on delete) are kept, with their action, who did it
@@ -132,17 +141,22 @@ export async function POST(req: NextRequest) {
         prisma.organization.count({ where: { AND: [{ id: org.id }, CREATED_SOMETHING] } }).then((n) => n > 0),
       ]);
       const signedUp = new Date(org.createdAt).toISOString();
-      // What it stored, while the rows that name the files still exist.
-      const stored = await companyStoredFiles(org.id);
-      const gone = await prisma.$transaction(
+      const result = await prisma.$transaction(
         async (tx) => {
-          // 1. The company's row, locked while it is still due.
-          await tx.$queryRaw`
-            SELECT 1 FROM "Organization"
+          // 1. The company's row, locked while it is still due. Restored, or
+          // deleted by an overlapping run, since the read: nothing is done.
+          const locked = await tx.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "Organization"
              WHERE "id" = ${org.id}
                AND "status" = 'CANCELLED'
                AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
                FOR UPDATE`;
+          if (locked.length === 0) return { n: 0, userIds: [] as string[] };
+          // 1b. Accounts that also belong to another workspace move there and
+          // outlive it. Every step below reads "its people" after this.
+          await moveHomesOutOf(org.id, tx);
+          // The accounts that go with it (their photos go after the commit).
+          const leaving = await tx.user.findMany({ where: { organizationId: org.id }, select: { id: true } });
           // 2. Its staff audit rows lose every name (an AppSumo refund keeps
           // its label, which is the code, not a name).
           await tx.$executeRaw`
@@ -183,6 +197,14 @@ export async function POST(req: NextRequest) {
                      SELECT 1 FROM "Organization"
                       WHERE "id" = ${org.id} AND "status" = 'CANCELLED' AND "settings"->>'scheduledHardDeleteAt' = ${org.scheduled}
                    )`;
+          // 2d. Emails to its people that name no company (step 3b deletes
+          // the ones that do), by the same match. A row the queue is sending
+          // goes too: the queue's writes after its claim update nothing then.
+          await tx.$executeRaw`
+            DELETE FROM "EmailLog" e
+             WHERE e."organizationId" IS NULL
+               AND EXISTS (SELECT 1 FROM "User" u WHERE u."organizationId" = ${org.id} AND lower(u."email") = lower(e."to"))
+               AND NOT EXISTS (SELECT 1 FROM "User" v WHERE v."organizationId" <> ${org.id} AND lower(v."email") = lower(e."to"))`;
           // 3. The company.
           const n = await tx.$executeRaw`
             DELETE FROM "Organization"
@@ -220,13 +242,13 @@ export async function POST(req: NextRequest) {
                       WHERE "organizationId" = ${org.id} AND "hardDeletedAt" = (${at}::timestamptz AT TIME ZONE 'UTC')
                    )
             ON CONFLICT DO NOTHING`;
-          return n;
+          return { n, userIds: leaving.map((u) => u.id) };
         },
         { maxWait: 10_000, timeout: 30 * 60_000 },
       );
-      if (gone === 1) {
+      if (result.n === 1) {
         // Committed: now its files can go (best effort, never throws).
-        await freeCompanyFiles(org.id, stored);
+        await freeCompanyFiles(org.id, { userIds: result.userIds });
         deleted += 1;
         // The id only: the name is part of what was just deleted.
         console.info(`[org-hard-delete] deleted ${org.id}`);
