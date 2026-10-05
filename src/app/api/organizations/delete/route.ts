@@ -4,7 +4,7 @@ import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/works
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
-import { stripe } from "@/services/billing";
+import { stopSubscription } from "@/services/billing";
 
 /**
  * Schedule a tenant for deletion. Soft-delete with a 30-day grace
@@ -32,12 +32,13 @@ import { stripe } from "@/services/billing";
  * company's Stripe ids, the only link to the customer in Stripe once the hard
  * delete takes the Subscription row (refunds, disputes).
  *
- * A live Stripe subscription is cancelled FIRST, so a deleted workspace is
- * never billed again; if it cannot be cancelled (Stripe refuses, or Stripe is
- * not configured on this server), nothing is deleted and the answer says why.
- * Restoring the workspace later does not bring the subscription back.
+ * A Stripe subscription that can still bill (active, trialing, past due,
+ * unpaid, incomplete or paused, by Stripe's own status) is cancelled FIRST,
+ * so a deleted workspace is never billed again; if it cannot be cancelled
+ * (Stripe refuses, or Stripe is not configured on this server), nothing is
+ * deleted and the answer says why. Restoring the workspace later does not
+ * bring the subscription back.
  */
-const LIVE_STRIPE = new Set(["ACTIVE", "TRIALING", "PAST_DUE"]);
 const GRACE_DAYS = 30;
 
 interface OrgSettingsWithDeletion {
@@ -89,15 +90,17 @@ export async function POST(req: NextRequest) {
     where: { organizationId: orgId },
     select: { stripeCustomerId: true, stripeSubscriptionId: true, status: true },
   });
+  // Every subscription not stored as CANCELED is checked with Stripe: the row
+  // stores unpaid and paused as INCOMPLETE, and an unpaid subscription keeps
+  // raising an invoice every period. One Stripe already ended is passed by.
   let subscriptionCancelled = false;
-  if (sub?.stripeSubscriptionId && LIVE_STRIPE.has(String(sub.status))) {
-    if (!stripe) {
-      return jsonError("This workspace has a paid subscription that cannot be cancelled from here. Email billing@workwrk.com to cancel it, then delete the workspace.", 409);
-    }
+  if (sub?.stripeSubscriptionId && String(sub.status) !== "CANCELED") {
     try {
-      await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
-      subscriptionCancelled = true;
+      subscriptionCancelled = (await stopSubscription(sub.stripeSubscriptionId)) === "cancelled";
     } catch (err) {
+      if (err instanceof Error && err.message === "Stripe not configured") {
+        return jsonError("This workspace has a paid subscription that cannot be cancelled from here. Email billing@workwrk.com to cancel it, then delete the workspace.", 409);
+      }
       console.error("[delete-org] Stripe cancel failed:", err instanceof Error ? err.message : err);
       return jsonError("The paid subscription could not be cancelled, so nothing was deleted. Try again, or cancel it in Settings, Plan & billing, Manage billing first.", 502);
     }

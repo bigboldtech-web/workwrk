@@ -42,6 +42,7 @@ export default function MarketplacePage() {
   const { askAiVisible } = useOsShell();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [canManage, setCanManage] = useState(false);
+  const [canChangePlan, setCanChangePlan] = useState(false);
   const [plan, setPlan] = useState("STARTER");
   const [error, setError] = useState<string | null>(null);
   const [override, setOverride] = useState<Record<string, boolean>>({});
@@ -49,11 +50,12 @@ export default function MarketplacePage() {
   const [suggestOpen, setSuggestOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const r = await apiFetch<{ products: Product[]; canManage: boolean; plan?: string }>("/api/products", { cache: "no-store" });
+    const r = await apiFetch<{ products: Product[]; canManage: boolean; canChangePlan?: boolean; plan?: string }>("/api/products", { cache: "no-store" });
     if (!r.ok) { setError(r.error); return; }
     setError(null);
     setProducts(r.data.products);
     setCanManage(r.data.canManage);
+    setCanChangePlan(r.data.canChangePlan ?? r.data.canManage);
     setPlan(r.data.plan ?? "STARTER");
     setOverride({});
   }, []);
@@ -100,6 +102,7 @@ export default function MarketplacePage() {
                 module={m}
                 on={isOn(m.productSlug)}
                 canManage={canManage}
+                canChangePlan={canChangePlan}
                 plan={plan}
                 needsUpgrade={bySlug.get(m.productSlug)?.needsUpgrade ?? false}
                 onChanged={(on) => setOverride((o) => ({ ...o, [m.productSlug]: on }))}

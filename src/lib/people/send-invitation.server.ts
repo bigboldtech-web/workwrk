@@ -121,7 +121,8 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
   // this invite asks for, instead of making the admin Revoke first. The
   // renewal is conditional on the row still being unaccepted and expired.
   const existingInvite = await prisma.invitation.findFirst({
-    where: { email, organizationId: orgId, accepted: false },
+    // Any case of the address: Bob@ and bob@ are one person and one seat.
+    where: { email: { equals: email, mode: "insensitive" }, organizationId: orgId, accepted: false },
   });
   const now = new Date();
   if (existingInvite && existingInvite.expiresAt >= now) {

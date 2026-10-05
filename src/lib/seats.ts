@@ -11,12 +11,17 @@
 // THE COUNT. A seat is a person who can sign in, or an invitation still open:
 //   - live people anchored here (not removed, not deactivated);
 //   - live people in through a membership (anchored in another workspace);
-//   - invitations not accepted and not expired.
+//   - addresses with an invitation not accepted and not expired, each address
+//     once, whatever its case, and none that is already one of the people
+//     above: one person invited to the workspace and to two of its Spaces
+//     used to hold three seats.
 // Invitations count because an invite is a promise of a seat: counting them
 // is what stops 40 invitations going out on a 10-person plan.
 //
 // THE LIMIT. Seats bought, where seats were bought: a lifetime (AppSumo)
-// subscription's seats, and a per-person Stripe subscription's seats. A flat
+// subscription's seats (never fewer than free Starter's people limit: a paid
+// code never leaves a workspace with less than it had for free), and a
+// per-person Stripe subscription's seats. A flat
 // Stripe price stores its checkout quantity (1) in seats, which is not a seat
 // count: it, and every workspace without a live subscription, uses the plan's
 // people limit (PLAN_LIMITS[plan].users). Unlimited seats (the staff
@@ -36,7 +41,7 @@ const PLAN_LABEL: Record<string, string> = { STARTER: "Starter", GROWTH: "Growth
 export interface SeatUse {
   /** People who can sign in: anchored here or in through a membership. */
   members: number;
-  /** Invitations not accepted and not expired. */
+  /** Addresses with an invitation not accepted and not expired, not already people here. */
   pending: number;
   /** The cap; UNLIMITED_SEATS (99,999) or more is no limit. */
   limit: number;
@@ -53,7 +58,7 @@ export function seatLimit(plan: string, sub: SubFacts | null): { limit: number; 
   if (!sub || !(LIVE_SUBSCRIPTION as readonly string[]).includes(String(sub.status))) return { limit: planLimit, canBuyMore: false };
   const source = subscriptionSource(sub);
   if (source === "lifetime") {
-    return { limit: seatsAreUnlimited(sub.seats) ? UNLIMITED_SEATS : sub.seats, canBuyMore: false };
+    return { limit: seatsAreUnlimited(sub.seats) ? UNLIMITED_SEATS : Math.max(sub.seats, PLAN_LIMITS.STARTER.users), canBuyMore: false };
   }
   if (source === "stripe" && sub.billingMode === "PER_USER" && sub.seats > 0) {
     return sub.seats >= UNLIMITED_SEATS ? { limit: UNLIMITED_SEATS, canBuyMore: false } : { limit: sub.seats, canBuyMore: true };
@@ -61,15 +66,40 @@ export function seatLimit(plan: string, sub: SubFacts | null): { limit: number; 
   return { limit: planLimit, canBuyMore: false };
 }
 
+/**
+ * Open invitations, one per address (any case), leaving out every address
+ * that is already a live person here (anchored, or through a membership).
+ * Matched against this workspace's own people only, so it stays one hash
+ * join however many accounts the database holds.
+ */
+async function openInvitedAddresses(organizationId: string, db: Db): Promise<number> {
+  const rows = await db.$queryRaw<{ n: number }[]>`
+    WITH open_inv AS (
+      SELECT DISTINCT lower(i."email") AS e
+      FROM "Invitation" i
+      WHERE i."organizationId" = ${organizationId}
+        AND i."accepted" = false
+        AND i."expiresAt" > (now() AT TIME ZONE 'UTC')
+    ),
+    inside AS (
+      SELECT lower(u."email") AS e FROM "User" u
+      WHERE u."organizationId" = ${organizationId} AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+      UNION
+      SELECT lower(u."email") FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"
+      WHERE m."organizationId" = ${organizationId} AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+    )
+    SELECT count(*)::int AS n FROM open_inv o WHERE NOT EXISTS (SELECT 1 FROM inside WHERE inside.e = o.e)`;
+  return Number(rows[0]?.n ?? 0);
+}
+
 export async function seatUse(organizationId: string, db: Db = prisma): Promise<SeatUse> {
-  const now = new Date();
   const [org, anchored, viaMembership, pending, sub] = await Promise.all([
     db.organization.findUnique({ where: { id: organizationId }, select: { plan: true } }),
     db.user.count({ where: { organizationId, deletedAt: null, status: { not: "INACTIVE" } } }),
     db.organizationMembership.count({
       where: { organizationId, user: { deletedAt: null, status: { not: "INACTIVE" }, NOT: { organizationId } } },
     }),
-    db.invitation.count({ where: { organizationId, accepted: false, expiresAt: { gt: now } } }),
+    openInvitedAddresses(organizationId, db),
     db.subscription.findUnique({
       where: { organizationId },
       select: { seats: true, status: true, billingMode: true, stripeSubscriptionId: true },

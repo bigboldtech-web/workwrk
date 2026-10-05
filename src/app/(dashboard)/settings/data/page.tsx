@@ -51,7 +51,7 @@ import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
-import { PeopleImport, usePeopleImport } from "@/components/people/people-import";
+import { PeopleImport, importable, usePeopleImport } from "@/components/people/people-import";
 import { useSettingsSection } from "@/hooks/use-settings-section";
 import { RETENTION_BOUNDS } from "@/lib/settings/org-policy";
 import type { LegacyMarketingCounts, LegacyMarketingReport, LegacyPending } from "@/lib/marketing/legacy-import";
@@ -109,7 +109,7 @@ export default function DataSettingsPage() {
   const [progress, setProgress] = useState<string | null>(null);
   const [summary, setSummary] = useState<Summary | null | "error">(null);
   const flow = usePeopleImport();
-  const ready = flow.state.staged?.summary.ready ?? 0;
+  const ready = importable(flow.state.staged?.summary);
 
   const loadSummary = useCallback(async () => {
     const r = await apiFetch<Summary>("/api/settings/data-summary", { cache: "no-store" });

@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import type { Plan, SubscriptionStatus } from "@/generated/prisma";
+import type { Plan, Prisma, SubscriptionStatus } from "@/generated/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 
 /**
@@ -63,10 +63,10 @@ export async function ensureStripeCustomer(params: {
   organizationId: string;
   organizationName: string;
   adminEmail: string;
-}): Promise<string> {
+}, db: Prisma.TransactionClient | typeof prisma = prisma): Promise<string> {
   if (!stripe) throw new Error("Stripe not configured");
 
-  const existing = await prisma.subscription.findUnique({
+  const existing = await db.subscription.findUnique({
     where: { organizationId: params.organizationId },
     select: { stripeCustomerId: true },
   });
@@ -80,7 +80,7 @@ export async function ensureStripeCustomer(params: {
 
   // Upsert the Subscription row so the customer ID is persisted even
   // before the user completes checkout.
-  await prisma.subscription.upsert({
+  await db.subscription.upsert({
     where: { organizationId: params.organizationId },
     create: {
       organizationId: params.organizationId,
@@ -109,44 +109,78 @@ export async function createCheckoutSession(params: {
   cancelUrl: string;
 }) {
   if (!stripe) throw new Error("Stripe not configured");
-
-  const customerId = await ensureStripeCustomer({
-    organizationId: params.organizationId,
-    organizationName: params.organizationName,
-    adminEmail: params.adminEmail,
-  });
+  const client = stripe;
   const priceId = getPriceId(params.key);
-
   const quantity = Math.max(1, params.seats);
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [
-      {
-        price: priceId,
-        quantity,
-        // A per-person price lets the buyer choose the seats at checkout,
-        // from the seats already in use up to Growth's people limit.
-        ...(params.key === "growth-per-user"
-          ? { adjustable_quantity: { enabled: true, minimum: quantity, maximum: Math.max(quantity, PLAN_LIMITS.GROWTH.users) } }
-          : {}),
-      },
-    ],
-    success_url: params.successUrl,
-    cancel_url: params.cancelUrl,
-    allow_promotion_codes: true,
-    metadata: {
+
+  // ONE CHECKOUT AT A TIME PER WORKSPACE. A checkout session stays payable
+  // for 24 hours, so two opened before either was paid (the Owner and a
+  // billing Admin, or two tabs) both billed. Under this workspace's lock the
+  // Stripe customer is made once, and every checkout still open for it is
+  // closed before the new one opens: only the newest can be paid.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"stripe-checkout:" + params.organizationId}))`;
+    const customerId = await ensureStripeCustomer({
       organizationId: params.organizationId,
-      billingKey: params.key,
-    },
-    subscription_data: {
+      organizationName: params.organizationName,
+      adminEmail: params.adminEmail,
+    }, tx);
+    const open = await client.checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+    for (const old of open.data) await client.checkout.sessions.expire(old.id);
+    const session = await client.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [
+        {
+          price: priceId,
+          quantity,
+          // A per-person price lets the buyer choose the seats at checkout,
+          // from the seats already in use up to Growth's people limit.
+          ...(params.key === "growth-per-user"
+            ? { adjustable_quantity: { enabled: true, minimum: quantity, maximum: Math.max(quantity, PLAN_LIMITS.GROWTH.users) } }
+            : {}),
+        },
+      ],
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      allow_promotion_codes: true,
       metadata: {
         organizationId: params.organizationId,
         billingKey: params.key,
       },
-    },
-  });
-  return { url: session.url, sessionId: session.id };
+      subscription_data: {
+        metadata: {
+          organizationId: params.organizationId,
+          billingKey: params.key,
+        },
+      },
+    });
+    return { url: session.url, sessionId: session.id };
+  }, { maxWait: 10_000, timeout: 30_000 });
+}
+
+// Stripe statuses under which a subscription can still bill or come back:
+// the row stores unpaid, incomplete and paused all as INCOMPLETE, the same as
+// the dead incomplete_expired, so only Stripe can say which it is.
+const STILL_OPEN = new Set<string>(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
+
+/** Whether a subscription can still bill (or be resumed), by Stripe's own status. Throws when Stripe cannot say. */
+export async function subscriptionStillOpen(subscriptionId: string): Promise<boolean> {
+  if (!stripe) throw new Error("Stripe not configured");
+  const current = await stripe.subscriptions.retrieve(subscriptionId);
+  return STILL_OPEN.has(current.status);
+}
+
+/**
+ * Stop a subscription for good: cancelled, unless Stripe already holds it as
+ * ended (cancelling an ended one throws). Throws when Stripe cannot be
+ * reached or refuses, so the caller can keep what it was about to do.
+ */
+export async function stopSubscription(subscriptionId: string): Promise<"cancelled" | "already_ended"> {
+  if (!stripe) throw new Error("Stripe not configured");
+  if (!(await subscriptionStillOpen(subscriptionId))) return "already_ended";
+  await stripe.subscriptions.cancel(subscriptionId);
+  return "cancelled";
 }
 
 /**
@@ -227,22 +261,38 @@ function priceIdToPlan(priceId: string): { plan: Plan; billingMode: "PER_USER" |
 
 // What a Stripe status means for the workspace's own plan, the one every
 // limit reads (PLAN_LIMITS[Organization.plan]):
-//   paying (active, trialing, past_due)   the price's plan;
+//   paying (active, trialing, past_due)   the price's plan, and a workspace
+//     still on its free trial status becomes ACTIVE (as an AppSumo code does);
 //   ended (canceled, unpaid, incomplete_expired, paused)   back to Starter:
 //     a cancelled subscription used to leave the workspace on Growth for
 //     good, because every event mirrored the price's plan whatever its status;
 //   incomplete   nothing changes: the first payment has not gone through.
+// Either way, only while the workspace's plan is still the one Stripe set
+// (the plan on the subscription row): a plan staff set, or a code gave,
+// since then is not Stripe's to change.
 const PAYING = new Set<string>(["active", "trialing", "past_due"]);
 const ENDED = new Set<string>(["canceled", "unpaid", "incomplete_expired", "paused"]);
+const LIVE_ROW = new Set<string>(["ACTIVE", "TRIALING", "PAST_DUE"]);
+
+export type SubscriptionEventResult = "applied" | "older" | "lifetime" | "duplicate";
 
 /**
  * Apply a subscription's state. `eventAt` is when Stripe created the event
  * that carried it (Stripe's clock, never this server's): Stripe
  * delivers events out of order and retries them for days, so a state older
- * than the one already applied is skipped (Subscription.stripeEventAt), in
- * one conditional write, so two deliveries at once cannot interleave either.
+ * than the one already applied is skipped (Subscription.stripeEventAt). The
+ * workspace's row is locked first, so two deliveries at once apply one after
+ * the other.
+ *
+ * Never applied:
+ *   - to a lifetime deal (an AppSumo code: no Stripe subscription, a flat
+ *     tier, live), which no Stripe event may overwrite;
+ *   - for a second subscription while the row follows another one that is
+ *     still live: two checkouts opened at once and both paid. The second is
+ *     cancelled at once, so the customer is never billed twice, and logged so
+ *     its first payment can be refunded.
  */
-export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: Date = new Date()) {
+export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: Date = new Date()): Promise<SubscriptionEventResult | undefined> {
   const orgId = sub.metadata?.organizationId;
   if (!orgId) return;
   const item = sub.items.data[0];
@@ -262,27 +312,48 @@ export async function applySubscriptionEvent(sub: Stripe.Subscription, eventAt: 
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
     stripeEventAt: eventAt,
   };
-  await prisma.$transaction(async (tx) => {
-    const applied = await tx.subscription.updateMany({
-      where: { organizationId: orgId, OR: [{ stripeEventAt: null }, { stripeEventAt: { lte: eventAt } }] },
-      data,
+  const result = await prisma.$transaction(async (tx): Promise<SubscriptionEventResult> => {
+    const org = await tx.$queryRaw<{ plan: string | null }[]>`
+      SELECT "plan"::text AS plan FROM "Organization" WHERE id = ${orgId} FOR UPDATE`;
+    if (org.length === 0) return "older";
+    const row = await tx.subscription.findUnique({
+      where: { organizationId: orgId },
+      select: { plan: true, status: true, billingMode: true, stripeSubscriptionId: true, stripeEventAt: true },
     });
-    if (applied.count === 0) {
-      const exists = await tx.subscription.findUnique({ where: { organizationId: orgId }, select: { id: true } });
+    if (row) {
+      if (!row.stripeSubscriptionId && row.billingMode === "FLAT_TIER" && LIVE_ROW.has(String(row.status))) return "lifetime";
+      if (row.stripeSubscriptionId && row.stripeSubscriptionId !== sub.id && LIVE_ROW.has(String(row.status))) return "duplicate";
       // A newer state is already applied: this event is older news.
-      if (exists) return;
+      if (row.stripeEventAt && row.stripeEventAt > eventAt) return "older";
+    }
+    // The row's plan is the plan Stripe last gave the workspace (a workspace
+    // with no row has only the plan it signed up on). Stripe changes the
+    // workspace's plan only while that is still its plan.
+    const orgPlan = String(org[0].plan ?? "STARTER");
+    const stripesPlan = row ? String(row.plan) : orgPlan;
+    const owned = orgPlan === stripesPlan;
+    const nextPlan = !owned ? null : PAYING.has(sub.status) ? mapped.plan : ENDED.has(sub.status) ? ("STARTER" as Plan) : null;
+    const rowData = { ...data, plan: (nextPlan ?? stripesPlan) as Plan };
+    if (row) {
+      await tx.subscription.update({ where: { organizationId: orgId }, data: rowData });
+    } else {
       await tx.subscription.create({
         data: {
           organizationId: orgId,
           stripeCustomerId: typeof sub.customer === "string" ? sub.customer : sub.customer.id,
-          ...data,
+          ...rowData,
         },
       });
     }
+    if (nextPlan) await tx.organization.update({ where: { id: orgId }, data: { plan: nextPlan } });
     if (PAYING.has(sub.status)) {
-      await tx.organization.update({ where: { id: orgId }, data: { plan: mapped.plan } });
-    } else if (ENDED.has(sub.status)) {
-      await tx.organization.update({ where: { id: orgId }, data: { plan: "STARTER" } });
+      await tx.organization.updateMany({ where: { id: orgId, status: "TRIAL" }, data: { status: "ACTIVE" } });
     }
+    return "applied";
   });
+  if (result === "duplicate" && PAYING.has(sub.status) && stripe) {
+    await stripe.subscriptions.cancel(sub.id);
+    console.error(`[billing] a second subscription (${sub.id}) for workspace ${orgId} was cancelled: the workspace already pays through another one. Refund its first payment in Stripe.`);
+  }
+  return result;
 }

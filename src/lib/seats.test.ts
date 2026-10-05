@@ -16,12 +16,16 @@ function fakeDb(o: {
   pending?: number;
   sub?: { seats: number; status: string; billingMode: string; stripeSubscriptionId: string | null } | null;
 }) {
-  const seen: { user?: Where; membership?: Where; invitation?: Where } = {};
+  const seen: { user?: Where; membership?: Where; invitationSql?: string; invitationValues?: unknown[] } = {};
   const db = {
     organization: { findUnique: async () => (o.plan === null ? null : { plan: o.plan ?? "STARTER" }) },
     user: { count: async (a: { where: Where }) => { seen.user = a.where; return o.anchored ?? 0; } },
     organizationMembership: { count: async (a: { where: Where }) => { seen.membership = a.where; return o.viaMembership ?? 0; } },
-    invitation: { count: async (a: { where: Where }) => { seen.invitation = a.where; return o.pending ?? 0; } },
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      seen.invitationSql = strings.join("?");
+      seen.invitationValues = values;
+      return [{ n: o.pending ?? 0 }];
+    },
     subscription: { findUnique: async () => o.sub ?? null },
   };
   return { db: db as never, seen };
@@ -37,9 +41,13 @@ describe("seatUse", () => {
     // A membership counts only for a live person anchored somewhere else
     // (someone anchored here is already counted once).
     expect(seen.membership).toMatchObject({ organizationId: "org_1", user: { deletedAt: null, status: { not: "INACTIVE" }, NOT: { organizationId: "org_1" } } });
-    // Only invitations not accepted and not expired.
-    expect(seen.invitation).toMatchObject({ organizationId: "org_1", accepted: false });
-    expect((seen.invitation?.expiresAt as { gt: Date }).gt).toBeInstanceOf(Date);
+    // Only invitations not accepted and not expired, one per address in any
+    // case, and none for an address already among the people here.
+    expect(seen.invitationSql).toContain(`i."accepted" = false`);
+    expect(seen.invitationSql).toContain(`i."expiresAt" > (now() AT TIME ZONE 'UTC')`);
+    expect(seen.invitationSql).toContain(`SELECT DISTINCT lower(i."email")`);
+    expect(seen.invitationSql).toContain("NOT EXISTS (SELECT 1 FROM inside");
+    expect(seen.invitationValues).toEqual(["org_1", "org_1", "org_1"]);
   });
 
   it("uses the plan's people limit with no subscription", async () => {
@@ -75,6 +83,8 @@ describe("seatLimit", () => {
 
   it("a lifetime (AppSumo) subscription's seats are the cap, and more are not bought in the portal", () => {
     expect(seatLimit("GROWTH", live(25, "FLAT_TIER", null))).toEqual({ limit: 25, canBuyMore: false });
+    // Never fewer than free Starter's 10: a 5-seat code does not take seats away.
+    expect(seatLimit("GROWTH", live(5, "FLAT_TIER", null))).toEqual({ limit: 10, canBuyMore: false });
   });
 
   it("unlimited lifetime seats (the staff console's empty field, AppSumo Tier 3) mean no limit", () => {

@@ -11,14 +11,15 @@
 import { useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { PeopleImport, usePeopleImport } from "./people-import";
+import { PeopleImport, importable, usePeopleImport } from "./people-import";
 
 export { PeopleImport, usePeopleImport } from "./people-import";
 
 export function ImportPeopleModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
   const flow = usePeopleImport();
   const { state } = flow;
-  const ready = state.staged?.summary.ready ?? 0;
+  // Ready rows that fit in the seats: none when the dry run said they do not.
+  const ready = importable(state.staged?.summary);
   // A step change unmounts the focused control (Choose file, Continue), and
   // focus would fall back to the dialog frame and ring the whole 960 card: a
   // second focus indicator. Move it to the step's own region instead, which

@@ -35,6 +35,7 @@ import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { persistGoalRollupChain } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
+import { isModuleActive } from "@/lib/entitlements";
 
 export interface ToolContext {
   orgId: string;
@@ -1227,6 +1228,9 @@ const listForms: ToolDefinition = {
   },
 };
 
+/** What the Tables tools answer while Tables is not on in the workspace. */
+const TABLES_OFF = "Tables is not on in this workspace, so there are no tables here and none can be made. It comes with the Growth plan; an Owner or Admin can change the plan in Settings, Plan & billing.";
+
 const createDataTable: ToolDefinition = {
   name: "create_data_table",
   description:
@@ -1253,6 +1257,8 @@ const createDataTable: ToolDefinition = {
     required: ["name", "columns"],
   },
   handler: async (ctx, input) => {
+    // A table nobody could open is never made: Tables is a module.
+    if (!(await isModuleActive(ctx.orgId, "workwrk-tables"))) return { error: TABLES_OFF };
     const cols = Array.isArray(input.columns) ? input.columns : [];
     const safe = cols
       .filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && TABLE_COL_TYPES.includes((c as { type: string }).type as typeof TABLE_COL_TYPES[number]))
@@ -1288,6 +1294,7 @@ const listDataTables: ToolDefinition = {
     properties: { nameContains: { type: "string", description: "Case-insensitive part of the table's name" } },
   },
   handler: async (ctx, input) => {
+    if (!(await isModuleActive(ctx.orgId, "workwrk-tables"))) return { error: TABLES_OFF };
     // Only the tables this person can open (their Space, their own, a grant),
     // paged until 50 are found: the newest 200 filtered once could leave a
     // reader whose tables are older with an empty list.
@@ -1652,11 +1659,17 @@ export const PRODUCT_TOOL_NAMES: Record<string, ToolName[]> = {
 // Resolve which tools are available to a given chat session.
 //   - General Sidekick (no agent): just CROSS_TOOL_NAMES
 //   - Agent: CROSS + the agent's product's tools
-export function toolsForSession(opts: { agentProductSlug?: string | null }): ToolDefinition[] {
+//   - Without Tables on (`tablesOn: false`), no Tables tools: a table made
+//     there could not be opened, and on Starter Tables cannot be turned on.
+export function toolsForSession(opts: { agentProductSlug?: string | null; tablesOn?: boolean }): ToolDefinition[] {
   const available = new Set<ToolName>(CROSS_TOOL_NAMES);
   if (opts.agentProductSlug) {
     const productTools = PRODUCT_TOOL_NAMES[opts.agentProductSlug] ?? [];
     for (const name of productTools) available.add(name);
+  }
+  if (opts.tablesOn === false) {
+    available.delete("create_data_table");
+    available.delete("list_data_tables");
   }
   return Array.from(available).map((name) => TOOLS[name]).filter((t): t is ToolDefinition => Boolean(t));
 }

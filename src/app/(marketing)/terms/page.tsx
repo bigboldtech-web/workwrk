@@ -133,8 +133,9 @@ export default function TermsPage() {
                 writing to us at the address that page gives.
               </p>
               <p>
-                If a payment fails we will retry and contact you. A workspace is suspended before anything is deleted,
-                and section 9 says what happens to the data after that.
+                If a payment fails, our payment processor tries it again. If the subscription still ends unpaid, the
+                workspace moves back to the free Starter plan and keeps its people and its data: nothing is deleted
+                because a payment failed. Section 9 says what happens to the data when a workspace is deleted.
               </p>
             </>
           ),

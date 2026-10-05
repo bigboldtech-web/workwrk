@@ -13,6 +13,7 @@ import { z } from "zod";
 import { AGENTS_BY_PRODUCT } from "@/lib/agents/catalog";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { MODULE_BY_SLUG, moduleUpgradeSentence } from "@/lib/modules";
+import { sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { moduleNeedsUpgradeFor } from "@/lib/module-plan.server";
 
 async function resolveOrgAndRole() {
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
   // workspace that never had the module is refused; one that had it keeps it.
   if (await moduleNeedsUpgradeFor(ctx.orgId, product.slug)) {
     return NextResponse.json(
-      { error: moduleUpgradeSentence(MODULE_BY_SLUG[product.slug].label, true), code: "plan_required" },
+      { error: moduleUpgradeSentence(MODULE_BY_SLUG[product.slug].label, await sessionMayManageOwnerPage(ctx.session, "billing")), code: "plan_required" },
       { status: 403 },
     );
   }

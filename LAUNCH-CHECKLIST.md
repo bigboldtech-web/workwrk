@@ -91,6 +91,29 @@ Stripe webhook at `https://app.workwrk.com/api/billing/webhook` for
 back to Starter. Unset, Plan & billing says billing is handled by your team
 at `billing@workwrk.com`, so make that a mailbox someone reads.
 
+Before taking a real card:
+
+- **The Growth price matches the pricing page.** `STRIPE_PRICE_GROWTH_PER_USER`
+  is ONE recurring price, billed yearly, per seat (quantity), with a currency
+  option for each currency the pricing page shows, each the page's monthly
+  per-seat number times 12 (`src/components/marketing/data/pricing.json`,
+  Growth `perSeat`): USD 96, INR 7,800, AED 360, SGD 132, GBP 84, EUR 96.
+  Checkout charges that one price, so a monthly price, or a USD-only one,
+  charges a buyer something the page never showed them.
+- **The customer portal is set up**, in test mode and again in live mode
+  (Stripe dashboard, Settings, Billing, Customer portal), with payment method
+  updates, invoice history, cancellation, and subscription updates with
+  quantity changes for the Growth price turned on. Until it is saved, Stripe
+  refuses to open the portal, so Manage billing fails; without quantity
+  changes, the seat sentences that say "add seats in Plan & billing (Manage
+  billing)" are false.
+- **Stripe's failed-payment emails** (Settings, Billing, Subscriptions and
+  emails) are on, so a customer whose card fails hears about it: the product
+  itself sends none, it only moves a subscription that ends unpaid back to
+  Starter.
+- In test mode, run one checkout (check the amount shown is the page's, in
+  the buyer's currency), one seat change in the portal, and one cancellation.
+
 ### Switches, off unless you decide otherwise
 
 | Variable | Turns on |
@@ -121,9 +144,10 @@ at `billing@workwrk.com`, so make that a mailbox someone reads.
   that tells you email has stopped.
 - Email: send yourself an invitation and a password reset, and check both
   arrive outside spam.
-- Billing: with Stripe set (above), run one checkout and one cancellation in
-  Stripe's test mode before taking real cards. AppSumo: a code redeemed in
-  Plan & billing moves the workspace onto the plan and seats it grants.
+- Billing: with Stripe set (above), the four steps under "Before taking a
+  real card", in Stripe's test mode first. AppSumo: a code redeemed in
+  Plan & billing raises the workspace to the plan and seats it grants, and
+  never lowers either.
 - Plans are enforced now: a workspace already past its plan's people or AI
   questions (before Batch 13 nothing counted) keeps everyone it has, but
   cannot add people or ask the AI until it changes plan.

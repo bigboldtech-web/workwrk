@@ -55,8 +55,11 @@ export interface AiStatus {
  *   agent_off     ?agent= named an agent that is not turned on
  *   gone          the chat was archived or removed (elsewhere) before this
  *                 send; the text is back in the composer for a new chat
+ *   ai_limit      the workspace has used all its plan's AI questions; the
+ *                 server's sentence (errorText) says what to do
+ *   rate_limited  too many AI requests in a minute; errorText says when
  */
-export type AiSendError = "not_sent" | "stopped" | "start_failed" | "agent_off" | "gone";
+export type AiSendError = "not_sent" | "stopped" | "start_failed" | "agent_off" | "gone" | "ai_limit" | "rate_limited";
 
 export interface AiSessionMeta {
   id: string;
@@ -77,6 +80,8 @@ export interface AiSessionState {
   /** The chat asked for does not exist, or is not the viewer's. */
   missing: boolean;
   error: AiSendError | null;
+  /** The server's own sentence for ai_limit and rate_limited. */
+  errorText: string | null;
   draft: string;
   /** The agent the next new chat is bound to (?agent=<slug>). */
   agent: { slug: string; name: string | null; examplePrompts?: string[] } | null;
@@ -93,6 +98,7 @@ const INITIAL: AiSessionState = {
   loadError: false,
   missing: false,
   error: null,
+  errorText: null,
   draft: "",
   agent: null,
   status: null,
@@ -336,6 +342,16 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       signal: ctrl.signal,
     });
     if (res.status === 401) markSessionExpired({ reason: "expired" });
+    if (res.status === 403 || res.status === 429) {
+      // The plan's AI questions are used up, or too many requests in a
+      // minute: the question was not written, and the server says why.
+      const refusal = (await res.clone().json().catch(() => null)) as { code?: unknown; error?: unknown } | null;
+      if (refusal?.code === "ai_limit" || refusal?.code === "rate_limited") {
+        if (gen === generation) set({ errorText: typeof refusal.error === "string" ? refusal.error : null });
+        fail(refusal.code);
+        return;
+      }
+    }
     if (res.status === 403) void loadStatus(true);
     if (res.status === 404) {
       // Archived or gone (another tab, All chats): the question was not

@@ -40,11 +40,14 @@ export function ModuleCard({
   canManage,
   plan,
   needsUpgrade,
+  canChangePlan = canManage,
   onChanged,
 }: {
   module: ModuleDef;
   on: boolean;
   canManage: boolean;
+  /** May change the plan in Plan & billing (with the Owner split on, not every Admin). */
+  canChangePlan?: boolean;
   /** The workspace's plan (GET /api/products). */
   plan: string;
   /** Starter and never had it: turning it on needs a plan change first. */
@@ -101,13 +104,13 @@ export function ModuleCard({
       </div>
       <div className="mt-auto flex min-h-8 items-center gap-3">
         {needsUpgrade && !on ? (
-          canManage ? (
+          canChangePlan ? (
             <span className="text-sm text-ink-2">
               On the {MODULE_FROM_PLAN} plan.{" "}
               <Link href="/settings/billing" className="font-medium text-brand-deep hover:underline">Plan &amp; billing</Link>
             </span>
           ) : (
-            <span className="text-sm text-ink-2">On the {MODULE_FROM_PLAN} plan · ask an admin</span>
+            <span className="text-sm text-ink-2">On the {MODULE_FROM_PLAN} plan · ask {canManage ? "an Owner" : "an admin"}</span>
           )
         ) : canManage ? (
           <label className="inline-flex items-center gap-2 text-sm font-medium text-ink">

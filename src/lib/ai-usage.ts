@@ -14,7 +14,7 @@
 
 import { prisma } from "@/lib/prisma";
 
-export type AiUseKind = "field_fill" | "talk_update";
+export type AiUseKind = "field_fill" | "talk_update" | "auto";
 
 export type AiUseClaim = "ok" | "limit" | "not_ready";
 

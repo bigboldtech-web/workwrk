@@ -27,6 +27,7 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { claimAiQuestion, releaseAiQuestion } from "@/lib/ai-allowance";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { isModuleActive } from "@/lib/entitlements";
 import { nextCronRun } from "@/lib/agents/cron";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -179,7 +180,7 @@ export async function runAgentAutonomously(args: {
     },
   });
 
-  const availableTools = toolsForSession({ agentProductSlug: agent.productSlug ?? null });
+  const availableTools = toolsForSession({ agentProductSlug: agent.productSlug ?? null, tablesOn: await isModuleActive(agent.organizationId, "workwrk-tables") });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
     description: t.description,

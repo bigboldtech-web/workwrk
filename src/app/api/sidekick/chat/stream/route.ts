@@ -30,6 +30,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { isModuleActive } from "@/lib/entitlements";
 import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -152,7 +153,7 @@ export async function POST(req: Request) {
   const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   const systemPromptText = contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt;
-  const availableTools = toolsForSession({ agentProductSlug: productScope });
+  const availableTools = toolsForSession({ agentProductSlug: productScope, tablesOn: await isModuleActive(c.chat.organizationId, "workwrk-tables") });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
     description: t.description,

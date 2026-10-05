@@ -1,10 +1,18 @@
 // The plan's AI questions (src/lib/ai-allowance.ts): the cap, the claim
-// handed back only when the model call fails, the per-person limit, and the
-// automatic calls that never spend a question.
+// handed back only when the model call fails, the per-person limit, the
+// automatic calls that never spend a question but take one of the day's
+// automatic uses, and Enterprise's no limit.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = { plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true };
+const state = { plan: "STARTER" as string | null, used: 0, created: [] as Array<Record<string, unknown>>, deleted: [] as string[], orgFound: true, autoAnswer: "ok" as "ok" | "limit" | "not_ready", autoClaims: [] as Array<{ org: string; kind: string; cap: number }> };
+
+vi.mock("@/lib/ai-usage", () => ({
+  claimAiUse: async (org: string, kind: string, cap: number) => {
+    state.autoClaims.push({ org, kind, cap });
+    return state.autoAnswer;
+  },
+}));
 
 vi.mock("@/lib/prisma", () => {
   const aIQuery = {
@@ -33,7 +41,7 @@ vi.mock("@/lib/prisma", () => {
   };
 });
 
-import { AI_ACTIONS_PER_MINUTE, AI_AUTO_PER_MINUTE, aiAutoAllowed, callOrGiveBack, claimAiAction, claimAiQuestion } from "./ai-allowance";
+import { AI_ACTIONS_PER_MINUTE, AI_AUTO_PER_DAY, AI_AUTO_PER_MINUTE, aiAutoAllowed, callOrGiveBack, claimAiAction, claimAiQuestion } from "./ai-allowance";
 
 beforeEach(() => {
   state.plan = "STARTER";
@@ -41,6 +49,8 @@ beforeEach(() => {
   state.created = [];
   state.deleted = [];
   state.orgFound = true;
+  state.autoAnswer = "ok";
+  state.autoClaims = [];
 });
 
 describe("claimAiQuestion", () => {
@@ -75,6 +85,14 @@ describe("claimAiQuestion", () => {
   it("refuses a workspace that does not exist", async () => {
     state.orgFound = false;
     expect((await claimAiQuestion("gone", "u1", "x")).ok).toBe(false);
+  });
+
+  it("never refuses Enterprise, whose 99,999 means no limit, and still records the question", async () => {
+    state.plan = "ENTERPRISE";
+    state.used = 250_000;
+    const r = await claimAiQuestion("org", "u1", "Agent run");
+    expect(r.ok).toBe(true);
+    expect(state.created).toHaveLength(1);
   });
 });
 
@@ -120,15 +138,31 @@ describe("claimAiAction", () => {
 });
 
 describe("aiAutoAllowed", () => {
-  it("runs while the workspace has questions left, and never spends one", async () => {
+  it("runs while the workspace has questions left, never spends one, and takes one of the day's automatic uses", async () => {
     state.used = 49;
     expect(await aiAutoAllowed("org", "auto-1")).toBe(true);
     expect(state.created).toEqual([]);
+    expect(state.autoClaims).toEqual([{ org: "org", kind: "auto", cap: AI_AUTO_PER_DAY.STARTER }]);
   });
 
-  it("stops at the total", async () => {
+  it("stops at the day's total of automatic calls, and when the day's table is missing", async () => {
+    state.autoAnswer = "limit";
+    expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
+    state.autoAnswer = "not_ready";
+    expect(await aiAutoAllowed("org", "auto-5")).toBe(false);
+  });
+
+  it("uses the plan's daily total, and runs for Enterprise however many questions it has used", async () => {
+    state.plan = "ENTERPRISE";
+    state.used = 250_000;
+    expect(await aiAutoAllowed("org", "auto-6")).toBe(true);
+    expect(state.autoClaims).toEqual([{ org: "org", kind: "auto", cap: AI_AUTO_PER_DAY.ENTERPRISE }]);
+  });
+
+  it("stops at the total, before taking any of the day", async () => {
     state.used = 50;
     expect(await aiAutoAllowed("org", "auto-2")).toBe(false);
+    expect(state.autoClaims).toEqual([]);
   });
 
   it("stops past the person's per-minute limit", async () => {
