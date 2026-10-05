@@ -39,8 +39,10 @@ const INITIAL_WINDOW_DAYS = 30;
  * made again.
  */
 function failureIsPersonal(err: unknown): boolean {
-  const e = err as { googleError?: unknown; message?: unknown } | null;
+  const e = err as { googleError?: unknown; message?: unknown; status?: unknown } | null;
   if (e?.googleError === "invalid_grant") return true;
+  // The calendar was deleted, or is no longer shared with them.
+  if (e?.status === 404) return true;
   const msg = typeof e?.message === "string" ? e.message : "";
   return msg.includes("user must reconnect") || msg.includes("No master subscription");
 }
@@ -92,7 +94,8 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
   });
   if (!master) throw new Error("No master subscription with tokens");
 
-  const token = await ensureFreshToken(master);
+  let token = await ensureFreshToken(master);
+  let refreshed = false;
 
   // User's orgId for writing tasks.
   const user = await prisma.user.findUnique({
@@ -116,6 +119,15 @@ export async function syncOne(sub: CalendarSubscription): Promise<{
     try {
       page = await listEvents(token, calendarId, { syncToken, pageToken, timeMin });
     } catch (err: any) {
+      // The stored token was refused before its expiry (the person revoked
+      // access, or Google ended the token): refresh once and try again, so
+      // the answer is Google's own reason (invalid_grant is the person's,
+      // invalid_client the server's).
+      if (err?.status === 401 && !refreshed) {
+        refreshed = true;
+        token = await ensureFreshToken(master, { force: true });
+        continue;
+      }
       if (err?.code === 410) {
         // Sync token expired — reset and let the next cron pass do a full resync.
         await prisma.calendarSubscription.update({

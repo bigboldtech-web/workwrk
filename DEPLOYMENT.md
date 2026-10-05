@@ -8,10 +8,14 @@ reaches the server is in [scripts/DEPLOY-NOTES.md](scripts/DEPLOY-NOTES.md).
 ## Releases
 
 A push to `main` runs CI (type check and tests). When it passes, the Deploy
-workflow deploys that exact commit: it applies the database migrations,
+workflow deploys the newest commit on `main` whose CI passed on a push (an
+automatic run never goes back, and does nothing when that commit is already
+live; a re-run of CI never deploys): it applies the database migrations,
 builds beside the live release, swaps the new build in, reloads pm2, checks
 the new release answers, and puts the previous build back if it does not.
-Nothing is deployed by hand over SSH.
+Releases go through the workflow. The only deploys by hand are the Going back
+steps in [scripts/DEPLOY-NOTES.md](scripts/DEPLOY-NOTES.md), for when Actions
+cannot run.
 
 ## Database
 
@@ -108,7 +112,8 @@ lost disk or a bad write.
 - Uptime: an uptime monitor on `https://app.workwrk.com/api/health`, which
   answers 503 when the database is unreachable and names the build it serves.
 - Scheduled jobs: `OPS_ALERT_EMAIL` (above), and for the email-queue job the
-  cron log or a dead-man check on its row.
+  dead-man check on its row (scripts/CRON-SETUP.md), a launch step in
+  LAUNCH-CHECKLIST.md.
 - Error tracking: not wired yet.
 
 ## Google sign in and Calendar
