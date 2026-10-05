@@ -131,11 +131,19 @@ async function prune(prefix, days) {
   // must not be pruned down to nothing.
   const newest = all.reduce((m, o) => (!m || new Date(o.at) > new Date(m.at) ? o : m), null);
   const doomed = old.filter((o) => o.key !== newest?.key);
+  // DeleteObjects answers 200 and lists every key it refused under Errors
+  // (a key without delete rights refuses all of them): those are counted,
+  // and any refusal fails the run, so a log that says "pruned" means pruned.
+  let refused = 0;
   if (localDir) for (const o of doomed) unlinkSync(join(localDir, o.key));
   else for (let i = 0; i < doomed.length; i += 1000) {
-    await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: doomed.slice(i, i + 1000).map((o) => ({ Key: o.key })) } }));
+    const res = await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: doomed.slice(i, i + 1000).map((o) => ({ Key: o.key })) } }));
+    refused += res.Errors?.length ?? 0;
   }
-  console.log(`pruned ${doomed.length} of ${all.length} under ${prefix} older than ${n} days`);
+  console.log(`pruned ${doomed.length - refused} of ${all.length} under ${prefix} older than ${n} days`);
+  if (refused > 0) {
+    die(`${refused} old ${refused === 1 ? "backup" : "backups"} under ${prefix} could not be deleted (the key may lack delete rights; set BACKUP_PRUNE=off and a lifecycle rule instead)`);
+  }
 }
 
 const [cmd, a, b] = process.argv.slice(2);

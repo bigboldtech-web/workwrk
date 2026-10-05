@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+# The deploy's parked packages (.github/workflows/deploy.yml): ignored so
+# Tailwind's source scan and git never read them.
+/node_modules-prev
+/node_modules-failed
 /.pnp
 .pnp.*
 .yarn/*
@@ -16,6 +20,10 @@
 # next.js
 /.next/
 /out/
+# The deploy's builds beside the live one (NEXT_DIST_DIR and the swap).
+/.next-staging/
+/.next-prev/
+/.next-failed/
 
 # production
 /build

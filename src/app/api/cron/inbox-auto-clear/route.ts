@@ -44,6 +44,7 @@ import { hasClearedAt, isMissingClearedAtError, setClearedAtAvailable } from "@/
 // only way to say "the JSON column is SQL NULL" in a filter.
 import { Prisma } from "@/generated/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ const ALLOWED_DAYS = new Set([7, 14, 30]);
 /** Preference rows are read in pages: a nightly job may not load a whole table. */
 const PAGE = 500;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   // Refusing is the safe answer. A delete sweep that runs for anybody who
   // can reach the URL is worse than a sweep that never runs.
   const refused = cronRefusal(req);
@@ -149,3 +150,6 @@ export async function POST(req: NextRequest) {
     detail: swept,
   });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("inbox-auto-clear", handle);

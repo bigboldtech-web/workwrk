@@ -25,12 +25,13 @@ import { prisma } from "@/lib/prisma";
 import { retentionOf } from "@/lib/settings/org-policy";
 import { auditPurgeWhere } from "@/lib/audit-retention";
 import { cronRefusal } from "@/lib/cron-auth";
+import { cronJob } from "@/lib/cron-result";
 
 export const dynamic = "force-dynamic";
 
 const BATCH = 5000;
 
-export async function POST(req: NextRequest) {
+async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
@@ -86,3 +87,6 @@ export async function POST(req: NextRequest) {
   }
   return Response.json({ ok: true, dryRun, orgs: report.length, report });
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("audit-purge", handle);

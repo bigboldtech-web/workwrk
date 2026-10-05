@@ -15,10 +15,19 @@ function getTransporter() {
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || "587"),
     secure: process.env.SMTP_PORT === "465",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+    // A login only when both are set: a relay that needs none (and still
+    // offers AUTH) failed every send when nodemailer tried empty ones.
+    auth:
+      process.env.SMTP_USER && process.env.SMTP_PASS
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
+    // A mail server that stops answering fails a send in seconds, well
+    // inside the claim's lease (processEmailQueue): nodemailer's own
+    // defaults (two minutes to connect, ten of silence) let a batch outlast
+    // its lease, and a second run then sent the same emails again.
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 60_000,
   });
 }
 
@@ -189,11 +198,13 @@ const RETRY_DELAYS_MIN = [1, 5, 30, 120, 360];
 export const EMAIL_MAX_ATTEMPTS = RETRY_DELAYS_MIN.length + 1;
 // A claimed row holds its claim this long. A run that dies while sending (a
 // deploy's reload, a crash) leaves its rows SENDING; once the claim runs out
-// the next run takes them again, while they are still worth sending.
+// the next run takes them again, however old the row is (a backlog held
+// while mail was off is sent the day it comes on, and a reload mid-flush
+// must not lose it), until its last try. A row interrupted on its last try,
+// and a row left SENDING more than a day ago from before claims had a lease
+// (no nextAttemptAt), are closed as FAILED instead.
 const CLAIM_LEASE_MIN = 15;
-// A row still not sent a day after it was queued is closed as FAILED rather
-// than sent late: its links (resets, verifications) have long expired.
-const GIVE_UP_HOURS = 24;
+const LEGACY_SENDING_HOURS = 24;
 
 /** The wait before the next try, after `attempts` failed ones. */
 export function emailRetryDelayMs(attempts: number): number {
@@ -210,9 +221,10 @@ const UTC_NOW = `(now() AT TIME ZONE 'UTC')`;
 // Rows a run may claim: queued and due, or SENDING with the claim run out.
 const CLAIMABLE = `(
   ("status" = 'QUEUED' AND attempts < ${EMAIL_MAX_ATTEMPTS} AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${UTC_NOW}))
-  OR ("status" = 'SENDING' AND attempts < ${EMAIL_MAX_ATTEMPTS}
-      AND "createdAt" > ${UTC_NOW} - interval '${GIVE_UP_HOURS} hours'
-      AND COALESCE("nextAttemptAt", "createdAt" + interval '${CLAIM_LEASE_MIN} minutes') <= ${UTC_NOW})
+  OR ("status" = 'SENDING' AND attempts < ${EMAIL_MAX_ATTEMPTS} AND (
+        ("nextAttemptAt" IS NOT NULL AND "nextAttemptAt" <= ${UTC_NOW})
+        OR ("nextAttemptAt" IS NULL AND "createdAt" + interval '${CLAIM_LEASE_MIN} minutes' <= ${UTC_NOW}
+            AND "createdAt" > ${UTC_NOW} - interval '${LEGACY_SENDING_HOURS} hours')))
 )`;
 
 let warnedEmailOff = false;
@@ -248,10 +260,19 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
     return { sent: 0, retrying: 0, failed: 0, held };
   }
 
-  // Rows a run died on more than a day ago are closed, not sent late.
-  const giveUpBefore = new Date(Date.now() - GIVE_UP_HOURS * 3_600_000);
-  const interrupted = { status: "SENDING" as const, createdAt: { lt: giveUpBefore } };
-  const giveUp = { status: "FAILED" as const, error: "Interrupted while sending, and not sent within a day.", nextAttemptAt: null };
+  // Rows nothing will take again are closed (the claim's rules above): ones
+  // interrupted on their last try, once that claim has run out (a live run
+  // sending a row right now is never touched), and ones left SENDING more
+  // than a day ago from before claims had a lease.
+  const legacyBefore = new Date(Date.now() - LEGACY_SENDING_HOURS * 3_600_000);
+  const interrupted = {
+    status: "SENDING" as const,
+    OR: [
+      { attempts: { gte: EMAIL_MAX_ATTEMPTS }, nextAttemptAt: { lt: new Date() } },
+      { nextAttemptAt: null, createdAt: { lt: legacyBefore } },
+    ],
+  };
+  const giveUp = { status: "FAILED" as const, error: "Interrupted while sending, and not taken again.", nextAttemptAt: null };
   await prisma.emailLog.updateMany({ where: { ...interrupted, template: { in: [...SECRET_LINK_TEMPLATES] } }, data: { ...giveUp, html: null } });
   await prisma.emailLog.updateMany({ where: { ...interrupted, template: { notIn: [...SECRET_LINK_TEMPLATES] } }, data: giveUp });
 
@@ -260,8 +281,18 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
   // all the time (send-reminders queues hundreds at once). FOR UPDATE SKIP
   // LOCKED makes a second run pass over the rows the first is claiming, and
   // the outer check makes it skip any row that was claimed while it waited;
-  // without both, two runs read the same ids and sent each email twice. The
-  // claim is a lease (nextAttemptAt), so a row whose run died is taken again.
+  // without both, two runs read the same ids and sent each email twice.
+  //
+  // The claim is a LEASE (nextAttemptAt), so a row whose run died is taken
+  // again, and its attempts count is the claim's token: every claim adds one.
+  // Before each send the run renews the lease on that row, but only while
+  // the row is still SENDING with ITS attempts; if another run took it after
+  // a lease ran out, this run skips it. Every write after the claim carries
+  // the same condition, so a run never overwrites what another run recorded
+  // (a SENT turned back to QUEUED and sent again). A run sends twice only if
+  // one send outlasts the renewed lease, which the transport's timeouts
+  // rule out.
+  //
   // A claimed row can be deleted while it is sent (its company deleted for
   // good, /api/cron/org-hard-delete), so each write after the claim is an
   // updateMany: a row that is gone updates nothing, where update would throw
@@ -288,7 +319,27 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
   });
 
   for (const email of emails) {
+    // This run's hold on the row: SENDING with the attempts its claim set.
+    const ours = { id: email.id, status: "SENDING" as const, attempts: email.attempts };
     try {
+      const renewed = await prisma.$executeRawUnsafe(
+        `UPDATE "EmailLog" SET "nextAttemptAt" = ${UTC_NOW} + interval '${CLAIM_LEASE_MIN} minutes'
+         WHERE id = $1 AND status = 'SENDING' AND attempts = $2`,
+        email.id,
+        email.attempts,
+      );
+      // Another run holds it now, or it was closed or deleted: not ours to send.
+      if (renewed !== 1) continue;
+      // A secret-link email whose stored content is gone cannot be sent
+      // again: what renderFromLog builds is no email, and its link is gone.
+      if (!email.html && SECRET_LINK_TEMPLATES.has(email.template)) {
+        await prisma.emailLog.updateMany({
+          where: ours,
+          data: closedRowData(email.template, { status: "FAILED", error: "Its content was cleared before it could be sent.", nextAttemptAt: null }),
+        });
+        failed++;
+        continue;
+      }
       if (!EMAIL_ENABLED || !transporter) {
         // Development with no mail transport: log instead of sending.
         console.log(`\n========== EMAIL (dev) ==========`);
@@ -303,7 +354,7 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
         console.log(`================================\n`);
 
         await prisma.emailLog.updateMany({
-          where: { id: email.id },
+          where: ours,
           data: closedRowData(email.template, { status: "SENT", sentAt: new Date(), nextAttemptAt: null }),
         });
         sent++;
@@ -318,7 +369,7 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
       });
 
       await prisma.emailLog.updateMany({
-        where: { id: email.id },
+        where: ours,
         data: closedRowData(email.template, { status: "SENT", sentAt: new Date(), nextAttemptAt: null }),
       });
       sent++;
@@ -326,13 +377,13 @@ export async function processEmailQueue(): Promise<EmailQueueResult> {
       console.error(`[Email] Failed to send to ${email.to}:`, err.message);
       if (email.attempts >= EMAIL_MAX_ATTEMPTS) {
         await prisma.emailLog.updateMany({
-          where: { id: email.id },
+          where: ours,
           data: closedRowData(email.template, { status: "FAILED", error: err.message, nextAttemptAt: null }),
         });
         failed++;
       } else {
         await prisma.emailLog.updateMany({
-          where: { id: email.id },
+          where: ours,
           data: { status: "QUEUED", error: err.message, nextAttemptAt: new Date(Date.now() + emailRetryDelayMs(email.attempts)) },
         });
         retrying++;

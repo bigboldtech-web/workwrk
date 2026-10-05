@@ -6,9 +6,9 @@
 import { prisma } from "@/lib/prisma";
 import { fireReminder } from "@/lib/reminders";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronResult } from "@/lib/cron-result";
+import { cronJob, cronResult } from "@/lib/cron-result";
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const refused = cronRefusal(req);
   if (refused) return refused;
   const due = await prisma.reminder.findMany({
@@ -24,3 +24,6 @@ export async function POST(req: Request) {
   }
   return cronResult("reminders", { fired, failed, scanned: due.length }, failed);
 }
+
+// Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
+export const POST = cronJob("reminders", handle);
