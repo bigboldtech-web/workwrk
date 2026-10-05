@@ -84,7 +84,8 @@ to rerun. Use `--dry-run` first.
 
 Files that land on the server's disk instead (workspace logos, avatars, and
 uploads made while object storage is unset or failing) are in
-`public/uploads`; the nightly backup copies them (scripts/BACKUPS.md).
+`storage/uploads`, outside `public/`, served only by the uploads route; the
+nightly backup copies them (scripts/BACKUPS.md).
 
 ## Scheduled jobs
 

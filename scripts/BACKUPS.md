@@ -1,9 +1,11 @@
 # Backups
 
 Every night, root's crontab runs `scripts/backup/backup.sh`. It dumps the
-database and archives `public/uploads` (workspace logos, avatars, and files
-saved while object storage was unset or failing), encrypts both on the
-server, and copies them to a bucket that is not the app's own. Without this,
+database and archives the files the app keeps on its own disk
+(`storage/uploads`: workspace logos, avatars, and files saved while object
+storage was unset or failing; and `public/uploads` while anything written
+before Batch 11 is still there), encrypts both on the server, and copies them
+to a bucket that is not the app's own. Without this,
 the database and the local uploads exist only on the server's disk, and one
 disk failure loses every customer's data.
 
@@ -105,8 +107,10 @@ or `sudo -u postgres`, depending on how Postgres was installed.
    rename the databases), then `pm2 start workwrk` and check
    `https://app.workwrk.com/api/health`.
 5. Uploads: fetch and decrypt the newest `uploads/<time>.tar.gz.enc`, then
-   `openssl enc -d ... | tar -xzf - -C /www/wwwroot/workwrk.com/public` and
-   `chown -R www:www /www/wwwroot/workwrk.com/public/uploads`.
+   `openssl enc -d ... | tar -xzf - -C /www/wwwroot/workwrk.com` (it holds
+   `storage/uploads/` and, for an older backup, `public/uploads/`) and
+   `chown -R www:www /www/wwwroot/workwrk.com/storage`. Files restored into
+   `public/uploads` move to `storage/uploads` by themselves at the next start.
 
 Everything written after the backup's time is lost; tell the customers whose
 workspaces changed in that window.

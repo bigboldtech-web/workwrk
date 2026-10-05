@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Nightly off-site backup of WorkwrK: the database and public/uploads (logos,
-# avatars, files saved while object storage was unset or failing), each
+# Nightly off-site backup of WorkwrK: the database and the files the app keeps
+# on its own disk (storage/uploads: logos, avatars, files saved while object
+# storage was unset or failing; plus public/uploads, where they lived before
+# Batch 11 moved them out, while anything is left there), each
 # ENCRYPTED on this server, then copied to a bucket that is not the app's own.
 #
 # WHY. The database, its only dumps and the local uploads all sat on this one
@@ -65,9 +67,15 @@ echo "backup: $STAMP database"
 "$PG_DUMP" --format=custom --no-owner --no-privileges "$PG_URL" | encrypt "$WORK/db.dump.enc"
 node "$STORE_JS" put "$WORK/db.dump.enc" "db/$STAMP.dump.enc"
 
-if [ -d "$APP/public/uploads" ]; then
+# One archive of both places, as storage/uploads/... and public/uploads/...,
+# so a restore puts each file back where the app reads it.
+DIRS=""
+[ -d "$APP/storage/uploads" ] && DIRS="$DIRS storage/uploads"
+[ -d "$APP/public/uploads" ] && DIRS="$DIRS public/uploads"
+if [ -n "$DIRS" ]; then
   echo "backup: $STAMP uploads"
-  tar -C "$APP/public" -czf - uploads | encrypt "$WORK/uploads.tar.gz.enc"
+  # shellcheck disable=SC2086
+  tar -C "$APP" -czf - $DIRS | encrypt "$WORK/uploads.tar.gz.enc"
   node "$STORE_JS" put "$WORK/uploads.tar.gz.enc" "uploads/$STAMP.tar.gz.enc"
 fi
 
