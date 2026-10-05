@@ -416,7 +416,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           <SettingsRow
             id="data.retention.auditDays"
             label="Keep the audit log for"
-            helper={mode === "forever" ? "Every entry is kept." : `Not enforced yet. Once the nightly job is installed, entries older than this are removed (at least ${b.auditDays.min} days; decisions, invitations, consent and staff actions are always kept).`}
+            helper={mode === "forever" ? "Every entry is kept." : `Not enforced yet. Once the nightly job is installed, entries older than this are removed (at least ${b.auditDays.min} days; review decisions, goal creators, invitations, changes to the access switches and Public links, consent, staff actions and a few system records are always kept).`}
             savedAt={saved.audit}
             error={retryOf("audit")}
             readOnlyValue={canPurge ? undefined : cur.retention.auditDays ? `${cur.retention.auditDays} days` : "Forever"}
@@ -454,7 +454,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           write("audit", () => ret.save({ auditDays: n }), () => { setAuditMode(null); setAuditDays(null); });
         }}
       >
-        <p className="text-base text-ink-2">Once the nightly job is installed, entries older than the window are removed for good. You can change the number of days next.</p>
+        <p className="text-base text-ink-2">Once the nightly job is installed, entries older than the window are removed for good, except the kinds named on that row. You can change the number of days next.</p>
       </ConfirmDialog>
       <SettingsCard title="Privacy" id="data.privacy">
         <SettingsRow

@@ -71,16 +71,21 @@ export async function liveAccountFor(email: string): Promise<{ id: string; organ
   });
 }
 
-/** Whether this address is already in the invited workspace, as its own row or as a membership. */
-export async function alreadyInOrg(email: string, organizationId: string): Promise<{ member: boolean; inactive: boolean }> {
+/**
+ * Whether this address is already in the invited workspace, as its own row or
+ * as a membership. `removed`: its own row was removed (Directory, Removed, to
+ * restore). `inactive`: removed or deactivated. `elsewhere`: in only through a
+ * membership, so the person is anchored in (working in) another workspace.
+ */
+export async function alreadyInOrg(email: string, organizationId: string): Promise<{ member: boolean; inactive: boolean; removed: boolean; elsewhere: boolean }> {
   const own = await prisma.user.findFirst({
     where: { email: { equals: email.trim(), mode: "insensitive" }, organizationId },
     select: { deletedAt: true, status: true },
   });
-  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE" };
+  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE", removed: !!own.deletedAt, elsewhere: false };
   const membership = await prisma.organizationMembership.findFirst({
     where: { organizationId, user: { email: { equals: email.trim(), mode: "insensitive" }, deletedAt: null } },
     select: { id: true },
   });
-  return { member: !!membership, inactive: false };
+  return { member: !!membership, inactive: false, removed: false, elsewhere: !!membership };
 }
