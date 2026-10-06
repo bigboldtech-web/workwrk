@@ -74,7 +74,15 @@ export async function GET() {
     take: 200,
   });
 
-  const installedSlugs = new Set(installed.map((a) => a.slug));
+  // Every slug a workspace agent holds, a teammate's included: a catalog
+  // agent whose tools were chosen in AI teammates leaves the list above, but
+  // must not be offered (and added over its own prompt) again (review round 2).
+  const held = await prisma.agent.findMany({
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
+    select: { slug: true },
+    take: 500,
+  });
+  const installedSlugs = new Set([...installed.map((a) => a.slug), ...held.map((a) => a.slug)]);
   const inScope = new Set(Object.keys(PRODUCT_TOOL_NAMES));
   const available = AGENT_CATALOG.filter((a) => !installedSlugs.has(a.slug) && inScope.has(a.productSlug)).map((a) => ({
     slug: a.slug,

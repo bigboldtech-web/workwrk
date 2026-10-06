@@ -706,6 +706,8 @@ export function teammateLimitMessage(n: number, plan: string, scope: "personal" 
 // ── Settings drawer ──────────────────────────────────────────────────
 
 export const TEAMMATE_SETTINGS = {
+  /** An agent made before teammates got its tools chosen here: its old schedule stopped (review round 2). */
+  scheduleStopped: "Its schedule from Workspace agents stopped, because a teammate runs on routines. Set one up in Routines.",
   tabInstructions: "Instructions",
   tabTools: "Tools and approvals",
   tabMemory: "Memory",
@@ -1023,6 +1025,12 @@ function someNames(names: readonly string[]): string {
 export const INVITE_CARD = {
   level: (words: string) => `Joins as: ${words}.`,
   role: (title: string) => `Role: ${title}. Its KRAs and published SOPs are assigned when they accept.`,
+  /** KRAs listed: they replace the role's own, and the role's SOPs are not added (accept-invite seedRoleDefinition). */
+  roleListedOnly: (title: string) => `Role: ${title}. Only the KRAs and SOPs below are assigned, not the role's own.`,
+  /** Only SOPs listed: the role's KRAs, with the listed SOPs instead of its own. */
+  roleKrasListedSops: (title: string) => `Role: ${title}. Its KRAs are assigned when they accept, and the SOPs below replace its own.`,
+  /** The address already has an account: accepting signed in sets only the level. */
+  existingAccount: "They already use WorkwrK, so their role, manager, department, office, KRAs and SOPs aren't set when they join. Set them in Members afterwards.",
   manager: (name: string) => `Reports to ${name}.`,
   department: (name: string) => `Department: ${name}.`,
   office: (name: string) => `Office: ${name}.`,

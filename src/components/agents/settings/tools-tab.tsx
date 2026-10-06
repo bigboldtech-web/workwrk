@@ -48,12 +48,13 @@ export function ToolsTab({
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
-    const r = await apiFetch<{ teammate: TeammateDetail }>(base, { method: "PATCH", json: body });
+    const r = await apiFetch<{ teammate: TeammateDetail; scheduleStopped?: boolean }>(base, { method: "PATCH", json: body });
     setBusy(false);
     if (!r.ok) {
       toast(r.code ? r.error : TEAMMATE_SETTINGS.saveFailed, { tone: "danger" });
       return;
     }
+    if (r.data.scheduleStopped) toast(TEAMMATE_SETTINGS.scheduleStopped);
     onSaved(r.data.teammate);
   }
 

@@ -13,6 +13,7 @@ type Gate = {
 };
 
 const db = vi.hoisted(() => ({
+  accounts: {} as Record<string, { id: string; organizationId: string }>,
   tasks: {} as Record<string, Gate | number>,
   people: {} as Record<string, { id: string; firstName: string; lastName: string; email: string }>,
   personalBoards: new Set<string>(),
@@ -84,9 +85,15 @@ vi.mock("@/lib/prisma", () => ({
     conversationMember: { count: async () => db.members, findFirst: async () => null },
     doc: { findFirst: async (a: { where: { id: string } }) => db.docs[a.where.id] ?? null },
     role: { findFirst: async () => ({ id: "r1", title: "Account Executive" }) },
-    kRA: { findFirst: async () => ({ id: "k1", name: "Pipeline health" }) },
+    kRA: {
+      findFirst: async () => ({ id: "k1", name: "Pipeline health" }),
+      findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, name: `KRA ${id}` })),
+    },
+    sOP: { findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, title: `SOP ${id}` })) },
   },
 }));
+// Whether the invited address already has an account, and where (invite-facts.server.ts).
+vi.mock("@/lib/auth/invite-facts.server", () => ({ liveAccountFor: async (email: string) => db.accounts[email.toLowerCase()] ?? null }));
 
 import { prepareCall, type PrepareContext } from "./previews";
 import { INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
@@ -122,6 +129,7 @@ function task(id: string, o: { personal: boolean; ownerId?: string | null; assig
 }
 
 beforeEach(() => {
+  db.accounts = {};
   db.tasks = {};
   db.people = { [ME.email]: ME, [MAX.email]: MAX };
   db.personalBoards = new Set(["b-personal"]);
@@ -285,6 +293,24 @@ describe("the card's choices", () => {
     if (!r.ok) return;
     expect(r.preview.lines).toEqual([INVITE_CARD.level("Team Lead"), INVITE_CARD.role("Account Executive"), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
     expect(r.input).toEqual({ email: "new@x.com", ...legacyLevelRow("TEAM_LEAD"), roleId: "r1" });
+  });
+
+  it("says what acceptance seeds when KRAs or SOPs are listed with a role (review round 2)", async () => {
+    // KRAs listed: they replace the role's own, and its SOPs are not added.
+    const kras = await prepareCall("invite_person_with_role", { email: "new@x.com", roleId: "r1", kraIds: ["k9"] }, ctx());
+    expect(kras.ok && kras.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.roleListedOnly("Account Executive"), INVITE_CARD.kras(["KRA k9"]), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+    // Only SOPs listed: the role's KRAs, with these SOPs instead of its own.
+    const sops = await prepareCall("invite_person_with_role", { email: "new@x.com", roleId: "r1", sopIds: ["s4"] }, ctx());
+    expect(sops.ok && sops.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.roleKrasListedSops("Account Executive"), INVITE_CARD.sops(["SOP s4"]), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+  });
+
+  it("promises and stores no placement for someone who already uses WorkwrK: they accept signed in, which sets only the level (review round 2)", async () => {
+    db.accounts["priya@acme.eu"] = { id: "u-eu", organizationId: "org-eu" };
+    const r = await prepareCall("invite_person_with_role", { email: "priya@acme.eu", roleId: "r1", kraIds: ["k9"] }, ctx());
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+    expect(r.input).toEqual({ email: "priya@acme.eu", ...legacyLevelRow("EMPLOYEE") });
   });
 
   it("never offers it where a manager set the tool to ask", async () => {

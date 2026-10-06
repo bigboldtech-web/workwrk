@@ -283,6 +283,13 @@ export const routeDb = {
   agentRoutine: {
     findMany: async (a: Args) => pickMany(db.routines, a),
     findFirst: async (a: Args) => copy(db.routines.find((r) => matches(r, a.where))),
+    update: async (a: Args & { data: Row }) => {
+      const row = db.routines.find((r) => matches(r, a.where));
+      if (!row) throw Object.assign(new Error("Record to update not found."), { code: "P2025" });
+      Object.assign(row, a.data);
+      routeDb.writes.push("agentRoutine.update");
+      return copy(row);
+    },
     deleteMany: async (a: Args) => {
       const kept = db.routines.filter((r) => !matches(r, a.where));
       const count = db.routines.length - kept.length;

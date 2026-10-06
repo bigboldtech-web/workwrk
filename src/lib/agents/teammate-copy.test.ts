@@ -224,6 +224,7 @@ describe("the invitation card", () => {
     const all = [
       copy.INVITE_CARD.level("x"), copy.INVITE_CARD.role("x"), copy.INVITE_CARD.manager("x"), copy.INVITE_CARD.department("x"),
       copy.INVITE_CARD.office("x"), copy.INVITE_CARD.kras(["x"]), copy.INVITE_CARD.sops(["x"]), copy.INVITE_CARD.unknown("x"), copy.NEW_OPEN_TO_ALL,
+      copy.INVITE_CARD.roleListedOnly("x"), copy.INVITE_CARD.roleKrasListedSops("x"), copy.INVITE_CARD.existingAccount, copy.TEAMMATE_SETTINGS.scheduleStopped,
     ];
     for (const line of all) expect(line).not.toMatch(/\u2014|\u2013|--/);
   });

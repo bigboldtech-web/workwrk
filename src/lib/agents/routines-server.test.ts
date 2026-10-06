@@ -336,6 +336,17 @@ describe("processDueRoutines", () => {
     expect(s.routines.get("r1")).toMatchObject({ status: "paused", pausedReason: "no_next_run" });
   });
 
+  it("runs a leap day's routine at its one slot, then pauses it, since no later time comes within a year (review round 2)", async () => {
+    const leap = new Date("2028-02-29T09:00:00Z");
+    const row = s.routines.get("r1")!;
+    row.schedule = "CRON_TZ=UTC 0 9 29 2 *";
+    row.nextRunAt = leap;
+    const counts = await processDueRoutines(leap, RUNNER);
+    expect(counts).toMatchObject({ due: 1, succeeded: 1, paused: 1 });
+    expect(s.runTeammateTurn).toHaveBeenCalledTimes(1);
+    expect(s.routines.get("r1")).toMatchObject({ status: "paused", pausedReason: "no_next_run" });
+  });
+
   const PAUSES: Array<[string, () => void, string, string]> = [
     ["the teammate was removed", () => (s.agent = agent({ status: "ARCHIVED" })), "agent_removed", "This teammate was removed."],
     ["the person was deactivated", () => s.resolveActingPerson.mockResolvedValue({ ok: false, reason: "inactive" }), "person_gone", "The person it works for is no longer in the workspace."],
