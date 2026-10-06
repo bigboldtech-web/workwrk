@@ -19,10 +19,11 @@ import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
 import { isValidSchedule } from "@/lib/agents/schedule-words";
 import { auditAgent } from "@/lib/agents/audit";
+import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
 
 async function resolveAgent(slug: string, organizationId: string) {
   return prisma.agent.findFirst({
-    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
+    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" }, ...LEGACY_AGENT },
     select: {
       id: true, name: true, status: true, scheduleCron: true,
       autonomousEnabled: true, autonomousPrompt: true,

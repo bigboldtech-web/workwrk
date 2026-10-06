@@ -57,6 +57,7 @@ import {
 import { isToolName, type ToolName } from "./tool-names";
 import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
+import { badInputSentence, checkToolInput } from "./input-check";
 
 /** The most characters of one result the model is given; past it the result is cut and says so. */
 export const TOOL_DATA_MAX = 30_000;
@@ -194,6 +195,11 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const name = a.name;
   const tool = isToolName(name) && enabled.has(name) && !TEAMMATE_EXCLUDED.has(name) ? TOOLS[name] : undefined;
   if (!isToolName(name) || !tool) return refuse(ACTION_ERRORS.toolOff);
+  // The model API does not enforce input_schema: no read or write sees an
+  // input the tool's own schema does not describe (input-check.ts), so an
+  // object where a string belongs never reaches a query as a filter.
+  const checked = checkToolInput(tool.input_schema, a.input);
+  if (!checked.ok) return refuse(badInputSentence(checked.field));
   const teammate: Omit<TeammateToolContext, "timezone"> = {
     agentId: a.agent.id,
     agentName: a.agent.name,
@@ -204,12 +210,12 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
 
   // Reads run, in a practice run too: they change nothing.
   if (BASE_RISK[name] === "READ") {
-    const ran = await runHandler(tool, toolCtxFor(a.person, teammate), input);
+    const ran = await runHandler(tool, toolCtxFor(a.person, teammate), checked.input);
     if (!ran.ok) return done("failed", { error: ran.error }, { errorText: ran.error });
     return done(toolOutcome(name, ran.result).failed ? "failed" : "ran", ran.result);
   }
 
-  const prepared = await prepareCall(name, input, {
+  const prepared = await prepareCall(name, checked.input, {
     person: a.person,
     teammate: { agentId: a.agent.id, agentName: a.agent.name, trigger: a.turn.trigger },
     agentRules: a.agentRules,
@@ -352,10 +358,8 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   }
   const href = outcome.href ?? a.action.preview?.target?.href ?? null;
   const result: ActionResult = { text: toolOutcomeSentence(name, a.input, outcome).text, href, data };
-  await prisma.agentAction.updateMany({
-    where: { id: a.action.id, status: "RUNNING" },
-    data: { status: "EXECUTED", result: json(result), executedAt: new Date(), error: null },
-  });
+  // It ran: the audit row is written first, so nothing after it can leave an
+  // action that happened with no record of it (review round 1).
   await auditAgentAction({
     person: a.person,
     agent: a.agent,
@@ -369,6 +373,20 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
     routineId: a.action.routineId,
     decidedVia: a.decidedVia,
   });
+  try {
+    await prisma.agentAction.updateMany({
+      where: { id: a.action.id, status: "RUNNING" },
+      data: { status: "EXECUTED", result: json(result), executedAt: new Date(), error: null },
+    });
+  } catch (err) {
+    // The full result would not store: keep the outcome with its sentence
+    // alone, so the card still says it ran and nothing asks to run it again.
+    console.error(`[agents] action ${a.action.id} result not stored: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+    await prisma.agentAction.updateMany({
+      where: { id: a.action.id, status: "RUNNING" },
+      data: { status: "EXECUTED", result: json({ text: clampText(result.text, 240), href: result.href }), executedAt: new Date(), error: null },
+    });
+  }
   return { status: "EXECUTED", result, data };
 }
 

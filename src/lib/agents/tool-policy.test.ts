@@ -39,13 +39,14 @@ describe("every tool has a class", () => {
   it("matches the 3.3 table", () => {
     const by = (risk: ToolRisk) => ALL.filter((t) => BASE_RISK[t] === risk).sort();
     expect(by("IRREVERSIBLE")).toEqual(["invite_person_with_role"]);
-    expect(by("OUTWARD")).toEqual(["create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
+    // A new doc, form or table is open to every member: making one is outward (review round 1).
+    expect(by("OUTWARD")).toEqual(["create_data_table", "create_doc", "create_form", "create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
     expect(by("READ")).toEqual([
       "get_team_alignment_rollup", "list_data_tables", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
       "list_my_sops", "list_my_weekly_reviews", "read_talk", "search_contracts", "search_employees", "search_meetings",
       "search_okrs", "search_sops", "search_tasks",
     ]);
-    expect(by("INTERNAL")).toHaveLength(ALL.length - 15 - 6 - 1);
+    expect(by("INTERNAL")).toHaveLength(ALL.length - 15 - 9 - 1);
   });
 
   it("an escalation never lowers a class, and an unknown tool is the strictest", () => {
@@ -62,10 +63,10 @@ describe("gateFor", () => {
   });
 
   it("INTERNAL runs unless someone asked to be asked", () => {
-    expect(gate("create_doc", "INTERNAL")).toBe("run");
-    expect(gate("create_doc", "INTERNAL", { personRules: { create_doc: "ask" } })).toBe("ask");
-    expect(gate("create_doc", "INTERNAL", { agentRules: { create_doc: "ask" } })).toBe("ask");
-    expect(gate("create_doc", "INTERNAL", { personRules: { create_doc: "always" } })).toBe("run");
+    expect(gate("create_sop", "INTERNAL")).toBe("run");
+    expect(gate("create_sop", "INTERNAL", { personRules: { create_sop: "ask" } })).toBe("ask");
+    expect(gate("create_sop", "INTERNAL", { agentRules: { create_sop: "ask" } })).toBe("ask");
+    expect(gate("create_sop", "INTERNAL", { personRules: { create_sop: "always" } })).toBe("run");
   });
 
   it("OUTWARD asks unless the person chose Don't ask", () => {
@@ -95,7 +96,7 @@ describe("gateFor", () => {
   it("agent rules only tighten: a manager's ask beats the person's always, and the agent level cannot loosen", () => {
     expect(gate("send_kudos", "OUTWARD", { agentRules: { send_kudos: "ask" }, personRules: { send_kudos: "always" } })).toBe("ask");
     expect(gate("send_kudos", "OUTWARD", { agentRules: { send_kudos: "always" } })).toBe("ask");
-    expect(gate("create_doc", "INTERNAL", { agentRules: { create_doc: "always" }, personRules: { create_doc: "ask" } })).toBe("ask");
+    expect(gate("create_sop", "INTERNAL", { agentRules: { create_sop: "always" }, personRules: { create_sop: "ask" } })).toBe("ask");
   });
 
   it("post_in_talk: a tool-wide always is ignored, a conversation's is honoured for that conversation only", () => {
@@ -162,12 +163,12 @@ describe("sanitizeRules", () => {
   const allowed = ALL;
 
   it("drops unknown tools, tools the teammate does not have, and any value but ask or always", () => {
-    expect(sanitizeRules({ not_a_tool: "ask", send_kudos: "never", create_doc: true, update_task: "always" }, { level: "person", allowedTools: allowed })).toEqual({ update_task: "always" });
-    expect(sanitizeRules({ send_kudos: "always" }, { level: "person", allowedTools: ["create_doc"] })).toEqual({});
+    expect(sanitizeRules({ not_a_tool: "ask", send_kudos: "never", create_sop: true, update_task: "always" }, { level: "person", allowedTools: allowed })).toEqual({ update_task: "always" });
+    expect(sanitizeRules({ send_kudos: "always" }, { level: "person", allowedTools: ["create_sop"] })).toEqual({});
   });
 
   it("keeps only tool-wide ask at the agent level", () => {
-    expect(sanitizeRules({ send_kudos: "always", create_doc: "ask", "post_in_talk:conv:c1": "ask" }, { level: "agent", allowedTools: allowed })).toEqual({ create_doc: "ask" });
+    expect(sanitizeRules({ send_kudos: "always", create_sop: "ask", "post_in_talk:conv:c1": "ask" }, { level: "agent", allowedTools: allowed })).toEqual({ create_sop: "ask" });
   });
 
   it("drops an always the policy would never honour, and Talk's tool-wide keys, at the person level", () => {

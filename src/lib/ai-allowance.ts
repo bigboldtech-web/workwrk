@@ -71,7 +71,19 @@ export function aiIsCapped(limit: number): boolean {
 
 export type AiClaim =
   | { ok: true; id: string }
-  | { ok: false; message: string; limit: number; used: number };
+  | {
+      ok: false;
+      message: string;
+      limit: number;
+      used: number;
+      /**
+       * Which bound refused: the plan's total, the free questions one person
+       * gets across free workspaces, or the platform's free ceiling for the
+       * day (which comes back tomorrow, UTC). A teammate's routine pauses for
+       * the first two and only skips a run for the third.
+       */
+      refusedBy?: "plan" | "person" | "free_day";
+    };
 
 export type FreeKind = "question" | "auto" | "fill";
 
@@ -193,20 +205,20 @@ export async function claimAiQuestionIn(tx: Prisma.TransactionClient, organizati
   const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
   if (aiIsCapped(limit)) {
     const used = await tx.aIQuery.count({ where: { organizationId } });
-    if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
+    if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used, refusedBy: "plan" as const };
   }
   const freeTier = plan === "STARTER";
   let freeDay: string | null = null;
   if (freeTier) {
     const free = PLAN_LIMITS.STARTER.ai;
     const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
-    if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
+    if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine, refusedBy: "person" as const };
     // In the same transaction, so an error below rolls the day's use back.
     // A free workspace made before the ceiling takes no use (and so its
     // question records no day, and gives nothing back).
     if (underFreeCeiling(rows[0].createdAt)) {
       freeDay = await takeFreeDay("question", tx);
-      if (!freeDay) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
+      if (!freeDay) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0, refusedBy: "free_day" as const };
     }
   }
   const row = await tx.aIQuery.create({

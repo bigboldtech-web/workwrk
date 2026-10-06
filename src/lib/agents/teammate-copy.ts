@@ -107,6 +107,12 @@ export const TEAMMATE_CHAT = {
   removeFailed: "Couldn't remove the teammate",
   routinePaused: "Routine paused",
   routinePauseFailed: "Couldn't pause the routine",
+  // Words that could not be sent, kept on screen while there is no composer
+  // to hold them (teammate-chat.tsx UnsentDraft).
+  unsent: "Not sent",
+  copy: "Copy",
+  copied: "Copied",
+  copyMessageFailed: "Couldn't copy the message",
 } as const;
 
 export function chatWith(name: string): string {
@@ -862,6 +868,10 @@ export const ACTIVITY_COPY = {
   /** The tab's third section: what it used, in AI questions (never a cost). */
   usage: "Usage",
   loadError: "Couldn't load the activity",
+  // The chip of a call the person's own Don't ask let run: nobody approved
+  // it and it never had a card (teammate-thread.ts activityActionView).
+  ranWithoutAsking: "Ran without asking",
+  running: "Running",
 } as const;
 
 // ── Months (UTC: a teammate's monthly limit is a UTC calendar month) ──
@@ -999,3 +1009,27 @@ export const TEAMMATE_RUN_DRAWER = {
   openChat: (name: string) => `Open ${name}`,
 } as const;
 
+
+/** A list of names for a card line: the first three, then how many more. */
+function someNames(names: readonly string[]): string {
+  const shown = names.slice(0, 3).join(", ");
+  return names.length > 3 ? `${shown} and ${names.length - 3} more` : shown;
+}
+
+/**
+ * The invitation card's lines: everything the invitation gives, named, so
+ * what runs is what the person approved (review round 1).
+ */
+export const INVITE_CARD = {
+  level: (words: string) => `Joins as: ${words}.`,
+  role: (title: string) => `Role: ${title}. Its KRAs and published SOPs are assigned when they accept.`,
+  manager: (name: string) => `Reports to ${name}.`,
+  department: (name: string) => `Department: ${name}.`,
+  office: (name: string) => `Office: ${name}.`,
+  kras: (names: readonly string[]) => `KRAs assigned when they accept: ${someNames(names)}.`,
+  sops: (names: readonly string[]) => `SOPs assigned when they accept: ${someNames(names)}.`,
+  unknown: (what: string) => `That ${what} isn't in this workspace, so the invitation wasn't prepared.`,
+} as const;
+
+/** The card line for a new doc, form or table: a root one is open to every member (review round 1). */
+export const NEW_OPEN_TO_ALL = "Everyone in the workspace can open and edit it.";

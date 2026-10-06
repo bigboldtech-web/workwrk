@@ -153,3 +153,16 @@ describe("toolOutcome", () => {
     expect(toolOutcomeSentence("create_task", { title: "A" }, toolOutcome("create_task", { error: "x" })).text).toBe("Couldn't create the task");
   });
 });
+
+describe("the subject a sentence names", () => {
+  it("never ends on half an emoji, which a JSON column refuses (review round 1)", () => {
+    const title = `${"a".repeat(79)}\u{1F389} launch`;
+    const subject = toolSubject({ title }) ?? "";
+    expect(subject).toBe("a".repeat(79));
+    expect(/[\uD800-\uDBFF]$/.test(subject)).toBe(false);
+    const sentence = toolOutcomeSentence("create_task", { title }, toolOutcome("create_task", { ok: true, task: { id: "t1", title } })).text;
+    expect(() => JSON.parse(JSON.stringify({ sentence }))).not.toThrow();
+    expect(JSON.stringify({ sentence })).not.toMatch(/\\ud83c(?!\\udf89)/i);
+  });
+});
+

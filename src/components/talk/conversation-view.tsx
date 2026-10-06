@@ -48,7 +48,7 @@ import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { AddPeopleDialog } from "@/components/talk/add-people-dialog";
-import { conversationTitle, type ChatUserLite } from "@/components/talk/conversation-utils";
+import { conversationTitle, editedKind, type ChatUserLite } from "@/components/talk/conversation-utils";
 import { MessageFeed, type FeedMessage } from "@/components/talk/message-feed";
 import { MessageBox, type MessagePayload } from "@/components/talk/message-box";
 import {
@@ -823,15 +823,19 @@ export function ConversationView({
     // failure: a poll answering mid-PATCH would otherwise paint the saved
     // words back over the rewrite while it was still on its way.
     pendingEdits.current.set(m.id, { next: newBody, saved: savedBody, savedEditedAt, saving: true });
-    // An AI update the person edits is theirs from now on (the server marks
-    // it the same way), so it stops saying AI wrote it at once.
-    patchEverywhere(m.id, (x) => ({
-      ...x,
-      body: newBody,
-      editedAt: new Date().toISOString(),
-      failed: false,
-      ...(x.metadata?.kind === "ai_update" ? { metadata: { ...x.metadata, kind: "ai_update_edited" } } : {}),
-    }));
+    // An AI update or an AI teammate's post the person edits is theirs from
+    // now on (the server marks it the same way), so it stops saying AI wrote
+    // it at once.
+    patchEverywhere(m.id, (x) => {
+      const kind = editedKind(x.metadata?.kind);
+      return {
+        ...x,
+        body: newBody,
+        editedAt: new Date().toISOString(),
+        failed: false,
+        ...(kind ? { metadata: { ...x.metadata, kind } } : {}),
+      };
+    });
     fetch(`/api/conversations/${id}/messages/${m.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

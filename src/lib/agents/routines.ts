@@ -17,7 +17,7 @@
 // minute of the hour.
 
 import { isValidTimeZone } from "@/lib/reports/schedule";
-import { parseCron, withScheduleZone } from "./cron";
+import { nextCronRun, parseCron, withScheduleZone } from "./cron";
 import { isValidSchedule } from "./schedule-words";
 
 export const ROUTINE_LIMITS = {
@@ -93,7 +93,7 @@ export type RoutineScheduleProblem = "invalid" | "too_often";
  * the scheduler cannot read it (or it is every more than 24 hours), and
  * "too_often" when it would run more than once an hour.
  */
-export function routineScheduleProblem(schedule: string | null | undefined): RoutineScheduleProblem | null {
+export function routineScheduleProblem(schedule: string | null | undefined, now: Date = new Date()): RoutineScheduleProblem | null {
   const s = (schedule ?? "").trim().toLowerCase();
   if (/^every\s+\d+\s+minutes?$/.test(s)) return "too_often";
   if (!isValidSchedule(schedule)) return "invalid";
@@ -102,7 +102,11 @@ export function routineScheduleProblem(schedule: string | null | undefined): Rou
   if (["hourly", "@hourly", "daily", "@daily", "weekly", "@weekly"].includes(s)) return null;
   const cron = parseCron(schedule);
   if (!cron) return "invalid";
-  return cron.minutes.size === 1 ? null : "too_often";
+  if (cron.minutes.size !== 1) return "too_often";
+  // A date that never comes within a year (a 31st of February) is no
+  // schedule: the runner's hourly fallback would run it every hour (review
+  // round 1).
+  return schedule && nextCronRun(schedule, now) ? null : "invalid";
 }
 
 /** Why a routine paused or skipped a run (AgentRoutine.pausedReason, lastReason). */
@@ -115,9 +119,13 @@ export type RoutineReason =
   | "agent_paused"
   | "no_access"
   | "out_of_questions"
+  | "person_free_used"
+  | "free_ai_day"
   | "agent_cap"
   | "not_configured"
   | "ai_failed"
+  | "no_answer"
+  | "no_next_run"
   | "missed";
 
 export const ROUTINE_REASON_TEXT: Record<RoutineReason, string> = {
@@ -129,9 +137,13 @@ export const ROUTINE_REASON_TEXT: Record<RoutineReason, string> = {
   agent_paused: "This teammate is paused.",
   no_access: "The person it works for can no longer use this teammate.",
   out_of_questions: "This workspace has used all its AI questions. Resume it after the plan changes.",
+  person_free_used: "The person it works for has used the free AI questions one person gets across free workspaces. Resume it after the plan changes.",
+  free_ai_day: "Free AI reached its limit for today across WorkwrK, so this run was skipped. It runs again at its next time.",
   agent_cap: "This teammate has used its AI questions for the month.",
   not_configured: "AI isn't set up for this workspace yet.",
   ai_failed: "The AI service didn't answer.",
+  no_answer: "The AI gave no usable answer, so nothing was done.",
+  no_next_run: "Its schedule names no time in the next year. Change when it runs to start it again.",
   missed: "Skipped: the scheduler reached it more than three hours late.",
 };
 

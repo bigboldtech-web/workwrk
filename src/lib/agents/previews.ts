@@ -26,12 +26,13 @@
 import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { objectHref } from "@/lib/nav/object-href";
 import { checkPlanLimit } from "@/lib/plan-limits";
+import { ACCESS_LEVELS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { canPost } from "@/lib/talk-access";
 import { talkGateForUser } from "@/lib/talk-gate";
 // The person's legacy level is read only in acting.ts, which hands it to the
 // permission matrix, the List helpers and the goal rules.
-import { canContributeAs, goalActorFor, isManagerPerson, personMay, type ActingPerson } from "./acting";
+import { canContributeAs, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
 import { splitScheduleZone } from "./cron";
 import { routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
 import { describeSchedule, wordsInZone, zoneName } from "./schedule-words";
@@ -41,6 +42,8 @@ import {
   CHANGE_LABELS,
   GOAL_LEVEL_LINES,
   PREVIEW_LINES,
+  INVITE_CARD,
+  NEW_OPEN_TO_ALL,
   TEAMMATE_ERRORS,
   TEAMMATE_TOOL_ERRORS as ERR,
   TOOL_PICKER_COPY,
@@ -86,6 +89,7 @@ import { BASE_RISK, EDITABLE_FIELD, alwaysKeyFor, maxRisk, type ApprovalRules, t
 import { isToolName, type ToolName } from "./tool-names";
 import { PRECHECK_REFUSALS, toGoalLevel, type TeammateToolContext } from "./tools";
 import { clampText } from "./clamp";
+import { badInputSentence } from "./input-check";
 
 export type { ActionPreview };
 
@@ -117,6 +121,17 @@ const SUBJECT_MAX = 80;
 function short(s: string): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > SUBJECT_MAX ? `${clampText(t, SUBJECT_MAX - 1).trimEnd()}…` : t;
+}
+
+/** The distinct ids in a list the model sent, text only, at most 50. */
+function ids(v: unknown): string[] {
+  return Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()))].slice(0, 50) : [];
+}
+
+/** An access level in the words the app uses: Admin for the two admin levels, else its name. */
+function accessLevelWords(level: string): string {
+  if (level === "SUPER_ADMIN" || level === "COMPANY_ADMIN") return "Admin";
+  return ACCESS_LEVELS.find((l) => l.value === level)?.label ?? level;
 }
 
 function str(v: unknown): string {
@@ -352,6 +367,9 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "create_task": {
       const title = clampText(str(raw.title), 280).trim();
       if (!title) return { error: ERR.taskTitle };
+      // An email that is not text is refused, never read as "nobody": the
+      // handler would resolve it as a filter (review round 1).
+      if (raw.assigneeEmail !== undefined && raw.assigneeEmail !== null && typeof raw.assigneeEmail !== "string") return { error: badInputSentence("assigneeEmail") };
       const email = str(raw.assigneeEmail);
       let forOther: { name: string; email: string } | null = null;
       const input: Record<string, unknown> = { ...raw, title };
@@ -406,6 +424,7 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       const manager = isManagerPerson(person);
       if (!manager && level !== "INDIVIDUAL") return { error: PRECHECK_REFUSALS.goalLevel };
       let owner: { id: string; name: string; email: string } | null = null;
+      if (raw.ownerEmail !== undefined && raw.ownerEmail !== null && typeof raw.ownerEmail !== "string") return { error: badInputSentence("ownerEmail") };
       const ownerEmail = str(raw.ownerEmail);
       if (ownerEmail) {
         owner = await livePersonByEmail(person.organizationId, ownerEmail);
@@ -487,19 +506,72 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       if (!(await personMay(person, "people", "create"))) return { error: PRECHECK_REFUSALS.invite };
       const email = str(raw.email);
       if (!email) return { error: ERR.inviteEmail };
-      return {
-        input: { ...raw, email },
-        preview: { title: placeTitle(verb(tool), email), lines: [PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending], target: { label: email } },
-      };
+      // What the invitation gives, named on the card, and nothing else stored:
+      // the card showed only the email while an Admin level, a manager and
+      // KRA ids ran (review round 1). The level is the one POST
+      // /api/invitations would give from this person; each id must name
+      // something in this workspace.
+      const level = inviteLevelAs(person, raw);
+      if (!level.ok) return { error: level.error };
+      const org = person.organizationId;
+      const input = inviteInput(email, level.level);
+      const lines: string[] = [INVITE_CARD.level(accessLevelWords(level.level))];
+      if (str(raw.roleId)) {
+        const role = await prisma.role.findFirst({ where: { id: str(raw.roleId), organizationId: org }, select: { id: true, title: true } });
+        if (!role) return { error: INVITE_CARD.unknown("role") };
+        input.roleId = role.id;
+        lines.push(INVITE_CARD.role(role.title));
+      }
+      if (str(raw.managerId)) {
+        const m = await prisma.user.findFirst({
+          where: { id: str(raw.managerId), organizationId: org, deletedAt: null, status: { not: "INACTIVE" } },
+          select: { id: true, firstName: true, lastName: true },
+        });
+        if (!m) return { error: INVITE_CARD.unknown("manager") };
+        input.managerId = m.id;
+        lines.push(INVITE_CARD.manager(`${m.firstName ?? ""} ${m.lastName ?? ""}`.trim()));
+      }
+      if (str(raw.departmentId)) {
+        const d = await prisma.department.findFirst({ where: { id: str(raw.departmentId), organizationId: org }, select: { id: true, name: true } });
+        if (!d) return { error: INVITE_CARD.unknown("department") };
+        input.departmentId = d.id;
+        lines.push(INVITE_CARD.department(d.name));
+      }
+      if (str(raw.officeId)) {
+        const o = await prisma.office.findFirst({ where: { id: str(raw.officeId), organizationId: org }, select: { id: true, name: true } });
+        if (!o) return { error: INVITE_CARD.unknown("office") };
+        input.officeId = o.id;
+        lines.push(INVITE_CARD.office(o.name));
+      }
+      const kraIds = ids(raw.kraIds);
+      if (kraIds.length) {
+        const kras = await prisma.kRA.findMany({ where: { id: { in: kraIds }, organizationId: org }, select: { id: true, name: true } });
+        if (kras.length !== kraIds.length) return { error: INVITE_CARD.unknown("KRA") };
+        input.kraIds = kras.map((k) => k.id);
+        lines.push(INVITE_CARD.kras(kras.map((k) => k.name)));
+      }
+      const sopIds = ids(raw.sopIds);
+      if (sopIds.length) {
+        const sops = await prisma.sOP.findMany({ where: { id: { in: sopIds }, organizationId: org }, select: { id: true, title: true } });
+        if (sops.length !== sopIds.length) return { error: INVITE_CARD.unknown("SOP") };
+        input.sopIds = sops.map((x) => x.id);
+        lines.push(INVITE_CARD.sops(sops.map((x) => x.title)));
+      }
+      lines.push(PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending);
+      return { input, preview: { title: placeTitle(verb(tool), email), lines, target: { label: email } } };
     }
 
     // Something new that only the person sees; each handler holds its own
     // rules (the Tables module, a private form). create_sprint,
     // create_contract and update_contract are TEAMMATE_EXCLUDED: no teammate
     // is given them, so only their title is spelled here.
+    // A new doc, form or table is made at the top of its place, which every
+    // member can open and edit (node-rules: a root doc, form or table), so
+    // the card says so and the call asks first (review round 1).
     case "create_doc":
     case "create_form":
     case "create_data_table":
+      return { input: raw, preview: { title: titled(tool, str(raw.title) || str(raw.name)), lines: [NEW_OPEN_TO_ALL] } };
     case "create_sprint":
     case "create_contract":
       return { input: raw, preview: { title: titled(tool, str(raw.title) || str(raw.name)) } };

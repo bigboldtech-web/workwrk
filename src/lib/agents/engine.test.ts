@@ -335,6 +335,8 @@ describe("the loop", () => {
     const first = await runTeammateTurn(turn());
     expect(db.executed).toEqual([]);
     expect(first).toMatchObject({ text: "", error: TURN_ERRORS.declined, failedBeforeAnything: true });
+    // The call came back and was billed: the question is kept (Ask AI's rule).
+    expect(first.giveBack).toBe(false);
     // The model read the note and answered: it is not handed back, so a note
     // that draws a refusal cannot come back on every turn.
     expect(db.released).toEqual([]);
@@ -605,7 +607,7 @@ describe("a turn that got nothing back", () => {
     const denied = outcome({ status: "DENIED" });
     db.replies = [new Error("529 overloaded")];
     const r = await runTeammateTurn(turn());
-    expect(r).toMatchObject({ failedBeforeAnything: true, assistantMessageId: null, approvalMessageId: null, text: "", error: TURN_ERRORS.noAnswer, messages: [] });
+    expect(r).toMatchObject({ failedBeforeAnything: true, giveBack: true, assistantMessageId: null, approvalMessageId: null, text: "", error: TURN_ERRORS.noAnswer, messages: [] });
     expect(db.created).toEqual([]);
     expect(db.released).toEqual([[denied.id]]);
     expect(db.runUpdates[0].data).toMatchObject({ status: "FAILED", error: TURN_ERRORS.noAnswer, tokensIn: 0, tokensOut: 0, costCents: 0 });

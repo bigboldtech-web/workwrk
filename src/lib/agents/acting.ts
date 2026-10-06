@@ -52,6 +52,7 @@ import { isValidTimeZone } from "@/lib/reports/schedule";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { agentForPerson } from "./teammate-copy";
 import type { TeammateToolContext, ToolContext } from "./tools";
+import { resolveInviteLevel, type InviteLevelResult } from "@/lib/access/invite-level";
 
 export interface ActingPerson {
   userId: string;
@@ -215,3 +216,20 @@ export async function goalActorFor(person: ActingPerson): Promise<Awaited<Return
 export async function readableTargetsFor(person: ActingPerson, targets: readonly NotificationTarget[]): Promise<Map<string, TargetVerdict>> {
   return readableTargets(person.userId, person.organizationId, targets, person.accessLevel);
 }
+
+/**
+ * The level an invitation from this person would give: POST /api/invitations's
+ * rule (resolveInviteLevel), Employee when none is asked for. The invitation
+ * card names it, and the stored input carries only it (review round 1: the
+ * card showed an email while an Admin level ran).
+ */
+export function inviteLevelAs(person: ActingPerson, raw: Record<string, unknown>): InviteLevelResult {
+  const requested = raw.accessLevel;
+  return resolveInviteLevel(person.accessLevel, requested === undefined || requested === null || requested === "" ? "EMPLOYEE" : requested);
+}
+
+/** An invitation's checked input: its email and the level it gives; the checked ids are added to it. */
+export function inviteInput(email: string, level: string): Record<string, unknown> {
+  return { email, accessLevel: level };
+}
+

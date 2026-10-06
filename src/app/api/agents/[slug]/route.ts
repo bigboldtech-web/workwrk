@@ -22,6 +22,7 @@ import { cancelPendingActionsOf } from "@/lib/agents/actions";
 import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { auditAgent } from "@/lib/agents/audit";
 import { pauseRoutine } from "@/lib/agents/routines-server";
+import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
 
 const patchSchema = z
   .object({
@@ -34,7 +35,7 @@ const patchSchema = z
 async function findAgent(slug: string, organizationId: string) {
   return prisma.agent.findFirst({
     // A private teammate is not one of the workspace's agents (see above).
-    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
+    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" }, ...LEGACY_AGENT },
     select: { id: true, slug: true, name: true, status: true, autonomousEnabled: true, scheduleCron: true },
   });
 }

@@ -16,6 +16,8 @@
 // line that says why there is no composer (AI off, not set up, removed with
 // Add back, paused with Turn on), else the composer; above it the error row
 // with the server's sentence, and Try again where sending again can work.
+// While there is no composer, words the person wrote and could not send show
+// under that line, read-only with Copy (UnsentDraft), never out of sight.
 //
 // The chat is read again on window focus and on the realtime agent.changed
 // for this teammate (a decision in another tab, an expiry, a routine's report
@@ -303,6 +305,12 @@ export function TeammateChat({
     );
   }
 
+  // Words the person wrote and could not send (the teammate was paused or
+  // removed or is not there, AI is off or not set up) stay on screen,
+  // under the line that says why, whenever the composer is not drawn. The
+  // store keeps them, so the composer has them again when it comes back.
+  const unsent = !canCompose && chat.draft.trim() ? <UnsentDraft text={chat.draft} className={foot ? "mt-1" : undefined} /> : null;
+
   const errorRow = chat.error ? (
     <div role="alert" className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-danger-text">
       <span>{sendErrorSentence(chat.error, chat.errorText, t.name)}</span>
@@ -450,9 +458,12 @@ export function TeammateChat({
         <div className={cn(COLUMN, "py-6")}>{body}</div>
       </div>
 
-      {foot ? (
+      {foot || unsent ? (
         <div className="shrink-0 bg-app">
-          <div className={cn(COLUMN, "py-3")}>{foot}</div>
+          <div className={cn(COLUMN, "py-3")}>
+            {foot}
+            {unsent}
+          </div>
         </div>
       ) : null}
     </section>
@@ -462,4 +473,32 @@ export function TeammateChat({
 /** The one line at the foot that says why there is no composer. */
 function FootLine({ children }: { children: ReactNode }) {
   return <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-0.5 text-row text-ink-2">{children}</div>;
+}
+
+/**
+ * Words the person wrote that could not be sent, while no composer holds
+ * them: read-only, with Copy. Also under "That teammate can't be found."
+ * (teammates-view.tsx), where the chat itself is gone.
+ */
+export function UnsentDraft({ text, className }: { text: string; className?: string }) {
+  const { toast } = useOsToast();
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(TEAMMATE_CHAT.copied);
+    } catch {
+      toast(TEAMMATE_CHAT.copyMessageFailed, { tone: "danger" });
+    }
+  }
+  return (
+    <div className={cn("rounded-md bg-subtle px-3 py-2", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-ink-2">{TEAMMATE_CHAT.unsent}</span>
+        <button type="button" className={cn(LINK, "text-sm")} onClick={() => void copy()}>
+          {TEAMMATE_CHAT.copy}
+        </button>
+      </div>
+      <p className="m-0 mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-base text-ink">{text}</p>
+    </div>
+  );
 }

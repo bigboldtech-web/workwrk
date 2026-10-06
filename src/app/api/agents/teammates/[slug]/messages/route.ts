@@ -215,7 +215,8 @@ export async function POST(req: Request, { params }: Params) {
         // What it did is unknown, so its question is kept.
         console.error(`[agents] turn ${claim.runId} threw: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
       }
-      if (result?.failedBeforeAnything) await giveBackTurn(claim.runId, claim.questionId);
+      // Only a turn the model never answered gives its question back (TurnResult.giveBack).
+      if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       send(result ? { type: "done", messages: result.messages, error: result.error } : { type: "error", message: TURN_ERRORS.noAnswer });
 
       if (!clientGone) {

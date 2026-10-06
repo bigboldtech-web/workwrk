@@ -22,10 +22,12 @@
 //
 // The client's rules live here too, so they are tested without a browser:
 // how a stream event changes the chat (applyTeammateEvent), what a turn that
-// failed leaves behind and what the error row says, a decision's answer on
-// the cards, the page's address (hubViewFor), and the list's search.
+// failed leaves behind (in the thread and in the composer) and what the error
+// row says, a decision's answer on the cards, the page's address
+// (hubViewFor), the list's search, and a request's row on the Activity tab.
 
 import { callFromLog, withToolUse, type AiToolCall } from "@/lib/ai/thread";
+import type { RunTone } from "@/lib/automation/run-status";
 import { clampText } from "./clamp";
 import { plainLine } from "./run-view";
 import { EDITABLE_FIELD } from "./tool-policy";
@@ -33,6 +35,7 @@ import { isToolName } from "./tool-names";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_ERRORS,
+  ACTIVITY_COPY,
   APPROVAL_CARD,
   ROUTINE_FALLBACK_NAME,
   TEAMMATE_CHAT,
@@ -713,6 +716,21 @@ export function failedTurnMessages(messages: readonly TeammateMessageView[], ids
 }
 
 /**
+ * What the composer holds after a turn failed; `text` is the person's words
+ * (null for a continue). When the server never had the message its bubble
+ * leaves the thread, so the words always come back: above anything typed
+ * since the send, a blank line between, never in place of it. When the
+ * server has it, the bubble stays and the words come back only to an empty
+ * composer.
+ */
+export function draftAfterFailure(draft: string, text: string | null, serverHas: boolean): string {
+  if (text === null) return draft;
+  if (serverHas) return draft || text;
+  if (!draft.trim() || draft === text) return text;
+  return `${text}\n\n${draft}`;
+}
+
+/**
  * Why a message or a continue did not go through, as the composer's error row
  * says it (5.3, 5.4):
  *   not_sent        the chat never got the message; it is back in the composer
@@ -909,4 +927,33 @@ export function decidedLine(
     default:
       return null;
   }
+}
+
+/** A request on the settings' Activity tab: its chip, when the card's own would not be true, and where it opens. */
+export interface ActivityActionView {
+  /** Null: the card's own chip (approval-card.tsx ActionStatusChip). */
+  chip: { label: string; tone: RunTone } | null;
+  href: string;
+}
+
+/**
+ * One of the person's requests as the Activity tab lists it (5.5): it opens
+ * its card in the chat. A call their own "Don't ask" let run (decidedVia
+ * "rule") had no card and nobody approved it, so it reads "Ran without
+ * asking" ("Running" while it runs; one that failed keeps "Didn't work") and
+ * opens the run that made it, as a Recent runs row does. Its run is the part
+ * of its groupKey before the colon ("<runId>:<tool>"); without one, the chat.
+ */
+export function activityActionView(a: Pick<ActionView, "id" | "status" | "decidedVia" | "groupKey">, slug: string): ActivityActionView {
+  const chat = `/agents?chat=${encodeURIComponent(slug)}`;
+  if (a.decidedVia !== "rule") return { chip: null, href: `${chat}&action=${encodeURIComponent(a.id)}` };
+  const colon = a.groupKey ? a.groupKey.indexOf(":") : -1;
+  const runId = a.groupKey && colon > 0 ? a.groupKey.slice(0, colon) : null;
+  const chip: ActivityActionView["chip"] =
+    a.status === "EXECUTED"
+      ? { label: ACTIVITY_COPY.ranWithoutAsking, tone: "success" }
+      : a.status === "RUNNING"
+        ? { label: ACTIVITY_COPY.running, tone: "info" }
+        : null;
+  return { chip, href: runId ? `/agents?tab=runs&agent=${encodeURIComponent(slug)}&run=${encodeURIComponent(runId)}` : chat };
 }

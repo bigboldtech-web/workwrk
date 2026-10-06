@@ -105,3 +105,16 @@ describe("the reasons", () => {
     expect(ROUTINE_STALE_MS).toBe(3 * 60 * 60 * 1000);
   });
 });
+
+describe("a schedule with no next time", () => {
+  it("is refused: a date that never comes within a year would run every hour on the fallback (review round 1)", () => {
+    const now = new Date("2026-10-06T12:00:00Z");
+    expect(routineScheduleProblem("CRON_TZ=UTC 0 9 31 2 *", now)).toBe("invalid");
+    expect(routineScheduleProblem("CRON_TZ=UTC 0 9 30 2 *", now)).toBe("invalid");
+    expect(routineScheduleProblem("CRON_TZ=UTC 0 9 31 4 *", now)).toBe("invalid");
+    // A real date still passes.
+    expect(routineScheduleProblem("CRON_TZ=UTC 0 9 28 2 *", now)).toBeNull();
+    expect(routineScheduleProblem("CRON_TZ=UTC 0 9 * * 1-5", now)).toBeNull();
+  });
+});
+

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const st = vi.hoisted(() => ({
   order: [] as string[],
+  agentsWhere: undefined as unknown,
   agents: [] as Array<Record<string, unknown>>,
   sweepActions: vi.fn(),
   processDueRoutines: vi.fn(),
@@ -19,8 +20,9 @@ vi.mock("@/lib/cron-auth", () => ({ cronRefusal: () => null }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     agent: {
-      findMany: async () => {
+      findMany: async (a?: { where?: unknown }) => {
         st.order.push("agents");
+        st.agentsWhere = a?.where;
         return st.agents;
       },
       update: async () => ({}),
@@ -35,6 +37,7 @@ vi.mock("@/lib/agents/autonomous", () => ({
   runAgentAutonomously: st.runAgentAutonomously,
 }));
 
+import { Prisma } from "@/generated/prisma";
 import { POST } from "./route";
 
 const run = async () => {
@@ -69,6 +72,13 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("the legacy pass", () => {
+  it("never picks an agent made as a teammate: it runs through its routines (review round 1)", async () => {
+    await run();
+    expect(st.agentsWhere).toMatchObject({ toolNames: { equals: Prisma.DbNull } });
+  });
 });
 
 describe("one tick", () => {

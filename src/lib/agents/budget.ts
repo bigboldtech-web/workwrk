@@ -47,6 +47,8 @@ export type TurnClaim =
       code: "rate_limited" | "agent_cap" | "ai_limit" | "not_found";
       message: string;
       retryAfter?: number;
+      /** For ai_limit: which bound refused (AiClaim.refusedBy). */
+      refusedBy?: "plan" | "person" | "free_day";
     };
 
 type Db = Pick<typeof prisma, "$queryRaw">;
@@ -116,7 +118,7 @@ export async function claimTeammateTurn(a: {
       if (usage.used >= cap) return { ok: false, code: "agent_cap", message: agentCapMessage(agents[0].name, cap, usage.monthStart) };
     }
     const question = await claimAiQuestionIn(tx, a.organizationId, a.userId, a.what);
-    if (!question.ok) return { ok: false, code: "ai_limit", message: question.message };
+    if (!question.ok) return { ok: false, code: "ai_limit", message: question.message, ...(question.refusedBy ? { refusedBy: question.refusedBy } : {}) };
     const run = await tx.agentRun.create({
       data: {
         agentId: a.agentId,

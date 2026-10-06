@@ -59,9 +59,6 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   read_talk: "READ",
   // The person's own work, or something new nobody is told about.
   create_task: "INTERNAL",
-  create_doc: "INTERNAL",
-  create_form: "INTERNAL",
-  create_data_table: "INTERNAL",
   create_sop: "INTERNAL",
   create_sprint: "INTERNAL",
   create_contract: "INTERNAL",
@@ -74,7 +71,13 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   remember: "INTERNAL",
   forget: "INTERNAL",
   create_routine: "INTERNAL",
-  // Other people see it, or it changes what they share.
+  // Other people see it, or it changes what they share. A new doc, form or
+  // table made where the teammate can make it is open to every member, who
+  // can edit it (node-rules: a root doc, form or table), so making one is
+  // something other people will see (review round 1).
+  create_doc: "OUTWARD",
+  create_form: "OUTWARD",
+  create_data_table: "OUTWARD",
   create_kra: "OUTWARD",
   create_kpi: "OUTWARD",
   update_contract: "OUTWARD",
