@@ -104,6 +104,16 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   cancelledToolOffLine: [["Priya"], "Cancelled: Priya can no longer use this tool."],
   titleList: [[["Post in #general", "Post in #proof", "Send kudos to Max", "Invite lea@x.com", "Comment on Call Acme"]], "Post in #general, Post in #proof, Send kudos to Max and 2 more"],
   agentAuditLine: [["Chief of Staff", "Priya Shah", 'Created task "Call Acme"'], 'Chief of Staff (for Priya Shah): Created task "Call Acme"'],
+  // The tool picker and the Tools and approvals tab (5.5).
+  approvalFor: [["Create tasks"], "Approval for Create tasks"],
+  dontAskInLine: [["#general"], "Doesn't ask in #general"],
+  asksFirstInLine: [["your chat with Max Chen"], "Asks first in your chat with Max Chen"],
+  askEveryoneFor: [["Create tasks"], "Ask everyone first: Create tasks"],
+  removeChoice: [["Doesn't ask in #general"], "Remove: Doesn't ask in #general"],
+  // The Routines tab's Run now and Practice run.
+  routineRanToast: [["Morning brief"], "Morning brief ran. Its report is in the chat."],
+  routinePracticeToast: [["Morning brief"], "Practice run of Morning brief done. Nothing was changed."],
+  routineDidntFinish: [["Morning brief"], "Morning brief didn't finish. Try again."],
 };
 
 const builders = copy as unknown as Record<string, unknown>;

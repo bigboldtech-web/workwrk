@@ -4,8 +4,10 @@
 //   before teammates included) and their own private ones, never another
 //   person's. Each row carries what waits for them, the unread dot and the
 //   chat's last line. Also the plan's limits, whether they may make a
-//   workspace teammate, and whether Talk and Tables are on (the tools that
-//   need them). `removed=1` adds the removed ones (Show removed).
+//   workspace teammate, whether Talk and Tables are on (the tools that need
+//   them), and the six starter templates as this workspace can make them now
+//   (templates.ts templateCards: a tool it cannot give is left out and
+//   named). `removed=1` adds the removed ones (Show removed).
 // POST /api/agents/teammates
 //   Make a teammate. A private one: anyone who is a person. A workspace one:
 //   the Owner and Admins. Within the plan's limit (TEAMMATE_LIMITS).
@@ -35,6 +37,7 @@ import {
 } from "@/lib/agents/teammate-server";
 import { sortTeammates } from "@/lib/agents/teammate-thread";
 import { ALL_TOOL_NAMES, cleanToolNames, editedPersonRules } from "@/lib/agents/teammate-views";
+import { TEMPLATE_KEYS, templateCards } from "@/lib/agents/templates";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
 
 /** The most teammates one list reads. */
@@ -61,8 +64,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     teammates: sortTeammates(rows),
     waitingTotal,
-    // TODO(templates): the six starter cards (src/lib/agents/templates.ts, spec section 6).
-    templates: [],
+    templates: templateCards(modules),
     canCreateWorkspace: canCreateTeammate(viewer, "WORKSPACE") === "ok",
     limits: { personal: limits.personal, workspace: limits.workspace },
     talkOn: modules.talkOn,
@@ -73,8 +75,8 @@ export async function GET(req: Request) {
 const rulesSchema = z.record(z.string().max(120), z.enum(["ask", "always"]));
 
 const createSchema = z.object({
-  // TODO(templates): only a key of TEAMMATE_TEMPLATES (src/lib/agents/templates.ts) once it exists.
-  template: z.string().trim().min(1).max(60).nullable().optional(),
+  // The starter template it was made from: one of TEAMMATE_TEMPLATES, or none.
+  template: z.enum(TEMPLATE_KEYS).nullable().optional(),
   name: z.string().trim().min(1).max(60),
   hue: z.string().refine(isTeammateHue),
   avatar: z.string().trim().max(40).regex(/^[A-Za-z][A-Za-z0-9]*$/).nullable().optional(),

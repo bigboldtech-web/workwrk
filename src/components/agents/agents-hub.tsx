@@ -6,8 +6,8 @@
 //   /agents, ?tab=chats        Chats: the teammates, and the chat with one
 //   ?chat=<slug>               that chat (with Chats or Waiting for you);
 //                              &action=<id> scrolls to the card,
-//                              &settings=<tab> its settings (the settings
-//                              drawer, built next; see openSettings below)
+//                              &settings=<tab> opens its settings drawer
+//                              on that tab (teammate-settings-drawer.tsx)
 //   ?tab=waiting               Waiting for you: only the teammates with
 //                              something waiting, the count on the tab
 //   ?tab=workspace             Workspace agents: the agents table, its drawer
@@ -25,15 +25,26 @@
 //
 // The list of teammates is read here, not in the Chats view, because the
 // Waiting for you count shows on every view.
+//
+// New teammate (the toolbar's button, and the empty list's "Start from a
+// template") opens the new teammate dialog at its templates; a teammate made
+// there opens in Chats. Settings (the chat header's, a line's links) puts
+// &settings=<tab> in the address, which opens the drawer; closing it takes
+// it out. Picking another chat with unsaved settings asks first (the dirty
+// guard's leaveThen).
 
 import { useCallback, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 import { OsPageHeader, type HeaderMenuEntry, type OsToolbarProps } from "@/components/layout/os/page-header";
 import { ViewTab } from "@/components/ui/view-tabs";
+import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { TEAMMATES_PAGE } from "@/lib/agents/teammate-copy";
 import { useTeammateList } from "@/lib/agents/teammate-store";
-import { hubViewFor } from "@/lib/agents/teammate-thread";
+import { hubViewFor, settingsTabFor, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
+import { leaveThen } from "@/lib/dirty-guard";
+import { NewTeammateDialog } from "./new-teammate-dialog";
+import { TeammateSettingsDrawer } from "./teammate-settings-drawer";
 import { TeammatesView } from "./teammates-view";
 import { WorkspaceAgentsView } from "./workspace-agents-view";
 
@@ -51,12 +62,8 @@ export function AgentsHub() {
   const [showRemoved, setShowRemoved] = useState(false);
   const list = useTeammateList({ removed: showRemoved });
   const waitingTotal = list.data?.waitingTotal ?? 0;
-
-  // The new teammate dialog with its templates, and the settings drawer
-  // (spec 5.5), are built next: every button that opens them calls these,
-  // which open nothing yet.
-  const openNewTeammate = useCallback(() => {}, []);
-  const openSettings = useCallback(() => {}, []);
+  const settingsTab = settingsTabFor(sp?.get("settings"));
+  const [newOpen, setNewOpen] = useState(false);
 
   const setParams = useCallback(
     (patch: Record<string, string | null>) => {
@@ -69,6 +76,16 @@ export function AgentsHub() {
       router.replace(qs ? `/agents?${qs}` : "/agents", { scroll: false });
     },
     [router, sp],
+  );
+
+  // The new teammate dialog, at its templates (spec 5.5).
+  const openNewTeammate = useCallback(() => setNewOpen(true), []);
+  // The open chat's settings drawer, on a tab (Instructions unless named).
+  const openSettings = useCallback(
+    (tab?: TeammateSettingsTab) => {
+      if (chat) setParams({ settings: tab ?? "instructions" });
+    },
+    [chat, setParams],
   );
 
   // Chats and Waiting for you keep the open chat between them.
@@ -131,10 +148,28 @@ export function AgentsHub() {
         onShowRemoved={setShowRemoved}
         selectedSlug={chat}
         actionId={sp?.get("action") || null}
-        onSelect={(slug) => setParams({ chat: slug, action: null, settings: null })}
-        onBack={() => setParams({ chat: null, action: null, settings: null })}
+        onSelect={(slug) => void leaveThen(() => setParams({ chat: slug, action: null, settings: null }))}
+        onBack={() => void leaveThen(() => setParams({ chat: null, action: null, settings: null }))}
         onNewTeammate={openNewTeammate}
         onOpenSettings={openSettings}
+      />
+      <NewTeammateDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        list={list.data}
+        onCreated={(t) => {
+          setNewOpen(false);
+          // The list, its count and the AI sidebar read it again.
+          notifyAiChatsChanged();
+          setParams({ tab: null, chat: t.slug, action: null, settings: null });
+        }}
+      />
+      <TeammateSettingsDrawer
+        slug={chat && settingsTab ? chat : null}
+        tab={settingsTab ?? "instructions"}
+        onTab={(tab) => setParams({ settings: tab })}
+        onClose={() => setParams({ settings: null })}
+        onChanged={notifyAiChatsChanged}
       />
     </div>
   );

@@ -9,9 +9,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const modules = vi.hoisted(() => ({ talkOn: true, tablesOn: true }));
+
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/agents/teammate-route-fixtures")).routeDb }));
 vi.mock("@/lib/app-gate", async () => (await import("@/lib/agents/teammate-route-fixtures")).appGateFake);
-vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
+vi.mock("@/lib/entitlements", () => ({
+  isModuleActive: async (_organizationId: string, slug: string) => (slug === "workwrk-talk" ? modules.talkOn : modules.tablesOn),
+}));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 
 const mocks = vi.hoisted(() => ({
@@ -78,6 +82,8 @@ beforeEach(() => {
   resetRouteDb();
   mocks.audits.length = 0;
   vi.clearAllMocks();
+  modules.talkOn = true;
+  modules.tablesOn = true;
 });
 
 type Expect = { get: number; patch: number; del: number; canManage?: boolean };
@@ -245,6 +251,27 @@ describe("removing, pausing and adding back", () => {
       ["edited", { fields: ["job", "monthlyQuestionCap"] }],
       ["approvals_changed", { scope: "agent" }],
     ]);
+  });
+
+  it("keeps what is stored for a tool whose module is off when its tools are saved", async () => {
+    seedShared({ toolNames: ["post_in_talk", "read_talk", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    modules.talkOn = false;
+    // The tools tab sends what it shows: the Talk tools read as off while Talk is.
+    const saved = await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks", "create_task"] }), slugged(SHARED_SLUG)));
+    expect(saved.status).toBe(200);
+    expect(db.agents[0].toolNames).toEqual(["create_task", "post_in_talk", "read_talk", "search_tasks"]);
+    expect(saved.body.teammate.toolNames).toEqual(["create_task", "search_tasks"]);
+
+    // Nor can a save add one while its module is off.
+    seedShared({ slug: "digest", toolNames: ["search_tasks"] });
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks", "post_in_talk"] }), slugged("digest")));
+    expect(db.agents[1].toolNames).toEqual(["search_tasks"]);
+
+    // With Talk on, the save is what was sent.
+    modules.talkOn = true;
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
   });
 
   it("changes a removed teammate only by adding it back, within the plan's limit", async () => {

@@ -56,6 +56,15 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // not listed until it is on.
   {
     date: "2026-10-06",
+    title: "AI teammates",
+    items: [
+      { type: "feature", text: "AI teammates: AI helpers with one job each that you chat with, under AI. Start from a template (Chief of Staff, Project Manager, People Ops, Meeting Prep, Talk and inbox triage, Status Reporter) or from scratch. A teammate works as you and can see and change only what you can." },
+      { type: "feature", text: "Anything other people would see, such as a task for someone else, a comment on a shared task or a post in Talk, waits on an approval card in the chat until you approve, change or deny it. Inviting people always asks." },
+      { type: "feature", text: "Teammates remember what you ask them to (each person sees and deletes their own in Memory), run routines on the schedule you set, at most once an hour, and have a practice run that shows what they would do without changing anything. Each chat turn and each routine run uses one of the plan's AI questions." },
+    ],
+  },
+  {
+    date: "2026-10-06",
     title: "Plans that count what they promise",
     items: [
       { type: "improvement", text: "Seats and AI questions are counted the way the pricing page says: people who can sign in and open invitations hold the seats, and Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder use the plan's AI questions. Fill with AI and Talk updates have their own daily limit. On Starter, each person also has 50 free questions in total, counted across every free workspace they asked them in." },
@@ -205,7 +214,7 @@ export default function ChangelogPage() {
         <Headline id="log-list">Releases, newest first.</Headline>
         <ol className="ic-log">
           {ENTRIES.map((entry) => (
-            <li key={entry.date}>
+            <li key={`${entry.date}:${entry.title}`}>
               <span className="ic-logdate">{entry.date}</span>
               <span className="ic-logtitle">{entry.title}</span>
               <ul className="ic-logitems">

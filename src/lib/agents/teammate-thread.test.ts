@@ -521,6 +521,37 @@ describe("the card's parts", () => {
     expect(editStartText(task)).toBe("Call Acme");
     expect(editStartText(actionViewFromRow(action({ preview: { title: "Invite lea@x.com" } })))).toBe("");
   });
+  it("starts an edit from the field's own value in the input that runs, never the card's words", () => {
+    // A long title: the card's title shortens it at 80 characters; the edit starts whole.
+    const long = `Call Acme about the renewal and ${"the pricing ".repeat(10)}`.trim();
+    const task = actionViewFromRow(action({
+      toolName: "create_task",
+      input: { title: long, assigneeEmail: "max@x.com" },
+      preview: { title: `Create task "${long.slice(0, 79)}…" for Max Chen`, editable: { field: "title", label: "Title", maxLength: 280 } },
+    }));
+    expect(task.editableValue).toBe(long);
+    expect(editStartText(task)).toBe(long);
+    // A doc section: the card's body shows the heading above the text; only the text is the field.
+    const doc = actionViewFromRow(action({
+      toolName: "update_doc",
+      input: { docId: "d1", heading: "Weekly status", text: "All green." },
+      preview: { title: 'Add to "Plan"', body: "Weekly status\n\nAll green.", editable: { field: "text", label: "Text", maxLength: 8000 } },
+    }));
+    expect(doc.editableValue).toBe("All green.");
+    expect(editStartText(doc)).toBe("All green.");
+  });
+  it("reads the person's edit once there is one, a string only, cut to the field's length", () => {
+    expect(actionViewFromRow(action({ input: { conversationId: "c1", text: "First" }, editedInput: { conversationId: "c1", text: "Edited" } })).editableValue).toBe("Edited");
+    expect(actionViewFromRow(action({ input: { conversationId: "c1", text: "y".repeat(5000) } })).editableValue).toBe("y".repeat(3000));
+    // Never half a character: an emoji across the limit is left out whole.
+    expect(actionViewFromRow(action({ input: { text: `${"y".repeat(2999)}\u{1F600}` } })).editableValue).toBe("y".repeat(2999));
+    expect(actionViewFromRow(action({ input: { text: 42 } })).editableValue).toBeNull();
+    expect(actionViewFromRow(action({ input: "text" })).editableValue).toBeNull();
+    expect(actionViewFromRow(action()).editableValue).toBeNull();
+    // A tool with no editable field, and a tool this code does not know.
+    expect(actionViewFromRow(action({ toolName: "invite_person_with_role", input: { email: "lea@x.com", text: "x" } })).editableValue).toBeNull();
+    expect(actionViewFromRow(action({ toolName: "not_a_tool", input: { text: "x" } })).editableValue).toBeNull();
+  });
   it("words each decided card's line", () => {
     const words = { time: "10:42", date: "13 Oct", agentName: "Priya" };
     const with_ = (over: Partial<AgentActionRow>) => decidedLine(actionViewFromRow(action(over)), words);

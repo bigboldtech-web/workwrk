@@ -66,7 +66,7 @@ export function AutonomousDigest() {
   if (!loading && (runs?.length ?? 0) === 0) {
     return (
       <Link
-        href="/agents"
+        href="/agents?tab=workspace"
         className="group rounded-2xl border border-dashed border-blue-300/40 dark:border-blue-700/40 bg-gradient-to-br from-blue-50/40 to-transparent dark:from-blue-950/20 p-4 flex items-start gap-3 hover:border-blue-400 transition-colors"
       >
         <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950/30 text-blue-600 flex items-center justify-center flex-shrink-0">
@@ -98,7 +98,7 @@ export function AutonomousDigest() {
           )}
         </div>
         <Link
-          href="/agents"
+          href="/agents?tab=workspace"
           className="text-xs text-muted-2 hover:text-foreground inline-flex items-center gap-1"
         >
           Manage <ChevronRight size={11} />

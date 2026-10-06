@@ -652,7 +652,26 @@ export const NEW_TEAMMATE_DIALOG = {
   createFailed: "Couldn't create the teammate. Try again.",
   talkOff: "Talk is off in this workspace, so it can't read or post in Talk.",
   tablesOff: "Tables is off in this workspace.",
+  /** The list of template cards, for a screen reader. */
+  templatesLabel: "Templates",
+  /** A template tool no teammate may be given yet (TEAMMATE_EXCLUDED), left out of the form. */
+  toolsExcluded: "Some of its tools can't be given to a teammate yet, so they were left out.",
+  // The form's checks (teammate-setup.ts draftProblems), at the field.
+  nameRequired: "Give it a name.",
+  nameTooLong: "A name can be up to 60 characters.",
+  jobRequired: "Say its one job.",
+  jobTooLong: "Keep its job to 200 characters.",
+  instructionsTooLong: "Instructions can be up to 8,000 characters.",
+  // Closing, or picking another template, with something typed.
+  discardTitle: "Discard this teammate?",
+  discardBody: "What you typed is not saved.",
+  discard: "Discard",
 } as const;
+
+/** The approval Picker's name on a tool's row. */
+export function approvalFor(tool: string): string {
+  return `Approval for ${tool}`;
+}
 
 /** The colour swatches' accessible names. */
 export const HUE_LABEL: Record<TeammateHue, string> = {
@@ -699,10 +718,52 @@ export const TEAMMATE_SETTINGS = {
   managedByAdmins: "An Owner or Admin manages this teammate.",
   toolsFooter: "Reading never asks. Anything other people will see asks first unless you choose Don't ask. Inviting people always asks.",
   askEveryoneFirst: "Ask everyone first",
+  loadError: "Couldn't load the settings",
+  saved: "Changes saved",
+  saveFailed: "Couldn't save the changes. Try again.",
+  /** A person's own approval choice, or a Remove of one, that did not save. */
+  choiceFailed: "Couldn't save your choice. Try again.",
+  // Closing the drawer, or another tab, with the Instructions tab changed.
+  discardTitle: "Discard your changes?",
+  discardBody: "Your changes on this tab are not saved.",
+  discard: "Discard",
+  monthlyLimitInvalid: "Use a whole number from 1 to 100,000, or leave it empty.",
+  // What a person who does not manage it reads where the fields would be.
+  noMonthlyLimit: "No limit of its own",
+  noInstructions: "No instructions yet.",
+  noTools: "It can't use any tools yet.",
+  /** A person's choice held at Ask me first by its managers' Ask everyone first. */
+  askedByManagers: "Whoever manages it set this to ask everyone first.",
+  // A person's choice for a tool's calls above its own class
+  // ("<tool>:outward"), stored only from an approval card.
+  outwardDontAsk: "Doesn't ask, even when other people will see it",
+  outwardAsks: "Asks first when other people will see it",
+  /** A Talk choice for a conversation the person is no longer in. */
+  conversationGone: "a conversation you're no longer in",
 } as const;
 
 export function settingsCrumb(name: string): string {
   return `AI teammates › ${name}`;
+}
+
+/** A person's "Don't ask" for one Talk conversation, on the Tools and approvals tab. */
+export function dontAskInLine(place: string): string {
+  return `Doesn't ask in ${place}`;
+}
+
+/** A person's "Ask me first" for one Talk conversation. */
+export function asksFirstInLine(place: string): string {
+  return `Asks first in ${place}`;
+}
+
+/** The managers' "Ask everyone first" switch on a tool's row, for a screen reader. */
+export function askEveryoneFor(tool: string): string {
+  return `Ask everyone first: ${tool}`;
+}
+
+/** The Remove beside one of those choices, for a screen reader. */
+export function removeChoice(line: string): string {
+  return `Remove: ${line}`;
 }
 
 export function pauseTeammate(name: string): string {
@@ -727,6 +788,17 @@ export const MEMORY_COPY = {
   emptyHint: "Ask it to remember something in the chat, or add it here.",
   deleteTitle: "Delete this memory?",
   deleteBody: "It stops using it from the next message.",
+  // The add and edit form.
+  keyLabel: "Name",
+  keyPlaceholder: "For example, Report day",
+  valueLabel: "What to remember",
+  valuePlaceholder: "For example, Send my status on Mondays",
+  scopeLabel: "Who it's for",
+  save: "Save",
+  cancel: "Cancel",
+  loadError: "Couldn't load what it remembers",
+  saveFailed: "Couldn't save the memory. Try again.",
+  deleteFailed: "Couldn't delete the memory. Try again.",
 } as const;
 
 export const ROUTINE_COPY = {
@@ -745,7 +817,35 @@ export const ROUTINE_COPY = {
   emptyHint: "Ask in the chat, for example: Every Monday at 9:00, send me a status report.",
   deleteTitle: "Delete this routine?",
   deleteBody: "It stops running. Its past reports stay in the chat.",
+  // The new routine and edit form.
+  namePlaceholder: "For example, Morning brief",
+  whatToDoPlaceholder: "For example, Tell me my top three for the day",
+  nameRequired: "Give it a name.",
+  whatToDoRequired: "Say what to do each time.",
+  chooseWhen: "Choose when it runs.",
+  save: "Save",
+  cancel: "Cancel",
+  loadError: "Couldn't load your routines",
+  saveFailed: "Couldn't save the routine. Try again.",
+  deleteFailed: "Couldn't delete the routine. Try again.",
+  runFailed: "The routine didn't run. Try again.",
+  resumed: "Routine resumed",
 } as const;
+
+/** Run now finished and wrote its report into the chat. */
+export function routineRanToast(name: string): string {
+  return `${name} ran. Its report is in the chat.`;
+}
+
+/** A practice run finished: it only said what it would do. */
+export function routinePracticeToast(name: string): string {
+  return `Practice run of ${name} done. Nothing was changed.`;
+}
+
+/** Run now ran but ended early, or the AI never answered. */
+export function routineDidntFinish(name: string): string {
+  return `${name} didn't finish. Try again.`;
+}
 
 export function nextRunLine(time: string): string {
   return `Next run ${time}`;
@@ -759,6 +859,9 @@ export const ACTIVITY_COPY = {
   recentRuns: "Recent runs",
   approvals: "Approvals",
   nothingYet: "Nothing yet.",
+  /** The tab's third section: what it used, in AI questions (never a cost). */
+  usage: "Usage",
+  loadError: "Couldn't load the activity",
 } as const;
 
 // ── Months (UTC: a teammate's monthly limit is a UTC calendar month) ──
@@ -884,3 +987,15 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   forget: { label: "Forget things" },
   create_routine: { label: "Set up routines", description: "Runs on a schedule you choose. Each run uses one AI question." },
 };
+
+/**
+ * The Workspace agents drawer, opened for a slug that is not a workspace agent
+ * but is a teammate this person may use (their own private one, say): a run
+ * link from its Activity tab lands here. The run is shown; the chat is one
+ * click away.
+ */
+export const TEAMMATE_RUN_DRAWER = {
+  isTeammate: (name: string) => `${name} is an AI teammate, so it lives in Chats.`,
+  openChat: (name: string) => `Open ${name}`,
+} as const;
+

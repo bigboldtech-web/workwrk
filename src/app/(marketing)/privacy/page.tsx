@@ -174,9 +174,23 @@ export default function PrivacyPage() {
               <p>
                 workwrk uses AI for search, triage, and summarization, through a third party model provider. Your
                 workspace content is sent to that provider when someone in your workspace triggers an AI action, and on a
-                schedule only for AI features your workspace sets up to run on one, such as scheduled agents and scheduled
-                AI updates in Talk. We do not send it for training, and we do not use your workspace content to train
-                anything of our own. An Owner or Admin can turn AI features off for the whole workspace.
+                schedule only for AI features your workspace sets up to run on one, such as scheduled agents, the routines
+                people set up for their AI teammates, and scheduled AI updates in Talk. We do not send it for training, and
+                we do not use your workspace content to train anything of our own. An Owner or Admin can turn AI features
+                off for the whole workspace.
+              </p>
+              {/* AI teammates (docs/plans/ai-teammates.md): a teammate acts as
+                  the person using it, through the same checks their own
+                  requests pass (src/lib/agents/acting.ts); memories are per
+                  person, listed and deletable in the Memory tab; a routine
+                  belongs to one person and runs on their schedule; anything
+                  other people will see waits on an approval card unless the
+                  person chose Don't ask (invitations always ask). */}
+              <p>
+                AI teammates work as the person using them and can see and change only what that person can. What a teammate
+                is asked to remember is kept for that person, who can see and delete it in the teammate&apos;s Memory tab, and a
+                routine runs only on the schedule its person set. Anything other people would see, such as a post in Talk or a
+                comment on a shared task, waits for that person&apos;s approval unless they chose otherwise.
               </p>
               <p>
                 Which provider we use, and what their own retention terms say, is a question we will answer in writing
