@@ -10,7 +10,8 @@
 // named in the address that the list does not hold (a removed teammate while
 // Show removed is off, a link from the Inbox) is read on its own
 // (GET /api/agents/teammates/[slug]), so it still opens; one that is not
-// there for this person says so.
+// there for this person says so, with any words they could not send to it
+// under the sentence (teammate-chat.tsx UnsentDraft).
 
 import { useEffect, useState, type ReactNode } from "react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -18,11 +19,11 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import type { TeammateListData } from "@/lib/agents/teammate-store";
+import { useTeammateDraft, type TeammateListData } from "@/lib/agents/teammate-store";
 import { startersFor, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 import type { TeammateRow } from "@/lib/agents/teammate-views";
 import { cn } from "@/lib/utils";
-import { TeammateChat } from "./teammate-chat";
+import { TeammateChat, UnsentDraft } from "./teammate-chat";
 import { TeammateList } from "./teammate-list";
 
 export function TeammatesView({
@@ -83,6 +84,10 @@ export function TeammatesView({
   // undefined: still reading; null: not there for this person.
   const selected: TeammateRow | null | undefined = !selectedSlug ? null : listed ?? (own && own.slug === selectedSlug ? own.row : undefined);
 
+  // A send that found the teammate gone (404) puts the words back in the
+  // composer, and then the chat goes: they stay on screen here instead.
+  const unsent = useTeammateDraft(selectedSlug);
+
   let pane: ReactNode;
   if (!selectedSlug) {
     pane = (
@@ -98,7 +103,11 @@ export function TeammatesView({
       </div>
     );
   } else if (selected === null) {
-    pane = <OsEmptyView title={TEAMMATE_ROUTE_ERRORS.teammateNotFound} action={{ label: TEAMMATE_CHAT.back, onClick: onBack }} />;
+    pane = (
+      <OsEmptyView title={TEAMMATE_ROUTE_ERRORS.teammateNotFound} action={{ label: TEAMMATE_CHAT.back, onClick: onBack }}>
+        {unsent.trim() ? <UnsentDraft text={unsent} className="w-full text-start" /> : null}
+      </OsEmptyView>
+    );
   } else {
     pane = (
       <TeammateChat

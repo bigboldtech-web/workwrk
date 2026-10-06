@@ -23,6 +23,7 @@ import { isReservedAgentSlug } from "@/lib/agents/teammate-access";
 import { PRODUCT_TOOL_NAMES } from "@/lib/agents/tools";
 import { isOwnerOrAdmin, requireApp, requireManageApps } from "@/lib/app-gate";
 import { z } from "zod";
+import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
 
 export async function GET() {
   const gate = await requireApp("ai");
@@ -30,7 +31,7 @@ export async function GET() {
   const user = { organizationId: gate.viewer.organizationId };
 
   const installed = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" }, ...LEGACY_AGENT },
     select: {
       id: true,
       slug: true,
@@ -67,7 +68,7 @@ export async function GET() {
   const lastRunBy = new Map(lastRuns.map((r) => [r.agentId, r]));
 
   const removed = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: "ARCHIVED" },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: "ARCHIVED", ...LEGACY_AGENT },
     select: { id: true, slug: true, name: true, persona: true, description: true, isPrebuilt: true },
     orderBy: { name: "asc" },
     take: 200,

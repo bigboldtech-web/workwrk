@@ -13,7 +13,7 @@ import { TeamAvatar } from "@/components/team/ui";
 import { Dots } from "@/components/ui/dots";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { RichBody } from "@/components/talk/rich-body";
-import type { ChatUserLite } from "@/components/talk/conversation-utils";
+import { startsGroup, type ChatUserLite } from "@/components/talk/conversation-utils";
 import { QUICK_REACTIONS as QUICK_THREE } from "@/lib/emoji-data";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { dayKey, type DateFormatPrefs } from "@/lib/format/date";
@@ -47,7 +47,8 @@ export type FeedMessage = {
     update?: { id?: string; kind?: string; scope?: string; tasks?: number };
     /// AI teammates: a post an AI teammate made for this person after they
     /// approved it (kind "agent_post", src/lib/agents/teammate-tools.ts
-    /// post_in_talk). Only the server writes this kind.
+    /// post_in_talk). Only the server writes this kind. Once the person edits
+    /// it the words are theirs: kind "agent_post_edited", with no label.
     agent?: { id?: string; name?: string };
   } | null;
   author: ChatUserLite;
@@ -104,9 +105,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   const items = useMemo(() => {
     const out: Array<{ kind: "day"; key: string; label: string } | { kind: "msg"; key: string; msg: FeedMessage; head: boolean }> = [];
     let prevDay = "";
-    let prevAuthor = "";
-    let prevTime = 0;
-    let prevAi = false;
+    let prev: FeedMessage | null = null;
     for (const m of messages) {
       const d = new Date(m.createdAt);
       // The divider buckets by the VIEWER'S day, from the same preference the
@@ -118,18 +117,14 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
       if (day !== prevDay) {
         if (showDayDividers) out.push({ kind: "day", key: `day-${day}`, label: dayLabel(d, prefs, fmtDate) });
         prevDay = day;
-        prevAuthor = "";
+        prev = null;
       }
-      const t = d.getTime();
-      // An AI update (Batch 8) always heads its own group, and the person's
-      // next message after one does too, so the "AI update" label is never
-      // folded into, or over, words the person wrote themselves.
-      const ai = m.metadata?.kind === "ai_update" || m.metadata?.kind === "ai_update_hidden";
-      const head = m.authorId !== prevAuthor || t - prevTime > 5 * 60 * 1000 || ai || prevAi;
-      out.push({ kind: "msg", key: m.id, msg: m, head });
-      prevAuthor = m.authorId;
-      prevTime = t;
-      prevAi = ai;
+      // An AI update (Batch 8) or an AI teammate's post always heads its own
+      // group, and the person's next message after one does too, so the "AI
+      // update" or "via {teammate}" label is never folded into, or over,
+      // words the person wrote themselves (conversation-utils.ts startsGroup).
+      out.push({ kind: "msg", key: m.id, msg: m, head: startsGroup(prev, m) });
+      prev = m;
     }
     return out;
   }, [messages, fmtDate, prefs, showDayDividers]);

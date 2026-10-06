@@ -263,6 +263,10 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
   };
 }
 
+const FAKE_TOOL_PROPS: Record<string, unknown> = Object.fromEntries(
+  ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message"].map((k) => [k, { type: "string" }]),
+);
+
 /** Every tool, each recording its call and answering fx.answers[tool]. */
 export function fakeTools() {
   const tools: Record<string, { name: string; description: string; input_schema: { type: "object"; properties: Record<string, unknown> }; handler: (ctx: never, input: Record<string, unknown>) => Promise<unknown> }> = {};
@@ -270,7 +274,9 @@ export function fakeTools() {
     tools[name] = {
       name,
       description: "",
-      input_schema: { type: "object", properties: {} },
+      // The text fields the tests send, as the real tools declare them: the
+      // executor drops what a tool's schema does not declare (input-check.ts).
+      input_schema: { type: "object", properties: FAKE_TOOL_PROPS },
       handler: async (ctx: never, input: Record<string, unknown>) => {
         fx.handlerCalls.push({ tool: name, ctx, input });
         const answer = fx.answers[name];

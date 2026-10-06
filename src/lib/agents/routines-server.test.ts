@@ -215,11 +215,30 @@ describe("runRoutine", () => {
   });
 
   it("gives the question back when the AI never answered, and records the run as failed", async () => {
-    s.runTeammateTurn.mockResolvedValueOnce(turn({ assistantMessageId: null, text: "", failedBeforeAnything: true, error: "The AI service didn't answer. Try again." }));
+    s.runTeammateTurn.mockResolvedValueOnce(turn({ assistantMessageId: null, text: "", failedBeforeAnything: true, giveBack: true, error: "The AI service didn't answer. Try again." }));
     const out = await run();
     expect(out).toMatchObject({ ok: true, status: "FAILED", reason: "ai_failed", messageId: null });
     expect(s.giveBackTurn).toHaveBeenCalledWith("run1", "q1");
     expect(s.updates[0].data).toMatchObject({ lastStatus: "FAILED", lastReason: "ai_failed", lastRunId: "run1" });
+  });
+
+  it("keeps the question for an answer that came back refused or empty, with a true reason", async () => {
+    // Before: any turn with nothing to show gave its question back, so a
+    // refused call was free and the reason said the AI never answered.
+    s.runTeammateTurn.mockResolvedValueOnce(turn({ assistantMessageId: null, text: "", failedBeforeAnything: true, giveBack: false, error: "The AI declined to answer that." }));
+    const out = await run();
+    expect(out).toMatchObject({ ok: true, status: "FAILED", reason: "no_answer" });
+    expect(s.giveBackTurn).not.toHaveBeenCalled();
+    expect(s.updates[0].data).toMatchObject({ lastStatus: "FAILED", lastReason: "no_answer" });
+  });
+
+  it("only skips a run when free AI's ceiling for the day refused it, and pauses for the person's own free questions", async () => {
+    s.claimTeammateTurn.mockResolvedValueOnce({ ok: false, code: "ai_limit", message: "Free AI has reached its limit for today across WorkwrK.", refusedBy: "free_day" });
+    expect(await run()).toMatchObject({ ok: false, reason: "free_ai_day", pause: false });
+    s.claimTeammateTurn.mockResolvedValueOnce({ ok: false, code: "ai_limit", message: "You have used all 50 AI questions one person gets.", refusedBy: "person" });
+    expect(await run()).toMatchObject({ ok: false, reason: "person_free_used", pause: true });
+    s.claimTeammateTurn.mockResolvedValueOnce({ ok: false, code: "ai_limit", message: "This workspace has used all 50 AI questions.", refusedBy: "plan" });
+    expect(await run()).toMatchObject({ ok: false, reason: "out_of_questions", pause: true });
   });
 
   it("leaves the routine as it was after a practice run", async () => {
@@ -306,6 +325,15 @@ describe("processDueRoutines", () => {
     seedRoutine({ id: "r2", nextRunAt: DUE });
     const inTime = new Date(DUE.getTime() + 3 * 60 * 60 * 1000 - 60_000);
     expect(await processDueRoutines(inTime, RUNNER)).toMatchObject({ due: 1, succeeded: 1, missed: 0 });
+  });
+
+  it("pauses a routine whose schedule names no time within a year, instead of running it every hour (review round 1)", async () => {
+    s.routines.get("r1")!.schedule = "CRON_TZ=UTC 0 9 31 2 *";
+    const counts = await processDueRoutines(NOW, RUNNER);
+    expect(counts).toMatchObject({ due: 1, paused: 1, succeeded: 0 });
+    expect(s.claimTeammateTurn).not.toHaveBeenCalled();
+    expect(s.runTeammateTurn).not.toHaveBeenCalled();
+    expect(s.routines.get("r1")).toMatchObject({ status: "paused", pausedReason: "no_next_run" });
   });
 
   const PAUSES: Array<[string, () => void, string, string]> = [

@@ -36,6 +36,7 @@ import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
+import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
 
 /** The whole tick's time: the crontab's curl stops waiting at 290 seconds (scripts/CRON-SETUP.md). */
 const TICK_DEADLINE_MS = 260_000;
@@ -79,6 +80,8 @@ async function handle(req: Request) {
       status: "ENABLED",
       autonomousEnabled: true,
       scheduleCron: { not: null },
+      // Never a teammate: it runs through its routines (legacy-agents.ts).
+      ...LEGACY_AGENT,
       OR: [
         { nextRunAt: null }, // never run before
         { nextRunAt: { lte: now } },

@@ -14,6 +14,7 @@
 import type { ToolName } from "./tool-names";
 import { objectHref } from "../nav/object-href";
 import { APPROVAL_CARD, TEAMMATE_CHAT, TOOL_PICKER_COPY, waitingForApprovalLine, wouldDoLine } from "./teammate-copy";
+import { clampText } from "./clamp";
 
 export type ToolConcept =
   | "task"
@@ -96,7 +97,7 @@ export function toolSubject(input: Record<string, unknown> | null | undefined): 
   if (!input) return null;
   for (const key of SUBJECT_KEYS) {
     const v = input[key];
-    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 80);
+    if (typeof v === "string" && v.trim()) return clampText(v.trim(), 80);
   }
   return null;
 }
@@ -183,14 +184,14 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 }
 
 function titleOf(v: unknown): string | undefined {
-  return typeof v === "string" && v.trim() ? v.trim().slice(0, 240) : undefined;
+  return typeof v === "string" && v.trim() ? clampText(v.trim(), 240) : undefined;
 }
 
 export function toolOutcome(name: string, result: unknown, errorText?: string | null): ToolOutcome {
   const r = asRecord(result);
   const resultErr = typeof r?.error === "string" && r.error.trim() ? r.error.trim() : null;
   const message = (errorText && errorText.trim()) || resultErr;
-  if (message) return { failed: true, message: message.slice(0, 240), href: null, count: null, searched: null };
+  if (message) return { failed: true, message: clampText(message, 240), href: null, count: null, searched: null };
   // A call that did not run is neither done nor failed: it waits for the
   // person, or a practice run only said what it would do.
   if (r?.status === "waiting_for_approval") {

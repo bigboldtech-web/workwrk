@@ -32,7 +32,7 @@ import { resolveActingPerson } from "./acting";
 import { actionHref, writeEventLine } from "./actions";
 import { computeNextRunAt } from "./autonomous";
 import { claimTeammateTurn, giveBackTurn } from "./budget";
-import { splitScheduleZone } from "./cron";
+import { nextCronRun, parseCron, splitScheduleZone } from "./cron";
 import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom } from "./engine";
 import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, ROUTINE_STALE_MS, routineReasonForPerson, routineScheduleProblem, type RoutineReason } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
@@ -264,6 +264,8 @@ function refusal(reason: RoutineReason, pause: boolean, message: string = ROUTIN
  *   AI isn't set up                       skip    not_configured
  *   the teammate's month is used          skip    agent_cap
  *   the plan's questions are used         pause   out_of_questions
+ *   the person's free questions are used  pause   person_free_used
+ *   free AI's ceiling for the day         skip    free_ai_day (back tomorrow, UTC)
  *   the person's per-minute limit         Run now only: rate_limited
  * A refusal changes nothing: Run now answers with it, and the scheduled
  * runner pauses or skips as `pause` says. A run the AI never answered gives
@@ -307,7 +309,13 @@ export async function runRoutine(
   if (!claim.ok) {
     if (claim.code === "rate_limited") return { ok: false, reason: "rate_limited", message: claim.message, pause: false, retryAfter: claim.retryAfter };
     if (claim.code === "agent_cap") return refusal("agent_cap", false, claim.message);
-    if (claim.code === "ai_limit") return refusal("out_of_questions", true, claim.message);
+    if (claim.code === "ai_limit") {
+      // Only what does not come back by itself pauses: the day's free ceiling
+      // returns at 00:00 UTC, so that run is skipped and the next one runs.
+      if (claim.refusedBy === "free_day") return refusal("free_ai_day", false, claim.message);
+      if (claim.refusedBy === "person") return refusal("person_free_used", true, claim.message);
+      return refusal("out_of_questions", true, claim.message);
+    }
     return refusal("agent_removed", true);
   }
 
@@ -323,9 +331,11 @@ export async function runRoutine(
     questionId: claim.questionId,
     streaming: false,
   });
-  if (turn.failedBeforeAnything) await giveBackTurn(claim.runId, claim.questionId);
+  // Only a turn the model never answered gives its question back; a refused,
+  // cut or empty answer was made and billed, and keeps it (TurnResult.giveBack).
+  if (turn.giveBack) await giveBackTurn(claim.runId, claim.questionId);
   const status = turn.error ? "FAILED" : "SUCCEEDED";
-  const reason: RoutineReason | null = turn.failedBeforeAnything ? "ai_failed" : null;
+  const reason: RoutineReason | null = turn.giveBack ? "ai_failed" : turn.failedBeforeAnything ? "no_answer" : null;
   if (!opts.practice) {
     await prisma.agentRoutine
       .updateMany({ where: { id: r.id }, data: { lastRunAt: now, lastRunId: claim.runId, lastStatus: status, lastReason: reason } })
@@ -416,17 +426,35 @@ export async function processDueRoutines(
   return counts;
 }
 
+/**
+ * A routine's next slot: its cron's next minute (null when the cron names
+ * none in the next year), else the interval's (hourly, every N hours).
+ * computeNextRunAt alone falls back to an hour from now for a cron with no
+ * next minute, which would run such a routine every hour.
+ */
+function nextRoutineRun(schedule: string, now: Date): Date | null {
+  return parseCron(schedule) ? nextCronRun(schedule, now) : computeNextRunAt(schedule, now);
+}
+
 async function runDueSlot(r: DueRoutineRow, now: Date, counts: DueRoutineCounts): Promise<void> {
   const dueAt = r.nextRunAt;
   if (!dueAt) return;
+  const next = nextRoutineRun(r.schedule, now);
   // Claim the slot: move nextRunAt on from the very instant read. Only one
   // caller can move it from that value, so the slot runs at most once.
   const claimed = await prisma.agentRoutine.updateMany({
     where: { id: r.id, status: "active", nextRunAt: dueAt },
-    data: { nextRunAt: computeNextRunAt(r.schedule, now) },
+    data: { nextRunAt: next },
   });
   if (claimed.count !== 1) {
     counts.taken += 1;
+    return;
+  }
+  if (!next) {
+    // No time comes within a year: pause it with the reason, never run it
+    // every hour on the fallback (review round 1).
+    counts.paused += 1;
+    await pauseRoutine(r, "no_next_run");
     return;
   }
   if (now.getTime() - dueAt.getTime() > ROUTINE_STALE_MS) {

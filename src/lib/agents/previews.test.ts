@@ -37,7 +37,9 @@ vi.mock("@/lib/item-gate", () => ({
   },
 }));
 // The person's legacy gates, as acting.ts hands them over.
-vi.mock("./acting", () => ({
+vi.mock("./acting", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./acting")>();
+  return {
   itemCtxFor: (p: { userId: string; organizationId: string; name: string }) => ({ userId: p.userId, organizationId: p.organizationId, userName: p.name }),
   nodeCtxOf: () => ({}),
   canReadListAs: async (_p: unknown, id: string) => db.lists.some((l) => l.id === id),
@@ -45,7 +47,11 @@ vi.mock("./acting", () => ({
   personMay: async (_p: unknown, module: string, action: string) => db.allowed.has(`${module}.${action}`),
   isManagerPerson: () => db.manager,
   goalActorFor: async () => ({}),
-}));
+  // The real invitation rule, from the mocked person's level (legacyLevelRow).
+  inviteLevelAs: actual.inviteLevelAs,
+  inviteInput: actual.inviteInput,
+  };
+});
 vi.mock("@/lib/talk-gate", () => ({
   talkGateForUser: async (userId: string, organizationId: string) => ({ ok: true, gate: { userId, organizationId, orgRole: "MEMBER", ...legacyLevelRow("EMPLOYEE") } }),
   loadConversationRole: async (id: string) => {
@@ -83,7 +89,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { prepareCall, type PrepareContext } from "./previews";
-import { PREVIEW_LINES } from "./teammate-copy";
+import { INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
 
 const ME = { id: "me", firstName: "Priya", lastName: "Shah", email: "priya@x.com" };
 const MAX = { id: "max", firstName: "Max", lastName: "Chen", email: "max@x.com" };
@@ -266,8 +272,19 @@ describe("Talk posts", () => {
 describe("the card's choices", () => {
   it("never offers don't ask again for an invitation", async () => {
     const r = await prepareCall("invite_person_with_role", { email: "new@x.com" }, ctx());
-    expect(r).toMatchObject({ ok: true, risk: "IRREVERSIBLE", preview: { title: "Invite new@x.com", lines: [PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending] } });
+    expect(r).toMatchObject({ ok: true, risk: "IRREVERSIBLE", preview: { title: "Invite new@x.com", lines: [INVITE_CARD.level("Employee"), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending] } });
     if (r.ok) expect(r.preview.alwaysKey).toBeUndefined();
+  });
+
+  it("names what an invitation gives, refuses a level above the person's own, and stores only what it checked (review round 1)", async () => {
+    // Before: the card showed only the email while an Admin level ran.
+    const admin = await prepareCall("invite_person_with_role", { email: "new@x.com", ...legacyLevelRow("COMPANY_ADMIN") }, ctx("manager"));
+    expect(admin.ok).toBe(false);
+    const r = await prepareCall("invite_person_with_role", { email: "new@x.com", ...legacyLevelRow("TEAM_LEAD"), roleId: "r1", sneaky: "x" }, ctx("manager"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.preview.lines).toEqual([INVITE_CARD.level("Team Lead"), INVITE_CARD.role("Account Executive"), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+    expect(r.input).toEqual({ email: "new@x.com", ...legacyLevelRow("TEAM_LEAD"), roleId: "r1" });
   });
 
   it("never offers it where a manager set the tool to ask", async () => {

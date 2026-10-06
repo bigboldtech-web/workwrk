@@ -38,16 +38,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!text) return jsonError("Message can't be empty", 400);
   if (text.length > MAX_BODY) return jsonError("Message is too long", 400);
 
-  // An AI update a person edits is no longer the AI's words (Batch 8): it
-  // stops saying so, and keeps its reader list, so what it was posted from
-  // still reaches only the people it was checked against. The kind changes
-  // in the database, in one statement, so a reaction saved at the same
-  // moment (which rewrites metadata too) is never lost.
+  // An AI update (Batch 8) or an AI teammate's post (agent_post, "via
+  // {teammate}") that a person edits is no longer the AI's words: it stops
+  // saying so (the feed's own rule is conversation-utils.ts editedKind). An
+  // update keeps its reader list, so what it was posted from still reaches
+  // only the people it was checked against. The kind changes in the
+  // database, in one statement, so a reaction saved at the same moment
+  // (which rewrites metadata too) is never lost.
   const [, message] = await prisma.$transaction([
     prisma.$executeRaw`
       UPDATE "ConversationMessage"
-      SET "metadata" = jsonb_set("metadata", '{kind}', '"ai_update_edited"'::jsonb)
-      WHERE "id" = ${messageId} AND "metadata" ->> 'kind' = 'ai_update'`,
+      SET "metadata" = jsonb_set("metadata", '{kind}', CASE "metadata" ->> 'kind' WHEN 'ai_update' THEN '"ai_update_edited"'::jsonb ELSE '"agent_post_edited"'::jsonb END)
+      WHERE "id" = ${messageId} AND "metadata" ->> 'kind' IN ('ai_update', 'agent_post')`,
     prisma.conversationMessage.update({
       where: { id: messageId },
       data: { body: text, editedAt: new Date() },

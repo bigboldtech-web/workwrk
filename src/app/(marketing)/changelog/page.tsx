@@ -59,7 +59,7 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
     title: "AI teammates",
     items: [
       { type: "feature", text: "AI teammates: AI helpers with one job each that you chat with, under AI. Start from a template (Chief of Staff, Project Manager, People Ops, Meeting Prep, Talk and inbox triage, Status Reporter) or from scratch. A teammate works as you and can see and change only what you can." },
-      { type: "feature", text: "Anything other people would see, such as a task for someone else, a comment on a shared task or a post in Talk, waits on an approval card in the chat until you approve, change or deny it. Inviting people always asks." },
+      { type: "feature", text: "Anything other people would see, such as a task for someone else, a comment on a shared task or a post in Talk, waits on an approval card in the chat until you approve, change or deny it, unless you chose Don't ask for it. A request nobody answers expires after 7 days. Inviting people always asks." },
       { type: "feature", text: "Teammates remember what you ask them to (each person sees and deletes their own in Memory), run routines on the schedule you set, at most once an hour, and have a practice run that shows what they would do without changing anything. Each chat turn and each routine run uses one of the plan's AI questions." },
     ],
   },

@@ -113,9 +113,12 @@ describe("another person's private teammate is not one of the workspace's agents
 });
 
 describe("the workspace's agent list (GET and POST /api/agents)", () => {
-  it("never lists a private teammate, added or removed, for anyone, its owner included", async () => {
-    seedAgent({ slug: "status-reporter", name: "Status Reporter" });
-    seedAgent({ slug: "old-reporter", name: "Old reporter", status: "ARCHIVED" });
+  it("never lists a private teammate, added or removed, for anyone, its owner included, nor any agent made as a teammate", async () => {
+    seedAgent({ slug: "status-reporter", name: "Status Reporter", toolNames: null });
+    seedAgent({ slug: "old-reporter", name: "Old reporter", status: "ARCHIVED", toolNames: null });
+    // Made as workspace teammates: they live in Chats, never in the old loop's list (legacy-agents.ts).
+    seedAgent({ slug: "pm-team", name: "PM team" });
+    seedAgent({ slug: "pm-old", name: "PM old", status: "ARCHIVED" });
     seedAgent({ slug: PRIVATE_SLUG, name: "Planner", visibility: "PRIVATE", ownerId: "u-max" });
     seedAgent({ slug: REMOVED_PRIVATE_SLUG, name: "Old", visibility: "PRIVATE", ownerId: "u-max", status: "ARCHIVED" });
     for (const viewer of [PEOPLE.max, PEOPLE.admin, PEOPLE.owner]) {
@@ -154,24 +157,29 @@ describe("a workspace agent", () => {
     expect(mocks.audits.map((a) => a.action)).toEqual(["paused", "turned_on", "schedule_changed", "run_now", "added"]);
   });
 
-  it("adds a removed workspace teammate back only within the plan's limit, as its own restore does", async () => {
-    // Starter: three workspace teammates. Agents the workspace had before teammates (toolNames null) never count.
-    for (const slug of ["one", "two", "three"]) seedAgent({ slug });
+  it("never adds a removed workspace teammate back through Workspace agents: its own restore does, within the plan's limit", async () => {
     seedAgent({ slug: "weekly-status", name: "Weekly status", status: "ARCHIVED" });
     seedAgent({ slug: "old-custom", toolNames: null, status: "ARCHIVED" });
     db.viewer = PEOPLE.admin;
-    const full = await call(installAgent(jsonRequest("POST"), slugged("weekly-status")));
-    expect(full.status).toBe(403);
-    expect(full.body.code).toBe("limit");
+    expect((await call(installAgent(jsonRequest("POST"), slugged("weekly-status")))).status).toBe(404);
     expect(db.agents.find((a) => a.slug === "weekly-status")?.status).toBe("ARCHIVED");
     expect((await call(installAgent(jsonRequest("POST"), slugged("old-custom")))).status).toBe(200);
-    db.plan = "GROWTH";
-    expect((await call(installAgent(jsonRequest("POST"), slugged("weekly-status")))).status).toBe(200);
-    expect(db.agents.find((a) => a.slug === "weekly-status")?.status).toBe("ENABLED");
+  });
+
+  it("never runs, schedules, changes or removes an agent made as a teammate: the old loop would skip its cards, its tools and its limit", async () => {
+    // Review round 1: Run now on a workspace teammate sent an invitation with no card.
+    seedAgent({ slug: "people-ops", name: "People Ops" });
+    db.viewer = PEOPLE.admin;
+    expect((await call(runNow(jsonRequest("POST"), slugged("people-ops")))).status).toBe(404);
+    expect((await call(patchSchedule(jsonRequest("PATCH", { autonomousEnabled: true, scheduleCron: "0 9 * * 1-5" }), slugged("people-ops")))).status).toBe(404);
+    expect((await call(patchAgent(jsonRequest("PATCH", { status: "DISABLED" }), slugged("people-ops")))).status).toBe(404);
+    expect((await call(removeAgent(jsonRequest("DELETE"), slugged("people-ops")))).status).toBe(404);
+    expect(mocks.runAgentAutonomously).not.toHaveBeenCalled();
+    expect(db.agents[0]).toMatchObject({ status: "ENABLED", autonomousEnabled: false });
   });
 
   it("is removed as removing a teammate removes it: what waits is cancelled and every running routine pauses", async () => {
-    const agent = seedAgent({ slug: "status-reporter", name: "Status Reporter", autonomousEnabled: true, scheduleCron: "0 9 * * 1-5", nextRunAt: new Date("2026-10-07T09:00:00Z") });
+    const agent = seedAgent({ slug: "status-reporter", name: "Status Reporter", toolNames: null, autonomousEnabled: true, scheduleCron: "0 9 * * 1-5", nextRunAt: new Date("2026-10-07T09:00:00Z") });
     db.routines.push(
       { id: "r-max", organizationId: "org1", agentId: agent.id, actingForId: "u-max", name: "Brief", status: "active" },
       { id: "r-lea", organizationId: "org1", agentId: agent.id, actingForId: "u-lea", name: "Digest", status: "active" },

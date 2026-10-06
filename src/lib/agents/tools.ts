@@ -160,6 +160,10 @@ const createTask: ToolDefinition = {
   },
   handler: async (ctx, input) => {
     let assigneeId = ctx.userId;
+    // Text only: anything else would reach the query below as a filter.
+    if (input.assigneeEmail !== undefined && input.assigneeEmail !== null && typeof input.assigneeEmail !== "string") {
+      return { error: "That assignee email wasn't text, so the task was not created." };
+    }
     if (input.assigneeEmail) {
       const user = await prisma.user.findFirst({
         where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
@@ -797,6 +801,10 @@ const createOkr: ToolDefinition = {
       return { error: PRECHECK_REFUSALS.goalLevel };
     }
     let ownerId = ctx.userId;
+    // Text only: anything else would reach the query below as a filter.
+    if (input.ownerEmail !== undefined && input.ownerEmail !== null && typeof input.ownerEmail !== "string") {
+      return { error: "That owner email wasn't text, so the goal was not created." };
+    }
     if (input.ownerEmail) {
       const owner = await prisma.user.findFirst({
         where: { email: input.ownerEmail as string, organizationId: ctx.orgId },

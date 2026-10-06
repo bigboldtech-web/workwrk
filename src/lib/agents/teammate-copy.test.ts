@@ -212,3 +212,20 @@ describe("labels", () => {
     expect(Object.keys(copy.HUE_LABEL)).toEqual([...TEAMMATE_HUES]);
   });
 });
+
+describe("the invitation card", () => {
+  it("names everything the invitation gives, in plain words", () => {
+    expect(copy.INVITE_CARD.level("Admin")).toBe("Joins as: Admin.");
+    expect(copy.INVITE_CARD.role("Account Executive")).toBe("Role: Account Executive. Its KRAs and published SOPs are assigned when they accept.");
+    expect(copy.INVITE_CARD.manager("Priya Shah")).toBe("Reports to Priya Shah.");
+    expect(copy.INVITE_CARD.kras(["Pipeline", "Renewals", "Upsell", "Churn"])).toBe("KRAs assigned when they accept: Pipeline, Renewals, Upsell and 1 more.");
+    expect(copy.INVITE_CARD.sops(["Onboarding"])).toBe("SOPs assigned when they accept: Onboarding.");
+    expect(copy.INVITE_CARD.unknown("role")).toBe("That role isn't in this workspace, so the invitation wasn't prepared.");
+    const all = [
+      copy.INVITE_CARD.level("x"), copy.INVITE_CARD.role("x"), copy.INVITE_CARD.manager("x"), copy.INVITE_CARD.department("x"),
+      copy.INVITE_CARD.office("x"), copy.INVITE_CARD.kras(["x"]), copy.INVITE_CARD.sops(["x"]), copy.INVITE_CARD.unknown("x"), copy.NEW_OPEN_TO_ALL,
+    ];
+    for (const line of all) expect(line).not.toMatch(/\u2014|\u2013|--/);
+  });
+});
+

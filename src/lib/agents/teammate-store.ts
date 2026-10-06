@@ -14,12 +14,13 @@
 // SEND, Ask AI's rules (session-store.ts send): the person's message shows
 // at once. When the server never had it (refused, offline, a stream that
 // never opened) it leaves the thread and its words come back to the
-// composer. When the server has it (the route saves it before the stream
-// opens, so an open stream means it does) and the answer breaks off, it
-// stays, the words come back to the composer as well, and the chat is read
-// again a moment later: the route finishes and saves the turn after a client
-// leaves. The server's own sentence shows for ai_limit, agent_cap,
-// rate_limited and a teammate paused or removed meanwhile.
+// composer, above anything typed while it was out. When the server has it
+// (the route saves it before the stream opens, so an open stream means it
+// does) and the answer breaks off, it stays, the words come back to an empty
+// composer as well, and the chat is read again a moment later: the route
+// finishes and saves the turn after a client leaves. The server's own
+// sentence shows for ai_limit, agent_cap, rate_limited and a teammate paused
+// or removed meanwhile.
 //
 // DECIDE: the approval card's buttons (POST /api/agents/actions/decide). The
 // cards change at once from the answer, the chat is read again for the
@@ -46,6 +47,7 @@ import {
   TEMP_ID_PREFIX,
   applyDecisionResults,
   applyTeammateEvent,
+  draftAfterFailure,
   failedTurnMessages,
   mergeNewestPage,
   prependOlder,
@@ -313,7 +315,8 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     set(slug, (c) => ({
       error,
       errorText,
-      draft: text !== null && !c.draft ? text : c.draft,
+      // Typed more while the send was out: both stay (draftAfterFailure).
+      draft: draftAfterFailure(c.draft, text, serverHas),
       messages: failedTurnMessages(c.messages, ids, serverHas),
     }));
     if (serverHas && error === "stopped") {
@@ -497,6 +500,17 @@ export function useTeammateChat(slug: string) {
     [slug],
   );
   return useMemo(() => ({ ...s, ...actions }), [s, actions]);
+}
+
+/**
+ * Only the words waiting in one chat's composer, for a screen that shows
+ * them without the chat (its teammate is not there any more). Read-only, and
+ * the chat does not count as open.
+ */
+export function useTeammateDraft(slug: string | null): string {
+  const sub = useCallback((l: () => void) => (slug ? subscribe(slug, l) : () => {}), [slug]);
+  const snap = useCallback(() => (slug ? stateOf(slug).draft : ""), [slug]);
+  return useSyncExternalStore(sub, snap, () => "");
 }
 
 /**

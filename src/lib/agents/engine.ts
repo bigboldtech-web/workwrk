@@ -24,8 +24,9 @@
 //
 // WHAT THE ENGINE NEVER DOES: decide who the person is (the route or the
 // routine runner resolved them), claim or give back an AI question (the
-// caller does, with budget.ts; failedBeforeAnything says when to give it
-// back), or write an AgentAction (executor.ts and actions.ts do).
+// caller does, with budget.ts; giveBack says when to give it back: only when
+// the model never answered), or write an AgentAction (executor.ts and
+// actions.ts do).
 //
 // INSTRUCTIONS COME FROM THREE PLACES ONLY: the person's own messages, the
 // teammate's instructions, and the server's own lines, which start with
@@ -191,8 +192,16 @@ export interface TurnResult {
   /** The requests this turn left waiting for the person. */
   proposedActionIds: string[];
   text: string;
-  /** No text came back and no tool ran: nothing was written to the chat, and the caller gives the question back. */
+  /** No text came back and no tool ran: nothing was written to the chat. */
   failedBeforeAnything: boolean;
+  /**
+   * The model never answered and no tool ran: the caller gives the question
+   * back. An answer that came back, refused, cut short or empty, keeps it, as
+   * Ask AI's does (callOrGiveBack): else a script could ask for unusable
+   * answers forever and spend nothing of the plan, the person's free
+   * questions, the day's free ceiling or the teammate's month.
+   */
+  giveBack: boolean;
   tokensIn: number;
   tokensOut: number;
   /** The sentence for a turn that ended early (TURN_ERRORS), else null. */
@@ -520,6 +529,11 @@ interface TurnState {
   /** The model asked for, then the one that answered. */
   model: string;
   error: string | null;
+  /**
+   * Whether any model call came back, a refused, cut or empty answer
+   * included: that call was made and billed, so the turn keeps its question.
+   */
+  answered: boolean;
 }
 
 /** Steps 1 to 4: the tools, the rules, the system blocks, the history and the client. */
@@ -621,6 +635,9 @@ async function runLoop(
       opened = true;
       emit({ type: "text_delta", text });
     });
+    // It came back, so it was made and billed: whatever it says, the turn
+    // keeps its question.
+    s.answered = true;
     s.tokensIn += response.usage?.input_tokens ?? 0;
     s.tokensOut += response.usage?.output_tokens ?? 0;
     s.finishReason = response.stop_reason ?? null;
@@ -744,7 +761,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     }
   };
   const started = new Date();
-  const s: TurnState = { records: [], said: [], tokensIn: 0, tokensOut: 0, finishReason: null, model: a.agent.modelOverride?.trim() || TEAMMATE_MODEL, error: null };
+  const s: TurnState = { records: [], said: [], tokensIn: 0, tokensOut: 0, finishReason: null, model: a.agent.modelOverride?.trim() || TEAMMATE_MODEL, error: null, answered: false };
   const claimed = new Map<string, AgentActionRow>();
   for (const row of a.outcomes ?? []) claimed.set(row.id, row);
   let broke = false;
@@ -824,6 +841,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     proposedActionIds: proposals.map((r) => r.actionId as string),
     text,
     failedBeforeAnything,
+    giveBack: !s.answered && s.records.length === 0,
     tokensIn: s.tokensIn,
     tokensOut: s.tokensOut,
     error: s.error,

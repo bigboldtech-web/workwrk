@@ -161,6 +161,7 @@ describe("claimTeammateTurn", () => {
       ok: false,
       code: "ai_limit",
       message: "This workspace has used all 50 AI questions on the Starter plan. An Owner or Admin can change the plan in Settings, Plan & billing.",
+      refusedBy: "plan",
     });
     expect(db.questions).toEqual([]);
     expect(db.runs).toEqual([]);

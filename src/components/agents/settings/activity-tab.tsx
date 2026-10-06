@@ -7,7 +7,9 @@
 //                a status dot, the summary, when; each opens its detail in
 //                Run history
 //   Approvals    this person's own requests to it: the card's status chip,
-//                the title, when; each opens its card in the chat
+//                the title, when; each opens its card in the chat. A call
+//                their own Don't ask let run had no card: it reads "Ran
+//                without asking" and opens its run (activityActionView)
 //   Usage        the month's AI questions, against its own limit when it
 //                has one
 //
@@ -16,10 +18,12 @@
 
 import Link from "next/link";
 import { RunStatusDot } from "@/components/automation/run-status-chip";
+import { StatusChip } from "@/components/ui/chip";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { ACTIVITY_COPY, TEAMMATE_CHAT, usageLine } from "@/lib/agents/teammate-copy";
-import type { ActionView } from "@/lib/agents/teammate-thread";
+import { activityActionView, type ActionView } from "@/lib/agents/teammate-thread";
 import type { TeammateDetail, TeammateRunRow, TeammateUsage } from "@/lib/agents/teammate-views";
+import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
 import { formatDate, formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { cn } from "@/lib/utils";
@@ -91,10 +95,15 @@ export function ActivityTab({ teammate: t }: { teammate: TeammateDetail }) {
           <ul className="flex flex-col">
             {data.actions.map((a) => {
               const at = a.decidedAt ?? a.createdAt;
+              const row = activityActionView(a, t.slug);
               return (
                 <li key={a.id}>
-                  <Link href={`/agents?chat=${slug}&action=${encodeURIComponent(a.id)}`} className={cn(ROW, "h-auto min-h-9 py-1")}>
-                    <ActionStatusChip status={a.status} className="shrink-0" />
+                  <Link href={row.href} className={cn(ROW, "h-auto min-h-9 py-1")}>
+                    {row.chip ? (
+                      <StatusChip color={RUN_TONE_COLOR[row.chip.tone]} label={row.chip.label} className="shrink-0" />
+                    ) : (
+                      <ActionStatusChip status={a.status} className="shrink-0" />
+                    )}
                     <span className="min-w-0 flex-1 truncate text-ink">{a.preview.title}</span>
                     <span className="shrink-0 text-ink-2" title={formatDate(at, datePrefs, "datetime")}>
                       {formatRelative(at, datePrefs)}

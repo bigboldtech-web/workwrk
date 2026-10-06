@@ -26,7 +26,7 @@ type TurnArgs = {
   outcomes?: unknown[];
   emit?: (e: Record<string, unknown>) => void;
 };
-type TurnOut = { failedBeforeAnything: boolean; error: string | null; messages: unknown[] };
+type TurnOut = { failedBeforeAnything: boolean; giveBack: boolean; error: string | null; messages: unknown[] };
 
 const m = vi.hoisted(() => ({
   order: [] as string[],
@@ -193,8 +193,16 @@ describe("a message", () => {
     expect(m.giveBackTurn).not.toHaveBeenCalled();
   });
 
-  it("gives the question back when the turn failed before anything", async () => {
-    turnReturns({ failedBeforeAnything: true, error: "The AI service didn't answer. Try again.", messages: [] });
+  it("keeps the question when the model answered but nothing came of it (a refusal, an empty answer)", async () => {
+    // Before: any turn with nothing to show gave its question back, so a
+    // script could buy refused or cut-off answers for nothing.
+    turnReturns({ failedBeforeAnything: true, giveBack: false, error: "The AI declined to answer that.", messages: [] });
+    await events(await send({ message: "Hello" }));
+    expect(m.giveBackTurn).not.toHaveBeenCalled();
+  });
+
+  it("gives the question back when the model never answered", async () => {
+    turnReturns({ failedBeforeAnything: true, giveBack: true, error: "The AI service didn't answer. Try again.", messages: [] });
     const got = await events(await send({ message: "Hello" }));
     expect(m.giveBackTurn).toHaveBeenCalledWith("run1", "q1");
     expect(got.at(-1)).toEqual({ type: "done", messages: [], error: "The AI service didn't answer. Try again." });
@@ -217,7 +225,7 @@ describe("a message", () => {
     const res = await send({ message: "Hello" });
     await res.body?.cancel();
     expect(m.runTeammateTurn).toHaveBeenCalledTimes(1);
-    finish({ failedBeforeAnything: true, error: "The AI service didn't answer. Try again." });
+    finish({ failedBeforeAnything: true, giveBack: true, error: "The AI service didn't answer. Try again." });
     await vi.waitFor(() => expect(m.giveBackTurn).toHaveBeenCalledWith("run1", "q1"));
   });
 });

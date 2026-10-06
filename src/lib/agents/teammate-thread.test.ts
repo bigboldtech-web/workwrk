@@ -3,11 +3,13 @@ import type { DecisionInput, DecisionResult } from "./actions";
 import { ACTION_ERRORS, TEAMMATE_CHAT } from "./teammate-copy";
 import {
   actionViewFromRow,
+  activityActionView,
   applyDecisionResults,
   applyTeammateEvent,
   canRetrySend,
   clipCardBody,
   decidedLine,
+  draftAfterFailure,
   editStartText,
   failedTurnMessages,
   filterTeammates,
@@ -418,6 +420,26 @@ describe("failedTurnMessages", () => {
   });
 });
 
+describe("draftAfterFailure", () => {
+  it("keeps both when the person typed more while a message the server never had was out", () => {
+    // Its bubble leaves the thread, so this is the only place the words are.
+    expect(draftAfterFailure("and invite Lea", "Book a room for Friday", false)).toBe("Book a room for Friday\n\nand invite Lea");
+  });
+  it("puts the words back in an empty composer, once", () => {
+    expect(draftAfterFailure("", "Book a room for Friday", false)).toBe("Book a room for Friday");
+    expect(draftAfterFailure("  \n", "Book a room for Friday", false)).toBe("Book a room for Friday");
+    expect(draftAfterFailure("Book a room for Friday", "Book a room for Friday", false)).toBe("Book a room for Friday");
+  });
+  it("leaves newer text alone when the server has the message, whose bubble stays", () => {
+    expect(draftAfterFailure("and invite Lea", "Book a room for Friday", true)).toBe("and invite Lea");
+    expect(draftAfterFailure("", "Book a room for Friday", true)).toBe("Book a room for Friday");
+  });
+  it("changes nothing for a continue, which has no words", () => {
+    expect(draftAfterFailure("and invite Lea", null, false)).toBe("and invite Lea");
+    expect(draftAfterFailure("", null, true)).toBe("");
+  });
+});
+
 describe("teammateSendFailure", () => {
   const cases: Array<[number, unknown, { error: TeammateSendError | null; text: string | null }]> = [
     [403, { error: "This workspace has used all its AI questions.", code: "ai_limit" }, { error: "ai_limit", text: "This workspace has used all its AI questions." }],
@@ -565,5 +587,27 @@ describe("the card's parts", () => {
     expect(with_({ status: "CANCELLED" })).toBe("Cancelled: Priya was removed.");
     expect(with_({ status: "PENDING" })).toBeNull();
     expect(with_({ status: "RUNNING" })).toBeNull();
+  });
+});
+
+describe("a request on the Activity tab", () => {
+  const view = (over: Partial<AgentActionRow>) => activityActionView(actionViewFromRow(action(over)), "status-reporter");
+  it("opens a request's card in the chat, with the card's own chip", () => {
+    expect(view({ status: "EXECUTED", decidedVia: "person" })).toEqual({ chip: null, href: "/agents?chat=status-reporter&action=a1" });
+    expect(view({ status: "PENDING" })).toEqual({ chip: null, href: "/agents?chat=status-reporter&action=a1" });
+  });
+  it("never calls a call the person's Don't ask let run Approved, nor sends it to a card it never had", () => {
+    expect(view({ status: "EXECUTED", decidedVia: "rule", groupKey: "run7:post_in_talk" })).toEqual({
+      chip: { label: "Ran without asking", tone: "success" },
+      href: "/agents?tab=runs&agent=status-reporter&run=run7",
+    });
+    expect(view({ status: "RUNNING", decidedVia: "rule", groupKey: "run7:post_in_talk" }).chip).toEqual({ label: "Running", tone: "info" });
+    // One that failed keeps the card's "Didn't work", and still opens its run.
+    expect(view({ status: "FAILED", decidedVia: "rule", groupKey: "run7:post_in_talk" })).toEqual({ chip: null, href: "/agents?tab=runs&agent=status-reporter&run=run7" });
+  });
+  it("opens the chat when the run can't be read from the groupKey", () => {
+    for (const groupKey of [null, "", "post_in_talk", ":post_in_talk"]) {
+      expect(view({ status: "EXECUTED", decidedVia: "rule", groupKey }).href).toBe("/agents?chat=status-reporter");
+    }
   });
 });

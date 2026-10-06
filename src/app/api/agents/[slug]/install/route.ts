@@ -16,6 +16,7 @@ import { requireManageApps } from "@/lib/app-gate";
 import { AGENTS_BY_SLUG } from "@/lib/agents/catalog";
 import { auditAgent } from "@/lib/agents/audit";
 import { overLimit, teammateLimits } from "@/lib/agents/teammate-server";
+import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -29,7 +30,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   const catalog = AGENTS_BY_SLUG[slug];
   if (!catalog) {
     const removed = await prisma.agent.findFirst({
-      where: { organizationId: user.organizationId, slug, visibility: "WORKSPACE", status: "ARCHIVED" },
+      where: { organizationId: user.organizationId, slug, visibility: "WORKSPACE", status: "ARCHIVED", ...LEGACY_AGENT },
       select: { id: true, toolNames: true },
     });
     if (!removed) return unknown();
