@@ -4,7 +4,7 @@
 
 import { logActivity } from "@/lib/activity";
 
-export type AgentAuditAction = "added" | "turned_on" | "paused" | "removed" | "schedule_changed" | "run_now";
+export type AgentAuditAction = "added" | "turned_on" | "paused" | "removed" | "schedule_changed" | "run_now" | "edited" | "approvals_changed";
 
 const WORDS: Record<AgentAuditAction, string> = {
   added: "added the agent",
@@ -13,6 +13,10 @@ const WORDS: Record<AgentAuditAction, string> = {
   removed: "removed the agent",
   schedule_changed: "changed the agent's schedule",
   run_now: "ran the agent",
+  // AI teammates (docs/plans/ai-teammates.md 3.11): its name, job,
+  // instructions, tools, colour or limit; and what it asks before doing.
+  edited: "changed the agent",
+  approvals_changed: "changed what the agent asks before doing",
 };
 
 export async function auditAgent(args: {

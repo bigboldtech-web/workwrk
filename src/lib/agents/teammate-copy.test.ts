@@ -62,6 +62,7 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   agentCapMessage: [["Status Reporter", 40, AT], "Status Reporter has used its 40 AI questions for October. It can answer again on November 1 (UTC), or whoever manages it can raise the limit in its settings."],
   pausedNotSent: [["Priya"], "Priya is paused, so your message wasn't sent."],
   routineLimitMessage: [[10, "teammate"], "You have 10 routines with this teammate, the most one person can have."],
+  tooManyDecisions: [[12], "Too many decisions at once. Try again in 12 seconds."],
   // Card titles, change lines and the tools' refusals (previews.ts, teammate-tools.ts).
   quotedTitle: [["Create task", "Call Acme"], 'Create task "Call Acme"'],
   placeTitle: [["Post in", "#general"], "Post in #general"],

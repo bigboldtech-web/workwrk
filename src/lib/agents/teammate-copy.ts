@@ -738,6 +738,33 @@ export function routineLimitMessage(n: number, scope: "teammate" | "person"): st
     : `You have ${count(n, "routine", "routines")}, the most one person can have.`;
 }
 
+// ── The teammate routes' refusals (src/app/api/agents/...) ───────────
+//
+// Each route answers { error: <sentence>, code }. A teammate that does not
+// exist and another person's private one read the same, so the words never
+// say which.
+
+export const TEAMMATE_ROUTE_ERRORS = {
+  teammateNotFound: "That teammate can't be found.",
+  invalid: "Check the details and try again.",
+  needsAdmin: "Only an Owner or Admin can make a teammate for the whole workspace.",
+  agentAccount: "An agent account can't have AI teammates.",
+  /** A continue with no decision the teammate has not heard yet. */
+  nothingToContinue: "There's nothing new to continue from.",
+  /** The person's message could not be written, so no turn ran. */
+  messageNotSaved: "Your message couldn't be saved. Try again.",
+  memoryNotFound: "That memory can't be found.",
+  /** A memory for everyone, asked of a teammate that is one person's own. */
+  privateMemoryScope: "A teammate that's just yours keeps only your own memories.",
+  routineNotFound: "That routine can't be found.",
+  actionNotFound: "That request can't be found.",
+} as const;
+
+/** The approval routes' per-minute limit (POST /api/agents/actions/decide). */
+export function tooManyDecisions(retryAfter: number): string {
+  return `Too many decisions at once. Try again in ${retryAfter} seconds.`;
+}
+
 // ── Tool picker (labels and the one-line notes) ──────────────────────
 
 export interface ToolPickerCopy {

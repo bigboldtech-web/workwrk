@@ -345,6 +345,26 @@ async function decideOne(viewer: Viewer, row: DecideRow, d: DecisionInput, opts:
   return approve(viewer, row, title, d, opts, cache, now);
 }
 
+/**
+ * Close every request a removed teammate left waiting (DELETE
+ * /api/agents/teammates/[slug]): CANCELLED with the reason its card shows,
+ * by one swap from PENDING, so a request decided a moment ago keeps its
+ * outcome, and the Inbox notifications that pointed at them marked read. No
+ * line: nobody decided them. Returns how many it closed.
+ */
+export async function cancelPendingActionsOf(agent: { id: string; slug: string; name: string }, now: Date = new Date()): Promise<number> {
+  const rows = await prisma.agentAction.findMany({ where: { agentId: agent.id, status: "PENDING" }, select: { id: true, actingForId: true } });
+  if (rows.length === 0) return 0;
+  const closed = await prisma.agentAction.updateMany({
+    where: { id: { in: rows.map((r) => r.id) }, status: "PENDING" },
+    data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: cancelledRemovedLine(agent.name) },
+  });
+  const linksByPerson = new Map<string, string[]>();
+  for (const r of rows) linksByPerson.set(r.actingForId, [...(linksByPerson.get(r.actingForId) ?? []), actionHref(agent.slug, r.id)]);
+  for (const [userId, links] of linksByPerson) await markLinksRead(userId, links);
+  return closed.count;
+}
+
 /** Close a request that can never run now, with the reason on its card. No line: nobody decided it. */
 async function cancel(row: DecideRow, userId: string, code: "agent_removed" | "tool_off", error: string, now: Date): Promise<DecisionResult> {
   if (!(await swap(row.id, "PENDING", { status: "CANCELLED", decidedVia: "system", decidedAt: now, error }))) return lost(row.id);

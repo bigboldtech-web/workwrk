@@ -75,8 +75,12 @@ export type ActingRefusal = "gone" | "inactive" | "guest" | "agent_account" | "a
 
 export type ActingResult = { ok: true; person: ActingPerson } | { ok: false; reason: ActingRefusal };
 
-/** The zone the person's dates are written in: their own, else the workspace's, else UTC. */
-async function personZone(userId: string, organizationId: string): Promise<string> {
+/**
+ * The zone the person's dates are written in: their own, else the
+ * workspace's, else UTC. Also the teammate routes' zone for a routine's
+ * words and for a schedule the person picks.
+ */
+export async function personZone(userId: string, organizationId: string): Promise<string> {
   const prefs = await getEffectivePreferences(userId, organizationId).catch(() => null);
   const own = prefs?.home?.locale?.timezone;
   if (own && isValidTimeZone(own)) return own;

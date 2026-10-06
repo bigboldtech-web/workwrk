@@ -17,7 +17,7 @@ vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeT
 vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixtures")).fakeLogActivity }));
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
 
-import { RUNNING_STUCK_MS, actionHref, actionViews, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
+import { RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
 import { AGENT_SLUG, VIEWER, fx, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -345,5 +345,29 @@ describe("reading the cards", () => {
     talkPost({ actingForId: "max" });
     talkPost({ status: "EXECUTED" });
     expect(await waitingCount("org", "me")).toBe(1);
+  });
+});
+
+describe("cancelPendingActionsOf: a removed teammate", () => {
+  it("cancels what still waits, everyone's, with the reason its card shows, and runs nothing", async () => {
+    const mine = talkPost();
+    const theirs = talkPost({ actingForId: "max" });
+    const done = talkPost({ status: "EXECUTED" });
+    const otherTeammate = talkPost({ agentId: "a2" });
+    expect(await cancelPendingActionsOf({ id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" })).toBe(2);
+    expect(fx.actions.map((r) => [r.id, r.status])).toEqual([
+      [mine.id, "CANCELLED"],
+      [theirs.id, "CANCELLED"],
+      [done.id, "EXECUTED"],
+      [otherTeammate.id, "PENDING"],
+    ]);
+    expect(fx.actions[0]).toMatchObject({ decidedVia: "system", error: "Cancelled: Chief of Staff was removed." });
+    // Each person's Inbox notifications for their cards are marked read; no line is written.
+    expect(fx.notifications.map((n) => n.where)).toEqual([
+      { userId: "me", link: { in: [actionHref(AGENT_SLUG, mine.id)] }, read: false },
+      { userId: "max", link: { in: [actionHref(AGENT_SLUG, theirs.id)] }, read: false },
+    ]);
+    expect(fx.messages).toEqual([]);
+    expect(fx.handlerCalls).toEqual([]);
   });
 });

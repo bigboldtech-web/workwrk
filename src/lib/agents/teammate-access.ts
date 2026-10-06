@@ -1,7 +1,7 @@
 // Who may use, manage and create an AI teammate (docs/plans/ai-teammates.md
 // 3.1 and 4). The pure half, so the teammate routes, the routine runner, the
 // Ask AI guard and the tests read one rule. loadTeammate (a row by slug,
-// through these rules) comes with the teammate routes.
+// through these rules) is the server half, in teammate-server.ts.
 //
 // USING. A WORKSPACE teammate, which is every agent made before the
 // visibility column, is for every member with the AI app, exactly as before.

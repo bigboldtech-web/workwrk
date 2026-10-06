@@ -146,6 +146,35 @@ export async function rememberFact(a: {
 }
 
 /**
+ * Change one memory's key or value from the Memory tab, in its own scope.
+ * The caller has checked whose it is (PATCH /api/agents/memories/[id]). A
+ * new key that matches another memory of that scope (without case) replaces
+ * that one, as remembering a fact under its key does, in one transaction.
+ */
+export async function updateMemory(
+  row: { id: string; agentId: string; scope: MemoryScope; scopeId: string; key: string },
+  patch: { key?: string; value?: string },
+  editorId: string,
+): Promise<RememberResult> {
+  const key = patch.key !== undefined ? clampText(tidyKey(patch.key), MEMORY_LIMITS.keyMax).trim() : row.key;
+  const value = patch.value !== undefined ? clampText(String(patch.value).trim(), MEMORY_LIMITS.valueMax).trim() : null;
+  if (!key || value === "") return { ok: false, error: TEAMMATE_TOOL_ERRORS.memoryEmpty };
+  const others = await prisma.agentMemory.findMany({
+    where: { agentId: row.agentId, scope: row.scope, scopeId: row.scopeId, id: { not: row.id } },
+    select: { id: true, key: true },
+  });
+  const replaced = others.filter((m) => normaliseKey(m.key) === normaliseKey(key)).map((m) => m.id);
+  const [, updated] = await prisma.$transaction([
+    prisma.agentMemory.deleteMany({ where: { id: { in: replaced }, agentId: row.agentId, scope: row.scope, scopeId: row.scopeId } }),
+    prisma.agentMemory.update({
+      where: { id: row.id },
+      data: { key, ...(value !== null ? { value } : {}), source: "settings", createdById: editorId },
+    }),
+  ]);
+  return { ok: true, created: false, memory: viewOf(updated) };
+}
+
+/**
  * Forget one of the person's own memories by key. Only person scope, only
  * theirs: a chat can never remove a workspace teammate's shared memories or
  * anyone else's.
