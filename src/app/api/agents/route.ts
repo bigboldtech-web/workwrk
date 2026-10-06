@@ -9,10 +9,17 @@
 // `available` lists only agents whose product is in the PPMS scope: the CRM,
 // ITSM, procurement, books, helpdesk and campaigns agents stay in the
 // catalog (an org that already added one keeps it) but are not offered.
+//
+// Workspace agents only (docs/plans/ai-teammates.md 3.15): a PRIVATE AI
+// teammate is its owner's alone and lives in AI teammates, so it is in
+// neither `installed` nor `removed`, for anyone, its owner and Admins
+// included. A new custom agent never takes a slug a static route beside
+// /api/agents/[slug] owns (RESERVED_AGENT_SLUGS).
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AGENT_CATALOG } from "@/lib/agents/catalog";
+import { isReservedAgentSlug } from "@/lib/agents/teammate-access";
 import { PRODUCT_TOOL_NAMES } from "@/lib/agents/tools";
 import { isOwnerOrAdmin, requireApp, requireManageApps } from "@/lib/app-gate";
 import { z } from "zod";
@@ -23,7 +30,7 @@ export async function GET() {
   const user = { organizationId: gate.viewer.organizationId };
 
   const installed = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, status: { not: "ARCHIVED" } },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
     select: {
       id: true,
       slug: true,
@@ -60,7 +67,7 @@ export async function GET() {
   const lastRunBy = new Map(lastRuns.map((r) => [r.agentId, r]));
 
   const removed = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, status: "ARCHIVED" },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: "ARCHIVED" },
     select: { id: true, slug: true, name: true, persona: true, description: true, isPrebuilt: true },
     orderBy: { name: "asc" },
     take: 200,
@@ -127,14 +134,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid body", issues: parsed.error.issues }, { status: 400 });
   }
 
-  // Generate a unique slug within the org; bump with -2/-3/... on clash.
+  // Generate a unique slug within the org; bump with -2/-3/... on clash. A
+  // reserved slug ("runs", "teammates", ...) counts as taken: the static
+  // route of that name is served first, so the agent could never be reached.
   const baseSlug = slugify(parsed.data.name);
   let slug = baseSlug;
   for (let i = 2; i < 50; i++) {
-    const clash = await prisma.agent.findFirst({
-      where: { organizationId: user.organizationId, slug },
-      select: { id: true },
-    });
+    const clash = isReservedAgentSlug(slug)
+      ? { id: slug }
+      : await prisma.agent.findFirst({
+          where: { organizationId: user.organizationId, slug },
+          select: { id: true },
+        });
     if (!clash) break;
     slug = `${baseSlug}-${i}`;
   }

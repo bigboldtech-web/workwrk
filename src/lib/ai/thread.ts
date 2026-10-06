@@ -17,19 +17,22 @@ export type StreamEvent =
 /**
  * Split an SSE buffer into complete events and the unfinished tail. Events
  * are separated by a blank line; each carries one `data:` line of JSON. A
- * malformed event is skipped rather than ending the stream.
+ * malformed event is skipped rather than ending the stream. `E` is the
+ * stream's own event union (an AI teammate's chat reads TeammateStreamEvent);
+ * Ask AI's is the default. Only the `type` string is checked here, so the
+ * caller reads each event by its type.
  */
-export function splitSse(buffer: string): { events: StreamEvent[]; rest: string } {
+export function splitSse<E extends { type: string } = StreamEvent>(buffer: string): { events: E[]; rest: string } {
   const parts = buffer.split(/\r?\n\r?\n/);
   const rest = parts.pop() ?? "";
-  const events: StreamEvent[] = [];
+  const events: E[] = [];
   for (const part of parts) {
     const line = part.split(/\r?\n/).find((l) => l.startsWith("data:"));
     if (!line) continue;
     const payload = line.slice(5).trim();
     if (!payload) continue;
     try {
-      const evt = JSON.parse(payload) as StreamEvent;
+      const evt = JSON.parse(payload) as E;
       if (evt && typeof evt === "object" && typeof (evt as { type?: unknown }).type === "string") events.push(evt);
     } catch {
       /* a malformed event: skip it */

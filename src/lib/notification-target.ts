@@ -53,6 +53,7 @@ export type TargetKind =
   | "policy"
   | "meeting"
   | "talk"
+  | "agent"
   | "external"
   | "none";
 
@@ -72,9 +73,11 @@ const EMPTY: NotificationTarget = { kind: "none", id: null, href: null, anchor: 
 
 /**
  * Route prefixes, longest first so `/kra-kpi` never loses to `/kra`. The value
- * is the kind and whether the segment after the prefix is the object's id.
+ * is the kind and whether the segment after the prefix is the object's id,
+ * or, for a page whose object rides in its query (`idParam`), which
+ * parameter names it.
  */
-const ROUTES: ReadonlyArray<{ prefix: string; kind: TargetKind; idFollows: boolean }> = [
+const ROUTES: ReadonlyArray<{ prefix: string; kind: TargetKind; idFollows: boolean; idParam?: string }> = [
   { prefix: "/item", kind: "item", idFollows: true },
   { prefix: "/boards", kind: "board", idFollows: true },
   { prefix: "/spaces", kind: "space", idFollows: true },
@@ -90,6 +93,9 @@ const ROUTES: ReadonlyArray<{ prefix: string; kind: TargetKind; idFollows: boole
   { prefix: "/policies", kind: "policy", idFollows: true },
   { prefix: "/meetings", kind: "meeting", idFollows: true },
   { prefix: "/tlk", kind: "talk", idFollows: true },
+  // An AI teammate's request: /agents?chat=<slug>&action=<id> (the card in
+  // that chat, src/lib/agents/actions.ts actionHref). The id is the request.
+  { prefix: "/agents", kind: "agent", idFollows: false, idParam: "action" },
 ];
 
 const ROUTES_BY_LENGTH = [...ROUTES].sort((a, b) => b.prefix.length - a.prefix.length);
@@ -142,7 +148,7 @@ export function parseNotificationLink(link: string | null | undefined): Notifica
   for (const route of ROUTES_BY_LENGTH) {
     if (pathname !== route.prefix && !pathname.startsWith(`${route.prefix}/`)) continue;
     const rest = pathname.slice(route.prefix.length).replace(/^\//, "");
-    const id = route.idFollows && rest ? rest.split("/")[0] : null;
+    const id = route.idParam ? readParam(withoutHash, route.idParam) : route.idFollows && rest ? rest.split("/")[0] : null;
     return { kind: route.kind, id, href: path, anchor, anchorIsComment };
   }
 
@@ -227,6 +233,8 @@ export const TARGET_NOUN: Readonly<Record<TargetKind, string>> = {
   table: "table",
   canvas: "canvas",
   form: "form",
+  // An AI teammate's request opens in its chat.
+  agent: "chat",
   external: "",
   none: "",
 };

@@ -20,7 +20,8 @@ const root = join(__dirname, "..", "..", "..");
 const read = (p: string) => readFileSync(join(root, p), "utf8");
 
 describe("the List ladder in the task route", () => {
-  const route = read("src/app/api/items/[id]/route.ts");
+  // PATCH's body is patchItemAs (src/lib/items/item-patch.ts).
+  const route = read("src/lib/items/item-patch.ts");
 
   it("refuses arranging below Can edit on the List", () => {
     expect(route).toMatch(/if \(\(parsed\.data\.position !== undefined \|\| parsed\.data\.groupKey !== undefined\) && !gate\.canAddToList\) \{\n\s+return NextResponse\.json\(\{ error: "no_access", reason: "list_read_only", requestAccess: true \}, \{ status: 403 \}\);/);

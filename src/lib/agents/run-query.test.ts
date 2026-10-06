@@ -74,6 +74,14 @@ describe("agentRunsWhere", () => {
     expect(w.AND).toContainEqual({ input: { path: ["trigger"], equals: "MANUAL" } });
     expect(w.AND).toContainEqual({ startedAt: { gte: new Date("2026-09-01T00:00:00.000Z") } });
   });
+  it("hides a private teammate's runs from everyone but its owner, the Owner and Admins included", () => {
+    for (const viewer of [admin, member]) {
+      const w = agentRunsWhere(parseRunQuery(p("agentSlug=t-planner-abc123")), viewer);
+      // Its own clause beside the slug filter, which stays as it was.
+      expect(w.AND).toContainEqual({ agent: { organizationId: "org1", slug: "t-planner-abc123" } });
+      expect(w.AND).toContainEqual({ agent: { OR: [{ visibility: "WORKSPACE" }, { ownerId: viewer.userId }] } });
+    }
+  });
 });
 
 describe("agentRunsOrder", () => {

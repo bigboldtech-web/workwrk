@@ -210,7 +210,7 @@ describe("a move or a new link says which List the task entered", () => {
   // loaded pages; only this field lets it count the arrival.
   it("is published by the move, the link move and a new link", () => {
     expect(code(read("src/lib/notify-realtime.ts"))).toMatch(/enteredListIds: Array\.from\(new Set\(args\.enteredListIds\)\)/);
-    expect(code(read("src/app/api/items/[id]/route.ts"))).toMatch(/boardId: target\.id,[\s\S]{0,120}enteredListIds: \[target\.id\]/);
+    expect(code(read("src/lib/items/item-patch.ts"))).toMatch(/boardId: target\.id,[\s\S]{0,120}enteredListIds: \[target\.id\]/);
     expect(code(read("src/app/api/boards/[id]/links/[itemId]/route.ts"))).toMatch(/outcome\.kind === "moved" \? \{ enteredListIds: \[targetId\] \} : \{\}/);
     expect(code(read("src/app/api/boards/[id]/links/route.ts"))).toMatch(/enteredListIds: \[id\]/);
   });

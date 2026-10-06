@@ -3,11 +3,17 @@
 // concept carries app-wide). Pure, so the page, the panel and the agent run
 // detail all print the same words.
 //
-// Typed against the 28 names in tool-names.ts: a tool with no sentence is a
-// compile error, so no call ever prints its raw name again.
+// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 10
+// AI teammate tools): a tool with no sentence is a compile error, so no call
+// ever prints its raw name again.
+//
+// A teammate's call can also end without running: it waits for the person's
+// approval, or a practice run only reports what it would do. Neither is done,
+// so neither reads as done (toolOutcome's `state`).
 
 import type { ToolName } from "./tool-names";
 import { objectHref } from "../nav/object-href";
+import { APPROVAL_CARD, TEAMMATE_CHAT, TOOL_PICKER_COPY, waitingForApprovalLine, wouldDoLine } from "./teammate-copy";
 
 export type ToolConcept =
   | "task"
@@ -26,7 +32,12 @@ export type ToolConcept =
   | "workspace"
   | "review"
   | "team"
-  | "search";
+  | "search"
+  | "comment"
+  | "talk"
+  | "memory"
+  | "routine"
+  | "inbox";
 
 export interface ToolVerb {
   concept: ToolConcept;
@@ -65,9 +76,20 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   search_tasks: { concept: "search", done: "Searched tasks", failed: "Couldn't search tasks" },
   send_kudos: { concept: "kudos", done: "Sent kudos", failed: "Couldn't send the kudos" },
   update_contract: { concept: "contract", done: "Updated contract", failed: "Couldn't update the contract" },
+  // AI teammates (docs/plans/ai-teammates.md 3.4).
+  update_task: { concept: "task", done: "Updated task", failed: "Couldn't update the task" },
+  comment_on_task: { concept: "comment", done: "Commented on task", failed: "Couldn't comment on the task" },
+  move_task: { concept: "task", done: "Moved task", failed: "Couldn't move the task" },
+  post_in_talk: { concept: "talk", done: "Posted in Talk", failed: "Couldn't post in Talk" },
+  update_doc: { concept: "doc", done: "Added to doc", failed: "Couldn't add to the doc" },
+  remember: { concept: "memory", done: "Remembered", failed: "Couldn't remember that" },
+  forget: { concept: "memory", done: "Forgot", failed: "Couldn't forget that" },
+  create_routine: { concept: "routine", done: "Created routine", failed: "Couldn't create the routine" },
+  list_my_inbox: { concept: "inbox", done: "Checked your Inbox", failed: "Couldn't check your Inbox" },
+  read_talk: { concept: "talk", done: "Read Talk messages", failed: "Couldn't read Talk" },
 };
 
-const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail"] as const;
+const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key"] as const;
 
 /** The subject a sentence names, from the call's own input. */
 export function toolSubject(input: Record<string, unknown> | null | undefined): string | null {
@@ -114,6 +136,14 @@ export interface ToolOutcome {
   count: number | null;
   /** A search cut short at its cap: how many of the newest candidates it read (null when it read them all). */
   searched: number | null;
+  /**
+   * A teammate's call that did not run: "waiting" for the person's approval,
+   * or "practice" (a practice run reports what it would do and writes
+   * nothing). Absent for a call that ran.
+   */
+  state?: "waiting" | "practice";
+  /** What a waiting or practice call would do, from the server's preview ("Post in #general"). */
+  title?: string;
 }
 
 const COUNT_NOUN: Partial<Record<ToolName, [string, string]>> = {
@@ -128,6 +158,8 @@ const COUNT_NOUN: Partial<Record<ToolName, [string, string]>> = {
   list_my_kras: ["KRA", "KRAs"],
   list_my_sops: ["SOP", "SOPs"],
   list_my_weekly_reviews: ["weekly review", "weekly reviews"],
+  list_my_inbox: ["notification", "notifications"],
+  read_talk: ["message", "messages"],
 };
 
 // The tools whose result names an object with an address of its own. Tasks
@@ -139,10 +171,19 @@ const CREATED: Partial<Record<ToolName, { key: string; href: (id: string) => str
   create_data_table: { key: "table", href: (id) => objectHref("table", id, "ai") },
   create_form: { key: "form", href: (id) => objectHref("form", id, "ai") },
   create_sop: { key: "sop", href: (id) => objectHref("sop", id, "ai") },
+  // The teammate tools that change an object name it the same way.
+  update_task: { key: "task", href: (id) => `/item/${encodeURIComponent(id)}` },
+  comment_on_task: { key: "task", href: (id) => `/item/${encodeURIComponent(id)}` },
+  move_task: { key: "task", href: (id) => `/item/${encodeURIComponent(id)}` },
+  update_doc: { key: "doc", href: (id) => objectHref("doc", id, "ai") },
 };
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function titleOf(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, 240) : undefined;
 }
 
 export function toolOutcome(name: string, result: unknown, errorText?: string | null): ToolOutcome {
@@ -150,6 +191,14 @@ export function toolOutcome(name: string, result: unknown, errorText?: string | 
   const resultErr = typeof r?.error === "string" && r.error.trim() ? r.error.trim() : null;
   const message = (errorText && errorText.trim()) || resultErr;
   if (message) return { failed: true, message: message.slice(0, 240), href: null, count: null, searched: null };
+  // A call that did not run is neither done nor failed: it waits for the
+  // person, or a practice run only said what it would do.
+  if (r?.status === "waiting_for_approval") {
+    return { failed: false, message: null, href: null, count: null, searched: null, state: "waiting", title: titleOf(r.title) };
+  }
+  if (r?.practice === true) {
+    return { failed: false, message: null, href: null, count: null, searched: null, state: "practice", title: titleOf(r.wouldDo) };
+  }
   let count: number | null = null;
   if (r && (name as ToolName) in COUNT_NOUN) {
     if (typeof r.count === "number") count = r.count;
@@ -165,8 +214,21 @@ export function toolOutcome(name: string, result: unknown, errorText?: string | 
   return { failed: false, message: null, href: created && id ? created.href(id) : null, count, searched };
 }
 
-/** The sentence once the outcome is known: a counted search reads "Searched 42 tasks". */
+/**
+ * The sentence once the outcome is known: a counted search reads "Searched 42
+ * tasks"; a call waiting for approval reads "Waiting for your approval: Post
+ * in #general"; a practice call reads "Would post in #general".
+ */
 export function toolOutcomeSentence(name: string, input: Record<string, unknown> | null | undefined, outcome: ToolOutcome): { concept: ToolConcept; text: string } {
+  if (outcome.state === "waiting" || outcome.state === "practice") {
+    const { concept } = toolSentence(name, input);
+    // The server's title, else the tool's picker label ("Post in Talk"),
+    // both imperative. Never the past-tense verb: "Would posted in Talk".
+    const label = Object.prototype.hasOwnProperty.call(TOOL_PICKER_COPY, name) ? TOOL_PICKER_COPY[name as ToolName].label : null;
+    const title = outcome.title ?? label;
+    if (outcome.state === "waiting") return { concept, text: waitingForApprovalLine(title ?? APPROVAL_CARD.untitled) };
+    return { concept, text: title ? wouldDoLine(title) : TEAMMATE_CHAT.practiceFooter };
+  }
   const base = toolSentence(name, input, outcome.failed);
   const noun = COUNT_NOUN[name as ToolName];
   if (outcome.failed || outcome.count === null || !noun) return base;

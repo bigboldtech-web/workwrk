@@ -239,7 +239,7 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/meetings": "Meetings",
   "/clock": "Clock in/out",
   "/sidekick": "Ask AI",
-  "/agents": "Agents",
+  "/agents": "AI teammates",
   "/automation": "Automation",
   "/build": "Build apps",
   "/store": "Marketplace",

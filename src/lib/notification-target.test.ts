@@ -36,6 +36,18 @@ describe("parseNotificationLink", () => {
     expect(parseNotificationLink("/kra-kpi?kra=abc")).toMatchObject({ kind: "kra", id: null });
   });
 
+  it("reads an AI teammate's request by the ?action= its card is opened with", () => {
+    expect(parseNotificationLink("/agents?chat=t-planner-abc123&action=act1")).toMatchObject({
+      kind: "agent",
+      id: "act1",
+      href: "/agents?chat=t-planner-abc123&action=act1",
+    });
+    // A paused routine links to the chat's settings: the page, no request.
+    expect(parseNotificationLink("/agents?chat=planner&settings=routines")).toMatchObject({ kind: "agent", id: null });
+    expect(parseNotificationLink("/agents")).toMatchObject({ kind: "agent", id: null });
+    expect(TARGET_NOUN.agent).toBe("chat");
+  });
+
   it("keeps the query string on the href but never in the id", () => {
     const t = parseNotificationLink("/item/abc?tab=comments");
     expect(t.id).toBe("abc");

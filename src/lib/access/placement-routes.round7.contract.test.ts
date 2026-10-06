@@ -31,7 +31,7 @@ describe("item 5: the return trip from the org root (P7)", () => {
     const lib = read("src/lib/access/node-placement.ts");
     expect(between(lib, "export async function moveCanvas(", "export async function moveTable(")).toMatch(/checkMove\(ctx, \{ kind: "canvas", id: canvas\.id \}, dest\)/);
     expect(between(lib, "export async function moveTable(", "// ── docs")).toMatch(/checkMove\(ctx, \{ kind: "table", id: table\.id \}, dest\)/);
-    expect(read("src/app/api/docs/[id]/route.ts")).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\);/);
+    expect(read("src/lib/docs/doc-save.ts")).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\);/);
     expect(read("src/app/api/whiteboards/[id]/route.ts")).toMatch(/moveCanvas\(/);
     expect(read("src/app/api/tables/[id]/route.ts")).toMatch(/checkMove\(tableCtx\(orgId, getUserId\(session\), session\), \{ kind: "table", id \}/);
   });
@@ -56,7 +56,9 @@ describe("items 3 and 4: POST /api/docs and PUT /api/docs/[id] refuse a half anc
     expect(create).toMatch(/entityType: anchor\.entityType,\n\s+entityId: anchor\.entityId,\n\s+parentId,/);
   });
   it("PUT lays the patch over the row, refuses a half anchor, and writes both halves together", () => {
-    const put = between(read("src/app/api/docs/[id]/route.ts"), "export async function PUT(", "export const PATCH = PUT;");
+    // PUT's body is saveDocAs (src/lib/docs/doc-save.ts), the last function there.
+    const save = read("src/lib/docs/doc-save.ts");
+    const put = save.slice(save.indexOf("export async function saveDocAs("));
     expect(put).toMatch(/if \(parsed\.data\.parentId === ""\) \{\n\s+return NextResponse\.json\(\{ error: DOC_PARENT_EMPTY_REFUSAL, code: "invalid_parent", message: DOC_PARENT_EMPTY_REFUSAL \}, \{ status: 400 \}\);/);
     expect(put).toMatch(/if \(anchorChanges && !anchorIn\.ok\) \{\n\s+return NextResponse\.json\(\{ error: anchorIn\.error, code: "invalid_anchor", message: anchorIn\.error \}, \{ status: 400 \}\);/);
     expect(put).toMatch(/\.\.\.\(anchorChanges \? \{ entityType: nextType, entityId: nextId \} : \{\}\),/);

@@ -8,6 +8,8 @@
 // Tool selection for a chat:
 //   - General Sidekick session (no agent) → CROSS_TOOLS (5 tools)
 //   - Agent-scoped session → CROSS_TOOLS ∪ the agent's catalog.tools
+//   - AI teammate chat → teammateToolNames (src/lib/agents/teammate-tools.ts),
+//     run by the teammate executor, never by the Ask AI loop
 //
 // We DON'T expose every WorkwrK model as a tool, only the high-value
 // "create + look up" surface the user would actually delegate. Power
@@ -24,8 +26,12 @@ import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { viewerForUser } from "@/lib/access/viewer";
 import { giveKudos } from "@/lib/kudos-give";
-import type { ToolName } from "./tool-names";
+import { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, type ToolName } from "./tool-names";
+import { TEAMMATE_TOOLS } from "./teammate-tools";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
+import { checkPlanLimit } from "@/lib/plan-limits";
+import { seedKraToRoleHolders } from "@/lib/alignment-assign";
+import { MEETING_TYPES, isMeetingType } from "@/lib/meeting-type";
 import { sopVisibilityWhere } from "@/lib/sop-access";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { sendInvitation } from "@/lib/people/send-invitation.server";
@@ -37,9 +43,28 @@ import { logActivity } from "@/lib/activity";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
 
+/**
+ * Set only when an AI teammate acts for the person
+ * (docs/plans/ai-teammates.md 3.2; built by src/lib/agents/acting.ts
+ * toolCtxFor). The Ask AI and legacy agent loops never set it.
+ */
+export interface TeammateToolContext {
+  agentId: string;
+  agentName: string;
+  sessionId: string | null;
+  routineId: string | null;
+  trigger: "CHAT" | "RESUME" | "ROUTINE" | "APPROVAL";
+  /** The acting person's zone, for the days and times a tool writes. */
+  timezone: string;
+  /** Set when running an approved action (idempotency keys: a Talk post's clientId). */
+  actionId?: string;
+}
+
 export interface ToolContext {
   orgId: string;
   userId: string;
+  /** An AI teammate acting for the person; existing handlers ignore it. */
+  teammate?: TeammateToolContext;
 }
 
 export interface ToolDefinition {
@@ -78,6 +103,31 @@ async function callerSession(ctx: ToolContext): Promise<{ user: { id: string; or
   const level = await callerLevel(ctx);
   return level ? { user: { id: ctx.userId, organizationId: ctx.orgId, accessLevel: level } } : null;
 }
+
+/**
+ * What a tool answers when the gate of the route it mirrors refuses the
+ * person (docs/plans/ai-teammates.md step 3b: a handler never does more than
+ * its route allows, for Ask AI and for teammates alike). The teammate
+ * previews (previews.ts) check the same gates before anything is proposed
+ * and answer with the same words.
+ */
+export const PRECHECK_REFUSALS = {
+  kras: "You can't create KRAs. Ask your manager or an admin to add it.",
+  kraNeedsRole: "A KRA belongs to a job title. Say which job title it is for.",
+  kpis: "You can't create KPIs. Ask your manager or an admin to add it.",
+  kpiNeedsKra: "A KPI sits under a KRA. Say which KRA it measures.",
+  sops: "You can't create SOPs. Ask your manager or an admin to draft it.",
+  meetings: "You can't schedule meetings in this workspace. Ask an admin.",
+  meetingTitle: "A meeting needs a title.",
+  meetingTime: "A meeting needs a start time, as an ISO date and time.",
+  // The sentences these handlers already answered with, named so the
+  // previews say the same.
+  goalLevel: "Only managers can create Company or Department goals. I can create an Individual goal for you instead.",
+  goalOwner: "You can only create goals you own. Ask your manager to set a goal for someone else.",
+  goalCompany: "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin.",
+  workspace: "Only a manager or an admin can create a workspace. Ask one of them.",
+  invite: "You can't invite people. Ask an admin to send the invitation.",
+} as const;
 
 // ─────────────────────────────────────────────────────────
 // Cross-product tools (available to every chat session)
@@ -537,7 +587,8 @@ const searchMeetings: ToolDefinition = {
 // OKR.level is the GoalLevel enum since the goals rebuild. The model
 // may still emit legacy "TEAM", map it to DEPARTMENT and anything
 // unrecognised to INDIVIDUAL, mirroring the migration's mapping.
-function toGoalLevel(v: unknown): "COMPANY" | "DEPARTMENT" | "INDIVIDUAL" {
+// Exported for the teammate previews, which read a goal's level the same way.
+export function toGoalLevel(v: unknown): "COMPANY" | "DEPARTMENT" | "INDIVIDUAL" {
   if (v === "TEAM") return "DEPARTMENT";
   return v === "COMPANY" || v === "DEPARTMENT" || v === "INDIVIDUAL" ? v : "INDIVIDUAL";
 }
@@ -743,7 +794,7 @@ const createOkr: ToolDefinition = {
     const manager = legacyIsManagerLevel(session.user.accessLevel);
     const level = toGoalLevel(input.level ?? "INDIVIDUAL");
     if (!manager && level !== "INDIVIDUAL") {
-      return { error: "Only managers can create Company or Department goals. I can create an Individual goal for you instead." };
+      return { error: PRECHECK_REFUSALS.goalLevel };
     }
     let ownerId = ctx.userId;
     if (input.ownerEmail) {
@@ -753,14 +804,14 @@ const createOkr: ToolDefinition = {
       });
       if (!owner) return { error: `Owner with email '${input.ownerEmail}' not found in this org` };
       if (!manager && owner.id !== ctx.userId) {
-        return { error: "You can only create goals you own. Ask your manager to set a goal for someone else." };
+        return { error: PRECHECK_REFUSALS.goalOwner };
       }
       ownerId = owner.id;
     }
     if (level === "COMPANY") {
       const actor = await goalRightsActor(session);
       if (!mayEditGoal(actor, { level: "COMPANY", ownerId, creatorId: ctx.userId })) {
-        return { error: "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin." };
+        return { error: PRECHECK_REFUSALS.goalCompany };
       }
     }
 
@@ -796,7 +847,8 @@ const createOkr: ToolDefinition = {
       type: "okr_created",
       actorId: ctx.userId,
       organizationId: ctx.orgId,
-      description: `Created OKR "${okr.title}" (${level}) with Ask AI`,
+      // Names what made it: Ask AI, or the AI teammate acting for the person.
+      description: `Created OKR "${okr.title}" (${level}) with ${ctx.teammate?.agentName ?? "Ask AI"}`,
       targetId: okr.id,
       targetType: "okr",
     });
@@ -830,10 +882,26 @@ const createMeeting: ToolDefinition = {
     required: ["title", "scheduledAt"],
   },
   handler: async (ctx, input) => {
-    const attendeeEmails = Array.isArray(input.attendeeEmails) ? (input.attendeeEmails as string[]) : [];
+    // POST /api/meetings's rules, and the permission matrix's "Create
+    // meetings" cell (the route does not read that cell; the tool does, so a
+    // workspace that turned it off is not overridden by the assistant). The
+    // creator is on record (the meeting page's role reads createdById), and
+    // only live people of this workspace become attendees.
+    const caller = await callerSession(ctx);
+    if (!caller || !(await hasPermission(caller, "meetings", "create"))) return { error: PRECHECK_REFUSALS.meetings };
+    const title = typeof input.title === "string" ? input.title.trim() : "";
+    if (!title) return { error: PRECHECK_REFUSALS.meetingTitle };
+    const type = input.type === undefined || input.type === null || input.type === "" ? "ADHOC" : input.type;
+    if (!isMeetingType(type)) return { error: `The meeting type must be one of: ${MEETING_TYPES.join(", ")}.` };
+    const when = new Date(String(input.scheduledAt ?? ""));
+    if (Number.isNaN(when.getTime())) return { error: PRECHECK_REFUSALS.meetingTime };
+    const minutes = Number(input.durationMinutes);
+    const duration = Number.isFinite(minutes) && minutes > 0 && minutes <= 24 * 60 ? Math.round(minutes) : 30;
+
+    const attendeeEmails = Array.isArray(input.attendeeEmails) ? (input.attendeeEmails as unknown[]).filter((e): e is string => typeof e === "string") : [];
     const attendees = attendeeEmails.length
       ? await prisma.user.findMany({
-          where: { organizationId: ctx.orgId, email: { in: attendeeEmails } },
+          where: { organizationId: ctx.orgId, email: { in: attendeeEmails }, deletedAt: null, status: { not: "INACTIVE" } },
           select: { id: true, email: true },
         })
       : [];
@@ -844,11 +912,12 @@ const createMeeting: ToolDefinition = {
     const meeting = await prisma.meeting.create({
       data: {
         organizationId: ctx.orgId,
-        title: input.title as string,
-        type: ((input.type as string) ?? "ADHOC") as "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC",
-        scheduledAt: new Date(input.scheduledAt as string),
-        duration: (input.durationMinutes as number) ?? 30,
-        agenda: (input.agenda as string) ?? null,
+        title,
+        type,
+        scheduledAt: when,
+        duration,
+        agenda: typeof input.agenda === "string" ? input.agenda : null,
+        createdById: ctx.userId,
         attendees: { create: Array.from(attendeeIds).map((userId) => ({ userId })) },
       },
       select: { id: true, title: true, type: true, scheduledAt: true, duration: true },
@@ -882,6 +951,13 @@ const createSop: ToolDefinition = {
     required: ["title"],
   },
   handler: async (ctx, input) => {
+    // POST /api/sops's gates, in its order: the SOP create permission, then
+    // the plan's SOP limit. The creator is on record (createdById), as the
+    // route writes it: a draft's own page and list read it.
+    const caller = await callerSession(ctx);
+    if (!caller || !(await hasPermission(caller, "sops", "create"))) return { error: PRECHECK_REFUSALS.sops };
+    const planCheck = await checkPlanLimit(ctx.orgId, "sops");
+    if (!planCheck.allowed) return { error: planCheck.message };
     const sopType = ((input.sopType as string) ?? "WRITTEN") as "WRITTEN" | "RECORDED" | "CHECKLIST";
     if (!["WRITTEN", "RECORDED", "CHECKLIST"].includes(sopType)) {
       return { error: `Invalid sopType "${input.sopType}". Use WRITTEN, RECORDED, or CHECKLIST.` };
@@ -905,6 +981,7 @@ const createSop: ToolDefinition = {
         sopType,
         tags,
         content,
+        createdById: ctx.userId,
       },
       select: { id: true, title: true, sopType: true, status: true, category: true, tags: true },
     });
@@ -919,27 +996,30 @@ const createSop: ToolDefinition = {
 const createKra: ToolDefinition = {
   name: "create_kra",
   description:
-    "Create a Key Result Area (a major accountability for a role). KRAs anchor KPIs. Use when the user is defining a new accountability or restructuring a role.",
+    "Create a Key Result Area (a major accountability for a job title). KRAs anchor KPIs, and everyone who holds the job title gets the KRA. Use when the user is defining a new accountability or restructuring a role.",
   input_schema: {
     type: "object",
     properties: {
       name: { type: "string" },
       description: { type: "string" },
       category: { type: "string" },
-      roleTitle: { type: "string", description: "Optional role title to link this KRA to (case-insensitive lookup)" },
+      roleTitle: { type: "string", description: "The job title this KRA belongs to (case-insensitive lookup). Required: a KRA exists only inside a job title." },
     },
-    required: ["name"],
+    required: ["name", "roleTitle"],
   },
   handler: async (ctx, input) => {
-    let roleId: string | undefined;
-    if (input.roleTitle) {
-      const role = await prisma.role.findFirst({
-        where: { organizationId: ctx.orgId, title: { equals: input.roleTitle as string, mode: "insensitive" } },
-        select: { id: true },
-      });
-      if (!role) return { error: `Role '${input.roleTitle}' not found in this org` };
-      roleId = role.id;
-    }
+    // POST /api/kras's rules: the KRA create permission, a KRA only inside a
+    // job title of this org (no new role-less KRA is ever born), and every
+    // holder of the title inherits it at once.
+    const caller = await callerSession(ctx);
+    if (!caller || !(await hasPermission(caller, "kras", "create"))) return { error: PRECHECK_REFUSALS.kras };
+    const roleTitle = typeof input.roleTitle === "string" ? input.roleTitle.trim() : "";
+    if (!roleTitle) return { error: PRECHECK_REFUSALS.kraNeedsRole };
+    const role = await prisma.role.findFirst({
+      where: { organizationId: ctx.orgId, title: { equals: roleTitle, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (!role) return { error: `Role '${roleTitle}' not found in this org` };
 
     const kra = await prisma.kRA.create({
       data: {
@@ -947,10 +1027,16 @@ const createKra: ToolDefinition = {
         name: input.name as string,
         description: (input.description as string) ?? null,
         category: (input.category as string) ?? null,
-        roleId,
+        roleId: role.id,
       },
       select: { id: true, name: true, category: true, roleId: true },
     });
+    // Best-effort, as the route: a seeding hiccup never fails the creation.
+    try {
+      await seedKraToRoleHolders({ kraId: kra.id, roleId: role.id, organizationId: ctx.orgId });
+    } catch (e) {
+      console.error("seedKraToRoleHolders failed", e);
+    }
     return { ok: true, kra };
   },
 };
@@ -962,7 +1048,7 @@ const createKra: ToolDefinition = {
 const createKpi: ToolDefinition = {
   name: "create_kpi",
   description:
-    "Create a KPI (a measurable indicator). Optionally attach it to a parent KRA by name. Use when the user wants to measure something, revenue, NPS, defect rate, etc.",
+    "Create a KPI (a measurable indicator) under the KRA it measures, named by the KRA's name. Use when the user wants to measure something, revenue, NPS, defect rate, etc.",
   input_schema: {
     type: "object",
     properties: {
@@ -973,20 +1059,24 @@ const createKpi: ToolDefinition = {
       frequency: { type: "string", enum: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"], description: "Defaults to MONTHLY" },
       targetValue: { type: "number" },
       lowerIsBetter: { type: "boolean", description: "True for cost/defect-type metrics" },
-      kraName: { type: "string", description: "Optional parent KRA, looked up by name (case-insensitive)" },
+      kraName: { type: "string", description: "The parent KRA, looked up by name (case-insensitive). Required: a KPI sits under a KRA." },
     },
-    required: ["name"],
+    required: ["name", "kraName"],
   },
   handler: async (ctx, input) => {
-    let kraId: string | undefined;
-    if (input.kraName) {
-      const kra = await prisma.kRA.findFirst({
-        where: { organizationId: ctx.orgId, name: { equals: input.kraName as string, mode: "insensitive" } },
-        select: { id: true },
-      });
-      if (!kra) return { error: `KRA '${input.kraName}' not found in this org` };
-      kraId = kra.id;
-    }
+    // POST /api/kpis's rules: the KRA create permission (KPIs are KRA
+    // definitions' gauges, the same cell), and a KPI only under a KRA of this
+    // org (no parentless KPI is ever born).
+    const caller = await callerSession(ctx);
+    if (!caller || !(await hasPermission(caller, "kras", "create"))) return { error: PRECHECK_REFUSALS.kpis };
+    const kraName = typeof input.kraName === "string" ? input.kraName.trim() : "";
+    if (!kraName) return { error: PRECHECK_REFUSALS.kpiNeedsKra };
+    const parent = await prisma.kRA.findFirst({
+      where: { organizationId: ctx.orgId, name: { equals: kraName, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (!parent) return { error: `KRA '${kraName}' not found in this org` };
+    const kraId = parent.id;
 
     const kpi = await prisma.kPI.create({
       data: {
@@ -1023,7 +1113,7 @@ const createWorkspaceTool: ToolDefinition = {
   async handler(ctx, input) {
     // Same rule as POST /api/workspaces: a manager or above creates one.
     if (!legacyIsManagerLevel(await callerLevel(ctx))) {
-      return { error: "Only a manager or an admin can create a workspace. Ask one of them." };
+      return { error: PRECHECK_REFUSALS.workspace };
     }
     const { createWorkspace } = await import("@/lib/workspaces");
     const ws = await createWorkspace({
@@ -1072,7 +1162,7 @@ const invitePersonWithRole: ToolDefinition = {
     const level = await callerLevel(ctx);
     const caller = await callerSession(ctx);
     if (!level || !caller || !(await hasPermission(caller, "people", "create"))) {
-      return { error: "You can't invite people. Ask an admin to send the invitation." };
+      return { error: PRECHECK_REFUSALS.invite };
     }
     // The ONE invitation path (src/lib/people/send-invitation.server.ts), the
     // same as Members: the level rule (at most the inviter's own rung, never
@@ -1581,7 +1671,14 @@ const getTeamAlignmentRollup: ToolDefinition = {
 
 // The registry, typed against the one name list (tool-names.ts): a missing or
 // extra entry is a compile error, which is what keeps the chat thread's verb
-// map and this table the same 28 names.
+// map and this table the same 38 names (the 28 Ask AI tools and the 10 AI
+// teammate tools, src/lib/agents/teammate-tools.ts).
+//
+// The Ask AI loops look a tool up here by the name the model sent. A
+// teammate tool is in no Ask AI set (CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES), so
+// it is never offered there, and each one refuses to run without
+// ctx.teammate, so a name the model makes up still answers no further than
+// the "Unknown tool" it answered before.
 const REGISTRY = {
   // Lego primitives
   create_form: createForm,
@@ -1620,41 +1717,18 @@ const REGISTRY = {
   list_my_sops: listMySops,
   list_my_weekly_reviews: listMyWeeklyReviews,
   get_team_alignment_rollup: getTeamAlignmentRollup,
+  // AI teammates: update_task, comment_on_task, move_task, post_in_talk,
+  // update_doc, remember, forget, create_routine, list_my_inbox, read_talk.
+  ...TEAMMATE_TOOLS,
 } satisfies Record<ToolName, ToolDefinition>;
 
 export const TOOLS: Record<string, ToolDefinition> = REGISTRY;
 
-// Tools every session can use, regardless of agent (or no agent).
-export const CROSS_TOOL_NAMES: ToolName[] = [
-  "create_task", "search_tasks", "send_kudos", "search_employees",
-  "search_meetings", "search_okrs", "search_sops",
-  "create_meeting", "create_okr", "create_sop",
-  // System-building tools: workspaces and invitations
-  "create_workspace", "invite_person_with_role",
-  // Lego primitives: Forms, DataTables, Docs
-  "create_form", "list_forms",
-  "create_data_table", "list_data_tables",
-  "create_doc",
-  // Read-only org awareness
-  "list_my_kras", "list_my_kpi_status", "list_my_sops",
-  "list_my_weekly_reviews", "get_team_alignment_rollup",
-];
-
-// Tools per agent product. When a chat session is scoped to an agent,
-// the agent's productSlug determines which create-tools light up in
-// addition to the cross-product ones. The CRM, ITSM, campaigns and helpdesk
-// rows left with their tools (PPMS scope); an agent bound to one of those
-// products gets the cross-product set only.
-export const PRODUCT_TOOL_NAMES: Record<string, ToolName[]> = {
-  "workwrk-contracts": ["create_contract", "search_contracts", "update_contract"],
-  "workwrk-dev": ["create_sprint"],
-  // HR / Goals: KRAs and KPIs are org-design primitives, surfaced via the
-  // People product's agent.
-  "workwrk-people": ["create_kra", "create_kpi"],
-  "workwrk-goals": ["create_okr"],
-  "workwrk-sops": ["create_sop"],
-  "workwrk-meetings": ["create_meeting"],
-};
+// The Ask AI sets (tools every session can use, and the tools per agent
+// product) live beside the names in tool-names.ts, so the teammate tool set
+// reads them without importing this registry. Re-exported here, where their
+// callers have always imported them.
+export { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES };
 
 // Resolve which tools are available to a given chat session.
 //   - General Sidekick (no agent): just CROSS_TOOL_NAMES

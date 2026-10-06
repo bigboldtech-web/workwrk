@@ -3,7 +3,10 @@
 // The AI hub sidebar (sidebar-map section 3, spec-ai-automation section 1.2).
 //
 //   Ask AI                     /sidekick                 app ai (and AI features on)
-//   Agents          (count)    /agents                   app ai
+//   AI teammates    (count)    /agents                   app ai; the count is
+//                              what waits for the viewer's approval (hidden
+//                              at 0), else a dot when a teammate answered or
+//                              reported since they last read its chat
 //   CHATS                      15 most recent, pinned first; row "...":
 //                              Rename, Pin or Unpin, Archive; "See all chats"
 //                              past 15
@@ -18,7 +21,9 @@
 // (the launcher list), never on a manager tier. Section collapse persists in
 // sidebar.collapsedSections under ai.chats, ai.automation and ai.apps. The
 // live numbers come from ONE call, GET /api/ai/sidebar, refetched on window
-// focus and whenever a chat changes (AI_CHATS_CHANGED_EVENT).
+// focus, whenever a chat changes (AI_CHATS_CHANGED_EVENT) and whenever a
+// teammate's chat changes without the viewer typing (the realtime event
+// agent.changed: a decision, an expiry, a routine's report or pause).
 
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
@@ -42,6 +47,8 @@ import { isSectionCollapsed, toggleSectionCollapsed } from "@/lib/docs-prefs";
 import { appAudienceAllows } from "@/lib/nav/app-audience";
 import { parseOrgAppsConfig } from "@/lib/rail-apps";
 import { AI_CHATS_CHANGED_EVENT, notifyAiChatsChanged } from "@/lib/ai/events";
+import { TEAMMATES_PAGE } from "@/lib/agents/teammate-copy";
+import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import type { AppKey } from "@/lib/access/types";
 
 type Chat = { id: string; title: string; pinned: boolean; updatedAt: string };
@@ -53,13 +60,17 @@ type SidebarData = {
   runsFailed24h: number;
   /** Build apps this viewer may open (the Member exception, src/lib/build/gate.ts). */
   usableBuildApps?: number;
+  /** What waits for this viewer's approval across their AI teammates. */
+  teammatesWaiting?: number;
+  /** A teammate answered or reported since the viewer last read its chat. */
+  teammatesUnread?: boolean;
 };
 
 type Row = { href: string; label: string; Icon: LucideIcon; app: AppKey; adminOnly?: boolean };
 
 const TOP_ROWS: Row[] = [
   { href: "/sidekick", label: "Ask AI", Icon: Sparkles, app: "ai" },
-  { href: "/agents", label: "Agents", Icon: Bot, app: "ai" },
+  { href: "/agents", label: TEAMMATES_PAGE.title, Icon: Bot, app: "ai" },
 ];
 // spec-ai-automation 1.2 order: Workflows, Templates, Logs, Health, Usage,
 // Connections.
@@ -134,12 +145,19 @@ export function AiSidebar() {
   useEffect(() => {
     const t = setTimeout(() => { void load(); }, 0);
     const onChange = () => { void load(); };
+    // A teammate's chat changed without the viewer typing: what waits for
+    // them, or what they have not read, may have moved.
+    const onRealtime = (e: Event) => {
+      if ((e as CustomEvent<RealtimeEvent>).detail?.type === "agent.changed") void load();
+    };
     window.addEventListener(AI_CHATS_CHANGED_EVENT, onChange);
     window.addEventListener("focus", onChange);
+    window.addEventListener(WINDOW_EVENTS.realtime, onRealtime);
     return () => {
       clearTimeout(t);
       window.removeEventListener(AI_CHATS_CHANGED_EVENT, onChange);
       window.removeEventListener("focus", onChange);
+      window.removeEventListener(WINDOW_EVENTS.realtime, onRealtime);
     };
   }, [load]);
 
@@ -217,11 +235,15 @@ export function AiSidebar() {
 
   const renderRows = (rows: Row[]) =>
     rows.filter((r) => match(r.label)).map((r) => {
+      // AI teammates counts what waits for the viewer, never how many
+      // teammates exist: a count is something to do.
       const count =
-        r.href === "/agents" ? data?.agentsEnabled || null
+        r.href === "/agents" ? data?.teammatesWaiting || null
           : r.href === "/automation/workflows" ? data?.workflowsActive || null
             : null;
-      const dot = r.href === "/automation/logs" && (data?.runsFailed24h ?? 0) > 0;
+      const dot =
+        (r.href === "/automation/logs" && (data?.runsFailed24h ?? 0) > 0) ||
+        (r.href === "/agents" && data?.teammatesUnread === true);
       return <SidebarRow key={r.href} href={r.href} label={r.label} icon={r.Icon} active={activeHref === r.href} count={count} dot={dot} />;
     });
 

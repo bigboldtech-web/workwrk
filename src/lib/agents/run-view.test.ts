@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canReadRunDetail, plainLine, resultError, runDurationMs, runStatus, runSummary, runSummaryWithheld, runToolCalls, runTrigger, withheldToolCalls } from "./run-view";
+import { canReadRunDetail, plainLine, resultError, runChatHref, runDurationMs, runStatus, runSummary, runSummaryWithheld, runToolCalls, runTrigger, withheldToolCalls } from "./run-view";
 
 const start = "2026-09-25T09:00:00.000Z";
 const end = "2026-09-25T09:00:04.500Z";
@@ -10,6 +10,37 @@ describe("run-view", () => {
     expect(runTrigger({ trigger: "MANUAL" })).toBe("MANUAL");
     expect(runTrigger({ toolName: "create_task", input: {} })).toBe("CHAT");
     expect(runTrigger(null)).toBe("CHAT");
+  });
+
+  it("reads an AI teammate's turn: a routine as its own trigger, a chat and a continue as the chat", () => {
+    expect(runTrigger({ trigger: "ROUTINE", practice: false, routineId: "r1" })).toBe("ROUTINE");
+    expect(runTrigger({ trigger: "CHAT", practice: true, routineId: null })).toBe("CHAT");
+    expect(runTrigger({ trigger: "RESUME", practice: false, routineId: null })).toBe("CHAT");
+  });
+
+  it("passes on how a teammate's call ended, and nothing for an older row", () => {
+    const calls = runToolCalls({
+      input: { trigger: "CHAT" },
+      output: {
+        text: "Asked first.",
+        toolCalls: [
+          { name: "post_in_talk", input: { text: "Hi" }, result: { status: "waiting_for_approval" }, errorText: null, durationMs: 9, state: "waiting", actionId: "act1" },
+          { name: "create_task", input: { title: "A" }, result: { practice: true }, errorText: null, durationMs: 3, state: "practice", actionId: null },
+          { name: "search_tasks", input: {}, result: { count: 0 }, errorText: null, durationMs: 5, state: "bogus" },
+        ],
+      },
+      error: null,
+      startedAt: start,
+      endedAt: end,
+    });
+    expect(calls.map((c) => c.state)).toEqual(["waiting", "practice", undefined]);
+    expect("state" in calls[2]).toBe(false);
+  });
+
+  it("opens a teammate's run in its chat by slug, an Ask AI run by its chat id, and nothing without a chat", () => {
+    expect(runChatHref("s1", "TEAMMATE", "t-planner-abc123")).toBe("/agents?chat=t-planner-abc123");
+    expect(runChatHref("s1", null, "priya-hr")).toBe("/sidekick?session=s1");
+    expect(runChatHref(null, "TEAMMATE", "t-planner-abc123")).toBeNull();
   });
 
   it("maps the stored statuses to three", () => {

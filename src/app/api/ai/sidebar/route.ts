@@ -2,7 +2,7 @@
 // (spec-ai-automation section 1.2), so the sidebar never fans out.
 //
 // { chats, chatsTotal, agentsEnabled, workflowsActive, runsFailed24h,
-//   usableBuildApps }
+//   usableBuildApps, teammatesWaiting, teammatesUnread }
 //
 // usableBuildApps is the number of Build apps the viewer may open: the Member
 // exception (src/lib/build/gate.ts) keeps a Member using the org's live apps
@@ -11,13 +11,24 @@
 // Each field is scoped by the gate of the app it belongs to: a field whose
 // app the viewer cannot open comes back as zero (or an empty list), so the
 // sidebar never learns an org-wide number it would not render. Chats are the
-// viewer's own and nobody else's.
+// viewer's own Ask AI chats and nobody else's: a chat with an AI teammate is
+// not one of them (src/lib/agents/session-guard.ts).
+//
+// AI teammates (docs/plans/ai-teammates.md 3.15): agentsEnabled counts only
+// the agents this viewer may use (another person's private teammate is not
+// counted); teammatesWaiting is what waits for this viewer's own approval,
+// and teammatesUnread says a teammate they may use answered or reported
+// since they last read its chat.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/access/index";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { countUsableBuildApps } from "@/lib/build/gate";
+import { waitingCount } from "@/lib/agents/actions";
+import { ASK_AI_CHATS } from "@/lib/agents/session-guard";
+import { agentUsableWhere } from "@/lib/agents/teammate-access";
+import { anyTeammateUnread } from "@/lib/agents/teammate-server";
 
 export const dynamic = "force-dynamic";
 
@@ -37,21 +48,21 @@ export async function GET() {
   if (!ai.allowed && !automation.allowed) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [chats, chatsTotal, agentsEnabled, workflowsActive, runsFailed24h, usableBuildApps] = await Promise.all([
+  const [chats, chatsTotal, agentsEnabled, workflowsActive, runsFailed24h, usableBuildApps, teammatesWaiting, teammatesUnread] = await Promise.all([
     ai.allowed
       ? prisma.chatSession.findMany({
           // A chat with no messages (a send that never reached the server)
           // is not a row; /api/sidekick/sessions applies the same rule.
-          where: { organizationId: orgId, userId: viewer.userId, archivedAt: null, messages: { some: {} } },
+          where: { organizationId: orgId, userId: viewer.userId, ...ASK_AI_CHATS, archivedAt: null, messages: { some: {} } },
           select: { id: true, title: true, pinned: true, updatedAt: true },
           orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
           take: CHAT_ROWS,
         })
       : Promise.resolve([]),
     ai.allowed
-      ? prisma.chatSession.count({ where: { organizationId: orgId, userId: viewer.userId, archivedAt: null, messages: { some: {} } } })
+      ? prisma.chatSession.count({ where: { organizationId: orgId, userId: viewer.userId, ...ASK_AI_CHATS, archivedAt: null, messages: { some: {} } } })
       : Promise.resolve(0),
-    ai.allowed ? prisma.agent.count({ where: { organizationId: orgId, status: "ENABLED" } }) : Promise.resolve(0),
+    ai.allowed ? prisma.agent.count({ where: { organizationId: orgId, status: "ENABLED", ...agentUsableWhere(viewer.userId) } }) : Promise.resolve(0),
     automation.allowed
       ? prisma.automationWorkflow.count({ where: { organizationId: orgId, status: "ACTIVE" } })
       : Promise.resolve(0),
@@ -61,6 +72,8 @@ export async function GET() {
     viewer.orgRole === "GUEST"
       ? Promise.resolve(0)
       : countUsableBuildApps(orgId, viewer.userId),
+    ai.allowed ? waitingCount(orgId, viewer.userId) : Promise.resolve(0),
+    ai.allowed ? anyTeammateUnread(viewer) : Promise.resolve(false),
   ]);
 
   return NextResponse.json(
@@ -71,6 +84,8 @@ export async function GET() {
       workflowsActive,
       runsFailed24h,
       usableBuildApps,
+      teammatesWaiting,
+      teammatesUnread,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
