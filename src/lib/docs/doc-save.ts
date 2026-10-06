@@ -251,40 +251,40 @@ export async function saveDocAs(
     return NextResponse.json({ doc: written.doc, movedPages: written.rewritten });
   }
 
-  // Optimistic-concurrency precondition. The client sends the updatedAt
-  // it last observed; if the row has moved on, we 409 and let the UI
-  // prompt the writer to reload before overwriting a peer's work.
-  if (parsed.data.knownUpdatedAt) {
-    const observedMs = new Date(parsed.data.knownUpdatedAt).getTime();
-    const liveMs = existing.updatedAt.getTime();
-    if (observedMs < liveMs) {
-      return NextResponse.json(
-        {
-          error: "conflict",
-          message: "This note was edited elsewhere. Reload to see the latest version before saving again.",
-          liveUpdatedAt: existing.updatedAt,
-        },
-        { status: 409 },
-      );
+  // One save of a doc at a time. The conflict check, the next version number
+  // and what a partial save keeps (the title or the content it does not send)
+  // are read from the live row under its lock, in the same transaction as the
+  // writes. Read before it, two saves at once (a person and their AI teammate,
+  // say) could both pass the check and one silently overwrite the other, take
+  // the same version number (the second then failed on the unique key and was
+  // lost), or put back content the other had just saved.
+  const saved = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT 1 FROM "Doc" WHERE "id" = ${id} FOR UPDATE`;
+    const live = await tx.doc.findUnique({ where: { id }, select: { title: true, content: true, updatedAt: true } });
+    if (!live) return { missing: true as const };
+
+    // Optimistic-concurrency precondition. The client sends the updatedAt
+    // it last observed; if the row has moved on, we 409 and let the UI
+    // prompt the writer to reload before overwriting a peer's work.
+    if (parsed.data.knownUpdatedAt && new Date(parsed.data.knownUpdatedAt).getTime() < live.updatedAt.getTime()) {
+      return { conflict: live.updatedAt };
     }
-  }
 
-  // Compute the next version number for this Doc. Versions are
-  // monotonic + unique, so we just take MAX + 1.
-  const last = await prisma.docVersion.findFirst({
-    where: { docId: id },
-    orderBy: { version: "desc" },
-    select: { version: true },
-  });
-  const nextVersion = (last?.version ?? 0) + 1;
+    // Compute the next version number for this Doc. Versions are
+    // monotonic + unique, so we just take MAX + 1 (under the lock).
+    const last = await tx.docVersion.findFirst({
+      where: { docId: id },
+      orderBy: { version: "desc" },
+      select: { version: true },
+    });
+    const nextVersion = (last?.version ?? 0) + 1;
 
-  const nextTitle = parsed.data.title ?? existing.title;
-  const nextContent = (parsed.data.content as object) ?? (existing.content as object);
+    const nextTitle = parsed.data.title ?? live.title;
+    const nextContent = (parsed.data.content as object) ?? (live.content as object);
 
-  // Two writes in a transaction: snapshot the new version + update the
-  // live Doc. If either fails, both roll back.
-  const [, doc] = await prisma.$transaction([
-    prisma.docVersion.create({
+    // Snapshot the new version + update the live Doc. If either fails, both
+    // roll back.
+    await tx.docVersion.create({
       data: {
         docId: id,
         version: nextVersion,
@@ -292,8 +292,8 @@ export async function saveDocAs(
         content: nextContent,
         authorId: ctx.userId,
       },
-    }),
-    prisma.doc.update({
+    });
+    const doc = await tx.doc.update({
       where: { id },
       data: {
         title: nextTitle,
@@ -301,8 +301,21 @@ export async function saveDocAs(
         ...(parsed.data.excerpt !== undefined ? { excerpt: parsed.data.excerpt } : {}),
       },
       select: { id: true, title: true, content: true, excerpt: true, updatedAt: true },
-    }),
-  ]);
+    });
+    return { doc, nextVersion, nextContent };
+  }, { timeout: 30_000, maxWait: 10_000 });
+  if ("missing" in saved) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if ("conflict" in saved) {
+    return NextResponse.json(
+      {
+        error: "conflict",
+        message: "This note was edited elsewhere. Reload to see the latest version before saving again.",
+        liveUpdatedAt: saved.conflict,
+      },
+      { status: 409 },
+    );
+  }
+  const { doc, nextVersion, nextContent } = saved;
 
   // Outgoing-link sync — fire-and-forget. Keeps the EntityLink graph
   // current so backlinks queries are an indexed lookup, not a scan.
