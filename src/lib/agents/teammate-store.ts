@@ -62,6 +62,7 @@ import {
   type TurnIds,
 } from "./teammate-thread";
 import type { TeammateLimits, TeammateRow } from "./teammate-views";
+import type { TemplateCard } from "./templates";
 
 export interface TeammateChatState {
   /** Read at least once: the thread, or that it is not there. */
@@ -519,8 +520,8 @@ export interface TeammateListData {
   teammates: TeammateRow[];
   /** What waits for this person across their teammates: the Waiting for you count. */
   waitingTotal: number;
-  /** The starter templates (src/lib/agents/templates.ts), read by the new teammate dialog. */
-  templates: unknown[];
+  /** The starter templates as this workspace can make them now (templates.ts templateCards), read by the new teammate dialog and a new chat's starters. */
+  templates: TemplateCard[];
   canCreateWorkspace: boolean;
   limits: TeammateLimits;
   talkOn: boolean;

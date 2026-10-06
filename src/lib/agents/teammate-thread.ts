@@ -28,6 +28,8 @@
 import { callFromLog, withToolUse, type AiToolCall } from "@/lib/ai/thread";
 import { clampText } from "./clamp";
 import { plainLine } from "./run-view";
+import { EDITABLE_FIELD } from "./tool-policy";
+import { isToolName } from "./tool-names";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_ERRORS,
@@ -161,6 +163,14 @@ export interface ActionView {
   sessionId: string | null;
   /** The person changed the text before approving. */
   edited: boolean;
+  /**
+   * What Edit starts from: the tool's one editable field (tool-policy.ts
+   * EDITABLE_FIELD) as the input that runs holds it, the person's edit once
+   * there is one, cut to the field's length. Never the card's own words: a
+   * title there is shortened, and a doc section's body carries its heading.
+   * Null when the tool has no such field or the input holds no text in it.
+   */
+  editableValue: string | null;
   /** person | rule | expiry | system */
   decidedVia: string | null;
   createdAt: string;
@@ -202,6 +212,8 @@ export interface AgentActionRow {
   preview: unknown;
   result?: unknown;
   error?: string | null;
+  /** The input that runs: read only for the editable field's own text (editableValue). */
+  input?: unknown;
   editedInput?: unknown;
   groupKey?: string | null;
   sessionId?: string | null;
@@ -310,6 +322,19 @@ function previewFrom(raw: unknown): ActionPreview {
 }
 
 /**
+ * The editable field's own text in the input that runs (the person's edit
+ * when there is one, else the stored input), a string only, cut to the
+ * field's length without halving a character.
+ */
+function editableValueOf(row: AgentActionRow): string | null {
+  const field = isToolName(row.toolName) ? EDITABLE_FIELD[row.toolName] : undefined;
+  if (!field) return null;
+  const edited = row.editedInput !== null && row.editedInput !== undefined;
+  const value = rec(edited ? row.editedInput : row.input)?.[field.field];
+  return typeof value === "string" ? clampText(value, field.maxLength) : null;
+}
+
+/**
  * A stored action as its card shows it, read defensively (the columns are
  * JSON). A status or risk this code does not know reads as the safe one: no
  * buttons (CANCELLED), and never "don't ask again" (IRREVERSIBLE).
@@ -331,6 +356,7 @@ export function actionViewFromRow(row: AgentActionRow): ActionView {
     groupKey: row.groupKey ?? null,
     sessionId: row.sessionId ?? null,
     edited: row.editedInput !== null && row.editedInput !== undefined,
+    editableValue: editableValueOf(row),
     decidedVia: row.decidedVia ?? null,
     createdAt: iso(row.createdAt) ?? "",
     expiresAt: iso(row.expiresAt) ?? "",
@@ -840,13 +866,17 @@ export function clipCardBody(text: string, maxLines = CARD_BODY_LINES, maxChars 
 }
 
 /**
- * What the Edit box starts with: the exact text a post, a comment, kudos or
- * a doc section carries (the card's body), or for a title the subject the
- * card's title quotes ('Create task "Call Acme"').
+ * What the Edit box starts with: the field's own value as it will run
+ * (editableValue: a long title whole, a doc section's text without the
+ * heading its body shows above it). For a card read without its input, the
+ * exact text a post, a comment, kudos or a doc section carries (the card's
+ * body), or for a title the subject the card's title quotes ('Create task
+ * "Call Acme"').
  */
-export function editStartText(a: Pick<ActionView, "preview">): string {
+export function editStartText(a: Pick<ActionView, "preview"> & Partial<Pick<ActionView, "editableValue">>): string {
   const field = a.preview.editable?.field;
   if (!field) return "";
+  if (typeof a.editableValue === "string") return a.editableValue;
   if (field === "title") {
     const t = a.preview.title;
     const open = t.indexOf('"');

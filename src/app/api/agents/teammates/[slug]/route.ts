@@ -32,9 +32,12 @@ import {
   teammateError,
   teammateLimits,
   teammateNotFound,
+  workspaceModules,
 } from "@/lib/agents/teammate-server";
-import { ALL_TOOL_NAMES, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
+import { teammateToolNames } from "@/lib/agents/teammate-tools";
+import { ALL_TOOL_NAMES, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
+import { isToolName, type ToolName } from "@/lib/agents/tool-names";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -112,7 +115,16 @@ export async function PATCH(req: Request, { params }: Params) {
   if (b.toolNames !== undefined) {
     // A list is always stored: an agent the workspace had before teammates
     // keeps the legacy set only until its tools are chosen here.
-    const next = cleanToolNames(b.toolNames);
+    //
+    // A tool whose module is off in this workspace keeps what is stored for
+    // it. The tools tab cannot show it on or off (its row is disabled, and
+    // the detail's tool set leaves it out while the module is off), so a save
+    // made then must neither drop it nor add it: Talk turned back on brings
+    // back the Talk tools its managers chose.
+    const modules = await workspaceModules(agent.organizationId);
+    const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);
+    const kept = teammateToolNames(agent, { tablesOn: true, talkOn: true }).filter(off);
+    const next = cleanToolNames([...b.toolNames.filter((n) => !(isToolName(n) && off(n))), ...kept]);
     if (!sameList(next, agent.toolNames)) {
       data.toolNames = next;
       edited.push("tools");

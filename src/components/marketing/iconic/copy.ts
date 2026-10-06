@@ -166,7 +166,9 @@ export const LEGAL_COPY = {
     // export holds in section 5, and deletion, older files and backups in
     // section 6. 6 October 2026: section 6 says which closures are deleted
     // after 30 days (from a named date, not this one), and the older-files
-    // date; section 1 names the random id a consent record is filed under.
+    // date; section 1 names the random id a consent record is filed under;
+    // section 3 says what AI teammates may do and remember, and that their
+    // routines run on a schedule.
     updated: "6 October 2026",
   },
   terms: {

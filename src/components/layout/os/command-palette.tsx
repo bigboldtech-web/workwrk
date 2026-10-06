@@ -536,7 +536,7 @@ function PaletteBody() {
       );
       // Two AI hub pages that are routes, not catalog apps, so the Apps list
       // alone could not reach them (spec-ai-automation 1.3 canon labels).
-      if (aiVisible) personal.push({ id: "j-agents", label: "Agents", glyph: <Glyph icon={Bot} />, href: "/agents" });
+      if (aiVisible) personal.push({ id: "j-agents", label: "AI teammates", glyph: <Glyph icon={Bot} />, href: "/agents" });
       personal.push({ id: "j-integrations", label: "Integrations", glyph: <Glyph icon={Plug} />, href: "/integrations" });
     }
     const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);

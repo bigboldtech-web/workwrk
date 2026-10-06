@@ -24,7 +24,7 @@ vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixt
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
 
 import { RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
-import { AGENT_SLUG, VIEWER, fx, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
+import { AGENT_SLUG, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
 
@@ -223,6 +223,16 @@ describe("decideActions: saying no", () => {
     expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "You said no: Post in #general", meta: { event: "action_denied", actionId: row.id } }]);
   });
 
+  it("does not resume for a request decided before this call", async () => {
+    const row = talkPost();
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).resume).toBe(true);
+    // A second tab, or a double click: nothing runs, nothing new to tell.
+    const again = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(again.results).toEqual([{ id: row.id, status: "EXECUTED", code: "already_decided" }]);
+    expect(again.resume).toBe(false);
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
+
   it("resumes when anything in the batch ran", async () => {
     const yes = talkPost();
     const no = talkPost();
@@ -377,6 +387,23 @@ describe("reading the cards", () => {
     expect(Object.keys(views).sort()).toEqual([mine.id, overdue.id].sort());
     expect(views[mine.id]).toMatchObject({ status: "PENDING", always: { allowed: true } });
     expect(views[overdue.id]).toMatchObject({ status: "EXPIRED", always: { allowed: false, label: null } });
+  });
+
+  it("reads each card's editable field from the input that runs, so Edit never starts from the card's shortened words", async () => {
+    const reads = vi.spyOn(prismaFake.agentAction, "findMany");
+    try {
+      const doc = seedAction({
+        toolName: "update_doc",
+        input: { docId: "d1", heading: "Weekly status", text: "All green." },
+        preview: { title: 'Add to "Plan"', body: "Weekly status\n\nAll green.", editable: { field: "text", label: "Text", maxLength: 8000 } },
+      });
+      const views = await actionViews([doc.id], "me");
+      expect(views[doc.id].editableValue).toBe("All green.");
+      // The card's read selects the input (the double hands back whole rows, so this is what proves it).
+      expect(reads.mock.calls[0][0]).toMatchObject({ select: { input: true, editedInput: true } });
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   it("counts what waits for the person now", async () => {

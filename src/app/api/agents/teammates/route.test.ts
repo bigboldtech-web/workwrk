@@ -1,14 +1,19 @@
 // GET and POST /api/agents/teammates (docs/plans/ai-teammates.md 4): who may
 // make which teammate, the plan's limits (the person's own private ones; the
 // workspace's ones made as teammates, never the agents it already had), what
-// a new teammate stores, and a list that never shows another person's
-// private teammate. The database is the routes' in-memory double.
+// a new teammate stores, a list that never shows another person's private
+// teammate, and the starter templates as the workspace can make them now.
+// The database is the routes' in-memory double.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const modules = vi.hoisted(() => ({ talkOn: true, tablesOn: true }));
+
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/agents/teammate-route-fixtures")).routeDb }));
 vi.mock("@/lib/app-gate", async () => (await import("@/lib/agents/teammate-route-fixtures")).appGateFake);
-vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
+vi.mock("@/lib/entitlements", () => ({
+  isModuleActive: async (_organizationId: string, slug: string) => (slug === "workwrk-talk" ? modules.talkOn : modules.tablesOn),
+}));
 vi.mock("@/lib/agents/actions", () => ({ waitingCount: async () => 0 }));
 vi.mock("@/lib/agents/budget", () => ({ agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }) }));
 const audits: Array<{ action: string; agent: { slug: string } }> = [];
@@ -29,6 +34,8 @@ async function list(query = "") {
 beforeEach(() => {
   resetRouteDb();
   audits.length = 0;
+  modules.talkOn = true;
+  modules.tablesOn = true;
 });
 
 describe("POST /api/agents/teammates: who may make which", () => {
@@ -153,7 +160,7 @@ describe("GET /api/agents/teammates", () => {
     expect(status).toBe(200);
     expect(body.teammates.map((t: { slug: string }) => t.slug).sort()).toEqual(["priya-hr", "status-reporter", "t-maxs-aaaaaa"]);
     expect(body.teammates.find((t: { slug: string }) => t.slug === "priya-hr")).toMatchObject({ legacy: true, canManage: false, hue: "sky" });
-    expect(body).toMatchObject({ canCreateWorkspace: false, talkOn: true, tablesOn: true, waitingTotal: 0, templates: [] });
+    expect(body).toMatchObject({ canCreateWorkspace: false, talkOn: true, tablesOn: true, waitingTotal: 0 });
     expect(body.limits).toEqual({ personal: { used: 1, max: 3 }, workspace: { used: 1, max: 3 } });
 
     // An Admin manages workspace teammates, and still never sees a private one.
@@ -201,5 +208,55 @@ describe("GET /api/agents/teammates", () => {
     expect(body.teammates[0]).toMatchObject({ waiting: 1, unread: true, lastLine: "You said no: Post in #general", lastAt: at(6).toISOString() });
     expect(body.teammates[1]).toMatchObject({ waiting: 0, unread: false, lastLine: "Three things." });
     expect(body.teammates[2]).toMatchObject({ waiting: 0, unread: false, lastLine: null, lastAt: null });
+  });
+});
+
+describe("the starter templates", () => {
+  type Card = { key: string; persona: string; tools: string[]; dropped: Array<{ name: string; why: string }>; starters: string[] };
+
+  it("lists the six templates with their starters, every tool offered when every module is on", async () => {
+    const { body } = await list();
+    const cards = body.templates as Card[];
+    expect(cards.map((c) => c.key)).toEqual(["chief-of-staff", "project-manager", "people-ops", "meeting-prep", "talk-inbox-triage", "status-reporter"]);
+    const chief = cards[0];
+    expect(chief).toMatchObject({ persona: "Chief of Staff", hue: "sky", avatar: "Briefcase", dropped: [] });
+    expect(chief.tools).toContain("post_in_talk");
+    expect(chief.starters).toEqual([
+      "What should I focus on today?",
+      "What is overdue, and what should I do about it?",
+      "Draft my update for this week",
+      "Every weekday at 8:30, tell me my top three for the day",
+    ]);
+  });
+
+  it("leaves out a tool the workspace cannot give now, and names it", async () => {
+    modules.talkOn = false;
+    const { body } = await list();
+    const triage = (body.templates as Card[]).find((c) => c.key === "talk-inbox-triage");
+    expect(triage?.tools).not.toContain("read_talk");
+    expect(triage?.tools).not.toContain("post_in_talk");
+    expect(triage?.dropped).toEqual([
+      { name: "read_talk", why: "talk_off" },
+      { name: "post_in_talk", why: "talk_off" },
+    ]);
+    expect(body.talkOn).toBe(false);
+  });
+
+  it("stores the template a teammate was made from, and takes only a real one", async () => {
+    const made = await create({ template: "status-reporter" });
+    expect(made.status).toBe(201);
+    expect((await made.json()).teammate).toMatchObject({ template: "status-reporter" });
+    expect(db.agents.at(-1)).toMatchObject({ template: "status-reporter" });
+
+    expect((await create({ template: null, name: "Mine" })).status).toBe(201);
+    expect(db.agents.at(-1)).toMatchObject({ template: null });
+
+    const writes = routeDb.writes.length;
+    for (const template of ["not-a-template", "Status-Reporter", "", 7]) {
+      const res = await create({ template });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Check the details and try again.", code: "invalid" });
+    }
+    expect(routeDb.writes).toHaveLength(writes);
   });
 });

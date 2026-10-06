@@ -114,7 +114,7 @@ export default function MarketplacePage() {
                     points: the Marketplace category "AI"), for anyone who
                     has Ask AI. */}
                 {askAiVisible ? (
-                  <LinkCard href="/agents" icon={Bot} title="Agents" blurb="AI teammates that do one job for you, on a schedule or when you ask." />
+                  <LinkCard href="/agents" icon={Bot} title="AI teammates" blurb="AI helpers with one job each, that work as you and ask before anything other people will see." />
                 ) : null}
                 {showBuild ? (
                   <LinkCard href="/build" icon={Hammer} title="Build apps" blurb="Describe a small app of your own and WorkwrK drafts it for you." />

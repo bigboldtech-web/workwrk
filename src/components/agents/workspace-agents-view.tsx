@@ -58,6 +58,7 @@ import { formatDate, formatRelative } from "@/lib/format/date";
 import { formatDuration } from "@/lib/format/duration";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { TEAMMATE_RUN_DRAWER } from "@/lib/agents/teammate-copy";
 import { useSurfaceState } from "@/lib/use-surface-state";
 import { pick } from "@/lib/surface-prefs";
 import type { HubHeader } from "./agents-hub";
@@ -570,10 +571,7 @@ function AgentDrawer({
       ) : undefined}
     >
       {missing ? (
-        <div className="flex flex-col gap-1 p-4">
-          <p className="flex min-h-9 items-center text-base text-ink">This agent isn&apos;t here any more.</p>
-          <Link href="/agents?tab=workspace" className="text-sm font-medium text-brand-deep hover:underline">See all agents</Link>
-        </div>
+        <MissingAgent slug={slug} runId={runId} onCloseRun={onCloseRun} />
       ) : removedAgent ? (
         <div className="flex flex-col gap-6 p-4">
           <div className="flex items-center gap-3">
@@ -693,6 +691,42 @@ function FieldRow({ label, children, top }: { label: string; children: React.Rea
 }
 
 /* ─────────────────────────── the run detail ─────────────────────────── */
+
+/**
+ * A slug Workspace agents does not hold. A teammate this person may use (their
+ * own private one, whose runs its Activity tab links here) is named, with its
+ * run and a way to its chat; anything else is gone, as before.
+ */
+function MissingAgent({ slug, runId, onCloseRun }: { slug: string | null; runId: string | null; onCloseRun: () => void }) {
+  const [teammate, setTeammate] = useState<{ name: string } | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    if (!slug) {
+      const t = setTimeout(() => { if (live) setTeammate(null); }, 0);
+      return () => { live = false; clearTimeout(t); };
+    }
+    void apiFetch<{ teammate: { name: string } }>(`/api/agents/teammates/${encodeURIComponent(slug)}`, { cache: "no-store" }).then((r) => {
+      if (live) setTeammate(r.ok && r.data.teammate?.name ? { name: r.data.teammate.name } : null);
+    });
+    return () => { live = false; };
+  }, [slug]);
+  if (teammate === undefined) return <div className="p-4"><SkeletonLines lines={3} /></div>;
+  if (!teammate || !slug) {
+    return (
+      <div className="flex flex-col gap-1 p-4">
+        <p className="flex min-h-9 items-center text-base text-ink">This agent isn&apos;t here any more.</p>
+        <Link href="/agents?tab=workspace" className="text-sm font-medium text-brand-deep hover:underline">See all agents</Link>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <p className="flex min-h-9 items-center text-base text-ink">{TEAMMATE_RUN_DRAWER.isTeammate(teammate.name)}</p>
+      <Link href={`/agents?chat=${encodeURIComponent(slug)}`} className="text-sm font-medium text-brand-deep hover:underline">{TEAMMATE_RUN_DRAWER.openChat(teammate.name)}</Link>
+      {runId ? <RunDetail id={runId} agentSlug={slug} onClose={onCloseRun} /> : null}
+    </div>
+  );
+}
 
 function RunDetail({ id, agentSlug, onClose }: { id: string; agentSlug: string; onClose: () => void }) {
   const datePrefs = useDatePrefs();

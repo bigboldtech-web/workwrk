@@ -103,7 +103,11 @@ export function actionHref(agentSlug: string, actionId: string): string {
   return `/agents?chat=${encodeURIComponent(agentSlug)}&action=${encodeURIComponent(actionId)}`;
 }
 
-/** The columns a card reads (teammate-thread.ts AgentActionRow). */
+/**
+ * The columns a card reads (teammate-thread.ts AgentActionRow). `input` only
+ * for its editable field's own text (ActionView.editableValue, what Edit
+ * starts from); the rest of the input never reaches the card.
+ */
 const VIEW_SELECT = {
   id: true,
   toolName: true,
@@ -112,6 +116,7 @@ const VIEW_SELECT = {
   preview: true,
   result: true,
   error: true,
+  input: true,
   editedInput: true,
   groupKey: true,
   sessionId: true,
@@ -334,7 +339,10 @@ export async function decideActions(
       firstSlug ??= row.agent.slug;
       touched.push([viewer.userId, row.agentId]);
       const r = await decideOne(viewer, row, d, opts, cache);
-      if (r.status === "EXECUTED" || r.status === "FAILED") resumeSlug ??= row.agent.slug;
+      // Only what ran (or failed) in this call continues the chat: approving
+      // a request decided before (two tabs, a double click) changes nothing,
+      // so the turn after it would have nothing to tell.
+      if ((r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided") resumeSlug ??= row.agent.slug;
       results.push(r);
     }
   } finally {

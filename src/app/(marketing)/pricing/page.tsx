@@ -63,7 +63,7 @@ import { stopShipped } from "@/components/marketing/data/tuesday";
 // The enforced limits, straight from the constant the server reads. It is a
 // pure object with zero imports, so a page can read it without pulling
 // prisma in behind it.
-import { PLAN_LIMITS } from "@/lib/plan-limits-data";
+import { PLAN_LIMITS, TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
 
 const SITE = "https://workwrk.com";
 const STARTER = tier("starter");
@@ -99,6 +99,17 @@ const AI_CAP = {
   starter: PLAN_LIMITS.STARTER.ai,
   growth: PLAN_LIMITS.GROWTH.ai,
   scale: PLAN_LIMITS.SCALE.ai,
+} as const;
+
+/**
+ * AI teammates per tier, read from the limits POST /api/agents/teammates
+ * checks (TEAMMATE_LIMITS): each person's own, and the workspace's shared
+ * ones. A teammate's chats and routines spend the tier's AI questions.
+ */
+const TEAMMATE_CAP = {
+  starter: TEAMMATE_LIMITS.STARTER,
+  growth: TEAMMATE_LIMITS.GROWTH,
+  scale: TEAMMATE_LIMITS.SCALE,
 } as const;
 
 /** "50" or "2,000", in the page's own locale-free grouping. */
@@ -146,6 +157,12 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
     // unbuilt mechanism word for word, so it is gated on the stop.
     rows: [
       ["Ask, across the workspace (not yet scoped per person)", true, true, true],
+      [
+        "AI teammates (each person's own, and shared by the workspace)",
+        `${cap(TEAMMATE_CAP.starter.personal)} each, ${cap(TEAMMATE_CAP.starter.workspace)} shared`,
+        `${cap(TEAMMATE_CAP.growth.personal)} each, ${cap(TEAMMATE_CAP.growth.workspace)} shared`,
+        `${cap(TEAMMATE_CAP.scale.personal)} each, ${cap(TEAMMATE_CAP.scale.workspace)} shared`,
+      ],
       ...(stopShipped(6)
         ? ([["Answers sourced from the entities they read", true, true, true]] as Array<
             [string, CompareValue, CompareValue, CompareValue]

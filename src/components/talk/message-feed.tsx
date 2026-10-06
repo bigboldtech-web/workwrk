@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
+  Bot, Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
   Smile, Sparkles, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
@@ -45,6 +45,10 @@ export type FeedMessage = {
     /// Batch 8: a scheduled AI update (kind "ai_update"), written by AI and
     /// posted as the person who set it up. Only the server writes this kind.
     update?: { id?: string; kind?: string; scope?: string; tasks?: number };
+    /// AI teammates: a post an AI teammate made for this person after they
+    /// approved it (kind "agent_post", src/lib/agents/teammate-tools.ts
+    /// post_in_talk). Only the server writes this kind.
+    agent?: { id?: string; name?: string };
   } | null;
   author: ChatUserLite;
   /** Client-only send states. */
@@ -225,6 +229,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // (src/lib/talk-updates.ts serveAiUpdate); an edited one is the person's.
   const aiHidden = msg.metadata?.kind === "ai_update_hidden";
   const aiEdited = msg.metadata?.kind === "ai_update_edited";
+  // Said on the post itself too: the person approved it, their AI teammate wrote it.
+  const agentPost = msg.metadata?.kind === "agent_post" ? msg.metadata.agent?.name?.trim() || "an AI teammate" : null;
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
@@ -260,6 +266,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             {aiUpdate || aiHidden ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--os-brand-deep)]">
                 <Sparkles className="h-3 w-3" aria-hidden /> AI update
+              </span>
+            ) : null}
+            {agentPost ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold text-[var(--os-brand-deep)]">
+                <Bot className="h-3 w-3" aria-hidden /> via {agentPost}
               </span>
             ) : null}
             <span className="text-xs text-ink-3 tabular-nums">{time}</span>

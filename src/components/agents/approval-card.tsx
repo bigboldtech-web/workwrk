@@ -18,6 +18,9 @@
 //   ticked: unticking holds one back), Select all, each title opening its
 //   text and facts, Edit per request, then "Approve {k}" and "Deny {k}".
 // Edit: a textarea held to the field's length; Approve with changes, Cancel.
+// It starts from the field's own value as it will run (ActionView
+// editableValue, through editStartText), never the card's words: a title
+// there is shortened, and a doc section's body shows its heading too.
 // In flight the buttons give way to "Approving…". Decided: a chip and the
 // line the outcome reads as (teammate-thread.ts decidedLine), with what it
 // made and Open.
@@ -60,6 +63,12 @@ const CHIP: Record<AgentActionStatus, { label: string; tone: RunTone }> = {
   EXPIRED: { label: APPROVAL_CARD.expired, tone: "neutral" },
   CANCELLED: { label: APPROVAL_CARD.cancelled, tone: "neutral" },
 };
+
+/** A request's status as its card's chip reads it: the settings' Activity tab lists them with it. */
+export function ActionStatusChip({ status, className }: { status: AgentActionStatus; className?: string }) {
+  const chip = CHIP[status];
+  return <StatusChip color={RUN_TONE_COLOR[chip.tone]} label={chip.label} className={className} />;
+}
 
 export interface ApprovalCardProps {
   /** The card's requests, in the order the turn asked (teammate-thread.ts groupApprovals). */
