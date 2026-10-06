@@ -223,17 +223,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Rule 1 of the watcher contract: commenting subscribes you, unless you
     // explicitly unwatched. One metadata write, merged, never a replace of the
-    // whole blob with a stale copy.
-    const state = readWatchers(gate.item.metadata);
-    const next = autoWatch(state, [c.userId, ...mentionedUserIds]);
-    if (next.watchers.length !== state.watchers.length) {
-      await prisma.item
-        .update({
-          where: { id },
-          data: { metadata: writeWatchers(gate.item.metadata, next) as object },
-        })
-        .catch(() => {});
-    }
+    // whole blob with a stale copy: the row is read again under its lock and
+    // only the watcher lists change, so a field edit saved since the gate read
+    // the task (a person and their AI teammate at once, say) is kept.
+    let metadata: unknown = gate.item.metadata;
+    let next = autoWatch(readWatchers(metadata), [c.userId, ...mentionedUserIds]);
+    await prisma
+      .$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ metadata: unknown }>>`
+          SELECT "metadata" FROM "Item" WHERE "id" = ${id} FOR UPDATE`;
+        if (rows.length === 0) return;
+        metadata = rows[0].metadata;
+        const state = readWatchers(metadata);
+        next = autoWatch(state, [c.userId, ...mentionedUserIds]);
+        if (next.watchers.length !== state.watchers.length) {
+          await tx.item.update({ where: { id }, data: { metadata: writeWatchers(metadata, next) as object } });
+        }
+      })
+      .catch(() => {});
 
     let mentioned: string[] = [];
     if (mentionedUserIds.length) {
@@ -252,7 +259,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await notifyItemCommented({
       organizationId: c.organizationId,
       item: { id, title: gate.item.title, dueAt: gate.item.dueAt },
-      metadata: writeWatchers(gate.item.metadata, next),
+      metadata: writeWatchers(metadata, next),
       assigneeIds: gate.item.assigneeIds,
       actorId: c.userId,
       preview: parsed.data.body,
