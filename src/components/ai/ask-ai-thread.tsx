@@ -30,6 +30,7 @@ import { useAiSession, type AiMessage, type AiSendError, type ChatContext } from
 import { isStoppedAnswer, unansweredQuestion } from "@/lib/ai/thread";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { ASK_AI_STARTERS, starterLabel, starterWantsMore } from "@/lib/ai/starters";
+import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import { SUPPORT_EMAIL } from "@/lib/nav/labels";
 import { cn } from "@/lib/utils";
 
@@ -135,7 +136,7 @@ export function AskAiThread({
     <div role="alert" className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-danger-text">
       <span>{(s.error === "ai_limit" || s.error === "rate_limited") && s.errorText ? s.errorText : ERROR_TEXT[s.error]}</span>
       {s.error === "ai_limit" ? null : s.error === "agent_off" ? (
-        <Link href="/agents" className="font-medium underline underline-offset-2">See agents</Link>
+        <Link href="/agents" className="font-medium underline underline-offset-2">{TEAMMATE_CHAT.seeAiTeammates}</Link>
       ) : s.error === "gone" ? (
         <button type="button" className="whitespace-nowrap font-medium underline underline-offset-2" onClick={() => newChat(true)}>
           Start a new chat with it
@@ -241,7 +242,7 @@ export function AskAiThread({
                   <h2 className={cn("font-semibold text-ink", page ? "text-xl" : "text-lg")}>That agent is not turned on</h2>
                   <p className="mt-2 text-sm text-ink-2">It is paused or was removed, so it can&apos;t chat right now.</p>
                   <div className="mt-4 flex items-center gap-4 text-row">
-                    <Link href="/agents" className={LINK}>See agents</Link>
+                    <Link href="/agents" className={LINK}>{TEAMMATE_CHAT.seeAiTeammates}</Link>
                     <button type="button" className={LINK} onClick={() => newChat()}>Ask AI instead</button>
                   </div>
                 </>

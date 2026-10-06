@@ -1,0 +1,59 @@
+"use client";
+
+// A centred line in a teammate's chat (docs/plans/ai-teammates.md 5.2, 5.6):
+// an EVENT row the server wrote, 13px ink-2 with a 16px icon. The row's
+// words ARE the sentence ("Memory updated: ...", "You approved: ..."); the
+// event only picks the icon and the links:
+//
+//   memory_updated    See memory               (the settings drawer's Memory tab)
+//   routine_created   Pause, Settings          (the routine; its Routines tab)
+//
+// A line whose event this code does not know still shows its words.
+
+import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Info, type LucideIcon } from "lucide-react";
+import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import type { TeammateEventKind, TeammateMessageView, TeammateSettingsTab } from "@/lib/agents/teammate-thread";
+
+const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
+  memory_updated: Brain,
+  memory_forgotten: Brain,
+  routine_created: CalendarClock,
+  routine_paused: CalendarClock,
+  routine_skipped: CalendarClock,
+  action_approved: CircleCheck,
+  action_denied: Ban,
+  action_expired: Clock,
+  action_failed: CircleAlert,
+};
+
+const LINK = "whitespace-nowrap font-medium text-brand-deep hover:underline";
+
+export function SystemLine({
+  m,
+  onOpenSettings,
+  onPauseRoutine,
+}: {
+  m: Extract<TeammateMessageView, { kind: "event" }>;
+  onOpenSettings: (tab?: TeammateSettingsTab) => void;
+  onPauseRoutine: (routineId: string) => void;
+}) {
+  const Icon = m.event ? EVENT_ICON[m.event] : Info;
+  const routineId = m.routineId;
+  return (
+    <div className="flex min-h-6 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center text-sm text-ink-2">
+      <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
+      <span className="min-w-0 break-words">{m.text}</span>
+      {m.event === "memory_updated" ? (
+        <button type="button" className={LINK} onClick={() => onOpenSettings("memory")}>{TEAMMATE_CHAT.seeMemory}</button>
+      ) : null}
+      {m.event === "routine_created" ? (
+        <>
+          {routineId ? (
+            <button type="button" className={LINK} onClick={() => onPauseRoutine(routineId)}>{TEAMMATE_CHAT.pause}</button>
+          ) : null}
+          <button type="button" className={LINK} onClick={() => onOpenSettings("routines")}>{TEAMMATE_CHAT.routineSettings}</button>
+        </>
+      ) : null}
+    </div>
+  );
+}

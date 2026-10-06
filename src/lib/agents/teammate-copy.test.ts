@@ -19,6 +19,12 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   composerPlaceholder: [["Priya"], "Message Priya…"],
   pausedComposer: [["Priya"], "Priya is paused."],
   removedComposer: [["Priya"], "Priya was removed. Its chat is kept."],
+  // The chat header's menu and its toasts (the Agents page's own words).
+  actionsFor: [["Priya"], "Actions for Priya"],
+  turnedOnToast: [["Priya"], "Priya is on"],
+  pausedToast: [["Priya"], "Priya is paused"],
+  removedToast: [["Priya"], "Priya removed"],
+  backToast: [["Priya"], "Priya is back"],
   waitingForApprovalLine: [["Post in #general"], "Waiting for your approval: Post in #general"],
   wouldDoLine: [["Post in #proof"], "Would post in #proof"],
   reportHeader: [["Daily brief", "9:00"], "Daily brief · 9:00"],

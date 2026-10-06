@@ -1,14 +1,47 @@
 import { describe, expect, it } from "vitest";
+import type { DecisionInput, DecisionResult } from "./actions";
+import { ACTION_ERRORS, TEAMMATE_CHAT } from "./teammate-copy";
 import {
   actionViewFromRow,
+  applyDecisionResults,
+  applyTeammateEvent,
+  canRetrySend,
+  clipCardBody,
+  decidedLine,
+  editStartText,
+  failedTurnMessages,
+  filterTeammates,
   groupApprovals,
+  hubViewFor,
+  lastAnswerId,
   lastLineFor,
+  mergeNewestPage,
   messageViewFromRow,
+  prependOlder,
   reportLines,
+  sendErrorSentence,
+  settingsTabFor,
   sortTeammates,
+  startersFor,
+  teammateSendFailure,
+  withTeammateToolResult,
   type AgentActionRow,
+  type TeammateDecision,
+  type TeammateDecisionResult,
   type TeammateMessageRow,
+  type TeammateMessageView,
+  type TeammateSendError,
+  type TeammateStreamEvent,
+  type TurnIds,
+  type TurnView,
 } from "./teammate-thread";
+
+// The client's decision shapes are the route's (actions.ts), held by the
+// compiler: a field the route adds or renames fails the type check here.
+const fromRoute = (r: DecisionResult): TeammateDecisionResult => r;
+const toRoute = (d: TeammateDecision): DecisionInput => d;
+void fromRoute;
+void toRoute;
 
 const AT = new Date("2026-10-06T09:00:00Z");
 
@@ -208,5 +241,298 @@ describe("sortTeammates", () => {
     ];
     expect(sortTeammates(rows).map((r) => r.name)).toEqual(["New", "Old", "alpha", "Beta", "zed"]);
     expect(rows[0].name).toBe("zed");
+  });
+});
+
+describe("filterTeammates", () => {
+  const rows = [
+    { name: "Chief of Staff", job: "Keeps your week on track", waiting: 0 },
+    { name: "Status Reporter", job: "Writes your weekly status", waiting: 2 },
+    { name: "Triage", job: "Reads Talk and your Inbox", waiting: 0 },
+  ];
+  it("matches the name or the job, in any case", () => {
+    expect(filterTeammates(rows, "  STATUS ").map((r) => r.name)).toEqual(["Status Reporter"]);
+    expect(filterTeammates(rows, "inbox").map((r) => r.name)).toEqual(["Triage"]);
+    expect(filterTeammates(rows, "")).toHaveLength(3);
+  });
+  it("keeps only what waits on Waiting for you", () => {
+    expect(filterTeammates(rows, "", { waitingOnly: true }).map((r) => r.name)).toEqual(["Status Reporter"]);
+    expect(filterTeammates(rows, "triage", { waitingOnly: true })).toEqual([]);
+  });
+});
+
+describe("startersFor", () => {
+  const templates = [
+    { key: "chief-of-staff", starters: ["What should I focus on today?", "", 7, "Draft my update", "Overdue?", "Every weekday at 8:30"] },
+    { key: "status-reporter" },
+  ];
+  it("reads up to four starters of the teammate's template", () => {
+    expect(startersFor(templates, "chief-of-staff")).toEqual(["What should I focus on today?", "Draft my update", "Overdue?", "Every weekday at 8:30"]);
+  });
+  it("offers none for no template, an unknown one, or one without starters", () => {
+    expect(startersFor(templates, null)).toEqual([]);
+    expect(startersFor(templates, "meeting-prep")).toEqual([]);
+    expect(startersFor(templates, "status-reporter")).toEqual([]);
+    expect(startersFor(undefined, "chief-of-staff")).toEqual([]);
+    expect(startersFor([null, "x"], "chief-of-staff")).toEqual([]);
+  });
+});
+
+describe("hubViewFor", () => {
+  const view = (q: string) => hubViewFor(new URLSearchParams(q));
+  it("opens the view the tab names, Chats by default", () => {
+    expect(view("")).toBe("chats");
+    expect(view("tab=chats")).toBe("chats");
+    expect(view("chat=planner&action=a1")).toBe("chats");
+    expect(view("tab=waiting&chat=planner")).toBe("waiting");
+    expect(view("tab=workspace")).toBe("workspace");
+    expect(view("tab=runs")).toBe("runs");
+    expect(view("tab=nope")).toBe("chats");
+    expect(hubViewFor(null)).toBe("chats");
+  });
+  it("keeps every link from before: an agent drawer with no tab is Workspace agents", () => {
+    expect(view("agent=hr-helper")).toBe("workspace");
+    expect(view("agent=hr-helper&run=r1")).toBe("workspace");
+    // A run opened from Run history keeps Run history under the drawer.
+    expect(view("tab=runs&agent=hr-helper&run=r1")).toBe("runs");
+  });
+  it("reads the settings tab only when it is one", () => {
+    expect(settingsTabFor("routines")).toBe("routines");
+    expect(settingsTabFor("memory")).toBe("memory");
+    expect(settingsTabFor("billing")).toBeNull();
+    expect(settingsTabFor(null)).toBeNull();
+  });
+});
+
+type UserMsg = Extract<TeammateMessageView, { kind: "user" }>;
+type AgentMsg = Extract<TeammateMessageView, { kind: "agent" }>;
+
+const T0 = "2026-10-06T09:00:00.000Z";
+const IDS: TurnIds = { userId: "tmp:user-1", liveId: "tmp:live-1" };
+const userMsg = (over: Partial<UserMsg> = {}): UserMsg => ({ id: "tmp:user-1", kind: "user", text: "Post hello in #team", practice: false, createdAt: T0, ...over });
+const liveMsg = (over: Partial<AgentMsg> = {}): AgentMsg => ({ id: "tmp:live-1", kind: "agent", text: "", practice: false, toolCalls: [], createdAt: T0, streaming: true, ...over });
+const line = (id: string): TeammateMessageView => ({ id, kind: "event", text: "Memory updated: Mondays", event: "memory_updated", routineId: null, actionId: null, createdAt: T0 });
+
+function run(start: TurnView, events: TeammateStreamEvent[], ids: TurnIds = IDS): { view: TurnView; ids: TurnIds } {
+  let s = { view: start, ids };
+  for (const e of events) s = applyTeammateEvent(s.view, s.ids, e);
+  return s;
+}
+
+describe("withTeammateToolResult", () => {
+  const pending = (name: string) => ({ name, input: null, outcome: null, failed: false, pending: true, durationMs: null });
+  it("settles the newest pending row of that tool", () => {
+    const calls = [pending("search_tasks"), pending("search_tasks")];
+    const next = withTeammateToolResult(calls, { name: "search_tasks", isError: false, state: "ran" });
+    expect(next.map((c) => c.pending)).toEqual([true, false]);
+    expect(calls[1].pending).toBe(true);
+  });
+  it("never reads a call that waits or practised as done", () => {
+    const waiting = withTeammateToolResult([pending("post_in_talk")], { name: "post_in_talk", isError: false, state: "waiting", title: "Post in #team" })[0];
+    expect(waiting).toMatchObject({ pending: false, failed: false, outcome: { failed: false, state: "waiting", title: "Post in #team", href: null } });
+    const practice = withTeammateToolResult([pending("create_task")], { name: "create_task", isError: false, state: "practice", title: 'Create task "Call Acme"' })[0];
+    expect(practice.outcome).toMatchObject({ state: "practice", title: 'Create task "Call Acme"' });
+  });
+  it("marks a failed call failed", () => {
+    expect(withTeammateToolResult([pending("update_task")], { name: "update_task", isError: true, state: "failed" })[0]).toMatchObject({ pending: false, failed: true, outcome: null });
+  });
+});
+
+describe("applyTeammateEvent", () => {
+  it("swaps the optimistic bubble for the saved message and follows its id", () => {
+    const saved = userMsg({ id: "m1", practice: true });
+    const out = run({ messages: [userMsg(), liveMsg()], actions: {} }, [{ type: "user_message", message: saved }]);
+    expect(out.view.messages[0]).toEqual(saved);
+    expect(out.ids).toEqual({ userId: "m1", liveId: "tmp:live-1" });
+  });
+
+  it("builds the answer from text and tool rows, and keeps each card's action", () => {
+    const card = actionViewFromRow(action({ id: "a9" }));
+    const out = run({ messages: [userMsg(), liveMsg()], actions: {} }, [
+      { type: "text_delta", text: "Looking. " },
+      { type: "tool_use", name: "search_tasks", input: { query: "acme" } },
+      { type: "tool_result", name: "search_tasks", isError: false, state: "ran" },
+      { type: "tool_use", name: "post_in_talk", input: { channel: "#team" } },
+      { type: "approval", action: card },
+      { type: "tool_result", name: "post_in_talk", isError: false, state: "waiting", title: "Post in #team" },
+      { type: "text_delta", text: "Asked first." },
+    ]);
+    const answer = out.view.messages[1] as AgentMsg;
+    expect(answer.text).toBe("Looking. Asked first.");
+    expect(answer.toolCalls.map((c) => [c.name, c.pending, c.outcome?.state ?? null])).toEqual([
+      ["search_tasks", false, null],
+      ["post_in_talk", false, "waiting"],
+    ]);
+    expect(out.view.actions.a9).toEqual(card);
+  });
+
+  it("puts a line above the answer, once", () => {
+    const out = run({ messages: [userMsg(), liveMsg()], actions: {} }, [
+      { type: "event", message: line("e1") },
+      { type: "event", message: line("e1") },
+    ]);
+    expect(out.view.messages.map((m) => m.id)).toEqual(["tmp:user-1", "e1", "tmp:live-1"]);
+  });
+
+  it("puts the saved answer and its card where the live answer was", () => {
+    const answer = liveMsg({ id: "m2", text: "Asked first.", streaming: undefined });
+    const card: TeammateMessageView = { id: "m3", kind: "approval", text: "Waiting for your approval: Post in #team", actionIds: ["a9"], createdAt: T0 };
+    const out = run({ messages: [userMsg({ id: "m1" }), line("e1"), liveMsg({ text: "Asked" })], actions: {} }, [
+      { type: "done", messages: [answer, card], error: null },
+    ], { userId: "m1", liveId: "tmp:live-1" });
+    expect(out.view.messages.map((m) => m.id)).toEqual(["m1", "e1", "m2", "m3"]);
+    expect(out.view.messages[2]).toEqual(answer);
+  });
+
+  it("keeps what streamed, settled, when nothing was saved; drops an answer that never started", () => {
+    const pendingCall = { name: "search_tasks", input: null, outcome: null, failed: false, pending: true, durationMs: null };
+    const kept = run({ messages: [userMsg(), liveMsg({ text: "Half", toolCalls: [pendingCall] })], actions: {} }, [{ type: "done", messages: [], error: "The answer couldn't be saved." }]);
+    expect(kept.view.messages[1]).toMatchObject({ id: "tmp:live-1", text: "Half", streaming: false });
+    expect((kept.view.messages[1] as AgentMsg).toolCalls[0].pending).toBe(false);
+    const empty = run({ messages: [userMsg(), liveMsg()], actions: {} }, [{ type: "done", messages: [], error: "The AI service didn't answer. Try again." }]);
+    expect(empty.view.messages.map((m) => m.id)).toEqual(["tmp:user-1"]);
+  });
+
+  it("leaves the chat alone for an error event, and for an event it cannot read", () => {
+    const start = { messages: [userMsg(), liveMsg()], actions: {} };
+    expect(run(start, [{ type: "error", message: "The AI service didn't answer. Try again." }]).view).toEqual(start);
+    expect(run(start, [{ type: "event", message: null as unknown as TeammateMessageView }]).view).toEqual(start);
+  });
+});
+
+describe("failedTurnMessages", () => {
+  it("takes the message back when the server never had it", () => {
+    expect(failedTurnMessages([line("e0"), userMsg(), liveMsg()], IDS, false).map((m) => m.id)).toEqual(["e0"]);
+  });
+  it("keeps the message when the server has it, and drops an answer that never started", () => {
+    expect(failedTurnMessages([userMsg(), liveMsg()], IDS, true).map((m) => m.id)).toEqual(["tmp:user-1"]);
+  });
+  it("keeps an answer that started, with its rows settled", () => {
+    const pendingCall = { name: "create_task", input: null, outcome: null, failed: false, pending: true, durationMs: null };
+    const out = failedTurnMessages([userMsg(), liveMsg({ text: "Making it", toolCalls: [pendingCall] })], IDS, true);
+    expect(out[1]).toMatchObject({ text: "Making it", streaming: false });
+    expect((out[1] as AgentMsg).toolCalls[0].pending).toBe(false);
+  });
+  it("takes only the live answer of a continue that never reached the server", () => {
+    expect(failedTurnMessages([userMsg({ id: "m1" }), liveMsg()], { userId: null, liveId: "tmp:live-1" }, false).map((m) => m.id)).toEqual(["m1"]);
+  });
+});
+
+describe("teammateSendFailure", () => {
+  const cases: Array<[number, unknown, { error: TeammateSendError | null; text: string | null }]> = [
+    [403, { error: "This workspace has used all its AI questions.", code: "ai_limit" }, { error: "ai_limit", text: "This workspace has used all its AI questions." }],
+    [403, { error: "Priya has used its 40 AI questions for October.", code: "agent_cap" }, { error: "agent_cap", text: "Priya has used its 40 AI questions for October." }],
+    [429, { error: "Too many AI requests. Try again in 20 seconds.", code: "rate_limited" }, { error: "rate_limited", text: "Too many AI requests. Try again in 20 seconds." }],
+    [409, { error: "Priya is paused, so your message wasn't sent.", code: "agent_paused" }, { error: "paused", text: "Priya is paused, so your message wasn't sent." }],
+    [409, { error: "Priya was removed. Its chat is kept.", code: "agent_removed" }, { error: "removed", text: "Priya was removed. Its chat is kept." }],
+    [409, { error: "There's nothing new to continue from.", code: "nothing_to_continue" }, { error: null, text: null }],
+    [503, { error: "AI isn't set up for this workspace yet.", code: "not_configured" }, { error: "not_configured", text: "AI isn't set up for this workspace yet." }],
+    // The app gate's refusals carry a code in `error`, never a sentence.
+    [403, { error: "app_off", app: "ai" }, { error: "ai_off", text: null }],
+    [403, { error: "no_access" }, { error: "refused", text: null }],
+    [404, { error: "That teammate can't be found.", code: "not_found" }, { error: "gone", text: null }],
+    [500, { error: "Your message couldn't be saved. Try again.", code: "not_saved" }, { error: "not_sent", text: "Your message couldn't be saved. Try again." }],
+    [502, null, { error: "not_sent", text: null }],
+    [401, "Unauthorized", { error: "not_sent", text: null }],
+  ];
+  it.each(cases)("%i %j", (status, body, want) => {
+    expect(teammateSendFailure(status, body)).toEqual(want);
+  });
+});
+
+describe("the error row", () => {
+  it("says the server's sentence, else its own", () => {
+    expect(sendErrorSentence("ai_limit", "Used up.", "Priya")).toBe("Used up.");
+    expect(sendErrorSentence("not_sent", null, "Priya")).toBe(TEAMMATE_CHAT.notSent);
+    expect(sendErrorSentence("stopped", null, "Priya")).toBe("The answer stopped.");
+    expect(sendErrorSentence("paused", null, "Priya")).toBe("Priya is paused, so your message wasn't sent.");
+    expect(sendErrorSentence("removed", null, "Priya")).toBe("Priya was removed. Its chat is kept.");
+    expect(sendErrorSentence("ai_off", null, "Priya")).toBe("AI is turned off for this workspace.");
+    expect(sendErrorSentence("refused", null, "Priya")).toBe(ACTION_ERRORS.personCannot);
+  });
+  it("offers Try again only where sending again can work", () => {
+    const all: TeammateSendError[] = ["not_sent", "stopped", "ended", "ai_limit", "agent_cap", "rate_limited", "paused", "removed", "gone", "not_configured", "ai_off", "refused"];
+    expect(all.filter(canRetrySend)).toEqual(["not_sent", "stopped", "rate_limited"]);
+  });
+});
+
+describe("reading the chat again", () => {
+  const msg = (id: string, at: string): TeammateMessageView => ({ id, kind: "user", text: id, practice: false, createdAt: at });
+  it("keeps older messages already shown above a fresh newest page", () => {
+    const held = { messages: [msg("o1", "2026-10-01T09:00:00.000Z"), msg("n1", "2026-10-06T09:00:00.000Z"), msg("tmp:user-3", "2026-10-06T09:05:00.000Z")], hasMore: true };
+    const page = { messages: [msg("n1", "2026-10-06T09:00:00.000Z"), msg("n2", "2026-10-06T09:05:00.000Z")], hasMore: true };
+    expect(mergeNewestPage(held, page)).toEqual({ messages: [held.messages[0], ...page.messages], hasMore: true });
+  });
+  it("takes the page's word on what is older when nothing older is held", () => {
+    const page = { messages: [msg("n1", "2026-10-06T09:00:00.000Z")], hasMore: false };
+    expect(mergeNewestPage({ messages: [msg("tmp:user-1", T0)], hasMore: true }, page)).toEqual({ messages: page.messages, hasMore: false });
+    expect(mergeNewestPage({ messages: [msg("x", T0)], hasMore: true }, { messages: [], hasMore: false })).toEqual({ messages: [], hasMore: false });
+  });
+  it("puts an older page above, each message once", () => {
+    const held = [msg("b", "2026-10-02T09:00:00.000Z"), msg("c", "2026-10-03T09:00:00.000Z")];
+    expect(prependOlder(held, [msg("a", "2026-10-01T09:00:00.000Z"), msg("b", "2026-10-02T09:00:00.000Z")]).map((m) => m.id)).toEqual(["a", "b", "c"]);
+  });
+  it("reads up to the newest saved answer or report", () => {
+    const report: TeammateMessageView = { id: "r1", kind: "report", text: "Done", practice: false, toolCalls: [], createdAt: T0, routine: { id: null, name: "Daily", runId: null, dueAt: null } };
+    expect(lastAnswerId([liveMsg({ id: "a1", streaming: undefined }), report, line("e1"), liveMsg()])).toBe("r1");
+    expect(lastAnswerId([userMsg()])).toBeNull();
+  });
+});
+
+describe("a decision on the cards", () => {
+  const views = {
+    a1: actionViewFromRow(action({ id: "a1" })),
+    a2: actionViewFromRow(action({ id: "a2" })),
+    a3: actionViewFromRow(action({ id: "a3" })),
+  };
+  const AT = "2026-10-06T10:00:00.000Z";
+  it("shows each outcome at once, and keeps a request that still waits as it was", () => {
+    const out = applyDecisionResults(views, [
+      { id: "a1", status: "EXECUTED", result: { text: "Posted in #general", href: "/tlk/c1" } },
+      { id: "a2", status: "PENDING", code: "agent_paused", error: "Priya is paused." },
+      { id: "a3", status: "FAILED", code: "failed", error: "The channel is archived." },
+      { id: "gone", status: "not_found" },
+    ], AT);
+    expect(out.a1).toMatchObject({ status: "EXECUTED", result: { text: "Posted in #general", href: "/tlk/c1" }, decidedAt: AT, executedAt: AT, always: { allowed: false, label: null } });
+    expect(out.a2).toEqual(views.a2);
+    expect(out.a3).toMatchObject({ status: "FAILED", error: "The channel is archived.", decidedAt: AT, executedAt: null });
+    expect(Object.keys(out)).toEqual(["a1", "a2", "a3"]);
+    expect(views.a1.status).toBe("PENDING");
+  });
+  it("never keeps a link that leaves the app", () => {
+    const out = applyDecisionResults(views, [{ id: "a1", status: "EXECUTED", result: { text: "Posted", href: "https://example.com" } }], AT);
+    expect(out.a1.result).toEqual({ text: "Posted", href: null });
+  });
+});
+
+describe("the card's parts", () => {
+  it("cuts a long text by lines and characters, never hiding it without Show all", () => {
+    expect(clipCardBody("one\ntwo")).toEqual({ text: "one\ntwo", clipped: false });
+    const many = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
+    const cut = clipCardBody(many);
+    expect(cut.clipped).toBe(true);
+    expect(cut.text.split("\n")).toHaveLength(12);
+    expect(cut.text.endsWith("line 12…")).toBe(true);
+    expect(clipCardBody("x".repeat(2000))).toEqual({ text: `${"x".repeat(1500)}…`, clipped: true });
+  });
+  it("starts an edit from the exact text, or the title's quoted subject", () => {
+    expect(editStartText(actionViewFromRow(action()))).toBe("Proof hello");
+    const task = actionViewFromRow(action({ toolName: "create_task", preview: { title: 'Create task "Call Acme" for Max Chen', editable: { field: "title", label: "Title", maxLength: 280 } } }));
+    expect(editStartText(task)).toBe("Call Acme");
+    expect(editStartText(actionViewFromRow(action({ preview: { title: "Invite lea@x.com" } })))).toBe("");
+  });
+  it("words each decided card's line", () => {
+    const words = { time: "10:42", date: "13 Oct", agentName: "Priya" };
+    const with_ = (over: Partial<AgentActionRow>) => decidedLine(actionViewFromRow(action(over)), words);
+    expect(with_({ status: "EXECUTED" })).toBe("Approved · 10:42");
+    expect(with_({ status: "DENIED" })).toBe("Denied · 10:42");
+    expect(with_({ status: "EXPIRED" })).toBe("Expired · 13 Oct. Ask Priya again if you still want this.");
+    expect(with_({ status: "FAILED", error: ACTION_ERRORS.unconfirmed })).toBe("Couldn't confirm it finished. Check #general before asking again.");
+    expect(with_({ status: "FAILED", error: "The channel is archived." })).toBe("Didn't work: The channel is archived.");
+    expect(with_({ status: "FAILED" })).toBe("Didn't work: Post in #general.");
+    expect(with_({ status: "CANCELLED", error: "Cancelled: Priya can no longer use this tool." })).toBe("Cancelled: Priya can no longer use this tool.");
+    expect(with_({ status: "CANCELLED" })).toBe("Cancelled: Priya was removed.");
+    expect(with_({ status: "PENDING" })).toBeNull();
+    expect(with_({ status: "RUNNING" })).toBeNull();
   });
 });
