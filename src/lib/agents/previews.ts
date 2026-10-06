@@ -26,6 +26,7 @@
 import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { objectHref } from "@/lib/nav/object-href";
 import { checkPlanLimit } from "@/lib/plan-limits";
+import { liveAccountFor } from "@/lib/auth/invite-facts.server";
 import { ACCESS_LEVELS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { canPost } from "@/lib/talk-access";
@@ -516,11 +517,25 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       const org = person.organizationId;
       const input = inviteInput(email, level.level);
       const lines: string[] = [INVITE_CARD.level(accessLevelWords(level.level))];
+      // Someone who already uses WorkwrK accepts signed in, and that path
+      // sets only the level (accept-invite's signed-in branch): no role,
+      // manager, department, office, KRAs or SOPs. So none is stored or
+      // promised; the card says where to set them (review round 2).
+      const account = await liveAccountFor(email);
+      if (account && account.organizationId !== org) {
+        lines.push(INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending);
+        return { input, preview: { title: placeTitle(verb(tool), email), lines, target: { label: email } } };
+      }
+      const kraIds = ids(raw.kraIds);
+      const sopIds = ids(raw.sopIds);
       if (str(raw.roleId)) {
         const role = await prisma.role.findFirst({ where: { id: str(raw.roleId), organizationId: org }, select: { id: true, title: true } });
         if (!role) return { error: INVITE_CARD.unknown("role") };
         input.roleId = role.id;
-        lines.push(INVITE_CARD.role(role.title));
+        // What acceptance seeds (seedRoleDefinition): the role's own KRAs
+        // only when none are listed, and their published SOPs only when no
+        // SOPs are listed either. Listed ones replace the role's own.
+        lines.push(kraIds.length ? INVITE_CARD.roleListedOnly(role.title) : sopIds.length ? INVITE_CARD.roleKrasListedSops(role.title) : INVITE_CARD.role(role.title));
       }
       if (str(raw.managerId)) {
         const m = await prisma.user.findFirst({
@@ -543,14 +558,12 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
         input.officeId = o.id;
         lines.push(INVITE_CARD.office(o.name));
       }
-      const kraIds = ids(raw.kraIds);
       if (kraIds.length) {
         const kras = await prisma.kRA.findMany({ where: { id: { in: kraIds }, organizationId: org }, select: { id: true, name: true } });
         if (kras.length !== kraIds.length) return { error: INVITE_CARD.unknown("KRA") };
         input.kraIds = kras.map((k) => k.id);
         lines.push(INVITE_CARD.kras(kras.map((k) => k.name)));
       }
-      const sopIds = ids(raw.sopIds);
       if (sopIds.length) {
         const sops = await prisma.sOP.findMany({ where: { id: { in: sopIds }, organizationId: org }, select: { id: true, title: true } });
         if (sops.length !== sopIds.length) return { error: INVITE_CARD.unknown("SOP") };

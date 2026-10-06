@@ -16,7 +16,7 @@ import type { Prisma } from "@/generated/prisma";
 import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
 import { personZone } from "@/lib/agents/acting";
-import { computeNextRunAt } from "@/lib/agents/autonomous";
+import { nextRoutineRun } from "@/lib/agents/routines-server";
 import { scheduleForSave } from "@/lib/agents/cron";
 import { ROUTINE_LIMITS, routineScheduleProblem } from "@/lib/agents/routines";
 import { canUseAgent } from "@/lib/agents/teammate-access";
@@ -66,12 +66,19 @@ export async function PATCH(req: Request, { params }: Params) {
     data.schedule = schedule;
   }
   const active = routine.status === "active";
-  if (b.status === "active" && !active) {
+  // A routine paused because its schedule named no time starts again once
+  // it is given one (its reason says so): review round 2.
+  const restarts = !active && b.status === undefined && b.schedule !== undefined && routine.pausedReason === "no_next_run";
+  if ((b.status === "active" && !active) || restarts) {
     // A routine of a removed teammate stays paused: it could only pause again.
     if (routine.agent.status === "ARCHIVED") return teammateError(409, "agent_removed", removedComposer(routine.agent.name));
+    // Its own next slot, never an hourly fallback: a schedule with none
+    // cannot resume (runDueSlot would only pause it again).
+    const next = nextRoutineRun(schedule, new Date());
+    if (!next) return teammateError(400, "invalid_schedule", TEAMMATE_ERRORS.routineInvalid);
     data.status = "active";
     data.pausedReason = null;
-    data.nextRunAt = computeNextRunAt(schedule, new Date());
+    data.nextRunAt = next;
   } else if (b.status === "paused" && active) {
     // Paused by its person: no reason, and no next run until they resume it.
     data.status = "paused";
@@ -79,7 +86,7 @@ export async function PATCH(req: Request, { params }: Params) {
     data.nextRunAt = null;
   } else if (active && b.schedule !== undefined) {
     // A new schedule on a running routine: its next slot, from now.
-    data.nextRunAt = computeNextRunAt(schedule, new Date());
+    data.nextRunAt = nextRoutineRun(schedule, new Date());
   }
 
   const updated = await prisma.agentRoutine.update({ where: { id: routine.id }, data, select: ROUTINE_VIEW_SELECT });

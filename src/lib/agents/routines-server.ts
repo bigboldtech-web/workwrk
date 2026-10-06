@@ -432,7 +432,7 @@ export async function processDueRoutines(
  * computeNextRunAt alone falls back to an hour from now for a cron with no
  * next minute, which would run such a routine every hour.
  */
-function nextRoutineRun(schedule: string, now: Date): Date | null {
+export function nextRoutineRun(schedule: string, now: Date): Date | null {
   return parseCron(schedule) ? nextCronRun(schedule, now) : computeNextRunAt(schedule, now);
 }
 
@@ -450,9 +450,13 @@ async function runDueSlot(r: DueRoutineRow, now: Date, counts: DueRoutineCounts)
     counts.taken += 1;
     return;
   }
-  if (!next) {
-    // No time comes within a year: pause it with the reason, never run it
-    // every hour on the fallback (review round 1).
+  // No later time comes within a year. The slot due now still runs when it
+  // is a real time of the schedule (a leap day's 29 February, review round
+  // 2); a slot the old hourly fallback stored is no time of its cron and does
+  // not. Either way it then pauses with the reason, and never runs every hour
+  // (review round 1). nextRunAt is already null, so the slot cannot run twice.
+  const last = !next;
+  if (last && !isSlotOf(r.schedule, dueAt)) {
     counts.paused += 1;
     await pauseRoutine(r, "no_next_run");
     return;
@@ -460,30 +464,44 @@ async function runDueSlot(r: DueRoutineRow, now: Date, counts: DueRoutineCounts)
   if (now.getTime() - dueAt.getTime() > ROUTINE_STALE_MS) {
     counts.missed += 1;
     await recordSkip(r, "missed", now);
+  } else if (await runClaimedSlot(r, now, dueAt, counts)) {
     return;
   }
+  if (last) {
+    counts.paused += 1;
+    await pauseRoutine(r, "no_next_run");
+  }
+}
 
+/** Whether `at` is a time the schedule names (its cron's next minute after the one before). */
+function isSlotOf(schedule: string, at: Date): boolean {
+  return Boolean(parseCron(schedule)) && nextCronRun(schedule, new Date(at.getTime() - 60_000))?.getTime() === at.getTime();
+}
+
+/** Run a claimed, timely slot; true when the run paused the routine. */
+async function runClaimedSlot(r: DueRoutineRow, now: Date, dueAt: Date, counts: DueRoutineCounts): Promise<boolean> {
   const run = await runRoutine(r, { practice: false, rateLimit: false, dueAt });
   if (!run.ok) {
     // rate_limited is Run now's alone: this runner claims without the
     // per-minute limit. Should it ever come back, the slot is skipped.
     if (run.reason === "rate_limited") {
       counts.skipped += 1;
-      return;
+      return false;
     }
     if (run.pause) {
       // False when its person paused it a moment ago: then it stays theirs.
       if (await pauseRoutine(r, run.reason)) counts.paused += 1;
       else counts.skipped += 1;
-      return;
+      return true;
     }
     counts.skipped += 1;
     await recordSkip(r, run.reason, now);
-    return;
+    return false;
   }
   if (run.status === "SUCCEEDED") counts.succeeded += 1;
   else counts.failed += 1;
   if (run.proposedActionIds.length > 0) await noticeApprovals(run, r.name);
+  return false;
 }
 
 /**

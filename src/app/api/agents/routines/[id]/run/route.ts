@@ -42,6 +42,9 @@ function refusalResponse(r: RoutineRefusal): NextResponse {
     case "agent_cap":
       return teammateError(403, "agent_cap", r.message);
     case "out_of_questions":
+    case "person_free_used":
+    case "free_ai_day":
+      // The claim's own sentence: which AI questions ran out, and when they come back.
       return teammateError(403, "ai_limit", r.message);
     case "no_access":
       return routineNotFound();

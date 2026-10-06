@@ -130,6 +130,16 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
     }
   });
 
+  it("never offers or adds a catalog agent over one whose tools were chosen in AI teammates (review round 2)", async () => {
+    // priya-hr, chosen tools: a teammate now, out of the list above.
+    seedAgent({ slug: "priya-hr", name: "Our HR helper", systemPrompt: "Our own leave rules." });
+    db.viewer = PEOPLE.admin;
+    const { body } = await call(listAgents());
+    expect(body.available.map((a: { slug: string }) => a.slug)).not.toContain("priya-hr");
+    expect((await call(installAgent(jsonRequest("POST"), slugged("priya-hr")))).status).toBe(404);
+    expect(db.agents[0]).toMatchObject({ name: "Our HR helper", systemPrompt: "Our own leave rules." });
+  });
+
   it("never gives a new agent a slug a static route beside /api/agents/[slug] owns", async () => {
     db.viewer = PEOPLE.admin;
     const made = await call(createAgent(jsonRequest("POST", { name: "Runs", description: "Runs things.", systemPrompt: "Be brief." })));

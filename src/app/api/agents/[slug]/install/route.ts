@@ -55,9 +55,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   // a row that does anyway is not the workspace's to add.
   const holder = await prisma.agent.findFirst({
     where: { organizationId: user.organizationId, slug },
-    select: { visibility: true },
+    select: { visibility: true, toolNames: true },
   });
   if (holder && holder.visibility !== "WORKSPACE") return unknown();
+  // Nor is a catalog agent whose tools were chosen in AI teammates: it is a
+  // teammate now, and adding the catalog agent would write the catalog's
+  // name and prompt over its own instructions (review round 2).
+  if (holder && holder.toolNames !== null) return unknown();
 
   const agent = await prisma.agent.upsert({
     where: { organizationId_slug: { organizationId: user.organizationId, slug } },

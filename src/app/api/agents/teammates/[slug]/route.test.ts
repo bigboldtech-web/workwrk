@@ -44,7 +44,17 @@ vi.mock("@/lib/agents/engine", () => ({
   teammateAgentFrom: (r: unknown) => r,
 }));
 vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: mocks.resolveActingPerson, personZone: async () => "UTC" }));
-vi.mock("@/lib/agents/routines-server", () => ({ pauseRoutine: mocks.pauseRoutine, createRoutine: mocks.createRoutine, ROUTINE_RUN_SELECT: {}, runRoutine: vi.fn() }));
+vi.mock("@/lib/agents/routines-server", async () => {
+  // The routine's next slot, as the runner computes it (its cron's real next minute).
+  const { nextCronRun, parseCron } = await import("@/lib/agents/cron");
+  return {
+    pauseRoutine: mocks.pauseRoutine,
+    createRoutine: mocks.createRoutine,
+    ROUTINE_RUN_SELECT: {},
+    runRoutine: vi.fn(),
+    nextRoutineRun: (schedule: string, now: Date) => (parseCron(schedule) ? nextCronRun(schedule, now) : new Date(now.getTime() + 3_600_000)),
+  };
+});
 vi.mock("@/lib/agents/autonomous", () => ({ computeNextRunAt: () => new Date("2026-10-07T09:00:00Z") }));
 
 import { DELETE as deleteTeammate, GET as getTeammate, PATCH as patchTeammate } from "./route";
@@ -172,6 +182,23 @@ describe("another person's private teammate is not there", () => {
     });
   }
 
+  it("resumes a routine only onto a real next time, and starts one paused for no time once it is given one (review round 2)", async () => {
+    const agent = seedPrivate();
+    db.routines.push({ id: "r1", organizationId: "org1", agentId: agent.id, actingForId: "u-max", name: "Brief", prompt: "Brief me", schedule: "CRON_TZ=UTC 0 9 31 2 *", status: "paused", pausedReason: "no_next_run", nextRunAt: null, lastRunAt: null, lastStatus: null, lastReason: null, createdVia: "chat", createdAt: new Date("2026-10-01T09:00:00Z"), updatedAt: new Date("2026-10-01T09:00:00Z"), agent: { name: agent.name, status: "ENABLED", organizationId: "org1", visibility: "PRIVATE", ownerId: "u-max" } });
+    db.viewer = PEOPLE.max;
+    const routine = paramsOf({ id: "r1" });
+    // Before: Resume stored an hourly fallback, and the runner paused it again.
+    const resumed = await call(patchRoutine(jsonRequest("PATCH", { status: "active" }), routine));
+    expect(resumed.status).toBe(400);
+    expect(resumed.body.code).toBe("invalid_schedule");
+    expect(db.routines[0]).toMatchObject({ status: "paused", pausedReason: "no_next_run" });
+    // Before: a new schedule left it paused, with a reason that no longer held.
+    const fixed = await call(patchRoutine(jsonRequest("PATCH", { schedule: "0 9 * * 1-5" }), routine));
+    expect(fixed.status).toBe(200);
+    expect(db.routines[0]).toMatchObject({ status: "active", pausedReason: null });
+    expect(db.routines[0].nextRunAt).toBeInstanceOf(Date);
+  });
+
   it("answers anyone else's routine, memory and request like a missing one, an Admin's included", async () => {
     const agent = seedPrivate();
     db.routines.push({ id: "r1", organizationId: "org1", agentId: agent.id, actingForId: "u-max", name: "Brief", prompt: "Brief me", schedule: "0 9 * * 1-5", status: "active" });
@@ -234,6 +261,20 @@ describe("removing, pausing and adding back", () => {
     expect((await call(patchTeammate(jsonRequest("PATCH", { status: "ENABLED" }), slugged("deal-desk")))).status).toBe(200);
     expect(db.agents[0]).toMatchObject({ status: "ENABLED", nextRunAt: new Date("2026-10-07T09:00:00Z") });
     expect(mocks.audits.map((a) => a.action)).toEqual(["paused", "turned_on"]);
+  });
+
+  it("stops an agent's old schedule in the open when its tools are first chosen here (review round 2)", async () => {
+    // Before: it left Workspace agents and its schedule stopped with no word.
+    seedShared({ slug: "deal-desk", toolNames: null, autonomousEnabled: true, scheduleCron: "0 9 * * 1-5", nextRunAt: new Date("2026-10-07T09:00:00Z") });
+    db.viewer = PEOPLE.admin;
+    const res = await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks"] }), slugged("deal-desk")));
+    expect(res.status).toBe(200);
+    expect(res.body.scheduleStopped).toBe(true);
+    expect(db.agents[0]).toMatchObject({ toolNames: ["search_tasks"], autonomousEnabled: false, nextRunAt: null });
+    expect(mocks.audits.find((a) => a.action === "edited")?.metadata).toEqual({ fields: ["tools", "schedule"] });
+    // Its tools chosen again: nothing more to stop.
+    const again = await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks", "create_task"] }), slugged("deal-desk")));
+    expect(again.body.scheduleStopped).toBeUndefined();
   });
 
   it("keeps managers to tightening, and records what changed", async () => {

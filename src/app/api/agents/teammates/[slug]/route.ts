@@ -112,6 +112,7 @@ export async function PATCH(req: Request, { params }: Params) {
     data.avatar = b.avatar;
     edited.push("avatar");
   }
+  let scheduleStopped = false;
   if (b.toolNames !== undefined) {
     // A list is always stored: an agent the workspace had before teammates
     // keeps the legacy set only until its tools are chosen here.
@@ -128,6 +129,17 @@ export async function PATCH(req: Request, { params }: Params) {
     if (!sameList(next, agent.toolNames)) {
       data.toolNames = next;
       edited.push("tools");
+      // An agent made before teammates has its tools chosen here for the
+      // first time: it is a teammate from now on, which the old loop never
+      // runs (legacy-agents.ts), so its Workspace agents schedule stops here,
+      // in the open, and its routines take over. Before, it stopped silently
+      // and Workspace agents offered the catalog agent again (review round 2).
+      if (agent.toolNames === null && agent.autonomousEnabled) {
+        data.autonomousEnabled = false;
+        data.nextRunAt = null;
+        edited.push("schedule");
+        scheduleStopped = true;
+      }
     }
   }
   if (b.monthlyQuestionCap !== undefined && b.monthlyQuestionCap !== agent.monthlyQuestionCap) {
@@ -152,7 +164,7 @@ export async function PATCH(req: Request, { params }: Params) {
     // slot counts from now. Left null, run-due-agents reads "never run" and
     // fires it on the next tick.
     if (status === "DISABLED") data.nextRunAt = null;
-    else if (agent.autonomousEnabled && agent.scheduleCron) data.nextRunAt = computeNextRunAt(agent.scheduleCron);
+    else if (agent.autonomousEnabled && agent.scheduleCron && !scheduleStopped) data.nextRunAt = computeNextRunAt(agent.scheduleCron);
   }
 
   const updated = Object.keys(data).length > 0 ? await prisma.agent.update({ where: { id: agent.id }, data, select: TEAMMATE_SELECT }) : agent;
@@ -163,7 +175,7 @@ export async function PATCH(req: Request, { params }: Params) {
   if (rulesChanged) audits.push({ action: "approvals_changed", metadata: { scope: "agent" } });
   for (const a of audits) await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent: updated, ...a });
 
-  return NextResponse.json({ teammate: await teammateDetail(updated, viewer), canManage: true });
+  return NextResponse.json({ teammate: await teammateDetail(updated, viewer), canManage: true, ...(scheduleStopped ? { scheduleStopped: true } : {}) });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
