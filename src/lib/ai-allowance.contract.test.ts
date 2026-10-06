@@ -20,7 +20,10 @@ const EXEMPT: Record<string, string> = {
   "src/lib/ai-client.ts": "the client factory itself; its callers are metered",
   "src/lib/ai-fallback.ts": "the model-availability retry helper; its callers are metered",
   "src/app/api/organization/byok/route.ts": "tests the workspace's OWN key before saving it (BYOK), never WorkwrK's",
+  "src/lib/agents/engine.ts": "an AI teammate's turn; every caller claims the turn's question first (claimTeammateTurn), which the contract below holds",
 };
+
+const ENGINE = "src/lib/agents/engine.ts";
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(path.join(ROOT, dir))) {
@@ -45,5 +48,21 @@ describe("every model call is metered", () => {
 
   it("keeps the exemptions real: each exempt file still exists and still calls the model", () => {
     for (const f of Object.keys(EXEMPT)) expect(files).toContain(f);
+  });
+});
+
+// The AI teammate engine claims nothing itself (src/lib/agents/engine.ts): a
+// turn's question is claimed by whoever starts the turn, through
+// src/lib/agents/budget.ts. So every file that runs a turn claims one.
+describe("every AI teammate turn is metered", () => {
+  const read = (f: string) => readFileSync(path.join(ROOT, f), "utf8");
+
+  it("is started only by code that claims the turn's question first", () => {
+    const callers = [...walk("src/app/api"), ...walk("src/lib")].filter((f) => f !== ENGINE && /runTeammateTurn\(/.test(read(f)));
+    expect(callers.filter((f) => !/claimTeammateTurn\(/.test(read(f)))).toEqual([]);
+  });
+
+  it("keeps the engine where this contract looks for it", () => {
+    expect(read(ENGINE)).toMatch(/export async function runTeammateTurn\(/);
   });
 });

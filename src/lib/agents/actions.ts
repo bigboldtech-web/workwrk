@@ -523,3 +523,16 @@ export async function claimUnreportedOutcomes(sessionId: string): Promise<AgentA
   const at = (v: Date | string) => new Date(v).getTime();
   return [...rows].sort((x, y) => at(x.createdAt) - at(y.createdAt));
 }
+
+/**
+ * Hand claimed outcomes back, unreported: the turn that claimed them never
+ * got an answer from the model (engine.ts, a call that failed before anything
+ * came back), so the teammate never heard them, and the next turn of this
+ * chat tells it instead. Only this chat's rows. Never throws: it runs on a
+ * path that is already failing.
+ */
+export async function releaseOutcomes(sessionId: string, ids: readonly string[]): Promise<void> {
+  const wanted = [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))];
+  if (wanted.length === 0) return;
+  await prisma.agentAction.updateMany({ where: { id: { in: wanted }, sessionId }, data: { reportedAt: null } }).catch(() => {});
+}

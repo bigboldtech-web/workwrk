@@ -537,6 +537,20 @@ export function agentAuditLine(agent: string, person: string, what: string): str
   return `${agent} (for ${person}): ${what}`;
 }
 
+// ── A turn that ended early (engine.ts) ──────────────────────────────
+
+/** Why a teammate's turn ended before its answer did (the stream's done event and the run's error). */
+export const TURN_ERRORS = {
+  /** The answer reached its length limit: what it said is kept, and no tool from it ran. */
+  cutShort: "The answer was cut short.",
+  /** The model declined to answer: nothing from that answer ran or was kept. */
+  declined: "The AI declined to answer that. Try asking another way.",
+  /** The AI service failed, or nothing came back. */
+  noAnswer: "The AI service didn't answer. Try again.",
+  /** The turn ran, but its answer could not be written to the chat. */
+  notSaved: "The answer couldn't be saved. Check what it did before asking again.",
+} as const;
+
 // ── New teammate dialog ──────────────────────────────────────────────
 
 export const NEW_TEAMMATE_DIALOG = {
