@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as copy from "./teammate-copy";
 import { TEAMMATE_HUES } from "./hues";
 import { ROUTINE_REASON_TEXT } from "./routines";
-import { PPMS_TOOL_NAMES } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES } from "./tool-names";
 
 // The copy rule (docs/plans/ai-teammates.md 5.6): no em dash (U+2014), no en
 // dash (U+2013), no double hyphen in anything a person reads. The two dashes
@@ -62,6 +62,31 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   agentCapMessage: [["Status Reporter", 40, AT], "Status Reporter has used its 40 AI questions for October. It can answer again on November 1 (UTC), or whoever manages it can raise the limit in its settings."],
   pausedNotSent: [["Priya"], "Priya is paused, so your message wasn't sent."],
   routineLimitMessage: [[10, "teammate"], "You have 10 routines with this teammate, the most one person can have."],
+  // Card titles, change lines and the tools' refusals (previews.ts, teammate-tools.ts).
+  quotedTitle: [["Create task", "Call Acme"], 'Create task "Call Acme"'],
+  placeTitle: [["Post in", "#general"], "Post in #general"],
+  moveTitle: [["Call Acme", "Backlog"], 'Move "Call Acme" to Backlog'],
+  forPersonTitle: [['Create task "Call Acme"', "Max Chen"], 'Create task "Call Acme" for Max Chen'],
+  channelPlace: [["general"], "#general"],
+  dmPlace: [["Max Chen"], "your chat with Max Chen"],
+  approveAlwaysIn: [["your chat with Max Chen"], "Approve and don't ask again in your chat with Max Chen"],
+  changeLine: [["Status", "Done"], "Status: Done"],
+  meetingAtLine: [["Mon 12 Oct, 14:00, Kolkata time"], "On Mon 12 Oct, 14:00, Kolkata time."],
+  withPeopleLine: [[["Max Chen", "Lea Alpha"]], "With Max Chen and Lea Alpha."],
+  kraHoldersLine: [["Account Executive"], "Everyone with the job title Account Executive gets it."],
+  kpiUnderLine: [["Pipeline health"], "It sits under the KRA Pipeline health."],
+  agentForPerson: [["Chief of Staff", "Priya Shah"], "Chief of Staff for Priya Shah"],
+  statusesSentence: [[["To Do", "In Progress", "Done"]], "That isn't a status in this List. Its statuses are: To Do, In Progress, Done."],
+  unknownPerson: [["max@x.com"], "There's nobody with the email max@x.com in this workspace."],
+  noListNamed: [["Backlog"], "There's no List called Backlog that you can add tasks to."],
+  severalLists: [["Backlog"], "More than one List is called Backlog. Say which one by its id."],
+  alreadyInList: [["Backlog"], "That task is already in Backlog."],
+  noConversationNamed: [["design"], "There's no channel or group called design that you're in."],
+  severalConversations: [["design"], "More than one conversation is called design. Say which one by its id."],
+  noDmWith: [["Max Chen"], "You don't have a direct message with Max Chen yet. Start one in Talk first."],
+  cantPostIn: [["#general"], "You can't post in #general."],
+  memoryFull: [[100, "person"], "I already remember 100 things for you. Forget some first."],
+  nothingRemembered: [["report day"], 'Nothing is remembered as "report day".'],
 };
 
 const builders = copy as unknown as Record<string, unknown>;
@@ -106,6 +131,9 @@ describe("the builders", () => {
     expect(copy.usageLine(1, null, AT)).toBe("Used 1 AI question in October.");
     expect(copy.usageLine(5, null, AT)).toBe("Used 5 AI questions in October.");
     expect(copy.routineLimitMessage(30, "person")).toBe("You have 30 routines, the most one person can have.");
+    expect(copy.withPeopleLine(["Max"])).toBe("With Max.");
+    expect(copy.withPeopleLine(["A", "B", "C"], 2)).toBe("With A, B, C and 2 more.");
+    expect(copy.memoryFull(1, "agent")).toBe("This teammate already remembers 1 thing for everyone. Delete some first.");
   });
   it("name the workspace when it is the workspace's limit", () => {
     expect(copy.teammateLimitMessage(30, "GROWTH", "workspace")).toBe(
@@ -136,7 +164,14 @@ describe("labels", () => {
 
   it("name every tool a teammate may be given", () => {
     expect(Object.keys(copy.TOOL_PICKER_COPY).sort()).toEqual([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].sort());
+    expect([...TEAMMATE_TOOL_NAMES].sort()).toEqual([...TEAMMATE_TOOLS].sort());
     for (const c of Object.values(copy.TOOL_PICKER_COPY)) expect(c.label.trim()).not.toBe("");
+  });
+  it("give every tool but the reads a card verb", () => {
+    const reads = ["search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status", "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk"];
+    // move_task's title is its own builder (moveTitle).
+    const expected = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].filter((t) => !reads.includes(t) && t !== "move_task").sort();
+    expect(Object.keys(copy.ACTION_VERB).sort()).toEqual(expected);
   });
   it("name every colour", () => {
     expect(Object.keys(copy.HUE_LABEL)).toEqual([...TEAMMATE_HUES]);

@@ -8,13 +8,16 @@
 // task" in the danger text with the server's own message on a second line.
 //
 // The words come from src/lib/agents/tool-verbs.ts, which is typed against
-// the 28 tools the assistant can run, so a call never prints its code name
-// or its raw input.
+// every tool (the 28 Ask AI tools and the 10 AI teammate tools), so a call
+// never prints its code name or its raw input. An AI teammate's call that
+// waits for the person's approval shows a clock, and a practice call an
+// empty circle: neither ran, so neither reads as done or links anywhere.
 
 import Link from "next/link";
 import {
   CheckSquare, FileText, ClipboardList, Table2, ScrollText, Trophy, Target, Gauge,
   CalendarClock, FileSignature, Timer, UserPlus, Heart, LayoutGrid, NotebookPen, Users, Search,
+  MessageSquare, MessageCircle, Brain, Inbox, Clock, Circle,
   type LucideIcon,
 } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
@@ -39,6 +42,17 @@ const CONCEPT_ICON: Record<ToolConcept, LucideIcon> = {
   review: NotebookPen,
   team: Users,
   search: Search,
+  comment: MessageSquare,
+  talk: MessageCircle,
+  memory: Brain,
+  routine: CalendarClock,
+  inbox: Inbox,
+};
+
+/** A teammate's call that did not run: waiting for approval, or a practice run. */
+const STATE_ICON: Record<NonNullable<ToolOutcome["state"]>, LucideIcon> = {
+  waiting: Clock,
+  practice: Circle,
 };
 
 export function ToolCallRow({
@@ -60,7 +74,7 @@ export function ToolCallRow({
 }) {
   const isFailed = outcome ? outcome.failed : failed;
   const { concept, text } = outcome ? toolOutcomeSentence(name, input, outcome) : toolSentence(name, input, isFailed);
-  const Icon = CONCEPT_ICON[concept];
+  const Icon = outcome?.state ? STATE_ICON[outcome.state] : CONCEPT_ICON[concept];
   const took = formatDuration(durationMs);
   return (
     <div
@@ -70,7 +84,7 @@ export function ToolCallRow({
       <Icon className="mt-px size-4 shrink-0" strokeWidth={1.5} aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          {outcome?.href && !isFailed ? (
+          {outcome?.href && !isFailed && !outcome.state ? (
             <Link href={outcome.href} className="min-w-0 truncate text-ink hover:underline">{text}</Link>
           ) : (
             <span className="min-w-0 truncate">{text}</span>

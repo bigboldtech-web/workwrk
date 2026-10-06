@@ -7,9 +7,10 @@
 // Constants are grouped by surface; a sentence with a name or a number in it
 // is a builder, so the words around the value are spelled here too.
 //
-// Pure: no imports but a type.
+// Pure: no imports but types.
 
 import type { TeammateHue } from "./hues";
+import type { ToolName } from "./tool-names";
 
 function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
@@ -285,6 +286,220 @@ export function personalListOf(name: string): string {
   return `It goes on ${name}'s Personal list.`;
 }
 
+// ── Card titles and change lines (previews.ts) ───────────────────────
+//
+// A card's title is what the action does, in the imperative, from the input
+// the server cleaned and resolved: 'Create task "Call Acme"', "Post in
+// #general". A practice run prints it after "Would" (wouldDoLine).
+
+/** The verb each tool's card title starts with. */
+export const ACTION_VERB: Readonly<Partial<Record<ToolName, string>>> = {
+  create_task: "Create task",
+  update_task: "Change task",
+  comment_on_task: "Comment on",
+  post_in_talk: "Post in",
+  update_doc: "Add to",
+  remember: "Remember",
+  forget: "Forget",
+  create_routine: "Set up routine",
+  create_doc: "Create doc",
+  create_form: "Create form",
+  create_data_table: "Create table",
+  create_sop: "Draft SOP",
+  create_sprint: "Plan sprint",
+  create_contract: "Track contract",
+  update_contract: "Change contract",
+  create_workspace: "Create workspace",
+  create_meeting: "Schedule meeting",
+  create_okr: "Create goal",
+  create_kra: "Create KRA",
+  create_kpi: "Create KPI",
+  send_kudos: "Send kudos to",
+  invite_person_with_role: "Invite",
+};
+
+/** 'Create task "Call Acme"' */
+export function quotedTitle(verb: string, subject: string): string {
+  return `${verb} "${subject}"`;
+}
+
+/** "Post in #general", "Send kudos to Max Chen" */
+export function placeTitle(verb: string, place: string): string {
+  return `${verb} ${place}`;
+}
+
+/** 'Move "Call Acme" to Backlog' */
+export function moveTitle(task: string, list: string): string {
+  return `Move "${task}" to ${list}`;
+}
+
+/** 'Create task "Call Acme" for Max Chen' */
+export function forPersonTitle(title: string, name: string): string {
+  return `${title} for ${name}`;
+}
+
+/** Where a channel post goes: "#general". */
+export function channelPlace(name: string): string {
+  return `#${name}`;
+}
+
+/** Where a direct message goes: "your chat with Max Chen". */
+export function dmPlace(name: string): string {
+  return `your chat with ${name}`;
+}
+
+/** A group chat with no name. */
+export const GROUP_FALLBACK = "a group chat";
+
+/** "Don't ask again" for one conversation that is not a channel. */
+export function approveAlwaysIn(place: string): string {
+  return `Approve and don't ask again in ${place}`;
+}
+
+/** What a task change card lists, one line per field. */
+export const CHANGE_LABELS = {
+  status: "Status",
+  dueDate: "Due date",
+  priority: "Priority",
+  owner: "Owner",
+} as const;
+
+export const NO_DUE_DATE = "No due date";
+export const NO_PRIORITY = "No priority";
+
+/** "Status: Done" */
+export function changeLine(label: string, value: string): string {
+  return `${label}: ${value}`;
+}
+
+/** "On Mon 12 Oct, 14:00, Kolkata time." */
+export function meetingAtLine(when: string): string {
+  return `On ${when}.`;
+}
+
+/** "With Max Chen and Lea Alpha.", "With A, B, C and 2 more." */
+export function withPeopleLine(names: readonly string[], more = 0): string {
+  const all = more > 0 ? [...names, `${more} more`] : [...names];
+  if (all.length === 0) return "";
+  if (all.length === 1) return `With ${all[0]}.`;
+  return `With ${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}.`;
+}
+
+/** Why a goal card asks: its level reaches past the person. */
+export const GOAL_LEVEL_LINES = {
+  COMPANY: "It's a Company goal.",
+  DEPARTMENT: "It's a Department goal.",
+} as const;
+
+/** A KRA is seeded to every holder of its job title (POST /api/kras). */
+export function kraHoldersLine(role: string): string {
+  return `Everyone with the job title ${role} gets it.`;
+}
+
+/** A KPI measures one KRA (POST /api/kpis). */
+export function kpiUnderLine(kra: string): string {
+  return `It sits under the KRA ${kra}.`;
+}
+
+/** The label of the one field a card lets the person edit (tool-policy.ts EDITABLE_FIELD). */
+export const EDIT_FIELD_LABELS = {
+  title: "Title",
+  message: "Message",
+  comment: "Comment",
+  text: "Text",
+} as const;
+
+/** The audit row's actorLabel (acting.ts actorLabelFor): "Chief of Staff for Priya Shah". */
+export function agentForPerson(agent: string, person: string): string {
+  return `${agent} for ${person}`;
+}
+
+// ── What a teammate tool answers when it cannot (teammate-tools.ts) ──
+//
+// The teammate reads these and tells the person; a tool row shows them on
+// its second line. Plain sentences, in the person's terms.
+
+export const TEAMMATE_TOOL_ERRORS = {
+  teammateOnly: "Only an AI teammate can use this tool.",
+  personCant: "The person this teammate works for can't do that in this workspace now.",
+  taskNotFound: "I can't find that task.",
+  cantChangeTask: "You can't change this task.",
+  cantCommentTask: "You can't comment on this task.",
+  cantMoveTask: "You can't move this task.",
+  nothingToChange: "Say what to change: the status, the due date, the priority or the owner.",
+  badDueDate: "A due date is a day written like 2026-10-12, or none.",
+  listNotFound: "I can't find that List.",
+  needList: "Say which List to move it to.",
+  personalListTarget: "A task can't be moved onto a Personal list.",
+  cantAddToList: "You can't add tasks to that List.",
+  cantMoveOut: "You can't move tasks out of the List it's in.",
+  docNotFound: "I can't find that doc.",
+  cantEditDoc: "You can't change this doc.",
+  docLocked: "This doc is locked. Ask the person who locked it to unlock it.",
+  docArchived: "This doc is in Trash.",
+  docFormat: "I can't add to this doc's format yet. Open it and paste the text.",
+  docChanged: "The doc changed while I was adding to it. Try again.",
+  talkOff: "Talk is off in this workspace.",
+  conversationNotFound: "I can't find that conversation.",
+  needPlace: "Say where to post: a channel, a group or a person's email.",
+  needsApproval: "A post in Talk runs only from its approval.",
+  emptyText: "There's nothing left to send once links and @ signs are taken out.",
+  memoryEmpty: "Say what to remember: a short name and the fact.",
+  taskTitle: "A task needs a title.",
+  goalTitle: "A goal needs a title.",
+  inviteEmail: "Say who to invite, by their email.",
+  kudosMessage: "Say who the kudos is for, by their email, and write the message.",
+  kudosSelf: "You can't give kudos to yourself.",
+  notAllowed: "That didn't work. Check it in the app and try again.",
+} as const;
+
+export function statusesSentence(labels: readonly string[]): string {
+  return `That isn't a status in this List. Its statuses are: ${labels.join(", ")}.`;
+}
+
+export function unknownPerson(email: string): string {
+  return `There's nobody with the email ${email} in this workspace.`;
+}
+
+export function noListNamed(name: string): string {
+  return `There's no List called ${name} that you can add tasks to.`;
+}
+
+export function severalLists(name: string): string {
+  return `More than one List is called ${name}. Say which one by its id.`;
+}
+
+export function alreadyInList(list: string): string {
+  return `That task is already in ${list}.`;
+}
+
+export function noConversationNamed(name: string): string {
+  return `There's no channel or group called ${name} that you're in.`;
+}
+
+export function severalConversations(name: string): string {
+  return `More than one conversation is called ${name}. Say which one by its id.`;
+}
+
+export function noDmWith(name: string): string {
+  return `You don't have a direct message with ${name} yet. Start one in Talk first.`;
+}
+
+export function cantPostIn(place: string): string {
+  return `You can't post in ${place}.`;
+}
+
+/** MEMORY_LIMITS reached (memory.ts): the person's memories, or a workspace teammate's shared ones. */
+export function memoryFull(n: number, scope: "person" | "agent"): string {
+  return scope === "person"
+    ? `I already remember ${count(n, "thing", "things")} for you. Forget some first.`
+    : `This teammate already remembers ${count(n, "thing", "things")} for everyone. Delete some first.`;
+}
+
+export function nothingRemembered(key: string): string {
+  return `Nothing is remembered as "${key}".`;
+}
+
 // ── New teammate dialog ──────────────────────────────────────────────
 
 export const NEW_TEAMMATE_DIALOG = {
@@ -481,10 +696,10 @@ export interface ToolPickerCopy {
 
 /**
  * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 10
- * teammate tools (tool-names.ts gains the ten in step 3). Typed by string
- * until then; teammate-copy.test.ts holds it to every Ask AI tool name.
+ * teammate tools (tool-names.ts). Typed by ToolName, so a tool with no label
+ * is a compile error; teammate-copy.test.ts holds it to every name too.
  */
-export const TOOL_PICKER_COPY: Readonly<Record<string, ToolPickerCopy>> = {
+export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   search_tasks: { label: "Find tasks" },
   search_employees: { label: "Find people" },
   search_meetings: { label: "Find meetings" },
