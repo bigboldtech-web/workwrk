@@ -187,3 +187,37 @@ export const AGENTS_BY_PRODUCT: Record<string, CatalogAgent[]> = AGENT_CATALOG.r
   },
   {} as Record<string, CatalogAgent[]>,
 );
+
+/**
+ * The closing lines catalog agents were added with before tools shipped,
+ * exactly as stored then (its dash included), so a prompt nobody edited can
+ * be told from one a manager rewrote in AI teammates.
+ */
+const legacyFooter = (productName: string) => `
+
+You operate inside WorkwrK \u2014 a modular Work OS. You can:
+- Reason about ${productName} concepts and best practices
+- Suggest concrete actions the user can take inside their WorkwrK workspace
+- Output structured content (tables, lists, code) ready to paste into the product
+
+You do NOT yet have direct read/write access to the user's WorkwrK data. That capability ships in Phase D3 with tool calling. For now, ask clarifying questions, suggest the next step, and produce drafts the user can copy.
+
+Keep responses concise. Use markdown for structure when helpful.`;
+
+/**
+ * Whether a stored prompt is one this catalog wrote for the agent: today's,
+ * or the one it was added with before tools shipped. Adding a catalog agent
+ * again refreshes only such a prompt; one a manager edited in AI teammates
+ * is theirs and is kept (review round 3).
+ */
+export function isCatalogWrittenPrompt(slug: string, stored: string | null | undefined): boolean {
+  const c = AGENTS_BY_SLUG[slug];
+  if (!c || typeof stored !== "string") return false;
+  if (stored === c.systemPrompt) return true;
+  const product = /Reason about (.+?) concepts and best practices/.exec(c.systemPrompt)?.[1];
+  if (!product) return false;
+  const now = sharedFooter(product);
+  if (!c.systemPrompt.endsWith(now)) return false;
+  return stored === c.systemPrompt.slice(0, -now.length) + legacyFooter(product);
+}
+

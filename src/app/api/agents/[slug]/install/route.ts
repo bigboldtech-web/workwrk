@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireManageApps } from "@/lib/app-gate";
-import { AGENTS_BY_SLUG } from "@/lib/agents/catalog";
+import { AGENTS_BY_SLUG, isCatalogWrittenPrompt } from "@/lib/agents/catalog";
 import { auditAgent } from "@/lib/agents/audit";
 import { overLimit, teammateLimits } from "@/lib/agents/teammate-server";
 import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
@@ -55,7 +55,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   // a row that does anyway is not the workspace's to add.
   const holder = await prisma.agent.findFirst({
     where: { organizationId: user.organizationId, slug },
-    select: { visibility: true, toolNames: true },
+    select: { visibility: true, toolNames: true, systemPrompt: true },
   });
   if (holder && holder.visibility !== "WORKSPACE") return unknown();
   // Nor is a catalog agent whose tools were chosen in AI teammates: it is a
@@ -81,11 +81,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
     },
     update: {
       status: "ENABLED",
-      // Refresh from catalog if the team improves the prompt later
-      name: catalog.name,
-      persona: catalog.persona,
-      description: catalog.description,
-      systemPrompt: catalog.systemPrompt,
+      // The catalog's prompt is refreshed only over one the catalog itself
+      // wrote (today's, or the one added before tools shipped); a prompt a
+      // manager edited in AI teammates is kept, and so are a name, persona
+      // and job they may have changed there (review round 3: Add back wrote
+      // the catalog over them, with no copy kept).
+      ...(isCatalogWrittenPrompt(slug, holder?.systemPrompt) ? { systemPrompt: catalog.systemPrompt } : {}),
     },
     select: { id: true, slug: true, name: true, status: true },
   });

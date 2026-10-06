@@ -140,6 +140,31 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
     expect(db.agents[0]).toMatchObject({ name: "Our HR helper", systemPrompt: "Our own leave rules." });
   });
 
+  it("adds a catalog agent back over its own instructions only when the catalog wrote them (review round 3)", async () => {
+    const { AGENTS_BY_SLUG } = await import("@/lib/agents/catalog");
+    const catalogPrompt = AGENTS_BY_SLUG["priya-hr"].systemPrompt;
+    // Instructions a manager edited in AI teammates, then removed: kept on Add back.
+    seedAgent({ slug: "priya-hr", name: "HR helper", toolNames: null, status: "ARCHIVED", systemPrompt: "Our leave rules: 20 days, ask Lea." });
+    db.viewer = PEOPLE.admin;
+    expect((await call(installAgent(jsonRequest("POST"), slugged("priya-hr")))).status).toBe(200);
+    expect(db.agents[0]).toMatchObject({ status: "ENABLED", name: "HR helper", systemPrompt: "Our leave rules: 20 days, ask Lea." });
+    // The prompt it was added with before tools shipped, untouched: refreshed.
+    const old = catalogPrompt.replace(/\n\nYou operate inside WorkwrK[\s\S]*$/, "") +
+      "\n\nYou operate inside WorkwrK \u2014 a modular Work OS. You can:\n- Reason about People & HR concepts and best practices\n- Suggest concrete actions the user can take inside their WorkwrK workspace\n- Output structured content (tables, lists, code) ready to paste into the product\n\nYou do NOT yet have direct read/write access to the user's WorkwrK data. That capability ships in Phase D3 with tool calling. For now, ask clarifying questions, suggest the next step, and produce drafts the user can copy.\n\nKeep responses concise. Use markdown for structure when helpful.";
+    db.agents[0].status = "ARCHIVED";
+    db.agents[0].systemPrompt = old;
+    expect((await call(installAgent(jsonRequest("POST"), slugged("priya-hr")))).status).toBe(200);
+    expect(db.agents[0].systemPrompt).toBe(catalogPrompt);
+  });
+
+  it("never offers a catalog agent made a teammate and then removed: it comes back in AI teammates (review round 3)", async () => {
+    seedAgent({ slug: "priya-hr", name: "Our HR helper", status: "ARCHIVED" });
+    db.viewer = PEOPLE.admin;
+    const { body } = await call(listAgents());
+    expect(body.available.map((a: { slug: string }) => a.slug)).not.toContain("priya-hr");
+    expect(body.removed.map((a: { slug: string }) => a.slug)).not.toContain("priya-hr");
+  });
+
   it("never gives a new agent a slug a static route beside /api/agents/[slug] owns", async () => {
     db.viewer = PEOPLE.admin;
     const made = await call(createAgent(jsonRequest("POST", { name: "Runs", description: "Runs things.", systemPrompt: "Be brief." })));
