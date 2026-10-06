@@ -77,13 +77,15 @@ export async function GET() {
   // Every slug a workspace agent holds, a teammate's included: a catalog
   // agent whose tools were chosen in AI teammates leaves the list above, but
   // must not be offered (and added over its own prompt) again (review round 2).
-  // A removed one too: removed in AI teammates, it comes back there, and
-  // the catalog entry could only fail (review round 3). A removed agent
-  // made before teammates is listed under removed, as Add back.
+  // Every workspace row that holds a catalog slug, whatever its status or
+  // tools, keeps that catalog entry out of `available`: a removed one comes
+  // back only through `removed` (as Add back, under its own name, which Add
+  // back keeps since round 3), and one made a teammate is not the catalog's
+  // to add. Filtered to the catalog's few slugs, so no cap can drop one
+  // (review rounds 2 to 4).
   const held = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, visibility: "WORKSPACE", OR: [{ status: { not: "ARCHIVED" } }, { NOT: LEGACY_AGENT }] },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", slug: { in: AGENT_CATALOG.map((a) => a.slug) } },
     select: { slug: true },
-    take: 500,
   });
   const installedSlugs = new Set([...installed.map((a) => a.slug), ...held.map((a) => a.slug)]);
   const inScope = new Set(Object.keys(PRODUCT_TOOL_NAMES));

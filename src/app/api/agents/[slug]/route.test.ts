@@ -165,6 +165,14 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
     expect(body.removed.map((a: { slug: string }) => a.slug)).not.toContain("priya-hr");
   });
 
+  it("offers a removed catalog agent someone renamed only as itself, never as the catalog's, so Add back names what comes back (review round 4)", async () => {
+    seedAgent({ slug: "priya-hr", name: "Leave desk", description: "Answers Acme leave questions.", toolNames: null, status: "ARCHIVED" });
+    db.viewer = PEOPLE.admin;
+    const { body } = await call(listAgents());
+    expect(body.available.map((a: { slug: string }) => a.slug)).not.toContain("priya-hr");
+    expect(body.removed).toEqual([expect.objectContaining({ slug: "priya-hr", name: "Leave desk" })]);
+  });
+
   it("never gives a new agent a slug a static route beside /api/agents/[slug] owns", async () => {
     db.viewer = PEOPLE.admin;
     const made = await call(createAgent(jsonRequest("POST", { name: "Runs", description: "Runs things.", systemPrompt: "Be brief." })));
