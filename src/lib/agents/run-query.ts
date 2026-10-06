@@ -9,6 +9,9 @@
 //   result) are that person's chat, and nobody reads another person's chats
 //   (spec-ai-automation 1.4). What a Member may see INSIDE an autonomous run
 //   somebody else started is narrower again (run-view.ts redactRunFor).
+//   A PRIVATE AI teammate's runs are its owner's alone, whatever started
+//   them: anyone else reads none of them, an Admin included, exactly as they
+//   cannot open the teammate (teammate-access.ts agentUsableWhere).
 //
 // An autonomous run stores its trigger in input.trigger; a chat run has
 // none. Every JSON filter here is a positive match, because a negated JSON
@@ -16,6 +19,7 @@
 // would silently drop the chat runs it meant to keep.
 
 import type { Prisma } from "@/generated/prisma";
+import { agentUsableWhere } from "./teammate-access";
 
 export type RunStatusFilter = "succeeded" | "failed" | "running";
 export type RunTriggerFilter = "SCHEDULED" | "MANUAL";
@@ -81,6 +85,8 @@ export function agentRunsWhere(q: RunQuery, viewer: { organizationId: string; us
     // The same for every role: `admin` no longer widens it to other
     // people's chat rows.
     { OR: [autonomous("SCHEDULED"), autonomous("MANUAL"), { triggeredBy: viewer.userId }] },
+    // A private teammate's runs: its owner's only (see the header).
+    { agent: agentUsableWhere(viewer.userId) },
   ];
   if (q.trigger) and.push(autonomous(q.trigger));
   if (q.statuses.length > 0) and.push({ status: { in: q.statuses.flatMap((s) => STATUS_VALUES[s]) } });

@@ -5,13 +5,23 @@
 // automation 1.4 and section 4 step 2). DELETE is a soft remove: the row goes
 // to status ARCHIVED, so its run history and every chat bound to it are kept,
 // and adding the same catalog agent again (POST .../install) brings it back.
+//
+// Workspace agents only (docs/plans/ai-teammates.md 3.15). A PRIVATE AI
+// teammate is its owner's alone and only its owner manages it (PATCH and
+// DELETE /api/agents/teammates/[slug]), so here it answers exactly as a slug
+// that does not exist: an Admin who learns one can neither pause, rename nor
+// remove it. Removing a workspace agent does what removing it as a teammate
+// does: what it asked that still waits is cancelled, and every routine with
+// it pauses (agent_removed).
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireManageApps } from "@/lib/app-gate";
+import { cancelPendingActionsOf } from "@/lib/agents/actions";
 import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { auditAgent } from "@/lib/agents/audit";
+import { pauseRoutine } from "@/lib/agents/routines-server";
 
 const patchSchema = z
   .object({
@@ -23,7 +33,8 @@ const patchSchema = z
 
 async function findAgent(slug: string, organizationId: string) {
   return prisma.agent.findFirst({
-    where: { slug, organizationId, status: { not: "ARCHIVED" } },
+    // A private teammate is not one of the workspace's agents (see above).
+    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
     select: { id: true, slug: true, name: true, status: true, autonomousEnabled: true, scheduleCron: true },
   });
 }
@@ -73,10 +84,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ slug
   const { slug } = await params;
   const agent = await findAgent(slug, gate.viewer.organizationId);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  // First, so no new turn, approval or routine run starts with it.
   await prisma.agent.update({
     where: { id: agent.id },
     data: { status: "ARCHIVED", autonomousEnabled: false, nextRunAt: null },
   });
+  // As removing it as a teammate does (DELETE /api/agents/teammates/[slug]):
+  // nothing it asked can run now, and its routines stop with the reason.
+  await cancelPendingActionsOf(agent);
+  const routines = await prisma.agentRoutine.findMany({
+    where: { agentId: agent.id, status: "active" },
+    select: { id: true, organizationId: true, agentId: true, actingForId: true, name: true },
+  });
+  for (const r of routines) await pauseRoutine(r, "agent_removed", agent);
   await auditAgent({ organizationId: gate.viewer.organizationId, actorId: gate.viewer.userId, agent, action: "removed" });
   return NextResponse.json({ ok: true });
 }

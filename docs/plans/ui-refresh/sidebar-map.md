@@ -111,8 +111,8 @@ No section is collapsed by default. No FAVORITES here (favorites are a Work-hub 
 | # | Section | Label | Icon | href | `match` | Gating | Count / dot | Collapsed |
 |---|---|---|---|---|---|---|---|---|
 | 1 | (personal) | **Ask AI** | `Sparkles` | `/sidekick` | prefix | `app: ai`, every Member; never a Guest | none | n/a |
-| 2 | (personal) | **Agents** | `Bot` | `/agents` | prefix | `app: ai` | enabled agents; hidden at 0 | n/a |
-| 3 | CHATS | one row per chat session, pinned first then newest | `MessageSquare` (`Pin` when pinned) | `/sidekick?session=<id>` | exact on the param | `app: ai` | none | no |
+| 2 | (personal) | **AI teammates** | `Bot` | `/agents` | prefix | `app: ai` | what waits for the viewer's approval across their teammates, hidden at 0; else a `Dots unread` when a teammate answered or reported since they last read its chat (docs/plans/ai-teammates.md 3.15) | n/a |
+| 3 | CHATS | one row per Ask AI chat session (never a chat with an AI teammate), pinned first then newest | `MessageSquare` (`Pin` when pinned) | `/sidekick?session=<id>` | exact on the param | `app: ai` | none | no |
 | 3z | CHATS | **See all chats** (ghost row, 13/500) | none | `/sidekick?view=all` | exact | rendered only past 15 chats | none | n/a |
 | 4 | AUTOMATION | **Workflows** | `Workflow` | `/automation/workflows` | prefix | `app: automation`, every Member | active workflows; hidden at 0 | no |
 | 5 | AUTOMATION | **Templates** | `LayoutTemplate` | `/automation/templates` | prefix | `app: automation` | none | no |

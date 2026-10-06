@@ -4,12 +4,18 @@
 // is expired, cancelled or left waiting, never run; an edit changes only the
 // one editable field, clamped; a deny runs nothing; the Inbox notification is
 // marked read; "don't ask again" is stored only where the policy allows it;
-// the sweep expires and fails what it must and never runs anything; and a
-// chat's outcomes are claimed once. The database and the modules around it
-// are the shared doubles in test-fixtures.ts.
+// the sweep expires and fails what it must and never runs anything; a
+// chat's outcomes are claimed once; and the person's other tabs are told
+// once per teammate. The database and the modules around it are the shared
+// doubles in test-fixtures.ts.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const published = vi.hoisted(() => [] as Array<{ userId: string; event: unknown }>);
+vi.mock("@/lib/realtime-bus", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/realtime-bus")>()),
+  publishToUser: (userId: string, event: unknown) => void published.push({ userId, event }),
+}));
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./test-fixtures")).prismaFake }));
 vi.mock("./acting", async () => (await import("./test-fixtures")).actingFake);
 vi.mock("./previews", async () => ({ prepareCall: (await import("./test-fixtures")).fakePrepareCall }));
@@ -37,6 +43,7 @@ const POSTED = { ok: true, message: { id: "msg1", conversationId: "c1" }, conver
 
 beforeEach(() => {
   resetFixtures();
+  published.length = 0;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
 });
@@ -311,6 +318,39 @@ describe("sweepActions", () => {
     const again = await decideActions(viewer, [{ id: stuck.id, decision: "approve" }]);
     expect(again.results).toEqual([{ id: stuck.id, status: "FAILED", code: "already_decided" }]);
     expect(fx.handlerCalls).toEqual([]);
+  });
+});
+
+describe("telling the person's other tabs (agent.changed)", () => {
+  it("publishes once per teammate after the decisions settle, and nothing for an id that is not theirs", async () => {
+    const a = talkPost();
+    const b = talkPost();
+    const theirs = talkPost({ actingForId: "max" });
+    await decideActions(viewer, [{ id: a.id, decision: "deny" }, { id: b.id, decision: "approve" }, { id: theirs.id, decision: "deny" }]);
+    expect(published).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "a1" } }]);
+
+    published.length = 0;
+    await decideActions(viewer, [{ id: theirs.id, decision: "approve" }, { id: "nope", decision: "deny" }]);
+    expect(published).toEqual([]);
+  });
+
+  it("publishes once per person and teammate after a sweep expires their requests", async () => {
+    const past = new Date(Date.now() - 1000);
+    talkPost({ expiresAt: past });
+    talkPost({ expiresAt: past });
+    talkPost({ expiresAt: past, agentId: "a2", sessionId: "s3" });
+    talkPost({ expiresAt: past, actingForId: "max", sessionId: "s2" });
+    talkPost();
+    await sweepActions(new Date());
+    expect(published).toEqual([
+      { userId: "me", event: { type: "agent.changed", agentId: "a1" } },
+      { userId: "me", event: { type: "agent.changed", agentId: "a2" } },
+      { userId: "max", event: { type: "agent.changed", agentId: "a1" } },
+    ]);
+
+    published.length = 0;
+    await sweepActions(new Date());
+    expect(published).toEqual([]);
   });
 });
 

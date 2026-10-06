@@ -2,17 +2,25 @@
 // /agents: the Run history tab and the agent run detail). Pure, so the list
 // route, the detail route and the tests read an AgentRun row the same way.
 //
-// An AgentRun is written in two shapes:
+// An AgentRun is written in three shapes:
 //   autonomous (a schedule or Run now, src/lib/agents/autonomous.ts)
 //     input  { trigger: "SCHEDULED" | "MANUAL", prompt }
 //     output { text, toolCalls: [{ name, input, result, errorText, durationMs }], finishReason }
 //   from a chat with the agent (the stream route, one row per tool call)
 //     input  { toolName, input }
 //     output the tool's raw result
+//   one AI teammate turn (src/lib/agents/budget.ts and engine.ts)
+//     input  { trigger: "CHAT" | "RESUME" | "ROUTINE", practice, routineId }
+//     output { text, toolCalls: [{ ..., state, actionId }], finishReason, practice }
+//
+// A teammate's continue after the person decided on its requests (RESUME)
+// reads as a chat run: it is the same chat going on, started by the person's
+// own decision in it. A routine's run reads as its own trigger.
 
+import type { CallState } from "./teammate-thread";
 import { toolSentence } from "./tool-verbs";
 
-export type RunTrigger = "SCHEDULED" | "MANUAL" | "CHAT";
+export type RunTrigger = "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE";
 export type RunStatus = "SUCCEEDED" | "FAILED" | "RUNNING";
 
 export interface RunToolCall {
@@ -21,7 +29,12 @@ export interface RunToolCall {
   result: unknown;
   error: string | null;
   durationMs: number | null;
+  /** A teammate's call: how it ended (waiting for approval and practice never ran). Absent on older rows. */
+  state?: CallState;
 }
+
+const CALL_STATE_LIST: readonly CallState[] = ["ran", "failed", "waiting", "practice"];
+const CALL_STATES: ReadonlySet<string> = new Set<string>(CALL_STATE_LIST);
 
 export interface RunRowLike {
   status: string;
@@ -38,7 +51,7 @@ function rec(v: unknown): Record<string, unknown> | null {
 
 export function runTrigger(input: unknown): RunTrigger {
   const t = rec(input)?.trigger;
-  return t === "SCHEDULED" || t === "MANUAL" ? t : "CHAT";
+  return t === "SCHEDULED" || t === "MANUAL" || t === "ROUTINE" ? t : "CHAT";
 }
 
 /** PENDING (the row is written before the model answers) reads as Running. */
@@ -77,14 +90,26 @@ export function runToolCalls(row: Pick<RunRowLike, "input" | "output" | "error" 
     const call = rec(c);
     if (!call || typeof call.name !== "string") return [];
     const errorText = typeof call.errorText === "string" && call.errorText ? call.errorText : null;
+    const state = typeof call.state === "string" && CALL_STATES.has(call.state) ? (call.state as CallState) : null;
     return [{
       name: call.name,
       input: rec(call.input),
       result: call.result ?? null,
       error: errorText ?? resultError(call.result),
       durationMs: typeof call.durationMs === "number" ? call.durationMs : null,
+      ...(state ? { state } : {}),
     }];
   });
+}
+
+/**
+ * Where a run's chat opens, for a run whose chat is the viewer's own: an AI
+ * teammate's chat by the teammate's slug (there is one per person), an Ask
+ * AI chat by its id. Null when the run has no chat.
+ */
+export function runChatHref(sessionId: string | null, kind: string | null | undefined, agentSlug: string): string | null {
+  if (!sessionId) return null;
+  return kind === "TEAMMATE" ? `/agents?chat=${encodeURIComponent(agentSlug)}` : `/sidekick?session=${encodeURIComponent(sessionId)}`;
 }
 
 /** Markdown down to one plain line: no headings, bullets, emphasis or code ticks. */

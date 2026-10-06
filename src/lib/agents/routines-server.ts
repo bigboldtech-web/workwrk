@@ -1,13 +1,25 @@
-// Routines, the server half (docs/plans/ai-teammates.md 3.9): saving one,
-// running one (runRoutine: Run now, and the scheduled runner's run of a due
-// slot), and pausing one. The rules are routines.ts; the scheduled runner
-// (processDueRoutines: the due slots, claimed by compare-and-swap) joins this
-// file with the cron step and runs each slot through runRoutine.
+// Routines, the server half (docs/plans/ai-teammates.md 3.9 and 3.14):
+// saving one, running one (runRoutine: Run now, and the scheduled runner's
+// run of a due slot), pausing one, and the scheduled runner itself
+// (processDueRoutines, which /api/cron/run-due-agents calls every tick). The
+// rules are routines.ts.
 //
 // A routine works for ONE person, set at creation and never changed: its
 // actingForId is the person who asked for it, re-checked on every run, and
 // never a fallback to anyone else. It runs at most once an hour (every run
 // spends one AI question), and one person has at most ROUTINE_LIMITS of them.
+//
+// EACH SLOT RUNS AT MOST ONCE. The runner claims a due slot by one
+// compare-and-swap on nextRunAt (from the instant it read to the next one),
+// so two ticks at once, or a tick retried, find the slot taken and run
+// nothing. A slot reached more than ROUTINE_STALE_MS late is skipped as
+// missed rather than run hours after its time.
+//
+// WHAT THE PERSON IS TOLD. A pause writes its line into the chat and one
+// Inbox row (agent_routine_paused); a scheduled run that asked them to
+// approve something writes one Inbox row (agent_approval) linked to the
+// first request's card, so deciding it marks the row read. Every report and
+// every pause also tells their open tabs (the realtime event agent.changed).
 //
 // Server-only: imports prisma.
 
@@ -15,17 +27,44 @@ import type { Prisma } from "@/generated/prisma";
 import { isAiConfigured } from "@/lib/ai-client";
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
 import { prisma } from "@/lib/prisma";
+import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson } from "./acting";
-import { writeEventLine } from "./actions";
+import { actionHref, writeEventLine } from "./actions";
 import { computeNextRunAt } from "./autonomous";
 import { claimTeammateTurn, giveBackTurn } from "./budget";
 import { splitScheduleZone } from "./cron";
 import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom } from "./engine";
-import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, routineReasonForPerson, routineScheduleProblem, type RoutineReason } from "./routines";
+import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, ROUTINE_STALE_MS, routineReasonForPerson, routineScheduleProblem, type RoutineReason } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
 import { canUseAgent } from "./teammate-access";
-import { TEAMMATE_CHAT, TEAMMATE_ERRORS, routineLimitMessage, routinePausedLine } from "./teammate-copy";
+import {
+  APPROVAL_CARD,
+  TEAMMATE_CHAT,
+  TEAMMATE_ERRORS,
+  approvalNoticeMessage,
+  approvalNoticeTitle,
+  routineLimitMessage,
+  routinePausedLine,
+  routinePausedNoticeMessage,
+  routinePausedNoticeTitle,
+  routineSkippedLine,
+} from "./teammate-copy";
+import { actionViewFromRow } from "./teammate-thread";
 import { clampText } from "./clamp";
+
+function errorLine(err: unknown): string {
+  return err instanceof Error ? (err.message.split("\n").pop() ?? err.message) : String(err);
+}
+
+/** Tell the person's open tabs that a teammate's chat changed (realtime-events.ts agent.changed). */
+function agentChanged(userId: string, agentId: string): void {
+  publishToUser(userId, { type: "agent.changed", agentId });
+}
+
+/** Where a paused routine's Inbox row opens: the teammate's chat, with its routines. */
+export function routinesHref(agentSlug: string): string {
+  return `/agents?chat=${encodeURIComponent(agentSlug)}&settings=routines`;
+}
 
 export interface RoutineCreated {
   id: string;
@@ -110,24 +149,51 @@ export interface PausableRoutine {
   name: string;
 }
 
+/** The person's live chat with the routine's teammate, where its lines go; null before they have one. */
+async function routineChatId(r: PausableRoutine): Promise<string | null> {
+  const chat = await prisma.chatSession.findFirst({
+    where: { organizationId: r.organizationId, agentId: r.agentId, userId: r.actingForId, kind: "TEAMMATE", archivedAt: null },
+    select: { id: true },
+  });
+  return chat?.id ?? null;
+}
+
 /**
  * Pause a routine for a reason (3.9): status paused with the reason kept, no
- * next run, and the line "Routine paused: {name}. {reason}" in its person's
- * chat with the teammate. One swap from active, so a routine paused twice at
- * once writes one line. Only its person resumes it (PATCH
- * /api/agents/routines/[id]). True when this call paused it.
+ * next run, the line "Routine paused: {name}. {reason}" in its person's chat
+ * with the teammate, and one Inbox row (agent_routine_paused) linked to the
+ * chat's routines. One swap from active, so a routine paused twice at once
+ * writes one line and one row. Only its person resumes it (PATCH
+ * /api/agents/routines/[id]). `agent` names the teammate when the caller
+ * already holds it; else it is read. True when this call paused it.
  */
-export async function pauseRoutine(r: PausableRoutine, reason: RoutineReason): Promise<boolean> {
+export async function pauseRoutine(r: PausableRoutine, reason: RoutineReason, agent?: { name: string; slug: string } | null): Promise<boolean> {
   const paused = await prisma.agentRoutine.updateMany({
     where: { id: r.id, status: "active" },
     data: { status: "paused", pausedReason: reason, nextRunAt: null },
   });
   if (paused.count !== 1) return false;
-  const chat = await prisma.chatSession.findFirst({
-    where: { organizationId: r.organizationId, agentId: r.agentId, userId: r.actingForId, kind: "TEAMMATE", archivedAt: null },
-    select: { id: true },
-  });
-  await writeEventLine(chat?.id ?? null, { text: routinePausedLine(r.name, ROUTINE_REASON_TEXT[reason]), event: "routine_paused", routineId: r.id });
+  const why = ROUTINE_REASON_TEXT[reason];
+  await writeEventLine(await routineChatId(r), { text: routinePausedLine(r.name, why), event: "routine_paused", routineId: r.id });
+  const named = agent ?? (await prisma.agent.findFirst({ where: { id: r.agentId, organizationId: r.organizationId }, select: { name: true, slug: true } }));
+  if (named) {
+    try {
+      await prisma.notification.create({
+        data: {
+          userId: r.actingForId,
+          type: "agent_routine_paused",
+          title: routinePausedNoticeTitle(named.name),
+          message: routinePausedNoticeMessage(r.name, why),
+          link: routinesHref(named.slug),
+        },
+      });
+      publishToUser(r.actingForId, { type: "notification" });
+    } catch (err) {
+      // A notice: the pause stands without it, and its line is in the chat.
+      console.error(`[agents] routine ${r.id} pause notice not written: ${errorLine(err)}`);
+    }
+  }
+  agentChanged(r.actingForId, r.agentId);
   return true;
 }
 
@@ -265,6 +331,8 @@ export async function runRoutine(
       .updateMany({ where: { id: r.id }, data: { lastRunAt: now, lastRunId: claim.runId, lastStatus: status, lastReason: reason } })
       .catch((err) => console.error(`[agents] routine ${r.id} run not recorded: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`));
   }
+  // Its report, and any card, are in the chat now: the person's open tabs re-read it.
+  agentChanged(person.userId, agent.id);
   return {
     ok: true,
     runId: claim.runId,
@@ -278,4 +346,169 @@ export async function runRoutine(
     personId: person.userId,
     agent: { id: agent.id, slug: agent.slug, name: agent.name },
   };
+}
+
+// ── The scheduled runner ────────────────────────────────────────────
+
+/** What the runner reads of a due routine: what a run reads, its slot, and how its last slot went. */
+const DUE_SELECT = { ...ROUTINE_RUN_SELECT, nextRunAt: true, lastRunAt: true, lastReason: true } as const;
+
+type DueRoutineRow = Prisma.AgentRoutineGetPayload<{ select: typeof DUE_SELECT }>;
+
+/** What one tick of the runner did, in counts only: no workspace, teammate or person is named. */
+export interface DueRoutineCounts {
+  /** Due when the tick looked (at most `limit`). */
+  due: number;
+  /** Ran and reported. */
+  succeeded: number;
+  /** Ran but ended early or never got an answer, or the run threw. */
+  failed: number;
+  /** Not run, for a reason that skips this one slot (the routine runs at its next). */
+  skipped: number;
+  /** Reached more than ROUTINE_STALE_MS after its time: skipped as missed. */
+  missed: number;
+  /** Not run, for a reason that pauses the routine until its person resumes it. */
+  paused: number;
+  /** Another tick claimed the slot first, or the routine changed since it was read. */
+  taken: number;
+  /** Not started: the tick's budget ran out first. Still due, so the next tick runs them. */
+  deferred: number;
+}
+
+/**
+ * Run the routines that are due (3.9), oldest slot first: at most `limit`
+ * per tick, `concurrency` at a time, and none started once `budgetMs` has
+ * passed (the cron's later steps need the rest of its time). Each slot is
+ * claimed by one compare-and-swap on nextRunAt, then run through runRoutine
+ * as its person, then paused or skipped as runRoutine's refusal says.
+ */
+export async function processDueRoutines(
+  now: Date,
+  opts: { limit: number; budgetMs: number; concurrency: number },
+): Promise<DueRoutineCounts> {
+  const started = Date.now();
+  const due = await prisma.agentRoutine.findMany({
+    where: { status: "active", nextRunAt: { lte: now } },
+    orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
+    take: opts.limit,
+    select: DUE_SELECT,
+  });
+  const counts: DueRoutineCounts = { due: due.length, succeeded: 0, failed: 0, skipped: 0, missed: 0, paused: 0, taken: 0, deferred: 0 };
+  const queue = [...due];
+  const work = async () => {
+    for (let r = queue.shift(); r; r = queue.shift()) {
+      if (Date.now() - started >= opts.budgetMs) {
+        // Past the budget: nothing more starts. What is left stays due, and
+        // the next tick takes it well inside ROUTINE_STALE_MS.
+        counts.deferred += 1 + queue.length;
+        queue.length = 0;
+        return;
+      }
+      try {
+        await runDueSlot(r, now, counts);
+      } catch (err) {
+        counts.failed += 1;
+        console.error(`[agents] routine ${r.id} failed: ${errorLine(err)}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency, queue.length)) }, work));
+  return counts;
+}
+
+async function runDueSlot(r: DueRoutineRow, now: Date, counts: DueRoutineCounts): Promise<void> {
+  const dueAt = r.nextRunAt;
+  if (!dueAt) return;
+  // Claim the slot: move nextRunAt on from the very instant read. Only one
+  // caller can move it from that value, so the slot runs at most once.
+  const claimed = await prisma.agentRoutine.updateMany({
+    where: { id: r.id, status: "active", nextRunAt: dueAt },
+    data: { nextRunAt: computeNextRunAt(r.schedule, now) },
+  });
+  if (claimed.count !== 1) {
+    counts.taken += 1;
+    return;
+  }
+  if (now.getTime() - dueAt.getTime() > ROUTINE_STALE_MS) {
+    counts.missed += 1;
+    await recordSkip(r, "missed", now);
+    return;
+  }
+
+  const run = await runRoutine(r, { practice: false, rateLimit: false, dueAt });
+  if (!run.ok) {
+    // rate_limited is Run now's alone: this runner claims without the
+    // per-minute limit. Should it ever come back, the slot is skipped.
+    if (run.reason === "rate_limited") {
+      counts.skipped += 1;
+      return;
+    }
+    if (run.pause) {
+      // False when its person paused it a moment ago: then it stays theirs.
+      if (await pauseRoutine(r, run.reason)) counts.paused += 1;
+      else counts.skipped += 1;
+      return;
+    }
+    counts.skipped += 1;
+    await recordSkip(r, run.reason, now);
+    return;
+  }
+  if (run.status === "SUCCEEDED") counts.succeeded += 1;
+  else counts.failed += 1;
+  if (run.proposedActionIds.length > 0) await noticeApprovals(run, r.name);
+}
+
+/**
+ * A slot that did not run: the routine records why (lastStatus SKIPPED with
+ * the reason, at the tick's time, and no run) and runs again at its next
+ * slot. Only the teammate's monthly limit says so in the chat, and once a
+ * month: whoever manages the teammate can raise it, and the line would
+ * otherwise come back every slot until the month turns. The other reasons
+ * are the workspace's or a manager's (AI off, the teammate paused, AI not
+ * set up), or a late scheduler, and stay on the routine.
+ */
+async function recordSkip(r: DueRoutineRow, reason: RoutineReason, now: Date): Promise<void> {
+  await prisma.agentRoutine
+    .updateMany({ where: { id: r.id }, data: { lastRunAt: now, lastRunId: null, lastStatus: "SKIPPED", lastReason: reason } })
+    .catch((err) => console.error(`[agents] routine ${r.id} skip not recorded: ${errorLine(err)}`));
+  if (reason !== "agent_cap") return;
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  if (r.lastReason === "agent_cap" && r.lastRunAt && r.lastRunAt.getTime() >= monthStart) return;
+  const line = await writeEventLine(await routineChatId(r), {
+    text: routineSkippedLine(r.name, ROUTINE_REASON_TEXT.agent_cap),
+    event: "routine_skipped",
+    routineId: r.id,
+  });
+  if (line) agentChanged(r.actingForId, r.agentId);
+}
+
+/**
+ * One Inbox row for a scheduled run that asked its person to approve
+ * something (3.14), linked to the first request's card (actions.ts
+ * actionHref), so deciding that request, or its expiry, marks the row read.
+ * A chat's own requests write none: the person is in the chat, and the AI
+ * sidebar's count covers a card they leave.
+ */
+async function noticeApprovals(run: RoutineRun, routineName: string): Promise<void> {
+  const firstId = run.proposedActionIds[0];
+  try {
+    const first = await prisma.agentAction.findFirst({
+      where: { id: firstId, actingForId: run.personId },
+      select: { id: true, toolName: true, risk: true, status: true, preview: true, createdAt: true, expiresAt: true },
+    });
+    const title = first ? actionViewFromRow(first).preview.title : APPROVAL_CARD.untitled;
+    await prisma.notification.create({
+      data: {
+        userId: run.personId,
+        type: "agent_approval",
+        title: approvalNoticeTitle(run.agent.name),
+        message: approvalNoticeMessage(run.proposedActionIds.length, routineName, title),
+        link: actionHref(run.agent.slug, firstId),
+      },
+    });
+    publishToUser(run.personId, { type: "notification" });
+  } catch (err) {
+    // A notice: the requests wait on their cards, and the AI sidebar counts them.
+    console.error(`[agents] approval notice for run ${run.runId} not written: ${errorLine(err)}`);
+  }
 }

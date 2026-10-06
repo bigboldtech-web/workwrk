@@ -183,6 +183,28 @@ export function didntWorkLine(title: string, error: string): string {
   return error ? `Didn't work: ${title}. ${error}` : `Didn't work: ${title}.`;
 }
 
+// ── Inbox notifications (the routine runner, 3.14) ───────────────────
+
+/** A scheduled run asked its person to approve something: the row's title. */
+export function approvalNoticeTitle(agent: string): string {
+  return `${agent} is waiting for your approval`;
+}
+
+/** Its message: the one request's own title, or how many and from which routine. */
+export function approvalNoticeMessage(n: number, routine: string, firstTitle: string): string {
+  return n === 1 ? firstTitle : `${n} things from ${routine}`;
+}
+
+/** A routine paused: the row's title. */
+export function routinePausedNoticeTitle(agent: string): string {
+  return `${agent} paused a routine`;
+}
+
+/** Its message: the routine and why. */
+export function routinePausedNoticeMessage(routine: string, reason: string): string {
+  return reason ? `${routine}: ${reason}` : routine;
+}
+
 // ── Approval card ────────────────────────────────────────────────────
 
 export const APPROVAL_CARD = {

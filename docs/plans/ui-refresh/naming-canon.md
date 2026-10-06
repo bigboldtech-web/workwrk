@@ -240,7 +240,8 @@ A task is **not** a favourite kind. Favorites covers Spaces, Folders, Lists, Doc
 | Canon | Destination | Replaces |
 |---|---|---|
 | **Ask AI** | the assistant everywhere: the `/sidekick` page, the ⌘J panel, the page-header slot, the palette row, the Create-menu row, the task and canvas entry points | Sidekick, Brain, "Ask the Brain", "Ask Sidekick", AI Engine, Super Agent, "Super Agent · Hot", Create with AI |
-| **Agents** | `/agents`. One row is an agent: an AI teammate that does a job on a schedule | Hire, Hired, AI teammates |
+| **AI teammates** | `/agents`: the page title, the AI sidebar row and the breadcrumb (docs/plans/ai-teammates.md, approved 2026-10-05). One row is a teammate: an AI helper with one job that works as the person using it | Agents (as the page name), Hire, Hired |
+| **Workspace agents** | the AI teammates tab that lists the workspace's agents (the agents made before teammates) | Agents (as a tab) |
 | **Workflows** | `/automation/workflows`. One row is an automation | Autopilot, Rules, Automations (as a page name), Manage |
 | **Automation** | the sidebar section label and the breadcrumb crumb | Automation Hub, Autopilot |
 | **New automation** | the blue button on Workflows | New rule, Create workflow, "+ Automation" |

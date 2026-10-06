@@ -33,7 +33,10 @@
 // Each decision and each expiry writes its line into the chat (an EVENT row,
 // teammate-copy.ts) and marks read the Inbox notification that pointed at
 // the action. The teammate learns the outcome at its next turn
-// (claimUnreportedOutcomes: one statement, so one turn reports it).
+// (claimUnreportedOutcomes: one statement, so one turn reports it). The
+// person's open tabs learn it at once: once the decisions settle, and after
+// a sweep, each teammate whose cards moved is published to its person
+// (the realtime event agent.changed), once per person and teammate.
 //
 // Server-only: imports prisma.
 
@@ -41,6 +44,7 @@ import type { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
+import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson, type ActingResult } from "./acting";
 import { prepareCall, type Prepared } from "./previews";
 import { canUseAgent } from "./teammate-access";
@@ -191,6 +195,21 @@ async function markLinksRead(userId: string, links: readonly string[]): Promise<
   await prisma.notification.updateMany({ where: { userId, link: { in: [...links] }, read: false }, data: { read: true } }).catch(() => {});
 }
 
+/**
+ * Tell each person's open tabs that their chat with these teammates changed
+ * (realtime-events.ts agent.changed): one event per person and teammate,
+ * however many of its cards moved.
+ */
+function publishChanged(pairs: Iterable<readonly [userId: string, agentId: string]>): void {
+  const seen = new Set<string>();
+  for (const [userId, agentId] of pairs) {
+    const key = `${userId}:${agentId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    publishToUser(userId, { type: "agent.changed", agentId });
+  }
+}
+
 // ── Asking ──────────────────────────────────────────────────────────
 
 export interface ProposeInput {
@@ -299,21 +318,29 @@ export async function decideActions(
 ): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null }> {
   const cache: DecideCache = { person: null, modules: null, tools: new Map() };
   const results: DecisionResult[] = [];
+  const touched: Array<[string, string]> = [];
   let firstSlug: string | null = null;
   let resumeSlug: string | null = null;
-  for (const d of decisions.slice(0, MAX_DECISIONS)) {
-    const id = typeof d.id === "string" ? d.id : "";
-    const row = id
-      ? await prisma.agentAction.findFirst({ where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId }, select: DECIDE_SELECT })
-      : null;
-    if (!row) {
-      results.push({ id, status: "not_found" });
-      continue;
+  try {
+    for (const d of decisions.slice(0, MAX_DECISIONS)) {
+      const id = typeof d.id === "string" ? d.id : "";
+      const row = id
+        ? await prisma.agentAction.findFirst({ where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId }, select: DECIDE_SELECT })
+        : null;
+      if (!row) {
+        results.push({ id, status: "not_found" });
+        continue;
+      }
+      firstSlug ??= row.agent.slug;
+      touched.push([viewer.userId, row.agentId]);
+      const r = await decideOne(viewer, row, d, opts, cache);
+      if (r.status === "EXECUTED" || r.status === "FAILED") resumeSlug ??= row.agent.slug;
+      results.push(r);
     }
-    firstSlug ??= row.agent.slug;
-    const r = await decideOne(viewer, row, d, opts, cache);
-    if (r.status === "EXECUTED" || r.status === "FAILED") resumeSlug ??= row.agent.slug;
-    results.push(r);
+  } finally {
+    // Settled (or stopped by a throw after some ran): the person's other
+    // tabs re-read the cards, the chat's lines and the sidebar's count.
+    publishChanged(touched);
   }
   return { results, resume: resumeSlug !== null, agentSlug: resumeSlug ?? firstSlug };
 }
@@ -487,15 +514,16 @@ async function storeAlways(agentId: string, userId: string, tool: ToolName, prep
 
 /**
  * Each cron tick: requests past their time become EXPIRED (one line per chat
- * naming them, their notifications marked read), and a request RUNNING for
- * over RUNNING_STUCK_MS becomes FAILED with "Couldn't confirm it finished."
- * and is never run again: it may have happened, so the card tells the person
- * to check before asking again.
+ * naming them, their notifications marked read, and one agent.changed per
+ * person and teammate), and a request RUNNING for over RUNNING_STUCK_MS
+ * becomes FAILED with "Couldn't confirm it finished." and is never run
+ * again: it may have happened, so the card tells the person to check before
+ * asking again.
  */
 export async function sweepActions(now: Date = new Date()): Promise<{ expired: number; stuck: number }> {
   const due = await prisma.agentAction.findMany({
     where: { status: "PENDING", expiresAt: { lte: now } },
-    select: { ...VIEW_SELECT, actingForId: true, agent: { select: { slug: true } } },
+    select: { ...VIEW_SELECT, actingForId: true, agentId: true, agent: { select: { slug: true } } },
     orderBy: { expiresAt: "asc" },
     take: SWEEP_BATCH,
   });
@@ -516,6 +544,7 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
     await writeEventLine(sessionId, { text: expiredWithoutAnswerLine(titleList(titles)), event: "action_expired", actionId: rows[0].id });
   }
   for (const [userId, links] of linksByPerson) await markLinksRead(userId, links);
+  publishChanged(expired.map((row) => [row.actingForId, row.agentId] as const));
 
   const cutoff = new Date(now.getTime() - RUNNING_STUCK_MS);
   const stuck = await prisma.agentAction.updateMany({

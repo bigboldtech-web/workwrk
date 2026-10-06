@@ -1,8 +1,9 @@
 // The teammate routes' test double (src/app/api/agents/**/route.test.ts): an
 // in-memory workspace behind the prisma calls the routes make (agents,
 // chats, messages, settings, requests, routines), the people of the
-// authorization matrix, and a requireApp that answers a Guest the way the
-// real gate does (404). Every write that changed a row is recorded in
+// authorization matrix, a requireApp that answers a Guest the way the real
+// gate does (404), and the Apps settings gate the workspace agent routes use
+// (requireManageApps). Every write that changed a row is recorded in
 // `routeDb.writes`, so a test can say that a refusal wrote nothing. The tests
 // mock the real modules with these: vi.mock("@/lib/prisma", async () =>
 // ({ prisma: (await import("@/lib/agents/teammate-route-fixtures")).routeDb })).
@@ -218,6 +219,15 @@ export const routeDb = {
       Object.assign(row, a.data);
       return copy(row);
     },
+    // POST /api/agents/[slug]/install adds a catalog agent by its unique
+    // (organizationId, slug), whatever row holds that slug.
+    upsert: async (a: Args) => {
+      routeDb.writes.push("agent.upsert");
+      const key = (a.where as { organizationId_slug: { organizationId: string; slug: string } }).organizationId_slug;
+      const row = db.agents.find((r) => r.organizationId === key.organizationId && r.slug === key.slug);
+      if (row) return copy(Object.assign(row, a.update));
+      return copy(seedAgent({ ...(a.create as Row & { slug: string }), toolNames: null }));
+    },
   },
   organization: {
     findUnique: async () => ({ plan: db.plan, settings: {} }),
@@ -306,10 +316,19 @@ export const routeDb = {
   },
 };
 
-/** requireApp("ai") and isOwnerOrAdmin as src/lib/app-gate.ts answers them, for `db.viewer`. */
+/**
+ * requireApp("ai"), requireManageApps and isOwnerOrAdmin as
+ * src/lib/app-gate.ts answers them, for `db.viewer`. The Apps settings gate
+ * is the Owner and Admins'; anyone else gets the settings page's 403
+ * (src/lib/access/gate.ts: a settings page never 404s).
+ */
 export const appGateFake = {
   requireApp: async () =>
     db.viewer.orgRole === "GUEST" ? { error: NextResponse.json({ error: "not_found" }, { status: 404 }) } : { viewer: db.viewer },
+  requireManageApps: async () =>
+    db.viewer.orgRole === "OWNER" || db.viewer.orgRole === "ADMIN"
+      ? { viewer: db.viewer }
+      : { error: NextResponse.json({ error: "no_access", page: "apps" }, { status: 403 }) },
   isOwnerOrAdmin: (v: FakeViewer) => v.orgRole === "OWNER" || v.orgRole === "ADMIN",
 };
 

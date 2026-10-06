@@ -34,6 +34,11 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   youSaidNoLine: [["Comment on Call Acme"], "You said no: Comment on Call Acme"],
   expiredWithoutAnswerLine: [["Post in #general"], "Expired without an answer: Post in #general"],
   didntWorkLine: [["Post in #general", "The channel is archived."], "Didn't work: Post in #general. The channel is archived."],
+  // The Inbox rows the routine runner writes (3.14).
+  approvalNoticeTitle: [["Status Reporter"], "Status Reporter is waiting for your approval"],
+  approvalNoticeMessage: [[3, "Weekly status", "Post in #team"], "3 things from Weekly status"],
+  routinePausedNoticeTitle: [["Status Reporter"], "Status Reporter paused a routine"],
+  routinePausedNoticeMessage: [["Weekly status", "This teammate was removed."], "Weekly status: This teammate was removed."],
   thingsWaiting: [[12], "12 things are waiting for your approval"],
   approveCount: [[12], "Approve 12"],
   denyCount: [[2], "Deny 2"],
@@ -156,6 +161,10 @@ describe("the builders", () => {
     );
     // 00:30 on 1 November in Kolkata is still 31 October in UTC.
     expect(copy.monthName(new Date("2026-10-31T19:00:00Z"))).toBe("October");
+  });
+  it("name the one request a routine left waiting by its own title", () => {
+    expect(copy.approvalNoticeMessage(1, "Weekly status", "Post in #team")).toBe("Post in #team");
+    expect(copy.routinePausedNoticeMessage("Weekly status", "")).toBe("Weekly status");
   });
   it("lower only a word's first letter, never an acronym's", () => {
     expect(copy.wouldDoLine("SOP draft for onboarding")).toBe("Would SOP draft for onboarding");

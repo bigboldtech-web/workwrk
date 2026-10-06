@@ -105,6 +105,13 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // declines a Request access (Phase 8 stage E). A grant is told by
   // grants.ts as access_granted.
   access_declined: k("access_declined", "Request declined", "KeyRound", "primary", "requests"),
+  // AI teammates (docs/plans/ai-teammates.md 3.14), written by the routine
+  // runner in src/lib/agents/routines-server.ts: one row per scheduled run
+  // that asked the person to approve something (it links to the approval
+  // card, so deciding it there marks the row read), and one per routine
+  // that paused. A chat's own requests write none: the person is in it.
+  agent_approval: k("agent_approval", "Waiting for your approval", "Bot", "primary", "requests"),
+  agent_routine_paused: k("agent_routine_paused", "Routine paused", "Bot", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),

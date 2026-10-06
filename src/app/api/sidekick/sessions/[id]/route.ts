@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { ASK_AI_CHATS } from "@/lib/agents/session-guard";
 
 async function ctxAndSession(id: string, opts: { includeArchived?: boolean } = {}) {
   // The ai app key: Guests 404, a hidden app or AI features off 403 app_off.
@@ -24,8 +25,10 @@ async function ctxAndSession(id: string, opts: { includeArchived?: boolean } = {
   const orgId = (session.user as { organizationId?: string }).organizationId;
   if (!orgId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
 
+  // Ask AI's chats only: a chat with an AI teammate is not read, renamed or
+  // archived here (src/lib/agents/session-guard.ts), so its id is a 404.
   const row = await prisma.chatSession.findFirst({
-    where: { id, userId, organizationId: orgId, ...(opts.includeArchived ? {} : { archivedAt: null }) },
+    where: { id, userId, organizationId: orgId, ...ASK_AI_CHATS, ...(opts.includeArchived ? {} : { archivedAt: null }) },
   });
   if (!row) return { error: NextResponse.json({ error: "not found" }, { status: 404 }) };
   return { userId, session: row };

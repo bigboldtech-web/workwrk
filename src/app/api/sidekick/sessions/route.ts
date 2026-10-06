@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { ASK_AI_CHATS } from "@/lib/agents/session-guard";
+import { agentUsableWhere } from "@/lib/agents/teammate-access";
 
 async function ctx() {
   // The ai app key: Guests 404, a hidden app or AI features off 403 app_off.
@@ -37,6 +39,8 @@ async function ctx() {
  * { sessions: [{ id, title, pinned, archived, messageCount, lastModel,
  *   createdAt, updatedAt }], total, nextCursor, restarted }. Always the
  * viewer's own: nobody, the Owner included, reads another person's chats.
+ * Ask AI's chats only: a chat with an AI teammate lives in AI teammates
+ * (src/lib/agents/session-guard.ts).
  *
  * A chat with no messages is not listed: a session is created just before
  * its first message is sent, so a send that never reached the server (the
@@ -62,6 +66,7 @@ export async function GET(req: Request) {
   const where = {
     organizationId: c.orgId,
     userId: c.userId,
+    ...ASK_AI_CHATS,
     archivedAt: archived ? { not: null } : null,
     ...(pinnedOnly ? { pinned: true } : {}),
     ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
@@ -123,12 +128,14 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  // Resolve optional agent, must belong to the same org + be enabled.
+  // Resolve optional agent, must belong to the same org + be enabled, and be
+  // one this person may use: another person's private AI teammate is the
+  // same 404 as a slug that does not exist.
   let agentId: string | null = null;
   let inheritedTitle: string | null = null;
   if (parsed.data.agentSlug) {
     const agent = await prisma.agent.findFirst({
-      where: { organizationId: c.orgId, slug: parsed.data.agentSlug, status: "ENABLED" },
+      where: { organizationId: c.orgId, slug: parsed.data.agentSlug, status: "ENABLED", ...agentUsableWhere(c.userId) },
       select: { id: true, name: true },
     });
     if (!agent) return NextResponse.json({ error: "agent not found or not enabled" }, { status: 404 });

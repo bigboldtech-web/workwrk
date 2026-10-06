@@ -28,14 +28,19 @@ export interface CatalogAgent {
   examplePrompts: string[];   // shown in the agent detail page
 }
 
+// The closing lines of every catalog agent's prompt. They used to say the
+// agent had no access to WorkwrK data, which stopped being true when tools
+// shipped (docs/plans/ai-teammates.md 3.15). An agent already added keeps
+// the prompt it was added with until it is added again (POST
+// /api/agents/[slug]/install refreshes the prompt from here).
 const sharedFooter = (productName: string) => `
 
-You operate inside WorkwrK — a modular Work OS. You can:
+You operate inside WorkwrK, a modular Work OS. You can:
 - Reason about ${productName} concepts and best practices
 - Suggest concrete actions the user can take inside their WorkwrK workspace
 - Output structured content (tables, lists, code) ready to paste into the product
 
-You do NOT yet have direct read/write access to the user's WorkwrK data. That capability ships in Phase D3 with tool calling. For now, ask clarifying questions, suggest the next step, and produce drafts the user can copy.
+You can read and change WorkwrK data through your tools, only as far as the person you work for can. When a tool can do what the user asks, use it instead of describing what you would do. When no tool covers it, say so, suggest the next step, and produce a draft the user can copy.
 
 Keep responses concise. Use markdown for structure when helpful.`;
 

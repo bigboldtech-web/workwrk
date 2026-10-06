@@ -30,6 +30,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { askAiAgent, teammateChatRefusal } from "@/lib/agents/session-guard";
 import { isModuleActive } from "@/lib/entitlements";
 import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 
@@ -76,7 +77,11 @@ async function ctxAndSession(sessionId: string) {
     where: { id: sessionId, userId, organizationId: orgId, archivedAt: null },
     include: {
       agent: {
-        select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true },
+        select: {
+          id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true,
+          // Who may use it (src/lib/agents/session-guard.ts askAiAgent).
+          organizationId: true, visibility: true, ownerId: true,
+        },
       },
     },
   });
@@ -127,6 +132,11 @@ export async function POST(req: Request) {
   const c = await ctxAndSession(parsed.data.sessionId);
   if (c.status === 401) return new Response("unauthorized", { status: 401 });
   if (c.status === 404) return new Response("session not found", { status: 404 });
+  // An AI teammate's chat runs only through its own route, which asks before
+  // anything other people will see; this loop never does. 409 before any
+  // question is spent or anything is written.
+  const refused = teammateChatRefusal(c.chat);
+  if (refused) return refused;
 
   // One message is one of the plan's AI questions (src/lib/ai-allowance.ts):
   // the person's per-minute limit, then the question claimed before anything
@@ -153,8 +163,10 @@ export async function POST(req: Request) {
   });
   history.reverse();
 
-  // 3. Resolve agent + tools + system prompt + model.
-  const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
+  // 3. Resolve agent + tools + system prompt + model. The agent only while it
+  // is on and the person may still use it: one that became someone else's
+  // private teammate runs as plain Ask AI.
+  const agentScoped = askAiAgent(c.chat.agent, gate.viewer);
   const productScope = agentScoped?.productSlug ?? c.chat.productContext ?? null;
   const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;

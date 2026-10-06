@@ -35,6 +35,10 @@ describe("realtime event contract", () => {
     expect(REALTIME_EVENT_NAMES).toContain("item");
     expect(isRealtimeEvent({ type: "item", itemId: "i1", boardId: "b1" })).toBe(true);
   });
+  it("carries the AI teammate event, so a decision, an expiry, a report or a pause reaches the person's other tabs", () => {
+    expect(REALTIME_EVENT_NAMES).toContain("agent.changed");
+    expect(isRealtimeEvent({ type: "agent.changed", agentId: "a1" })).toBe(true);
+  });
   it("guards parsed payloads by type name only", () => {
     expect(isRealtimeEvent({ type: "notif.changed", unread: 3 })).toBe(true);
     expect(isRealtimeEvent({ type: "message", conversationId: "c1" })).toBe(true);
@@ -64,6 +68,8 @@ describe("realtime event contract", () => {
       [{ type: "item", itemId: "i1", boardId: "b1" }, [WINDOW_EVENTS.itemChanged]],
       // Phase 6: its consumers subscribe to workwrk:realtime directly.
       [{ type: "review.decided", reviewId: "r1" }, []],
+      // AI teammates: the page and the AI sidebar read workwrk:realtime too.
+      [{ type: "agent.changed", agentId: "a1" }, []],
     ];
     for (const [ev, expected] of cases) expect(legacyWindowEventsFor(ev)).toEqual(expected);
     // Exhaustive: every named type has a mapping (the switch returns an array).

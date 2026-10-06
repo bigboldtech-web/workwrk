@@ -89,6 +89,16 @@ export type ItemChangedEvent = {
 export type ReviewDecidedEvent = { type: "review.decided"; reviewId: string };
 
 /**
+ * Something changed in one of the person's AI teammate chats without them
+ * typing it (docs/plans/ai-teammates.md 3.14): a decision on a request (here
+ * or in another tab), a request that expired, a routine's report, or a
+ * routine that paused. Published only to the person the teammate acts for.
+ * TRIGGER-ONLY: the teammate's id and nothing else, so the list, the open
+ * chat and the AI sidebar re-read through their own scoped endpoints.
+ */
+export type AgentChangedEvent = { type: "agent.changed"; agentId: string };
+
+/**
  * The same event dispatched by THIS tab about its own write (see
  * `emitItemChanged`). `local` tells the editor that caused it to ignore it;
  * `gone` tells a host list to drop the row rather than re-read it.
@@ -109,7 +119,8 @@ export type ShellRealtimeEvent =
   | PrefsChangedEvent
   | SessionIdleEvent
   | ItemChangedEvent
-  | ReviewDecidedEvent;
+  | ReviewDecidedEvent
+  | AgentChangedEvent;
 
 export type RealtimeEvent = LegacyRealtimeEvent | ShellRealtimeEvent;
 export type RealtimeEventName = RealtimeEvent["type"];
@@ -144,6 +155,7 @@ export const REALTIME_EVENT_NAMES: readonly RealtimeEventName[] = [
   "session.idle",
   "item",
   "review.decided",
+  "agent.changed",
 ];
 
 const NAME_SET: ReadonlySet<string> = new Set(REALTIME_EVENT_NAMES);
@@ -275,6 +287,10 @@ export function legacyWindowEventsFor(ev: RealtimeEvent): string[] {
       // No legacy name: its consumers (the boot counts, the weekly queue and
       // the Alignment board) subscribe to `workwrk:realtime` and read
       // detail.type, the contract new consumers use.
+      return [];
+    case "agent.changed":
+      // No legacy name either: the AI teammates page and the AI sidebar
+      // subscribe to `workwrk:realtime` and read detail.type.
       return [];
     case "item":
       return [WINDOW_EVENTS.itemChanged];

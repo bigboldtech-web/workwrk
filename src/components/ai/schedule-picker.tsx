@@ -18,6 +18,11 @@
 //
 // `onChange` returns whether the save worked, so a refused or failed save
 // keeps the custom field open with the text still in it.
+//
+// `isValid` narrows what the custom field saves: an AI teammate's routine
+// runs at most once an hour (src/lib/agents/routines.ts
+// routineScheduleProblem), so its picker refuses "every 10 minutes" in the
+// field rather than after the save. The presets are all hourly or slower.
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
@@ -36,6 +41,7 @@ export function SchedulePicker({
   onChange,
   onManual,
   disabled = false,
+  isValid = isValidSchedule,
 }: {
   cron: string | null;
   /** Whether it runs by itself at all; false reads "When you ask". */
@@ -49,6 +55,8 @@ export function SchedulePicker({
   /** Only when you ask was picked. Absent: the option is not offered. */
   onManual?: () => Promise<boolean> | boolean;
   disabled?: boolean;
+  /** Which custom schedules may be saved. Default: any the scheduler can read (isValidSchedule). */
+  isValid?: (schedule: string) => boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState<string | null>(null);
@@ -74,7 +82,7 @@ export function SchedulePicker({
     setCustom(null);
   }
 
-  const draftValid = custom !== null && isValidSchedule(custom);
+  const draftValid = custom !== null && isValid(custom);
 
   return (
     <div className="flex min-w-0 flex-col gap-2">

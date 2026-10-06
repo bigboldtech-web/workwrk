@@ -191,6 +191,37 @@ export async function teammateRows(agents: readonly TeammateRecord[], viewer: Vi
   });
 }
 
+/**
+ * Whether any teammate this person may use, and that was not removed, has an
+ * answer or report they have not read: a row's unread dot (teammateRows), for
+ * every teammate at once. The AI sidebar's dot. Three queries at most.
+ */
+export async function anyTeammateUnread(viewer: Viewer): Promise<boolean> {
+  const sessions = await prisma.chatSession.findMany({
+    where: {
+      organizationId: viewer.organizationId,
+      userId: viewer.userId,
+      kind: "TEAMMATE",
+      archivedAt: null,
+      agent: { organizationId: viewer.organizationId, status: { not: "ARCHIVED" }, ...agentUsableWhere(viewer.userId) },
+    },
+    select: { id: true, agentId: true },
+  });
+  const live = sessions.flatMap((s) => (s.agentId ? [{ id: s.id, agentId: s.agentId }] : []));
+  if (live.length === 0) return false;
+  const [settings, lastAnswer] = await Promise.all([
+    prisma.agentPersonSetting.findMany({ where: { userId: viewer.userId, agentId: { in: live.map((s) => s.agentId) } }, select: { agentId: true, lastReadAt: true } }),
+    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: live.map((s) => s.id) }, role: "ASSISTANT" }, _max: { createdAt: true } }),
+  ]);
+  const readAt = new Map(settings.map((s) => [s.agentId, s.lastReadAt]));
+  const answeredAt = new Map(lastAnswer.map((g) => [g.sessionId, g._max.createdAt]));
+  return live.some((s) => {
+    const answered = answeredAt.get(s.id);
+    const read = readAt.get(s.agentId) ?? null;
+    return Boolean(answered && (!read || answered.getTime() > read.getTime()));
+  });
+}
+
 // ── The plan's limits ───────────────────────────────────────────────
 
 /** The person's own teammates that count toward the plan: PRIVATE, theirs, not removed. */

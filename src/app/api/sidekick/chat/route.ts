@@ -25,6 +25,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { askAiAgent, teammateChatRefusal } from "@/lib/agents/session-guard";
 import { isModuleActive } from "@/lib/entitlements";
 import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 
@@ -71,11 +72,20 @@ async function ctxAndSession(sessionId: string) {
     where: { id: sessionId, userId, organizationId: orgId, archivedAt: null },
     include: {
       agent: {
-        select: { id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true },
+        select: {
+          id: true, name: true, systemPrompt: true, modelOverride: true, status: true, productSlug: true,
+          // Who may use it (src/lib/agents/session-guard.ts askAiAgent).
+          organizationId: true, visibility: true, ownerId: true,
+        },
       },
     },
   });
   if (!chat) return { error: NextResponse.json({ error: "session not found" }, { status: 404 }) };
+  // An AI teammate's chat runs only through its own route, which asks before
+  // anything other people will see; this loop never does. 409 before any
+  // question is spent or anything is written.
+  const refused = teammateChatRefusal(chat);
+  if (refused) return { error: refused };
   return { userId, chat };
 }
 
@@ -166,7 +176,9 @@ export async function POST(req: Request) {
   // Both feed into `toolsForSession` so the model gets the right
   // create-tools lit up either way. Board context also augments the
   // system prompt so the model knows which surface the user is on.
-  const agentScoped = c.chat.agent && c.chat.agent.status === "ENABLED" ? c.chat.agent : null;
+  // The agent only while it is on and the person may still use it: one that
+  // became someone else's private teammate runs as plain Ask AI.
+  const agentScoped = askAiAgent(c.chat.agent, gate.viewer);
   const productScope = agentScoped?.productSlug ?? c.chat.productContext ?? null;
   const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;

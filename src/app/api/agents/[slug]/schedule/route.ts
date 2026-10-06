@@ -5,6 +5,11 @@
 // settings gate, access section 9; spec-ai-automation 1.4). POST is Run now.
 // Run-now is the manual sibling of the cron path so a user can hit
 // "Run autonomous now" to dry-run a schedule.
+//
+// Workspace agents only (docs/plans/ai-teammates.md 3.15): a PRIVATE AI
+// teammate answers exactly as a slug that does not exist, so an Admin who
+// learns one can neither schedule it nor run it with their own rights. Its
+// owner sets its routines in AI teammates.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -17,7 +22,7 @@ import { auditAgent } from "@/lib/agents/audit";
 
 async function resolveAgent(slug: string, organizationId: string) {
   return prisma.agent.findFirst({
-    where: { slug, organizationId, status: { not: "ARCHIVED" } },
+    where: { slug, organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
     select: {
       id: true, name: true, status: true, scheduleCron: true,
       autonomousEnabled: true, autonomousPrompt: true,

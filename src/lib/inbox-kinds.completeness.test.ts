@@ -96,6 +96,7 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   "policy.publish": "an ActivityLog action beside the publish notification in api/policies/[id]",
   message: "the SSE realtime event name in api/conversations/[id]/messages",
   notification: "the SSE realtime event name in the same handler",
+  "agent.changed": "the SSE realtime event name published beside the AI teammate notices in lib/agents/routines-server",
   kudos_given: "an ActivityLog action beside the KUDOS notification",
   kudos_deleted: "an ActivityLog action in api/kudos/[id] (the audit of a delete)",
   okr_created: "an ActivityLog action beside okr_assigned",
@@ -161,6 +162,13 @@ describe("inbox-kinds covers every notification the app writes", () => {
     // read it. Its docblock declares exactly these four.
     for (const type of ["task_assigned", "task_status_changed", "task_due_today", "task_overdue"]) {
       expect(KINDS[type], `${type} has no kind`).toBeDefined();
+    }
+  });
+
+  it("routes the two AI teammate notices, which the routine runner writes inline", () => {
+    for (const type of ["agent_approval", "agent_routine_paused"]) {
+      expect(KINDS[type], `${type} has no kind`).toBeDefined();
+      expect(written.get(type) ?? [], `${type} is not written where the scanner reads it`).toContain("src/lib/agents/routines-server.ts");
     }
   });
 
