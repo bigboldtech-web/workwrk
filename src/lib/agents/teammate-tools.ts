@@ -81,6 +81,7 @@ import {
 import { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, isToolName, type TeammateToolName, type ToolName } from "./tool-names";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
 import type { ToolContext, ToolDefinition } from "./tools";
+import { clampText } from "./clamp";
 
 // ── The write paths, loaded on first use ────────────────────────────
 //
@@ -144,7 +145,7 @@ export async function livePersonByEmail(organizationId: string, email: string): 
 export function cleanOutwardText(text: string, o: { talk: boolean; max: number }): string {
   let t = withoutLinks(String(text ?? "")).trim();
   if (o.talk) t = t.replace(/@(?=[\p{L}\p{N}_])/gu, "");
-  return t.slice(0, o.max).trim();
+  return clampText(t, o.max).trim();
 }
 
 /** A route's answer, read once. */
@@ -1089,7 +1090,7 @@ const readTalk: ToolDefinition = {
         .filter((x) => (x.metadata as { kind?: unknown } | null)?.kind !== AI_UPDATE_HIDDEN_KIND)
         .map((x) => ({
           from: (x.author.firstName ?? "").trim() || x.author.email,
-          text: stripMarkup(x.body).replace(/\s+/g, " ").trim().slice(0, TALK_MESSAGE_CHARS),
+          text: clampText(stripMarkup(x.body).replace(/\s+/g, " ").trim(), TALK_MESSAGE_CHARS),
           at: x.createdAt.toISOString(),
         }))
         .filter((x) => x.text.length > 0);

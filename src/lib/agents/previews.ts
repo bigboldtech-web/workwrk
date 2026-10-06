@@ -85,6 +85,7 @@ import {
 import { BASE_RISK, EDITABLE_FIELD, alwaysKeyFor, maxRisk, type ApprovalRules, type ToolRisk } from "./tool-policy";
 import { isToolName, type ToolName } from "./tool-names";
 import { PRECHECK_REFUSALS, toGoalLevel, type TeammateToolContext } from "./tools";
+import { clampText } from "./clamp";
 
 export type { ActionPreview };
 
@@ -115,7 +116,7 @@ const SUBJECT_MAX = 80;
 
 function short(s: string): string {
   const t = s.replace(/\s+/g, " ").trim();
-  return t.length > SUBJECT_MAX ? `${t.slice(0, SUBJECT_MAX - 1).trimEnd()}…` : t;
+  return t.length > SUBJECT_MAX ? `${clampText(t, SUBJECT_MAX - 1).trimEnd()}…` : t;
 }
 
 function str(v: unknown): string {
@@ -349,7 +350,7 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     }
 
     case "create_task": {
-      const title = str(raw.title).slice(0, 280).trim();
+      const title = clampText(str(raw.title), 280).trim();
       if (!title) return { error: ERR.taskTitle };
       const email = str(raw.assigneeEmail);
       let forOther: { name: string; email: string } | null = null;

@@ -53,6 +53,7 @@
 // (a question records that day, AIQuery.freeDay), and the first time a kind
 // reaches the ceiling in a UTC day, OPS_ALERT_EMAIL is told.
 import { NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { rateLimit } from "@/lib/rate-limit-memory";
@@ -173,38 +174,48 @@ export function aiPersonCapMessage(limit: number): string {
 
 /** Claim one AI question for this workspace, or say why not. */
 export async function claimAiQuestion(organizationId: string, userId: string, query: string): Promise<AiClaim> {
-  return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<{ plan: string | null; createdAt: Date | null }[]>`
-      SELECT "plan"::text AS plan, "createdAt" FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
-    if (rows.length === 0) return { ok: false as const, message: "Organization not found", limit: 0, used: 0 };
-    const plan = rows[0].plan || "STARTER";
-    const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
-    if (aiIsCapped(limit)) {
-      const used = await tx.aIQuery.count({ where: { organizationId } });
-      if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
+  return prisma.$transaction((tx) => claimAiQuestionIn(tx, organizationId, userId, query));
+}
+
+/**
+ * claimAiQuestion's claim, inside a transaction the caller already holds, so
+ * a caller can check a limit of its own under its own lock and claim in the
+ * same transaction (an AI teammate's monthly limit, src/lib/agents/budget.ts):
+ * a refusal or an error anywhere rolls back everything, the day's free use
+ * included. It locks the workspace's row FOR UPDATE, so a caller that locks
+ * another row first must always take its locks in that same order.
+ */
+export async function claimAiQuestionIn(tx: Prisma.TransactionClient, organizationId: string, userId: string, query: string): Promise<AiClaim> {
+  const rows = await tx.$queryRaw<{ plan: string | null; createdAt: Date | null }[]>`
+    SELECT "plan"::text AS plan, "createdAt" FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+  if (rows.length === 0) return { ok: false as const, message: "Organization not found", limit: 0, used: 0 };
+  const plan = rows[0].plan || "STARTER";
+  const limit = (PLAN_LIMITS[plan] ?? PLAN_LIMITS.STARTER).ai;
+  if (aiIsCapped(limit)) {
+    const used = await tx.aIQuery.count({ where: { organizationId } });
+    if (used >= limit) return { ok: false as const, message: aiCapMessage(plan, limit), limit, used };
+  }
+  const freeTier = plan === "STARTER";
+  let freeDay: string | null = null;
+  if (freeTier) {
+    const free = PLAN_LIMITS.STARTER.ai;
+    const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
+    if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
+    // In the same transaction, so an error below rolls the day's use back.
+    // A free workspace made before the ceiling takes no use (and so its
+    // question records no day, and gives nothing back).
+    if (underFreeCeiling(rows[0].createdAt)) {
+      freeDay = await takeFreeDay("question", tx);
+      if (!freeDay) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
     }
-    const freeTier = plan === "STARTER";
-    let freeDay: string | null = null;
-    if (freeTier) {
-      const free = PLAN_LIMITS.STARTER.ai;
-      const mine = await tx.aIQuery.count({ where: { userId, freeTier: true } });
-      if (mine >= free) return { ok: false as const, message: aiPersonCapMessage(free), limit: free, used: mine };
-      // In the same transaction, so an error below rolls the day's use back.
-      // A free workspace made before the ceiling takes no use (and so its
-      // question records no day, and gives nothing back).
-      if (underFreeCeiling(rows[0].createdAt)) {
-        freeDay = await takeFreeDay("question", tx);
-        if (!freeDay) return { ok: false as const, message: FREE_AI_DAY_MESSAGE, limit: freeAiPerDay("question"), used: 0 };
-      }
-    }
-    const row = await tx.aIQuery.create({
-      data: { query: query.slice(0, 4000), userId, organizationId, freeTier },
-      select: { id: true },
-    });
-    // The day whose use it took: handing the question back gives back exactly that use.
-    if (freeDay) await tx.$executeRaw`UPDATE "AIQuery" SET "freeDay" = ${freeDay}::date WHERE "id" = ${row.id}`;
-    return { ok: true as const, id: row.id };
+  }
+  const row = await tx.aIQuery.create({
+    data: { query: query.slice(0, 4000), userId, organizationId, freeTier },
+    select: { id: true },
   });
+  // The day whose use it took: handing the question back gives back exactly that use.
+  if (freeDay) await tx.$executeRaw`UPDATE "AIQuery" SET "freeDay" = ${freeDay}::date WHERE "id" = ${row.id}`;
+  return { ok: true as const, id: row.id };
 }
 
 /**
@@ -249,6 +260,11 @@ export function aiQuestionsUsed(organizationId: string): Promise<number> {
 /** AI requests one person may start in a minute, across every AI action: nobody clicks that fast, a script does. */
 export const AI_ACTIONS_PER_MINUTE = 30;
 
+/** The sentence a person past AI_ACTIONS_PER_MINUTE is shown (Ask AI's, and an AI teammate's, src/lib/agents/budget.ts). */
+export function aiRateLimitMessage(retryAfter: number): string {
+  return `Too many AI requests at once. Try again in ${retryAfter} seconds.`;
+}
+
 export type AiActionClaim = { ok: true; id: string } | { ok: false; response: NextResponse };
 
 /**
@@ -267,7 +283,7 @@ export async function claimAiAction(organizationId: string, userId: string, what
     return {
       ok: false,
       response: NextResponse.json(
-        { error: `Too many AI requests at once. Try again in ${limited.retryAfter} seconds.`, code: "rate_limited" },
+        { error: aiRateLimitMessage(limited.retryAfter), code: "rate_limited" },
         { status: 429, headers: { "Retry-After": String(limited.retryAfter) } },
       ),
     };

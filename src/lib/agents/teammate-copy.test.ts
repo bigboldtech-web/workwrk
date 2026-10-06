@@ -87,6 +87,11 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   cantPostIn: [["#general"], "You can't post in #general."],
   memoryFull: [[100, "person"], "I already remember 100 things for you. Forget some first."],
   nothingRemembered: [["report day"], 'Nothing is remembered as "report day".'],
+  // Running a call and deciding one (executor.ts, actions.ts).
+  tooManyWaiting: [["Priya"], "Too many things are waiting for Priya's approval."],
+  cancelledToolOffLine: [["Priya"], "Cancelled: Priya can no longer use this tool."],
+  titleList: [[["Post in #general", "Post in #proof", "Send kudos to Max", "Invite lea@x.com", "Comment on Call Acme"]], "Post in #general, Post in #proof, Send kudos to Max and 2 more"],
+  agentAuditLine: [["Chief of Staff", "Priya Shah", 'Created task "Call Acme"'], 'Chief of Staff (for Priya Shah): Created task "Call Acme"'],
 };
 
 const builders = copy as unknown as Record<string, unknown>;
@@ -134,6 +139,10 @@ describe("the builders", () => {
     expect(copy.withPeopleLine(["Max"])).toBe("With Max.");
     expect(copy.withPeopleLine(["A", "B", "C"], 2)).toBe("With A, B, C and 2 more.");
     expect(copy.memoryFull(1, "agent")).toBe("This teammate already remembers 1 thing for everyone. Delete some first.");
+    expect(copy.titleList(["Post in #general"])).toBe("Post in #general");
+    expect(copy.titleList(["A", "B"])).toBe("A and B");
+    expect(copy.titleList(["A", "B", "C"])).toBe("A, B and C");
+    expect(copy.titleList(["A", "B", "C", "D"])).toBe("A, B, C and 1 more");
   });
   it("name the workspace when it is the workspace's limit", () => {
     expect(copy.teammateLimitMessage(30, "GROWTH", "workspace")).toBe(

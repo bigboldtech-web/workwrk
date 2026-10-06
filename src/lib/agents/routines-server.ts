@@ -15,6 +15,7 @@ import { splitScheduleZone } from "./cron";
 import { ROUTINE_LIMITS, routineScheduleProblem } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
 import { TEAMMATE_ERRORS, routineLimitMessage } from "./teammate-copy";
+import { clampText } from "./clamp";
 
 export interface RoutineCreated {
   id: string;
@@ -45,8 +46,8 @@ export async function createRoutine(a: {
   zone?: string | null;
   now?: Date;
 }): Promise<CreateRoutineResult> {
-  const name = String(a.name ?? "").trim().replace(/\s+/g, " ").slice(0, ROUTINE_LIMITS.nameMax).trim();
-  const prompt = String(a.prompt ?? "").trim().slice(0, ROUTINE_LIMITS.promptMax).trim();
+  const name = clampText(String(a.name ?? "").trim().replace(/\s+/g, " "), ROUTINE_LIMITS.nameMax).trim();
+  const prompt = clampText(String(a.prompt ?? "").trim(), ROUTINE_LIMITS.promptMax).trim();
   if (!name || !prompt) return { ok: false, code: "invalid", message: TEAMMATE_ERRORS.routineInvalid };
   const schedule = String(a.schedule ?? "").trim();
   const problem = routineScheduleProblem(schedule);

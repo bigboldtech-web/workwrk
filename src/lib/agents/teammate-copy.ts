@@ -500,6 +500,43 @@ export function nothingRemembered(key: string): string {
   return `Nothing is remembered as "${key}".`;
 }
 
+// ── Running a call and deciding one (executor.ts, actions.ts) ────────
+
+export const ACTION_ERRORS = {
+  /** A tool outside the teammate's tool set this turn, or no tool at all. */
+  toolOff: "This teammate can't use that tool.",
+  /** MAX_TOOL_CALLS_PER_TURN reached. */
+  tooManyCalls: "That's the most actions one turn can take. Send another message to carry on.",
+  /** A request left RUNNING past the sweep: it may or may not have happened, and it never runs again. */
+  unconfirmed: "Couldn't confirm it finished.",
+  /** The person deciding is not someone a teammate may act for now (resolveActingPerson refused). */
+  personCannot: "A teammate can't act for you in this workspace now.",
+} as const;
+
+/** MAX_PROPOSALS_PER_TURN or MAX_PENDING_PER_PERSON reached. */
+export function tooManyWaiting(first: string): string {
+  return `Too many things are waiting for ${first}'s approval.`;
+}
+
+/** A card cancelled because its teammate can no longer use the tool. */
+export function cancelledToolOffLine(name: string): string {
+  return `Cancelled: ${name} can no longer use this tool.`;
+}
+
+/** Up to `shown` titles, then how many more: "A, B and 2 more" (one line for several requests). */
+export function titleList(titles: readonly string[], shown = 3): string {
+  const head = titles.slice(0, shown);
+  const more = titles.length - head.length;
+  const all = more > 0 ? [...head, `${more} more`] : head;
+  if (all.length <= 1) return all[0] ?? "";
+  return `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}`;
+}
+
+/** The audit log's sentence for what a teammate did: 'Chief of Staff (for Priya Shah): Created task "Call Acme"'. */
+export function agentAuditLine(agent: string, person: string, what: string): string {
+  return `${agent} (for ${person}): ${what}`;
+}
+
 // ── New teammate dialog ──────────────────────────────────────────────
 
 export const NEW_TEAMMATE_DIALOG = {

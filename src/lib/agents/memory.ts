@@ -26,6 +26,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { TEAMMATE_TOOL_ERRORS, memoryFull } from "./teammate-copy";
+import { clampText } from "./clamp";
 
 export const MEMORY_LIMITS = {
   keyMax: 80,
@@ -108,8 +109,8 @@ export async function rememberFact(a: {
   source: "chat" | "settings";
   createdById: string;
 }): Promise<RememberResult> {
-  const key = tidyKey(a.key).slice(0, MEMORY_LIMITS.keyMax).trim();
-  const value = String(a.value ?? "").trim().slice(0, MEMORY_LIMITS.valueMax).trim();
+  const key = clampText(tidyKey(a.key), MEMORY_LIMITS.keyMax).trim();
+  const value = clampText(String(a.value ?? "").trim(), MEMORY_LIMITS.valueMax).trim();
   if (!key || !value) return { ok: false, error: TEAMMATE_TOOL_ERRORS.memoryEmpty };
   const scopeId = scopeIdOf(a.scope, a);
   const match = normaliseKey(key);
