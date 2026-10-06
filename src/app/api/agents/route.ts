@@ -77,8 +77,11 @@ export async function GET() {
   // Every slug a workspace agent holds, a teammate's included: a catalog
   // agent whose tools were chosen in AI teammates leaves the list above, but
   // must not be offered (and added over its own prompt) again (review round 2).
+  // A removed one too: removed in AI teammates, it comes back there, and
+  // the catalog entry could only fail (review round 3). A removed agent
+  // made before teammates is listed under removed, as Add back.
   const held = await prisma.agent.findMany({
-    where: { organizationId: user.organizationId, visibility: "WORKSPACE", status: { not: "ARCHIVED" } },
+    where: { organizationId: user.organizationId, visibility: "WORKSPACE", OR: [{ status: { not: "ARCHIVED" } }, { NOT: LEGACY_AGENT }] },
     select: { slug: true },
     take: 500,
   });
