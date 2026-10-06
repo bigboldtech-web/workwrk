@@ -19,11 +19,34 @@
 //             title, for any reader that cannot
 // A practice turn carries meta.practice. A TOOL row, a SYSTEM row with no
 // kind and a kind this code does not know do not render.
+//
+// The client's rules live here too, so they are tested without a browser:
+// how a stream event changes the chat (applyTeammateEvent), what a turn that
+// failed leaves behind and what the error row says, a decision's answer on
+// the cards, the page's address (hubViewFor), and the list's search.
 
-import { callFromLog, type AiToolCall } from "@/lib/ai/thread";
+import { callFromLog, withToolUse, type AiToolCall } from "@/lib/ai/thread";
+import { clampText } from "./clamp";
 import { plainLine } from "./run-view";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
-import { APPROVAL_CARD, ROUTINE_FALLBACK_NAME, lastLineReport, lastLineYou } from "./teammate-copy";
+import {
+  ACTION_ERRORS,
+  APPROVAL_CARD,
+  ROUTINE_FALLBACK_NAME,
+  TEAMMATE_CHAT,
+  TEAMMATE_ROUTE_ERRORS,
+  approvedAt,
+  cancelledRemovedLine,
+  cardFailedLine,
+  deniedAt,
+  didntWorkLine,
+  expiredAt,
+  lastLineReport,
+  lastLineYou,
+  pausedNotSent,
+  removedComposer,
+  unconfirmedLine,
+} from "./teammate-copy";
 
 /** At most this many calls render from one turn's log (MAX_TOOL_CALLS_PER_TURN). */
 const MAX_CALLS = 30;
@@ -418,4 +441,442 @@ export function sortTeammates<T extends { name: string; lastAt: string | Date | 
     if (hasA && ta !== tb) return tb - ta;
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
+}
+
+/** The list as the search and the tab show it: by name or job, and on Waiting for you only those with something waiting. */
+export function filterTeammates<T extends { name: string; job: string; waiting: number }>(
+  rows: readonly T[],
+  query: string,
+  opts: { waitingOnly?: boolean } = {},
+): T[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter(
+    (r) => (!opts.waitingOnly || r.waiting > 0) && (!q || r.name.toLowerCase().includes(q) || r.job.toLowerCase().includes(q)),
+  );
+}
+
+/** At most this many starter buttons on a new chat (5.4). */
+const STARTERS_SHOWN = 4;
+
+/**
+ * The starter prompts of the template a teammate was made from, read from
+ * the list's templates (GET /api/agents/teammates) by the template's key.
+ * Read defensively: a template without starters, or none, offers none.
+ */
+export function startersFor(templates: readonly unknown[] | null | undefined, key: string | null | undefined): string[] {
+  if (!key || !templates) return [];
+  for (const t of templates) {
+    const r = rec(t);
+    if (!r || r.key !== key || !Array.isArray(r.starters)) continue;
+    return r.starters.filter((s): s is string => typeof s === "string" && s.trim().length > 0).slice(0, STARTERS_SHOWN);
+  }
+  return [];
+}
+
+// ── The page's address (5.1) ────────────────────────────────────────
+
+export const AGENTS_HUB_VIEWS = ["chats", "waiting", "workspace", "runs"] as const;
+
+/** Chats, Waiting for you, Workspace agents, Run history. */
+export type AgentsHubView = (typeof AGENTS_HUB_VIEWS)[number];
+
+const HUB_VIEW_SET: ReadonlySet<string> = new Set(AGENTS_HUB_VIEWS);
+
+/**
+ * The view an /agents address opens. ?tab= names it. With no tab, a link
+ * from before AI teammates (?agent=<slug>[&run=<id>], the agent drawer)
+ * opens Workspace agents with that drawer, exactly as it did; anything else
+ * is Chats.
+ */
+export function hubViewFor(params: { get(name: string): string | null } | null | undefined): AgentsHubView {
+  const tab = params?.get("tab") ?? null;
+  if (tab && HUB_VIEW_SET.has(tab)) return tab as AgentsHubView;
+  if (!tab && params?.get("agent")) return "workspace";
+  return "chats";
+}
+
+export const TEAMMATE_SETTINGS_TABS = ["instructions", "tools", "memory", "routines", "activity"] as const;
+
+/** &settings=<tab>: the settings drawer and the tab it opens on. */
+export type TeammateSettingsTab = (typeof TEAMMATE_SETTINGS_TABS)[number];
+
+const SETTINGS_TAB_SET: ReadonlySet<string> = new Set(TEAMMATE_SETTINGS_TABS);
+
+export function settingsTabFor(v: string | null | undefined): TeammateSettingsTab | null {
+  return v && SETTINGS_TAB_SET.has(v) ? (v as TeammateSettingsTab) : null;
+}
+
+// ── A chat as the client holds it (teammate-store.ts) ───────────────
+
+/** GET /api/agents/teammates/[slug]/messages: a page, oldest first, and the cards its rows name. */
+export interface TeammateMessagesPage {
+  session: { id: string } | null;
+  messages: TeammateMessageView[];
+  actions: Record<string, ActionView>;
+  hasMore: boolean;
+}
+
+/** The id prefix of a row the store made before the server named it: the person's message, the answer as it arrives. */
+export const TEMP_ID_PREFIX = "tmp:";
+
+export function isTempMessage(m: { id: string }): boolean {
+  return m.id.startsWith(TEMP_ID_PREFIX);
+}
+
+/** Whether `a` comes before `b` in the thread: the route's order, time and then id. */
+function comesBefore(a: TeammateMessageView, b: TeammateMessageView): boolean {
+  return a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id);
+}
+
+/**
+ * The chat after a fresh read of its newest page: the page, under any older
+ * messages already on screen (Show earlier messages), so a refresh never
+ * takes them away. The store's own rows (an optimistic bubble, an answer
+ * that broke off) give way to the saved ones. `hasMore` stays about the
+ * oldest message held.
+ */
+export function mergeNewestPage(
+  held: { messages: readonly TeammateMessageView[]; hasMore: boolean },
+  page: { messages: readonly TeammateMessageView[]; hasMore: boolean },
+): { messages: TeammateMessageView[]; hasMore: boolean } {
+  const first = page.messages[0];
+  if (!first) return { messages: [], hasMore: false };
+  const ids = new Set(page.messages.map((m) => m.id));
+  const older = held.messages.filter((m) => !isTempMessage(m) && !ids.has(m.id) && comesBefore(m, first));
+  return { messages: [...older, ...page.messages], hasMore: older.length > 0 ? held.hasMore : page.hasMore };
+}
+
+/** Show earlier messages: an older page above what is on screen, each message once. */
+export function prependOlder(held: readonly TeammateMessageView[], older: readonly TeammateMessageView[]): TeammateMessageView[] {
+  const have = new Set(held.map((m) => m.id));
+  return [...older.filter((m) => !have.has(m.id)), ...held];
+}
+
+/** The newest answer or report the server saved: what the person has read up to once the chat is open. */
+export function lastAnswerId(messages: readonly TeammateMessageView[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if ((m.kind === "agent" || m.kind === "report") && !isTempMessage(m)) return m.id;
+  }
+  return null;
+}
+
+// ── The live turn ───────────────────────────────────────────────────
+
+type AgentMessage = Extract<TeammateMessageView, { kind: "agent" }>;
+
+/** The chat while a turn streams in. */
+export interface TurnView {
+  messages: TeammateMessageView[];
+  actions: Record<string, ActionView>;
+}
+
+/** The rows of the turn in flight. */
+export interface TurnIds {
+  /** The person's message: the optimistic bubble's id until the server's arrives. Null for a continue. */
+  userId: string | null;
+  /** The answer being written. */
+  liveId: string;
+}
+
+function isMessageView(v: unknown): v is TeammateMessageView {
+  const r = rec(v);
+  return Boolean(r && typeof r.id === "string" && r.id && typeof r.kind === "string");
+}
+
+function patchAnswer(messages: readonly TeammateMessageView[], liveId: string, fn: (m: AgentMessage) => AgentMessage): TeammateMessageView[] {
+  return messages.map((m) => (m.id === liveId && m.kind === "agent" ? fn(m) : m));
+}
+
+/** An answer that stopped arriving: no Working dots, no pending rows. */
+function settleAnswer(m: AgentMessage): AgentMessage {
+  return { ...m, streaming: false, toolCalls: m.toolCalls.map((c) => (c.pending ? { ...c, pending: false } : c)) };
+}
+
+/**
+ * tool_result: settle the newest pending row of that tool. A call that
+ * waits for the person's approval, or only practised, carries the title the
+ * server gave it, so the row reads "Waiting for your approval: ..." or
+ * "Would ...", never as done.
+ */
+export function withTeammateToolResult(
+  calls: readonly AiToolCall[],
+  e: { name: string; isError: boolean; state: CallState; title?: string },
+): AiToolCall[] {
+  const next = [...calls];
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    if (next[i].name !== e.name || !next[i].pending) continue;
+    const failed = e.isError || e.state === "failed";
+    const didNotRun = !failed && (e.state === "waiting" || e.state === "practice");
+    next[i] = {
+      ...next[i],
+      pending: false,
+      failed,
+      outcome: didNotRun
+        ? { failed: false, message: null, href: null, count: null, searched: null, state: e.state as "waiting" | "practice", ...(e.title ? { title: e.title } : {}) }
+        : next[i].outcome,
+    };
+    return next;
+  }
+  return next;
+}
+
+/**
+ * One event of the teammate stream applied to the chat. The person's saved
+ * message replaces the optimistic one; text and tool rows build the answer;
+ * a card's action joins the cards; a line (a memory saved, a routine set up)
+ * lands above the answer, where its saved row sorts; `done` puts the saved
+ * rows (the answer, then its card) where the live answer was. When nothing
+ * was saved, what streamed stays, settled, so what it did stays in sight.
+ */
+export function applyTeammateEvent(view: TurnView, ids: TurnIds, e: TeammateStreamEvent): { view: TurnView; ids: TurnIds } {
+  switch (e.type) {
+    case "user_message": {
+      const saved = e.message;
+      const from = ids.userId;
+      if (!isMessageView(saved) || from === null) return { view, ids };
+      return { view: { ...view, messages: view.messages.map((m) => (m.id === from ? saved : m)) }, ids: { ...ids, userId: saved.id } };
+    }
+    case "text_delta":
+      return { view: { ...view, messages: patchAnswer(view.messages, ids.liveId, (m) => ({ ...m, text: m.text + (typeof e.text === "string" ? e.text : "") })) }, ids };
+    case "tool_use":
+      return { view: { ...view, messages: patchAnswer(view.messages, ids.liveId, (m) => ({ ...m, toolCalls: withToolUse(m.toolCalls, e.name, e.input ?? null) })) }, ids };
+    case "tool_result":
+      return { view: { ...view, messages: patchAnswer(view.messages, ids.liveId, (m) => ({ ...m, toolCalls: withTeammateToolResult(m.toolCalls, e) })) }, ids };
+    case "approval": {
+      const action = e.action;
+      if (!action || typeof action.id !== "string" || !action.id) return { view, ids };
+      return { view: { ...view, actions: { ...view.actions, [action.id]: action } }, ids };
+    }
+    case "event": {
+      const line = e.message;
+      if (!isMessageView(line) || view.messages.some((m) => m.id === line.id)) return { view, ids };
+      const at = view.messages.findIndex((m) => m.id === ids.liveId);
+      const messages = at < 0 ? [...view.messages, line] : [...view.messages.slice(0, at), line, ...view.messages.slice(at)];
+      return { view: { ...view, messages }, ids };
+    }
+    case "done": {
+      const have = new Set(view.messages.map((m) => m.id));
+      const rows: readonly TeammateMessageView[] = Array.isArray(e.messages) ? e.messages : [];
+      const saved = rows.filter((m) => isMessageView(m) && !have.has(m.id));
+      const at = view.messages.findIndex((m) => m.id === ids.liveId);
+      if (at < 0) return { view: { ...view, messages: [...view.messages, ...saved] }, ids };
+      const live = view.messages[at];
+      const kept = live.kind === "agent" && (live.text.length > 0 || live.toolCalls.length > 0) ? [settleAnswer(live)] : [];
+      const messages = [...view.messages.slice(0, at), ...(saved.length > 0 ? saved : kept), ...view.messages.slice(at + 1)];
+      return { view: { ...view, messages }, ids };
+    }
+    default:
+      return { view, ids };
+  }
+}
+
+/**
+ * What a turn that failed leaves in the chat (session-store.ts send's rule):
+ * when the server never had the message, the bubble leaves (its words go
+ * back to the composer); when it has it, the bubble stays, an answer that
+ * never started leaves, and one that did stays with its tool rows settled.
+ */
+export function failedTurnMessages(messages: readonly TeammateMessageView[], ids: TurnIds, serverHas: boolean): TeammateMessageView[] {
+  return messages.flatMap((m): TeammateMessageView[] => {
+    if (!serverHas && ids.userId !== null && m.id === ids.userId) return [];
+    if (m.id !== ids.liveId || m.kind !== "agent") return [m];
+    if (!serverHas || (!m.text && m.toolCalls.length === 0)) return [];
+    return [settleAnswer(m)];
+  });
+}
+
+/**
+ * Why a message or a continue did not go through, as the composer's error row
+ * says it (5.3, 5.4):
+ *   not_sent        the chat never got the message; it is back in the composer
+ *   stopped         the chat has the message and the answer broke off
+ *   ended           the answer is saved but ended early (cut short, declined)
+ *   ai_limit        the workspace's AI questions are used up
+ *   agent_cap       the teammate's own monthly limit is reached
+ *   rate_limited    too many AI requests in a minute
+ *   paused, removed the teammate was paused or removed meanwhile
+ *   gone            the teammate is not there for this person any more
+ *   not_configured  the workspace has no AI key
+ *   ai_off          AI was turned off for the workspace
+ *   refused         the server said no for another reason
+ */
+export type TeammateSendError =
+  | "not_sent"
+  | "stopped"
+  | "ended"
+  | "ai_limit"
+  | "agent_cap"
+  | "rate_limited"
+  | "paused"
+  | "removed"
+  | "gone"
+  | "not_configured"
+  | "ai_off"
+  | "refused";
+
+/**
+ * A refused POST .../messages as the error row says it, with the server's
+ * own sentence where it sent one. Only the teammate routes' { error, code }
+ * carries a sentence; the app gate's { error: "app_off" } is a code. A
+ * continue with nothing new to tell the teammate is no error at all (null).
+ */
+export function teammateSendFailure(status: number, body: unknown): { error: TeammateSendError | null; text: string | null } {
+  const b = rec(body);
+  const code = str(b?.code);
+  const sentence = code ? str(b?.error) : null;
+  if (status === 403 && str(b?.error) === "app_off") return { error: "ai_off", text: null };
+  if (status === 403 && (code === "ai_limit" || code === "agent_cap")) return { error: code, text: sentence };
+  if (status === 429) return { error: "rate_limited", text: sentence };
+  if (status === 409 && code === "nothing_to_continue") return { error: null, text: null };
+  if (status === 409 && code === "agent_paused") return { error: "paused", text: sentence };
+  if (status === 409 && code === "agent_removed") return { error: "removed", text: sentence };
+  if (status === 503) return { error: "not_configured", text: sentence };
+  if (status === 404) return { error: "gone", text: null };
+  if (status === 403) return { error: "refused", text: sentence };
+  return { error: "not_sent", text: sentence };
+}
+
+/** The error row's sentence: the server's when it sent one, else the row's own. */
+export function sendErrorSentence(error: TeammateSendError, serverText: string | null, name: string): string {
+  if (serverText) return serverText;
+  switch (error) {
+    case "stopped":
+      return TEAMMATE_CHAT.stopped;
+    case "paused":
+      return pausedNotSent(name);
+    case "removed":
+      return removedComposer(name);
+    case "gone":
+      return TEAMMATE_ROUTE_ERRORS.teammateNotFound;
+    case "not_configured":
+      return TEAMMATE_CHAT.notSetUp;
+    case "ai_off":
+      return TEAMMATE_CHAT.aiOff;
+    case "refused":
+      return ACTION_ERRORS.personCannot;
+    default:
+      return TEAMMATE_CHAT.notSent;
+  }
+}
+
+/** Whether the error row offers Try again: only where sending the same words again can work. */
+export function canRetrySend(error: TeammateSendError): boolean {
+  return error === "not_sent" || error === "stopped" || error === "rate_limited";
+}
+
+// ── Deciding (POST /api/agents/actions/decide) ──────────────────────
+
+/** One decision the person sends (actions.ts DecisionInput). */
+export interface TeammateDecision {
+  id: string;
+  decision: "approve" | "deny";
+  /** The person's change to the action's one editable field. */
+  edit?: { text: string };
+}
+
+/** What the route answers for one decision (actions.ts DecisionResult). */
+export interface TeammateDecisionResult {
+  id: string;
+  status: AgentActionStatus | "not_found";
+  code?: string;
+  result?: { text: string; href: string | null };
+  error?: string;
+}
+
+/** A card's decision: the route's results, or why the request itself failed (its sentence, for a 429). */
+export type DecideAnswer = { ok: true; results: TeammateDecisionResult[] } | { ok: false; error: string | null };
+
+/**
+ * The cards after a decision's answer, before the chat is read again: each
+ * decided action shows its outcome at once. One that stays PENDING (its
+ * teammate is paused, or the person cannot be acted for now) keeps its
+ * buttons; the card says why. `at` stands in for the decision's time until
+ * the read brings the server's.
+ */
+export function applyDecisionResults(
+  actions: Readonly<Record<string, ActionView>>,
+  results: readonly TeammateDecisionResult[],
+  at: string,
+): Record<string, ActionView> {
+  const next: Record<string, ActionView> = { ...actions };
+  for (const r of results) {
+    const a = Object.prototype.hasOwnProperty.call(next, r.id) ? next[r.id] : undefined;
+    if (!a || !isAgentActionStatus(r.status)) continue;
+    const decided = r.status !== "PENDING";
+    next[r.id] = {
+      ...a,
+      status: r.status,
+      always: decided ? { allowed: false, label: null } : a.always,
+      decidedAt: decided ? (a.decidedAt ?? at) : a.decidedAt,
+      executedAt: r.status === "EXECUTED" ? (a.executedAt ?? at) : a.executedAt,
+      result: r.result && typeof r.result.text === "string" ? { text: r.result.text, href: appHref(r.result.href) } : a.result,
+      error: decided ? (r.error ?? a.error) : a.error,
+    };
+  }
+  return next;
+}
+
+/** How many lines of a card's quoted text show before "Show all" (5.4). */
+export const CARD_BODY_LINES = 12;
+
+/** And at most this many characters of them: one long paragraph is many lines. */
+const CARD_BODY_CHARS = 1500;
+
+/**
+ * A card's quoted text as it first shows: its first lines, cut by lines and
+ * characters rather than by the box's height, so nothing is ever hidden
+ * without "Show all" beside it.
+ */
+export function clipCardBody(text: string, maxLines = CARD_BODY_LINES, maxChars = CARD_BODY_CHARS): { text: string; clipped: boolean } {
+  const lines = text.split(/\r?\n/);
+  let shown = lines.length > maxLines ? lines.slice(0, maxLines).join("\n") : text;
+  let clipped = lines.length > maxLines;
+  if (shown.length > maxChars) {
+    shown = clampText(shown, maxChars);
+    clipped = true;
+  }
+  return clipped ? { text: `${shown.trimEnd()}…`, clipped } : { text, clipped };
+}
+
+/**
+ * What the Edit box starts with: the exact text a post, a comment, kudos or
+ * a doc section carries (the card's body), or for a title the subject the
+ * card's title quotes ('Create task "Call Acme"').
+ */
+export function editStartText(a: Pick<ActionView, "preview">): string {
+  const field = a.preview.editable?.field;
+  if (!field) return "";
+  if (field === "title") {
+    const t = a.preview.title;
+    const open = t.indexOf('"');
+    const close = t.lastIndexOf('"');
+    return open >= 0 && close > open ? t.slice(open + 1, close) : "";
+  }
+  return a.preview.body ?? "";
+}
+
+/**
+ * A decided card's line (5.4): `time` is when it was decided, `date` when it
+ * expired, in the viewer's words. Null while it waits or runs.
+ */
+export function decidedLine(
+  a: Pick<ActionView, "status" | "error" | "preview">,
+  words: { time: string; date: string; agentName: string },
+): string | null {
+  switch (a.status) {
+    case "EXECUTED":
+      return approvedAt(words.time);
+    case "DENIED":
+      return deniedAt(words.time);
+    case "EXPIRED":
+      return expiredAt(words.date, words.agentName);
+    case "FAILED":
+      if (a.error === ACTION_ERRORS.unconfirmed) return unconfirmedLine(a.preview.target?.label ?? a.preview.title);
+      return a.error ? cardFailedLine(a.error) : didntWorkLine(a.preview.title, "");
+    case "CANCELLED":
+      return a.error ?? cancelledRemovedLine(words.agentName);
+    default:
+      return null;
+  }
 }

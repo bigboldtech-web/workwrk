@@ -43,6 +43,8 @@ export const TEAMMATE_LIST = {
   loadError: "Couldn't load your teammates",
   tryAgain: "Try again",
   showRemoved: "Show removed",
+  /** A row's unread dot, for a screen reader. */
+  unread: "Unread",
 } as const;
 
 /** The chips on a row and in the chat header. */
@@ -90,6 +92,21 @@ export const TEAMMATE_CHAT = {
   routineSettings: "Settings",
   /** Ask AI's agent_off link. */
   seeAiTeammates: "See AI teammates",
+  // Ask AI's composer words (src/components/ai/ask-ai-thread.tsx).
+  sendHint: "Send · Enter",
+  offline: "You're offline. Changes will save when you reconnect.",
+  supportSubject: "Turn on AI teammates",
+  /** Above the first message shown, while older ones wait. */
+  showEarlier: "Show earlier messages",
+  earlierFailed: "Couldn't load earlier messages",
+  // The chat header's menu, the composer's Turn on and Add back, and the
+  // Pause on a routine's line.
+  linkCopied: "Link copied",
+  copyFailed: "Couldn't copy the link",
+  updateFailed: "Couldn't update the teammate",
+  removeFailed: "Couldn't remove the teammate",
+  routinePaused: "Routine paused",
+  routinePauseFailed: "Couldn't pause the routine",
 } as const;
 
 export function chatWith(name: string): string {
@@ -112,6 +129,28 @@ export function pausedComposer(name: string): string {
 /** The composer of a removed teammate. */
 export function removedComposer(name: string): string {
   return `${name} was removed. Its chat is kept.`;
+}
+
+/** The chat header's "..." button. */
+export function actionsFor(name: string): string {
+  return `Actions for ${name}`;
+}
+
+/** The toasts after Turn on, Pause, Remove and Add back. */
+export function turnedOnToast(name: string): string {
+  return `${name} is on`;
+}
+
+export function pausedToast(name: string): string {
+  return `${name} is paused`;
+}
+
+export function removedToast(name: string): string {
+  return `${name} removed`;
+}
+
+export function backToast(name: string): string {
+  return `${name} is back`;
 }
 
 /** A tool row that asked first. */
@@ -223,6 +262,12 @@ export const APPROVAL_CARD = {
   denyFailed: "Couldn't deny. Try again.",
   /** A stored action with no title (it always has one; this is the floor). */
   untitled: "An action",
+  // The chip of a decided card; its line (approvedAt, deniedAt, ...) follows.
+  approved: "Approved",
+  denied: "Denied",
+  expired: "Expired",
+  failed: "Didn't work",
+  cancelled: "Cancelled",
 } as const;
 
 export function thingsWaiting(n: number): string {
