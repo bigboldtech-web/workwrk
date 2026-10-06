@@ -53,7 +53,8 @@ describe("docMenuOffers", () => {
 });
 
 describe("the doc routes answer the menu with the write's own rules", () => {
-  const route = read("src/app/api/docs/[id]/route.ts");
+  // PUT's body moved to src/lib/docs/doc-save.ts, so the route and its save path are read as one.
+  const route = read("src/app/api/docs/[id]/route.ts") + read("src/lib/docs/doc-save.ts");
   const dup = read("src/app/api/docs/[id]/duplicate/route.ts");
 
   it("GET ?menu=1 builds the caps on canCreateDocAt and the move rule's own destinations", () => {

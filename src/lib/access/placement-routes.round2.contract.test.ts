@@ -13,8 +13,9 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 describe("break 0: a doc move takes its page tree", () => {
   it("PUT writes the tree move through writeDocTreeMove, never a bare row update", () => {
-    const route = read("src/app/api/docs/[id]/route.ts");
-    const put = route.slice(route.indexOf("export async function PUT("), route.indexOf("export const PATCH = PUT;"));
+    // PUT's body is saveDocAs (src/lib/docs/doc-save.ts), the last function there.
+    const route = read("src/lib/docs/doc-save.ts");
+    const put = route.slice(route.indexOf("export async function saveDocAs("));
     expect(put).toMatch(/const written = await writeDocTreeMove\(ctx\.orgId, id, \{/);
     const tree = put.slice(put.indexOf("if (isTreeOnly) {"), put.indexOf("// Optimistic-concurrency precondition."));
     expect(tree).not.toMatch(/prisma\.doc\.update\(/);

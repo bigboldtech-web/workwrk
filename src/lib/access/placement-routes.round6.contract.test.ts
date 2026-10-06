@@ -51,7 +51,7 @@ describe("breaks 5 and 6: the manager of the Space a node leaves is exempt from 
   });
   it("the canvas and doc routes still move through the one helper, so the exemption reaches PATCH /api/whiteboards/[id] and PUT /api/docs/[id]", () => {
     expect(read("src/app/api/whiteboards/[id]/route.ts")).toMatch(/const moved = await moveCanvas\(nodeCtx, id, \{/);
-    const docs = read("src/app/api/docs/[id]/route.ts");
+    const docs = read("src/lib/docs/doc-save.ts");
     expect(docs).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\);/);
   });
 });
@@ -74,7 +74,7 @@ describe("item 4: a doc is made on an anchor the model knows, on every create ro
     expect(check).toBeLessThan(route.indexOf("prisma.doc.findFirst("));
   });
   it("PUT /api/docs/[id] moves onto the same set, not a set of its own", () => {
-    const route = read("src/app/api/docs/[id]/route.ts");
+    const route = read("src/lib/docs/doc-save.ts");
     expect(route).toMatch(/if \(anchorChanges && nextType && !isDocAnchorKind\(nextType\)\) \{/);
     expect(route).not.toMatch(/MOVABLE_ANCHORS/);
   });

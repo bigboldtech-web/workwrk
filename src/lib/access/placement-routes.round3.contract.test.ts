@@ -154,7 +154,7 @@ describe("break 9: every move out of every Space asks the landing rule", () => {
     const lib = read("src/lib/access/node-placement.ts");
     expect(between(lib, "export async function moveCanvas(", "export async function moveTable(")).toMatch(/checkMove\(ctx, \{ kind: "canvas", id: canvas\.id \}, dest\)/);
     expect(between(lib, "export async function moveTable(", "// ── docs")).toMatch(/checkMove\(ctx, \{ kind: "table", id: table\.id \}, dest\)/);
-    expect(read("src/app/api/docs/[id]/route.ts")).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\);/);
+    expect(read("src/lib/docs/doc-save.ts")).toMatch(/const check = await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\);/);
   });
 });
 

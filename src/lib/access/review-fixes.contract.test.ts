@@ -22,7 +22,7 @@ function block(src: string, marker: string): string {
 }
 
 describe("the doc move gate (finding 1)", () => {
-  const route = read("src/app/api/docs/[id]/route.ts");
+  const route = read("src/lib/docs/doc-save.ts");
   it("asks the placement rule (Full access on the doc and where it is, Can edit where it goes) before any move, one that could open a doc to the org included", () => {
     expect(route).toMatch(/const refused = await treeMoveRefusal\(ctx, nodeCtx, id, existing, after\)/);
     expect(route).toMatch(/await checkMove\(nodeCtx, \{ kind: "doc", id \}, dest\)/);

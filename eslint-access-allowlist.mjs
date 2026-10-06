@@ -267,7 +267,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/invoices/\\[id\\]/route.ts",
   "src/app/api/invoices/route.ts",
   "src/app/api/item-activity/route.ts",
-  "src/app/api/items/\\[id\\]/route.ts",
   "src/app/api/items/\\[id\\]/duplicate/route.ts",
   "src/app/api/journal-entries/\\[id\\]/route.ts",
   "src/app/api/journal-entries/route.ts",
@@ -459,6 +458,15 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/people/department-access.server.ts",
   "src/lib/permissions.ts",
   "src/lib/item-gate.ts",
+  // AI teammates step 3a (2026-10-06, docs/plans/ai-teammates.md 3.15): the
+  // PATCH of /api/items/[id] and the PUT of /api/docs/[id] moved verbatim into
+  // these two files, so a teammate's tools run the same write path a person's
+  // request runs, and their legacy reads moved with them. The items route
+  // reads nothing any more, so its entry MOVED here; the docs route's GET and
+  // DELETE still read the level, so that entry stays and doc-save.ts is one
+  // new row. Both leave with their routes at access step 6.
+  "src/lib/items/item-patch.ts",
+  "src/lib/docs/doc-save.ts",
   // Phase 5 (Data): the ONE reader gate the three new /api/tables/[id]/*
   // routes (duplicate, export, presence) share, on the item-gate precedent,
   // so none of them reads the legacy signal itself.
