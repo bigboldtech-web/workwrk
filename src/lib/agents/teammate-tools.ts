@@ -1102,7 +1102,6 @@ const readTalk: ToolDefinition = {
   },
 };
 
-/** The ten teammate tools, by name (tools.ts spreads them into REGISTRY). */
 // ── ask_teammate (Phase 2 step 5) ──────────────────────────────────
 
 const askTeammateInput = z.object({
@@ -1131,6 +1130,7 @@ const askTeammate: ToolDefinition = {
   handler: async () => refused(ERR.teammateOnly),
 };
 
+/** The eleven teammate tools, by name (tools.ts spreads them into REGISTRY). */
 export const TEAMMATE_TOOLS = {
   update_task: updateTask,
   comment_on_task: commentOnTask,

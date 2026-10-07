@@ -132,19 +132,25 @@ export function honoursDontAsk(t: PolicyTrigger): boolean {
 /** Tools only a turn the person watches is offered: their lines land in a chat nobody may be reading (Decision 18). */
 export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["remember", "forget", "create_routine", "ask_teammate"]);
 
-/** Tools that read other people's words to the person: never offered where the answer posts or flows on (Decision 12). */
+/**
+ * Tools that read other people's words to the person: never offered where
+ * the answer posts or flows on (Decision 12). A delegated answer flows on,
+ * back to the asking teammate's turn, where the person's "Don't ask" still
+ * holds, so a delegate never has them either (review of step 5: else one
+ * teammate could read DMs through another and post them without a card).
+ */
 export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["read_talk", "list_my_inbox"]);
 
 /**
  * The tools a turn is offered, by what started it: a routine never asks
- * another teammate (it would fan out unattended); a delegated turn has
- * none of the watched-only tools; a Talk or automation turn also reads no
- * one else's words. A chat and its continue keep everything.
+ * another teammate (it would fan out unattended); a turn the person did not
+ * start in their own chat (another teammate's ask, a Talk message, an
+ * automation) has none of the watched-only tools and reads no one else's
+ * words. A chat and its continue keep everything.
  */
 export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
   if (t === "CHAT" || t === "RESUME") return [...enabled];
   if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
-  if (t === "DELEGATED") return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n));
   return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n));
 }
 

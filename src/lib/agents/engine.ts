@@ -628,6 +628,11 @@ interface TurnState {
   answered: boolean;
 }
 
+/** A rule set with only its "ask" choices: the person's tightening, without their "Don't ask". */
+function askOnly(rules: ApprovalRules): ApprovalRules {
+  return Object.fromEntries(Object.entries(rules).filter(([, v]) => v === "ask"));
+}
+
 /** Steps 1 to 4: the tools, the rules, the system blocks, the history and the client. */
 async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   const org = a.person.organizationId;
@@ -685,8 +690,12 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     enabled,
     agentRules: sanitizeRules(a.agent.approvalRules, { level: "agent", allowedTools: enabled }),
     // The person's own "Don't ask" holds only in their chats and routines
-    // (Decision 17): a turn they are not watching asks for everything above INTERNAL.
-    personRules: honoursDontAsk(a.trigger) ? sanitizeRules(setting?.approvalRules, { level: "person", allowedTools: enabled }) : {},
+    // (Decision 17): a turn they are not watching asks for everything above
+    // INTERNAL. Their "Ask me first" holds everywhere: only "always" is
+    // dropped, never their tightening (review of step 5).
+    personRules: honoursDontAsk(a.trigger)
+      ? sanitizeRules(setting?.approvalRules, { level: "person", allowedTools: enabled })
+      : askOnly(sanitizeRules(setting?.approvalRules, { level: "person", allowedTools: enabled })),
     history,
   };
 }

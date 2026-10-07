@@ -234,8 +234,8 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
   it("never lets a routine ask another teammate", () => {
     expect(toolsForTrigger(ALL_TEAMMATE, "ROUTINE")).toEqual(ALL_TEAMMATE.filter((t) => t !== "ask_teammate"));
   });
-  it("gives a delegated turn none of the watched-only tools", () => {
-    expect(toolsForTrigger(ALL_TEAMMATE, "DELEGATED")).toEqual(["search_tasks", "post_in_talk", "read_talk", "list_my_inbox"]);
+  it("gives a delegated turn none of the watched-only tools, and nobody else's words (review of step 5)", () => {
+    expect(toolsForTrigger(ALL_TEAMMATE, "DELEGATED")).toEqual(["search_tasks", "post_in_talk"]);
   });
   it("gives a Talk or automation turn nobody else's words either", () => {
     expect(toolsForTrigger(ALL_TEAMMATE, "TALK")).toEqual(["search_tasks", "post_in_talk"]);
