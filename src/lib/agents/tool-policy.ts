@@ -142,10 +142,10 @@ export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["rem
 export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["read_talk", "list_my_inbox"]);
 
 /**
- * Reads of the person's own private records (their goals, KPI status,
- * weekly reviews, their team's alignment, contracts): never offered where
- * the answer goes out with no card (a Talk answer, an automation's answer
- * for its later steps). Other people's words reach those turns as data (the
+ * Reads of the person's own private records (their goals and KRAs, KPI
+ * status, weekly reviews, their team's alignment, contracts, meetings):
+ * never offered where the answer goes out with no card (a Talk answer, an
+ * automation's answer for its later steps). Other people's words reach those turns as data (the
  * conversation, the record), and a planted "start with the asker's review"
  * must find nothing private to post (review round 1). A delegated answer
  * comes back to the person's own chat first, so a delegate keeps them.
@@ -156,6 +156,10 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
   "list_my_weekly_reviews",
   "get_team_alignment_rollup",
   "search_contracts",
+  // Goals (OKRs, "Find goals"): a person's own, and their team's for a
+  // manager; meetings: 1:1 agendas and attendees (review round 2).
+  "search_okrs",
+  "search_meetings",
 ]);
 
 /**

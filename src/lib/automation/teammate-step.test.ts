@@ -61,7 +61,7 @@ describe("hideTeammateAnswers", () => {
     expect(out[1].outputJson).toEqual({ notificationId: "n1" });
     // Nor which teammate: its name and slug are its person's (review round 1).
     expect(out[2].outputJson).toEqual({ answerHidden: true });
-    expect(out[3].outputJson).toEqual({ answerHidden: true });
+    expect(out[3].outputJson).toEqual({ outputHidden: true });
     expect(JSON.stringify(out)).not.toContain("1:1 notes");
     expect(out[2].inputJson).toEqual({ teammate: null, request: "Summarise {{title}}" });
     expect(JSON.stringify(out)).not.toMatch(/Salary Coach|t-salary-coach/);
@@ -69,5 +69,18 @@ describe("hideTeammateAnswers", () => {
 
   it("changes nothing in a run without a teammate step", () => {
     expect(hideTeammateAnswers([steps[0], steps[1]])).toEqual([steps[0], steps[1]]);
+  });
+});
+
+describe("teammateSlugsUsableBy (a copy's teammate steps; review round 2)", () => {
+  it("keeps a teammate the new owner can use and empties one they cannot", async () => {
+    const { teammateSlugsUsableBy } = await import("./teammate-step");
+    const def = { actions: [{ key: "ask_teammate", params: { teammate: "t-triage", request: "a" } }, { key: "ask_teammate", params: { teammate: "t-olivias-private", request: "b" } }, { key: "add_comment", params: {} }] };
+    const out = await teammateSlugsUsableBy(def, viewer);
+    expect(out.actions).toEqual([
+      { key: "ask_teammate", params: { teammate: "t-triage", request: "a" } },
+      { key: "ask_teammate", params: { teammate: null, request: "b" } },
+      { key: "add_comment", params: {} },
+    ]);
   });
 });

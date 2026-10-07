@@ -1376,3 +1376,33 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
       - "See memory" finds a removed teammate.
       - A teammate list that failed to load says so, with Try again.
     - Proved live: an answer posted while only Ola was in #proof kept readers [Ola]. Eve, added after, read it as hidden (no words), and Ola read the words without the list.
+- **Step 8, review round 2** (four read-only reviewers: three on round 1's fixes, one fresh pass over all of Phase 2 for leaks and spend): 22 found (1 high, 2 medium; 2 found twice), 20 fixed.
+  - High:
+    1. A Talk turn's context could hold an earlier teammate answer or AI update that the asker may read but someone in the conversation now may not. The new answer, read by them all, could carry it past its reader list. The context now leaves out any message whose reader list does not hold everyone reading now. An answer whose readers changed during the turn is not posted.
+  - Medium:
+    1. Goals (search_okrs, "Find goals") and meetings (1:1 agendas) joined the private records that Talk and automation turns never read.
+    2. A task titled with the teammate's answer can no longer be assigned to a Guest. Assigning gives the task, so the step fails, as for a notice or an email.
+  - Low:
+    - Talk:
+      - An answer's Inbox notices go to its readers only.
+      - The chat row records whether the answer posted (`postedMessageId`, or null). The history then never tells the model it posted what it did not.
+      - "ops@triage.io" is never read as asking Triage: the pick and the check share one rule for where a whole @name starts.
+    - Automations:
+      - The builder, version and toggle answers never send another person's teammate slug.
+      - A copy keeps a teammate only when its new owner can use it.
+      - An email to an outside address that uses the answer is not sent (the step fails), never sent around an empty answer.
+      - A locked view offers no Cmd+S and no turning it back on, and its banner says which it can do.
+      - A later step's hidden result says why it is hidden.
+    - Moved schedules:
+      - A changed bare cron is pinned to the server's zone too.
+      - A schedule turned back on after its move is always turned off, never moved again, even when its creator deleted the routine.
+    - Group chats:
+      - A continue for a teammate removed meanwhile cancels what it asked.
+      - Removing a teammate tells every open tab.
+      - The continues queued behind a removed teammate still run.
+      - 409 `not_in_group` shows no error and offers no Try again that would send the draft.
+      - A stop is matched in the server's order, never across two clocks.
+    - The page:
+      - Menus take focus after the portal shows them.
+      - Each panel refocuses after Add teammate, Back and Remove.
+      - The members menu shows a list that failed to load, with Try again.

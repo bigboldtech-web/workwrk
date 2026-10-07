@@ -33,6 +33,11 @@ describe("which teammate a message asks (review round 1)", () => {
     expect(pickTeammateInBody("@Chief of Staff and @PM, sum up", [PM, COS])).toBe("t-cos");
   });
 
+  it("never reads an address like ops@triage.io as naming Triage (review round 2)", () => {
+    const TRIAGE = { slug: "t-triage", name: "Triage" };
+    expect(pickTeammateInBody("ops@triage.io is down. @PM please look, then @Triage", [TRIAGE, PM])).toBe("t-pm");
+  });
+
   it("forgets picks the draft no longer names, and every pick once it is empty", () => {
     expect(picksStillNamed("@PM Lead go", [PM, LEAD])).toEqual([PM, LEAD]);
     expect(picksStillNamed("go", [PM, LEAD])).toEqual([]);

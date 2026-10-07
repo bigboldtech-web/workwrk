@@ -15,6 +15,8 @@ interface SwitchProps {
   onChange?: (next: boolean) => void;
   disabled?: boolean;
   "aria-label"?: string;
+  /** Why it is off, read on hover. */
+  title?: string;
 }
 
 // Metrics are fixed pixels (design-system 5: 36 by 20 track, 16px white knob
@@ -29,6 +31,7 @@ export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
       role="switch"
       aria-checked={checked}
       aria-label={rest["aria-label"]}
+      title={rest.title}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
       style={{ backgroundColor: checked ? "var(--os-brand)" : "var(--os-line-strong)" }}

@@ -355,6 +355,9 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       await assertCanWrite(ctx, board.id);
       const ownerRaw = paramString(params, "ownerId", ctx.payload);
       const owner = ownerRaw ? await resolveUser(ctx, ownerRaw) : null;
+      // Assigning a task gives the assignee the task: a title made of the
+      // answer is never handed to a Guest that way (review round 2).
+      if (owner) await answerNeverToAGuest(ctx, params, ["title"], owner.id);
       const dueInDays = typeof params.dueInDays === "number" && Number.isFinite(params.dueInDays) ? params.dueInDays : null;
       const created = await createBoardItem({
         organizationId: ctx.organizationId,
@@ -458,6 +461,11 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       // A teammate's answer is read from the creator's own reach: it may go
       // to a member, never to an address outside the workspace.
       const toMember = !!toRaw && !toRaw.includes("@");
+      // An outside address never gets the answer, and never an email written
+      // around an empty one: the step fails, sending nothing (review round 2).
+      if (!toMember && ["subject", "body"].some((k) => typeof params[k] === "string" && TEAMMATE_TOKEN.test(params[k] as string))) {
+        throw new Error(AUTOMATION_TEAMMATE_COPY.answerMembersOnly);
+      }
       const subject = toMember ? paramStringWithAnswer(ctx, params, "subject") : paramString(params, "subject", ctx.payload);
       const body = toMember ? paramStringWithAnswer(ctx, params, "body") : paramString(params, "body", ctx.payload);
       if (!toRaw) throw new Error("send_email requires a to param");

@@ -207,11 +207,17 @@ export function groupStopAnswered(messages: readonly TeammateMessageView[], stop
   // (review round 1: else the stop waited for a continue's answer, which a
   // message's answers never are, and never ended).
   if (!questionId && !stop.continued && stop.text) {
+    // In the server's own order, never across two clocks (review round 2):
+    // after the newest row this device already had when it stopped.
     const words = stop.text.trim();
-    const since = stop.startedAt - STOP_CLOCK_SLACK_MS;
-    const found = [...messages]
+    let lastKnown = -1;
+    messages.forEach((m, i) => {
+      if (stop.known.has(m.id)) lastKnown = i;
+    });
+    const found = messages
+      .slice(lastKnown + 1)
       .reverse()
-      .find((m) => m.kind === "user" && !isTempMessage(m) && !stop.known.has(m.id) && m.text.trim() === words && Date.parse(m.createdAt) >= since);
+      .find((m) => m.kind === "user" && !isTempMessage(m) && !stop.known.has(m.id) && m.text.trim() === words);
     questionId = found?.id ?? null;
   }
   let expect = stop.expect ?? [];
@@ -226,8 +232,6 @@ export function groupStopAnswered(messages: readonly TeammateMessageView[], stop
   return saved.some((m) => m.kind === "agent" && m.resume === true && (!stop.liveAgentId || m.agentId === stop.liveAgentId));
 }
 
-/** How far the server's clock may be behind this device's when matching a send to its saved message. */
-const STOP_CLOCK_SLACK_MS = 2 * 60_000;
 
 /** Whether a group stop's own drawn answer is saved now: its row then goes, whatever the others are doing. */
 function drawnAnswerSaved(page: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
@@ -497,8 +501,12 @@ async function resume(slug: string, agentSlug: string | null = null): Promise<vo
   if (groupIdOf(slug)) {
     if (!agentSlug) return;
     const self = s.members.find((m) => m.slug === agentSlug);
-    // A teammate no longer in this group has nothing to continue here (review round 1).
-    if (!self && s.members.length > 0) return;
+    // A teammate no longer in this group has nothing to continue here
+    // (review round 1); the continues queued behind it still run (round 2).
+    if (!self && s.members.length > 0) {
+      await afterTurn(slug);
+      return;
+    }
     bump(slug);
     set(slug, { error: null, errorText: null, streaming: true });
     await streamGroup(slug, { resume: true, agentSlug }, { userId: null, liveId: null, agentId: null }, null, self ? [self.agentId] : []);

@@ -10,7 +10,7 @@
 // sentence, "Leave it instead".
 
 import { useState } from "react";
-import { ArrowLeft, LogOut, PenLine, UserPlus, X } from "lucide-react";
+import { ArrowLeft, LogOut, PenLine, RotateCw, UserPlus, X } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -30,6 +30,8 @@ export function GroupMembersMenu({
   onLeft,
   onClose,
   draft = "",
+  teammatesFailed = false,
+  onReloadTeammates,
 }: {
   group: GroupRow;
   /** The person's teammates (the list's rows), for Add teammate. */
@@ -39,6 +41,9 @@ export function GroupMembersMenu({
   onClose: () => void;
   /** Words typed in the group's composer: leaving says they will not be kept (review round 1). */
   draft?: string;
+  /** The teammate list could not be read, and how to read it again (review round 2). */
+  teammatesFailed?: boolean;
+  onReloadTeammates?: () => void;
 }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
@@ -88,11 +93,16 @@ export function GroupMembersMenu({
 
   if (adding) {
     return (
-      <MenuList aria-label={GROUP_COPY.addTeammate} keyboard>
+      <MenuList key="add" aria-label={GROUP_COPY.addTeammate} keyboard>
         <MenuItem icon={ArrowLeft} label={GROUP_COPY.back} onClick={() => setAdding(false)} />
         <MenuSeparator />
-        {teammates === null ? (
-          // Not read yet, or the read failed: never "everyone is already here" (review round 1).
+        {teammates === null && teammatesFailed ? (
+          // The read failed: say so, with the way to read it again, never "everyone is already here".
+          <>
+            <p className="m-0 px-3 py-2 text-sm text-ink-2">{GROUP_COPY.teammatesLoadFailed}</p>
+            {onReloadTeammates ? <MenuItem icon={RotateCw} label={GROUP_COPY.tryAgain} onClick={onReloadTeammates} /> : null}
+          </>
+        ) : teammates === null ? (
           <p className="m-0 px-3 py-2 text-sm text-ink-2">{GROUP_COPY.teammatesNotLoaded}</p>
         ) : addable.length === 0 ? (
           <p className="m-0 px-3 py-2 text-sm text-ink-2">{GROUP_COPY.nobodyToAdd}</p>
@@ -123,7 +133,7 @@ export function GroupMembersMenu({
 
   return (
     // Reachable by keyboard; each row's Remove is an item of the menu (review round 1).
-    <MenuList aria-label={GROUP_COPY.membersButton(g.members.length)} keyboard>
+    <MenuList key="main" aria-label={GROUP_COPY.membersButton(g.members.length)} keyboard focusKey={g.members.map((m) => m.agentId).join(",")}>
       <MenuSectionLabel>{GROUP_COPY.members}</MenuSectionLabel>
       {g.members.map((m) => (
         <div key={m.agentId} role="presentation" className="flex h-9 min-w-0 items-center gap-2 px-3">

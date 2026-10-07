@@ -231,6 +231,8 @@ export async function updateGroup(
   for (const m of g.members.filter((x) => removeIds.has(x.agent.id))) {
     await writeEventLine(g.id, { text: GROUP_COPY.removedLine(m.agent.name), event: "group_member_removed", agentId: m.agent.id });
   }
+  // Its cards were cancelled: every open tab and count reads the group again (review round 2).
+  for (const id of removeIds) publishToUser(viewer.userId, { type: "agent.changed", agentId: id, sessionId: g.id });
   const group = await loadGroup(g.id, viewer);
   return group ? { ok: true, group } : refuse(404, "not_found", GROUP_COPY.notFound);
 }

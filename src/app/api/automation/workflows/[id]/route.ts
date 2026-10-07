@@ -86,7 +86,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const rights = workflowRights(ctx, workflow.createdById);
   // The places the viewer cannot open are kept, never listed, named or
   // counted: the builder gets the rest and one "some are kept" flag.
-  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
+  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition, workflow.createdById);
 
   return NextResponse.json(
     {
@@ -202,7 +202,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     : await prisma.automationWorkflow.update({ where: { id }, data });
   if (!workflow) return staleDraft();
   // Answered as the builder reads it, so the hidden places never reach the page.
-  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition);
+  const forViewer = await definitionForViewer(ctx.viewer, workflow.definition, workflow.createdById);
   return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, scopeKept: forViewer.scopeKept, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });
 }
 

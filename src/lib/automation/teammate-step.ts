@@ -32,6 +32,24 @@ export function teammateStepSlugs(definition: unknown): string[] {
   return slugs;
 }
 
+/** The definition with each teammate step's teammate kept only when this person can use it, else left empty. */
+export async function teammateSlugsUsableBy(definition: Record<string, unknown>, viewer: Viewer): Promise<Record<string, unknown>> {
+  if (!Array.isArray(definition.actions)) return definition;
+  const actions = await Promise.all(
+    definition.actions.map(async (raw) => {
+      const a = asRecord(raw);
+      const key = typeof a.key === "string" ? a.key : typeof a.action === "string" ? a.action : typeof a.type === "string" ? a.type : null;
+      if (key !== TEAMMATE_STEP_KEY) return raw;
+      const field = a.params !== undefined ? "params" : a.config !== undefined ? "config" : "params";
+      const params = asRecord(a[field]);
+      const slug = typeof params.teammate === "string" ? params.teammate : "";
+      const usable = slug ? Boolean(await loadTeammate(slug, viewer).catch(() => null)) : false;
+      return usable ? raw : { ...a, [field]: { ...params, teammate: null } };
+    }),
+  );
+  return { ...definition, actions };
+}
+
 export type TeammateStepProblem = { status: 400 | 403; error: string; code: "teammate_step_creator_only" | "teammate_not_found" };
 
 /**
@@ -73,6 +91,8 @@ export function hideTeammateAnswers<T extends { order: number; stepType: string;
       const input = asRecord(s.inputJson);
       return { ...s, outputJson: { answerHidden: true }, ...(s.inputJson !== undefined ? { inputJson: { ...input, teammate: null } } : {}) };
     }
-    return { ...s, outputJson: { answerHidden: true } };
+    // A later step's result is hidden because it can carry the answer, not
+    // because it is the answer: it says so (review round 2).
+    return { ...s, outputJson: { outputHidden: true } };
   });
 }

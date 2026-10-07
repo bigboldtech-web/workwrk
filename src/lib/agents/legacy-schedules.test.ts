@@ -154,6 +154,18 @@ describe("moving an old schedule", () => {
     st.existingRoutine = null;
   });
 
+  it("never brings back a routine its creator deleted (review round 2)", async () => {
+    st.existingRoutine = null;
+    st.agents = [agent({ scheduleMovedAt: new Date("2026-10-07T08:00:00Z"), scheduleRoutineId: "r-deleted" })];
+    expect(await convertLegacySchedules(NOW, { limit: 100 })).toMatchObject({ moved: 0, stopped: 1 });
+    expect(st.routines).toEqual([]);
+  });
+
+  it("names the server zone on a changed bare cron too (review round 2)", async () => {
+    st.people["u-olivia"] = person("u-olivia");
+    expect(await legacyScheduleOutcome(agent({ scheduleCron: "0,30 9-17 * * 1-5" }), NOW)).toMatchObject({ schedule: `CRON_TZ=${serverTimeZone()} 0 9-17 * * 1-5`, changed: true });
+  });
+
   it("makes it its creator's routine, at most hourly, and stops the old schedule in the same step", async () => {
     st.people["u-olivia"] = person("u-olivia");
     st.agents = [agent()];

@@ -56,10 +56,18 @@ describe("{{teammate.answer}}", () => {
     expect(st.created[0].title).toBe("Triage: Restart the print server. (Printer down)");
   });
 
-  it("stays empty in an email to a raw address", async () => {
-    await getAction("send_email")!.execute(ctx(), { to: "someone@outside.test", subject: "Re {{title}}: {{teammate.answer}}", body: "{{teammate.answer}} for {{title}}" });
-    expect(st.emails[0]).toMatchObject({ to: "someone@outside.test", subject: "Re Printer down:" });
-    expect(JSON.stringify(st.emails[0])).not.toContain("Restart the print server");
+  it("never goes to an outside address: the email is not sent (review round 2)", async () => {
+    await expect(getAction("send_email")!.execute(ctx(), { to: "someone@outside.test", subject: "Re {{title}}: {{teammate.answer}}", body: "{{teammate.answer}} for {{title}}" })).rejects.toThrow("only to members");
+    expect(st.emails).toEqual([]);
+    // One that does not use the answer still goes.
+    await getAction("send_email")!.execute(ctx(), { to: "someone@outside.test", subject: "Re {{title}}", body: "Seen." });
+    expect(st.emails[0]).toMatchObject({ to: "someone@outside.test", subject: "Re Printer down" });
+  });
+
+  it("never assigns a task titled with the answer to a Guest (review round 2)", async () => {
+    st.guests = new Set(["u-gil"]);
+    await expect(getAction("create_task")!.execute(ctx(), { boardId: "b1", title: "{{teammate.answer}}", ownerId: "u-gil" })).rejects.toThrow("never sent to Guests");
+    expect(st.created).toEqual([]);
   });
 
   it("never reaches what a webhook is sent", async () => {

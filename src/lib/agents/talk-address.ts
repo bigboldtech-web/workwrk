@@ -55,17 +55,26 @@ const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 /** Whether the body addresses the teammate: "@<name>" without case, at a word's start, with no letter, digit or "_" after it. */
 export function addressedIn(body: string, name: string): boolean {
+  return addressedAt(body, name) >= 0;
+}
+
+/**
+ * Where the body first addresses the name, by addressedIn's rule (a whole
+ * "@<name>" at a word's start), or -1. The composer's pick reads the same
+ * place, so "ops@triage.io" is never read as asking Triage (review round 2).
+ */
+export function addressedAt(body: string, name: string): number {
   const key = String(name ?? "").trim().toLowerCase();
-  if (!key) return false;
+  if (!key) return -1;
   const lower = String(body ?? "").toLowerCase();
   let from = 0;
   for (;;) {
     const at = lower.indexOf(`@${key}`, from);
-    if (at < 0) return false;
+    if (at < 0) return -1;
     from = at + 1;
     if (at > 0 && WORD_CHAR.test(lower.charAt(at - 1))) continue;
     if (WORD_CHAR.test(lower.charAt(at + 1 + key.length))) continue;
-    return true;
+    return at;
   }
 }
 

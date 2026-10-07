@@ -13,7 +13,7 @@
 // (`.workwrk-os`) a global reset strips button border/padding/bg, so always
 // render menus through a portal (MorePortal / Radix) as every call site does.
 
-import { createElement, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createElement, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Check, ChevronRight, type LucideIcon } from "lucide-react";
@@ -97,6 +97,7 @@ export function MenuList({
   children,
   className,
   keyboard = false,
+  focusKey,
   onKeyDown,
   ...rest
 }: React.HTMLAttributes<HTMLDivElement> & {
@@ -107,11 +108,18 @@ export function MenuList({
    * their own focus are unchanged.
    */
   keyboard?: boolean;
+  /** Changed after the menu's items changed under the focus (an item removed): the first item takes it again. */
+  focusKey?: string | number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (keyboard) ref.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
-  }, [keyboard]);
+  // After paint, never in a layout effect: a menu in a portal is shown by
+  // the portal's own effect, which runs after this one, and a hidden item
+  // cannot take focus (review round 2).
+  useEffect(() => {
+    if (!keyboard) return;
+    const frame = requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [keyboard, focusKey]);
   return (
     <div
       ref={ref}

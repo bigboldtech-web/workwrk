@@ -155,6 +155,8 @@ export async function POST(req: Request, { params }: Params) {
       );
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       if (!(await groupStillOpen(person.viewer, g.id).catch(() => true))) await cancelLeftRequests(g.id, person.userId).catch(() => 0);
+      // Removed from the group while it continued: what it asked is cancelled too (review round 2).
+      else if (!(await stillInGroup(g.id, self.agentId).catch(() => true))) await cancelRemovedRequests(g.id, person.userId, self.agentId).catch(() => 0);
       send({ type: "answer_done", agentId: self.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
       send({ type: "done", messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
     });

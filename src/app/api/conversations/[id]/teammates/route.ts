@@ -50,7 +50,7 @@ import { clampText } from "@/lib/agents/clamp";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TalkPlaceKind, type TurnResult } from "@/lib/agents/engine";
 import { hueForAgent } from "@/lib/agents/hues";
 import { TALK_TEAMMATE_LIMITS, addressedIn, talkAddressRefusal, type TalkAddressRefusal } from "@/lib/agents/talk-address";
-import { auditTalkAnswer, conversationHasGuests, conversationReaderIds, noticeTalkApprovals, setRequestState, talkContext } from "@/lib/agents/talk-turn";
+import { auditTalkAnswer, conversationHasGuests, conversationReaderIds, noticeTalkApprovals, recordTalkOutcome, setRequestState, talkContext } from "@/lib/agents/talk-turn";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
 import { ACTION_ERRORS, TALK_TEAMMATE_COPY, TEAMMATE_CHAT, TURN_ERRORS, pausedNotSent } from "@/lib/agents/teammate-copy";
 import { invalidRequest, loadTeammate, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
@@ -216,7 +216,7 @@ export async function POST(req: Request, { params }: Params) {
     try {
       const [audience, context] = await Promise.all([
         talkAudience(id).catch(() => 0),
-        talkContext({ conversationId: id, parentId, before: request.createdAt, beforeId: request.id, person }).catch(() => []),
+        talkContext({ conversationId: id, parentId, before: request.createdAt, beforeId: request.id, person, readers: [...new Set([person.userId, ...readers.ids])] }).catch(() => []),
       ]);
       result = await runTeammateTurn({
         agent: teammateAgentFrom(agent),
@@ -252,13 +252,18 @@ export async function POST(req: Request, { params }: Params) {
       // Who reads it now: the answer keeps this list and reaches only them.
       const readersNow = await conversationReaderIds(id).catch(() => ({ ids: [] as string[], tooMany: true }));
       const standing = await requestStanding(id, request.id, parentId).catch(() => false);
+      // Nobody who joined during the turn reads an answer drawn from a
+      // context checked against the people here when it began (review round 2).
+      const sameReaders = readersNow.ids.every((uid) => uid === person.userId || readers.ids.includes(uid));
       const allowed =
         standing &&
+        sameReaders &&
         still !== null &&
         canPost(still.conversation, still.role) &&
         talkAddressRefusal(still.conversation, still.viewer, { isMember: still.viewer.isMember, hasGuests: guestsNow, tooManyPeople: readersNow.tooMany }) === null;
       if (allowed) {
         const at = new Date();
+        const answerReaders = [...new Set([person.userId, ...readersNow.ids])];
         answered = await insertConversationMessage({
           conversationId: id,
           authorId: person.userId,
@@ -272,7 +277,7 @@ export async function POST(req: Request, { params }: Params) {
             replyTo: request.id,
             runId: claim.runId,
             via: "talk",
-            readers: [...new Set([person.userId, ...readersNow.ids])],
+            readers: answerReaders,
           },
           clientId: `tm_${request.id}`,
           now: at,
@@ -291,12 +296,15 @@ export async function POST(req: Request, { params }: Params) {
             parentId,
             isCallCard: false,
             now: at,
+            // Its Inbox notices go to its readers only: someone added since never gets its opening words (review round 2).
+            onlyUserIds: answerReaders,
           });
           await auditTalkAnswer({ person, agent, what: TALK_TEAMMATE_COPY.answeredIn(place), conversationId: id, messageId: answered.message.id, runId: claim.runId }).catch(() => {});
         }
       }
     }
     const state = answered?.ok ? "answered" : !result ? "failed" : "no_answer";
+    if (result?.assistantMessageId) await recordTalkOutcome(result.assistantMessageId, answered?.ok ? answered.message.id : null);
     await setRequestState(request.id, {
       id: agent.id,
       slug: agent.slug,

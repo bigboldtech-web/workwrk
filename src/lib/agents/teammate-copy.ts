@@ -1114,7 +1114,7 @@ export const GROUP_COPY = {
   cancelledLeft: "Cancelled: you left the group chat.",
   leaveUnsent: "The message you were writing in it will not be kept.",
   teammatesLoadFailed: "Couldn't load your teammates.",
-  teammatesNotLoaded: "Your teammates aren't loaded yet. Close this and try again in a moment.",
+  teammatesNotLoaded: "Loading your teammates…",
   cancelledRemoved: "Cancelled: this teammate was removed from the group chat.",
   /** A later answerer removed from the group while an earlier one answered. */
   notMemberReason: "it was removed from this group chat.",
@@ -1279,12 +1279,14 @@ export const AUTOMATION_TEAMMATE_COPY = {
   dailyCap: (n: number) => `This automation has asked its teammates ${n} times today, the most one automation may. It asks again tomorrow (UTC).`,
   noAnswer: "The teammate didn't answer.",
   answerHidden: "Only the person who made this automation and admins can read what the teammate answered.",
+  outputHidden: "What this step returned can carry the AI teammate's answer, so only the person who made this automation and admins can read it.",
   teammateNotFound: "Pick a teammate you can use.",
   noRequest: "Write what the teammate should do.",
   noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it didn't answer, so it didn't run.",
   /** set_field with an answer the field can't take: never repeats the answer (the run's errors are read more widely). */
   answerNotAValue: "The AI teammate's answer isn't a value this field takes, so it was left alone.",
   answerNotForGuests: "The AI teammate's answer is never sent to Guests, so this step didn't run.",
+  answerMembersOnly: "The AI teammate's answer is sent only to members, never to an outside address, so this step didn't run.",
   /** The automation's row is gone under the claim. */
   workflowGone: "This automation no longer exists.",
   creatorOnlyOn: "Only the person who made this automation can turn it back on, because its AI teammate step works as them.",
