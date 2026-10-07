@@ -88,6 +88,8 @@ export const TEAMMATE_CHAT = {
   contactSupport: "Contact support",
   // Ask AI's send failures (src/components/ai/ask-ai-thread.tsx ERROR_TEXT).
   notSent: "Your message wasn't sent. Check your connection and try again.",
+  /** A continue after a decision that failed: no message was sent, and Try again continues (review round 6). */
+  continueFailed: "Couldn't carry on after your decision. Try again.",
   stopped: "The answer stopped.",
   /** The links on an EVENT line. */
   seeMemory: "See memory",
@@ -1274,6 +1276,8 @@ export const TALK_TEAMMATE_COPY = {
   // Counted on every try, including ones refused later, so it never says "asked" (review round 4).
   tooMany: (s: number) => `You've tried to ask teammates 5 times in a minute. Try again in ${count(s, "second", "seconds")}.`,
   noFiles: "Files can't go in a message that asks a teammate. Send them in a message of their own.",
+  /** A teammate picked from the @ list that can't be asked here any more. */
+  noLongerHere: "That teammate can't be asked here now. Remove its name to send the message on its own.",
   threadGone: "That thread no longer exists.",
   notSent: "Your message wasn't sent. Try again.",
 } as const;
@@ -1305,6 +1309,9 @@ export const AUTOMATION_TEAMMATE_COPY = {
   answerHidden: "Only the person who made this automation and admins can read what the teammate answered.",
   outputHidden: "What this step returned can carry the AI teammate's answer, so only the person who made this automation and admins can read it.",
   teammateNotFound: "Pick a teammate you can use.",
+  /** The builder's step while the creator's teammates are read, and when that read failed (review round 6). */
+  teammatesLoading: "Loading your teammates",
+  teammatesFailed: "Couldn't load your teammates.",
   pausedLabel: (name: string) => `${name} (paused: it won't run until it is turned back on)`,
   noRequest: "Write what the teammate should do.",
   noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it didn't answer, so it didn't run.",

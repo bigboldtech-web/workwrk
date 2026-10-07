@@ -322,6 +322,35 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
   }
 });
 
+describe("DELEGATION_COPY (one teammate asking another, Phase 2; review round 6)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    askedByLine: [["Chief of Staff", "Which tasks are stuck?"], "Asked by Chief of Staff: Which tasks are stuck?"],
+    delegateWaitingLine: [["Project Manager", "Move \"Call Acme\" to Backlog"], "Project Manager is waiting for your approval: Move \"Call Acme\" to Backlog"],
+    askTitle: [["Project Manager"], "Ask Project Manager"],
+    noTeammateNamed: [["Planner"], "You don't have a teammate called Planner."],
+    severalNamed: [["Planner"], "More than one of your teammates is called Planner. Rename one first."],
+    delegatePaused: [["Planner"], "Planner is paused, so it can't be asked."],
+    delegateNoAnswer: [["Planner"], "Planner didn't answer."],
+    requestTooLong: [[4000], "That request is longer than 4,000 characters, so nothing was asked. Shorten it or split it into parts."],
+    waitingNote: [["Priya", "Planner"], "These wait for Priya's approval in Planner's chat. Don't ask for them again."],
+    endedEarlyNote: [["Planner"], "Planner's answer stopped part way, so it may be missing something. Say so, and don't pass it on as complete."],
+  };
+  const d = copy.DELEGATION_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(d).filter((k) => typeof d[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what the spec says`, () => {
+      const made = (d[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+  it("writes every fixed sentence without a dash", () => {
+    for (const v of Object.values(d)) if (typeof v === "string") expect(BANNED.test(v)).toBe(false);
+  });
+});
+
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],

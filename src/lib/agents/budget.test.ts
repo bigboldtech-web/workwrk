@@ -133,9 +133,15 @@ describe("claimTeammateTurn for an automation (Phase 2 step 7)", () => {
     expect(r).toMatchObject({ ok: false, code: "workflow_cap", message: AUTOMATION_TEAMMATE_COPY.dailyCap(20) });
     expect(db.questions).toEqual([]);
     expect(db.runs).toEqual([]);
-    const count = db.sql.find((x) => x.includes('"automationWorkflowId"')) ?? "";
+    const at = db.sql.findIndex((x) => x.includes('"automationWorkflowId"'));
+    const count = db.sql[at] ?? "";
     expect(count).toContain('"questionId" IS NOT NULL');
     expect(count).toContain("date_trunc('day', now() AT TIME ZONE 'UTC')");
+    // This automation's runs, counted under its own row's lock (review round 6).
+    expect(db.values[at]).toEqual([WORKFLOW.id]);
+    const lock = lockOf("AutomationWorkflow");
+    expect(db.values[lock]).toEqual([WORKFLOW.id, "org"]);
+    expect(at).toBeGreaterThan(lock);
   });
 
   it("takes the teammate's and the automation's rows FOR NO KEY UPDATE, so a key check never waits on them (review round 3)", async () => {
@@ -290,6 +296,6 @@ describe("sweepStaleRuns (review round 5)", () => {
     ]);
     // The question is kept: nothing touches questionId.
     expect(db.runUpdates[0].data).not.toHaveProperty("questionId");
-    expect(RUN_STALE_MS).toBe(30 * 60 * 1000);
+    expect(RUN_STALE_MS).toBe(2 * 60 * 60 * 1000);
   });
 });

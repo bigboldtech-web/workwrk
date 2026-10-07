@@ -9,7 +9,7 @@ vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./teammate-route-f
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 
-import { anyTeammateUnread, teammateRows } from "./teammate-server";
+import { anyTeammateUnread, askableTeammates, teammateRows, usableTeammatesNamed } from "./teammate-server";
 import { PEOPLE, db, resetRouteDb, seedAgent, type Row } from "./teammate-route-fixtures";
 
 const viewer = PEOPLE.max as never;
@@ -82,5 +82,33 @@ describe("teammateRows (Phase 2)", () => {
     );
     const [row] = await teammateRows([pm as never], viewer);
     expect(row.waiting).toBe(2);
+  });
+});
+
+// The delegate a teammate may ask (ask_teammate, Phase 2 step 5): the
+// delegation tests stand these in, so the filters are held here (review round 6).
+describe("usableTeammatesNamed", () => {
+  it("finds the person's own and the workspace's teammates by name, never someone else's private one or a removed one", async () => {
+    seedAgent({ slug: "planner-lea", name: "Planner", visibility: "PRIVATE", ownerId: "u-lea" });
+    seedAgent({ slug: "planner-ws", name: "Planner", visibility: "WORKSPACE" });
+    seedAgent({ slug: "planner-mine", name: "planner", visibility: "PRIVATE", ownerId: "u-max" });
+    seedAgent({ slug: "planner-gone", name: "Planner", status: "ARCHIVED" });
+    const found = await usableTeammatesNamed(viewer, "PLANNER");
+    expect(found.map((t) => t.slug).sort()).toEqual(["planner-mine", "planner-ws"]);
+    expect(await usableTeammatesNamed(viewer, "  ")).toEqual([]);
+  });
+});
+
+describe("askableTeammates", () => {
+  it("lists the others that are on and usable, never itself, a paused one or someone else's private one", async () => {
+    seedAgent({ slug: "cos", name: "Chief of Staff" });
+    seedAgent({ slug: "pm", name: "Project Manager", description: "Keeps <projects> moving." });
+    seedAgent({ slug: "paused", name: "Paused", status: "DISABLED" });
+    seedAgent({ slug: "leas", name: "Lea's coach", visibility: "PRIVATE", ownerId: "u-lea" });
+    seedAgent({ slug: "mine", name: "My coach", visibility: "PRIVATE", ownerId: "u-max" });
+    expect(await askableTeammates(viewer, "a-cos")).toEqual([
+      { name: "My coach", job: "Keeps work moving." },
+      { name: "Project Manager", job: "Keeps <projects> moving." },
+    ]);
   });
 });

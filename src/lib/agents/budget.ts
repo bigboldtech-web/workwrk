@@ -165,8 +165,13 @@ export async function claimTeammateTurn(a: {
   });
 }
 
-/** A teammate run still open this long after it started never finished: its process stopped mid-turn. */
-export const RUN_STALE_MS = 30 * 60 * 1000;
+/**
+ * A teammate run still open this long after it started never finished: its
+ * process stopped mid-turn. Wide on purpose: a turn makes up to 8 model calls
+ * and may ask 3 other teammates, each a turn of its own, so a slow AI service
+ * can keep a live one going for most of an hour (review round 6).
+ */
+export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 
 /**
  * A turn whose process stopped (a restart, out of memory, a cut connection

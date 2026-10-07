@@ -280,6 +280,12 @@ export interface TurnResult {
   tokensOut: number;
   /** The sentence for a turn that ended early (TURN_ERRORS), else null. */
   error: string | null;
+  /**
+   * The answer itself stopped part way (cut short, declined, nothing back),
+   * whatever `error` now says: a save that failed afterwards replaces the
+   * sentence, never this (a delegated answer is marked by it; review round 6).
+   */
+  endedEarly: boolean;
   /** The rows the turn wrote, as the thread renders them: the answer (or report), then its approval card. */
   messages: TeammateMessageView[];
 }
@@ -1082,6 +1088,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
   const messages: TeammateMessageView[] = [];
   let assistantMessageId: string | null = null;
   let approvalMessageId: string | null = null;
+  const endedEarly = s.error !== null;
   if (!failedBeforeAnything) {
     try {
       const rows = await saveTurnRows(a, s, text, proposals, new Date());
@@ -1134,6 +1141,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     tokensIn: s.tokensIn,
     tokensOut: s.tokensOut,
     error: s.error,
+    endedEarly,
     messages,
   };
 }

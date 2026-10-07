@@ -15,15 +15,19 @@ const st = vi.hoisted(() => ({
   failAt: 0,
   finished: [] as Row[],
   steps: [] as Row[],
+  /** An older row with no published version runs its draft. */
+  noVersion: false,
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     automationWorkflow: {
-      findMany: async () => [{ id: "wf1", name: "Support triage", severity: "MINOR", definition: {}, publishedVersionId: "v1", createdById: "u-max", updatedById: "u-max" }],
+      // Three people (review round 6): Max made it, Olivia published the live
+      // version, Sam last saved the draft. The run's publisher is Olivia.
+      findMany: async () => [{ id: "wf1", name: "Support triage", severity: "MINOR", definition: { actions: st.actions }, publishedVersionId: st.noVersion ? null : "v1", createdById: "u-max", updatedById: "u-sam" }],
       update: async () => ({}),
     },
-    automationWorkflowVersion: { findMany: async () => [{ id: "v1", definitionJson: { actions: st.actions }, createdById: "u-max" }] },
+    automationWorkflowVersion: { findMany: async () => (st.noVersion ? [] : [{ id: "v1", definitionJson: { actions: st.actions }, createdById: "u-olivia" }]) },
     organization: { findUnique: async () => ({ settings: {} }) },
     automationRun: {
       count: async () => 0,
@@ -66,6 +70,7 @@ beforeEach(() => {
   st.failAt = 0;
   st.finished = [];
   st.steps = [];
+  st.noVersion = false;
 });
 
 describe("an Ask an AI teammate step in a run", () => {
@@ -80,7 +85,14 @@ describe("an Ask an AI teammate step in a run", () => {
     expect(st.seen[0].ctx.stepData).toEqual({});
     expect(st.seen[2].ctx.stepData).toEqual({ teammate: { answer: "Answer 2", name: "Triage" } });
     // The step runs knowing which automation, and who published what runs.
-    expect(st.seen[1].ctx).toMatchObject({ workflowName: "Support triage", publisherId: "u-max", workflowCreatorId: "u-max" });
+    expect(st.seen[1].ctx).toMatchObject({ workflowName: "Support triage", publisherId: "u-olivia", workflowCreatorId: "u-max" });
+  });
+
+  it("runs as whoever last saved the draft when no version is published (review round 6)", async () => {
+    st.noVersion = true;
+    st.actions = [{ key: "ask_teammate", params: { teammate: "t-triage", request: "x" } }];
+    await fire();
+    expect(st.seen[0].ctx).toMatchObject({ publisherId: "u-sam", workflowCreatorId: "u-max" });
   });
 
   it("leaves no answer when a later teammate step fails, never the earlier one's (review round 1)", async () => {

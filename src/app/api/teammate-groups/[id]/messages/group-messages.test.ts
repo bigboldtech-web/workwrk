@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  /** The runs whose question went back (giveBackTurn). */
+  givenBack: [] as string[],
   removedFromGroup: new Set<string>(),
   removedCancels: [] as unknown[][],
   group: null as Row | null,
@@ -91,7 +93,7 @@ vi.mock("@/lib/agents/budget", () => ({
     st.claims.push(a);
     return st.claimAnswers.shift() ?? { ok: true, runId: `run${st.claims.length}`, questionId: `q${st.claims.length}` };
   },
-  giveBackTurn: async () => {},
+  giveBackTurn: async (runId: string) => void st.givenBack.push(runId),
   abandonTurn: async (runId: string) => void st.abandoned.push(runId),
 }));
 vi.mock("@/lib/agents/engine", () => ({
@@ -133,6 +135,7 @@ const PM = agent("pm", "Project Manager");
 const TRIAGE = agent("triage", "Triage");
 
 beforeEach(() => {
+  st.givenBack = [];
   st.removedFromGroup = new Set();
   st.removedCancels = [];
   st.group = groupOf([PM, TRIAGE]);
@@ -250,6 +253,8 @@ describe("a group message", () => {
     const out = await send({ message: "Status?" });
     expect(st.lines.map((l) => l.text)).toEqual(["Project Manager didn't answer: the AI service didn't answer."]);
     expect(out.events.map((e) => e.type)).toEqual(["user_message", "answer_start", "answer_done", "skipped", "done"]);
+    // Nothing came back: its question goes back (review round 6).
+    expect(st.givenBack).toEqual(["run1"]);
   });
 
   it("cancels what was asked, and stops the rest, when the person left the group mid-turn (review of step 3)", async () => {
@@ -268,6 +273,25 @@ describe("a group message", () => {
     const cleared = vi.spyOn(globalThis, "clearInterval");
     await send({ message: "Status?" });
     expect(cleared).toHaveBeenCalled();
+  });
+});
+
+describe("a teammate removed from the group while it answers (review round 6)", () => {
+  it("has what it asked cancelled, in a message's turn and in a continue", async () => {
+    st.duringTurn = () => void st.removedFromGroup.add("a-pm");
+    await send({ message: "@Project Manager go" });
+    expect(st.removedCancels).toEqual([["g1", "u-max", "a-pm"]]);
+    st.removedCancels = [];
+    st.removedFromGroup = new Set();
+    st.outcomes = [{ id: "o1" }];
+    st.duringTurn = () => void st.removedFromGroup.add("a-triage");
+    expect((await send({ resume: true, agentSlug: "triage" })).status).toBe(200);
+    expect(st.removedCancels).toEqual([["g1", "u-max", "a-triage"]]);
+  });
+
+  it("cancels nothing for one still in the group", async () => {
+    await send({ message: "@Project Manager go" });
+    expect(st.removedCancels).toEqual([]);
   });
 });
 

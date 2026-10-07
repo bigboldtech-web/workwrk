@@ -611,22 +611,42 @@ export function ConversationView({
 
   /* ── AI teammates that can be asked here (Phase 2 step 6) ───── */
 
-  // Read once per conversation: the @ list offers them only where asking one
-  // is allowed (a member, no Guests, not a public channel, not archived).
+  // The @ list offers them only where asking one is allowed (a member, no
+  // Guests, not a public channel, not archived). It is read again when the
+  // conversation's people or setting change, on focus, and when a teammate
+  // changes in another tab, so it never offers what the server will refuse
+  // (review round 6). A read that fails keeps what was there.
   const [askable, setAskable] = useState<MentionTeammate[]>([]);
+  const [askTick, setAskTick] = useState(0);
+  const askKey = meta ? `${meta.memberCount ?? ""}:${String(meta.restricted)}:${String(meta.archivedAt ?? "")}` : "";
+  useEffect(() => {
+    setAskable([]);
+  }, [id]);
   useEffect(() => {
     let alive = true;
-    setAskable([]);
     void fetch(`/api/conversations/${id}/teammates`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { addressable?: boolean; teammates?: MentionTeammate[] } | null) => {
-        if (alive && d?.addressable && Array.isArray(d.teammates)) setAskable(d.teammates);
+        if (!alive || !d) return;
+        setAskable(d.addressable && Array.isArray(d.teammates) ? d.teammates : []);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, askKey, askTick]);
+  useEffect(() => {
+    const again = () => setAskTick((t) => t + 1);
+    const onRealtime = (e: Event) => {
+      if ((e as CustomEvent<{ type?: string } | null>).detail?.type === "agent.changed") again();
+    };
+    window.addEventListener("focus", again);
+    window.addEventListener(WINDOW_EVENTS.realtime, onRealtime);
+    return () => {
+      window.removeEventListener("focus", again);
+      window.removeEventListener(WINDOW_EVENTS.realtime, onRealtime);
+    };
+  }, []);
 
   /* ── sending ────────────────────────────────────────────────── */
 

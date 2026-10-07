@@ -41,7 +41,7 @@ import { actorLabelFor, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
 import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
 import { prepareCall, type Prepared } from "./previews";
-import { ACTION_ERRORS, DELEGATION_COPY, TALK_TEAMMATE_COPY, TEAMMATE_TOOL_ERRORS, TURN_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
+import { ACTION_ERRORS, DELEGATION_COPY, TALK_TEAMMATE_COPY, TEAMMATE_TOOL_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
 import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
 import {
@@ -285,9 +285,9 @@ async function runDelegation(
     return done("failed", { error: DELEGATION_COPY.delegateNoAnswer(delegate.name), ...waits }, { errorText: DELEGATION_COPY.delegateNoAnswer(delegate.name) });
   }
   // An answer cut short or declined part way is said to be one, so the
-  // caller never passes it on as whole (review round 5). An answer that only
-  // failed to save in the delegate's chat is whole.
-  const endedEarly = Boolean(turn.error) && turn.error !== TURN_ERRORS.notSaved;
+  // caller never passes it on as whole (review round 5), even when its save
+  // failed too (round 6). An answer that only failed to save is whole.
+  const endedEarly = turn.endedEarly;
   const notes = [
     ...(endedEarly ? [DELEGATION_COPY.endedEarlyNote(delegate.name)] : []),
     ...(titles.length > 0 ? [DELEGATION_COPY.waitingNote(a.person.firstName, delegate.name)] : []),

@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  /** The runs whose question went back (giveBackTurn). */
+  givenBack: [] as string[],
   named: {} as Record<string, Row[]>,
   claims: [] as Row[],
   claimAnswer: null as Row | null,
@@ -34,7 +36,7 @@ vi.mock("./budget", () => ({
     st.claims.push(a);
     return st.claimAnswer ?? { ok: true, runId: `drun${st.claims.length}`, questionId: `dq${st.claims.length}` };
   },
-  giveBackTurn: async () => {},
+  giveBackTurn: async (runId: string) => void st.givenBack.push(runId),
 }));
 vi.mock("./engine", () => ({
   getOrCreateTeammateSession: async (agent: { id: string }, userId: string) => ({ id: `chat:${agent.id}:${userId}`, created: false }),
@@ -78,6 +80,7 @@ const ASK = { teammate: "Project Manager", request: "Which tasks are stuck?" };
 
 beforeEach(() => {
   resetFixtures();
+  st.givenBack = [];
   st.named = { "project manager": [PM] };
   st.claims = [];
   st.claimAnswer = null;
@@ -145,10 +148,14 @@ describe("ask_teammate", () => {
     expect(st.turns).toEqual([]);
   });
 
-  it("is offered only where the person watches: a delegated turn never asks on", async () => {
-    const r = await call(ASK, { turn: { sessionId: "s1", routineId: null, trigger: "DELEGATED", runId: "run1" } });
-    expect(r.record.state).toBe("failed");
+  it("is offered only where the person watches: a delegated, routine, Talk or automation turn never asks on", async () => {
+    for (const trigger of ["DELEGATED", "ROUTINE", "TALK", "AUTOMATION"] as const) {
+      const r = await call(ASK, { turn: { sessionId: "s1", routineId: null, trigger, runId: "run1" } });
+      expect(r.record.state).toBe("failed");
+    }
     expect(st.claims).toEqual([]);
+    // A chat and its continue ask.
+    expect((await call(ASK, { turn: { sessionId: "s1", routineId: null, trigger: "RESUME", runId: "run1" } })).record.state).toBe("ran");
   });
 
   it("points the caller's chat at what the delegate asked for, which waits in the delegate's own chat", async () => {
@@ -172,6 +179,13 @@ describe("ask_teammate", () => {
     const r = await call(ASK);
     expect(r.record.state).toBe("failed");
     expect(dataOf(r.modelContent)).toEqual({ error: DELEGATION_COPY.delegateNoAnswer("Project Manager") });
+    // Nothing came back: the delegate's question goes back (review round 6).
+    expect(st.givenBack).toEqual(["drun1"]);
+  });
+
+  it("keeps the question of a delegate that answered", async () => {
+    await call(ASK);
+    expect(st.givenBack).toEqual([]);
   });
 
   it("still says what waits when the delegate left a card but no words (review round 1)", async () => {
@@ -187,12 +201,15 @@ describe("ask_teammate", () => {
   });
 
   it("marks an answer that stopped part way, so the caller never passes it on as whole (review round 5)", async () => {
-    st.turnAnswer = { text: "Stuck: Call Acme, Renew", error: "The answer was cut short.", giveBack: false, proposedActionIds: [], messages: [] };
+    st.turnAnswer = { text: "Stuck: Call Acme, Renew", error: "The answer was cut short.", endedEarly: true, giveBack: false, proposedActionIds: [], messages: [] };
     const cut = await call(ASK);
     expect(cut.record.state).toBe("ran");
     expect(dataOf(cut.modelContent)).toMatchObject({ answer: "Stuck: Call Acme, Renew", endedEarly: true, note: DELEGATION_COPY.endedEarlyNote("Project Manager") });
+    // Cut short and then not saved: the save's sentence replaced the reason, the mark stays (review round 6).
+    st.turnAnswer = { text: "Stuck: Call Acme", error: "The answer couldn't be saved. Check what it did before asking again.", endedEarly: true, giveBack: false, proposedActionIds: [], messages: [] };
+    expect(dataOf((await call(ASK)).modelContent)).toMatchObject({ endedEarly: true });
     // Whole, only not saved in the delegate's chat: no mark.
-    st.turnAnswer = { text: "Two are stuck.", error: "The answer couldn't be saved. Check what it did before asking again.", giveBack: false, proposedActionIds: [], messages: [] };
+    st.turnAnswer = { text: "Two are stuck.", error: "The answer couldn't be saved. Check what it did before asking again.", endedEarly: false, giveBack: false, proposedActionIds: [], messages: [] };
     const whole = await call(ASK);
     expect(dataOf(whole.modelContent)).not.toHaveProperty("endedEarly");
   });

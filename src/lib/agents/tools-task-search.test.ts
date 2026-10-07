@@ -25,6 +25,10 @@ let home = "org-1";
 /** Their membership's role here when anchored elsewhere. */
 let membership: string | null = null;
 let afterRead: ((page: Row[]) => void) | null = null;
+/** The viewers each Talk reader was checked as. */
+const readersSeen: Array<{ userId?: string; organizationId?: string }> = [];
+/** Whether a viewer carries u-elsewhere's home-workspace level (an admin there). */
+const homeAdmin = (v: object) => Object.entries(legacyLevelRow("ORG_ADMIN")).every(([k, x]) => (v as Record<string, unknown>)[k] === x);
 
 type Keyset = { updatedAt: Date | { lt: Date }; id?: { lt: string } };
 vi.mock("@/lib/prisma", () => ({
@@ -36,7 +40,8 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: async () => (level ? { organizationId: home, ...legacyLevelRow(level), status: denied ? "INACTIVE" : "ACTIVE", deletedAt: null } : null),
       // A Talk answer's readers (review round 4): each read at the level held here.
       findMany: async (a: { where: { id: { in: string[] } } }) =>
-        a.where.id.in.filter((id) => id !== "u-unknown").map((id) => ({ id, organizationId: id === "u-elsewhere" ? "org-2" : "org-1", ...legacyLevelRow("EMPLOYEE"), status: id === "u-gone" ? "INACTIVE" : "ACTIVE", deletedAt: null })),
+        // u-elsewhere is an admin in their home workspace and an Employee here (review round 6).
+        a.where.id.in.filter((id) => id !== "u-unknown").map((id) => ({ id, organizationId: id === "u-elsewhere" ? "org-2" : "org-1", ...legacyLevelRow(id === "u-elsewhere" ? "ORG_ADMIN" : "EMPLOYEE"), status: id === "u-gone" ? "INACTIVE" : "ACTIVE", deletedAt: null })),
     },
     // u-elsewhere works here through a second membership (anchored in org-2).
     organizationMembership: { findUnique: async (a?: { where?: { userId_organizationId?: { userId?: string } } }) => (a?.where?.userId_organizationId?.userId === "u-elsewhere" ? { role: "EMPLOYEE" } : membership ? { role: membership } : null) },
@@ -59,7 +64,12 @@ vi.mock("@/lib/access/node-access", () => ({
 }));
 vi.mock("@/lib/list-links-server", () => ({
   // A Talk answer's readers (review round 3): Eve opens no List here.
-  listReader: (v?: { userId?: string }) => ({ canRead: async () => v?.userId !== "u-eve" && v?.userId !== "u-elsewhere" }),
+  // An admin-level reader, or one read in another workspace, reads every List:
+  // so a reader read at their home level or in their home workspace passes.
+  listReader: (v?: { userId?: string; organizationId?: string }) => {
+    readersSeen.push({ ...v });
+    return { canRead: async () => homeAdmin(v ?? {}) || v?.organizationId !== "org-1" || (v?.userId !== "u-eve" && v?.userId !== "u-elsewhere") };
+  },
 
   readableItemsVia: async (_v: unknown, items: Row[]) => new Map(items.map((it) => [it.id, { readable: it.boardId === "L-mine", via: null }])),
 }));
@@ -152,8 +162,13 @@ describe("search_tasks in a Talk turn (review round 3)", () => {
 
   it("counts a reader anchored in another workspace, never skips them (review round 4)", async () => {
     // Reads nothing here, and is anchored in another workspace: the old lookup dropped them and passed every List.
+    readersSeen.length = 0;
     const out = await TOOLS.search_tasks.handler(talk(["u-1", "u-elsewhere"]), { limit: 20 }) as { count: number };
     expect(out.count).toBe(0);
+    // Read here, at the level their membership here holds: never their home workspace's admin level (review round 6).
+    const seen = readersSeen.find((r) => r.userId === "u-elsewhere");
+    expect(seen?.organizationId).toBe("org-1");
+    expect(homeAdmin(seen ?? {})).toBe(false);
   });
 
   it("fails closed for a reader who cannot be read, and leaves out one who can no longer sign in", async () => {

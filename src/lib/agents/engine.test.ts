@@ -48,6 +48,8 @@ const db = vi.hoisted(() => ({
   requests: [] as Req[],
   streamed: 0,
   executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown }>,
+  /** The chat's rows can't be written. */
+  saveThrows: false,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -68,6 +70,7 @@ vi.mock("@/lib/prisma", () => ({
         return r ? { createdAt: (r.createdAt as Date | undefined) ?? new Date("2026-10-07T09:00:00Z") } : null;
       },
       create: async (a: { data: Row }) => {
+        if (db.saveThrows) throw new Error("connection reset");
         db.created.push(a.data);
         db.nextId += 1;
         return { id: `m${db.nextId}`, kind: null, meta: null, toolCalls: null, ...a.data, createdAt: a.data.createdAt ?? new Date() };
@@ -361,12 +364,26 @@ describe("the loop", () => {
     expect(later).toMatchObject({ text: "Looking.", error: TURN_ERRORS.declined, failedBeforeAnything: false });
   });
 
+  it("keeps an answer marked as ended early when its save fails too, and only then (review round 6)", async () => {
+    db.saveThrows = true;
+    try {
+      db.replies = [reply([say("Here are your tasks")], "max_tokens")];
+      const cut = await runTeammateTurn(turn());
+      expect(cut).toMatchObject({ error: TURN_ERRORS.notSaved, endedEarly: true });
+      db.replies = [reply([say("Two are due.")], "end_turn")];
+      const whole = await runTeammateTurn(turn());
+      expect(whole).toMatchObject({ error: TURN_ERRORS.notSaved, endedEarly: false });
+    } finally {
+      db.saveThrows = false;
+    }
+  });
+
   it("runs nothing from an answer cut at max_tokens, keeps what it said and says it was cut short", async () => {
     db.replies = [reply([say("Here are your tasks"), use("tu1", "create_task", { title: "Call A" })], "max_tokens")];
     const r = await runTeammateTurn(turn());
     expect(db.executed).toEqual([]);
     expect(db.requests).toHaveLength(1);
-    expect(r).toMatchObject({ text: "Here are your tasks", error: "The answer was cut short.", failedBeforeAnything: false });
+    expect(r).toMatchObject({ text: "Here are your tasks", error: "The answer was cut short.", endedEarly: true, failedBeforeAnything: false });
     expect(db.created[0]).toMatchObject({ content: "Here are your tasks", finishReason: "max_tokens" });
   });
 

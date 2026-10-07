@@ -61,7 +61,11 @@ function NewGroupFlow({
   const [saving, setSaving] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const choices = (teammates ?? []).filter((t) => t.status === "ENABLED");
-  const full = picked.length >= GROUP_LIMITS.maxMembers;
+  // Only the picks the list still shows count and go: one paused, removed or
+  // made private in another tab drops out, never a hidden row that can't be
+  // unticked (review round 6).
+  const live = teammates === null ? picked : picked.filter((s) => choices.some((c) => c.slug === s));
+  const full = live.length >= GROUP_LIMITS.maxMembers;
 
   useEffect(() => {
     requestAnimationFrame(() => nameRef.current?.focus());
@@ -76,28 +80,28 @@ function NewGroupFlow({
 
   function toggle(slug: string) {
     setError(null);
-    if (picked.includes(slug)) {
+    if (live.includes(slug)) {
       setFieldProblem(null);
-      setPicked(picked.filter((s) => s !== slug));
+      setPicked(live.filter((s) => s !== slug));
       return;
     }
-    if (picked.length >= GROUP_LIMITS.maxMembers) {
+    if (live.length >= GROUP_LIMITS.maxMembers) {
       setFieldProblem(GROUP_COPY.tooMany);
       return;
     }
     setFieldProblem(null);
-    setPicked([...picked, slug]);
+    setPicked([...live, slug]);
   }
 
   async function create() {
     if (saving) return;
-    if (picked.length < GROUP_LIMITS.minMembers) {
+    if (live.length < GROUP_LIMITS.minMembers) {
       setFieldProblem(GROUP_COPY.pickMore);
       return;
     }
     setSaving(true);
     setError(null);
-    const r = await apiFetch<{ group: GroupDetail }>("/api/teammate-groups", { method: "POST", json: { name: name.trim() || null, agentSlugs: picked } });
+    const r = await apiFetch<{ group: GroupDetail }>("/api/teammate-groups", { method: "POST", json: { name: name.trim() || null, agentSlugs: live } });
     setSaving(false);
     if (!r.ok) {
       setError(r.code ? r.error : GROUP_COPY.createFailed);
@@ -155,7 +159,7 @@ function NewGroupFlow({
               ) : (
                 <ul className="flex flex-col rounded-md border border-line">
                   {choices.map((t) => {
-                    const on = picked.includes(t.slug);
+                    const on = live.includes(t.slug);
                     const off = !on && full;
                     return (
                       <li key={t.slug} className="border-b border-line last:border-b-0">

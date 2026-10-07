@@ -73,7 +73,7 @@ function fieldMatches(v: unknown, cond: unknown): boolean {
   if (keys.length > 0 && keys.every((k) => OPS.has(k))) {
     return keys.every((k) => {
       const x = c[k];
-      if (k === "equals") return same(v, x);
+      if (k === "equals") return c.mode === "insensitive" && typeof v === "string" && typeof x === "string" ? v.toLowerCase() === x.toLowerCase() : same(v, x);
       if (k === "in") return (x as unknown[]).some((y) => same(v, y));
       if (k === "notIn") return !(x as unknown[]).some((y) => same(v, y));
       if (k === "not") return !fieldMatches(v, x);

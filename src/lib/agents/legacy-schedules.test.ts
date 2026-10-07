@@ -34,7 +34,6 @@ const st = vi.hoisted(() => ({
   givenBack: [] as string[],
   abandoned: [] as string[],
   configured: true,
-  existingRoutine: null as Row | null,
   personSetting: null as Row | null,
 }));
 
@@ -66,7 +65,7 @@ vi.mock("@/lib/prisma", () => {
         findFirst: async (a: { where: { id: string } }) => st.agents.find((r) => r.id === a.where.id) ?? null,
         updateMany: async (a: Row) => (st.agentUpdates.push(a), { count: 1 }),
       },
-      agentRoutine: { count: async () => (st.routineCounts += 1, 30), findFirst: async () => st.existingRoutine },
+      agentRoutine: { count: async () => (st.routineCounts += 1, 30) },
       agentPersonSetting: { findUnique: async () => st.personSetting },
       user: {
         findFirst: async () => (st.userReads += 1, null),
@@ -145,20 +144,21 @@ beforeEach(() => {
 
 describe("moving an old schedule", () => {
   it("turns off, and never moves twice, a moved schedule an older build turned back on (review round 1)", async () => {
-    st.existingRoutine = { id: "r-old" };
     st.agents = [agent({ scheduleMovedAt: new Date("2026-10-07T08:00:00Z"), scheduleRoutineId: "r-old" })];
     expect(await convertLegacySchedules(NOW, { limit: 100 })).toEqual({ found: 1, moved: 0, stopped: 1, taken: 0, failed: 0 });
     expect(st.routines).toEqual([]);
     expect(st.agentUpdates.at(-1)).toEqual({ where: { id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes" }, data: { autonomousEnabled: false, nextRunAt: null } });
     expect(st.audits.at(-1)).toMatchObject({ action: "schedule_stopped", metadata: { routineId: "r-old", reason: "already_moved" } });
-    st.existingRoutine = null;
   });
 
   it("never brings back a routine its creator deleted (review round 2)", async () => {
-    st.existingRoutine = null;
+    // The creator can still be acted for, so a move again would succeed: only the moved-before rule stops it (review round 6).
+    st.people["u-olivia"] = person("u-olivia");
     st.agents = [agent({ scheduleMovedAt: new Date("2026-10-07T08:00:00Z"), scheduleRoutineId: "r-deleted" })];
     expect(await convertLegacySchedules(NOW, { limit: 100 })).toMatchObject({ moved: 0, stopped: 1 });
     expect(st.routines).toEqual([]);
+    expect(st.casData).toEqual([]);
+    expect(st.audits.at(-1)).toMatchObject({ action: "schedule_stopped", metadata: { routineId: "r-deleted", reason: "already_moved" } });
   });
 
   it("names the server zone on a changed bare cron too (review round 2)", async () => {
@@ -170,7 +170,7 @@ describe("moving an old schedule", () => {
     st.people["u-olivia"] = person("u-olivia");
     st.agents = [agent()];
     expect(await convertLegacySchedules(NOW, { limit: 100 })).toEqual({ found: 1, moved: 1, stopped: 0, taken: 0, failed: 0 });
-    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes", autonomousPrompt: "Flag deals stuck a week." }]);
+    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes", autonomousPrompt: "Flag deals stuck a week.", scheduleMovedAt: null }]);
     expect(st.casData).toEqual([{ autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: NOW, scheduleMoveReason: null }]);
     expect(st.routines).toEqual([
       {
