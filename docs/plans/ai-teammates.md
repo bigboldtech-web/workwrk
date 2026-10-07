@@ -11,6 +11,11 @@
 7. (Step 3 review) Ask AI's create_kra, create_kpi, create_sop and create_meeting now carry their routes' permission checks (kras.create, sops.create and the SOP plan limit, meetings.create, live attendees only, KRA needs a job title, KPI needs its KRA): a handler never does more than its route allows. create_contract, update_contract and create_sprint have no route to mirror and stay out of every teammate (TEAMMATE_EXCLUDED); Ask AI keeps them as before.
 
 
+## After Phase 1 (follow-ups 1.5, shipped one at a time)
+
+- 2026-10-07: the Inbox approval pane. An agent_approval row opens as the chat's own approval card with every request the same run asked (GET /api/agents/actions/[id] answers `actions`), decided through the chat's own call (src/lib/agents/decide-client.ts); the teammate never carries on from the Inbox (no model call); a decision marks the row read and tells the person's other tabs (`notification`); a request that is gone, or anyone else's, reads as deleted (notification-readability.ts). Files: src/components/inbox/inbox-approval-panel.tsx, inbox-target-pane.tsx.
+- 2026-10-07: the cost estimate. src/lib/ai-cost.ts aiCostCents is the one formula ($3 per million input tokens, $15 per million output, rounded up to a cent, whole numbers only); Ask AI's chat and stream, the autonomous loop and the teammate engine all record through it. Rows written before then hold 100 times the estimate. No screen shows cost.
+
 Status: approved by the founder 2026-10-05 (case study, memory note `project_workwrk_ai_teammates`). Starts only after B11 to B14 are pushed (the memory note's later order supersedes the draft's "after B11 + B12"). Branch from `main` at or after `eba2d2ac`. Save this file as `docs/plans/ai-teammates.md`.
 
 How this was checked: I could only use Read in this session (no Glob, no Grep, no shell). Every file named below was opened and read; line numbers are from that read. Where I could not locate something by reading, the step says **verify:** with the grep to run before writing code.
@@ -1163,7 +1168,7 @@ src/components/agents/agents-hub.tsx           OsPageHeader title "AI teammates"
     src/components/agents/settings/memory-tab.tsx
     src/components/agents/settings/routines-tab.tsx  SchedulePicker with isValid
     src/components/agents/settings/activity-tab.tsx  RunStatusDot rows, StatusChip for actions
-src/components/inbox/agent-approval-pane.tsx         InboxTargetPane case for agent_approval, reuses ApprovalCard
+src/components/inbox/inbox-approval-panel.tsx       InboxTargetPane case for agent_approval, reuses ApprovalCard
 ```
 
 Reused, not rebuilt: OsPageHeader, ViewTab/ViewTabStrip, Drawer, Dialog, MenuItem/MenuList/MorePortal, StatusChip with RUN_TONE_COLOR, EntityTile, Switch, Picker, SchedulePicker, ToolCallRow, OsMarkdown, Dots (unread, pending), Skeleton*, OsEmptyView, DotsArt, useOsToast, useConfirm, usePrompt, useDirtyGuard, RunStatusChip/RunStatusDot, apiFetch, formatRelative/formatDate with useDatePrefs, `splitSse`.

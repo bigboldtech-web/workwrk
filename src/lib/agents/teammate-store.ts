@@ -56,13 +56,13 @@ import {
   type ActionView,
   type DecideAnswer,
   type TeammateDecision,
-  type TeammateDecisionResult,
   type TeammateMessageView,
   type TeammateMessagesPage,
   type TeammateSendError,
   type TeammateStreamEvent,
   type TurnIds,
 } from "./teammate-thread";
+import { sendDecisions } from "./decide-client";
 import type { TeammateLimits, TeammateRow } from "./teammate-views";
 import type { TemplateCard } from "./templates";
 
@@ -427,10 +427,7 @@ async function decide(slug: string, decisions: TeammateDecision[], opts: { alway
     for (const d of decisions) deciding[d.id] = d.decision;
     return { deciding };
   });
-  const r = await apiFetch<{ results: TeammateDecisionResult[]; resume: boolean; agentSlug: string | null }>("/api/agents/actions/decide", {
-    method: "POST",
-    json: { decisions, ...(opts.always ? { always: true } : {}) },
-  });
+  const r = await sendDecisions(decisions, opts);
   const settle = (c: TeammateChatState) => {
     const deciding = { ...c.deciding };
     for (const id of ids) delete deciding[id];
@@ -438,13 +435,13 @@ async function decide(slug: string, decisions: TeammateDecision[], opts: { alway
   };
   if (!r.ok) {
     set(slug, (c) => ({ deciding: settle(c) }));
-    return { ok: false, error: r.status === 429 ? r.error : null };
+    return { ok: false, error: r.error };
   }
-  const results = Array.isArray(r.data.results) ? r.data.results : [];
+  const results = r.results;
   set(slug, (c) => ({ deciding: settle(c), actions: applyDecisionResults(c.actions, results, new Date().toISOString()) }));
   notifyAiChatsChanged();
   await refresh(slug);
-  const next = r.data.resume ? r.data.agentSlug : null;
+  const next = r.resume ? r.agentSlug : null;
   if (next && (shown.get(next) ?? 0) > 0) void resume(next);
   return { ok: true, results };
 }

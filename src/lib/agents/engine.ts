@@ -44,6 +44,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Prisma } from "@/generated/prisma";
 import { createMessageWithFallback, getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { aiCostCents } from "@/lib/ai-cost";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
@@ -688,11 +689,6 @@ async function runLoop(
   }
 }
 
-/** The cost Ask AI records for these tokens (the chat routes' formula, approximate Sonnet prices). */
-function costCentsFor(tokensIn: number, tokensOut: number): number {
-  return tokensIn && tokensOut ? Math.ceil((tokensIn * 0.0003 + tokensOut * 0.0015) * 100) : 0;
-}
-
 const ROW_SELECT = { id: true, role: true, content: true, kind: true, meta: true, toolCalls: true, createdAt: true } as const;
 
 /** Step 7's chat rows: the answer, or a routine's report, with its call log; then the card for what it asked. */
@@ -788,7 +784,8 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
   // note that draws a refusal every time would otherwise lock the chat.
   if (failedBeforeAnything && broke) await releaseOutcomes(a.sessionId, [...claimed.keys()]);
   const proposals = s.records.filter((r) => r.state === "waiting" && Boolean(r.actionId));
-  const costCents = costCentsFor(s.tokensIn, s.tokensOut);
+  // The estimate Ask AI records for the same tokens (src/lib/ai-cost.ts).
+  const costCents = aiCostCents(s.tokensIn, s.tokensOut);
 
   const messages: TeammateMessageView[] = [];
   let assistantMessageId: string | null = null;

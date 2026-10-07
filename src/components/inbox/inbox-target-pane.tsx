@@ -7,10 +7,12 @@
 // excerpt card, the access-request card or the summary card by kind", so that
 // "the user never leaves the Inbox to act".
 //
-// FOUR CASES, AND THE FOURTH IS THE IMPORTANT ONE.
+// FIVE CASES, AND THE LAST IS THE IMPORTANT ONE.
 //
 //   task       `TaskDetailBody host="panel"`: the drawer's body with no
 //              drawer chrome. The one task detail, third host.
+//   approval   an AI teammate's requests (agent_approval): the chat's own
+//              approval card, decided here (inbox-approval-panel.tsx).
 //   mention    the excerpt the notification's own message carries, in a
 //              bordered card, with one secondary "Open" to the block anchor.
 //   summary    kind glyph, title, message, time, one secondary "Open {kind}".
@@ -34,6 +36,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { useOsToast } from "@/components/layout/os/toast";
 import { TARGET_NOUN, UNREADABLE_SENTENCE } from "@/lib/notification-target";
 import { inboxRowTime, type LocaleContext } from "@/lib/work-buckets";
+import { InboxApprovalPanel } from "./inbox-approval-panel";
 import { KindIcon, type InboxNotification } from "./inbox-row";
 // The Inbox is Work: a notification's doc, table, canvas, SOP or form opens
 // in Work. Its stored href is canonical and is mapped before returnTo is
@@ -75,6 +78,7 @@ export function InboxTargetPane({
   }
 
   const isTask = notification.target.kind === "item" && notification.target.id !== null;
+  const isApproval = notification.type === "agent_approval" && notification.target.kind === "agent" && notification.target.id !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -97,6 +101,8 @@ export function InboxTargetPane({
             commentId={notification.target.anchorIsComment ? notification.target.anchor : null}
             locale={locale}
           />
+        ) : isApproval ? (
+          <ApprovalPane notification={notification} returnTo={returnTo} now={now} locale={locale} />
         ) : notification.type === "mention" ? (
           <MentionCard notification={notification} returnTo={returnTo} now={now} locale={locale} />
         ) : (
@@ -224,6 +230,37 @@ function TaskPanel({
           <p className="text-base text-ink-2">{UNREADABLE_SENTENCE.deleted}</p>
         </div>
       }
+    />
+  );
+}
+
+/* ───────────────────────── the approval card ────────────────────── */
+
+function ApprovalPane({
+  notification,
+  returnTo,
+  now,
+  locale,
+}: {
+  notification: InboxNotification;
+  returnTo: string;
+  now: Date;
+  locale: LocaleContext;
+}) {
+  const { map: sectionLink } = useObjectHref();
+  const href = notification.target.href ? sectionLink(notification.target.href) : null;
+  const withReturn = href ? `${href}${href.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}` : null;
+  // A request that is gone reads as any target that is: the row's own words.
+  const gone: InboxNotification = { ...notification, target: { ...notification.target, readable: false, reason: "deleted" } };
+  return (
+    <InboxApprovalPanel
+      key={notification.target.id}
+      actionId={notification.target.id!}
+      title={notification.title}
+      message={notification.message}
+      time={inboxRowTime(notification.createdAt, now, locale)}
+      chatHref={withReturn}
+      gone={<SummaryCard notification={gone} now={now} locale={locale} />}
     />
   );
 }

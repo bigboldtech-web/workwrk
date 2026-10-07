@@ -3,12 +3,17 @@
 // Anyone else's id, an Admin's view of it included, is the same 404 as a
 // missing one, so an id never says that a request exists.
 //
+// `actions` is every request the same run asked of this person, in the order
+// it asked, this one among them: a routine that asks several things writes
+// ONE Inbox row, linked to the first (routines-server.ts noticeApprovals), and
+// the pane shows them all on one card. `action` is this one, as before.
+//
 // docs/plans/ai-teammates.md 4.
 
 import { NextResponse } from "next/server";
 import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
-import { actionViews } from "@/lib/agents/actions";
+import { MAX_DECISIONS, actionViews } from "@/lib/agents/actions";
 import { hueForAgent } from "@/lib/agents/hues";
 import { TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { teammateError } from "@/lib/agents/teammate-server";
@@ -20,12 +25,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const row = await prisma.agentAction.findFirst({
     where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId },
-    select: { id: true, agent: { select: { slug: true, name: true, hue: true, avatar: true } } },
+    select: { id: true, runId: true, agentId: true, agent: { select: { slug: true, name: true, hue: true, avatar: true } } },
   });
-  const action = row ? (await actionViews([row.id], viewer.userId))[row.id] : undefined;
-  if (!row || !action) return teammateError(404, "not_found", TEAMMATE_ROUTE_ERRORS.actionNotFound);
+  if (!row) return teammateError(404, "not_found", TEAMMATE_ROUTE_ERRORS.actionNotFound);
+  // The run's requests of this person, as many as one decision may carry.
+  const run = row.runId
+    ? await prisma.agentAction.findMany({
+        where: { runId: row.runId, agentId: row.agentId, organizationId: viewer.organizationId, actingForId: viewer.userId },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: MAX_DECISIONS,
+        select: { id: true },
+      })
+    : [];
+  const ids = run.some((r) => r.id === row.id) ? run.map((r) => r.id) : [row.id, ...run.map((r) => r.id)].slice(0, MAX_DECISIONS);
+  const views = await actionViews(ids, viewer.userId);
+  const action = views[row.id];
+  if (!action) return teammateError(404, "not_found", TEAMMATE_ROUTE_ERRORS.actionNotFound);
   return NextResponse.json({
     action,
+    actions: ids.flatMap((x) => (views[x] ? [views[x]] : [])),
     agent: { slug: row.agent.slug, name: row.agent.name, hue: hueForAgent({ hue: row.agent.hue, slug: row.agent.slug }), avatar: row.agent.avatar },
   });
 }
