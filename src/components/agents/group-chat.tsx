@@ -19,22 +19,25 @@
 // sending again can work. Read again on focus and on agent.changed for this
 // group; opening it and each answer that arrives mark it read.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUp, Users } from "lucide-react";
 import { MorePortal } from "@/components/layout/os/more-portal";
+import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { leadOf, pickAnswerers, type GroupMember } from "@/lib/agents/group-chat";
 import { GROUP_COPY, TEAMMATE_CHAT, titleList } from "@/lib/agents/teammate-copy";
 import { useAiAvailability, useGroupChat } from "@/lib/agents/teammate-store";
-import { canRetrySend, lastAnswerId, sendErrorSentence, type GroupDetail, type GroupMemberView, type GroupRow, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
+import { canRetrySend, lastAnswerId, sendErrorSentence, type GroupDetail, type GroupMemberView, type GroupRow, type TeammateMessageView, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 import type { TeammateRow } from "@/lib/agents/teammate-views";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import { cn } from "@/lib/utils";
 import { GroupMembersMenu } from "./group-members-menu";
 import { StackedAvatars } from "./stacked-avatars";
 import { TeammateAvatar } from "./teammate-avatar";
+import { UnsentDraft } from "./teammate-chat";
 import { TeammateThread, type ThreadTeammate } from "./teammate-thread";
 
 const GHOST_28 = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink";
@@ -79,6 +82,7 @@ export function GroupChat({
   const chat = useGroupChat(g.id);
   const { status, offline } = useAiAvailability();
   const { toast } = useOsToast();
+  const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const membersRef = useRef<HTMLButtonElement>(null);
@@ -161,12 +165,36 @@ export function GroupChat({
     void chat.send(chat.draft);
   }
 
-  // Each answer under its own teammate; a row that names none reads as the group's.
+  // Each answer under its own teammate; one removed from the group since
+  // keeps the name its rows were saved with (review of step 4).
   const fallback: ThreadTeammate = { name: g.name, hue: null, avatar: null };
-  const teammateFor = (agentId: string | undefined): ThreadTeammate => {
-    const m = agentId ? byId.get(agentId) : undefined;
-    return m ? { name: m.name, hue: m.hue, avatar: m.avatar } : fallback;
+  const teammateFor = (m: TeammateMessageView): ThreadTeammate => {
+    const agentId = m.kind === "agent" || m.kind === "approval" ? m.agentId : undefined;
+    const member = agentId ? byId.get(agentId) : undefined;
+    if (member) return { name: member.name, hue: member.hue, avatar: member.avatar };
+    if (m.kind === "agent" && m.agentName) return { name: m.agentName, hue: null, avatar: null };
+    return fallback;
   };
+
+  // A line's links go to its own teammate: its settings open in that
+  // teammate's chat, and Pause pauses the routine (review of step 4).
+  function openSettingsFrom(tab?: TeammateSettingsTab, from?: TeammateMessageView) {
+    const agentId = from && from.kind === "event" ? from.agentId : undefined;
+    const member = agentId ? byId.get(agentId) : undefined;
+    if (!member) {
+      onOpenSettings(tab);
+      return;
+    }
+    router.push(`/agents?chat=${encodeURIComponent(member.slug)}&settings=${encodeURIComponent(tab ?? "instructions")}`);
+  }
+  async function pauseRoutine(routineId: string) {
+    const r = await apiFetch(`/api/agents/routines/${encodeURIComponent(routineId)}`, { method: "PATCH", json: { status: "paused" } });
+    if (!r.ok) {
+      toast(r.code ? r.error : TEAMMATE_CHAT.routinePauseFailed, { tone: "danger" });
+      return;
+    }
+    toast(TEAMMATE_CHAT.routinePaused);
+  }
 
   const aiOff = status !== null && !status.enabled;
   const notSetUp = status !== null && status.enabled && !status.configured;
@@ -190,6 +218,10 @@ export function GroupChat({
       />
     );
   }
+
+  // Words the person wrote that could not go out stay on screen whenever
+  // there is no composer to hold them (review of step 4, as a teammate chat).
+  const unsent = !canCompose && chat.draft.trim() ? <UnsentDraft text={chat.draft} className={foot ? "mt-1" : undefined} /> : null;
 
   const errorRow = chat.error ? (
     <div role="alert" className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-danger-text">
@@ -226,10 +258,13 @@ export function GroupChat({
     );
   } else if (chat.missing) {
     body = (
-      <div className="flex h-11 items-center gap-2 text-row text-ink-2">
-        {GROUP_COPY.notFound} ·
-        <button type="button" className={LINK} onClick={onBack}>{TEAMMATE_CHAT.back}</button>
-      </div>
+      <>
+        <div className="flex h-11 items-center gap-2 text-row text-ink-2">
+          {GROUP_COPY.notFound} ·
+          <button type="button" className={LINK} onClick={onBack}>{TEAMMATE_CHAT.back}</button>
+        </div>
+        {chat.draft.trim() ? <UnsentDraft text={chat.draft} className="mt-2" /> : null}
+      </>
     );
   } else if (chat.messages.length === 0) {
     body = (
@@ -253,14 +288,14 @@ export function GroupChat({
         ) : null}
         <TeammateThread
           teammate={fallback}
-          teammateFor={(m) => teammateFor(m.kind === "agent" || m.kind === "approval" ? m.agentId : undefined)}
+          teammateFor={teammateFor}
           showNames
           messages={chat.messages}
           actions={chat.actions}
           deciding={chat.deciding}
           onDecide={chat.decide}
-          onOpenSettings={onOpenSettings}
-          onPauseRoutine={() => undefined}
+          onOpenSettings={openSettingsFrom}
+          onPauseRoutine={(id) => void pauseRoutine(id)}
         />
         {errorRow ? <div className="mt-5">{errorRow}</div> : null}
       </>
@@ -311,9 +346,12 @@ export function GroupChat({
         <div className={cn(COLUMN, "py-6")}>{body}</div>
       </div>
 
-      {foot ? (
+      {foot || unsent ? (
         <div className="shrink-0 bg-app">
-          <div className={cn(COLUMN, "py-3")}>{foot}</div>
+          <div className={cn(COLUMN, "py-3")}>
+            {foot}
+            {unsent}
+          </div>
         </div>
       ) : null}
     </section>
@@ -362,6 +400,9 @@ function GroupComposer({
 }) {
   const [caret, setCaret] = useState(0);
   const [picked, setPicked] = useState(0);
+  // Escape closes the @ list for the "@" it was open for, without touching the words (review of step 4).
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const listId = useId();
   const canSend = value.trim().length > 0 && !busy && !offline;
   const rules = useMemo(() => rulesMembers(members), [members]);
 
@@ -374,18 +415,21 @@ function GroupComposer({
 
   const mention = mentionAt(value, caret);
   const matches = mention ? members.filter((m) => m.name.toLowerCase().startsWith(mention.query.toLowerCase())).slice(0, 5) : [];
-  const listOpen = Boolean(mention) && matches.length > 0;
+  const listOpen = Boolean(mention) && matches.length > 0 && mention?.start !== dismissedAt;
+  const activeId = listOpen ? `${listId}-${Math.min(picked, matches.length - 1)}` : undefined;
 
-  // Who answers the words so far: the named ones, else the lead.
+  // Who answers the words so far: the named ones that can, else the lead;
+  // named ones that can't say so (review of step 4).
   const hint = useMemo(() => {
     if (!value.trim()) return GROUP_COPY.composerHint;
     const pick = pickAnswerers(value, rules);
-    const names = pick.answerers.map((a) => a.member.name);
-    if (names.length === 0) {
+    if (!pick.named) {
       const lead = leadOf(rules);
-      return lead ? GROUP_COPY.answersFrom(lead.name) : GROUP_COPY.composerHint;
+      return lead ? GROUP_COPY.answersFrom(lead.name) : GROUP_COPY.noOneCanAnswer(titleList(rules.map((m) => m.name)));
     }
-    return GROUP_COPY.answersFrom(titleList(names));
+    const can = pick.answerers.filter((a) => a.skip === null).map((a) => a.member.name);
+    if (can.length === 0) return GROUP_COPY.noOneCanAnswer(titleList(pick.answerers.map((a) => a.member.name)));
+    return GROUP_COPY.answersFrom(titleList(can));
   }, [value, rules]);
 
   function choose(m: GroupMemberView) {
@@ -417,9 +461,9 @@ function GroupComposer({
       e.preventDefault();
       if (canSend) onSend();
     } else if (e.key === "Escape") {
-      if (listOpen) {
+      if (listOpen && mention) {
         e.preventDefault();
-        setCaret(-1);
+        setDismissedAt(mention.start);
         return;
       }
       e.currentTarget.blur();
@@ -429,24 +473,30 @@ function GroupComposer({
   return (
     <div className="relative rounded-lg border border-line-strong bg-raised p-3 focus-within:border-brand">
       {listOpen ? (
-        <ul role="listbox" aria-label={GROUP_COPY.mentionLabel} className="absolute bottom-full start-0 mb-1 w-64 rounded-md border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]">
+        <ul id={listId} role="listbox" aria-label={GROUP_COPY.mentionLabel} className="absolute bottom-full start-0 mb-1 w-64 rounded-md border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]">
           {matches.map((m, i) => (
-            <li key={m.agentId} role="option" aria-selected={i === picked}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => choose(m)}
-                className={cn("flex h-8 w-full min-w-0 items-center gap-2 px-3 text-start text-base text-ink", i === picked ? "bg-active" : "hover:bg-hover")}
-              >
-                <TeammateAvatar name={m.name} hue={m.hue} avatar={m.avatar} size="sm" />
-                <span className="min-w-0 truncate">{m.name}</span>
-              </button>
+            <li
+              key={m.agentId}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === picked}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => choose(m)}
+              className={cn("flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 px-3 text-start text-base text-ink", i === picked ? "bg-active" : "hover:bg-hover")}
+            >
+              <TeammateAvatar name={m.name} hue={m.hue} avatar={m.avatar} size="sm" />
+              <span className="min-w-0 truncate">{m.name}</span>
             </li>
           ))}
         </ul>
       ) : null}
       <textarea
         ref={inputRef}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={listOpen}
+        aria-controls={listOpen ? listId : undefined}
+        aria-activedescendant={activeId}
         className="block max-h-40 min-h-5 w-full resize-none bg-transparent text-base text-ink outline-none placeholder:text-ink-3"
         placeholder={GROUP_COPY.placeholder(name)}
         aria-label={GROUP_COPY.placeholder(name)}
@@ -456,6 +506,7 @@ function GroupComposer({
           onChange(e.target.value);
           setCaret(e.target.selectionStart ?? e.target.value.length);
           setPicked(0);
+          setDismissedAt(null);
         }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
         onKeyDown={onKey}

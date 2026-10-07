@@ -1264,3 +1264,14 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
   - In the chat, each answer sits under its own teammate's avatar and name, and the members menu offers Remove, Add teammate, Rename and Leave.
   - The @ list offers the group's teammates, and the composer says who will answer.
   - A card made in the group was approved there, and only that teammate continued (one RESUME run).
+  - Review (one read-only reviewer, findings re-read against the code), 10 found, 10 fixed:
+    1. Words that could not be sent left the screen when the composer went (AI off, the group gone). They now stay under the line, with Copy, as in a one-teammate chat.
+    2. A stop could end at once when the stream broke before naming its answerers. It now reads them from the saved message, else waits for an answer to it.
+    3. A teammate's drawn half answer stayed beside its saved one until every other teammate answered. It now goes when its own answer is saved.
+    4. Errors from a group turn (cut short, declined, not saved, a continue that got nothing back) were dropped. They show, as in a one-teammate chat.
+    5. A line's links were dead in a group. "See memory" and the routine's Settings now open that teammate's chat settings, Pause pauses the routine, and the members menu's Try again works.
+    6. Escape in the @ list garbled the draft. It now closes the list, and the composer is a proper combobox.
+    7. A removed member's earlier answers showed under the group's name. They keep the name they were saved with.
+    8. A late skipped line could read under a later message. It now orders under its own.
+    9. Two continues decided during one answer collapsed into one. Both now run, one after the other.
+    10. The "Answers:" hint named a paused teammate. It now names only those that can answer, and says when none can.

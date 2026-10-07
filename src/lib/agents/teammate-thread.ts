@@ -810,7 +810,9 @@ function comesBefore(a: TeammateMessageView, b: TeammateMessageView): boolean {
  */
 export function orderReplies(rows: readonly TeammateMessageView[]): TeammateMessageView[] {
   const questions = new Set(rows.filter((r) => r.kind === "user").map((r) => r.id));
-  const replyOf = (r: TeammateMessageView) => ((r.kind === "agent" || r.kind === "approval") && r.replyTo && questions.has(r.replyTo) ? r.replyTo : null);
+  // A group's skipped line names its message too, so a late one reads under it (review of step 4).
+  const replyOf = (r: TeammateMessageView) =>
+    (r.kind === "agent" || r.kind === "approval" || r.kind === "event") && r.replyTo && questions.has(r.replyTo) ? r.replyTo : null;
   const replies = new Map<string, TeammateMessageView[]>();
   const rest: TeammateMessageView[] = [];
   for (const r of rows) {

@@ -7,6 +7,7 @@ import {
   applyGroupEvent,
   groupAnsweredSince,
   listEntries,
+  orderReplies,
   applyDecisionResults,
   applyTeammateEvent,
   canRetrySend,
@@ -760,5 +761,18 @@ describe("group chats in the page (Phase 2 step 4)", () => {
     expect(listEntries(rows, groups, "").map((e) => e.row.name)).toEqual(["Offsite crew", "Planner", "Ops", "Quiet"]);
     expect(listEntries(rows, groups, "market").map((e) => [e.kind, e.row.name])).toEqual([["group", "Offsite crew"]]);
     expect(listEntries(rows, groups, "", { waitingOnly: true }).map((e) => e.row.name)).toEqual(["Ops", "Quiet"]);
+  });
+});
+
+describe("a group's skipped line (review of step 4)", () => {
+  it("reads under its own message, even when it lands after a later one", () => {
+    const at = "2026-10-07T10:00:00.000Z";
+    const rows: TeammateMessageView[] = [
+      { id: "u1", kind: "user", text: "first", practice: false, createdAt: at },
+      { id: "u2", kind: "user", text: "second", practice: false, createdAt: at },
+      { id: "a2", kind: "agent", text: "to the second", practice: false, toolCalls: [], createdAt: at, replyTo: "u2" },
+      { id: "l1", kind: "event", text: "Triage didn't answer: it is paused.", createdAt: at, event: "group_skipped", routineId: null, actionId: null, agentId: "a3", replyTo: "u1" },
+    ];
+    expect(orderReplies(rows).map((m) => m.id)).toEqual(["u1", "l1", "u2", "a2"]);
   });
 });

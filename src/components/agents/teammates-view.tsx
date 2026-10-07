@@ -19,7 +19,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import { useTeammateDraft, type TeammateListData } from "@/lib/agents/teammate-store";
+import { groupChatKey, useTeammateDraft, type TeammateListData } from "@/lib/agents/teammate-store";
 import { startersFor, type GroupDetail, type GroupRow, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 import type { TeammateRow } from "@/lib/agents/teammate-views";
 import { cn } from "@/lib/utils";
@@ -93,6 +93,7 @@ export function TeammatesView({
   // A send that found the teammate gone (404) puts the words back in the
   // composer, and then the chat goes: they stay on screen here instead.
   const unsent = useTeammateDraft(selectedSlug);
+  const unsentInGroup = useTeammateDraft(selectedGroupId ? groupChatKey(selectedGroupId) : null);
 
   // The group named in the address, read on its own when the list does not hold it.
   const groups = list?.groups ?? [];
@@ -122,7 +123,11 @@ export function TeammatesView({
         </div>
       );
     } else if (group === null) {
-      pane = <OsEmptyView title={GROUP_COPY.notFound} action={{ label: TEAMMATE_CHAT.back, onClick: onBack }} />;
+      pane = (
+        <OsEmptyView title={GROUP_COPY.notFound} action={{ label: TEAMMATE_CHAT.back, onClick: onBack }}>
+          {unsentInGroup.trim() ? <UnsentDraft text={unsentInGroup} className="w-full text-start" /> : null}
+        </OsEmptyView>
+      );
     } else {
       pane = (
         <GroupChat

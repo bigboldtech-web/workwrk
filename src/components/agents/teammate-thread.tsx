@@ -66,7 +66,8 @@ export function TeammateThread({
   actions: Readonly<Record<string, ActionView>>;
   deciding: Readonly<Record<string, "approve" | "deny">>;
   onDecide: (decisions: TeammateDecision[], opts?: { always?: boolean }) => Promise<DecideAnswer>;
-  onOpenSettings: (tab?: TeammateSettingsTab) => void;
+  /** The line it came from is passed too: a group opens that line's own teammate's settings. */
+  onOpenSettings: (tab?: TeammateSettingsTab, from?: TeammateMessageView) => void;
   onPauseRoutine: (routineId: string) => void;
 }) {
   return (
@@ -80,7 +81,7 @@ export function TeammateThread({
           case "report":
             return <ReportBubble key={m.id} m={m} teammate={teammate} />;
           case "event":
-            return <SystemLine key={m.id} m={m} onOpenSettings={onOpenSettings} onPauseRoutine={onPauseRoutine} />;
+            return <SystemLine key={m.id} m={m} onOpenSettings={(tab) => onOpenSettings(tab, m)} onPauseRoutine={onPauseRoutine} />;
           case "approval": {
             const cards = groupApprovals(m.actionIds, actions).groups.flatMap((g) => g.actions);
             if (cards.length === 0) {

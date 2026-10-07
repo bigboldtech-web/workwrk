@@ -169,6 +169,8 @@ interface StoppedTurn {
   startedAt: number;
   /** A group turn: the teammates whose answer (or skipped line) it waits for. */
   expect?: string[];
+  /** A group turn: the teammate whose answer was being drawn when it stopped. */
+  liveAgentId?: string | null;
 }
 const stoppedTurns = new Map<string, StoppedTurn[]>();
 /** The stop the chat's "The answer stopped" belongs to, per chat. */
@@ -182,16 +184,46 @@ const errorStop = new Map<string, StoppedTurn>();
  * never an answer to a chat turn.
  */
 function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
-  if (stop.expect) return groupAnsweredSince(messages, { questionId: stop.questionId, known: stop.known, expect: stop.expect });
+  if (stop.expect) return groupStopAnswered(messages, stop);
   const saved = messages.filter((m) => !isTempMessage(m));
   if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !stop.known.has(m.id));
   return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
 }
 
+/**
+ * A group turn's stop. When the stream never named its answerers (it broke
+ * before the saved message arrived, or a continue's teammate is not known
+ * here), they are read from the saved message itself, else any answer to it
+ * ends the stop; a continue's ends at a new continue answer. Never at once
+ * on an empty list (review of step 4).
+ */
+function groupStopAnswered(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  let expect = stop.expect ?? [];
+  if (expect.length === 0 && stop.questionId) {
+    const question = messages.find((m) => m.kind === "user" && m.id === stop.questionId);
+    expect = question?.kind === "user" ? (question.answerers ?? []) : [];
+  }
+  if (expect.length > 0) return groupAnsweredSince(messages, { questionId: stop.questionId, known: stop.known, expect });
+  const saved = messages.filter((m) => !isTempMessage(m) && !stop.known.has(m.id));
+  if (stop.questionId) return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
+  return saved.some((m) => m.kind === "agent" && m.resume === true && (!stop.liveAgentId || m.agentId === stop.liveAgentId));
+}
+
+/** Whether a group stop's own drawn answer is saved now: its row then goes, whatever the others are doing. */
+function drawnAnswerSaved(page: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  if (!stop.expect || !stop.liveAgentId) return false;
+  return page.some(
+    (m) =>
+      m.kind === "agent" &&
+      m.agentId === stop.liveAgentId &&
+      (stop.questionId ? m.replyTo === stop.questionId : m.resume === true && !stop.known.has(m.id)),
+  );
+}
+
 /** The page with each unanswered stop's drawn row back under its own message (a continue's at the end). */
 function withDrawn(held: readonly TeammateMessageView[], page: readonly TeammateMessageView[], open: readonly StoppedTurn[]): TeammateMessageView[] {
   if (open.length === 0) return [...page];
-  const drawn = (s: StoppedTurn) => held.filter((m) => m.id === s.liveId);
+  const drawn = (s: StoppedTurn) => (drawnAnswerSaved(page, s) ? [] : held.filter((m) => m.id === s.liveId));
   const under = new Map<string, TeammateMessageView[]>();
   const tail: TeammateMessageView[] = [];
   for (const s of open) {
@@ -217,8 +249,12 @@ const shown = new Map<string, number>();
 const epochs = new Map<string, number>();
 /** A read, and a continue, asked for while an answer was arriving: they run after it. */
 const readAfter = new Set<string>();
-/** A continue asked for during an answer, with the group teammate it is for (null in a one-teammate chat). */
-const resumeAfter = new Map<string, string | null>();
+/**
+ * Continues asked for during an answer, in order, with the group teammate
+ * each is for (null in a one-teammate chat): two decided in one stream both
+ * run, one after the other (review of step 4).
+ */
+const resumeAfter = new Map<string, Array<string | null>>();
 let seq = 0;
 
 function stateOf(slug: string): TeammateChatState {
@@ -434,7 +470,8 @@ async function resume(slug: string, agentSlug: string | null = null): Promise<vo
   const s = stateOf(slug);
   if (!s.ready) return;
   if (s.streaming) {
-    resumeAfter.set(slug, agentSlug);
+    const queued = resumeAfter.get(slug) ?? [];
+    if (!queued.includes(agentSlug)) resumeAfter.set(slug, [...queued, agentSlug]);
     return;
   }
   if (groupIdOf(slug)) {
@@ -595,12 +632,19 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   let sawDone = false;
   let broke: string | null = null;
   let expect: string[] = resumeExpect ?? [];
+  // An answer that ended early (cut short, declined, not saved, or nothing back): its sentence shows (review of step 4).
+  let endedEarly: string | null = null;
+  let savedRows = false;
 
   const nameOf = (agentId: string) => stateOf(slug).members.find((m) => m.agentId === agentId)?.name ?? null;
   const apply = (e: GroupStreamEvent) => {
     const c = stateOf(slug);
     if (e.type === "user_message" && Array.isArray(e.answerers)) {
       expect = e.answerers.map((m) => m.agentId).filter((id): id is string => typeof id === "string");
+    }
+    if (e.type === "answer_done") {
+      if (Array.isArray(e.messages) && e.messages.length > 0) savedRows = true;
+      if (typeof e.error === "string" && e.error) endedEarly ??= e.error;
     }
     const out = applyGroupEvent({ messages: c.messages, actions: c.actions }, ids, e, { newLiveId: `${TEMP_ID_PREFIX}live-${++seq}`, agentName: nameOf });
     ids = out.ids;
@@ -625,6 +669,7 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
         text,
         startedAt: Date.now(),
         expect,
+        liveAgentId: ids.agentId,
       };
       stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
       errorStop.set(slug, me);
@@ -668,9 +713,20 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
       }
     }
     if (!sawDone) fail("stopped", broke);
+    else if (endedEarly) {
+      // As a one-teammate turn: nothing kept (a continue that got nothing
+      // back) reads as an answer that broke off; anything kept stays, and
+      // the row says why.
+      if (savedRows || stateOf(slug).messages.some((m) => m.kind === "agent" && isTempMessage(m) && (m.text || m.toolCalls.length > 0))) set(slug, { error: "ended", errorText: endedEarly });
+      else if (resumeExpect) fail("stopped", endedEarly);
+      else set(slug, { error: "ended", errorText: endedEarly });
+    }
   } catch {
-    if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
-    fail(serverHas ? "stopped" : "not_sent", null);
+    // The connection dropping after the turn said it was done changes nothing.
+    if (!sawDone) {
+      if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
+      fail(serverHas ? "stopped" : "not_sent", null);
+    }
   } finally {
     set(slug, (c) => ({
       streaming: false,
@@ -684,10 +740,14 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
 /** What waited for the answer to end: a read, then a continue (only while the chat is open). */
 async function afterTurn(slug: string): Promise<void> {
   if (readAfter.delete(slug)) await refresh(slug);
-  if (resumeAfter.has(slug)) {
-    const agentSlug = resumeAfter.get(slug) ?? null;
-    resumeAfter.delete(slug);
-    if ((shown.get(slug) ?? 0) > 0) await resume(slug, agentSlug);
+  const queued = resumeAfter.get(slug);
+  if (queued && queued.length > 0) {
+    const [agentSlug, ...rest] = queued;
+    if (rest.length > 0) resumeAfter.set(slug, rest);
+    else resumeAfter.delete(slug);
+    // The next one waits for this one's end, and runs from its own afterTurn.
+    if ((shown.get(slug) ?? 0) > 0) await resume(slug, agentSlug ?? null);
+    else resumeAfter.delete(slug);
   }
 }
 

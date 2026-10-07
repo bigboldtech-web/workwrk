@@ -94,12 +94,14 @@ export function GroupMembersMenu({
               description={t.job}
               disabled={busy}
               onClick={() => {
-                void patch({ add: [t.slug] }, () => undefined).then((ok) => {
-                  if (ok) {
-                    setAdding(false);
-                    onClose();
-                  }
-                });
+                const again = () =>
+                  void patch({ add: [t.slug] }, again).then((ok) => {
+                    if (ok) {
+                      setAdding(false);
+                      onClose();
+                    }
+                  });
+                again();
               }}
             />
           ))
@@ -121,7 +123,10 @@ export function GroupMembersMenu({
           <button
             type="button"
             disabled={busy}
-            onClick={() => void patch({ remove: [m.slug] }, () => undefined)}
+            onClick={() => {
+              const again = () => void patch({ remove: [m.slug] }, again);
+              again();
+            }}
             aria-label={`${GROUP_COPY.remove} ${m.name}`}
             title={GROUP_COPY.remove}
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-60"

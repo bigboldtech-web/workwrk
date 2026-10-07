@@ -32,6 +32,8 @@ vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
   const body = new ReadableStream<Uint8Array>({
     pull(c) {
       if (i < chunks.length) c.enqueue(chunks[i++]);
+      // A stream that said it was done closes; any other breaks off.
+      else if (net.events.at(-1)?.includes('"type":"done"')) c.close();
       else c.error(new TypeError("the connection broke"));
     },
   });
@@ -105,5 +107,83 @@ describe("a group chat in the store", () => {
     await store.decide(key, [{ id: "x1", decision: "approve" }]);
     await new Promise((r) => setTimeout(r, 0));
     expect(net.posts).toEqual([]);
+  });
+
+  it("never ends a stop at once when the stream broke before naming its answerers (review of step 4)", async () => {
+    await store.open(key);
+    // The stream opens, then breaks before the saved message arrives.
+    net.events = [];
+    await store.send(key, "@Triage @PM what is late?");
+    expect(store.stateOf(key).error).toBe("stopped");
+    net.rows = [user("q1", ["a2", "a1"])];
+    await store.refresh(key);
+    expect(store.stateOf(key).error).toBe("stopped");
+    expect(store.stateOf(key).draft).toBe("@Triage @PM what is late?");
+  });
+
+  it("drops a teammate's drawn half answer once its own answer is saved, while another still answers (review of step 4)", async () => {
+    vi.useFakeTimers();
+    await store.open(key);
+    net.events = [
+      JSON.stringify({ type: "user_message", message: user("q1", ["a2", "a1"]), answerers: [{ agentId: "a2" }, { agentId: "a1" }] }),
+      JSON.stringify({ type: "answer_start", agentId: "a2" }),
+      JSON.stringify({ type: "text_delta", text: "Half" }),
+    ];
+    await store.send(key, "@Triage @PM what is late?");
+    expect(store.stateOf(key).error).toBe("stopped");
+    net.rows = [user("q1", ["a2", "a1"]), answer("m1", "a2", "q1")];
+    await store.refresh(key);
+    expect(store.stateOf(key).messages.map((m) => m.id)).toEqual(["q1", "m1"]);
+    expect(store.stateOf(key).error).toBe("stopped");
+  });
+
+  it("says why when an answer ended early", async () => {
+    await store.open(key);
+    net.events = [
+      JSON.stringify({ type: "user_message", message: user("q1", ["a1"]), answerers: [{ agentId: "a1" }] }),
+      JSON.stringify({ type: "answer_start", agentId: "a1" }),
+      JSON.stringify({ type: "text_delta", text: "Partly" }),
+      JSON.stringify({ type: "answer_done", agentId: "a1", messages: [answer("m1", "a1", "q1")], error: "The answer was cut short." }),
+      JSON.stringify({ type: "done", messages: [], error: null }),
+    ];
+    await store.send(key, "@PM go");
+    expect(store.stateOf(key)).toMatchObject({ error: "ended", errorText: "The answer was cut short." });
+  });
+
+  it("runs both continues decided during one answer, one after the other (review of step 4)", async () => {
+    await store.open(key);
+    store.show(key);
+    const id = key.slice("group:".length);
+    // A message is still streaming: it never ends until the test says so.
+    let release: () => void = () => undefined;
+    const blocked = new Promise<void>((r) => (release = r));
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
+      calls += 1;
+      net.posts.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      if (calls === 1) {
+        await blocked;
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: "done", messages: [], error: null })}\n\n`));
+          c.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    try {
+      const sending = store.send(key, "Status?");
+      net.decide = { ok: true, results: [{ id: "x1", status: "EXECUTED" }], resume: true, agentSlug: "pm", chat: { kind: "group", id, agentSlug: "pm" } };
+      await store.decide(key, [{ id: "x1", decision: "approve" }]);
+      net.decide = { ok: true, results: [{ id: "x2", status: "EXECUTED" }], resume: true, agentSlug: "triage", chat: { kind: "group", id, agentSlug: "triage" } };
+      await store.decide(key, [{ id: "x2", decision: "approve" }]);
+      release();
+      await sending;
+      await vi.waitFor(() => expect(net.posts.map((p) => p.body.agentSlug ?? "message")).toEqual(["message", "pm", "triage"]));
+    } finally {
+      vi.stubGlobal("fetch", realFetch);
+    }
   });
 });
