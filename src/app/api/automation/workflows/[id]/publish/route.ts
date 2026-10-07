@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
+import { teammateStepProblem } from "@/lib/automation/teammate-step";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
 import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
@@ -27,7 +28,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const workflow = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, status: true, triggerEvent: true, definition: true },
+    select: { id: true, status: true, triggerEvent: true, definition: true, createdById: true },
   });
   if (!workflow) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   if (workflow.status === "ARCHIVED") {
@@ -56,6 +57,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index, issues: { section: "then", index } }, { status: 400 });
     }
   }
+  // An AI teammate step works as the creator: only they may publish one, and
+  // only with a teammate they can use (the version records its publisher,
+  // and a run checks both again).
+  const teammate = await teammateStepProblem(workflow.definition, { saverId: ctx.userId, creatorId: workflow.createdById, viewer: ctx.viewer });
+  if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
   // A condition such as "priority equals" with no value would go live and
   // compare against "" on every event, never matching, so the automation
   // silently never runs. The builder refuses it too; this is for the API

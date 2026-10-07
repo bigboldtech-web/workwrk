@@ -41,6 +41,7 @@ import { formatDuration } from "@/lib/format/duration";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { useSurfaceState } from "@/lib/use-surface-state";
 import { pick } from "@/lib/surface-prefs";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 interface RunRecord { type: string; id: string; name: string; url: string | null }
 
@@ -89,6 +90,18 @@ const COLUMN_LABEL: Record<ColumnKey, string> = { when: "When", record: "Record"
 const SORTS = ["newest", "oldest"] as const;
 const SORT_LABEL: Record<(typeof SORTS)[number], string> = { newest: "Newest first", oldest: "Oldest first" };
 const STEP_TYPE_LABEL: Record<RunStep["stepType"], string> = { TRIGGER: "Trigger", CONDITION: "Check", ACTION: "Action" };
+
+
+/**
+ * A teammate step's answer hidden from this viewer (runs/[id] route,
+ * hideTeammateAnswers): the teammate's name for the sentence, else null.
+ */
+function answerHiddenIn(output: unknown): string | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
+  const o = output as Record<string, unknown>;
+  if (o.answerHidden !== true) return null;
+  return typeof o.teammate === "string" && o.teammate ? o.teammate : "the teammate";
+}
 
 function runSummary(r: { status: string; errorMessage: string | null; steps?: RunStep[] }): string {
   const actions = (r.steps ?? []).filter((s) => s.stepType === "ACTION");
@@ -262,7 +275,11 @@ function RunDrawer({ runId, known, onClose, onRetried, onMissing }: { runId: str
                     {open && hasDetail ? (
                       <div className="mb-2 flex flex-col gap-2 ps-1">
                         <JsonBlock label="What went in" value={s.inputJson} defaultOpen />
-                        <JsonBlock label="What came back" value={s.outputJson} defaultOpen />
+                        {answerHiddenIn(s.outputJson) ? (
+                          <p className="m-0 text-sm text-ink-2">{AUTOMATION_TEAMMATE_COPY.answerHidden(answerHiddenIn(s.outputJson) ?? "")}</p>
+                        ) : (
+                          <JsonBlock label="What came back" value={s.outputJson} defaultOpen />
+                        )}
                       </div>
                     ) : null}
                   </div>

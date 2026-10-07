@@ -18,6 +18,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAutomation, workflowRights } from "@/lib/automation/gate";
 import { getAction } from "@/lib/automation/registry-actions";
+import { hideTeammateAnswers } from "@/lib/automation/teammate-step";
 import { resolveRunRecords } from "@/lib/automation/run-records-server";
 import { triggerDisplayName } from "@/lib/automation/registry-triggers";
 
@@ -62,7 +63,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     failedActions.length > 0 &&
     blockedBy.length === 0;
 
-  const steps = run.steps.map((s) => ({
+  // A teammate step's answer, and what came after it, only for the creator and admins.
+  const readsAnswers = ctx.isAdmin || (!!run.workflow.createdById && run.workflow.createdById === ctx.userId);
+  const steps = (readsAnswers ? run.steps : hideTeammateAnswers(run.steps)).map((s) => ({
     ...s,
     stepName:
       s.stepType === "TRIGGER"

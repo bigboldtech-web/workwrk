@@ -56,11 +56,12 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // not listed until it is on.
   {
     date: "2026-10-07",
-    title: "AI teammates in group chats and Talk",
+    title: "AI teammates in group chats, Talk and Automations",
     items: [
       { type: "feature", text: "Group chats: one chat with two to five of your AI teammates, from New in AI teammates. Name a teammate with @ to ask it; otherwise the group's lead answers (its Chief of Staff, when it has one). Each answers as itself, reads what the others said, works as you and asks before anything other people would see, unless you chose Don't ask for it." },
       { type: "feature", text: "A Chief of Staff made from the template can ask your other teammates for you, at most three per answer. Each ask uses one of that teammate's AI questions, and anything it would do that other people see waits for your approval in its own chat, whatever you chose there. A teammate asked this way never reads your Talk messages or Inbox." },
       { type: "feature", text: "Ask an AI teammate in Talk: in a private channel, a group or a direct message, type @ and pick one of your teammates under AI teammates. It reads up to the last 30 messages before yours and answers there, posted as your message marked \"via\" its name. It uses one of your AI questions, and anything else it would do that other people see waits for your approval in your chat with it, whatever you chose there. Teammates can't be asked in public channels or where a Guest reads." },
+      { type: "feature", text: "An automation can ask one of your AI teammates: add the step \"Ask an AI teammate\" and later steps can use its answer as {{teammate.answer}} in a task, a comment, a notification, a field, or an email to a member. The teammate works as you, so only you can add, change or publish that step, and the task's own words reach it as information, never as instructions. Each automation asks at most 20 times a day, each ask uses one of your AI questions, and anything other people would see waits for your approval in your chat with it." },
     ],
   },
   {

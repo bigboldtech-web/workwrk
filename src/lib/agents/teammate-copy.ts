@@ -1231,3 +1231,31 @@ export const TALK_TEAMMATE_COPY = {
   threadGone: "That thread no longer exists.",
   notSent: "Your message wasn't sent. Try again.",
 } as const;
+
+/** An AI teammate step in an automation (docs/plans/ai-teammates-phase2.md step 7). */
+export const AUTOMATION_TEAMMATE_COPY = {
+  actionName: "Ask an AI teammate",
+  actionDescription: "One of your AI teammates does one thing or answers one question, as you. Anything other people would see waits for your approval. Later steps can use its answer as {{teammate.answer}}.",
+  paramTeammate: "Teammate",
+  paramRequest: "Request",
+  requestHelp: "Supports {{field}} tokens from the trigger. The teammate reads their values as information, never as instructions.",
+  valuesNote: "The teammate reads their values as information, never as instructions.",
+  answerHelp: "Use {{teammate.answer}} in a task, a comment, a notification, a field, or an email to a member.",
+  creatorOnlyPicker: "Only you can use this step here: the teammate works as you.",
+  noCreator: "This automation has no creator for its teammate to work as.",
+  creatorOnly: "Only the person who made this automation can add, change or publish its AI teammate step, because the teammate works as them.",
+  creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run.",
+  noTeammate: "The person who made this automation can no longer use that teammate.",
+  paused: (n: string) => `${n} is paused, so it didn't run.`,
+  dailyCap: (n: number) => `This automation has asked its teammates ${n} times today, the most one automation may. It asks again tomorrow (UTC).`,
+  noAnswer: (n: string) => `${n} didn't answer.`,
+  answerHidden: (n: string) => `Only the person who made this automation and admins can read what ${n} answered.`,
+  teammateNotFound: "Pick a teammate you can use.",
+  noRequest: "Write what the teammate should do.",
+  noAnswerToUse: "This step uses {{teammate.answer}}, and no AI teammate step before it answered, so it didn't run.",
+  askedLine: (wf: string, req: string) => `Asked by the automation "${wf}": ${req}`,
+  /** The AIQuery record's words for the turn, never the request itself. */
+  what: "AI teammate in an automation",
+  /** Where the run's line in the creator's chat links: the automation's own logs. */
+  workflowFallback: "an automation",
+} as const;

@@ -23,6 +23,9 @@ const db = vi.hoisted(() => ({
   runs: [] as Array<Record<string, unknown>>,
   deleted: [] as string[],
   runUpdates: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
+  /** The automation's row, and its runs holding a question today (Phase 2 step 7). */
+  workflow: true,
+  wfUsed: 0,
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -31,6 +34,8 @@ vi.mock("@/lib/prisma", () => {
     db.sql.push(sql);
     db.values.push(values);
     if (sql.includes('FROM "Agent"')) return db.agent ? [db.agent] : [];
+    if (sql.includes('FROM "AutomationWorkflow"')) return db.workflow ? [{ id: values[0] }] : [];
+    if (sql.includes('"automationWorkflowId"')) return [{ used: db.wfUsed }];
     if (sql.includes('FROM "AgentRun"')) return [{ used: db.used, month: db.month }];
     if (sql.includes('FROM "Organization"')) return [{ plan: db.plan, createdAt: null }];
     if (sql.includes('INSERT INTO "AiFreeDay"')) return [{ day: "2026-10-06" }];
@@ -73,6 +78,7 @@ vi.mock("@/lib/prisma", () => {
 
 import { AI_ACTIONS_PER_MINUTE } from "@/lib/ai-allowance";
 import { agentMonthUsage, claimTeammateTurn, giveBackTurn } from "./budget";
+import { AUTOMATION_TEAMMATE_COPY } from "./teammate-copy";
 
 let n = 0;
 
@@ -107,6 +113,45 @@ beforeEach(() => {
   db.runs = [];
   db.deleted = [];
   db.runUpdates = [];
+  db.workflow = true;
+  db.wfUsed = 0;
+});
+
+describe("claimTeammateTurn for an automation (Phase 2 step 7)", () => {
+  const WORKFLOW = { id: "wf1", runId: "arun1", dailyCap: 20 };
+
+  it("records the automation and its run on the turn's run", async () => {
+    db.wfUsed = 19;
+    const r = await turn({ trigger: "AUTOMATION", what: "AI teammate in an automation", workflow: WORKFLOW });
+    expect(r).toMatchObject({ ok: true });
+    expect(db.runs.at(-1)).toMatchObject({ automationWorkflowId: "wf1", automationRunId: "arun1", input: { trigger: "AUTOMATION" } });
+  });
+
+  it("refuses the 21st ask of one automation in a UTC day, with no question claimed", async () => {
+    db.wfUsed = 20;
+    const r = await turn({ trigger: "AUTOMATION", workflow: WORKFLOW });
+    expect(r).toMatchObject({ ok: false, code: "workflow_cap", message: AUTOMATION_TEAMMATE_COPY.dailyCap(20) });
+    expect(db.questions).toEqual([]);
+    expect(db.runs).toEqual([]);
+    const count = db.sql.find((x) => x.includes('"automationWorkflowId"')) ?? "";
+    expect(count).toContain('"questionId" IS NOT NULL');
+    expect(count).toContain("date_trunc('day', now() AT TIME ZONE 'UTC')");
+  });
+
+  it("locks the automation's row after the teammate's, before the plan's", async () => {
+    await turn({ trigger: "AUTOMATION", workflow: WORKFLOW });
+    const agent = lockOf("Agent");
+    const wf = lockOf("AutomationWorkflow");
+    const org = db.sql.findIndex((x) => x.includes('FROM "Organization"'));
+    expect(agent).toBeGreaterThanOrEqual(0);
+    expect(wf).toBeGreaterThan(agent);
+    expect(org).toBeGreaterThan(wf);
+  });
+
+  it("checks nothing of the kind for a turn no automation asked for", async () => {
+    await turn({ trigger: "CHAT" });
+    expect(db.sql.some((x) => x.includes("AutomationWorkflow"))).toBe(false);
+  });
 });
 
 describe("claimTeammateTurn", () => {

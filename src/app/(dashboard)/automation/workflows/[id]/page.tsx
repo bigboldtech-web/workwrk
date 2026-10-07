@@ -86,6 +86,10 @@ import { formatDate, formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { cn } from "@/lib/utils";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
+
+/** The "Ask an AI teammate" action's key (registry-actions.ts; teammate-step.ts on the server). */
+const TEAMMATE_STEP_KEY = "ask_teammate";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -132,6 +136,8 @@ interface ApiWorkflow {
   versions: ApiVersion[];
   runs: ApiRun[];
   can: { edit: boolean; archive: boolean };
+  /** The viewer made it: only they may add or change an AI teammate step (it works as them). */
+  viewerIsCreator?: boolean;
 }
 
 interface PlaceField { key: string; label: string; type: string; choices?: Array<{ value: string; label: string }> }
@@ -448,6 +454,8 @@ export default function AutomationBuilderPage() {
   const [signIn, setSignIn] = useState<PersonRef[]>([]);
   const [named, setNamed] = useState<PersonRef[]>([]);
   const [recipientQuery, setRecipientQuery] = useState("");
+  // The creator's own AI teammates, for an "Ask an AI teammate" step.
+  const [teammates, setTeammates] = useState<Array<{ value: string; label: string }>>([]);
   const [conditionQuery, setConditionQuery] = useState("");
   // Each list grows from its first page and its searches, merged by id and
   // kept in name order.
@@ -515,6 +523,21 @@ export default function AutomationBuilderPage() {
     return () => clearTimeout(t);
   }, [load]);
 
+  // The creator's teammates, only for the creator (nobody else may pick one).
+  const viewerIsCreator = Boolean(wf?.viewerIsCreator);
+  useEffect(() => {
+    if (!viewerIsCreator) return;
+    let alive = true;
+    void apiFetch<{ teammates: Array<{ slug: string; name: string; status: string }> }>("/api/agents/teammates", { cache: "no-store" }).then((r) => {
+      if (alive && r.ok && Array.isArray(r.data.teammates)) {
+        setTeammates(r.data.teammates.filter((t) => t.status === "ENABLED").map((t) => ({ value: t.slug, label: t.name })));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [viewerIsCreator]);
+
   // Picker sources, non-blocking.
   useEffect(() => {
     let alive = true;
@@ -565,7 +588,10 @@ export default function AutomationBuilderPage() {
   }, []);
 
   const canEdit = Boolean(wf?.can.edit);
-  const readOnly = !canEdit;
+  // An AI teammate step works as the creator, so anyone else reads the
+  // automation (the server refuses their save); its on/off switch stays theirs.
+  const teammateLocked = Boolean(wf && !wf.viewerIsCreator && draft?.actions.some((a) => a.key === TEAMMATE_STEP_KEY));
+  const readOnly = !canEdit || teammateLocked;
   const dirty = Boolean(draft && canEdit && draftSnapshot(draft) !== baseline);
 
   const triggerByKey = useMemo(() => new Map(catalog.triggers.map((t) => [t.key, t])), [catalog.triggers]);
@@ -1164,6 +1190,7 @@ export default function AutomationBuilderPage() {
     const byCat = new Map<string, PickerOption[]>();
     for (const a of catalog.actions) {
       if (!a.available && !showUpcoming) continue;
+      if (a.key === TEAMMATE_STEP_KEY && !wf?.viewerIsCreator) continue;
       const list = byCat.get(a.category) ?? [];
       list.push({ value: a.key, label: a.name, description: a.description, disabled: !a.available, hint: a.available ? undefined : "Coming soon" });
       byCat.set(a.category, list);
@@ -1189,6 +1216,7 @@ export default function AutomationBuilderPage() {
         : p.type === "status" ? statusOptions.find((o) => o.value === value)?.label ?? value
         : p.type === "field" ? (value === "priority" ? "Priority" : listFieldOptions.find((o) => o.value === value)?.label ?? value)
         : p.key === "priority" ? PRIORITY_OPTIONS.find((o) => o.value === value)?.label ?? value
+        : p.type === "teammate" ? (teammates.find((t) => t.value === value)?.label ?? (value ? `One of ${wf?.createdByName ?? "its creator"}'s AI teammates` : null))
         : value;
       return <span className="min-w-0 whitespace-pre-wrap break-words text-base text-ink">{shown || <span className="text-ink-3">Not set</span>}</span>;
     }
@@ -1196,6 +1224,10 @@ export default function AutomationBuilderPage() {
       const allowAdmins = action.key === "create_notification" && p.key === "userId";
       return <Token label={personLabel(value)} placeholder="Pick a person" ariaLabel={p.label} readOnly={false} alwaysSearch onSearchChange={setRecipientQuery}
         sections={peopleSections(recipients, recipientQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
+    }
+    if (p.type === "teammate") {
+      return <Token label={value ? teammates.find((t) => t.value === value)?.label ?? AUTOMATION_TEAMMATE_COPY.teammateNotFound : null} placeholder="Pick a teammate" ariaLabel={p.label} readOnly={false}
+        sections={[{ options: teammates }]} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
     }
     if (p.type === "board") {
       return <Token label={value ? listLabel(value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel={p.label} readOnly={false}
@@ -1229,7 +1261,11 @@ export default function AutomationBuilderPage() {
       const f = row.params.field;
       if (!f || f === "priority" || scopedLists.some((l) => (l.fields ?? []).some((x) => x.key === f && x.choices?.length))) return null;
     }
-    if (p.type === "user" || p.type === "board" || p.type === "field" || p.type === "status") return null;
+    if (p.type === "user" || p.type === "board" || p.type === "field" || p.type === "status" || p.type === "teammate") return null;
+    // A teammate's request: its values are read as information, never as instructions.
+    if (action.key === TEAMMATE_STEP_KEY && p.key === "request") {
+      return tokenHelp ? `Use ${tokenHelp} to put in what the trigger carries. ${AUTOMATION_TEAMMATE_COPY.valuesNote}` : AUTOMATION_TEAMMATE_COPY.valuesNote;
+    }
     if ((p.type === "text" || p.type === "string") && p.help?.includes("{{field}}")) return tokenHelp ? `Use ${tokenHelp} to put in what the trigger carries.` : null;
     return p.help ?? null;
   };
@@ -1401,7 +1437,9 @@ export default function AutomationBuilderPage() {
                 per-automation grant exists yet, so asking would reach someone
                 with nothing to give. What every Member can do is copy it. */}
             <span className="min-w-0 truncate">
-              View only. {wf.createdByName ? `${wf.createdByName} made this one.` : ""} You can change the automations you make.
+              {teammateLocked && canEdit
+                ? `View only. Its AI teammate step works as ${wf.createdByName ?? "its creator"}, so only they can change it. You can still pause it.`
+                : `View only. ${wf.createdByName ? `${wf.createdByName} made this one.` : ""} You can change the automations you make.`}
             </span>
             {canCreate ? (
               <button type="button" onClick={() => void duplicate()} className={cn("shrink-0", BTN.link)}>Duplicate it to make your own</button>
@@ -1552,6 +1590,11 @@ export default function AutomationBuilderPage() {
                             </p>
                           ) : null}
                           {action.key === "add_comment" ? <p className="m-0 text-sm text-ink-2">Posted as {wf.createdByName ?? "the person who made this automation"}.</p> : null}
+                          {action.key === TEAMMATE_STEP_KEY ? (
+                            <p className="m-0 text-sm text-ink-2">
+                              {wf.viewerIsCreator ? AUTOMATION_TEAMMATE_COPY.creatorOnlyPicker : AUTOMATION_TEAMMATE_COPY.creatorOnly} {AUTOMATION_TEAMMATE_COPY.answerHelp}
+                            </p>
+                          ) : null}
                           {action.params.filter((p) => p.key !== "itemId").map((p) => {
                             const help = paramHelp(action, p, row);
                             return (

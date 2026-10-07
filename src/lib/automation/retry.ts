@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma";
 import { getAction, type ActionContext } from "./registry-actions";
 import { recordUsage } from "./usage";
 import { loadAuthor, runReach } from "./author-reach";
+import { teammateStepData } from "./engine";
 
 /**
  * Retry queue: re-runs FAILED/PARTIAL runs whose failed steps are ALL
@@ -42,6 +43,24 @@ function readRetryState(payload: Record<string, unknown>): RetryState | null {
   return { attempt: s.attempt, nextAttemptAt: s.nextAttemptAt };
 }
 
+/**
+ * What the run's last "Ask an AI teammate" step that succeeded before `order`
+ * answered: a retried step reads {{teammate.answer}} as it would have.
+ */
+export function stepDataBefore(
+  steps: ReadonlyArray<{ order: number; stepType: string; stepKey: string; status: string; outputJson: unknown }>,
+  order: number,
+): NonNullable<ActionContext["stepData"]> {
+  // The engine's own rule: a teammate step that failed leaves the answer of
+  // the one before it in place.
+  const earlier = steps
+    .filter((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate" && s.status === "SUCCESS" && s.order < order)
+    .sort((a, b) => a.order - b.order)
+    .at(-1);
+  if (!earlier) return {};
+  return teammateStepData(earlier.outputJson && typeof earlier.outputJson === "object" ? (earlier.outputJson as Record<string, unknown>) : null);
+}
+
 export async function processAutomationRetries(): Promise<{
   scanned: number;
   retried: number;
@@ -60,7 +79,7 @@ export async function processAutomationRetries(): Promise<{
     take: 100,
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { status: true, createdById: true, updatedById: true } },
+      workflow: { select: { status: true, name: true, createdById: true, updatedById: true } },
       // Who published the version that ran: a retry is capped like the run (runReach).
       workflowVersion: { select: { createdById: true } },
     },
@@ -90,6 +109,7 @@ export async function processAutomationRetries(): Promise<{
       const cleanPayload = { ...payload };
       delete cleanPayload.__retryState;
       const depth = typeof cleanPayload.__automationDepth === "number" ? cleanPayload.__automationDepth : 0;
+      const publisherId = run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById;
       const ctx: ActionContext = {
         organizationId: run.organizationId,
         eventKey: run.triggerEventKey,
@@ -104,8 +124,10 @@ export async function processAutomationRetries(): Promise<{
         // version that ran (or last saved the draft, for a run with no version).
         author: await runReach((id) => loadAuthor(run.organizationId, id), {
           creatorId: run.workflow.createdById,
-          publisherId: run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById,
+          publisherId,
         }),
+        publisherId,
+        workflowName: run.workflow.name,
       };
 
       let stillFailing = 0;
@@ -118,7 +140,9 @@ export async function processAutomationRetries(): Promise<{
         }
         const stepStartedAt = new Date();
         try {
-          const output = await impl.execute({ ...ctx, stepOrder: step.order }, (step.inputJson ?? {}) as Record<string, unknown>);
+          // An earlier teammate step's answer, as the run's own steps read it.
+          const stepData = stepDataBefore(run.steps, step.order);
+          const output = await impl.execute({ ...ctx, stepOrder: step.order, stepData }, (step.inputJson ?? {}) as Record<string, unknown>);
           const completedAt = new Date();
           await prisma.automationRunStep.update({
             where: { id: step.id },

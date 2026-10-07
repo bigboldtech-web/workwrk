@@ -29,6 +29,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { forbidden, requireAutomation, triggerProblem, workflowRights } from "@/lib/automation/gate";
 import { definitionForSave, definitionSchema } from "@/lib/automation/definition-schema";
+import { teammateStepProblem } from "@/lib/automation/teammate-step";
 import { SCOPE_REFUSAL, readScope, restoreHiddenScope } from "@/lib/automation/definition";
 import { readAutomationSettings } from "@/lib/automation/settings";
 import { containerContents, definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
@@ -280,6 +281,9 @@ export async function POST(req: NextRequest) {
     if (problem) return NextResponse.json({ error: problem, section: "when", issues: { section: "when" } }, { status: 400 });
     definition.trigger = triggerEvent;
   }
+  // An AI teammate step: the saver makes it, so it must be a teammate they can use.
+  const teammate = await teammateStepProblem(definition, { saverId: ctx.userId, creatorId: ctx.userId, viewer: ctx.viewer });
+  if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
 
   const workflow = await prisma.automationWorkflow.create({
     data: {

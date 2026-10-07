@@ -90,6 +90,12 @@ export function parseDefinition(definition: unknown): ParsedDefinition {
   return { conditions: def.conditions ?? null, actions };
 }
 
+/** A teammate step's output as later steps read it. */
+export function teammateStepData(output: Record<string, unknown> | null | undefined): NonNullable<ActionContext["stepData"]> {
+  const o = output ?? {};
+  return { teammate: { answer: typeof o.answer === "string" ? o.answer : "", name: typeof o.teammate === "string" ? o.teammate : "" } };
+}
+
 export interface RunAutomationsInput {
   organizationId: string;
   event: string;
@@ -205,7 +211,7 @@ async function runMatched(args: {
   };
   const eventBoardId = typeof payload.boardId === "string" && payload.boardId ? payload.boardId : null;
 
-  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue; author: AutomationAuthor | null | undefined }> = [];
+  const runnable: Array<MatchedWorkflow & { live: Prisma.JsonValue; author: AutomationAuthor | null | undefined; publisherId: string | null }> = [];
   for (const wf of args.workflows) {
     const version = wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : undefined;
     const live = liveDefinition(wf, version ?? null) as Prisma.JsonValue;
@@ -217,12 +223,13 @@ async function runMatched(args: {
     if (!placeless && !isEverywhere(scope) && !scopeMatches(scope, await placeOf())) continue;
     // The run's reach (runReach): the creator and whoever published what
     // runs, or last saved the draft when an older row runs its draft.
-    const author = await runReach(authorOf, { creatorId: wf.createdById, publisherId: version ? version.createdById ?? null : wf.updatedById });
+    const publisherId = version ? version.createdById ?? null : wf.updatedById;
+    const author = await runReach(authorOf, { creatorId: wf.createdById, publisherId });
     if (author !== undefined) {
       if (!eventAllowedForAuthor(event, payload, author)) continue;
       if (eventBoardId && !(await authorCanRead(author, eventBoardId))) continue;
     }
-    runnable.push({ ...wf, live, author });
+    runnable.push({ ...wf, live, author, publisherId });
   }
   if (runnable.length === 0) return 0;
 
@@ -255,6 +262,7 @@ async function runMatched(args: {
       const created = await runWorkflow({
         workflow: { ...wf, definition: wf.live },
         author: wf.author,
+        publisherId: wf.publisherId,
         organizationId,
         event,
         payload,
@@ -288,6 +296,8 @@ async function runWorkflow(args: {
   idempotencyKey: string;
   depth: number;
   author?: AutomationAuthor | null;
+  /** Who published the version that runs: a teammate step runs only for its creator's own. */
+  publisherId?: string | null;
 }): Promise<boolean> {
   const { workflow, organizationId, event, payload, recordId, recordType, idempotencyKey, depth } = args;
   const startedAt = new Date();
@@ -432,12 +442,17 @@ async function runWorkflow(args: {
       depth,
       workflowCreatorId: workflow.createdById,
       author: args.author,
+      publisherId: args.publisherId ?? null,
+      workflowName: workflow.name,
     };
 
     let succeeded = 0;
     let failed = 0;
     let failedUnretryable = 0;
     let firstError: string | null = null;
+    // What the latest "Ask an AI teammate" step that succeeded answered, for
+    // the steps after it ({{teammate.answer}}).
+    let stepData: NonNullable<ActionContext["stepData"]> = {};
 
     for (const action of def.actions) {
       const stepStartedAt = new Date();
@@ -460,8 +475,9 @@ async function runWorkflow(args: {
       try {
         // The step's own order rides along, so a webhook delivery id is
         // unique per step and the same on every retry of that step.
-        const output = await impl.execute({ ...ctx, stepOrder }, action.params);
+        const output = await impl.execute({ ...ctx, stepOrder, stepData }, action.params);
         succeeded++;
+        if (action.key === "ask_teammate") stepData = teammateStepData(output);
         await logStep({
           stepType: "ACTION",
           stepKey: action.key,

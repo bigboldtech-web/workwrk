@@ -25,6 +25,7 @@ import { notYours, requireAutomation, workflowRights } from "@/lib/automation/ga
 import { getAction, type ActionContext } from "@/lib/automation/registry-actions";
 import { recordUsage } from "@/lib/automation/usage";
 import { loadAuthor, runReach } from "@/lib/automation/author-reach";
+import { stepDataBefore } from "@/lib/automation/retry";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -35,7 +36,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     where: { id, organizationId: ctx.orgId },
     include: {
       steps: { orderBy: { order: "asc" } },
-      workflow: { select: { id: true, status: true, createdById: true, updatedById: true } },
+      workflow: { select: { id: true, name: true, status: true, createdById: true, updatedById: true } },
       workflowVersion: { select: { createdById: true } },
     },
   });
@@ -74,6 +75,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   delete cleanPayload.__retryState;
   const depth = typeof cleanPayload.__automationDepth === "number" ? cleanPayload.__automationDepth : 0;
 
+  const publisherId = run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById;
   const actionCtx: ActionContext = {
     organizationId: run.organizationId,
     eventKey: run.triggerEventKey,
@@ -86,10 +88,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     workflowCreatorId: run.workflow.createdById,
     author: await runReach((uid) => loadAuthor(run.organizationId, uid), {
       creatorId: run.workflow.createdById,
-      publisherId: run.workflowVersion ? run.workflowVersion.createdById : run.workflow.updatedById,
+      publisherId,
       retrierId: ctx.userId,
     }),
     manualRetry: true,
+    publisherId,
+    retrierId: ctx.userId,
+    workflowName: run.workflow.name,
   };
 
   let stillFailing = 0;
@@ -103,7 +108,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
     const stepStartedAt = new Date();
     try {
-      const output = await impl.execute({ ...actionCtx, stepOrder: step.order }, (step.inputJson ?? {}) as Record<string, unknown>);
+      const output = await impl.execute(
+        { ...actionCtx, stepOrder: step.order, stepData: stepDataBefore(run.steps, step.order) },
+        (step.inputJson ?? {}) as Record<string, unknown>,
+      );
       const completedAt = new Date();
       await prisma.automationRunStep.update({
         where: { id: step.id },
