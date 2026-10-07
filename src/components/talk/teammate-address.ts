@@ -5,25 +5,11 @@
 //
 // Pure.
 
-import { addressedIn } from "@/lib/agents/talk-address";
+import { addressedAt, addressedIn } from "@/lib/agents/talk-address";
 
 export interface PickedTeammate {
   slug: string;
   name: string;
-}
-
-const WORD_CHAR = /[\p{L}\p{N}_]/u;
-
-/** Where "@<name>" first stands in the body as a whole name (addressedIn's rule), or -1. */
-function firstAt(body: string, name: string): number {
-  const lower = body.toLowerCase();
-  const key = `@${name.trim().toLowerCase()}`;
-  if (key.length < 2) return -1;
-  for (let i = lower.indexOf(key); i !== -1; i = lower.indexOf(key, i + 1)) {
-    const next = lower.charAt(i + key.length);
-    if (!next || !WORD_CHAR.test(next)) return i;
-  }
-  return -1;
 }
 
 /**
@@ -34,8 +20,7 @@ function firstAt(body: string, name: string): number {
 export function pickTeammateInBody(body: string, picked: readonly PickedTeammate[]): string | undefined {
   let best: { slug: string; at: number; len: number } | null = null;
   for (const t of picked) {
-    if (!addressedIn(body, t.name)) continue;
-    const at = firstAt(body, t.name);
+    const at = addressedAt(body, t.name);
     if (at < 0) continue;
     const len = t.name.trim().length;
     if (!best || at < best.at || (at === best.at && len > best.len)) best = { slug: t.slug, at, len };

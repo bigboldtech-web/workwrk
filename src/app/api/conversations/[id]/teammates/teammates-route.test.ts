@@ -27,6 +27,8 @@ const st = vi.hoisted(() => ({
   insertThrows: false,
   readerIds: ["u-olivia", "u-sam"] as string[],
   tooMany: false,
+  readerQueue: [] as Array<{ ids: string[]; tooMany: boolean }>,
+  afterSent: [] as Row[],
   userN: 0,
 }));
 
@@ -61,7 +63,7 @@ vi.mock("@/lib/talk-post", () => ({
     st.inserted.push(a);
     return { ok: true, message: { id: `m${st.inserted.length}`, createdAt: new Date("2026-10-07T10:00:00Z"), body: a.body, metadata: a.metadata } };
   },
-  afterMessageSent: async () => {},
+  afterMessageSent: async (a: Row) => void st.afterSent.push(a),
 }));
 vi.mock("@/lib/agents/acting", () => ({
   resolveActingPerson: async () => ({ ok: true, person: { userId: `u-${st.userN}`, organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: viewerFor() } }),
@@ -82,12 +84,13 @@ vi.mock("@/lib/agents/engine", () => ({
 }));
 vi.mock("@/lib/agents/talk-turn", () => ({
   conversationHasGuests: async () => st.guests.shift() ?? false,
-  conversationReaderIds: async () => ({ ids: st.readerIds, tooMany: st.tooMany }),
+  conversationReaderIds: async () => st.readerQueue.shift() ?? { ids: st.readerIds, tooMany: st.tooMany },
   talkContext: async () => [],
   setRequestState: async (messageId: string, state: Row) => void st.states.push({ messageId, ...state }),
   noticeTalkApprovals: async (userId: string, agent: { slug: string }, ids: string[]) =>
     void st.notified.push({ data: { type: "agent_approval", link: `/agents?chat=${agent.slug}&action=${ids[0]}` } }),
   auditTalkAnswer: async () => {},
+  recordTalkOutcome: async () => {},
 }));
 vi.mock("@/lib/agents/teammate-server", async () => {
   const real = await vi.importActual<typeof import("@/lib/agents/teammate-server")>("@/lib/agents/teammate-server");
@@ -132,6 +135,8 @@ beforeEach(() => {
   st.insertThrows = false;
   st.readerIds = ["u-olivia", "u-sam"];
   st.tooMany = false;
+  st.readerQueue = [];
+  st.afterSent = [];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -250,6 +255,18 @@ describe("asking a teammate in Talk", () => {
     st.already = { id: "m-old", body: "@Chief of Staff summarise this" };
     const again = await ask(ASK);
     expect(again.events).toEqual([{ type: "message", message: { id: "m-old", body: "@Chief of Staff summarise this" } }]);
+  });
+
+  it("posts nothing when someone joined during the turn: its context was checked against who was here (review round 2)", async () => {
+    st.readerQueue = [{ ids: ["u-olivia"], tooMany: false }, { ids: ["u-olivia", "u-eve"], tooMany: false }];
+    const out = await ask(ASK);
+    expect(out.events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    expect(st.inserted).toHaveLength(1);
+  });
+
+  it("sends the answer's Inbox notices to its readers only (review round 2)", async () => {
+    await ask(ASK);
+    expect(st.afterSent.at(-1)).toMatchObject({ onlyUserIds: [`u-${st.userN}`, "u-olivia", "u-sam"] });
   });
 
   it("is asked only where at most 250 people read, and posts nothing past it", async () => {

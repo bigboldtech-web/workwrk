@@ -63,6 +63,8 @@ function rulesMembers(members: readonly GroupMemberView[]): GroupMember[] {
 export function GroupChat({
   group: g,
   teammates,
+  teammatesFailed = false,
+  onReloadTeammates,
   actionId,
   onBack,
   onChanged,
@@ -72,6 +74,9 @@ export function GroupChat({
   group: GroupRow;
   /** The person's teammates, for Add teammate. */
   teammates: readonly TeammateRow[] | null;
+  /** The list could not be read; Try again reads it again (review round 2). */
+  teammatesFailed?: boolean;
+  onReloadTeammates?: () => void;
   actionId: string | null;
   onBack: () => void;
   /** The group changed (renamed, a teammate added or removed): the list reads it again. */
@@ -350,6 +355,8 @@ export function GroupChat({
               void refresh();
             }}
             draft={chat.draft}
+            teammatesFailed={teammatesFailed}
+            onReloadTeammates={onReloadTeammates}
             onLeft={() => {
               setMembersOpen(false);
               onLeft();

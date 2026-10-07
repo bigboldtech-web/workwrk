@@ -560,7 +560,12 @@ function historyText(row: HistoryRow): string | null {
       : origin.kind === "delegated"
         ? "Answer to another teammate's request: "
         : origin.kind === "talk"
-          ? "Answer posted in Talk: "
+          ? // Only what was posted reads as posted (review round 2).
+            typeof origin.postedMessageId === "string"
+            ? "Answer posted in Talk: "
+            : origin.postedMessageId === null
+              ? "Answer asked for in Talk, not posted there: "
+              : "Answer asked for in Talk: "
           : "";
   // The line is what the turn did, so the words give way to it, not the line to them.
   const room = HISTORY_CHARS - lead.length - (line ? line.length + 2 : 0);

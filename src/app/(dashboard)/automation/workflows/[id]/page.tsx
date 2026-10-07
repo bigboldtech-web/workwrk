@@ -822,7 +822,7 @@ export default function AutomationBuilderPage() {
     scope: "page",
     group: "On this page",
     inInputs: true,
-    when: () => canEdit,
+    when: () => canEdit && !teammateLocked,
     run: (e) => {
       e.preventDefault();
       if (!saving && !publishing && !offline) void save();
@@ -1216,7 +1216,7 @@ export default function AutomationBuilderPage() {
         : p.type === "status" ? statusOptions.find((o) => o.value === value)?.label ?? value
         : p.type === "field" ? (value === "priority" ? "Priority" : listFieldOptions.find((o) => o.value === value)?.label ?? value)
         : p.key === "priority" ? PRIORITY_OPTIONS.find((o) => o.value === value)?.label ?? value
-        : p.type === "teammate" ? (teammates.find((t) => t.value === value)?.label ?? (value ? `One of ${wf?.createdByName ?? "its creator"}'s AI teammates` : null))
+        : p.type === "teammate" ? (teammates.find((t) => t.value === value)?.label ?? (value || !wf?.viewerIsCreator ? `One of ${wf?.createdByName ?? "its creator"}'s AI teammates` : null))
         : value;
       return <span className="min-w-0 whitespace-pre-wrap break-words text-base text-ink">{shown || <span className="text-ink-3">Not set</span>}</span>;
     }
@@ -1378,7 +1378,14 @@ export default function AutomationBuilderPage() {
         ) : canEdit ? (
           <label className="flex items-center justify-between gap-3 text-base text-ink">
             <span>{wf.status === "ACTIVE" ? "On, running the published version" : "Paused"}</span>
-            <Switch checked={wf.status === "ACTIVE"} disabled={toggling || offline} onChange={(v) => void setActive(v)} aria-label="Turn the automation on" />
+            {/* A locked view can pause it, never turn it back on (the server refuses that; review round 2). */}
+            <Switch
+              checked={wf.status === "ACTIVE"}
+              disabled={toggling || offline || (teammateLocked && wf.status !== "ACTIVE")}
+              title={teammateLocked && wf.status !== "ACTIVE" ? AUTOMATION_TEAMMATE_COPY.creatorOnlyOn : undefined}
+              onChange={(v) => void setActive(v)}
+              aria-label="Turn the automation on"
+            />
           </label>
         ) : (
           <p className="m-0 text-base text-ink-2">{wf.status === "ACTIVE" ? "On" : "Paused"}</p>
@@ -1439,7 +1446,7 @@ export default function AutomationBuilderPage() {
                 with nothing to give. What every Member can do is copy it. */}
             <span className="min-w-0 truncate">
               {teammateLocked && canEdit
-                ? `View only. Its AI teammate step works as ${wf.createdByName ?? "its creator"}, so only they can change it. You can still pause it.`
+                ? `View only. Its AI teammate step works as ${wf.createdByName ?? "its creator"}, so only they can change it${wf.status === "ACTIVE" ? ". You can still pause it." : " or turn it back on."}`
                 : `View only. ${wf.createdByName ? `${wf.createdByName} made this one.` : ""} You can change the automations you make.`}
             </span>
             {canCreate ? (

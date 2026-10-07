@@ -1013,6 +1013,17 @@ describe("a turn an automation asked for (Phase 2 step 7)", () => {
 });
 
 describe("getOrCreateTeammateSession", () => {
+  it("reads a Talk answer back as posted only when it was (review round 2)", async () => {
+    const row = (id: string, postedMessageId: unknown) => ({ id, role: "ASSISTANT", content: `Said ${id}.`, kind: null, meta: { origin: { kind: "talk", place: "#proof", conversationId: "c1", messageId: "m1", ...(postedMessageId === undefined ? {} : { postedMessageId }) } }, toolCalls: null });
+    db.history = [{ id: "u0", role: "USER", content: "Hi", kind: null, meta: null, toolCalls: null }, row("a", "msg-9"), row("b", null), row("c", undefined)];
+    db.replies = [reply([say("Ok.")], "end_turn")];
+    await runTeammateTurn(turn());
+    const said = db.requests[0].messages.map((m) => m.content);
+    expect(said).toContain("Answer posted in Talk: Said a.");
+    expect(said).toContain("Answer asked for in Talk, not posted there: Said b.");
+    expect(said).toContain("Answer asked for in Talk: Said c.");
+  });
+
   it("finds the person's live chat with the teammate, never an archived one or someone else's", async () => {
     db.sessions.push({ id: "s-archived", organizationId: "org", agentId: "a1", userId: "me", kind: "TEAMMATE", archivedAt: new Date() });
     db.sessions.push({ id: "s-max", organizationId: "org", agentId: "a1", userId: "max", kind: "TEAMMATE", archivedAt: null });

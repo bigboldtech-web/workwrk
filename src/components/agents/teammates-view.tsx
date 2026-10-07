@@ -134,6 +134,8 @@ export function TeammatesView({
           key={group.id}
           group={group}
           teammates={rows}
+          teammatesFailed={listError && rows === null}
+          onReloadTeammates={onReload}
           actionId={actionId}
           onBack={onBack}
           onChanged={() => onReload()}

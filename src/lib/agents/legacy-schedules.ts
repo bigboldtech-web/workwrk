@@ -108,7 +108,9 @@ export async function legacyScheduleOutcome(agent: LegacyScheduleRow, now: Date)
   // A bare five-field cron ran on the server's clock: it keeps its times,
   // and now names the zone, so the words and a later edit read it right
   // (review round 1). The keywords keep reading in that zone (scheduleZone).
-  const schedule = moved.ok && !moved.changed && parseCron(moved.schedule) && !splitScheduleZone(moved.schedule).zone ? { ...moved, schedule: withScheduleZone(moved.schedule, serverTimeZone()) } : moved;
+  // Every bare cron, a changed one too ("0,30 9-17 * * 1-5" becomes
+  // "0 9-17 * * 1-5"), so a later edit never moves its times (review round 2).
+  const schedule = moved.ok && parseCron(moved.schedule) && !splitScheduleZone(moved.schedule).zone ? { ...moved, schedule: withScheduleZone(moved.schedule, serverTimeZone()) } : moved;
   if (!schedule.ok) return stop("unsupported_schedule");
   const creator = agent.createdById;
   if (!creator) return stop("no_creator");
@@ -158,26 +160,25 @@ export async function convertLegacySchedules(now: Date, opts: { limit: number })
 }
 
 async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "stopped" | "taken"> {
-  // Moved before, and turned back on since: its routine still stands, so
-  // there is one routine per agent and the schedule is simply off again.
-  if (agent.scheduleMovedAt && agent.scheduleRoutineId) {
-    const routine = await prisma.agentRoutine.findFirst({ where: { id: agent.scheduleRoutineId, organizationId: agent.organizationId }, select: { id: true } });
-    if (routine) {
-      const off = await prisma.agent.updateMany({
-        where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron },
-        data: { autonomousEnabled: false, nextRunAt: null },
-      });
-      if (off.count !== 1) return "taken";
-      await auditAgent({
-        organizationId: agent.organizationId,
-        actorId: null,
-        actorType: "system",
-        agent: { id: agent.id, name: agent.name, slug: agent.slug },
-        action: "schedule_stopped",
-        metadata: { routineId: routine.id, reason: "already_moved", schedule: agent.scheduleCron },
-      });
-      return "stopped";
-    }
+  // Moved before, and turned back on since (by an older build): it is simply
+  // off again, and never moved twice. A routine its creator deleted stays
+  // deleted: moving again would bring back what they chose to end (review
+  // round 2). Anyone who wants it scheduled sets up a routine in its chat.
+  if (agent.scheduleMovedAt) {
+    const off = await prisma.agent.updateMany({
+      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron },
+      data: { autonomousEnabled: false, nextRunAt: null },
+    });
+    if (off.count !== 1) return "taken";
+    await auditAgent({
+      organizationId: agent.organizationId,
+      actorId: null,
+      actorType: "system",
+      agent: { id: agent.id, name: agent.name, slug: agent.slug },
+      action: "schedule_stopped",
+      metadata: { routineId: agent.scheduleRoutineId ?? null, reason: "already_moved", schedule: agent.scheduleCron },
+    });
+    return "stopped";
   }
   const outcome = await legacyScheduleOutcome(agent, now);
   const reason = outcome.kind === "stop" ? outcome.reason : null;

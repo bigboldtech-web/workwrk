@@ -295,6 +295,17 @@ function readersOf(m: Record<string, unknown>): unknown[] | null {
   return null;
 }
 
+/**
+ * Whether every one of these people may read this message's words: a message
+ * with no reader list, or one whose list holds them all. A teammate's answer
+ * is read by everyone in the conversation now, so it may draw only on what
+ * they all may read (review round 2).
+ */
+export function readableByAll(metadata: unknown, viewerIds: readonly string[]): boolean {
+  const readers = readersOf(obj(metadata));
+  return readers === null || viewerIds.every((id) => readers.includes(id));
+}
+
 /** True when this viewer may not read this message's words (AI updates and teammate answers in Talk). */
 export function aiUpdateHiddenFor(metadata: unknown, viewerId: string): boolean {
   const readers = readersOf(obj(metadata));

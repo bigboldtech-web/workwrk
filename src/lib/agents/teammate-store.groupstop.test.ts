@@ -22,9 +22,16 @@ describe("groupStopAnswered when the saved message never arrived", () => {
     expect(groupStopAnswered([q, answer("m1", "a-triage", "u2"), answer("m2", "a-pm", "u2")], STOP)).toBe(true);
   });
 
-  it("never takes an older message with the same words", () => {
+  it("never takes an older message with the same words: it was on the page already", () => {
     const older = user("u1", "@Triage @PM what is late?", "2026-10-06T09:00:00Z", ["a-triage"]);
-    expect(groupStopAnswered([older, answer("m0", "a-triage", "u1")], STOP)).toBe(false);
+    const stop = { ...STOP, known: new Set(["u1", "m0"]) };
+    expect(groupStopAnswered([older, answer("m0", "a-triage", "u1")], stop)).toBe(false);
+  });
+
+  it("reads the server's order, never the two clocks: a device clock far ahead still finds it (review round 2)", () => {
+    const q = user("u2", "@Triage @PM what is late?", "2026-10-07T09:50:00Z", ["a-triage", "a-pm"]);
+    const ahead = { ...STOP, startedAt: SENT + 60 * 60_000 };
+    expect(groupStopAnswered([q, answer("m1", "a-triage", "u2"), answer("m2", "a-pm", "u2")], ahead)).toBe(true);
   });
 
   it("never reads a continue's answer as this message's", () => {

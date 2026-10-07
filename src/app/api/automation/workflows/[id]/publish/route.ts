@@ -128,5 +128,5 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   // The answer carries the definition as this editor may see it: places they
   // cannot open stay out of the row and out of the version's snapshot.
-  return NextResponse.json({ workflow: await workflowForViewer(ctx.viewer, result.workflow), version: await versionForViewer(ctx.viewer, result.version) });
+  return NextResponse.json({ workflow: await workflowForViewer(ctx.viewer, result.workflow), version: await versionForViewer(ctx.viewer, result.version, result.workflow.createdById) });
 }

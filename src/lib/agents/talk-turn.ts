@@ -10,7 +10,7 @@ import { anyGuestHere } from "@/lib/access/guests";
 import { logActivity } from "@/lib/activity";
 import { stripMarkup } from "@/lib/chat-markup";
 import { prisma } from "@/lib/prisma";
-import { AI_UPDATE_HIDDEN_KIND, serveAiUpdate } from "@/lib/talk-updates";
+import { AI_UPDATE_HIDDEN_KIND, readableByAll, serveAiUpdate } from "@/lib/talk-updates";
 import { actorLabelFor, type ActingPerson } from "./acting";
 import { clampText } from "./clamp";
 import { TALK_TEAMMATE_LIMITS } from "./talk-address";
@@ -76,6 +76,13 @@ export async function talkContext(a: {
   before: Date;
   beforeId: string;
   person: Pick<ActingPerson, "userId">;
+  /**
+   * Everyone who reads the conversation now (the answer's readers to be). A
+   * message only some of them may read (an AI update, an earlier teammate's
+   * answer, kept for who was there) is left out: else the new answer, read by
+   * them all, could carry it to someone outside its list (review round 2).
+   */
+  readers: readonly string[];
 }): Promise<Array<{ from: string; text: string }>> {
   const select = { id: true, body: true, metadata: true, createdAt: true, author: { select: { firstName: true, lastName: true, email: true } } } as const;
   const earlier: Prisma.ConversationMessageWhereInput = { OR: [{ createdAt: { lt: a.before } }, { createdAt: a.before, id: { lt: a.beforeId } }] };
@@ -100,6 +107,7 @@ export async function talkContext(a: {
         })
       ).reverse();
   const lines = rows
+    .filter((x) => readableByAll(x.metadata, a.readers))
     .map((x) => serveAiUpdate(x, a.person.userId))
     .filter((x) => (x.metadata as { kind?: unknown } | null)?.kind !== AI_UPDATE_HIDDEN_KIND)
     .map((x) => ({
@@ -133,6 +141,23 @@ export async function setRequestState(messageId: string, state: Record<string, u
     SET "metadata" = jsonb_set(COALESCE("metadata", '{}'::jsonb), '{teammate}', ${json}::jsonb, true),
         "updatedAt" = ${new Date()}
     WHERE "id" = ${messageId}`;
+}
+
+/**
+ * Whether the answer was posted where it was asked, on the teammate's own row
+ * in the person's chat (meta.origin.postedMessageId: the Talk message, or
+ * null when nothing was posted). The history then never tells the model it
+ * posted what it did not (review round 2). A notice: never throws.
+ */
+export async function recordTalkOutcome(chatMessageId: string, postedMessageId: string | null): Promise<void> {
+  try {
+    await prisma.$executeRaw`
+      UPDATE "ChatMessage"
+      SET "meta" = jsonb_set("meta", '{origin,postedMessageId}', ${JSON.stringify(postedMessageId)}::jsonb, true)
+      WHERE "id" = ${chatMessageId} AND jsonb_typeof("meta" -> 'origin') = 'object'`;
+  } catch (err) {
+    console.error(`[agents] talk outcome of ${chatMessageId} not saved: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+  }
 }
 
 /**

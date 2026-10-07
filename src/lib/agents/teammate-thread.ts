@@ -1128,6 +1128,9 @@ export function teammateSendFailure(status: number, body: unknown): { error: Tea
   if (status === 403 && (code === "ai_limit" || code === "agent_cap")) return { error: code, text: sentence };
   if (status === 429) return { error: "rate_limited", text: sentence };
   if (status === 409 && code === "nothing_to_continue") return { error: null, text: null };
+  // A teammate no longer in the group has nothing to continue: no error row,
+  // and never a Try again that would send the composer's words (review round 2).
+  if (status === 409 && code === "not_in_group") return { error: null, text: null };
   if (status === 409 && code === "no_one_to_answer") return { error: "refused", text: sentence };
   if (status === 409 && code === "agent_paused") return { error: "paused", text: sentence };
   if (status === 409 && code === "agent_removed") return { error: "removed", text: sentence };
