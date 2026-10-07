@@ -27,7 +27,7 @@ describe("failStaleRuns", () => {
         data: { status: "FAILED", completedAt: now, errorMessage: STALE_RUN_MESSAGE },
       },
     ]);
-    expect(RUN_STALE_MS).toBeGreaterThanOrEqual(30 * 60 * 1000);
+    expect(RUN_STALE_MS).toBe(2 * 60 * 60 * 1000);
     expect(STALE_RUN_MESSAGE).not.toMatch(/—|--/);
   });
 });

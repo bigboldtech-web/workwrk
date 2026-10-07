@@ -185,7 +185,8 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
   const routineId = await prisma.$transaction(async (tx): Promise<string | null | false> => {
     const cas = await tx.agent.updateMany({
       // The instructions too: one an Admin saved meanwhile is moved on the next tick, never lost (review round 3).
-      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron, autonomousPrompt: agent.autonomousPrompt },
+      // And never moved: a tick that overlaps another never moves it twice (review round 6).
+      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron, autonomousPrompt: agent.autonomousPrompt, scheduleMovedAt: null },
       data: { autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: now, scheduleMoveReason: reason },
     });
     if (cas.count !== 1) return false;

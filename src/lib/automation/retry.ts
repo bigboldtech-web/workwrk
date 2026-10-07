@@ -67,8 +67,12 @@ export function teammateInSteps(steps: ReadonlyArray<{ stepType: string; stepKey
   return steps.some((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate");
 }
 
-/** A run still RUNNING this long after it started never finished: its process stopped mid-run. */
-export const RUN_STALE_MS = 30 * 60 * 1000;
+/**
+ * A run still RUNNING this long after it started never finished: its process
+ * stopped mid-run. Wide on purpose: each AI teammate step is a whole turn,
+ * and an automation may hold several (review round 6).
+ */
+export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 
 /**
  * A run whose process stopped part way (a restart, out of memory) stays

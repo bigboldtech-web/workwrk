@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  /** The runs whose question went back (giveBackTurn). */
+  givenBack: [] as string[],
   teammates: {} as Record<string, Row | null>,
   inserted: [] as Row[],
   already: null as Row | null,
@@ -50,9 +52,12 @@ vi.mock("@/lib/realtime-bus", () => ({ publishToUser: () => {}, publishToConvers
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     conversationMessage: {
-      findFirst: async () => st.already,
+      // A thread's parent (a top-level message here), else the message already sent with this key.
+      findFirst: async (a: { where: { id?: string; parentId?: null } }) => (a.where.id && a.where.parentId === null ? { id: a.where.id } : st.already),
       findMany: async () => [],
-      count: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((x) => !st.removed.includes(x)).length,
+      // A removed message is soft-deleted: only a read that leaves deleted rows out stops counting it (review round 6).
+      count: async (a: { where: { id: { in: string[] }; conversationId?: string; deletedAt?: null } }) =>
+        a.where.conversationId === "c1" ? a.where.id.in.filter((x) => a.where.deletedAt !== null || !st.removed.includes(x)).length : 0,
     },
     conversationMember: { findMany: async () => [] },
     agentAction: { findFirst: async () => null },
@@ -77,7 +82,7 @@ vi.mock("@/lib/agents/actions", () => ({
 vi.mock("@/lib/agents/budget", () => ({
   claimTeammateTurn: async (a: Row) => (st.claims.push(a), st.claim ?? { ok: true, runId: "run1", questionId: "q1" }),
   abandonTurn: async (runId: string) => void st.abandoned.push(runId),
-  giveBackTurn: async () => {},
+  giveBackTurn: async (runId: string) => void st.givenBack.push(runId),
 }));
 vi.mock("@/lib/agents/engine", () => ({
   getOrCreateTeammateSession: async () => ({ id: "s-cos", created: false }),
@@ -119,6 +124,7 @@ async function ask(body: Row): Promise<{ status: number; events: Row[]; json: Ro
 const ASK = { body: "@Chief of Staff summarise this", teammate: "t-cos", clientId: "temp-12345678" };
 
 beforeEach(() => {
+  st.givenBack = [];
   st.userN += 1;
   st.teammates = { "t-cos": COS };
   st.inserted = [];
@@ -225,10 +231,27 @@ describe("asking a teammate in Talk", () => {
     expect(st.claims).toEqual([]);
   });
 
+  it("gives the question back when nothing came back, and only then (review round 6)", async () => {
+    st.turnAnswer = { text: "", error: "The AI service didn't answer. Try again.", giveBack: true, proposedActionIds: [], messages: [] };
+    await ask(ASK);
+    expect(st.givenBack).toEqual(["run1"]);
+    st.givenBack = [];
+    st.turnAnswer = null;
+    await ask({ ...ASK, clientId: "temp-answered1" });
+    expect(st.givenBack).toEqual([]);
+  });
+
   it("writes one Inbox row when the turn asked for something", async () => {
     st.turnAnswer = { text: "", error: null, giveBack: false, proposedActionIds: ["x1", "x2"], messages: [] };
     await ask(ASK);
     expect(st.notified).toEqual([{ data: expect.objectContaining({ type: "agent_approval", link: "/agents?chat=t-cos&action=x1" }) }]);
+    expect(st.inserted).toHaveLength(1);
+  });
+
+  it("posts nothing when the thread's first message was removed during the turn (review round 6)", async () => {
+    st.removed = ["p1"];
+    const out = await ask({ ...ASK, parentId: "p1" });
+    expect(out.events.map((e) => e.type)).toEqual(["message", "no_answer"]);
     expect(st.inserted).toHaveLength(1);
   });
 

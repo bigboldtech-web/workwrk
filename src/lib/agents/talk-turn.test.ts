@@ -9,10 +9,19 @@ const rows = vi.hoisted(() => ({
   guests: new Set<string>(),
   pages: 0,
   users: [] as Array<{ id: string; status: string; deletedAt: Date | null }>,
+  /** Each conversationMessage.findMany's where, in order. */
+  queries: [] as Array<Record<string, unknown>>,
+  /** A thread's parent, read on its own. */
+  parent: [] as Array<Record<string, unknown>>,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    conversationMessage: { findMany: async () => rows.list },
+    conversationMessage: {
+      findMany: async (a: { where: Record<string, unknown> }) => {
+        rows.queries.push(a.where);
+        return a.where.id ? rows.parent : rows.list;
+      },
+    },
     user: { findMany: async (a: { where: { id: { in: string[] } } }) => rows.users.filter((u) => a.where.id.in.includes(u.id)) },
     conversationMember: {
       findMany: async (a: { where: { id?: { gt: string } }; take: number }) => {
@@ -111,5 +120,28 @@ describe("conversationReaderIds (review round 5)", () => {
       { id: "u-max", status: "ACTIVE", deletedAt: null },
     ];
     expect(await conversationReaderIds("c1")).toEqual({ ids: ["u-olivia", "u-max"], tooMany: false });
+  });
+});
+
+describe("talkContext's reads (review round 6)", () => {
+  it("reads only this conversation's live top-level messages before the request", async () => {
+    rows.queries = [];
+    rows.list = [msg("m1", "First")];
+    await talkContext({ conversationId: "c1", parentId: null, before: at, beforeId: "m9", person: { userId: "u-max" }, readers: ["u-max"] });
+    expect(rows.queries).toEqual([
+      { conversationId: "c1", parentId: null, deletedAt: null, AND: [{ OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: "m9" } }] }] },
+    ]);
+  });
+
+  it("in a thread, reads its live parent and the live replies before the request", async () => {
+    rows.queries = [];
+    rows.parent = [msg("p1", "The plan")];
+    rows.list = [msg("r1", "A reply")];
+    const out = await talkContext({ conversationId: "c1", parentId: "p1", before: at, beforeId: "m9", person: { userId: "u-max" }, readers: ["u-max"] });
+    expect(rows.queries).toEqual([
+      { id: "p1", conversationId: "c1", deletedAt: null },
+      { conversationId: "c1", parentId: "p1", deletedAt: null, AND: [{ OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: "m9" } }] }] },
+    ]);
+    expect(out.map((l) => l.text)).toEqual(["The plan", "A reply"]);
   });
 });

@@ -130,6 +130,8 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
   const [menu, setMenu] = useState<{ agent: Agent; anchor: { current: HTMLElement | null } } | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // The agents whose Run now is running in this tab.
+  const [running, setRunning] = useState<ReadonlySet<string>>(() => new Set());
   const [runsVersion, setRunsVersion] = useState(0);
   // The Run history toolbar lives in the page header, so its state is here.
   const [filterOpen, setFilterOpen] = useState(false);
@@ -171,10 +173,15 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
     return true;
   }
   async function runNow(a: Agent) {
-    setBusy(a.slug);
+    // Each agent's Run now stays off while its own turn runs, whatever else starts (review round 6).
+    setRunning((r) => new Set(r).add(a.slug));
     toast(`${a.name} is running`);
     const r = await apiFetch<{ result: { runId: string; status: string; errorText?: string; waiting?: number; chatHref?: string } }>(`/api/agents/${a.slug}/schedule`, { method: "POST" });
-    setBusy(null);
+    setRunning((prev) => {
+      const next = new Set(prev);
+      next.delete(a.slug);
+      return next;
+    });
     if (!r.ok) { toast(r.error || "The run didn't start", { tone: "danger" }); return; }
     // It ran as the person who clicked, in their chat with it: what it asked
     // to do waits there for their approval.
@@ -338,7 +345,7 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
               <>
                 {menu.agent.status === "ENABLED" ? (
                   <>
-                    <MenuItem icon={Play} label="Run now" disabled={busy === menu.agent.slug} onClick={() => { const a = menu.agent; setMenu(null); void runNow(a); }} />
+                    <MenuItem icon={Play} label="Run now" disabled={busy === menu.agent.slug || running.has(menu.agent.slug)} onClick={() => { const a = menu.agent; setMenu(null); void runNow(a); }} />
                     <MenuItem icon={Pause} label="Pause" onClick={() => { const a = menu.agent; setMenu(null); void setStatus(a, "DISABLED"); }} />
                   </>
                 ) : (
@@ -361,7 +368,7 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
         viewerZone={viewerZone}
         runId={openRun}
         canManage={canManage}
-        busy={busy === openSlug}
+        busy={busy === openSlug || (openSlug !== null && running.has(openSlug))}
         version={runsVersion}
         onClose={() => setParams({ agent: null, run: null })}
         onRun={(id) => setParams({ run: id })}

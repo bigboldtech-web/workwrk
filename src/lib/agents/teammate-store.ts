@@ -79,6 +79,7 @@ import {
 import { sendDecisions } from "./decide-client";
 import type { TeammateLimits, TeammateRow } from "./teammate-views";
 import type { TemplateCard } from "./templates";
+import { TEAMMATE_CHAT } from "./teammate-copy";
 
 export interface TeammateChatState {
   /** Read at least once: the thread, or that it is not there. */
@@ -271,6 +272,13 @@ const listeners = new Map<string, Set<() => void>>();
 const shown = new Map<string, number>();
 /** Bumped whenever this tab adds rows to a chat; a read that started before is older than the screen. */
 const epochs = new Map<string, number>();
+
+/**
+ * The continue whose failure a chat's error row shows (the teammate's slug in
+ * a group, null in a one-teammate chat): Try again continues it, and never
+ * sends the composer's words as a new message (review round 6).
+ */
+const failedContinues = new Map<string, string | null>();
 /** A read, and a continue, asked for while an answer was arriving: they run after it. */
 const readAfter = new Set<string>();
 /**
@@ -324,13 +332,18 @@ const UNSENT_CHECK_MS = 2500;
  * the chat is read: it was saved when it holds a message with these words
  * that was not there when the send left (`known`, by id; no clock is
  * compared). A read that fails says no, so the words come back: seeing them
- * twice beats losing them (Ask AI's keepUnlessSaved; review round 5).
+ * twice beats losing them (Ask AI's keepUnlessSaved; review round 5). It
+ * answers the saved message's id, so the stop waits for that message's own
+ * answer (review round 6).
  */
-async function sentAnyway(slug: string, text: string, known: ReadonlySet<string>): Promise<boolean> {
+async function sentAnyway(slug: string, text: string, known: ReadonlySet<string>): Promise<string | null> {
   await new Promise((resolve) => setTimeout(resolve, UNSENT_CHECK_MS));
   const r = await apiFetch<TeammateMessagesPage>(messagesUrl(slug), { cache: "no-store" });
+  if (!r.ok) return null;
   const words = text.trim();
-  return r.ok && r.data.messages.some((m) => m.kind === "user" && m.text.trim() === words && !known.has(m.id));
+  // The newest such message: the one this send saved.
+  const found = [...r.data.messages].reverse().find((m) => m.kind === "user" && m.text.trim() === words && !known.has(m.id));
+  return found?.id ?? null;
 }
 
 /** The one reader per chat that waits for its stopped turns; each new stop takes it over. */
@@ -542,8 +555,13 @@ async function resume(slug: string, agentSlug: string | null = null): Promise<vo
   await stream(slug, { resume: true }, ids, null);
 }
 
-/** Try again after a failure: send what is in the composer. */
+/** Try again after a failure: the continue that failed, else send what is in the composer. */
 function retry(slug: string): Promise<void> {
+  if (failedContinues.has(slug)) {
+    const agentSlug = failedContinues.get(slug) ?? null;
+    failedContinues.delete(slug);
+    return resume(slug, agentSlug);
+  }
   const text = stateOf(slug).draft;
   if (!text.trim()) return Promise.resolve();
   return send(slug, text);
@@ -561,6 +579,9 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   const knownAtSend = new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id));
   const epochAtSend = epochs.get(slug) ?? 0;
   let unknown = false;
+  // A send saved anyway stops on what the chat held when it left, so a read
+  // during the check never hides its answer (review round 6).
+  let stopKnown: ReadonlySet<string> | null = null;
   let sawDone = false;
   let savedRows = false;
   let broke: string | null = null;
@@ -574,6 +595,10 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   };
 
   const fail = (error: TeammateSendError, errorText: string | null) => {
+    // A continue sent no message: its row says so, and Try again continues.
+    if (text === null) failedContinues.set(slug, null);
+    else failedContinues.delete(slug);
+    if (text === null && !errorText && (error === "not_sent" || error === "stopped")) errorText = TEAMMATE_CHAT.continueFailed;
     set(slug, (c) => ({
       error,
       errorText,
@@ -591,7 +616,7 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
       const me: StoppedTurn = {
         questionId: question,
         liveId: ids.liveId,
-        known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+        known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
         text,
         startedAt: Date.now(),
       };
@@ -678,13 +703,21 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   // that broke off, so a resend never asks and pays twice.
   if (unknown && text !== null) {
     const saved = await sentAnyway(slug, text, knownAtSend);
+    const drawnId = ids.userId;
     if ((epochs.get(slug) ?? 0) !== epochAtSend) {
       // Another send began meanwhile: its row is its own. Words the server
-      // never took still come back to the composer.
-      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false) }));
+      // never took come back to the composer, and their bubble goes, so the
+      // thread never shows them as sent (review round 6).
+      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
       return;
     }
-    serverHas = saved;
+    if (saved) {
+      // The drawn bubble is that saved message now, and the stop waits for its answer.
+      set(slug, (c) => ({ messages: c.messages.map((m) => (m.id === drawnId ? { ...m, id: saved } : m)) }));
+      ids = { ...ids, userId: saved };
+      stopKnown = knownAtSend;
+    }
+    serverHas = saved !== null;
     fail(saved ? "stopped" : "not_sent", null);
   }
 }
@@ -707,6 +740,9 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   const knownAtSend = new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id));
   const epochAtSend = epochs.get(slug) ?? 0;
   let unknown = false;
+  // A send saved anyway stops on what the chat held when it left, so a read
+  // during the check never hides its answer (review round 6).
+  let stopKnown: ReadonlySet<string> | null = null;
   const sentAt = Date.now();
   const continued = body.resume === true;
   // An answer that ended early (cut short, declined, not saved, or nothing back): its sentence shows (review of step 4).
@@ -731,6 +767,10 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
 
   const fail = (error: TeammateSendError, errorText: string | null) => {
     const drawn = turnIds();
+    // A continue sent no message: its row says so, and Try again continues that teammate.
+    if (continued) failedContinues.set(slug, typeof body.agentSlug === "string" ? body.agentSlug : null);
+    else failedContinues.delete(slug);
+    if (continued && !errorText && (error === "not_sent" || error === "stopped")) errorText = TEAMMATE_CHAT.continueFailed;
     set(slug, (c) => ({
       error,
       errorText,
@@ -742,7 +782,7 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
       const me: StoppedTurn = {
         questionId: question,
         liveId: drawn.liveId,
-        known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+        known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
         text,
         startedAt: sentAt,
         expect,
@@ -816,13 +856,21 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   }
   if (unknown && text !== null) {
     const saved = await sentAnyway(slug, text, knownAtSend);
+    const drawnId = ids.userId;
     if ((epochs.get(slug) ?? 0) !== epochAtSend) {
       // Another send began meanwhile: its row is its own. Words the server
-      // never took still come back to the composer.
-      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false) }));
+      // never took come back to the composer, and their bubble goes, so the
+      // thread never shows them as sent (review round 6).
+      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
       return;
     }
-    serverHas = saved;
+    if (saved) {
+      // The drawn bubble is that saved message now, and the stop waits for its answer.
+      set(slug, (c) => ({ messages: c.messages.map((m) => (m.id === drawnId ? { ...m, id: saved } : m)) }));
+      ids = { ...ids, userId: saved };
+      stopKnown = knownAtSend;
+    }
+    serverHas = saved !== null;
     fail(saved ? "stopped" : "not_sent", null);
   }
 }
@@ -899,6 +947,7 @@ function setPractice(slug: string, practice: boolean): void {
 }
 
 function clearError(slug: string): void {
+  failedContinues.delete(slug);
   if (stateOf(slug).error) set(slug, { error: null, errorText: null });
 }
 
@@ -1027,4 +1076,4 @@ export function useTeammateList(opts: { removed: boolean }) {
 }
 
 /** The store's own actions without React, for its tests (teammate-store.stop.test.ts). */
-export const teammateStoreForTests = { open, send, refresh, resume, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };
+export const teammateStoreForTests = { open, send, refresh, resume, retry, setDraft, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };

@@ -236,6 +236,13 @@ export function MessageBox({
     // the words. Its answer is posted here; files go in a message of their
     // own (the teammate route takes words only), so nothing is ever dropped.
     const teammate = pickTeammateInBody(body, pickedTeammates);
+    // A pick the @ list no longer offers (paused, made private, or this
+    // conversation can't ask one now): said, with the words kept, never
+    // posted as plain words the person meant for the teammate (review round 6).
+    if (teammate && !teammates.some((t) => t.slug === teammate)) {
+      onError(TALK_TEAMMATE_COPY.noLongerHere);
+      return;
+    }
     if (teammate && batch.length > 0) {
       onError(TALK_TEAMMATE_COPY.noFiles);
       return;

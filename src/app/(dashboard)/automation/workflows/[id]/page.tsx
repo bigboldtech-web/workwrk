@@ -458,6 +458,10 @@ export default function AutomationBuilderPage() {
   const [recipientQuery, setRecipientQuery] = useState("");
   // The creator's own AI teammates, for an "Ask an AI teammate" step.
   const [teammates, setTeammates] = useState<Array<{ value: string; label: string; paused: boolean }>>([]);
+  // Until the creator's teammates are read, a saved step's teammate is not
+  // called unusable; a read that failed says so, with Try again (review round 6).
+  const [teammatesRead, setTeammatesRead] = useState<"loading" | "ready" | "failed">("loading");
+  const [teammatesTick, setTeammatesTick] = useState(0);
   const [conditionQuery, setConditionQuery] = useState("");
   // Each list grows from its first page and its searches, merged by id and
   // kept in name order.
@@ -531,16 +535,20 @@ export default function AutomationBuilderPage() {
     if (!viewerIsCreator) return;
     let alive = true;
     void apiFetch<{ teammates: Array<{ slug: string; name: string; status: string }> }>("/api/agents/teammates", { cache: "no-store" }).then((r) => {
-      if (alive && r.ok && Array.isArray(r.data.teammates)) {
+      if (!alive) return;
+      if (r.ok && Array.isArray(r.data.teammates)) {
         // Paused ones too: a step that asks one reads it by name, marked paused,
         // never "a teammate you can't use" (review round 3). Only ENABLED ones are offered.
         setTeammates(r.data.teammates.filter((t) => t.status === "ENABLED" || t.status === "DISABLED").map((t) => ({ value: t.slug, label: t.name, paused: t.status !== "ENABLED" })));
+        setTeammatesRead("ready");
+      } else {
+        setTeammatesRead("failed");
       }
     });
     return () => {
       alive = false;
     };
-  }, [viewerIsCreator]);
+  }, [viewerIsCreator, teammatesTick]);
 
   // Picker sources, non-blocking.
   useEffect(() => {
@@ -1233,8 +1241,25 @@ export default function AutomationBuilderPage() {
     }
     if (p.type === "teammate") {
       const chosen = value ? teammates.find((t) => t.value === value) : undefined;
-      return <Token label={value ? (chosen ? (chosen.paused ? AUTOMATION_TEAMMATE_COPY.pausedLabel(chosen.label) : chosen.label) : AUTOMATION_TEAMMATE_COPY.teammateNotFound) : null} placeholder="Pick a teammate" ariaLabel={p.label} readOnly={false}
-        sections={[{ options: teammates.filter((t) => !t.paused).map((t) => ({ value: t.value, label: t.label })) }]} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
+      const unread = teammatesRead === "loading" ? AUTOMATION_TEAMMATE_COPY.teammatesLoading : teammatesRead === "failed" ? AUTOMATION_TEAMMATE_COPY.teammatesFailed : AUTOMATION_TEAMMATE_COPY.teammateNotFound;
+      return (
+        <span className="flex min-w-0 flex-col items-start gap-1">
+          <Token label={value ? (chosen ? (chosen.paused ? AUTOMATION_TEAMMATE_COPY.pausedLabel(chosen.label) : chosen.label) : unread) : null} placeholder="Pick a teammate" ariaLabel={p.label} readOnly={false}
+            sections={[{ options: teammates.filter((t) => !t.paused).map((t) => ({ value: t.value, label: t.label })) }]} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />
+          {teammatesRead === "failed" ? (
+            <button
+              type="button"
+              className={BTN.link}
+              onClick={() => {
+                setTeammatesRead("loading");
+                setTeammatesTick((n) => n + 1);
+              }}
+            >
+              {AUTOMATION_TEAMMATE_COPY.teammatesFailed} Try again
+            </button>
+          ) : null}
+        </span>
+      );
     }
     if (p.type === "board") {
       return <Token label={value ? listLabel(value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel={p.label} readOnly={false}

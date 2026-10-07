@@ -368,7 +368,13 @@ export function GroupChat({
               setMembersOpen(false);
               onLeft();
             }}
-            onClose={() => setMembersOpen(false)}
+            // Focus moves to the members button before Rename, Remove or
+            // Leave opens its dialog, so the dialog hands it back there, never
+            // to the page's top (review round 6).
+            onClose={() => {
+              setMembersOpen(false);
+              membersRef.current?.focus();
+            }}
           />
         </MorePortal>
       ) : null}

@@ -99,8 +99,9 @@ export function GroupMembersMenu({
     });
     if (!ok) return;
     const r = await apiFetch(`/api/teammate-groups/${encodeURIComponent(g.id)}`, { method: "DELETE" });
-    if (!r.ok) {
-      toast(GROUP_COPY.leaveFailed, { tone: "danger", action: { label: GROUP_COPY.tryAgain, onClick: () => void leave() } });
+    // Gone already (left in another tab, or this leave's answer was lost): it is left (review round 6).
+    if (!r.ok && r.status !== 404) {
+      toast(r.code ? r.error : GROUP_COPY.leaveFailed, { tone: "danger", ...(r.code ? {} : { action: { label: GROUP_COPY.tryAgain, onClick: () => void leave() } }) });
       return;
     }
     toast(GROUP_COPY.leftToast(g.name));

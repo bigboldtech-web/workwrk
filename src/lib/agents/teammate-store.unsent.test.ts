@@ -9,16 +9,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const AT = "2026-10-08T10:00:00.000Z";
 type Row = Record<string, unknown>;
-const net = vi.hoisted(() => ({ rows: [] as Row[] }));
+const net = vi.hoisted(() => ({ rows: [] as Row[], bodies: [] as Row[] }));
 
 const user = (id: string, text: string): Row => ({ id, kind: "user", text, practice: false, createdAt: AT });
+const answer = (id: string, replyTo: string): Row => ({ id, kind: "agent", text: `Answer to ${replyTo}`, practice: false, toolCalls: [], replyTo, createdAt: AT });
 
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async () => ({ ok: true, status: 200, data: { session: { id: "s1" }, messages: net.rows, actions: {}, hasMore: false } }),
 }));
 vi.mock("@/lib/ai/events", () => ({ AI_CHATS_CHANGED_EVENT: "ai-chats-changed", notifyAiChatsChanged: () => {} }));
 // The request never gets its headers back.
-vi.stubGlobal("fetch", async () => {
+vi.stubGlobal("fetch", async (_url: string, init?: { body?: string }) => {
+  net.bodies.push(JSON.parse(init?.body ?? "{}") as Row);
   throw new TypeError("Failed to fetch");
 });
 
@@ -29,6 +31,7 @@ let slug = "";
 beforeEach(() => {
   slug = `t-unsent-${++slugN}`;
   net.rows = [user("q0", "Earlier")];
+  net.bodies = [];
   vi.useFakeTimers();
 });
 
@@ -42,6 +45,12 @@ describe("a send that failed before the answer began", () => {
       await vi.advanceTimersByTimeAsync(2_600);
       await sending;
       expect(store.stateOf(slug).error).toBe("stopped");
+      // Its own answer lands: the stop ends and the error goes, so no Try
+      // again is left to ask a second time (review round 6).
+      net.rows = [user("q0", "Earlier"), user("q1", "Make a task to call Acme"), answer("a1", "q1")];
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(store.stateOf(slug).error).toBeNull();
+      expect(store.stateOf(slug).messages.map((m) => m.id)).toEqual(["q0", "q1", "a1"]);
     } finally {
       vi.useRealTimers();
     }
@@ -69,6 +78,23 @@ describe("a send that failed before the answer began", () => {
       await vi.advanceTimersByTimeAsync(2_600);
       await sending;
       expect(store.stateOf(slug).error).toBe("not_sent");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a continue that failed (review round 6)", () => {
+  it("says it couldn't carry on, and Try again continues: never the composer's words as a new message", async () => {
+    try {
+      await store.open(slug);
+      store.setDraft(slug, "@Triage also check");
+      await store.resume(slug);
+      expect(store.stateOf(slug).error).toBe("not_sent");
+      expect(store.stateOf(slug).errorText).toBe("Couldn't carry on after your decision. Try again.");
+      await store.retry(slug);
+      expect(net.bodies).toEqual([{ resume: true }, { resume: true }]);
+      expect(store.stateOf(slug).draft).toBe("@Triage also check");
     } finally {
       vi.useRealTimers();
     }
