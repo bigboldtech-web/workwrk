@@ -1258,3 +1258,9 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     5. An answerer that got nothing back left no trace, and the page would wait for it for ten minutes. It now leaves a line. A claim that throws leaves one too.
     6. A teammate's name (which someone else may set) reached the model inside the server's own line. Names are now inside `<workspace_note>`, both in the history and in block 2.
   - Not fixed, not material: the 20-group limit is not counted under a lock (a race can make a 21st group, which spends nothing); concurrent member edits can briefly leave one or six members (at most three answer any message).
+- **Step 4** (group chats, the page) proved locally with screenshots:
+  - The "New" menu and the New group chat dialog, with "Pick at least two teammates." at one pick and the sixth box held off with "A group chat has at most five teammates."
+  - The list holds the group row among the teammates (stacked avatars, "Proof PM: ..." as its last line).
+  - In the chat, each answer sits under its own teammate's avatar and name, and the members menu offers Remove, Add teammate, Rename and Leave.
+  - The @ list offers the group's teammates, and the composer says who will answer.
+  - A card made in the group was approved there, and only that teammate continued (one RESUME run).

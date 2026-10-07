@@ -8,6 +8,8 @@
 //                              &action=<id> scrolls to the card,
 //                              &settings=<tab> opens its settings drawer
 //                              on that tab (teammate-settings-drawer.tsx)
+//   ?group=<id>                a group chat (Phase 2; with Chats or Waiting
+//                              for you); &action=<id> scrolls to the card
 //   ?tab=waiting               Waiting for you: only the teammates with
 //                              something waiting, the count on the tab
 //   ?tab=workspace             Workspace agents: the agents table, its drawer
@@ -16,8 +18,8 @@
 //                              so every link from before keeps working
 //   ?tab=runs                  Run history, as before
 //
-// Chats and Waiting have a 32px search and a secondary "New teammate" in the
-// toolbar and no blue button: the page's one blue thing there is the
+// Chats and Waiting have a 32px search and a secondary "New" in the toolbar
+// (a menu: New teammate, New group chat) and no blue button: the page's one blue thing there is the
 // composer's Send, as on Ask AI. Workspace agents keeps "Add agent" as its
 // primary for Owners and Admins. The two views from before own their header
 // toolbar (their filter, sort and dialog state live with them), so the hub
@@ -33,16 +35,19 @@
 // it out. Picking another chat with unsaved settings asks first (the dirty
 // guard's leaveThen).
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { Bot, Plus, Search, Users } from "lucide-react";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { OsPageHeader, type HeaderMenuEntry, type OsToolbarProps } from "@/components/layout/os/page-header";
+import { MenuItem, MenuList } from "@/components/ui/menu";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
-import { TEAMMATES_PAGE } from "@/lib/agents/teammate-copy";
+import { GROUP_COPY, TEAMMATES_PAGE } from "@/lib/agents/teammate-copy";
 import { useTeammateList } from "@/lib/agents/teammate-store";
 import { hubViewFor, settingsTabFor, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 import { leaveThen } from "@/lib/dirty-guard";
+import { NewGroupDialog } from "./new-group-dialog";
 import { NewTeammateDialog } from "./new-teammate-dialog";
 import { TeammateSettingsDrawer } from "./teammate-settings-drawer";
 import { TeammatesView } from "./teammates-view";
@@ -58,12 +63,17 @@ export function AgentsHub() {
   const sp = useSearchParams();
   const view = hubViewFor(sp);
   const chat = sp?.get("chat") || null;
+  // A group chat (docs/plans/ai-teammates-phase2.md step 4): it keeps the view, as ?chat does.
+  const group = sp?.get("group") || null;
   const [query, setQuery] = useState("");
   const [showRemoved, setShowRemoved] = useState(false);
   const list = useTeammateList({ removed: showRemoved });
   const waitingTotal = list.data?.waitingTotal ?? 0;
   const settingsTab = settingsTabFor(sp?.get("settings"));
   const [newOpen, setNewOpen] = useState(false);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const newRef = useRef<HTMLButtonElement>(null);
 
   const setParams = useCallback(
     (patch: Record<string, string | null>) => {
@@ -88,8 +98,8 @@ export function AgentsHub() {
     [chat, setParams],
   );
 
-  // Chats and Waiting for you keep the open chat between them.
-  const chatParam = chat ? `chat=${encodeURIComponent(chat)}` : "";
+  // Chats and Waiting for you keep the open chat (or group) between them.
+  const chatParam = group ? `group=${encodeURIComponent(group)}` : chat ? `chat=${encodeURIComponent(chat)}` : "";
   const views = (
     <>
       <ViewTab label={TEAMMATES_PAGE.tabChats} active={view === "chats"} href={chatParam ? `/agents?${chatParam}` : "/agents"} />
@@ -130,9 +140,16 @@ export function AgentsHub() {
             </label>
           ),
           right: (
-            <button type="button" onClick={openNewTeammate} className={SECONDARY}>
+            <button
+              ref={newRef}
+              type="button"
+              onClick={() => setNewMenuOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={newMenuOpen}
+              className={SECONDARY}
+            >
               <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-              {TEAMMATES_PAGE.newTeammate}
+              {TEAMMATES_PAGE.newMenu}
             </button>
           ),
         },
@@ -146,12 +163,46 @@ export function AgentsHub() {
         onClearQuery={() => setQuery("")}
         showRemoved={showRemoved}
         onShowRemoved={setShowRemoved}
-        selectedSlug={chat}
+        selectedSlug={group ? null : chat}
+        selectedGroupId={group}
         actionId={sp?.get("action") || null}
-        onSelect={(slug) => void leaveThen(() => setParams({ chat: slug, action: null, settings: null }))}
-        onBack={() => void leaveThen(() => setParams({ chat: null, action: null, settings: null }))}
+        onSelect={(slug) => void leaveThen(() => setParams({ chat: slug, group: null, action: null, settings: null }))}
+        onSelectGroup={(id) => void leaveThen(() => setParams({ group: id, chat: null, action: null, settings: null }))}
+        onBack={() => void leaveThen(() => setParams({ chat: null, group: null, action: null, settings: null }))}
         onNewTeammate={openNewTeammate}
         onOpenSettings={openSettings}
+      />
+      {newMenuOpen ? (
+        <MorePortal anchorRef={newRef} width={220} open placement="below" onClose={() => setNewMenuOpen(false)}>
+          <MenuList aria-label={TEAMMATES_PAGE.newMenu}>
+            <MenuItem
+              icon={Bot}
+              label={TEAMMATES_PAGE.newTeammate}
+              onClick={() => {
+                setNewMenuOpen(false);
+                openNewTeammate();
+              }}
+            />
+            <MenuItem
+              icon={Users}
+              label={GROUP_COPY.newGroup}
+              onClick={() => {
+                setNewMenuOpen(false);
+                setNewGroupOpen(true);
+              }}
+            />
+          </MenuList>
+        </MorePortal>
+      ) : null}
+      <NewGroupDialog
+        open={newGroupOpen}
+        onOpenChange={setNewGroupOpen}
+        teammates={list.data?.teammates ?? null}
+        onCreated={(g) => {
+          setNewGroupOpen(false);
+          notifyAiChatsChanged();
+          setParams({ tab: null, group: g.id, chat: null, action: null, settings: null });
+        }}
       />
       <NewTeammateDialog
         open={newOpen}
@@ -165,7 +216,7 @@ export function AgentsHub() {
         }}
       />
       <TeammateSettingsDrawer
-        slug={chat && settingsTab ? chat : null}
+        slug={chat && !group && settingsTab ? chat : null}
         tab={settingsTab ?? "instructions"}
         onTab={(tab) => setParams({ settings: tab })}
         onClose={() => setParams({ settings: null })}

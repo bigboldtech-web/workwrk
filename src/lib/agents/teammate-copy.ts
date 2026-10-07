@@ -24,6 +24,8 @@ function lowerFirst(s: string): string {
 // ── Page and list ────────────────────────────────────────────────────
 
 export const TEAMMATES_PAGE = {
+  /** The toolbar's menu: New teammate, New group chat (Phase 2). */
+  newMenu: "New",
   title: "AI teammates",
   tabChats: "Chats",
   tabWaiting: "Waiting for you",
@@ -1123,6 +1125,16 @@ export const GROUP_COPY = {
   lastLineAgent: (name: string, text: string) => `${name}: ${text}`,
   /** A group with no name of its own: its first three teammates' names. */
   groupDefaultName: (names: readonly string[]) => titleList(names),
+  createFailed: "The group chat wasn't made. Try again.",
+  needTwo: "You need two teammates that are on to make a group chat.",
+  changeFailed: "That change wasn't saved.",
+  leaveFailed: "You're still in the group chat. Try again.",
+  leftToast: (name: string) => `You left ${name}`,
+  tryAgain: "Try again",
+  back: "Back",
+  nobodyToAdd: "Every teammate you can add is already here.",
+  /** The @ list above the composer. */
+  mentionLabel: "Teammates in this group",
 } as const;
 
 /**
@@ -1169,3 +1181,6 @@ export const LEGACY_COPY = {
 } as const;
 
 export type LegacyStopReason = keyof typeof LEGACY_COPY.stopReason;
+
+/** What an event line's link says, by where it goes (teammate-thread.ts EventLink; Phase 2). */
+export const LINE_LINKS = { chat: "Open", talk: "Open in Talk", automation: "Open the run" } as const;

@@ -6,6 +6,7 @@
 // teammate with no hue (an agent made before teammates, not from the
 // catalog) wears the neutral tile.
 //
+//   xs 16   a group's stacked avatars (stacked-avatars.tsx)
 //   sm 18   the thread, beside each answer
 //   md 20   the chat header
 //   lg 36   the list row
@@ -24,7 +25,7 @@ export function TeammateAvatar({
   name: string;
   hue: TeammateHue | null;
   avatar: string | null;
-  size: "sm" | "md" | "lg";
+  size: "xs" | "sm" | "md" | "lg";
   className?: string;
 }) {
   return (
