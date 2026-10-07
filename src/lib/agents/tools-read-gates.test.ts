@@ -23,6 +23,8 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       // A lookup by email is send_kudos finding the receiver; any other is the caller's level.
       findFirst: async (args: { where: { email?: unknown } }) => (args.where.email ? { id: "u-lea", firstName: "Lea", lastName: "Alpha" } : level ? legacyLevelRow(level) : null),
+      // The caller, by id, anchored here (tools.ts callerLevel).
+      findUnique: async () => (level ? { organizationId: "org-1", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null } : null),
       findMany: async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) => {
         employeeWhere = args.where;
         return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", ...legacyLevelRow("EMPLOYEE"), department: null, role: null }];
@@ -47,7 +49,7 @@ vi.mock("@/lib/sop-access", () => ({
   sopVisibilityWhere: async (s: { user: { accessLevel?: string } }) => (legacyLevelOf(s) === "COMPANY_ADMIN" ? {} : { OR: [{ visibleTo: "u-1" }] }),
 }));
 vi.mock("@/lib/access/viewer", () => ({
-  viewerForUser: async () => (engineRole ? { userId: "u-1", organizationId: "org-1", orgRole: engineRole, peopleTeam: false } : null),
+  viewerHeldIn: async () => (engineRole ? { userId: "u-1", organizationId: "org-1", orgRole: engineRole, peopleTeam: false } : null),
 }));
 vi.mock("@/lib/kudos-give", () => ({
   giveKudos: async (input: Record<string, unknown>) => {

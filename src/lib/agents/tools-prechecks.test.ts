@@ -28,6 +28,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
       // The caller's level (callerLevel), read fresh.
+      // The caller, by id, anchored here (tools.ts callerLevel), and the inviter's name.
+      findUnique: async () => ({ organizationId: "org-1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, email: "u1@x.com", firstName: "Una", lastName: "One" }),
       findFirst: async () => legacyLevelRow("MANAGER"),
       // Attendees by email: the test reads the where the tool sends.
       findMany: async (a: { where: Record<string, unknown> }) => {

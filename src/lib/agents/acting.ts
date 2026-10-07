@@ -29,9 +29,11 @@
 // (levelHeldIn) and builds their viewer at it (viewerHeldIn), exactly as their
 // own session here is built, so they are acted for at that membership's role,
 // never the anchor's (review of follow-up 1.5c: Ask AI's approvals and its
-// calls need the person). LIMITATION, stated so nobody relies on the opposite:
-// the legacy tools' callerLevel in tools.ts still needs the anchor, so those
-// tools still answer such a person with their own refusal.
+// calls need the person). The Ask AI tools read the caller the same way
+// (tools.ts callerLevel and callerNodeCtx, levelHeldIn), so their reads and
+// writes act at that role too. A few shared write paths still look a person
+// up by their anchor (a personal task, kudos): for such a person those
+// answer with their own refusal, never an empty answer.
 //
 // Server-only: imports prisma.
 

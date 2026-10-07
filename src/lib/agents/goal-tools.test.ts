@@ -16,6 +16,9 @@ const visibleTo: Record<string, Set<string>> = {};
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
+      // The caller, by id, anchored here (tools.ts callerLevel).
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        users[where.id] ? { organizationId: "org", ...legacyLevelRow(users[where.id]), status: "ACTIVE", deletedAt: null } : null,
       findFirst: async ({ where }: { where: { id?: string; email?: string } }) => {
         if (where.id) return users[where.id] ? legacyLevelRow(users[where.id]) : null;
         const id = where.email?.split("@")[0] ?? "";
