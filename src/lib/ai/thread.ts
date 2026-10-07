@@ -189,3 +189,18 @@ export function unansweredQuestion(
   const now = opts.now ?? Date.now();
   return { text: last.content, recent: Number.isFinite(at) && now - at < 2 * 60_000 };
 }
+
+/**
+ * What the composer holds after a turn failed; `text` is the person's words
+ * (null for a continue). When the server never had the message its bubble
+ * leaves the thread, so the words always come back: above anything typed
+ * since the send, a blank line between, never in place of it. When the
+ * server has it, the bubble stays and the words come back only to an empty
+ * composer.
+ */
+export function draftAfterFailure(draft: string, text: string | null, serverHas: boolean): string {
+  if (text === null) return draft;
+  if (serverHas) return draft || text;
+  if (!draft.trim() || draft === text) return text;
+  return `${text}\n\n${draft}`;
+}
