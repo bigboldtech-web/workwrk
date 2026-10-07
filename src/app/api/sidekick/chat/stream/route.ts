@@ -217,6 +217,18 @@ export async function POST(req: Request) {
           clientGone = true;
         }
       }
+      // A comment line every 15 s while the turn runs: a long tool input
+      // streams no text, and a proxy cuts a silent connection, which broke
+      // answers off mid-turn. The client's parser skips comment lines.
+      const beat = setInterval(() => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          clientGone = true;
+        }
+      }, 15_000);
+      try {
 
       // Ack the user message immediately so the UI can replace its optimistic
       // bubble before any text arrives.
@@ -412,11 +424,13 @@ export async function POST(req: Request) {
           ...(toolCallsLog.length > 0
             ? { toolCalls: toolCallsLog as unknown as object }
             : {}),
+          // The person's message this answers, so a reader matches them without guessing by order.
+          meta: { replyTo: userMessage.id },
         },
       });
 
       // The card for what it asked, below the answer.
-      const card = await saveApprovalRow(c.chat.id, assistantMessage.createdAt, waitingActions);
+      const card = await saveApprovalRow(c.chat.id, assistantMessage.createdAt, waitingActions, userMessage.id);
 
       const costCents = aiCostCents(totalTokensIn, totalTokensOut);
       await prisma.chatSession.update({
@@ -448,6 +462,9 @@ export async function POST(req: Request) {
 
       if (!clientGone) {
         try { controller.close(); } catch { /* already closed by the client */ }
+      }
+      } finally {
+        clearInterval(beat);
       }
     },
     cancel() {

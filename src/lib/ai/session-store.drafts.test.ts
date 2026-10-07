@@ -23,6 +23,9 @@ const net = vi.hoisted(() => ({
   breakAfter: null as null | string[],
   /** chat-s holds the saved answer and its card. */
   savedAnswer: false,
+  /** chat-t holds the answer (with its card) to its first and its second question. */
+  savedT1: false,
+  savedT2: false,
 }));
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string, init?: { method?: string }) => {
@@ -44,6 +47,24 @@ vi.mock("@/lib/api-fetch", () => ({
         rows.push({ id: "chat-s-card", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Send kudos to Max", meta: { actionIds: ["act1"] }, createdAt: "2026-10-07T10:00:06.000Z" });
       }
       return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages: rows, actions: net.savedAnswer ? { act1: { id: "act1", status: "PENDING", preview: { title: "Send kudos to Max" } } } : {} } };
+    }
+    if (id === "chat-t") {
+      // Two questions; each answer is saved for its own question (replyTo),
+      // whenever the route's loop for it ends, so the first can land after the second question.
+      const rows: Array<Record<string, unknown>> = [
+        { id: "t-u1", role: "USER", content: "Call Acme and thank Max", createdAt: "2026-10-07T10:00:00.000Z" },
+        { id: "t-u2", role: "USER", content: "Call Acme and thank Max", createdAt: "2026-10-07T10:00:10.000Z" },
+      ];
+      const answer = (n: number, at: string) => [
+        { id: `t-a${n}`, role: "ASSISTANT", content: `Answer ${n}`, meta: { replyTo: `t-u${n}` }, createdAt: at },
+        { id: `t-card${n}`, role: "SYSTEM", kind: "APPROVAL", content: "Waiting", meta: { actionIds: [`act${n}`], replyTo: `t-u${n}` }, createdAt: at },
+      ];
+      if (net.savedT1) rows.push(...answer(1, "2026-10-07T10:00:20.000Z"));
+      if (net.savedT2) rows.push(...answer(2, "2026-10-07T10:00:30.000Z"));
+      const actions: Record<string, unknown> = {};
+      if (net.savedT1) actions.act1 = { id: "act1", status: "PENDING", preview: { title: "Send kudos to Max" } };
+      if (net.savedT2) actions.act2 = { id: "act2", status: "PENDING", preview: { title: "Send kudos to Max" } };
+      return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages: rows, actions } };
     }
     const messages = [{ id: `${id}-m1`, role: "USER", content: "hi", createdAt: "2026-10-07T10:00:00.000Z" }];
     if (id === "chat-x" && net.earlierQuestion) messages.push({ id: "chat-x-m0", role: "USER", content: net.earlierQuestion, createdAt: "2026-10-07T09:00:00.000Z" });
@@ -306,6 +327,69 @@ describe("Ask AI drafts", () => {
       expect(saved.messages.map((m) => m.id)).toEqual(["chat-s-q", "chat-s-a", "chat-s-card"]);
       expect(saved.error).toBeNull();
       expect(saved.draft).toBe("");
+    } finally {
+      net.breakAfter = null;
+      net.savedAnswer = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps each broken-off turn under its own question, and clears the stop only when that question's answer is saved", async () => {
+    vi.useFakeTimers();
+    try {
+      await aiSession.open("chat-t");
+      const turn = (n: number) => [
+        JSON.stringify({ type: "user_message", message: { id: `t-u${n}`, content: "Call Acme and thank Max" } }),
+        JSON.stringify({ type: "tool_use", name: "create_task", input: { title: "Call Acme" } }),
+        JSON.stringify({ type: "tool_result", name: "create_task", isError: false, state: "ran" }),
+        JSON.stringify({ type: "approval", action: { id: `act${n}`, status: "PENDING", preview: { title: "Send kudos to Max" } } }),
+      ];
+      net.breakAfter = turn(1);
+      aiSession.setDraft("Call Acme and thank Max");
+      await aiSession.send("Call Acme and thank Max");
+      // Try again sends the same words, and that answer breaks off too.
+      net.breakAfter = turn(2);
+      await aiSession.send(aiSession.getState().draft);
+      expect(aiSession.getState().error).toBe("stopped");
+
+      const shape = () => aiSession.getState().messages.map((m) => (m.id.startsWith("streaming-") ? "live" : m.id.startsWith("card-") ? `card:${m.actionIds?.join()}` : m.id));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(shape()).toEqual(["t-u1", "live", "card:act1", "t-u2", "live", "card:act2"]);
+
+      // The first answer is saved after the second question: it reads under its own question,
+      // and the second question still waits, so the stop stays.
+      net.savedT1 = true;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(shape()).toEqual(["t-u1", "t-a1", "t-card1", "t-u2", "live", "card:act2"]);
+      expect(aiSession.getState().error).toBe("stopped");
+
+      net.savedT2 = true;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(shape()).toEqual(["t-u1", "t-a1", "t-card1", "t-u2", "t-a2", "t-card2"]);
+      expect(aiSession.getState().error).toBeNull();
+    } finally {
+      net.breakAfter = null;
+      net.savedT1 = false;
+      net.savedT2 = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps reading a broken-off answer the server saves minutes later, and clears the stop when it lands", async () => {
+    vi.useFakeTimers();
+    try {
+      await aiSession.open("chat-s");
+      net.breakAfter = [JSON.stringify({ type: "user_message", message: { id: "chat-s-q", content: "Call Acme and thank Max" } })];
+      aiSession.setDraft("Call Acme and thank Max");
+      await aiSession.send("Call Acme and thank Max");
+      expect(aiSession.getState().error).toBe("stopped");
+      // Past the first four reads (about 100 s): still waiting, still reading.
+      await vi.advanceTimersByTimeAsync(2_500 + 10_000 + 30_000 + 60_000 + 60_000);
+      expect(aiSession.getState().error).toBe("stopped");
+      net.savedAnswer = true;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(aiSession.getState().error).toBeNull();
+      expect(aiSession.getState().messages.map((m) => m.id)).toEqual(["chat-s-q", "chat-s-a", "chat-s-card"]);
     } finally {
       net.breakAfter = null;
       net.savedAnswer = false;

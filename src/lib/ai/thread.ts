@@ -74,6 +74,8 @@ export interface AiMessage {
   kind?: "APPROVAL" | "EVENT";
   /** An APPROVAL row's requests, in the order asked. */
   actionIds?: string[];
+  /** The question an answer or a card was saved for (meta.replyTo), when the server named it. */
+  replyTo?: string;
 }
 
 function rec(v: unknown): Record<string, unknown> | null {
@@ -108,17 +110,58 @@ export function actionIdsOf(meta: unknown): string[] {
  * decision's line). Any other row is left out.
  */
 export function messageFromApi(m: { id: string; role: string; content: string; toolCalls?: unknown; createdAt: string; kind?: string | null; meta?: unknown }): AiMessage | null {
+  const replyTo = rec(m.meta)?.replyTo;
+  const reply = typeof replyTo === "string" && replyTo ? { replyTo } : {};
   if (m.role === "SYSTEM") {
     const base = { id: m.id, role: "SYSTEM" as const, content: m.content ?? "", toolCalls: [], createdAt: String(m.createdAt) };
     if (m.kind === "APPROVAL") {
       const actionIds = actionIdsOf(m.meta);
-      return actionIds.length > 0 ? { ...base, kind: "APPROVAL", actionIds } : null;
+      return actionIds.length > 0 ? { ...base, kind: "APPROVAL", actionIds, ...reply } : null;
     }
     return m.kind === "EVENT" ? { ...base, kind: "EVENT" } : null;
   }
   if (m.role !== "USER" && m.role !== "ASSISTANT") return null;
   const calls = Array.isArray(m.toolCalls) ? m.toolCalls.map(callFromLog).filter((c): c is AiToolCall => c !== null) : [];
-  return { id: m.id, role: m.role, content: m.content ?? "", toolCalls: calls, createdAt: String(m.createdAt) };
+  return { id: m.id, role: m.role, content: m.content ?? "", toolCalls: calls, createdAt: String(m.createdAt), ...(m.role === "ASSISTANT" ? reply : {}) };
+}
+
+/**
+ * The thread in reading order: an answer or a card saved for a question
+ * (replyTo) sits right after that question, even when it was saved after a
+ * later one (an answer that broke off finishes on the server after the
+ * person asked again). Every other row keeps the order the server gave.
+ */
+export function threadOrder(rows: readonly AiMessage[]): AiMessage[] {
+  const questions = new Set(rows.filter((r) => r.role === "USER").map((r) => r.id));
+  const replies = new Map<string, AiMessage[]>();
+  const rest: AiMessage[] = [];
+  for (const r of rows) {
+    if (r.role !== "USER" && r.replyTo && questions.has(r.replyTo)) replies.set(r.replyTo, [...(replies.get(r.replyTo) ?? []), r]);
+    else rest.push(r);
+  }
+  if (replies.size === 0) return [...rows];
+  const out: AiMessage[] = [];
+  for (const r of rest) {
+    out.push(r);
+    if (r.role === "USER") out.push(...(replies.get(r.id) ?? []));
+  }
+  return out;
+}
+
+/**
+ * Whether the server holds an answer to question `id`: one saved for it
+ * (replyTo), or, for rows saved before answers named their question, the
+ * first answer after it and before the next question.
+ */
+export function answeredIn(rows: readonly AiMessage[], id: string): boolean {
+  if (rows.some((r) => r.role === "ASSISTANT" && r.replyTo === id)) return true;
+  const at = rows.findIndex((r) => r.id === id);
+  if (at < 0) return false;
+  for (let i = at + 1; i < rows.length; i++) {
+    if (rows[i].role === "USER") return false;
+    if (rows[i].role === "ASSISTANT" && !rows[i].replyTo) return true;
+  }
+  return false;
 }
 
 /** The chat's last turn: the last user or assistant message, past any card or line after it. */

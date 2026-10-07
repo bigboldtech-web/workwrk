@@ -370,11 +370,13 @@ export async function POST(req: Request) {
       ...(toolCallsLog.length > 0
         ? { toolCalls: toolCallsLog as unknown as object }
         : {}),
+      // The person's message this answers, so a reader matches them without guessing by order.
+      meta: { replyTo: userMessage.id },
     },
   });
 
   // The card for what it asked, below the answer.
-  const card = await saveApprovalRow(c.chat.id, assistantMessage.createdAt, waitingActions);
+  const card = await saveApprovalRow(c.chat.id, assistantMessage.createdAt, waitingActions, userMessage.id);
 
   // An estimate at approximate Sonnet prices (src/lib/ai-cost.ts).
   const costCents = aiCostCents(totalTokensIn, totalTokensOut);

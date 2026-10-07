@@ -54,6 +54,8 @@ export async function saveApprovalRow(
   sessionId: string,
   after: Date,
   waiting: ReadonlyArray<{ id: string; title: string | null }>,
+  /** The person's message this card answers, so a reader matches them without guessing by order. */
+  replyTo: string,
 ): Promise<{ id: string; createdAt: Date } | null> {
   if (waiting.length === 0) return null;
   try {
@@ -63,7 +65,7 @@ export async function saveApprovalRow(
         role: "SYSTEM",
         kind: "APPROVAL",
         content: waitingForApprovalLine(waiting[0].title || APPROVAL_CARD.untitled),
-        meta: { actionIds: waiting.map((w) => w.id) },
+        meta: { actionIds: waiting.map((w) => w.id), replyTo },
         createdAt: new Date(after.getTime() + 1),
       },
       select: { id: true, createdAt: true },
