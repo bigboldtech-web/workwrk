@@ -120,20 +120,63 @@ const STOP_READS_MS = [CHECK_AFTER_MS, 10_000, 30_000, 60_000];
 const STOP_READ_FOR_MS = 10 * 60_000;
 
 /**
- * A turn that broke off, per chat, until a read finds its answer: the rows
- * the server held when it stopped (an answer is a new agent or report row
- * among none of them), the person's words, and when it stopped.
+ * A turn that broke off, until a read finds its answer: the person's
+ * message it answers (its saved id; null for a continue), the row this tab
+ * drew for it (its live answer, with its tool rows), the rows the server
+ * held when it stopped (for a continue, whose answer names no message), the
+ * person's words, and when it stopped. Kept per chat, every one of them: a
+ * new send clears the error, never an earlier stop.
  */
 interface StoppedTurn {
+  questionId: string | null;
+  liveId: string;
   known: ReadonlySet<string>;
   text: string | null;
   startedAt: number;
 }
-const stoppedTurns = new Map<string, StoppedTurn>();
+const stoppedTurns = new Map<string, StoppedTurn[]>();
+/** The stop the chat's "The answer stopped" belongs to, per chat. */
+const errorStop = new Map<string, StoppedTurn>();
 
-/** Whether these rows hold an answer the server saved after the turn stopped. */
+/**
+ * Whether these rows hold the answer to this stopped turn: the answer saved
+ * for its message (replyTo); for a row saved before answers named their
+ * message, the first answer after it and before the next message; for a
+ * continue, a new answer that names no message. A routine's report is never
+ * an answer to a chat turn.
+ */
 function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
-  return messages.some((m) => !isTempMessage(m) && (m.kind === "agent" || m.kind === "report") && !stop.known.has(m.id));
+  const saved = messages.filter((m) => !isTempMessage(m));
+  if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !stop.known.has(m.id));
+  if (saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId)) return true;
+  const at = saved.findIndex((m) => m.id === stop.questionId);
+  if (at < 0) return false;
+  for (let i = at + 1; i < saved.length; i++) {
+    if (saved[i].kind === "user") return false;
+    if (saved[i].kind === "agent" && !(saved[i] as { replyTo?: string }).replyTo) return true;
+  }
+  return false;
+}
+
+/** The page with each unanswered stop's drawn row back under its own message (a continue's at the end). */
+function withDrawn(held: readonly TeammateMessageView[], page: readonly TeammateMessageView[], open: readonly StoppedTurn[]): TeammateMessageView[] {
+  if (open.length === 0) return [...page];
+  const drawn = (s: StoppedTurn) => held.filter((m) => m.id === s.liveId);
+  const under = new Map<string, TeammateMessageView[]>();
+  const tail: TeammateMessageView[] = [];
+  for (const s of open) {
+    const rows = drawn(s);
+    if (rows.length === 0) continue;
+    if (s.questionId && page.some((m) => m.id === s.questionId)) under.set(s.questionId, [...(under.get(s.questionId) ?? []), ...rows]);
+    else tail.push(...rows);
+  }
+  const out: TeammateMessageView[] = [];
+  for (const m of page) {
+    out.push(m);
+    const rows = under.get(m.id);
+    if (rows) out.push(...rows);
+  }
+  return [...out, ...tail];
 }
 
 const chats = new Map<string, TeammateChatState>();
@@ -180,6 +223,37 @@ function messagesUrl(slug: string, before?: string): string {
   return `/api/agents/teammates/${encodeURIComponent(slug)}/messages?${q.toString()}`;
 }
 
+/** The one reader per chat that waits for its stopped turns; each new stop takes it over. */
+const stopWatchers = new Map<string, object>();
+
+/**
+ * Read the chat again while it has stopped turns, soon and then once a
+ * minute, for ten minutes from the newest stop. When the window ends the
+ * stops are kept, so any later read (a focus, a decision) still ends them
+ * and clears the error, and one last read is made.
+ */
+function watchStops(slug: string): void {
+  const me = {};
+  stopWatchers.set(slug, me);
+  const startedAt = Date.now();
+  const step = (i: number) => {
+    setTimeout(() => {
+      if (stopWatchers.get(slug) !== me) return;
+      if (!stoppedTurns.has(slug)) {
+        stopWatchers.delete(slug);
+        return;
+      }
+      if (Date.now() - startedAt > STOP_READ_FOR_MS) {
+        stopWatchers.delete(slug);
+        void refresh(slug);
+        return;
+      }
+      void refresh(slug).finally(() => step(i + 1));
+    }, STOP_READS_MS[Math.min(i, STOP_READS_MS.length - 1)]);
+  };
+  step(0);
+}
+
 /* ─────────────────────────── reading ─────────────────────────── */
 
 /**
@@ -201,28 +275,33 @@ async function read(slug: string, first: boolean): Promise<boolean> {
     else if (r.status === 404) set(slug, { missing: true });
     return false;
   }
-  const stop = stoppedTurns.get(slug);
+  const stops = stoppedTurns.get(slug) ?? [];
   set(slug, (s) => {
     const merged = mergeNewestPage(s, { messages: r.data.messages, hasMore: r.data.hasMore });
     // A turn that broke off is saved only when the route's turn ends: until a
-    // read holds its answer, the rows this tab drew for it (its live answer
-    // with its tool rows) stay, and once one does, "The answer stopped" goes.
-    const answered = stop ? answeredSince(merged.messages, stop) : false;
-    if (stop && answered) stoppedTurns.delete(slug);
+    // read holds its answer, the row this tab drew for it stays under its own
+    // message, and once one does, its stop ends; "The answer stopped" goes
+    // only with the stop it belongs to.
+    const open = stops.filter((st) => !answeredSince(merged.messages, st));
+    if (open.length > 0) stoppedTurns.set(slug, open);
+    else stoppedTurns.delete(slug);
+    const owner = errorStop.get(slug);
+    const ownerAnswered = owner !== undefined && !open.includes(owner) && stops.includes(owner);
+    if (ownerAnswered) errorStop.delete(slug);
     return {
       loading: false,
       ready: true,
       loadError: false,
       missing: false,
       sessionId: r.data.session?.id ?? null,
-      messages: stop && !answered ? [...merged.messages, ...s.messages.filter(isTempMessage)] : merged.messages,
+      messages: withDrawn(s.messages, merged.messages, open),
       hasMore: merged.hasMore,
       actions: { ...s.actions, ...r.data.actions },
-      ...(stop && answered
+      ...(ownerAnswered && owner
         ? {
             error: s.error === "stopped" ? null : s.error,
             errorText: s.error === "stopped" ? null : s.errorText,
-            draft: stop.text !== null && s.draft === stop.text ? "" : s.draft,
+            draft: owner.text !== null && s.draft === owner.text ? "" : s.draft,
           }
         : {}),
     };
@@ -285,8 +364,8 @@ async function send(slug: string, raw: string, opts: { practice?: boolean } = {}
   const userId = `${TEMP_ID_PREFIX}user-${n}`;
   const liveId = `${TEMP_ID_PREFIX}live-${n}`;
   const now = new Date().toISOString();
-  // A new send: the error, and the reading for an earlier stop, are its own now.
-  stoppedTurns.delete(slug);
+  // A new send owns the error now; an earlier stop is still waited on.
+  errorStop.delete(slug);
   bump(slug);
   set(slug, (c) => ({
     error: null,
@@ -358,21 +437,20 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     if (serverHas && error === "stopped") {
       // The route saves the turn after the connection drops, but only when
       // the turn ends, so the chat is read again, soon and then once a minute
-      // for up to ten minutes, until the answer is there (Try again would ask
-      // a second time). Any read that finds it clears the error (read()).
-      const me: StoppedTurn = { known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)), text, startedAt: Date.now() };
-      stoppedTurns.set(slug, me);
-      const step = (i: number) => {
-        setTimeout(() => {
-          if (stoppedTurns.get(slug) !== me) return;
-          if (Date.now() - me.startedAt > STOP_READ_FOR_MS || stateOf(slug).error !== "stopped") {
-            stoppedTurns.delete(slug);
-            return;
-          }
-          void refresh(slug).finally(() => step(i + 1));
-        }, STOP_READS_MS[Math.min(i, STOP_READS_MS.length - 1)]);
+      // for up to ten minutes, until its answer is there (Try again would ask
+      // a second time). Any read that finds it, later ones included, ends the
+      // stop and clears the error it owns (read()).
+      const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
+      const me: StoppedTurn = {
+        questionId: question,
+        liveId: ids.liveId,
+        known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+        text,
+        startedAt: Date.now(),
       };
-      step(0);
+      stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
+      errorStop.set(slug, me);
+      watchStops(slug);
     }
   };
 
@@ -625,4 +703,4 @@ export function useTeammateList(opts: { removed: boolean }) {
 }
 
 /** The store's own actions without React, for its tests (teammate-store.stop.test.ts). */
-export const teammateStoreForTests = { open, send, stateOf };
+export const teammateStoreForTests = { open, send, refresh, stateOf };
