@@ -238,4 +238,20 @@ describe("Ask AI drafts", () => {
     expect(aiSession.getState().loading).toBe(false);
     expect(draft()).toBe("Plan the launch");
   });
+
+  it("sends nothing from a chat that could not load, and sends once it loads", async () => {
+    net.failing.add("chat-a");
+    net.streams = 0;
+    await aiSession.open("chat-a");
+    expect(aiSession.getState().loadError).toBe(true);
+    aiSession.setDraft("Book the room");
+    await aiSession.send("Book the room");
+    expect(net.streams).toBe(0);
+    expect(draft()).toBe("Book the room");
+    // Try again loads it, and the words are still there to send.
+    net.failing.delete("chat-a");
+    await aiSession.open("chat-a");
+    expect(aiSession.getState().loadError).toBe(false);
+    expect(draft()).toBe("Book the room");
+  });
 });

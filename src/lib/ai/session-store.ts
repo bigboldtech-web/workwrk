@@ -374,9 +374,11 @@ interface SessionRead {
 /** Send one message: create the chat on the first send, then stream the answer. */
 async function send(raw: string, context?: ChatContext): Promise<void> {
   const text = raw.trim();
-  // Never while the chat is still loading: the load would replace the thread
-  // under the send, and the question the server took would vanish from it.
-  if (!text || state.streaming || state.loading) return;
+  // Never while the chat is still loading, or when it could not load: the
+  // load would replace the thread under the send, or the thread stays hidden
+  // behind "Couldn't load this chat", and the question the server took would
+  // never show. Try again loads it, and the words wait in the composer.
+  if (!text || state.streaming || state.loading || state.loadError) return;
   if (state.meta?.archived) return;
   const gen = generation;
   // Where the words go back if this send is given up after the person moved
