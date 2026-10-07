@@ -8,11 +8,15 @@
 //   memory_updated    See memory               (the settings drawer's Memory tab)
 //   routine_created   Pause, Settings          (the routine; its Routines tab)
 //
+//   a line with a link (Phase 2: a teammate's card, a Talk message, an
+//   automation's run)  Open, Open in Talk, Open the run
+//
 // A line whose event this code does not know still shows its words.
 
 import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Info, MessageSquare, PenLine, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
-import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
-import type { TeammateEventKind, TeammateMessageView, TeammateSettingsTab } from "@/lib/agents/teammate-thread";
+import Link from "next/link";
+import { LINE_LINKS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { eventLinkHref, type TeammateEventKind, type TeammateMessageView, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 
 const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   memory_updated: Brain,
@@ -62,6 +66,12 @@ export function SystemLine({
           ) : null}
           <button type="button" className={LINK} onClick={() => onOpenSettings("routines")}>{TEAMMATE_CHAT.routineSettings}</button>
         </>
+      ) : null}
+      {/* Where the line points (a teammate's card, a Talk message, an automation's run): the address is built from its ids, never read from the row. */}
+      {m.link ? (
+        <Link href={eventLinkHref(m.link)} className={LINK}>
+          {LINE_LINKS[m.link.kind]}
+        </Link>
       ) : null}
     </div>
   );

@@ -13,6 +13,10 @@
 //                  of a practice run
 //   ReportBubble   a routine's report (report-bubble.tsx)
 //   SystemLine     a centred line the server wrote (system-line.tsx)
+//
+// A group chat (docs/plans/ai-teammates-phase2.md step 4) passes teammateFor,
+// so each answer and card is its own teammate's, and showNames, so each
+// answer has its teammate's name (12/500 ink-2) above it.
 //   ApprovalCard   one card for what a turn asked (approval-card.tsx), its
 //                  actions grouped by teammate-thread.ts groupApprovals; when
 //                  none of them can be read here, the row's own sentence
@@ -44,6 +48,8 @@ export interface ThreadTeammate {
 
 export function TeammateThread({
   teammate,
+  teammateFor,
+  showNames = false,
   messages,
   actions,
   deciding,
@@ -52,11 +58,16 @@ export function TeammateThread({
   onPauseRoutine,
 }: {
   teammate: ThreadTeammate;
+  /** A group chat: the teammate a row is from (its answer's avatar, its card's name). */
+  teammateFor?: (m: TeammateMessageView) => ThreadTeammate;
+  /** A group chat: each answer shows its teammate's name above it. */
+  showNames?: boolean;
   messages: readonly TeammateMessageView[];
   actions: Readonly<Record<string, ActionView>>;
   deciding: Readonly<Record<string, "approve" | "deny">>;
   onDecide: (decisions: TeammateDecision[], opts?: { always?: boolean }) => Promise<DecideAnswer>;
-  onOpenSettings: (tab?: TeammateSettingsTab) => void;
+  /** The line it came from is passed too: a group opens that line's own teammate's settings. */
+  onOpenSettings: (tab?: TeammateSettingsTab, from?: TeammateMessageView) => void;
   onPauseRoutine: (routineId: string) => void;
 }) {
   return (
@@ -66,11 +77,11 @@ export function TeammateThread({
           case "user":
             return <UserBubble key={m.id} m={m} />;
           case "agent":
-            return <AgentTurn key={m.id} m={m} teammate={teammate} />;
+            return <AgentTurn key={m.id} m={m} teammate={teammateFor?.(m) ?? teammate} showName={showNames} />;
           case "report":
             return <ReportBubble key={m.id} m={m} teammate={teammate} />;
           case "event":
-            return <SystemLine key={m.id} m={m} onOpenSettings={onOpenSettings} onPauseRoutine={onPauseRoutine} />;
+            return <SystemLine key={m.id} m={m} onOpenSettings={(tab) => onOpenSettings(tab, m)} onPauseRoutine={onPauseRoutine} />;
           case "approval": {
             const cards = groupApprovals(m.actionIds, actions).groups.flatMap((g) => g.actions);
             if (cards.length === 0) {
@@ -85,7 +96,7 @@ export function TeammateThread({
               <div key={m.id} className="flex gap-3">
                 <span className="w-[18px] shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <ApprovalCard actions={cards} agentName={teammate.name} deciding={deciding} onDecide={onDecide} />
+                  <ApprovalCard actions={cards} agentName={(teammateFor?.(m) ?? teammate).name} deciding={deciding} onDecide={onDecide} />
                 </div>
               </div>
             );
@@ -106,7 +117,7 @@ export function UserBubble({ m }: { m: Extract<TeammateMessageView, { kind: "use
   );
 }
 
-export function AgentTurn({ m, teammate }: { m: Extract<TeammateMessageView, { kind: "agent" }>; teammate: ThreadTeammate }) {
+export function AgentTurn({ m, teammate, showName = false }: { m: Extract<TeammateMessageView, { kind: "agent" }>; teammate: ThreadTeammate; showName?: boolean }) {
   const arriving = m.streaming === true;
   // Nothing to show yet but the dots; a pending tool row has dots of its own.
   const waiting = arriving && !m.text && !m.toolCalls.some((c) => c.pending);
@@ -114,6 +125,7 @@ export function AgentTurn({ m, teammate }: { m: Extract<TeammateMessageView, { k
     <div className="flex gap-3">
       <TeammateAvatar name={teammate.name} hue={teammate.hue} avatar={teammate.avatar} size="sm" className="mt-0.5" />
       <div className="min-w-0 flex-1">
+        {showName ? <p className="m-0 mb-0.5 text-xs font-medium text-ink-2">{teammate.name}</p> : null}
         {m.toolCalls.length > 0 ? (
           <div className="mb-1 flex flex-col">
             {m.toolCalls.map((c, i) => (

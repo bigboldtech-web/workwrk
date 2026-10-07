@@ -246,6 +246,7 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
     placeholder: [["Offsite crew"], "Message Offsite crew…"],
     lastLineAgent: [["Triage", "Two are late."], "Triage: Two are late."],
     groupDefaultName: [[["Chief of Staff", "Market Analyst", "Triage"]], "Chief of Staff, Market Analyst and Triage"],
+    leftToast: [["Offsite crew"], "You left Offsite crew"],
   };
   const g = copy.GROUP_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {

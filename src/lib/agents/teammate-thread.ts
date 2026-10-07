@@ -695,6 +695,33 @@ export function filterTeammates<T extends { name: string; job: string; waiting: 
   );
 }
 
+/** One row of the list: a teammate's chat, or a group chat (docs/plans/ai-teammates-phase2.md step 4). */
+export type ListEntry<T extends { name: string; job: string; waiting: number; lastAt: string | Date | null }> =
+  | { kind: "teammate"; row: T }
+  | { kind: "group"; row: GroupRow };
+
+/**
+ * Teammates and groups in one list, filtered and sorted together (sortTeammates'
+ * order, on name and last activity): the search matches a group's name and
+ * its teammates' names, and Waiting for you keeps only what waits.
+ */
+export function listEntries<T extends { name: string; job: string; waiting: number; lastAt: string | Date | null }>(
+  teammates: readonly T[],
+  groups: readonly GroupRow[],
+  query: string,
+  opts: { waitingOnly?: boolean } = {},
+): Array<ListEntry<T>> {
+  const q = query.trim().toLowerCase();
+  const shownGroups = groups.filter(
+    (g) => (!opts.waitingOnly || g.waiting > 0) && (!q || g.name.toLowerCase().includes(q) || g.members.some((m) => m.name.toLowerCase().includes(q))),
+  );
+  const entries: Array<ListEntry<T> & { name: string; lastAt: string | Date | null }> = [
+    ...filterTeammates(teammates, query, opts).map((row) => ({ kind: "teammate" as const, row, name: row.name, lastAt: row.lastAt })),
+    ...shownGroups.map((row) => ({ kind: "group" as const, row, name: row.name, lastAt: row.lastAt })),
+  ];
+  return sortTeammates(entries).map((e) => (e.kind === "teammate" ? { kind: "teammate", row: e.row } : { kind: "group", row: e.row }));
+}
+
 /** At most this many starter buttons on a new chat (5.4). */
 const STARTERS_SHOWN = 4;
 
@@ -783,7 +810,9 @@ function comesBefore(a: TeammateMessageView, b: TeammateMessageView): boolean {
  */
 export function orderReplies(rows: readonly TeammateMessageView[]): TeammateMessageView[] {
   const questions = new Set(rows.filter((r) => r.kind === "user").map((r) => r.id));
-  const replyOf = (r: TeammateMessageView) => ((r.kind === "agent" || r.kind === "approval") && r.replyTo && questions.has(r.replyTo) ? r.replyTo : null);
+  // A group's skipped line names its message too, so a late one reads under it (review of step 4).
+  const replyOf = (r: TeammateMessageView) =>
+    (r.kind === "agent" || r.kind === "approval" || r.kind === "event") && r.replyTo && questions.has(r.replyTo) ? r.replyTo : null;
   const replies = new Map<string, TeammateMessageView[]>();
   const rest: TeammateMessageView[] = [];
   for (const r of rows) {
@@ -937,6 +966,102 @@ export function applyTeammateEvent(view: TurnView, ids: TurnIds, e: TeammateStre
     default:
       return { view, ids };
   }
+}
+
+/** A group message's stream as it is drawn: the person's message, and the answer being written now (null between answers). */
+export interface GroupTurnIds {
+  userId: string | null;
+  liveId: string | null;
+  agentId: string | null;
+}
+
+/**
+ * One event of a group chat's stream applied to the chat
+ * (docs/plans/ai-teammates-phase2.md step 4). The person's saved message
+ * replaces the optimistic one; each answerer's turn starts its own live
+ * answer (`newLiveId` names it, from the caller, so a test can know it), and
+ * its text, tools, cards and lines go to that answer as in a one-teammate
+ * chat; answer_done puts that teammate's saved rows where its live answer
+ * was; a skipped teammate's line lands at the foot; done adds any saved row
+ * not drawn yet.
+ */
+export function applyGroupEvent(
+  view: TurnView,
+  ids: GroupTurnIds,
+  e: GroupStreamEvent,
+  live: { newLiveId: string; agentName: (agentId: string) => string | null },
+): { view: TurnView; ids: GroupTurnIds } {
+  const one = (t: TeammateStreamEvent): { view: TurnView; ids: GroupTurnIds } => {
+    if (!ids.liveId && t.type !== "user_message" && t.type !== "approval" && t.type !== "event") return { view, ids };
+    const out = applyTeammateEvent(view, { userId: ids.userId, liveId: ids.liveId ?? "" }, t);
+    return { view: out.view, ids: { ...ids, userId: out.ids.userId } };
+  };
+  switch (e.type) {
+    case "user_message":
+      return one({ type: "user_message", message: e.message });
+    case "answer_start": {
+      if (typeof e.agentId !== "string" || !e.agentId) return { view, ids };
+      const name = live.agentName(e.agentId);
+      const row: TeammateMessageView = {
+        id: live.newLiveId,
+        kind: "agent",
+        text: "",
+        practice: false,
+        toolCalls: [],
+        createdAt: new Date().toISOString(),
+        streaming: true,
+        agentId: e.agentId,
+        ...(name ? { agentName: name } : {}),
+        ...(ids.userId && !isTempMessage({ id: ids.userId }) ? { replyTo: ids.userId } : {}),
+      };
+      return { view: { ...view, messages: [...view.messages, row] }, ids: { ...ids, liveId: live.newLiveId, agentId: e.agentId } };
+    }
+    case "text_delta":
+    case "tool_use":
+    case "tool_result":
+    case "approval":
+    case "event":
+      return one(e);
+    case "answer_done": {
+      if (!ids.liveId) return { view, ids };
+      const out = applyTeammateEvent(view, { userId: ids.userId, liveId: ids.liveId }, { type: "done", messages: Array.isArray(e.messages) ? e.messages : [], error: e.error ?? null });
+      return { view: out.view, ids: { ...ids, liveId: null, agentId: null } };
+    }
+    case "skipped": {
+      const line = e.message;
+      if (!isMessageView(line) || view.messages.some((m) => m.id === line.id)) return { view, ids };
+      return { view: { ...view, messages: [...view.messages, line] }, ids };
+    }
+    case "done": {
+      const have = new Set(view.messages.map((m) => m.id));
+      const rows: readonly TeammateMessageView[] = Array.isArray(e.messages) ? e.messages : [];
+      const missing = rows.filter((m) => isMessageView(m) && !have.has(m.id));
+      return missing.length > 0 ? { view: { ...view, messages: [...view.messages, ...missing] }, ids } : { view, ids };
+    }
+    default:
+      return { view, ids };
+  }
+}
+
+/**
+ * Whether these rows answer a group turn that broke off: every teammate it
+ * expected has either its answer to that message (replyTo and agentId) or
+ * its skipped line. A group continue expects one teammate, and is answered
+ * by a new continue answer of that teammate (resume, not already held).
+ * Phase 1's rule (one answer to the message) would end a two-teammate turn
+ * at its first answer.
+ */
+export function groupAnsweredSince(
+  messages: readonly TeammateMessageView[],
+  stop: { questionId: string | null; known: ReadonlySet<string>; expect: readonly string[] },
+): boolean {
+  const saved = messages.filter((m) => !isTempMessage(m));
+  if (stop.questionId === null) {
+    return stop.expect.every((id) => saved.some((m) => m.kind === "agent" && m.agentId === id && m.resume === true && !stop.known.has(m.id)));
+  }
+  return stop.expect.every((id) =>
+    saved.some((m) => (m.kind === "agent" || m.kind === "event") && m.replyTo === stop.questionId && m.agentId === id),
+  );
 }
 
 /**

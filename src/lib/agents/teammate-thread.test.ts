@@ -4,6 +4,10 @@ import { ACTION_ERRORS, TEAMMATE_CHAT } from "./teammate-copy";
 import {
   actionViewFromRow,
   activityActionView,
+  applyGroupEvent,
+  groupAnsweredSince,
+  listEntries,
+  orderReplies,
   applyDecisionResults,
   applyTeammateEvent,
   canRetrySend,
@@ -687,5 +691,88 @@ describe("replies across pages (orderReplies in mergeNewestPage and prependOlder
     const held = { messages: [u("q1"), a("a1", "q1"), u("q2")], hasMore: false };
     const page = { messages: [u("q2"), a("a2", "q2"), a("a1", "q1")], hasMore: true };
     expect(mergeNewestPage(held, page).messages.map((m) => m.id)).toEqual(["q1", "a1", "q2", "a2"]);
+  });
+});
+
+describe("group chats in the page (Phase 2 step 4)", () => {
+  const at = "2026-10-07T10:00:00.000Z";
+  const member = (agentId: string, name: string, over: Record<string, unknown> = {}) => ({
+    agentId, slug: agentId, name, hue: null, avatar: null, status: "ENABLED" as const, canAnswer: true, position: 0, lead: false, ...over,
+  });
+  const names: Record<string, string> = { a1: "Project Manager", a2: "Triage" };
+  const live = (n: number) => ({ newLiveId: `tmp:live-${n}`, agentName: (id: string) => names[id] ?? null });
+
+  it("draws each answerer's answer as its turn starts, and settles only that one when it is done", () => {
+    let view: TurnView = { messages: [{ id: "tmp:user-1", kind: "user", text: "@Triage @PM hi", practice: false, createdAt: at }], actions: {} };
+    let ids = { userId: "tmp:user-1" as string | null, liveId: null as string | null, agentId: null as string | null };
+    const step = (e: Parameters<typeof applyGroupEvent>[2], n = 0) => {
+      const out = applyGroupEvent(view, ids, e, live(n));
+      view = out.view;
+      ids = out.ids;
+    };
+    step({ type: "user_message", message: { id: "u1", kind: "user", text: "@Triage @PM hi", practice: false, createdAt: at, answerers: ["a2", "a1"] }, answerers: [] });
+    step({ type: "answer_start", agentId: "a2" }, 1);
+    step({ type: "text_delta", text: "Two are late." });
+    expect(view.messages.map((m) => m.id)).toEqual(["u1", "tmp:live-1"]);
+    expect(view.messages[1]).toMatchObject({ kind: "agent", agentId: "a2", agentName: "Triage", replyTo: "u1", text: "Two are late.", streaming: true });
+    step({ type: "answer_done", agentId: "a2", messages: [{ id: "m1", kind: "agent", text: "Two are late.", practice: false, toolCalls: [], createdAt: at, agentId: "a2", replyTo: "u1" }], error: null });
+    step({ type: "answer_start", agentId: "a1" }, 2);
+    step({ type: "text_delta", text: "Agreed." });
+    expect(view.messages.map((m) => m.id)).toEqual(["u1", "m1", "tmp:live-2"]);
+    step({ type: "answer_done", agentId: "a1", messages: [{ id: "m2", kind: "agent", text: "Agreed.", practice: false, toolCalls: [], createdAt: at, agentId: "a1", replyTo: "u1" }], error: null });
+    step({ type: "skipped", agentId: "a3", message: { id: "l1", kind: "event", text: "Ops didn't answer: it is paused.", createdAt: at, event: "group_skipped", routineId: null, actionId: null, agentId: "a3", replyTo: "u1" } });
+    step({ type: "done", messages: [], error: null });
+    expect(view.messages.map((m) => m.id)).toEqual(["u1", "m1", "m2", "l1"]);
+    expect(ids.liveId).toBeNull();
+  });
+
+  it("drops text that arrives with no answer started", () => {
+    const view: TurnView = { messages: [], actions: {} };
+    const out = applyGroupEvent(view, { userId: null, liveId: null, agentId: null }, { type: "text_delta", text: "stray" }, live(1));
+    expect(out.view.messages).toEqual([]);
+  });
+
+  it("ends a stopped group turn only when every expected teammate answered or got its line (Phase 1's rule ended it at the first)", () => {
+    const stop = { questionId: "u1", known: new Set<string>(), expect: ["a2", "a1"] };
+    const first: TeammateMessageView[] = [{ id: "m1", kind: "agent", text: "x", practice: false, toolCalls: [], createdAt: at, agentId: "a2", replyTo: "u1" }];
+    expect(groupAnsweredSince(first, stop)).toBe(false);
+    expect(groupAnsweredSince([...first, { id: "m2", kind: "agent", text: "y", practice: false, toolCalls: [], createdAt: at, agentId: "a1", replyTo: "u1" }], stop)).toBe(true);
+    expect(groupAnsweredSince([...first, { id: "l1", kind: "event", text: "z", createdAt: at, event: "group_skipped", routineId: null, actionId: null, agentId: "a1", replyTo: "u1" }], stop)).toBe(true);
+    // An answer to another message, or a drawn row, never counts.
+    expect(groupAnsweredSince([...first, { id: "m3", kind: "agent", text: "y", practice: false, toolCalls: [], createdAt: at, agentId: "a1", replyTo: "u0" }], stop)).toBe(false);
+    expect(groupAnsweredSince([...first, { id: "tmp:live-9", kind: "agent", text: "y", practice: false, toolCalls: [], createdAt: at, agentId: "a1", replyTo: "u1" }], stop)).toBe(false);
+  });
+
+  it("ends a stopped group continue at a new continue answer of its own teammate", () => {
+    const stop = { questionId: null, known: new Set(["m1"]), expect: ["a1"] };
+    const old: TeammateMessageView = { id: "m1", kind: "agent", text: "x", practice: false, toolCalls: [], createdAt: at, agentId: "a1", resume: true };
+    expect(groupAnsweredSince([old], stop)).toBe(false);
+    expect(groupAnsweredSince([old, { id: "m2", kind: "agent", text: "y", practice: false, toolCalls: [], createdAt: at, agentId: "a2", resume: true }], stop)).toBe(false);
+    expect(groupAnsweredSince([old, { id: "m3", kind: "agent", text: "y", practice: false, toolCalls: [], createdAt: at, agentId: "a1", resume: true }], stop)).toBe(true);
+  });
+
+  it("lists teammates and groups together, newest first, and searches a group's teammates' names", () => {
+    const t = (name: string, lastAt: string | null, waiting = 0) => ({ name, job: "", waiting, lastAt });
+    const g = (id: string, name: string, lastAt: string | null, members: string[], waiting = 0) => ({
+      id, name, members: members.map((m, i) => member(`x${i}`, m)), waiting, unread: false, lastAt, lastLine: null,
+    });
+    const rows = [t("Planner", "2026-10-07T09:00:00.000Z"), t("Ops", null, 1)];
+    const groups = [g("g1", "Offsite crew", "2026-10-07T09:30:00.000Z", ["Triage", "Market Analyst"]), g("g2", "Quiet", null, ["Planner"], 2)];
+    expect(listEntries(rows, groups, "").map((e) => e.row.name)).toEqual(["Offsite crew", "Planner", "Ops", "Quiet"]);
+    expect(listEntries(rows, groups, "market").map((e) => [e.kind, e.row.name])).toEqual([["group", "Offsite crew"]]);
+    expect(listEntries(rows, groups, "", { waitingOnly: true }).map((e) => e.row.name)).toEqual(["Ops", "Quiet"]);
+  });
+});
+
+describe("a group's skipped line (review of step 4)", () => {
+  it("reads under its own message, even when it lands after a later one", () => {
+    const at = "2026-10-07T10:00:00.000Z";
+    const rows: TeammateMessageView[] = [
+      { id: "u1", kind: "user", text: "first", practice: false, createdAt: at },
+      { id: "u2", kind: "user", text: "second", practice: false, createdAt: at },
+      { id: "a2", kind: "agent", text: "to the second", practice: false, toolCalls: [], createdAt: at, replyTo: "u2" },
+      { id: "l1", kind: "event", text: "Triage didn't answer: it is paused.", createdAt: at, event: "group_skipped", routineId: null, actionId: null, agentId: "a3", replyTo: "u1" },
+    ];
+    expect(orderReplies(rows).map((m) => m.id)).toEqual(["u1", "l1", "u2", "a2"]);
   });
 });

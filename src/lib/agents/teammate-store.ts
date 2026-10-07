@@ -34,6 +34,14 @@
 // typing (the realtime event agent.changed: a decision in another tab, an
 // expiry, a routine's report or pause).
 //
+// GROUP CHATS (docs/plans/ai-teammates-phase2.md step 4): the same store,
+// keyed "group:<id>" (a slug never holds ":"). A group's message draws only
+// the person's bubble; each answerer's turn draws its own answer as it
+// starts (answer_start), and a turn that broke off waits until a read holds
+// every expected teammate's answer or skipped line (groupAnsweredSince).
+// A decision continues a group only when the decide answer names that
+// group, and a teammate's own chat only when it names that chat.
+//
 // The pure rules are in teammate-thread.ts.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -46,15 +54,21 @@ import { markSessionExpired, OFFLINE_EVENT } from "@/lib/session-expiry";
 import {
   TEMP_ID_PREFIX,
   applyDecisionResults,
+  applyGroupEvent,
   applyTeammateEvent,
   draftAfterFailure,
   failedTurnMessages,
+  groupAnsweredSince,
   mergeNewestPage,
   prependOlder,
   isTempMessage,
   teammateSendFailure,
   type ActionView,
   type DecideAnswer,
+  type GroupMemberView,
+  type GroupRow,
+  type GroupStreamEvent,
+  type GroupTurnIds,
   type TeammateDecision,
   type TeammateMessageView,
   type TeammateMessagesPage,
@@ -89,6 +103,8 @@ export interface TeammateChatState {
   practice: boolean;
   /** The requests this tab is deciding now: their card reads "Approving…". */
   deciding: Record<string, "approve" | "deny">;
+  /** A group chat's teammates, as its messages page names them (empty in a one-teammate chat). */
+  members: GroupMemberView[];
 }
 
 const INITIAL: TeammateChatState = {
@@ -107,7 +123,25 @@ const INITIAL: TeammateChatState = {
   draft: "",
   practice: false,
   deciding: {},
+  members: [],
 };
+
+const GROUP_PREFIX = "group:";
+
+/** The store's key for a group chat. */
+export function groupChatKey(id: string): string {
+  return `${GROUP_PREFIX}${id}`;
+}
+
+function groupIdOf(key: string): string | null {
+  return key.startsWith(GROUP_PREFIX) ? key.slice(GROUP_PREFIX.length) : null;
+}
+
+/** Where a chat's routes live: a group's, or a teammate's. */
+function chatBase(key: string): string {
+  const group = groupIdOf(key);
+  return group ? `/api/teammate-groups/${encodeURIComponent(group)}` : `/api/agents/teammates/${encodeURIComponent(key)}`;
+}
 
 /** The newest messages a read brings, and each older page. */
 const PAGE = 50;
@@ -133,6 +167,10 @@ interface StoppedTurn {
   known: ReadonlySet<string>;
   text: string | null;
   startedAt: number;
+  /** A group turn: the teammates whose answer (or skipped line) it waits for. */
+  expect?: string[];
+  /** A group turn: the teammate whose answer was being drawn when it stopped. */
+  liveAgentId?: string | null;
 }
 const stoppedTurns = new Map<string, StoppedTurn[]>();
 /** The stop the chat's "The answer stopped" belongs to, per chat. */
@@ -146,15 +184,46 @@ const errorStop = new Map<string, StoppedTurn>();
  * never an answer to a chat turn.
  */
 function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  if (stop.expect) return groupStopAnswered(messages, stop);
   const saved = messages.filter((m) => !isTempMessage(m));
   if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !stop.known.has(m.id));
   return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
 }
 
+/**
+ * A group turn's stop. When the stream never named its answerers (it broke
+ * before the saved message arrived, or a continue's teammate is not known
+ * here), they are read from the saved message itself, else any answer to it
+ * ends the stop; a continue's ends at a new continue answer. Never at once
+ * on an empty list (review of step 4).
+ */
+function groupStopAnswered(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  let expect = stop.expect ?? [];
+  if (expect.length === 0 && stop.questionId) {
+    const question = messages.find((m) => m.kind === "user" && m.id === stop.questionId);
+    expect = question?.kind === "user" ? (question.answerers ?? []) : [];
+  }
+  if (expect.length > 0) return groupAnsweredSince(messages, { questionId: stop.questionId, known: stop.known, expect });
+  const saved = messages.filter((m) => !isTempMessage(m) && !stop.known.has(m.id));
+  if (stop.questionId) return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
+  return saved.some((m) => m.kind === "agent" && m.resume === true && (!stop.liveAgentId || m.agentId === stop.liveAgentId));
+}
+
+/** Whether a group stop's own drawn answer is saved now: its row then goes, whatever the others are doing. */
+function drawnAnswerSaved(page: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  if (!stop.expect || !stop.liveAgentId) return false;
+  return page.some(
+    (m) =>
+      m.kind === "agent" &&
+      m.agentId === stop.liveAgentId &&
+      (stop.questionId ? m.replyTo === stop.questionId : m.resume === true && !stop.known.has(m.id)),
+  );
+}
+
 /** The page with each unanswered stop's drawn row back under its own message (a continue's at the end). */
 function withDrawn(held: readonly TeammateMessageView[], page: readonly TeammateMessageView[], open: readonly StoppedTurn[]): TeammateMessageView[] {
   if (open.length === 0) return [...page];
-  const drawn = (s: StoppedTurn) => held.filter((m) => m.id === s.liveId);
+  const drawn = (s: StoppedTurn) => (drawnAnswerSaved(page, s) ? [] : held.filter((m) => m.id === s.liveId));
   const under = new Map<string, TeammateMessageView[]>();
   const tail: TeammateMessageView[] = [];
   for (const s of open) {
@@ -180,7 +249,12 @@ const shown = new Map<string, number>();
 const epochs = new Map<string, number>();
 /** A read, and a continue, asked for while an answer was arriving: they run after it. */
 const readAfter = new Set<string>();
-const resumeAfter = new Set<string>();
+/**
+ * Continues asked for during an answer, in order, with the group teammate
+ * each is for (null in a one-teammate chat): two decided in one stream both
+ * run, one after the other (review of step 4).
+ */
+const resumeAfter = new Map<string, Array<string | null>>();
 let seq = 0;
 
 function stateOf(slug: string): TeammateChatState {
@@ -213,7 +287,7 @@ function bump(slug: string): void {
 function messagesUrl(slug: string, before?: string): string {
   const q = new URLSearchParams({ take: String(PAGE) });
   if (before) q.set("before", before);
-  return `/api/agents/teammates/${encodeURIComponent(slug)}/messages?${q.toString()}`;
+  return `${chatBase(slug)}/messages?${q.toString()}`;
 }
 
 /** The one reader per chat that waits for its stopped turns; each new stop takes it over. */
@@ -256,7 +330,7 @@ function watchStops(slug: string): void {
  */
 async function read(slug: string, first: boolean): Promise<boolean> {
   const at = epochs.get(slug) ?? 0;
-  const r = await apiFetch<TeammateMessagesPage>(messagesUrl(slug), { cache: "no-store" });
+  const r = await apiFetch<TeammateMessagesPage & { members?: GroupMemberView[] }>(messagesUrl(slug), { cache: "no-store" });
   if (stateOf(slug).streaming) {
     readAfter.add(slug);
     return false;
@@ -290,6 +364,7 @@ async function read(slug: string, first: boolean): Promise<boolean> {
       messages: withDrawn(s.messages, merged.messages, open),
       hasMore: merged.hasMore,
       actions: { ...s.actions, ...r.data.actions },
+      ...(Array.isArray(r.data.members) ? { members: r.data.members } : {}),
       ...(ownerAnswered && owner
         ? {
             error: s.error === "stopped" ? null : s.error,
@@ -360,6 +435,19 @@ async function send(slug: string, raw: string, opts: { practice?: boolean } = {}
   // A new send owns the error now; an earlier stop is still waited on.
   errorStop.delete(slug);
   bump(slug);
+  if (groupIdOf(slug)) {
+    // A group draws only the person's message: each answerer's answer
+    // starts when its turn does (answer_start).
+    set(slug, (c) => ({
+      error: null,
+      errorText: null,
+      streaming: true,
+      draft: "",
+      messages: [...c.messages, { id: userId, kind: "user", text, practice: false, createdAt: now }],
+    }));
+    await streamGroup(slug, { message: text }, { userId, liveId: null, agentId: null }, text, null);
+    return;
+  }
   set(slug, (c) => ({
     error: null,
     errorText: null,
@@ -374,12 +462,24 @@ async function send(slug: string, raw: string, opts: { practice?: boolean } = {}
   await stream(slug, { message: text, ...(practice ? { practice: true } : {}) }, { userId, liveId }, text);
 }
 
-/** The teammate carries on after the person decided (the decide answer's `resume`). */
-async function resume(slug: string): Promise<void> {
+/**
+ * The teammate carries on after the person decided (the decide answer's
+ * `resume`); in a group, the teammate named by `agentSlug` only.
+ */
+async function resume(slug: string, agentSlug: string | null = null): Promise<void> {
   const s = stateOf(slug);
   if (!s.ready) return;
   if (s.streaming) {
-    resumeAfter.add(slug);
+    const queued = resumeAfter.get(slug) ?? [];
+    if (!queued.includes(agentSlug)) resumeAfter.set(slug, [...queued, agentSlug]);
+    return;
+  }
+  if (groupIdOf(slug)) {
+    if (!agentSlug) return;
+    const self = s.members.find((m) => m.slug === agentSlug);
+    bump(slug);
+    set(slug, { error: null, errorText: null, streaming: true });
+    await streamGroup(slug, { resume: true, agentSlug }, { userId: null, liveId: null, agentId: null }, null, self ? [self.agentId] : []);
     return;
   }
   const ids: TurnIds = { userId: null, liveId: `${TEMP_ID_PREFIX}live-${++seq}` };
@@ -448,7 +548,7 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   };
 
   try {
-    const res = await fetch(`/api/agents/teammates/${encodeURIComponent(slug)}/messages`, {
+    const res = await fetch(`${chatBase(slug)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -520,10 +620,135 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   }
 }
 
+/**
+ * A group message's stream (or a group continue's): the same rules as a
+ * one-teammate turn's, over applyGroupEvent. `resumeExpect` is the teammate
+ * a continue waits for; a message waits for its answerers, named by the
+ * saved message the stream sends first.
+ */
+async function streamGroup(slug: string, body: Record<string, unknown>, start: GroupTurnIds, text: string | null, resumeExpect: string[] | null): Promise<void> {
+  let ids = start;
+  let serverHas = false;
+  let sawDone = false;
+  let broke: string | null = null;
+  let expect: string[] = resumeExpect ?? [];
+  // An answer that ended early (cut short, declined, not saved, or nothing back): its sentence shows (review of step 4).
+  let endedEarly: string | null = null;
+  let savedRows = false;
+
+  const nameOf = (agentId: string) => stateOf(slug).members.find((m) => m.agentId === agentId)?.name ?? null;
+  const apply = (e: GroupStreamEvent) => {
+    const c = stateOf(slug);
+    if (e.type === "user_message" && Array.isArray(e.answerers)) {
+      expect = e.answerers.map((m) => m.agentId).filter((id): id is string => typeof id === "string");
+    }
+    if (e.type === "answer_done") {
+      if (Array.isArray(e.messages) && e.messages.length > 0) savedRows = true;
+      if (typeof e.error === "string" && e.error) endedEarly ??= e.error;
+    }
+    const out = applyGroupEvent({ messages: c.messages, actions: c.actions }, ids, e, { newLiveId: `${TEMP_ID_PREFIX}live-${++seq}`, agentName: nameOf });
+    ids = out.ids;
+    set(slug, { messages: out.view.messages, actions: out.view.actions });
+  };
+  const turnIds = (): TurnIds => ({ userId: ids.userId, liveId: ids.liveId ?? "" });
+
+  const fail = (error: TeammateSendError, errorText: string | null) => {
+    const drawn = turnIds();
+    set(slug, (c) => ({
+      error,
+      errorText,
+      draft: draftAfterFailure(c.draft, text, serverHas),
+      messages: failedTurnMessages(c.messages, drawn, serverHas),
+    }));
+    if (serverHas && error === "stopped") {
+      const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
+      const me: StoppedTurn = {
+        questionId: question,
+        liveId: drawn.liveId,
+        known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+        text,
+        startedAt: Date.now(),
+        expect,
+        liveAgentId: ids.agentId,
+      };
+      stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
+      errorStop.set(slug, me);
+      watchStops(slug);
+    }
+  };
+
+  try {
+    const res = await fetch(`${chatBase(slug)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) markSessionExpired({ reason: "expired" });
+    if (!res.ok || !res.body) {
+      const refusal: unknown = await res.json().catch(() => null);
+      const why = teammateSendFailure(res.status, refusal);
+      if (why.error === null) return;
+      fail(why.error, why.text);
+      if (why.error === "paused" || why.error === "removed" || why.error === "gone") notifyAiChatsChanged();
+      if (why.error === "not_configured" || why.error === "ai_off") void aiSession.loadStatus(true);
+      return;
+    }
+    serverHas = true;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = splitSse<GroupStreamEvent>(buffer);
+      buffer = parsed.rest;
+      for (const e of parsed.events) {
+        if (e.type === "error") {
+          broke = typeof e.message === "string" ? e.message : null;
+          continue;
+        }
+        if (e.type === "done") sawDone = true;
+        apply(e);
+      }
+    }
+    if (!sawDone) fail("stopped", broke);
+    else if (endedEarly) {
+      // As a one-teammate turn: nothing kept (a continue that got nothing
+      // back) reads as an answer that broke off; anything kept stays, and
+      // the row says why.
+      if (savedRows || stateOf(slug).messages.some((m) => m.kind === "agent" && isTempMessage(m) && (m.text || m.toolCalls.length > 0))) set(slug, { error: "ended", errorText: endedEarly });
+      else if (resumeExpect) fail("stopped", endedEarly);
+      else set(slug, { error: "ended", errorText: endedEarly });
+    }
+  } catch {
+    // The connection dropping after the turn said it was done changes nothing.
+    if (!sawDone) {
+      if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
+      fail(serverHas ? "stopped" : "not_sent", null);
+    }
+  } finally {
+    set(slug, (c) => ({
+      streaming: false,
+      messages: c.messages.some((m) => m.kind === "agent" && m.streaming) ? failedTurnMessages(c.messages, turnIds(), true).map((m) => (m.kind === "agent" && m.streaming ? { ...m, streaming: false } : m)) : c.messages,
+    }));
+    notifyAiChatsChanged();
+    void afterTurn(slug);
+  }
+}
+
 /** What waited for the answer to end: a read, then a continue (only while the chat is open). */
 async function afterTurn(slug: string): Promise<void> {
   if (readAfter.delete(slug)) await refresh(slug);
-  if (resumeAfter.delete(slug) && (shown.get(slug) ?? 0) > 0) await resume(slug);
+  const queued = resumeAfter.get(slug);
+  if (queued && queued.length > 0) {
+    const [agentSlug, ...rest] = queued;
+    if (rest.length > 0) resumeAfter.set(slug, rest);
+    else resumeAfter.delete(slug);
+    // The next one waits for this one's end, and runs from its own afterTurn.
+    if ((shown.get(slug) ?? 0) > 0) await resume(slug, agentSlug ?? null);
+    else resumeAfter.delete(slug);
+  }
 }
 
 /* ─────────────────────────── deciding ─────────────────────────── */
@@ -555,14 +780,23 @@ async function decide(slug: string, decisions: TeammateDecision[], opts: { alway
   set(slug, (c) => ({ deciding: settle(c), actions: applyDecisionResults(c.actions, results, new Date().toISOString()) }));
   notifyAiChatsChanged();
   await refresh(slug);
-  const next = r.resume ? r.agentSlug : null;
-  if (next && (shown.get(next) ?? 0) > 0) void resume(next);
+  // Only the chat the decision names continues: a group's request continues
+  // that group (with its own teammate), never the teammate's other chat, and
+  // a teammate's continues only its own chat (an older server names none).
+  const chat = r.chat;
+  if (chat?.kind === "group") {
+    const key = groupChatKey(chat.id);
+    if ((shown.get(key) ?? 0) > 0) void resume(key, chat.agentSlug);
+  } else if (r.resume) {
+    const next = chat?.kind === "teammate" ? chat.slug : r.agentSlug;
+    if (next && (shown.get(next) ?? 0) > 0) void resume(next);
+  }
   return { ok: true, results };
 }
 
 /** The person has read the chat up to now: the list's unread dot clears. */
 async function markRead(slug: string): Promise<void> {
-  const r = await apiFetch(`/api/agents/teammates/${encodeURIComponent(slug)}/read`, { method: "POST", keepalive: true });
+  const r = await apiFetch(`${chatBase(slug)}/read`, { method: "POST", keepalive: true });
   if (r.ok) notifyAiChatsChanged();
 }
 
@@ -601,7 +835,7 @@ export function useTeammateChat(slug: string) {
       loadOlder: () => loadOlder(slug),
       send: (text: string, opts?: { practice?: boolean }) => send(slug, text, opts),
       retry: () => retry(slug),
-      resume: () => resume(slug),
+      resume: (agentSlug?: string) => resume(slug, agentSlug ?? null),
       decide: (decisions: TeammateDecision[], opts?: { always?: boolean }) => decide(slug, decisions, opts),
       markRead: () => markRead(slug),
       setDraft: (draft: string) => setDraft(slug, draft),
@@ -611,6 +845,11 @@ export function useTeammateChat(slug: string) {
     [slug],
   );
   return useMemo(() => ({ ...s, ...actions }), [s, actions]);
+}
+
+/** One group chat, as the components read it: the same store, keyed by the group. */
+export function useGroupChat(id: string) {
+  return useTeammateChat(groupChatKey(id));
 }
 
 /**
@@ -643,6 +882,8 @@ export function useAiAvailability(): { status: AiStatus | null; offline: boolean
 /** GET /api/agents/teammates */
 export interface TeammateListData {
   teammates: TeammateRow[];
+  /** The person's group chats (Phase 2); absent from an older server. */
+  groups?: GroupRow[];
   /** What waits for this person across their teammates: the Waiting for you count. */
   waitingTotal: number;
   /** The starter templates as this workspace can make them now (templates.ts templateCards), read by the new teammate dialog and a new chat's starters. */
@@ -696,4 +937,4 @@ export function useTeammateList(opts: { removed: boolean }) {
 }
 
 /** The store's own actions without React, for its tests (teammate-store.stop.test.ts). */
-export const teammateStoreForTests = { open, send, refresh, stateOf };
+export const teammateStoreForTests = { open, send, refresh, resume, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };

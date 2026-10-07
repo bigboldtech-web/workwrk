@@ -3,7 +3,8 @@
 // The list column of AI teammates (docs/plans/ai-teammates.md 5.1, 5.2,
 // 5.4): 320px with a border at its end on a wide screen, the whole width
 // under 1024px (where the chat replaces it). Rows are buttons
-// (teammate-row.tsx), most recent chat first (the route sorts them).
+// (teammate-row.tsx), and the person's group chats sit among them
+// (group-row.tsx, Phase 2), most recent chat first (listEntries).
 //
 //   loading        six skeleton rows at the row height
 //   load error     "Couldn't load your teammates · Try again"
@@ -19,15 +20,19 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TEAMMATE_LIST, TEAMMATES_PAGE } from "@/lib/agents/teammate-copy";
-import { filterTeammates } from "@/lib/agents/teammate-thread";
+import { listEntries, type GroupRow as GroupRowData } from "@/lib/agents/teammate-thread";
 import type { TeammateRow as TeammateRowData } from "@/lib/agents/teammate-views";
 import { cn } from "@/lib/utils";
+import { GroupRow } from "./group-row";
 import { TeammateRow } from "./teammate-row";
 
 const LINK = "font-medium text-brand-deep hover:underline";
 
 export function TeammateList({
   rows,
+  groups = [],
+  selectedGroupId = null,
+  onSelectGroup,
   error,
   onRetry,
   query,
@@ -42,6 +47,10 @@ export function TeammateList({
 }: {
   /** Null while the first read is out. */
   rows: TeammateRowData[] | null;
+  /** The person's group chats, in the same list (Phase 2). */
+  groups?: readonly GroupRowData[];
+  selectedGroupId?: string | null;
+  onSelectGroup?: (id: string) => void;
   error: boolean;
   onRetry: () => void;
   query: string;
@@ -54,7 +63,7 @@ export function TeammateList({
   onNewTeammate: () => void;
   className?: string;
 }) {
-  const shown = rows ? filterTeammates(rows, query, { waitingOnly }) : null;
+  const shown = rows ? listEntries(rows, groups, query, { waitingOnly }) : null;
 
   let body: ReactNode;
   if (rows === null && error) {
@@ -66,7 +75,7 @@ export function TeammateList({
     );
   } else if (rows === null || shown === null) {
     body = <SkeletonRows rows={6} rowHeight="56px" />;
-  } else if (rows.length === 0) {
+  } else if (rows.length === 0 && groups.length === 0) {
     body = (
       <OsEmptyView
         title={TEAMMATE_LIST.emptyTitle}
@@ -86,11 +95,17 @@ export function TeammateList({
   } else {
     body = (
       <ul aria-label={TEAMMATES_PAGE.title} className="flex flex-col py-1">
-        {shown.map((t) => (
-          <li key={t.id}>
-            <TeammateRow teammate={t} active={t.slug === selectedSlug} onSelect={onSelect} />
-          </li>
-        ))}
+        {shown.map((e) =>
+          e.kind === "group" ? (
+            <li key={`group:${e.row.id}`}>
+              <GroupRow group={e.row} active={e.row.id === selectedGroupId} onSelect={(id) => onSelectGroup?.(id)} />
+            </li>
+          ) : (
+            <li key={e.row.id}>
+              <TeammateRow teammate={e.row} active={!selectedGroupId && e.row.slug === selectedSlug} onSelect={onSelect} />
+            </li>
+          ),
+        )}
       </ul>
     );
   }

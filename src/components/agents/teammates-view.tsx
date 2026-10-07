@@ -18,11 +18,12 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { DotsArt } from "@/components/ui/dots-art";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
-import { TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import { useTeammateDraft, type TeammateListData } from "@/lib/agents/teammate-store";
-import { startersFor, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
+import { GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
+import { groupChatKey, useTeammateDraft, type TeammateListData } from "@/lib/agents/teammate-store";
+import { startersFor, type GroupDetail, type GroupRow, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 import type { TeammateRow } from "@/lib/agents/teammate-views";
 import { cn } from "@/lib/utils";
+import { GroupChat } from "./group-chat";
 import { TeammateChat, UnsentDraft } from "./teammate-chat";
 import { TeammateList } from "./teammate-list";
 
@@ -36,8 +37,10 @@ export function TeammatesView({
   showRemoved,
   onShowRemoved,
   selectedSlug,
+  selectedGroupId = null,
   actionId,
   onSelect,
+  onSelectGroup,
   onBack,
   onNewTeammate,
   onOpenSettings,
@@ -53,6 +56,9 @@ export function TeammatesView({
   onShowRemoved: (on: boolean) => void;
   /** ?chat=<slug> */
   selectedSlug: string | null;
+  /** ?group=<id> (Phase 2): a group chat, which wins over ?chat. */
+  selectedGroupId?: string | null;
+  onSelectGroup: (id: string) => void;
   /** &action=<id> */
   actionId: string | null;
   onSelect: (slug: string) => void;
@@ -87,9 +93,59 @@ export function TeammatesView({
   // A send that found the teammate gone (404) puts the words back in the
   // composer, and then the chat goes: they stay on screen here instead.
   const unsent = useTeammateDraft(selectedSlug);
+  const unsentInGroup = useTeammateDraft(selectedGroupId ? groupChatKey(selectedGroupId) : null);
+
+  // The group named in the address, read on its own when the list does not hold it.
+  const groups = list?.groups ?? [];
+  const listedGroup = selectedGroupId ? (groups.find((g) => g.id === selectedGroupId) ?? null) : null;
+  const [ownGroup, setOwnGroup] = useState<{ id: string; row: GroupRow | null } | null>(null);
+  const needOwnGroup = Boolean(selectedGroupId) && !listedGroup && (rows !== null || listError);
+  useEffect(() => {
+    if (!needOwnGroup || !selectedGroupId) return;
+    let alive = true;
+    void apiFetch<{ group: GroupDetail }>(`/api/teammate-groups/${encodeURIComponent(selectedGroupId)}`, { cache: "no-store" }).then((r) => {
+      if (!alive) return;
+      if (!r.ok && r.status !== 404) return;
+      setOwnGroup({ id: selectedGroupId, row: r.ok ? r.data.group : null });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [needOwnGroup, selectedGroupId, rows]);
+  const group: GroupRow | null | undefined = !selectedGroupId ? null : listedGroup ?? (ownGroup && ownGroup.id === selectedGroupId ? ownGroup.row : undefined);
 
   let pane: ReactNode;
-  if (!selectedSlug) {
+  if (selectedGroupId) {
+    if (group === undefined) {
+      pane = (
+        <div className="mx-auto w-[min(720px,100%-32px)] py-6">
+          <SkeletonLines lines={3} />
+        </div>
+      );
+    } else if (group === null) {
+      pane = (
+        <OsEmptyView title={GROUP_COPY.notFound} action={{ label: TEAMMATE_CHAT.back, onClick: onBack }}>
+          {unsentInGroup.trim() ? <UnsentDraft text={unsentInGroup} className="w-full text-start" /> : null}
+        </OsEmptyView>
+      );
+    } else {
+      pane = (
+        <GroupChat
+          key={group.id}
+          group={group}
+          teammates={rows}
+          actionId={actionId}
+          onBack={onBack}
+          onChanged={() => onReload()}
+          onLeft={() => {
+            onReload();
+            onBack();
+          }}
+          onOpenSettings={onOpenSettings}
+        />
+      );
+    }
+  } else if (!selectedSlug) {
     pane = (
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <DotsArt arrangement="row" className="mb-4" />
@@ -126,6 +182,9 @@ export function TeammatesView({
     <div className="os-chrome flex min-h-0 flex-1">
       <TeammateList
         rows={rows}
+        groups={groups}
+        selectedGroupId={selectedGroupId}
+        onSelectGroup={onSelectGroup}
         error={listError}
         onRetry={onReload}
         query={query}
@@ -136,9 +195,9 @@ export function TeammatesView({
         selectedSlug={selectedSlug}
         onSelect={onSelect}
         onNewTeammate={onNewTeammate}
-        className={cn("w-full lg:w-[320px] lg:shrink-0 lg:border-e", selectedSlug && "max-lg:hidden")}
+        className={cn("w-full lg:w-[320px] lg:shrink-0 lg:border-e", (selectedSlug || selectedGroupId) && "max-lg:hidden")}
       />
-      <div className={cn("flex min-w-0 flex-1 flex-col", !selectedSlug && "max-lg:hidden")}>{pane}</div>
+      <div className={cn("flex min-w-0 flex-1 flex-col", !selectedSlug && !selectedGroupId && "max-lg:hidden")}>{pane}</div>
     </div>
   );
 }
