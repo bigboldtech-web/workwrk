@@ -48,6 +48,16 @@ beforeEach(() => {
 });
 
 describe("POST /api/agents/routines/[id]/run", () => {
+  it("answers every reason as itself: only the person's own say they can't be acted for (review round 12)", async () => {
+    const person = new Set(["person_gone", "guest", "agent_account"]);
+    for (const reason of Object.keys(ROUTINE_REASON_TEXT) as RoutineReason[]) {
+      st.result = refused(reason, true);
+      const r = await run();
+      expect([reason, r.body.code === "person_cannot"]).toEqual([reason, person.has(reason)]);
+      if (!person.has(reason) && r.body.code !== "ai_limit" && r.body.code !== "app_off" && r.body.code !== "not_found") expect(r.body.error).toBe(ROUTINE_REASON_TEXT[reason]);
+    }
+  });
+
   it("answers each refusal runRoutine gives as its own code", async () => {
     const cases: Array<[RoutineReason | "rate_limited", boolean, number, string]> = [
       ["rate_limited", false, 429, "rate_limited"],

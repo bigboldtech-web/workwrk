@@ -1542,3 +1542,11 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
   - Low:
     - The teammate_changed reason no longer says someone else changed the teammate: a workspace teammate's own manager may have.
     - "More decisions are waiting" is said only when some are: a turn told a full 50 asks once whether any are left (outcomesWaiting), in a teammate's chat and in Ask AI.
+- **Step 8, review round 12** (one read-only reviewer on round 11's fixes): 6 found, all low (no high or medium), all 6 fixed. With no high or medium finding left, the review rounds end here.
+  - Low:
+    - The fair pick's second read applies the due window again, so a slot another tick claimed, or its person rescheduled, between the pick and the read is left alone, never claimed at its new time and run at once.
+    - The routine runner starts nothing after 120 seconds (was 180), so the turns still running and the cron's later steps end inside the crontab's curl --max-time 290 and the cron log does not record false failures.
+    - The fair-pick test pins the clauses that carry the fairness (the per-workspace numbering, both bounds, the rn filter and the order), since its stand-in answers as Postgres would whatever the SQL says.
+    - Run now's refusal answers are exhaustive: every reason answers as itself, a new one fails the type check, and the test walks every reason, so only the person's own reasons say they can't be acted for.
+    - outcomesWaiting's filters are tested: one teammate's in a group, and none an outside turn left for a continue.
+    - Doc comments: claimUnreportedOutcomes' description sits on it again, and the runner's due count says it counts both passes.

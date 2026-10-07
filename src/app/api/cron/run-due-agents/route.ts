@@ -35,12 +35,14 @@ import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
  * AI teammate routines: up to 200 a tick, picked fairly across workspaces
- * (routines-server.ts pickDueFairly), 10 at a time, none started after 180
+ * (routines-server.ts pickDueFairly), 10 at a time, none started after 120
  * seconds. The budget and the 10 at a time set the pace: what has not
  * started by then stays due for the next tick (review rounds 10 and 11: 20,
  * then 40, a tick capped the platform well below what the budget can run).
+ * 120 seconds leaves the turns still running, and the steps after, inside
+ * the crontab's curl --max-time 290 (review round 12).
  */
-const ROUTINE_RUNNER = { limit: 200, budgetMs: 180_000, concurrency: 10 } as const;
+const ROUTINE_RUNNER = { limit: 200, budgetMs: 120_000, concurrency: 10 } as const;
 
 /** Old schedules moved per tick: each is one read of its creator and one transaction. */
 const LEGACY_MOVER = { limit: 100 } as const;

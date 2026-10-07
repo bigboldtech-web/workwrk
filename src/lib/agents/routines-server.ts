@@ -386,7 +386,7 @@ type DueRoutineRow = Prisma.AgentRoutineGetPayload<{ select: typeof DUE_SELECT }
 
 /** What one tick of the runner did, in counts only: no workspace, teammate or person is named. */
 export interface DueRoutineCounts {
-  /** Due when the tick looked (at most `limit`). */
+  /** Due when the tick looked: the late slots (up to MISSED_PER_TICK) and the timely ones (up to `limit`). */
   due: number;
   /** Ran and reported. */
   succeeded: number;
@@ -428,7 +428,13 @@ async function pickDueFairly(now: Date, staleBefore: Date, limit: number): Promi
     ORDER BY d.rn, d."nextRunAt", d."id"
     LIMIT ${limit}`;
   if (picked.length === 0) return [];
-  const rows = await prisma.agentRoutine.findMany({ where: { id: { in: picked.map((p) => p.id) } }, select: DUE_SELECT });
+  // The same window again: a slot another tick claimed (or its person
+  // rescheduled) between the two reads has moved, and is left alone, never
+  // claimed at its new time and run now (review round 12).
+  const rows = await prisma.agentRoutine.findMany({
+    where: { id: { in: picked.map((p) => p.id) }, status: "active", nextRunAt: { gte: staleBefore, lte: now } },
+    select: DUE_SELECT,
+  });
   const byId = new Map(rows.map((r) => [r.id, r]));
   return picked.map((p) => byId.get(p.id)).filter((r): r is DueRoutineRow => Boolean(r));
 }

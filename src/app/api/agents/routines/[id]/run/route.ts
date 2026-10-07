@@ -54,9 +54,22 @@ function refusalResponse(r: RoutineRefusal): NextResponse {
       return teammateError(403, "app_off", TEAMMATE_CHAT.aiOff);
     case "teammate_changed":
       return teammateError(409, "teammate_changed", r.message);
-    default:
+    case "person_gone":
+    case "guest":
+    case "agent_account":
       // The person may not be acted for now (gone, a Guest, an agent account).
       return teammateError(403, "person_cannot", ACTION_ERRORS.personCannot);
+    case "ai_failed":
+    case "no_answer":
+    case "no_next_run":
+    case "missed":
+      // Reasons a run records, never a refusal before one: should one come, it says itself.
+      return teammateError(409, r.reason, r.message);
+    default: {
+      // Every reason answers as itself: a new one fails the type check here (review round 12).
+      const unknown: never = r.reason;
+      return teammateError(409, String(unknown), r.message);
+    }
   }
 }
 

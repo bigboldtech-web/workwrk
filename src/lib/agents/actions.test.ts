@@ -458,6 +458,16 @@ describe("claimUnreportedOutcomes, a turn's worth at a time (review round 9)", (
     expect(await outcomesWaiting("s1")).toBe(false);
     expect(fx.sql.at(-1)).toContain("LIMIT 1");
   });
+
+  it("counts only what that claim could take: one teammate's in a group, and none an outside turn left for a continue", async () => {
+    talkPost({ status: "EXECUTED", sessionId: "g1", agentId: "a2" });
+    expect(await outcomesWaiting("g1", "a1")).toBe(false);
+    expect(await outcomesWaiting("g1", "a2")).toBe(true);
+    fx.runTriggers = { "run-talk": "TALK" };
+    talkPost({ status: "EXECUTED", runId: "run-talk" });
+    expect(await outcomesWaiting("s1", null, { continuable: true })).toBe(false);
+    expect(await outcomesWaiting("s1")).toBe(true);
+  });
 });
 
 describe("claimUnreportedOutcomes for a continue (review round 8)", () => {
