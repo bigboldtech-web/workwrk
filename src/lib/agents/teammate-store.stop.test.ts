@@ -130,4 +130,25 @@ describe("a teammate turn that broke off", () => {
       vi.useRealTimers();
     }
   });
+
+  it("never takes a continue's answer (it names no message) for a stopped chat turn's answer", async () => {
+    try {
+      await store.open(slug);
+      net.rows = [user("q1", "Draft the Q3 plan")];
+      breaksAfterTask("q1", "Draft the Q3 plan");
+      await store.send(slug, "Draft the Q3 plan");
+      // A continue after the person approved an older card: its answer names no message.
+      net.rows = [user("q1", "Draft the Q3 plan"), { id: "r1", kind: "agent", text: "Posted it.", practice: false, toolCalls: [], createdAt: AT }];
+      await store.refresh(slug);
+      expect(store.stateOf(slug).error).toBe("stopped");
+      expect(store.stateOf(slug).draft).toBe("Draft the Q3 plan");
+      expect(shape(slug)).toEqual(["q1", "drawn:agent", "r1"]);
+      net.rows = [...net.rows, answer("a1", "q1")];
+      await store.refresh(slug);
+      expect(store.stateOf(slug).error).toBeNull();
+      expect(shape(slug)).toEqual(["q1", "a1", "r1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

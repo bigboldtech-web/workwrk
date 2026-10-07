@@ -139,23 +139,16 @@ const stoppedTurns = new Map<string, StoppedTurn[]>();
 const errorStop = new Map<string, StoppedTurn>();
 
 /**
- * Whether these rows hold the answer to this stopped turn: the answer saved
- * for its message (replyTo); for a row saved before answers named their
- * message, the first answer after it and before the next message; for a
- * continue, a new answer that names no message. A routine's report is never
- * an answer to a chat turn.
+ * Whether these rows hold the answer to this stopped turn: for a chat turn,
+ * only the answer saved for its message (replyTo: every chat answer names
+ * it, so an answer that names none, a continue's, is never this one's); for
+ * a continue, a new answer that names no message. A routine's report is
+ * never an answer to a chat turn.
  */
 function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
   const saved = messages.filter((m) => !isTempMessage(m));
   if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !stop.known.has(m.id));
-  if (saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId)) return true;
-  const at = saved.findIndex((m) => m.id === stop.questionId);
-  if (at < 0) return false;
-  for (let i = at + 1; i < saved.length; i++) {
-    if (saved[i].kind === "user") return false;
-    if (saved[i].kind === "agent" && !(saved[i] as { replyTo?: string }).replyTo) return true;
-  }
-  return false;
+  return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
 }
 
 /** The page with each unanswered stop's drawn row back under its own message (a continue's at the end). */

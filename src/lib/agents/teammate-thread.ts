@@ -597,20 +597,22 @@ export function orderReplies(rows: readonly TeammateMessageView[]): TeammateMess
 
 export function mergeNewestPage(
   held: { messages: readonly TeammateMessageView[]; hasMore: boolean },
-  rawPage: { messages: readonly TeammateMessageView[]; hasMore: boolean },
+  page: { messages: readonly TeammateMessageView[]; hasMore: boolean },
 ): { messages: TeammateMessageView[]; hasMore: boolean } {
-  const page = { ...rawPage, messages: orderReplies(rawPage.messages) };
   const first = page.messages[0];
   if (!first) return { messages: [], hasMore: false };
   const ids = new Set(page.messages.map((m) => m.id));
   const older = held.messages.filter((m) => !isTempMessage(m) && !ids.has(m.id) && comesBefore(m, first));
-  return { messages: [...older, ...page.messages], hasMore: older.length > 0 ? held.hasMore : page.hasMore };
+  // Ordered across everything held, not one page: a late answer whose
+  // message sits on an older page still reads under that message.
+  return { messages: orderReplies([...older, ...page.messages]), hasMore: older.length > 0 ? held.hasMore : page.hasMore };
 }
 
 /** Show earlier messages: an older page above what is on screen, each message once. */
 export function prependOlder(held: readonly TeammateMessageView[], older: readonly TeammateMessageView[]): TeammateMessageView[] {
   const have = new Set(held.map((m) => m.id));
-  return [...older.filter((m) => !have.has(m.id)), ...held];
+  // Replies placed under their message across both pages (orderReplies).
+  return orderReplies([...older.filter((m) => !have.has(m.id)), ...held]);
 }
 
 /** The newest answer or report the server saved: what the person has read up to once the chat is open. */

@@ -611,3 +611,19 @@ describe("a request on the Activity tab", () => {
     }
   });
 });
+
+describe("replies across pages (orderReplies in mergeNewestPage and prependOlder)", () => {
+  const at = "2026-10-07T10:00:00.000Z";
+  const u = (id: string) => ({ id, kind: "user" as const, text: id, practice: false, createdAt: at });
+  const a = (id: string, replyTo: string) => ({ id, kind: "agent" as const, text: id, practice: false, toolCalls: [], replyTo, createdAt: at });
+  it("puts a late answer under its message when that message is on an older page", () => {
+    // Server order: q1, q2, a2, a1 (a1 saved last). The newest page starts at q2.
+    const out = prependOlder([u("q2"), a("a2", "q2"), a("a1", "q1")], [u("q1")]);
+    expect(out.map((m) => m.id)).toEqual(["q1", "a1", "q2", "a2"]);
+  });
+  it("keeps a reply under a message held from an older read when the newest page no longer holds it", () => {
+    const held = { messages: [u("q1"), a("a1", "q1"), u("q2")], hasMore: false };
+    const page = { messages: [u("q2"), a("a2", "q2"), a("a1", "q1")], hasMore: true };
+    expect(mergeNewestPage(held, page).messages.map((m) => m.id)).toEqual(["q1", "a1", "q2", "a2"]);
+  });
+});
