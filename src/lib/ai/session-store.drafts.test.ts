@@ -19,6 +19,10 @@ const net = vi.hoisted(() => ({
   loadingY: null as null | Promise<void>,
   /** How many stream requests left. */
   streams: 0,
+  /** The events a stream sends before its connection breaks (no done). */
+  breakAfter: null as null | string[],
+  /** chat-s holds the saved answer and its card. */
+  savedAnswer: false,
 }));
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string, init?: { method?: string }) => {
@@ -32,6 +36,15 @@ vi.mock("@/lib/api-fetch", () => ({
     if (net.failing.has(id)) return { ok: false, status: 500, error: "Something went wrong" };
     // Each chat has one saved message, as every chat a list shows does, and
     // chat-x the question the server took, when it took one.
+    if (id === "chat-s") {
+      // The question the stream acked; the answer and its card only once the route's loop ended.
+      const rows: Array<Record<string, unknown>> = [{ id: "chat-s-q", role: "USER", content: "Call Acme and thank Max", createdAt: "2026-10-07T10:00:00.000Z" }];
+      if (net.savedAnswer) {
+        rows.push({ id: "chat-s-a", role: "ASSISTANT", content: "Done, and I asked about the kudos.", toolCalls: [{ name: "create_task", input: {}, result: { ok: true }, errorText: null, durationMs: 5 }], createdAt: "2026-10-07T10:00:05.000Z" });
+        rows.push({ id: "chat-s-card", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Send kudos to Max", meta: { actionIds: ["act1"] }, createdAt: "2026-10-07T10:00:06.000Z" });
+      }
+      return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages: rows, actions: net.savedAnswer ? { act1: { id: "act1", status: "PENDING", preview: { title: "Send kudos to Max" } } } : {} } };
+    }
     const messages = [{ id: `${id}-m1`, role: "USER", content: "hi", createdAt: "2026-10-07T10:00:00.000Z" }];
     if (id === "chat-x" && net.earlierQuestion) messages.push({ id: "chat-x-m0", role: "USER", content: net.earlierQuestion, createdAt: "2026-10-07T09:00:00.000Z" });
     // Written by the server's clock, which need not agree with the browser's: hours "earlier" here.
@@ -43,6 +56,17 @@ vi.mock("@/lib/api-fetch", () => ({
 // not sent, or hangs until the client gives it up.
 vi.stubGlobal("fetch", async (_url: string, init?: { signal?: AbortSignal }) => {
   net.streams += 1;
+  if (net.breakAfter) {
+    const chunks = net.breakAfter.map((e) => new TextEncoder().encode(`data: ${e}\n\n`));
+    let i = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (i < chunks.length) c.enqueue(chunks[i++]);
+        else c.error(new TypeError("the connection broke"));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }
   if (net.hangStream) {
     return new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
@@ -253,5 +277,39 @@ describe("Ask AI drafts", () => {
     await aiSession.open("chat-a");
     expect(aiSession.getState().loadError).toBe(false);
     expect(draft()).toBe("Book the room");
+  });
+
+  it("keeps what an answer that broke off already drew until the server saves it, and then shows the saved turn", async () => {
+    vi.useFakeTimers();
+    try {
+      await aiSession.open("chat-s");
+      net.breakAfter = [
+        JSON.stringify({ type: "user_message", message: { id: "chat-s-q", content: "Call Acme and thank Max" } }),
+        JSON.stringify({ type: "tool_use", name: "create_task", input: { title: "Call Acme" } }),
+        JSON.stringify({ type: "tool_result", name: "create_task", isError: false, state: "ran" }),
+        JSON.stringify({ type: "approval", action: { id: "act1", status: "PENDING", preview: { title: "Send kudos to Max" } } }),
+      ];
+      aiSession.setDraft("Call Acme and thank Max");
+      await aiSession.send("Call Acme and thank Max");
+      expect(aiSession.getState().error).toBe("stopped");
+      // The first read again: the server has only the question so far.
+      await vi.advanceTimersByTimeAsync(3000);
+      const kept = aiSession.getState();
+      expect(kept.messages.some((m) => m.id.startsWith("streaming-") && m.toolCalls.some((c) => c.name === "create_task"))).toBe(true);
+      expect(kept.messages.some((m) => m.kind === "APPROVAL" && m.actionIds?.includes("act1"))).toBe(true);
+      expect(kept.actions.act1).toBeDefined();
+      expect(kept.error).toBe("stopped");
+      // The server finishes: the next read shows the saved turn in place of the drawn one.
+      net.savedAnswer = true;
+      await vi.advanceTimersByTimeAsync(10_000);
+      const saved = aiSession.getState();
+      expect(saved.messages.map((m) => m.id)).toEqual(["chat-s-q", "chat-s-a", "chat-s-card"]);
+      expect(saved.error).toBeNull();
+      expect(saved.draft).toBe("");
+    } finally {
+      net.breakAfter = null;
+      net.savedAnswer = false;
+      vi.useRealTimers();
+    }
   });
 });
