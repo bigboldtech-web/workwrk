@@ -23,7 +23,7 @@ vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeT
 vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixtures")).fakeLogActivity }));
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
 
-import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
+import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount } from "./actions";
 import { AGENT_SLUG, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -447,6 +447,16 @@ describe("claimUnreportedOutcomes, a turn's worth at a time (review round 9)", (
     const all = Array.from({ length: OUTCOMES_PER_TURN + 10 }, (_, i) => talkPost({ status: "EXPIRED", createdAt: new Date(base + i * 1000) }));
     expect((await claimUnreportedOutcomes("s1", null, { limit: 3 })).map((r) => r.id)).toEqual(all.slice(0, 3).map((r) => r.id));
     expect(await claimUnreportedOutcomes("s1", null, { limit: OUTCOMES_PER_TURN * 5 })).toHaveLength(OUTCOMES_PER_TURN);
+  });
+
+  it("says whether any are left after a claim, with the claim's own filters, taking none (review round 11)", async () => {
+    const base = Date.now() - 1_000_000;
+    Array.from({ length: OUTCOMES_PER_TURN }, (_, i) => talkPost({ status: "EXPIRED", createdAt: new Date(base + i * 1000) }));
+    expect(await outcomesWaiting("s1")).toBe(true);
+    expect(await outcomesWaiting("s1")).toBe(true);
+    await claimUnreportedOutcomes("s1");
+    expect(await outcomesWaiting("s1")).toBe(false);
+    expect(fx.sql.at(-1)).toContain("LIMIT 1");
   });
 });
 

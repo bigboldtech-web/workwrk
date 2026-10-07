@@ -188,6 +188,8 @@ vi.mock("./actions", () => ({
     for (const r of hit) r.reportedAt = new Date();
     return hit.map((r) => ({ ...r }));
   },
+  outcomesWaiting: async (sessionId: string, agentId?: string | null) =>
+    db.outcomes.some((r) => r.sessionId === sessionId && r.reportedAt === null && ["EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"].includes(r.status as string) && (!agentId || (r.agentId ?? "a1") === agentId)),
   releaseOutcomes: async (sessionId: string, ids: readonly string[]) => {
     db.released.push([...ids]);
     for (const r of db.outcomes) if (r.sessionId === sessionId && ids.includes(r.id as string)) r.reportedAt = null;
@@ -490,14 +492,22 @@ describe("what the person decided", () => {
     ]);
   });
 
-  it("is told at most a turn's worth in all, and that more are waiting (review round 10)", async () => {
+  it("is told at most a turn's worth in all, and that more are waiting only when they are (review rounds 10 and 11)", async () => {
     const row = (i: number): AgentActionRow => ({ id: `o${i}`, toolName: "post_in_talk", risk: "OUTWARD", status: "DENIED", preview: { title: `Post ${i}` }, createdAt: new Date(1000 + i), expiresAt: new Date() });
-    // The route claimed a full turn's worth: the engine claims none more.
+    const full = Array.from({ length: OUTCOMES_PER_TURN }, (_, i) => row(i));
+    const toldFirst = () => (lastMessage(db.requests[0]).content as Array<{ text: string }>)[0].text;
+    // The route claimed a full turn's worth and none are left: the engine claims none more, and says nothing of more.
     db.replies = [reply([say("Okay.")], "end_turn")];
-    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: Array.from({ length: OUTCOMES_PER_TURN }, (_, i) => row(i)) }));
+    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: full }));
     expect(db.claims).toBe(0);
-    const told = (lastMessage(db.requests[0]).content as Array<{ text: string }>)[0].text;
-    expect(told.endsWith("</workspace_note>\n[WorkwrK] More of Priya's decisions are waiting; they come with the next turn.")).toBe(true);
+    expect(toldFirst()).not.toContain("More of Priya");
+    // One more is waiting: it is said.
+    db.requests = [];
+    outcome({ id: "o-late", status: "EXPIRED" });
+    db.replies = [reply([say("Okay.")], "end_turn")];
+    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: full }));
+    expect(toldFirst().endsWith("</workspace_note>\n[WorkwrK] More of Priya's decisions are waiting; they come with the next turn.")).toBe(true);
+    db.outcomes = [];
     // Fewer: it claims only what is left of the turn's worth.
     db.requests = [];
     db.claimOpts = [];

@@ -8,7 +8,8 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
-import { claimUnreportedOutcomes, releaseOutcomes } from "./actions";
+import { claimUnreportedOutcomes, outcomesWaiting, releaseOutcomes } from "./actions";
+import { OUTCOMES_PER_TURN } from "./tool-policy";
 import { outcomeNote } from "./engine";
 import { APPROVAL_CARD, waitingForApprovalLine } from "./teammate-copy";
 
@@ -26,7 +27,8 @@ export const ASK_AI_APPROVAL_PROMPT = [
  */
 export async function claimAskAiNote(sessionId: string, firstName: string): Promise<{ note: string | null; ids: string[] }> {
   const rows = await claimUnreportedOutcomes(sessionId).catch(() => []);
-  return { note: rows.length > 0 ? outcomeNote(rows, firstName) : null, ids: rows.map((r) => r.id) };
+  const more = rows.length >= OUTCOMES_PER_TURN && (await outcomesWaiting(sessionId));
+  return { note: rows.length > 0 ? outcomeNote(rows, firstName, { more }) : null, ids: rows.map((r) => r.id) };
 }
 
 /** Give the note's outcomes back for the next turn: this one never reached the model. */

@@ -48,7 +48,7 @@ import { aiCostCents } from "@/lib/ai-cost";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
-import { claimUnreportedOutcomes, releaseOutcomes } from "./actions";
+import { claimUnreportedOutcomes, outcomesWaiting, releaseOutcomes } from "./actions";
 import type { TurnTrigger } from "./budget";
 import { executeToolCall, wrapToolData, type CallRecord } from "./executor";
 import { memoriesForPrompt } from "./memory";
@@ -674,7 +674,7 @@ function noteResult(raw: unknown): unknown {
  * close the note; a done request's result is the tool's own answer, inside
  * <tool_data>. Null when there is nothing to tell.
  */
-export function outcomeNote(rows: readonly AgentActionRow[], firstName: string): string | null {
+export function outcomeNote(rows: readonly AgentActionRow[], firstName: string, opts: { more?: boolean } = {}): string | null {
   const lines: string[] = [];
   let room = NOTE_RESULTS_MAX;
   for (const row of rows) {
@@ -701,9 +701,9 @@ export function outcomeNote(rows: readonly AgentActionRow[], firstName: string):
     }
   }
   if (lines.length === 0) return null;
-  // A full turn's worth: more wait, told at the next turn, so this is never
-  // read as everything (review round 10).
-  const more = rows.length >= OUTCOMES_PER_TURN ? [`[WorkwrK] More of ${oneLine(firstName, 80)}'s decisions are waiting; they come with the next turn.`] : [];
+  // More wait (a turn is told OUTCOMES_PER_TURN at most): said, so this is
+  // never read as everything (review rounds 10 and 11).
+  const more = opts.more ? [`[WorkwrK] More of ${oneLine(firstName, 80)}'s decisions are waiting; they come with the next turn.`] : [];
   return [`[WorkwrK] ${oneLine(firstName, 80)} decided on your requests.`, "<workspace_note>", ...lines, "</workspace_note>", ...more].join("\n");
 }
 
@@ -1097,7 +1097,9 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     }
     const at = (v: Date | string) => new Date(v).getTime();
     const outcomes = [...claimed.values()].sort((x, y) => at(x.createdAt) - at(y.createdAt));
-    await runLoop(a, p, [...p.history, turnMessage(a, outcomeNote(outcomes, a.person.firstName))], s, emit);
+    // Told a full turn's worth: whether any are left, so "more are waiting" is true (review round 11).
+    const more = outcomes.length >= OUTCOMES_PER_TURN && honoursDontAsk(a.trigger) && (await outcomesWaiting(a.sessionId, a.agent.id, { continuable: a.trigger !== "CHAT" }));
+    await runLoop(a, p, [...p.history, turnMessage(a, outcomeNote(outcomes, a.person.firstName, { more }))], s, emit);
   } catch (err) {
     console.error(`[agents] turn ${a.runId} failed: ${errorLine(err)}`);
     s.error = TURN_ERRORS.noAnswer;

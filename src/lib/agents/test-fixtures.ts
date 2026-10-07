@@ -227,13 +227,15 @@ export const prismaFake = {
     },
   },
   // claimUnreportedOutcomes' one statement, as Postgres runs it: it stamps
-  // what it returns, so a second run returns nothing.
+  // what it returns, so a second run returns nothing. outcomesWaiting's read
+  // takes the same rows and stamps none.
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
     // Prisma.sql fragments (one teammate's filter, the continuable filter) arrive as values.
     const frags = values.filter((v): v is { strings: string[]; values: unknown[] } => Boolean(v) && typeof v === "object" && "strings" in (v as object) && "values" in (v as object));
     const sql = strings.join("?") + frags.map((f) => ` [${f.strings.join("?")}]`).join("");
     fx.sql.push(sql);
-    if (!sql.includes('UPDATE "AgentAction"')) return [];
+    const claim = sql.includes('UPDATE "AgentAction"');
+    if (!claim && !/^\s*SELECT "id" FROM "AgentAction"/.test(sql)) return [];
     const ofAgent = frags.find((f) => f.strings.join("?").includes('"agentId"'));
     const agentId = ofAgent ? ofAgent.values[0] : null;
     // The continuable filter: a card a Talk, automation or delegated run made is left (review round 8).
@@ -245,7 +247,7 @@ export const prismaFake = {
       .filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId) && !(continuable && outside(r)))
       .sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime())
       .slice(0, limit);
-    for (const r of hit) r.reportedAt = new Date();
+    if (claim) for (const r of hit) r.reportedAt = new Date();
     return hit.map((r) => ({ ...r }));
   },
 };

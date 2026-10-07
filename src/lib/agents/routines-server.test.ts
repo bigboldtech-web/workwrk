@@ -24,6 +24,7 @@ const s = vi.hoisted(() => ({
   notifications: [] as Array<Record<string, unknown>>,
   published: [] as Array<{ userId: string; event: unknown }>,
   firstAction: null as Record<string, unknown> | null,
+  sql: [] as string[],
   resolveActingPerson: vi.fn(),
   isAiConfigured: vi.fn(),
   getOrCreateTeammateSession: vi.fn(),
@@ -37,12 +38,18 @@ vi.mock("@/lib/prisma", () => ({
     organization: { findUnique: async () => s.org },
     agent: { findFirst: async () => s.agent },
     agentRoutine: {
-      // The runner's read: active, due by `lte`, oldest slot first, at most `take`. Copies, as a database hands back.
-      findMany: async (a: { where: { status: string; nextRunAt: { lte: Date } }; take: number }) =>
+      // The runner's reads: the slots already past the stale mark (active,
+      // `lt`, oldest first, at most `take`), and the picked rows by id.
+      // Copies, as a database hands back.
+      findMany: async (a: { where: { status?: string; nextRunAt?: { lt: Date }; id?: { in: string[] } }; take?: number }) =>
         [...s.routines.values()]
-          .filter((r) => r.status === a.where.status && r.nextRunAt !== null && r.nextRunAt.getTime() <= a.where.nextRunAt.lte.getTime())
+          .filter((r) =>
+            a.where.id
+              ? a.where.id.in.includes(r.id)
+              : r.status === a.where.status && r.nextRunAt !== null && r.nextRunAt.getTime() < a.where.nextRunAt!.lt.getTime(),
+          )
           .sort((x, y) => x.nextRunAt!.getTime() - y.nextRunAt!.getTime() || x.id.localeCompare(y.id))
-          .slice(0, a.take)
+          .slice(0, a.take ?? Infinity)
           .map((r) => ({ ...r })),
       // Every condition in the where must hold, so a swap changes one row once.
       updateMany: async (a: Update) => {
@@ -54,6 +61,27 @@ vi.mock("@/lib/prisma", () => ({
         Object.assign(row, a.data);
         return { count: 1 };
       },
+    },
+    // The fair pick (pickDueFairly), as Postgres runs it: active slots due
+    // by now and not past the stale mark, numbered within each workspace by
+    // slot, taken by number, then slot, then id.
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      s.sql.push(strings.join("?"));
+      const [nowIso, staleIso, limit] = values as [string, string, number];
+      const now = new Date(nowIso).getTime();
+      const stale = new Date(staleIso).getTime();
+      const due = [...s.routines.values()]
+        .filter((r) => r.status === "active" && r.nextRunAt !== null && r.nextRunAt.getTime() <= now && r.nextRunAt.getTime() >= stale)
+        .sort((x, y) => x.nextRunAt!.getTime() - y.nextRunAt!.getTime() || x.id.localeCompare(y.id));
+      const seen = new Map<string, number>();
+      const numbered = due.map((r) => {
+        const org = String(r.organizationId);
+        const rn = (seen.get(org) ?? 0) + 1;
+        seen.set(org, rn);
+        return { r, rn };
+      });
+      numbered.sort((x, y) => x.rn - y.rn || x.r.nextRunAt!.getTime() - y.r.nextRunAt!.getTime() || x.r.id.localeCompare(y.r.id));
+      return numbered.filter((n) => n.rn <= limit).slice(0, limit).map((n) => ({ id: n.r.id }));
     },
     chatSession: { findFirst: async () => ({ id: "s1" }) },
     agentAction: { findFirst: async () => s.firstAction },
@@ -88,7 +116,7 @@ vi.mock("./actions", () => ({
 }));
 vi.mock("./autonomous", () => ({ computeNextRunAt: () => new Date("2026-10-07T09:00:00Z") }));
 
-import { fairPick, pauseRoutine, processDueRoutines, routinesHref, runRoutine, type RoutineRunRow } from "./routines-server";
+import { pauseRoutine, processDueRoutines, routinesHref, runRoutine, type RoutineRunRow } from "./routines-server";
 import { teammateFingerprint } from "./teammate-print";
 
 /** The workspace teammate as the routine's person last chose it (agent() is hoisted). */
@@ -140,6 +168,7 @@ beforeEach(() => {
   s.routines = new Map();
   seedRoutine();
   s.updates = [];
+  s.sql = [];
   s.lines = [];
   s.notifications = [];
   s.published = [];
@@ -479,15 +508,31 @@ describe("a routine's teammate as its person chose it (review round 10)", () => 
   });
 });
 
-describe("fairPick (review round 10)", () => {
-  it("takes the oldest due slot of each workspace in turn, so one large workspace never crowds out the rest", () => {
-    const rows = [
-      ...Array.from({ length: 5 }, (_, i) => ({ id: `big-${i}`, organizationId: "big" })),
-      { id: "small-0", organizationId: "small" },
-      { id: "other-0", organizationId: "other" },
-    ];
-    expect(fairPick(rows, 4).map((r) => r.id)).toEqual(["big-0", "small-0", "other-0", "big-1"]);
-    expect(fairPick(rows, 10).map((r) => r.id)).toEqual(["big-0", "small-0", "other-0", "big-1", "big-2", "big-3", "big-4"]);
-    expect(fairPick([], 3)).toEqual([]);
+describe("processDueRoutines across workspaces (review rounds 10 and 11)", () => {
+  it("takes each workspace's oldest due slot in turn over every due slot, so one large workspace never holds the rest's places", async () => {
+    s.routines = new Map();
+    // The large workspace's slots are all older than the small ones'.
+    for (let i = 0; i < 6; i += 1) seedRoutine({ id: `big-${i}`, organizationId: "big", nextRunAt: new Date(DUE.getTime() - (10 - i) * 60_000) });
+    seedRoutine({ id: "small-0", organizationId: "small", nextRunAt: DUE });
+    seedRoutine({ id: "other-0", organizationId: "other", nextRunAt: DUE });
+    const counts = await processDueRoutines(NOW, { limit: 4, budgetMs: 180_000, concurrency: 1 });
+    expect(counts).toMatchObject({ due: 4, succeeded: 4 });
+    const ran = s.runTeammateTurn.mock.calls.map(([a]) => (a as { routine: { id: string } }).routine.id);
+    // Same slot: by id, as the query orders them.
+    expect(ran).toEqual(["big-0", "other-0", "small-0", "big-1"]);
+    // Picked in SQL, numbered within each workspace, the times as UTC text.
+    expect(s.sql.at(-1)).toContain('PARTITION BY "organizationId"');
+    expect(s.sql.at(-1)).toContain("::timestamptz AT TIME ZONE 'UTC'");
+  });
+
+  it("clears slots already past the stale mark first, without their taking the places of slots on time", async () => {
+    s.routines = new Map();
+    const lateBy = 3 * 60 * 60 * 1000 + 60_000;
+    for (let i = 0; i < 3; i += 1) seedRoutine({ id: `late-${i}`, nextRunAt: new Date(NOW.getTime() - lateBy - i * 60_000) });
+    seedRoutine({ id: "on-time", nextRunAt: DUE });
+    const counts = await processDueRoutines(NOW, { limit: 1, budgetMs: 180_000, concurrency: 2 });
+    expect(counts).toMatchObject({ due: 4, missed: 3, succeeded: 1 });
+    expect(s.runTeammateTurn).toHaveBeenCalledTimes(1);
+    expect([...s.routines.values()].filter((r) => r.lastReason === "missed").map((r) => r.id).sort()).toEqual(["late-0", "late-1", "late-2"]);
   });
 });
