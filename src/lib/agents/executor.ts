@@ -59,6 +59,7 @@ import {
 import { isToolName, type ToolName } from "./tool-names";
 import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
+import { plainData } from "./plain-data";
 import { badInputSentence, checkToolInput } from "./input-check";
 
 /** The most characters of one result the model is given; past it the result is cut and says so. */
@@ -147,7 +148,8 @@ function jsonText(v: unknown): string {
 export function wrapToolData(tool: string, payload: unknown): string {
   let body = jsonText(payload);
   if (body.length > TOOL_DATA_MAX) body = jsonText({ truncated: true, partial: clampText(body, TOOL_DATA_MAX) });
-  const safe = body.replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+  // Look-alike brackets and invisible format characters made plain first (review round 7).
+  const safe = plainData(body).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
   const name = String(tool).replace(/[^A-Za-z0-9_]/g, "").slice(0, 64) || "tool";
   return `<tool_data tool="${name}">${safe}</tool_data>`;
 }

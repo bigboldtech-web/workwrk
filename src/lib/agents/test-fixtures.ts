@@ -90,6 +90,8 @@ export const fx = {
   modules: { tablesOn: true, talkOn: true },
   activity: [] as Array<Record<string, unknown>>,
   sql: [] as string[],
+  /** What started each run, by run id (AgentRun.input.trigger). */
+  runTriggers: {} as Record<string, string>,
   /** The Ask AI chat an Ask AI request's decision reads (null: gone, or not the person's). */
   chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { id?: string; kind?: string | null; productContext: string | null; agent: Record<string, unknown> | null } | null,
 };
@@ -108,6 +110,7 @@ export function resetFixtures(): void {
   fx.modules = { tablesOn: true, talkOn: true };
   fx.activity = [];
   fx.sql = [];
+  fx.runTriggers = {};
   fx.chat = { productContext: null, agent: null };
 }
 
@@ -173,6 +176,9 @@ const rows = (where?: Record<string, unknown>) => fx.actions.filter((r) => match
 const withAgent = (r: ActionRowFx) => ({ ...r, agent: r.agentId ? { ...fx.agent } : null });
 
 export const prismaFake = {
+  agentRun: {
+    findUnique: async (a: { where: { id: string } }) => (a.where.id in fx.runTriggers ? { input: { trigger: fx.runTriggers[a.where.id] } } : null),
+  },
   agentAction: {
     findFirst: async (a: { where: Record<string, unknown> }) => {
       const row = rows(a.where)[0];

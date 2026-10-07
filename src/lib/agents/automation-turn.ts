@@ -51,7 +51,8 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // 3, 4. The creator, and their teammate. The slug is the creator's pick,
   // never filled from the record: it is read as written.
   const acting = await resolveActingPerson(ctx.organizationId, creator);
-  if (!acting.ok) throw new Error(AUTOMATION_TEAMMATE_COPY.creatorCannot);
+  // AI turned off is said as such, never as something wrong with the creator (review round 7).
+  if (!acting.ok) throw new Error(acting.reason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.aiOffForCreator : AUTOMATION_TEAMMATE_COPY.creatorCannot);
   const person = acting.person;
   const slug = typeof params.teammate === "string" ? params.teammate : "";
   const agent = slug ? await loadTeammate(slug, person.viewer) : null;

@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
-import { teammateStepProblem } from "@/lib/automation/teammate-step";
+import { teammateCreatorGone, teammateStepProblem } from "@/lib/automation/teammate-step";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
 import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
@@ -72,7 +72,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!teammate && workflow.publishedVersionId) {
     const live = await prisma.automationWorkflowVersion.findFirst({ where: { id: workflow.publishedVersionId, organizationId: ctx.orgId }, select: { definitionJson: true } });
     const p = await teammateStepProblem(live?.definitionJson ?? null, { saverId: ctx.userId, creatorId: workflow.createdById, viewer: ctx.viewer });
-    if (p?.status === 403) teammate = p;
+    // Unless its creator can no longer be acted for: the step can never run again (review round 7).
+    if (p?.status === 403 && !(await teammateCreatorGone(ctx.orgId, workflow.createdById))) teammate = p;
   }
   if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
   // A condition such as "priority equals" with no value would go live and

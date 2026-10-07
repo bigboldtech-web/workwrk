@@ -27,7 +27,7 @@ import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { SCOPE_REFUSAL, definitionWithScope, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
 import { livePlaces, scopeReadable } from "@/lib/automation/places-server";
-import { teammateStepSlugs } from "@/lib/automation/teammate-step";
+import { teammateCreatorGone, teammateStepSlugs } from "@/lib/automation/teammate-step";
 import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 const EVERYWHERE_OVER_HIDDEN = "That version runs everywhere, and this draft also runs in places you can't open. Restoring it would drop them, so choose Everywhere in Where it runs yourself, or ask someone who can open them to restore it.";
@@ -53,7 +53,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   // request in its place, or take the step out of the draft.
   if (ctx.userId !== wf.createdById) {
     const target = await prisma.automationWorkflowVersion.findFirst({ where: { workflowId: wf.id, organizationId: ctx.orgId, versionNumber: number }, select: { definitionJson: true } });
-    if (teammateStepSlugs(wf.definition).length > 0 || teammateStepSlugs(target?.definitionJson ?? null).length > 0) {
+    // Taking the draft's step out is anyone's once its creator can no longer be acted for (review round 7); putting one in never is.
+    const intoDraft = teammateStepSlugs(target?.definitionJson ?? null).length > 0;
+    const outOfDraft = teammateStepSlugs(wf.definition).length > 0 && !(await teammateCreatorGone(ctx.orgId, wf.createdById));
+    if (intoDraft || outOfDraft) {
       return NextResponse.json({ error: AUTOMATION_TEAMMATE_COPY.creatorOnly, code: "teammate_step_creator_only", section: "then", issues: { section: "then" } }, { status: 403 });
     }
   }

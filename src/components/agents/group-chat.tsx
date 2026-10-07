@@ -248,6 +248,8 @@ export function GroupChat({
           type="button"
           className="whitespace-nowrap font-medium underline underline-offset-2"
           onClick={() => {
+            // A failed continue continues, whatever the composer holds (review round 7).
+            if (chat.tryAgainContinue()) return;
             chat.clearError();
             if (chat.draft.trim()) void chat.retry();
             else requestAnimationFrame(() => composerRef.current?.focus());

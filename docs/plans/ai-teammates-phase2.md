@@ -553,13 +553,13 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
   - `routineFor(name)`: `Routine for ${name}`; `routineForYou: "Your routine"`; `stoppedChip: "Stopped"`
   - `scheduleLine(name)`: `Now a routine for ${name}`; `scheduleLineYou: "Now your routine"`
   - `stopped(reason)`: `Its schedule stopped: ${reason} Anyone who wants it on a schedule can set up a routine in its chat.`
-  - `stopReason`:
-    - `no_creator: "nobody is on record as having set it up, and it never runs as someone else."`
-    - `person_gone: "the person who set it up is no longer in the workspace."`
-    - `guest: "the person who set it up is a guest now."`
+  - `stopReason` (review round 7: worded as what was true when the schedule moved, never said again as if still true):
+    - `no_creator: "nobody was on record as having set it up, and it never runs as someone else."`
+    - `person_gone: "when schedules moved to routines, the person who set it up was no longer in the workspace."`
+    - `guest: "when schedules moved to routines, the person who set it up was a guest."`
     - `agent_account: "it was set up by an agent account."`
-    - `no_access: "the person who set it up can no longer use it."`
-    - `unsupported_schedule: "its schedule isn't one a routine can run."`
+    - `no_access: "when schedules moved to routines, the person who set it up could no longer use it."`
+    - `unsupported_schedule: "its schedule wasn't one a routine can run."`
     - `no_schedule: "it had no schedule."`
     - `agent_removed: "it was removed."`
   - `openRoutines: "Open routines"`, `setUpRoutine: "Set up a routine"`, `scheduleLabel: "Schedule"`
@@ -717,7 +717,7 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
   - `newGroup: "New group chat"`, `title: "New group chat"`, `intro: "Pick two to five of your teammates. Each answers as itself, works as you and asks you first, as in its own chat."`
   - `name: "Name"`, `namePlaceholder: "For example, Offsite crew"`, `members: "Teammates"`, `create: "Create group chat"`, `cancel: "Cancel"`
   - `pickMore: "Pick at least two teammates."`, `tooMany: "A group chat has at most five teammates."`
-  - `duplicateName: "Two teammates in a group can't share a name. Rename one first."`
+  - `duplicateName: "Two teammates in a group can't share a name. Leave one out, or rename it first."` (review round 7: words a Member can follow)
   - `removedCantJoin(name)`: `${name} was removed, so it can't join a group.`
   - `limit(n)`: `You have ${n} group chats, the most one person can have. Leave one first.`
   - `minMembers: "A group chat needs at least two teammates. Leave it instead."`
@@ -882,7 +882,7 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
     - `open: "Open"`
     - `askTitle(name)`: `Ask ${name}` (`wouldDoLine` gives "Would ask Project Manager")
     - `noTeammateNamed(n)`: `You don't have a teammate called ${n}.`
-    - `severalNamed(n)`: `More than one of your teammates is called ${n}. Rename one first.`
+    - `severalNamed(n)`: `More than one of your teammates is called ${n}, so it isn't clear which to ask. One needs another name: the person can rename their own, and an Owner or Admin can rename a workspace one.` (review round 7)
     - `cantAskItself: "A teammate can't ask itself."`
     - `delegatePaused(n)`: `${n} is paused, so it can't be asked.`
     - `tooManyAsks: "That's the most teammates one answer can ask. Send another message to ask more."`
@@ -1475,3 +1475,16 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     - The schedule move's compare-and-swap also requires that the schedule was never moved.
     - Tests also added: the moved-before rule with a creator who can still be acted for, cancel-on-removal in a group turn and continue, and the delegation sentences.
     - Recorded, not changed: the "AutomationRun" partial index from round 5 is built without CONCURRENTLY, which holds that table's writes for the build. It ran with the round 5 deploy (green, the table is small today), and IF NOT EXISTS makes every later run a no-op, so the file is left as it ran.
+- **Step 8, review round 7** (three read-only reviewers: round 6's fixes, a fresh pass on prompt injection, a fresh pass on what happens when something a piece depends on changes): 15 found (no high, 3 medium), all fixed.
+  - Medium:
+    1. Try again after a failed continue never continued: the button cleared the error, and the continue with it, before it asked, so it sent the composer's words as a new message. The button now continues first (tryAgainContinue).
+    2. Deciding a card that a Talk, automation or delegated turn made started a continue at once, with this chat's tools and the person's "Don't ask", reading back an answer whose words could carry what others planted where it read. Such a card never continues at once now (its outcome is told at the person's next message), and an answer given in Talk or to another teammate reads back as information the server hands the teammate, in a workspace note, never as its own words.
+    3. The Talk cleaner removed every "@" before a letter, breaking email addresses and links in answers posted with no card. Only an "@" that starts a word goes now.
+  - Low:
+    - Sends and continues: a stopped continue keeps "The answer stopped." (it carries on and is saved), and the continue sentence is only for one the server never got; a saved send another send overtook is still watched until its answer lands.
+    - Talk: the @ list is read again when the conversation's members change (by id); an answer's Inbox notice names the teammate ("Chief of Staff for Ola Owner"); an answer is not posted when the person was deactivated, or the teammate removed or paused, during the turn.
+    - Data escaping: look-alike brackets and invisible format characters (direction overrides, zero-width marks, tag letters) are made plain before escaping on every data path (src/lib/agents/plain-data.ts), with no Unicode normalising, which would turn a fullwidth quote into a real one inside a tool's JSON.
+    - Automations: when its creator can no longer be acted for (gone, deactivated, a Guest, an agent account), anyone who may edit an automation may take its teammate step out, then save and publish; adding or changing one stays the creator's, and AI being off keeps the lock. The step says "AI is turned off" when it is, never that the creator can't be acted for.
+    - Groups: a group with no name of its own stores none, so its name follows its live members; a shared name a rename elsewhere made never blocks an unrelated change, and the advice is one a Member can follow.
+    - Workspace agents: a stop reason says what was true when the schedule moved, never as if still true.
+    - The builder says "Couldn't load your teammates." once.

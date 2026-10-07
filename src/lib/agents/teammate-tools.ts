@@ -140,12 +140,14 @@ export async function livePersonByEmail(organizationId: string, email: string): 
 
 /**
  * Text that leaves the person's chat: markdown links reduced to their words,
- * again until none is left (withoutLinks), and for Talk no "@" before a word,
- * so a post pings nobody. Trimmed to `max` characters.
+ * again until none is left (withoutLinks), and for Talk no "@" that starts a
+ * word, so a post reads as pinging nobody. An "@" inside a word or a link
+ * stays: an email address or a URL keeps working, never turned silently into
+ * another one (review round 7). Trimmed to `max` characters.
  */
 export function cleanOutwardText(text: string, o: { talk: boolean; max: number }): string {
   let t = withoutLinks(String(text ?? "")).trim();
-  if (o.talk) t = t.replace(/@(?=[\p{L}\p{N}_])/gu, "");
+  if (o.talk) t = t.replace(/(^|[\s(\[{"'\u201C\u2018])@(?=[\p{L}\p{N}_])/gu, "$1");
   return clampText(t, o.max).trim();
 }
 

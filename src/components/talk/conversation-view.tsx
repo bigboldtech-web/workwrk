@@ -618,7 +618,8 @@ export function ConversationView({
   // (review round 6). A read that fails keeps what was there.
   const [askable, setAskable] = useState<MentionTeammate[]>([]);
   const [askTick, setAskTick] = useState(0);
-  const askKey = meta ? `${meta.memberCount ?? ""}:${String(meta.restricted)}:${String(meta.archivedAt ?? "")}` : "";
+  // Who is here, by id (a member's meta carries the list, not memberCount; review round 7).
+  const askKey = meta ? `${meta.members.map((m) => m.userId).sort().join(",")}:${String(meta.restricted)}:${String(meta.archivedAt ?? "")}` : "";
   useEffect(() => {
     setAskable([]);
   }, [id]);

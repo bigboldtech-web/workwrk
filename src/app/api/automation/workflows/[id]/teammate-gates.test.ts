@@ -18,6 +18,8 @@ const st = vi.hoisted(() => ({
   live: null as Row | null,
   updates: [] as Row[],
   versions: [] as Row[],
+  /** How the creator resolves now: acted for, or refused (gone, inactive, guest, ai_off). */
+  creator: { ok: true } as { ok: true } | { ok: false; reason: string },
 }));
 
 const STEP = { key: "ask_teammate", params: { teammate: "t-triage", request: "Summarise [title]" } };
@@ -29,6 +31,7 @@ vi.mock("@/lib/automation/gate", () => ({
   triggerProblem: async () => null,
   workflowRights: () => ({ edit: true, archive: true }),
 }));
+vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: async () => (st.creator.ok ? { ok: true, person: { userId: "u-max" } } : st.creator) }));
 vi.mock("@/lib/agents/teammate-server", () => ({ loadTeammate: async (slug: string) => (slug === "t-triage" ? { id: "a1", slug } : null) }));
 vi.mock("@/lib/automation/definition-view", () => ({
   definitionForViewer: async (_v: unknown, definition: unknown) => ({ definition, scopeHidden: false, scopeKept: [] }),
@@ -97,6 +100,7 @@ beforeEach(() => {
   st.versions = [];
   st.wfUnderLock = null;
   st.live = null;
+  st.creator = { ok: true };
   // Max made it; its draft asks Triage.
   st.wf = { id: "wf1", status: "PAUSED", publishedVersionId: null, triggerEvent: "task.created", definition: { trigger: "task.created", conditions: null, actions: [COMMENT, STEP] }, name: "Support triage", description: null, severity: "MINOR", createdById: "u-max" };
 });
@@ -178,5 +182,35 @@ describe("restoring an older version", () => {
     st.live = { definitionJson: { actions: [COMMENT, STEP] } };
     expect(await read(await restore(new Request("https://x.test", { method: "POST" }) as never, restoreParams))).toMatchObject({ status: 403, body: { code: "teammate_step_creator_only" } });
     expect(st.updates).toEqual([]);
+  });
+});
+
+describe("when its creator can no longer be acted for (review round 7)", () => {
+  it("lets anyone who may edit it take the teammate step out, save and publish, and nothing more", async () => {
+    st.creator = { ok: false, reason: "inactive" };
+    as("u-olivia");
+    // Keeping the step (changing anything else) is still refused: it works as Max.
+    expect(await read(await put({ definition: { trigger: "task.updated", actions: [COMMENT, STEP], everywhere: true } }))).toMatchObject({ status: 403 });
+    // Taking it out is allowed.
+    expect((await put({ definition: { trigger: "task.created", actions: [COMMENT], everywhere: true } })).status).toBe(200);
+    // Publishing a draft without it over a live version with it is allowed too.
+    st.wf = { ...st.wf, publishedVersionId: "v1", definition: { trigger: "task.created", conditions: null, actions: [COMMENT] } };
+    st.live = { definitionJson: { actions: [COMMENT, STEP] } };
+    expect((await publish(new Request("https://x.test") as never, params)).status).toBe(200);
+  });
+
+  it("keeps the lock while AI is only turned off: it can come back on", async () => {
+    st.creator = { ok: false, reason: "ai_off" };
+    as("u-olivia");
+    expect(await read(await put({ definition: { trigger: "task.created", actions: [COMMENT], everywhere: true } }))).toMatchObject({ status: 403 });
+  });
+
+  it("never lets anyone else restore a version with a teammate step into the draft", async () => {
+    st.creator = { ok: false, reason: "gone" };
+    as("u-olivia");
+    st.wf = { ...st.wf, definition: { trigger: "task.created", conditions: null, actions: [COMMENT] } };
+    st.live = { definitionJson: { actions: [COMMENT, STEP] } };
+    const res = await restore(new Request("https://x.test", { method: "POST" }) as never, { params: Promise.resolve({ id: "wf1", n: "1" }) });
+    expect(await read(res)).toMatchObject({ status: 403, body: { code: "teammate_step_creator_only" } });
   });
 });

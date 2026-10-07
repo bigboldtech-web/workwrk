@@ -92,7 +92,15 @@ describe("a continue that failed (review round 6)", () => {
       await store.resume(slug);
       expect(store.stateOf(slug).error).toBe("not_sent");
       expect(store.stateOf(slug).errorText).toBe("Couldn't carry on after your decision. Try again.");
-      await store.retry(slug);
+      // As the error row's button runs it (review round 7): the continue
+      // first, never clearing it away before it asks.
+      const pressTryAgain = async () => {
+        if (store.tryAgainContinue(slug)) return;
+        store.clearError(slug);
+        await store.retry(slug);
+      };
+      await pressTryAgain();
+      await vi.advanceTimersByTimeAsync(10);
       expect(net.bodies).toEqual([{ resume: true }, { resume: true }]);
       expect(store.stateOf(slug).draft).toBe("@Triage also check");
     } finally {

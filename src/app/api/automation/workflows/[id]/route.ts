@@ -22,7 +22,7 @@ import { definitionForViewer } from "@/lib/automation/definition-view";
 import { draftRevision } from "@/lib/automation/draft-revision";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
-import { teammateStepProblem, teammateStepSlugs } from "@/lib/automation/teammate-step";
+import { teammateCreatorGone, teammateStepProblem, teammateStepSlugs } from "@/lib/automation/teammate-step";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -87,6 +87,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // The places the viewer cannot open are kept, never listed, named or
   // counted: the builder gets the rest and one "some are kept" flag.
   const forViewer = await definitionForViewer(ctx.viewer, workflow.definition, workflow.createdById);
+  // Read only when a teammate step is there to take out (review round 7).
+  const hasTeammateStep = teammateStepSlugs(workflow.definition).length > 0 || (live ? teammateStepSlugs(live.definitionJson).length > 0 : false);
+  const teammateCreatorCannot = hasTeammateStep ? await teammateCreatorGone(ctx.orgId, workflow.createdById) : false;
 
   return NextResponse.json(
     {
@@ -110,6 +113,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         viewerIsCreator: Boolean(workflow.createdById) && workflow.createdById === ctx.userId,
         // Turning it back on is checked against what runs (activate route): the builder's switch reads the same (review round 3).
         liveHasTeammateStep: live ? teammateStepSlugs(live.definitionJson).length > 0 : false,
+        // Its creator can no longer be acted for: its teammate step can never run, and anyone who may edit it may take that step out.
+        teammateCreatorGone: teammateCreatorCannot,
       },
     },
     { headers: { "Cache-Control": "private, no-store" } },
@@ -184,9 +189,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // An AI teammate step works as the creator: only they may change what it
     // asks, where it runs or what starts it (a trigger alone included).
     // Nor take one out: a draft that holds one is the creator's to change (review round 3, as restore rules).
+    // Unless its creator can no longer be acted for: then the step can never run, and taking it out is anyone's (review round 7).
+    const removing = await teammateStepProblem(existing.definition, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer }).then((p) => (p?.status === 403 ? p : null));
     const teammate =
       (await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer })) ??
-      (await teammateStepProblem(existing.definition, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer }).then((p) => (p?.status === 403 ? p : null)));
+      (removing && !(await teammateCreatorGone(ctx.orgId, existing.createdById)) ? removing : null);
     if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
     data.definition = next as Prisma.InputJsonValue;
     // Before the first publish nothing runs, so the column follows the

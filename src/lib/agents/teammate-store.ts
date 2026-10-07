@@ -598,7 +598,9 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     // A continue sent no message: its row says so, and Try again continues.
     if (text === null) failedContinues.set(slug, null);
     else failedContinues.delete(slug);
-    if (text === null && !errorText && (error === "not_sent" || error === "stopped")) errorText = TEAMMATE_CHAT.continueFailed;
+    // Only a continue the server never got failed: a stopped one carries on
+    // and is saved, so it keeps "The answer stopped." (review round 7).
+    if (text === null && !errorText && error === "not_sent") errorText = TEAMMATE_CHAT.continueFailed;
     set(slug, (c) => ({
       error,
       errorText,
@@ -606,24 +608,27 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
       draft: draftAfterFailure(c.draft, text, serverHas),
       messages: failedTurnMessages(c.messages, ids, serverHas),
     }));
-    if (serverHas && error === "stopped") {
-      // The route saves the turn after the connection drops, but only when
-      // the turn ends, so the chat is read again, soon and then once a minute
-      // for up to ten minutes, until its answer is there (Try again would ask
-      // a second time). Any read that finds it, later ones included, ends the
-      // stop and clears the error it owns (read()).
-      const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
-      const me: StoppedTurn = {
-        questionId: question,
-        liveId: ids.liveId,
-        known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
-        text,
-        startedAt: Date.now(),
-      };
-      stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
-      errorStop.set(slug, me);
-      watchStops(slug);
-    }
+    if (serverHas && error === "stopped") watchStop(true);
+  };
+
+  // The route saves the turn after the connection drops, but only when the
+  // turn ends, so the chat is read again, soon and then once a minute for up
+  // to ten minutes, until its answer is there (Try again would ask a second
+  // time). Any read that finds it, later ones included, ends the stop and
+  // clears the error it owns (read()); a stop whose row a newer send owns is
+  // watched without it.
+  const watchStop = (ownsError: boolean) => {
+    const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
+    const me: StoppedTurn = {
+      questionId: question,
+      liveId: ids.liveId,
+      known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+      text,
+      startedAt: Date.now(),
+    };
+    stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
+    if (ownsError) errorStop.set(slug, me);
+    watchStops(slug);
   };
 
   try {
@@ -704,18 +709,20 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
   if (unknown && text !== null) {
     const saved = await sentAnyway(slug, text, knownAtSend);
     const drawnId = ids.userId;
-    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
-      // Another send began meanwhile: its row is its own. Words the server
-      // never took come back to the composer, and their bubble goes, so the
-      // thread never shows them as sent (review round 6).
-      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
-      return;
-    }
     if (saved) {
       // The drawn bubble is that saved message now, and the stop waits for its answer.
       set(slug, (c) => ({ messages: c.messages.map((m) => (m.id === drawnId ? { ...m, id: saved } : m)) }));
       ids = { ...ids, userId: saved };
       stopKnown = knownAtSend;
+    }
+    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
+      // Another send began meanwhile: its row is its own. One the server
+      // took is still watched until its answer lands (review round 7); words
+      // it never took come back to the composer, and their bubble goes, so
+      // the thread never shows them as sent (review round 6).
+      if (saved) watchStop(false);
+      else set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
+      return;
     }
     serverHas = saved !== null;
     fail(saved ? "stopped" : "not_sent", null);
@@ -770,29 +777,34 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
     // A continue sent no message: its row says so, and Try again continues that teammate.
     if (continued) failedContinues.set(slug, typeof body.agentSlug === "string" ? body.agentSlug : null);
     else failedContinues.delete(slug);
-    if (continued && !errorText && (error === "not_sent" || error === "stopped")) errorText = TEAMMATE_CHAT.continueFailed;
+    // Only a continue the server never got failed (review round 7).
+    if (continued && !errorText && error === "not_sent") errorText = TEAMMATE_CHAT.continueFailed;
     set(slug, (c) => ({
       error,
       errorText,
       draft: draftAfterFailure(c.draft, text, serverHas),
       messages: failedTurnMessages(c.messages, drawn, serverHas),
     }));
-    if (serverHas && error === "stopped") {
-      const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
-      const me: StoppedTurn = {
-        questionId: question,
-        liveId: drawn.liveId,
-        known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
-        text,
-        startedAt: sentAt,
-        expect,
-        liveAgentId: ids.agentId,
-        continued,
-      };
-      stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
-      errorStop.set(slug, me);
-      watchStops(slug);
-    }
+    if (serverHas && error === "stopped") watchStop(true);
+  };
+
+  // As a one-teammate turn's: a stop whose row a newer send owns is watched without it.
+  const watchStop = (ownsError: boolean) => {
+    const drawn = turnIds();
+    const question = ids.userId && !isTempMessage({ id: ids.userId }) ? ids.userId : null;
+    const me: StoppedTurn = {
+      questionId: question,
+      liveId: drawn.liveId,
+      known: stopKnown ?? new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
+      text,
+      startedAt: sentAt,
+      expect,
+      liveAgentId: ids.agentId,
+      continued,
+    };
+    stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
+    if (ownsError) errorStop.set(slug, me);
+    watchStops(slug);
   };
 
   try {
@@ -857,18 +869,20 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   if (unknown && text !== null) {
     const saved = await sentAnyway(slug, text, knownAtSend);
     const drawnId = ids.userId;
-    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
-      // Another send began meanwhile: its row is its own. Words the server
-      // never took come back to the composer, and their bubble goes, so the
-      // thread never shows them as sent (review round 6).
-      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
-      return;
-    }
     if (saved) {
       // The drawn bubble is that saved message now, and the stop waits for its answer.
       set(slug, (c) => ({ messages: c.messages.map((m) => (m.id === drawnId ? { ...m, id: saved } : m)) }));
       ids = { ...ids, userId: saved };
       stopKnown = knownAtSend;
+    }
+    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
+      // Another send began meanwhile: its row is its own. One the server
+      // took is still watched until its answer lands (review round 7); words
+      // it never took come back to the composer, and their bubble goes, so
+      // the thread never shows them as sent (review round 6).
+      if (saved) watchStop(false);
+      else set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false), messages: c.messages.filter((m) => m.id !== drawnId) }));
+      return;
     }
     serverHas = saved !== null;
     fail(saved ? "stopped" : "not_sent", null);
@@ -946,6 +960,19 @@ function setPractice(slug: string, practice: boolean): void {
   if (practice !== stateOf(slug).practice) set(slug, { practice });
 }
 
+/**
+ * The error row's Try again when a continue failed: it continues, whatever
+ * the composer holds, and never sends those words as a new message. False
+ * when the row is a message's, so the button sends the composer as before
+ * (review round 7: the button cleared the error, and the continue with it,
+ * before it asked).
+ */
+function tryAgainContinue(slug: string): boolean {
+  if (!failedContinues.has(slug)) return false;
+  void retry(slug);
+  return true;
+}
+
 function clearError(slug: string): void {
   failedContinues.delete(slug);
   if (stateOf(slug).error) set(slug, { error: null, errorText: null });
@@ -974,6 +1001,7 @@ export function useTeammateChat(slug: string) {
       loadOlder: () => loadOlder(slug),
       send: (text: string, opts?: { practice?: boolean }) => send(slug, text, opts),
       retry: () => retry(slug),
+      tryAgainContinue: () => tryAgainContinue(slug),
       resume: (agentSlug?: string) => resume(slug, agentSlug ?? null),
       decide: (decisions: TeammateDecision[], opts?: { always?: boolean }) => decide(slug, decisions, opts),
       markRead: () => markRead(slug),
@@ -1076,4 +1104,4 @@ export function useTeammateList(opts: { removed: boolean }) {
 }
 
 /** The store's own actions without React, for its tests (teammate-store.stop.test.ts). */
-export const teammateStoreForTests = { open, send, refresh, resume, retry, setDraft, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };
+export const teammateStoreForTests = { open, send, refresh, resume, retry, tryAgainContinue, clearError, setDraft, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };

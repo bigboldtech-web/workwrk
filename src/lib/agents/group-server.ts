@@ -115,9 +115,19 @@ export function memberViews(g: Pick<GroupRecord, "members">, viewer: Viewer): Gr
 }
 
 /** The group's name: its own, else its first three teammates'. */
+/**
+ * A group's name: the one the person gave it, else its live members' names
+ * as they are now. A group with no name of its own stores none, so its name
+ * follows its members: never one removed, never an old name (review round 7).
+ */
 export function groupNameOf(g: Pick<GroupRecord, "title" | "members">): string {
   const own = (g.title ?? "").trim();
-  return own || GROUP_COPY.groupDefaultName(g.members.map((m) => m.agent.name).slice(0, 3));
+  return own || GROUP_COPY.groupDefaultName(g.members.filter((m) => m.agent.status !== "ARCHIVED").map((m) => m.agent.name).slice(0, 3));
+}
+
+/** The name to store: the person's own, or none, so the name follows the members. */
+function ownName(input: string | null | undefined): string | null {
+  return (input ?? "").trim() ? groupNameFrom(input, []) : null;
 }
 
 // ── Making and changing one ─────────────────────────────────────────
@@ -165,7 +175,7 @@ export async function createGroup(viewer: Viewer, input: { name?: string | null;
   if (problem) return refuse(PROBLEM[problem].status, problem, PROBLEM[problem].error);
   const live = await prisma.chatSession.count({ where: { organizationId: viewer.organizationId, userId: viewer.userId, kind: GROUP_KIND, archivedAt: null } });
   if (live >= GROUP_LIMITS.perPerson) return refuse(403, "limit", GROUP_COPY.limit(GROUP_LIMITS.perPerson));
-  const title = groupNameFrom(input.name, found.agents.map((a) => a.name));
+  const title = ownName(input.name);
   const id = await prisma.$transaction(async (tx) => {
     const chat = await tx.chatSession.create({
       data: { organizationId: viewer.organizationId, userId: viewer.userId, kind: GROUP_KIND, agentId: null, title },
@@ -202,11 +212,15 @@ export async function updateGroup(
     if (liveAfter < GROUP_LIMITS.minMembers && liveAfter < liveBefore) return refuse(409, "min_members", GROUP_COPY.minMembers);
     const problem = memberProblem(after);
     // Too few that removing did not cause (a teammate removed from the
-    // workspace) never blocks an add or a removal of a removed one.
-    if (problem && problem !== "too_few") return refuse(PROBLEM[problem].status, problem, PROBLEM[problem].error);
+    // workspace) never blocks an add or a removal of a removed one. Nor does
+    // a shared name this change did not bring: a rename elsewhere made it,
+    // and only someone else may undo it (review round 7).
+    const key = (n: string) => n.trim().toLowerCase();
+    const addedClash = found.agents.some((a) => after.filter((m) => m.status !== "ARCHIVED" && key(m.name) === key(a.name)).length > 1);
+    if (problem && problem !== "too_few" && (problem !== "duplicate_name" || addedClash)) return refuse(PROBLEM[problem].status, problem, PROBLEM[problem].error);
   }
   const renaming = input.name !== undefined;
-  const title = renaming ? groupNameFrom(input.name, after.map((m) => m.name)) : g.title;
+  const title = renaming ? ownName(input.name) : g.title;
   const renamed = renaming && title !== g.title;
   if (!changing && !renamed) return { ok: true, group: g };
 
@@ -226,7 +240,7 @@ export async function updateGroup(
     }
     await tx.chatSession.update({ where: { id: g.id }, data: { ...(renamed ? { title } : {}), updatedAt: new Date() } });
   });
-  if (renamed && title) await writeEventLine(g.id, { text: GROUP_COPY.renamedLine(title), event: "group_renamed" });
+  if (renamed) await writeEventLine(g.id, { text: GROUP_COPY.renamedLine(title ?? GROUP_COPY.groupDefaultName(after.filter((m) => m.status !== "ARCHIVED").map((m) => m.name).slice(0, 3))), event: "group_renamed" });
   for (const a of found.agents) await writeEventLine(g.id, { text: GROUP_COPY.addedLine(a.name), event: "group_member_added", agentId: a.id });
   for (const m of g.members.filter((x) => removeIds.has(x.agent.id))) {
     await writeEventLine(g.id, { text: GROUP_COPY.removedLine(m.agent.name), event: "group_member_removed", agentId: m.agent.id });

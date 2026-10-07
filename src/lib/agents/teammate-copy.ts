@@ -1102,7 +1102,8 @@ export const GROUP_COPY = {
   cancel: "Cancel",
   pickMore: "Pick at least two teammates.",
   tooMany: "A group chat has at most five teammates.",
-  duplicateName: "Two teammates in a group can't share a name. Rename one first.",
+  // Words a Member can follow: a workspace teammate is renamed only by an Owner or Admin (review round 7).
+  duplicateName: "Two teammates in a group can't share a name. Leave one out, or rename it first.",
   removedCantJoin: (name: string) => `${name} was removed, so it can't join a group.`,
   limit: (n: number) => `You have ${n} group chats, the most one person can have. Leave one first.`,
   minMembers: "A group chat needs at least two teammates. Leave it instead.",
@@ -1188,13 +1189,15 @@ export const LEGACY_COPY = {
     `${reason ? `Its schedule stopped: ${reason}` : "Its schedule stopped."} Anyone who wants it on a schedule can set up a routine in its chat.`,
   /** Who a routine works for when their name can't be read. */
   itsCreator: "its creator",
+  // What was true when the schedule moved, worded so: it is never said again
+  // as if still true after the person comes back (review round 7).
   stopReason: {
-    no_creator: "nobody is on record as having set it up, and it never runs as someone else.",
-    person_gone: "the person who set it up is no longer in the workspace.",
-    guest: "the person who set it up is a guest now.",
+    no_creator: "nobody was on record as having set it up, and it never runs as someone else.",
+    person_gone: "when schedules moved to routines, the person who set it up was no longer in the workspace.",
+    guest: "when schedules moved to routines, the person who set it up was a guest.",
     agent_account: "it was set up by an agent account.",
-    no_access: "the person who set it up can no longer use it.",
-    unsupported_schedule: "its schedule isn't one a routine can run.",
+    no_access: "when schedules moved to routines, the person who set it up could no longer use it.",
+    unsupported_schedule: "its schedule wasn't one a routine can run.",
     no_schedule: "it had no schedule.",
     agent_removed: "it was removed.",
   },
@@ -1224,7 +1227,7 @@ export const DELEGATION_COPY = {
   delegateWaitingLine: (name: string, titles: string) => `${name} is waiting for your approval: ${titles}`,
   askTitle: (name: string) => `Ask ${name}`,
   noTeammateNamed: (n: string) => `You don't have a teammate called ${n}.`,
-  severalNamed: (n: string) => `More than one of your teammates is called ${n}. Rename one first.`,
+  severalNamed: (n: string) => `More than one of your teammates is called ${n}, so it isn't clear which to ask. One needs another name: the person can rename their own, and an Owner or Admin can rename a workspace one.`,
   cantAskItself: "A teammate can't ask itself.",
   delegatePaused: (n: string) => `${n} is paused, so it can't be asked.`,
   tooManyAsks: "That's the most teammates one answer can ask. Send another message to ask more.",
@@ -1265,6 +1268,8 @@ export const TALK_TEAMMATE_COPY = {
   toldWaiting: "Asked the person to approve it in their chat with you. Don't name what it is for here: not everyone here may open it.",
   toldDone: "Done. Don't name what changed here: not everyone here may open it.",
   toldFailed: "That didn't go through, and nothing changed. The details stay out of Talk: the person can ask again in their chat with you.",
+  /** Who a Talk answer's Inbox notice names as sending it (review round 7). */
+  noticeSender: (agent: string, person: string) => `${agent} for ${person}`,
   /** The audit log's words for a direct message: admins read it, so never "your chat with" (review round 4). */
   auditDmPlace: "a direct message",
   guestCannot: "Guests can't ask AI teammates.",
@@ -1298,6 +1303,7 @@ export const AUTOMATION_TEAMMATE_COPY = {
   noCreator: "This automation has no creator for its teammate to work as.",
   creatorOnly: "Only the person who made this automation can add, change or publish its AI teammate step, because the teammate works as them.",
   creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run.",
+  aiOffForCreator: "AI is turned off for the person who made this automation, so its teammate didn't run.",
   noTeammate: "The person who made this automation can no longer use that teammate.",
   // The step's own sentences never name the teammate: every reader of the
   // automation's runs reads them, and a private teammate's name is its
@@ -1323,6 +1329,9 @@ export const AUTOMATION_TEAMMATE_COPY = {
   /** The automation's row is gone under the claim. */
   workflowGone: "This automation no longer exists.",
   creatorOnlyOn: "Only the person who made this automation can turn it back on, because its AI teammate step works as them.",
+  /** Its creator can no longer be acted for here: the step can never run, and anyone who may edit it takes it out first (review round 7). */
+  creatorGoneRemove: (name: string | null) =>
+    `Its AI teammate step works as ${name ?? "its creator"}, who can no longer be acted for here, so it can't run. Remove that step to change or publish this automation.`,
   /** The draft has no teammate step but the live version does: the live one is the creator's to replace (review round 4). */
   creatorOnlyPublish: (name: string | null) =>
     `Its live version has an AI teammate step that works as ${name ?? "its creator"}, so only they can publish a new version. You can still save the draft.`,
