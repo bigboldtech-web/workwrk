@@ -55,6 +55,14 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
   // not listed until it is on.
   {
+    date: "2026-10-08",
+    title: "AI teammates keep to the teammate you chose",
+    items: [
+      { type: "security", text: "A routine, or an automation step, that works as you on a workspace teammate now runs only with the teammate as it was when you set it up. If an Owner or Admin changes that teammate's name, job, instructions, tools, approval rules or model, the routine pauses and says why, and the automation step stops and names what changed. Check the teammate, then resume the routine or publish the automation again." },
+      { type: "improvement", text: "Where AI teammates can't be asked in Talk (a public channel, or a place a Guest reads), typing @ now says why under AI teammates." },
+    ],
+  },
+  {
     date: "2026-10-07",
     title: "AI teammates in group chats, Talk and Automations",
     items: [

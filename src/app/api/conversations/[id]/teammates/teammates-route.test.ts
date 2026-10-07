@@ -42,6 +42,8 @@ const st = vi.hoisted(() => ({
   userN: 0,
   convType: "CHANNEL" as "CHANNEL" | "GROUP" | "DM",
   audits: [] as Row[],
+  /** The person's teammates, as the GET's read finds them. */
+  agents: [] as Row[],
 }));
 
 const conversation = () => ({ id: "c1", type: st.convType, name: st.convType === "DM" ? null : "proof", restricted: st.restricted, archivedAt: null });
@@ -68,6 +70,7 @@ vi.mock("@/lib/prisma", () => ({
         a.where.conversationId === "c1" ? a.where.id.in.filter((x) => a.where.deletedAt !== null || !st.removed.includes(x)).length : 0,
     },
     conversationMember: { findMany: async () => [] },
+    agent: { findMany: async () => st.agents },
     agentAction: { findFirst: async () => null },
     notification: { create: async (a: Row) => void st.notified.push(a) },
   },
@@ -119,7 +122,8 @@ vi.mock("@/lib/agents/teammate-tools", async () => {
   return { ...real, placeOf: async () => "#proof", talkAudience: async () => 2 };
 });
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
+import { TALK_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 const COS: Row = { id: "a-cos", slug: "t-cos", name: "Chief of Staff", status: "ENABLED", organizationId: "org1" };
 
@@ -135,6 +139,7 @@ async function ask(body: Row): Promise<{ status: number; events: Row[]; json: Ro
 const ASK = { body: "@Chief of Staff summarise this", teammate: "t-cos", clientId: "temp-12345678" };
 
 beforeEach(() => {
+  st.agents = [];
   st.givenBack = [];
   st.audienceReads = 0;
   st.restricted = true;
@@ -215,6 +220,25 @@ describe("asking a teammate in Talk", () => {
     expect(sixth).toMatchObject({ status: 429, json: { code: "rate_limited" } });
     // Refused before any member read (review round 8).
     expect(st.audienceReads).toBe(reads);
+  });
+
+  it("says in the @ list why no teammate can be asked here, to a person who has one (found by the live proof)", async () => {
+    const list = async () => (await GET(new Request("https://app.example.test/api/conversations/c1/teammates"), { params: Promise.resolve({ id: "c1" }) })).json();
+    st.agents = [{ organizationId: "org1", visibility: "PRIVATE", ownerId: `u-${st.userN}`, slug: "t-mine", name: "Mine", hue: "sky", avatar: null }];
+    st.restricted = false;
+    expect(await list()).toEqual({ addressable: false, reason: "public_channel", teammates: [], hint: TALK_TEAMMATE_COPY.publicChannel });
+    st.restricted = true;
+    st.guests = [true];
+    expect(await list()).toEqual({ addressable: false, reason: "has_guests", teammates: [], hint: TALK_TEAMMATE_COPY.hasGuests });
+    // Someone with no teammate of their own is told nothing about a feature they do not use.
+    st.agents = [{ organizationId: "org1", visibility: "PRIVATE", ownerId: "u-someone-else", slug: "t-theirs", name: "Theirs", hue: "sky", avatar: null }];
+    st.guests = [true];
+    expect(await list()).toMatchObject({ addressable: false, reason: "has_guests", hint: null });
+    // Where they can ask, there is no hint.
+    st.agents = [{ organizationId: "org1", visibility: "PRIVATE", ownerId: `u-${st.userN}`, slug: "t-mine", name: "Mine", hue: "sky", avatar: null }];
+    const open = await list();
+    expect(open).toMatchObject({ addressable: true, reason: null });
+    expect(open.hint).toBeUndefined();
   });
 
   it("refuses a public channel without reading who is in it (review round 8)", async () => {
