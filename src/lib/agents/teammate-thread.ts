@@ -101,10 +101,10 @@ export interface TeammateRoutineRef {
 /** One row of the thread. */
 export type TeammateMessageView =
   | (MessageBase & { kind: "user"; practice: boolean })
-  | (MessageBase & { kind: "agent"; practice: boolean; toolCalls: AiToolCall[]; streaming?: boolean })
+  | (MessageBase & { kind: "agent"; practice: boolean; toolCalls: AiToolCall[]; streaming?: boolean; replyTo?: string })
   | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef })
   | (MessageBase & { kind: "event"; event: TeammateEventKind | null; routineId: string | null; actionId: string | null })
-  | (MessageBase & { kind: "approval"; actionIds: string[] });
+  | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string });
 
 export const AGENT_ACTION_STATUSES = ["PENDING", "RUNNING", "EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"] as const;
 
@@ -270,7 +270,11 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
   switch (row.kind ?? null) {
     case null:
       if (row.role === "USER") return { ...base, kind: "user", practice };
-      if (row.role === "ASSISTANT") return { ...base, kind: "agent", practice, toolCalls: callsFrom(row.toolCalls) };
+      if (row.role === "ASSISTANT") {
+        // The person's message this answers (meta.replyTo), when the turn named it.
+        const replyTo = str(meta?.replyTo);
+        return { ...base, kind: "agent", practice, toolCalls: callsFrom(row.toolCalls), ...(replyTo ? { replyTo } : {}) };
+      }
       return null;
     case "REPORT":
       return {
@@ -289,8 +293,10 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
       const event = meta?.event;
       return { ...base, kind: "event", event: isTeammateEventKind(event) ? event : null, routineId: str(meta?.routineId), actionId: str(meta?.actionId) };
     }
-    case "APPROVAL":
-      return { ...base, kind: "approval", actionIds: idsFrom(meta?.actionIds) };
+    case "APPROVAL": {
+      const replyTo = str(meta?.replyTo);
+      return { ...base, kind: "approval", actionIds: idsFrom(meta?.actionIds), ...(replyTo ? { replyTo } : {}) };
+    }
     default:
       return null;
   }
@@ -564,10 +570,36 @@ function comesBefore(a: TeammateMessageView, b: TeammateMessageView): boolean {
  * that broke off) give way to the saved ones. `hasMore` stays about the
  * oldest message held.
  */
+/**
+ * A page in reading order: an answer or a card saved for a message
+ * (replyTo) sits right after that message, even when it was saved after a
+ * later one (a turn that broke off finishes on the server after the person
+ * asked again). Every other row keeps the server's order.
+ */
+export function orderReplies(rows: readonly TeammateMessageView[]): TeammateMessageView[] {
+  const questions = new Set(rows.filter((r) => r.kind === "user").map((r) => r.id));
+  const replyOf = (r: TeammateMessageView) => ((r.kind === "agent" || r.kind === "approval") && r.replyTo && questions.has(r.replyTo) ? r.replyTo : null);
+  const replies = new Map<string, TeammateMessageView[]>();
+  const rest: TeammateMessageView[] = [];
+  for (const r of rows) {
+    const q = replyOf(r);
+    if (q) replies.set(q, [...(replies.get(q) ?? []), r]);
+    else rest.push(r);
+  }
+  if (replies.size === 0) return [...rows];
+  const out: TeammateMessageView[] = [];
+  for (const r of rest) {
+    out.push(r);
+    if (r.kind === "user") out.push(...(replies.get(r.id) ?? []));
+  }
+  return out;
+}
+
 export function mergeNewestPage(
   held: { messages: readonly TeammateMessageView[]; hasMore: boolean },
-  page: { messages: readonly TeammateMessageView[]; hasMore: boolean },
+  rawPage: { messages: readonly TeammateMessageView[]; hasMore: boolean },
 ): { messages: TeammateMessageView[]; hasMore: boolean } {
+  const page = { ...rawPage, messages: orderReplies(rawPage.messages) };
   const first = page.messages[0];
   if (!first) return { messages: [], hasMore: false };
   const ids = new Set(page.messages.map((m) => m.id));

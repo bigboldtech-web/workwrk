@@ -706,13 +706,18 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
     : a.practice
       ? practice
       : null;
+  // A chat turn's answer and card name the person's message they answer, so
+  // the chat matches them without guessing by order (a routine's report, an
+  // earlier turn finishing late).
+  const reply = a.trigger === "CHAT" && a.userMessageId ? { replyTo: a.userMessageId } : {};
+  const answerMeta = meta || Object.keys(reply).length > 0 ? { ...(meta ?? {}), ...reply } : null;
   const assistant = await prisma.chatMessage.create({
     data: {
       sessionId: a.sessionId,
       role: "ASSISTANT",
       content: text,
       ...(report ? { kind: "REPORT" } : {}),
-      ...(meta ? { meta: json(meta) } : {}),
+      ...(answerMeta ? { meta: json(answerMeta) } : {}),
       modelUsed: s.model,
       tokensIn: s.tokensIn || null,
       tokensOut: s.tokensOut || null,
@@ -731,7 +736,7 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       kind: "APPROVAL",
       // The card reads the actions live; the sentence is for any reader that cannot.
       content: waitingForApprovalLine(firstTitle),
-      meta: json({ actionIds: proposals.map((r) => r.actionId) }),
+      meta: json({ actionIds: proposals.map((r) => r.actionId), ...reply }),
       // A moment after the answer, so the card always reads below it.
       createdAt: new Date(at.getTime() + 1),
     },

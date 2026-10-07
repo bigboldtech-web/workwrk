@@ -637,12 +637,13 @@ describe("what a turn saves", () => {
     const [answer, card] = db.created;
     expect(answer).toMatchObject({ sessionId: "s1", role: "ASSISTANT", content: "Posting.\n\nI asked to post in two channels.", modelUsed: "claude-sonnet-4-6", tokensIn: 200, tokensOut: 40, finishReason: "end_turn" });
     expect(answer.kind).toBeUndefined();
-    expect(answer.meta).toBeUndefined();
+    // A chat answer names the person's message it answers, so the chat never matches by order.
+    expect(answer.meta).toEqual({ replyTo: "u-now" });
     expect(answer.toolCalls).toEqual([
       expect.objectContaining({ name: "post_in_talk", state: "waiting", actionId: "act1" }),
       expect.objectContaining({ name: "post_in_talk", state: "waiting", actionId: "act2" }),
     ]);
-    expect(card).toMatchObject({ sessionId: "s1", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Post in #general", meta: { actionIds: ["act1", "act2"] } });
+    expect(card).toMatchObject({ sessionId: "s1", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Post in #general", meta: { actionIds: ["act1", "act2"], replyTo: "u-now" } });
     expect((card.createdAt as Date).getTime()).toBeGreaterThan((answer.createdAt as Date).getTime());
 
     // $3 per million in, $15 per million out, rounded up (src/lib/ai-cost.ts).
