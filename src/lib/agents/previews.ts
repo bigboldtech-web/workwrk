@@ -89,7 +89,7 @@ import {
   targetListFor,
   taskPatchFor,
 } from "./teammate-tools";
-import { BASE_RISK, EDITABLE_FIELD, alwaysKeyFor, maxRisk, type ApprovalRules, type ToolRisk } from "./tool-policy";
+import { BASE_RISK, EDITABLE_FIELD, alwaysKeyFor, honoursDontAsk, maxRisk, type ApprovalRules, type ToolRisk } from "./tool-policy";
 import { isToolName, type ToolName } from "./tool-names";
 import { PRECHECK_REFUSALS, toGoalLevel, type TeammateToolContext } from "./tools";
 import { clampText } from "./clamp";
@@ -213,7 +213,12 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
   const editable = EDITABLE_FIELD[tool];
   if (editable) preview.editable = { ...editable };
   const tightened = ctx.agentRules && Object.prototype.hasOwnProperty.call(ctx.agentRules, tool) && ctx.agentRules[tool] === "ask";
-  const alwaysKey = tightened ? null : alwaysKeyFor(tool, risk, targetKey);
+  // A Talk, automation or delegated turn never reads "Don't ask" (Decision
+  // 17), so its cards never offer it (review round 4). A decision re-prepares
+  // as APPROVAL and keeps what the card showed.
+  const trigger = ctx.teammate.trigger;
+  const honours = trigger === "APPROVAL" || honoursDontAsk(trigger);
+  const alwaysKey = tightened || !honours ? null : alwaysKeyFor(tool, risk, targetKey);
   if (alwaysKey) {
     preview.alwaysKey = alwaysKey;
     preview.alwaysLabel ??= APPROVAL_CARD.approveAlways;

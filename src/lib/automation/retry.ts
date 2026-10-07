@@ -57,8 +57,14 @@ export function stepDataBefore(
     .filter((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate" && s.order < order)
     .sort((a, b) => a.order - b.order)
     .at(-1);
-  if (!earlier || earlier.status !== "SUCCESS") return {};
+  if (!earlier) return {};
+  if (earlier.status !== "SUCCESS") return { teammateFailed: true };
   return teammateStepData(earlier.outputJson && typeof earlier.outputJson === "object" ? (earlier.outputJson as Record<string, unknown>) : null);
+}
+
+/** Whether a run's steps include an "Ask an AI teammate" step, wherever it sits. */
+export function teammateInSteps(steps: ReadonlyArray<{ stepType: string; stepKey: string }>): boolean {
+  return steps.some((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate");
 }
 
 export async function processAutomationRetries(): Promise<{
@@ -128,6 +134,7 @@ export async function processAutomationRetries(): Promise<{
         }),
         publisherId,
         workflowName: run.workflow.name,
+        teammateInRun: teammateInSteps(run.steps),
       };
 
       let stillFailing = 0;

@@ -331,6 +331,19 @@ describe("the card's choices", () => {
     expect(tight.ok && tight.preview.alwaysKey).toBeUndefined();
   });
 
+  it("never offers it on a card from a turn that never reads it (review round 4)", async () => {
+    db.people["max@x.com"] = MAX;
+    for (const trigger of ["TALK", "AUTOMATION", "DELEGATED"] as const) {
+      const r = await prepareCall("send_kudos", { receiverEmail: "max@x.com", message: "Thanks" }, { ...ctx(), teammate: { agentId: "a1", agentName: "Chief of Staff", trigger } });
+      expect(r.ok && r.preview.alwaysKey).toBeUndefined();
+      expect(r.ok && r.preview.alwaysLabel).toBeUndefined();
+    }
+    for (const trigger of ["ROUTINE", "RESUME", "APPROVAL"] as const) {
+      const r = await prepareCall("send_kudos", { receiverEmail: "max@x.com", message: "Thanks" }, { ...ctx(), teammate: { agentId: "a1", agentName: "Chief of Staff", trigger } });
+      expect(r.ok && r.preview.alwaysKey).toBe("send_kudos");
+    }
+  });
+
   it("passes a read through as a read", async () => {
     expect(await prepareCall("search_tasks", { titleContains: "acme" }, ctx())).toEqual({ ok: true, tool: "search_tasks", input: { titleContains: "acme" }, risk: "READ", preview: { title: "Find tasks" }, targetKey: null });
   });

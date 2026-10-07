@@ -295,4 +295,12 @@ describe("a group continue", () => {
     expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "agent_paused" });
     expect(st.claims).toEqual([]);
   });
+
+  it("says removed only for a removed teammate, and no access for one the person can no longer use (review round 4)", async () => {
+    st.group = groupOf([PM, agent("triage", "Triage", { status: "ARCHIVED" })]);
+    expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "agent_removed", error: "Triage can't continue here: it was removed." });
+    st.group = groupOf([PM, agent("triage", "Triage", { visibility: "PRIVATE", ownerId: "u-olivia" })]);
+    expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "no_access", error: "Triage can't continue here: you can no longer use it." });
+    expect(st.claims).toEqual([]);
+  });
 });

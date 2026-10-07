@@ -1106,6 +1106,8 @@ export const GROUP_COPY = {
   noOneCanAnswer: (names: string) => `${names} can't answer now.`,
   skippedLine: (name: string, reason: string) => `${name} didn't answer: ${reason}`,
   skipReason: { paused: "it is paused.", removed: "it was removed.", no_access: "you can no longer use it." },
+  /** A continue for a member that can't take it: the group's own words, never a one-teammate chat's (review round 4). */
+  cantContinue: (name: string, reason: string) => `${name} can't continue here: ${reason}`,
   /** A teammate whose turn got nothing back from the AI service. */
   noAnswerReason: "the AI service didn't answer.",
   renamedLine: (name: string) => `Renamed to ${name}`,
@@ -1160,11 +1162,13 @@ export const LEGACY_COPY = {
   routineName: "Scheduled check",
   /** The old loop's own line when "What to do each run" was empty. */
   defaultPrompt: "Run your usual scheduled check. Summarize what you found and call any tools you need to keep things moving.",
-  movedLine: (when: string) =>
-    `Your schedule from Workspace agents is now a routine: Scheduled check · ${when}. It works as you and asks before anything other people will see.`,
+  // The person who hears it may not be who set the schedule up (an admin
+  // may have), so the line never calls it theirs (review round 4).
+  movedLine: (name: string, when: string) =>
+    `The schedule ${name} had in Workspace agents is now your routine: Scheduled check · ${when}. It works as you and asks before anything other people will see.`,
   /** The same, for someone who chose "Don't ask" for some of its actions in this chat. */
-  movedLineKept: (when: string) =>
-    `Your schedule from Workspace agents is now a routine: Scheduled check · ${when}. It works as you and asks before anything other people will see, except what you chose not to be asked about.`,
+  movedLineKept: (name: string, when: string) =>
+    `The schedule ${name} had in Workspace agents is now your routine: Scheduled check · ${when}. It works as you and asks before anything other people will see, except what you chose not to be asked about.`,
   routineFor: (name: string) => `Routine for ${name}`,
   routineForYou: "Your routine",
   routinePausedFor: (name: string) => `Routine for ${name}, paused`,
@@ -1247,13 +1251,16 @@ export const TALK_TEAMMATE_COPY = {
   tooManyPeople: "AI teammates can be asked only where there are at most 250 people.",
   askedLine: (place: string, req: string) => `Asked in ${place}: ${req}`,
   answeredIn: (place: string) => `Answered in ${place}`,
+  /** The audit log's words for a direct message: admins read it, so never "your chat with" (review round 4). */
+  auditDmPlace: "a direct message",
   guestCannot: "Guests can't ask AI teammates.",
   publicChannel: "AI teammates can't be asked in public channels. Ask in a private channel, a group or a direct message.",
   hasGuests: "AI teammates can't be asked in a conversation with guests.",
   notMember: "Join this conversation to ask a teammate here.",
   archived: "This conversation is archived.",
   notAddressed: "Pick the teammate from the @ list to ask it.",
-  tooMany: (s: number) => `You've asked teammates 5 times in a minute. Try again in ${count(s, "second", "seconds")}.`,
+  // Counted on every try, including ones refused later, so it never says "asked" (review round 4).
+  tooMany: (s: number) => `You've tried to ask teammates 5 times in a minute. Try again in ${count(s, "second", "seconds")}.`,
   noFiles: "Files can't go in a message that asks a teammate. Send them in a message of their own.",
   threadGone: "That thread no longer exists.",
   notSent: "Your message wasn't sent. Try again.",
@@ -1269,6 +1276,9 @@ export const AUTOMATION_TEAMMATE_COPY = {
   valuesNote: "Their values are marked as information for the teammate, not instructions.",
   answerHelp: "Use {{teammate.answer}} in a task, a comment, a notification, a field, or an email to a member. The answer then goes wherever that task, comment or field goes.",
   creatorOnlyPicker: "Only you can use this step here: the teammate works as you.",
+  /** The builder's words for the step when AI is off for the viewer (review round 4). */
+  aiOff: "AI is turned off for you, so this step can't be added or published.",
+  aiOffHint: "AI is off for you",
   noCreator: "This automation has no creator for its teammate to work as.",
   creatorOnly: "Only the person who made this automation can add, change or publish its AI teammate step, because the teammate works as them.",
   creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run.",
@@ -1278,7 +1288,7 @@ export const AUTOMATION_TEAMMATE_COPY = {
   // person's (review round 1). The creator knows which one the step asks.
   paused: "The teammate is paused, so it didn't run.",
   agentCap: "The teammate has used all its AI questions for this month, so it didn't run.",
-  dailyCap: (n: number) => `This automation has asked its teammates ${n} times today, the most one automation may. It asks again tomorrow (UTC).`,
+  dailyCap: (n: number) => `This automation has asked its teammates ${n} times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again.`,
   noAnswer: "The teammate didn't answer.",
   answerHidden: "Only the person who made this automation and admins can read what the teammate answered.",
   outputHidden: "What this step returned can carry the AI teammate's answer, so only the person who made this automation and admins can read it.",
@@ -1286,6 +1296,7 @@ export const AUTOMATION_TEAMMATE_COPY = {
   pausedLabel: (name: string) => `${name} (paused: it won't run until it is turned back on)`,
   noRequest: "Write what the teammate should do.",
   noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it didn't answer, so it didn't run.",
+  noTeammateBefore: "This step uses the AI teammate's answer, and no AI teammate step comes before it, so it didn't run.",
   /** set_field with an answer the field can't take: never repeats the answer (the run's errors are read more widely). */
   answerNotAValue: "The AI teammate's answer isn't a value this field takes, so it was left alone.",
   answerNotForGuests: "The AI teammate's answer is never sent to Guests, so this step didn't run.",
@@ -1293,6 +1304,9 @@ export const AUTOMATION_TEAMMATE_COPY = {
   /** The automation's row is gone under the claim. */
   workflowGone: "This automation no longer exists.",
   creatorOnlyOn: "Only the person who made this automation can turn it back on, because its AI teammate step works as them.",
+  /** The draft has no teammate step but the live version does: the live one is the creator's to replace (review round 4). */
+  creatorOnlyPublish: (name: string | null) =>
+    `Its live version has an AI teammate step that works as ${name ?? "its creator"}, so only they can publish a new version. You can still save the draft.`,
   askedLine: (wf: string, req: string) => `Asked by the automation "${wf}": ${req}`,
   /** The AIQuery record's words for the turn, never the request itself. */
   what: "AI teammate in an automation",

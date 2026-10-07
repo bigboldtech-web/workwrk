@@ -1198,7 +1198,7 @@ export default function AutomationBuilderPage() {
       if (!a.available && !showUpcoming) continue;
       if (a.key === TEAMMATE_STEP_KEY && !wf?.viewerIsCreator) continue;
       const list = byCat.get(a.category) ?? [];
-      list.push({ value: a.key, label: a.name, description: a.description, disabled: !a.available, hint: a.available ? undefined : "Coming soon" });
+      list.push({ value: a.key, label: a.name, description: a.description, disabled: !a.available, hint: a.available ? undefined : a.unavailableReason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.aiOffHint : "Coming soon" });
       byCat.set(a.category, list);
     }
     return [...byCat.entries()].map(([label, options]) => ({ label, options }));
@@ -1341,8 +1341,9 @@ export default function AutomationBuilderPage() {
           icon: null,
           onClick: () => void publish(),
           busy: publishing,
-          disabled: busy || offline || (published && !dirty && !wf.unpublishedChanges),
-          title: offlineTitle ?? (published ? "The live automation keeps running the old version until you republish." : "Publishing checks the sentence and turns the automation on."),
+          // The server refuses a new version over a live teammate step from anyone but its creator (review round 4).
+          disabled: busy || offline || onLocked || (published && !dirty && !wf.unpublishedChanges),
+          title: offlineTitle ?? (onLocked ? AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null) : published ? "The live automation keeps running the old version until you republish." : "Publishing checks the sentence and turns the automation on."),
         } : undefined,
       }}
     />
@@ -1459,6 +1460,12 @@ export default function AutomationBuilderPage() {
             {canCreate ? (
               <button type="button" onClick={() => void duplicate()} className={cn("shrink-0", BTN.link)}>Duplicate it to make your own</button>
             ) : null}
+          </div>
+        </div>
+      ) : onLocked && canEdit && !archived ? (
+        <div className="px-6">
+          <div className="os-chrome mb-2 flex min-h-11 items-center gap-2 rounded-lg bg-subtle px-3 py-2 text-row text-ink-2" role="status">
+            <span className="min-w-0">{AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null)}</span>
           </div>
         </div>
       ) : null}

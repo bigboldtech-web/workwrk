@@ -30,16 +30,18 @@ const st = vi.hoisted(() => ({
   readerQueue: [] as Array<{ ids: string[]; tooMany: boolean }>,
   afterSent: [] as Row[],
   userN: 0,
+  convType: "CHANNEL" as "CHANNEL" | "GROUP" | "DM",
+  audits: [] as Row[],
 }));
 
-const CONVERSATION = { id: "c1", type: "CHANNEL", name: "proof", restricted: true, archivedAt: null };
+const conversation = () => ({ id: "c1", type: st.convType, name: st.convType === "DM" ? null : "proof", restricted: true, archivedAt: null });
 const viewerFor = () => ({ userId: `u-${st.userN}`, organizationId: "org1", orgRole: "MEMBER", isAgent: false });
 
 vi.mock("@/lib/talk-gate", () => ({
   requireConversation: async () => ({
-    ctx: { conversation: CONVERSATION, viewer: { userId: `u-${st.userN}`, orgRole: "MEMBER", isMember: true }, membershipId: "mem1", role: "edit", gate: { userId: `u-${st.userN}`, organizationId: "org1" } },
+    ctx: { conversation: conversation(), viewer: { userId: `u-${st.userN}`, orgRole: "MEMBER", isMember: true }, membershipId: "mem1", role: "edit", gate: { userId: `u-${st.userN}`, organizationId: "org1" } },
   }),
-  loadConversationRole: async () => ({ conversation: CONVERSATION, viewer: { userId: `u-${st.userN}`, orgRole: "MEMBER", isMember: true }, role: "edit" }),
+  loadConversationRole: async () => ({ conversation: conversation(), viewer: { userId: `u-${st.userN}`, orgRole: "MEMBER", isMember: true }, role: "edit" }),
 }));
 vi.mock("@/lib/talk-access", () => ({ canPost: () => true }));
 vi.mock("@/lib/app-gate", () => ({ requireApp: async () => ({ viewer: viewerFor() }) }));
@@ -89,7 +91,7 @@ vi.mock("@/lib/agents/talk-turn", () => ({
   setRequestState: async (messageId: string, state: Row) => void st.states.push({ messageId, ...state }),
   noticeTalkApprovals: async (userId: string, agent: { slug: string }, ids: string[]) =>
     void st.notified.push({ data: { type: "agent_approval", link: `/agents?chat=${agent.slug}&action=${ids[0]}` } }),
-  auditTalkAnswer: async () => {},
+  auditTalkAnswer: async (a: Row) => void st.audits.push(a),
   recordTalkOutcome: async () => {},
 }));
 vi.mock("@/lib/agents/teammate-server", async () => {
@@ -137,6 +139,8 @@ beforeEach(() => {
   st.tooMany = false;
   st.readerQueue = [];
   st.afterSent = [];
+  st.convType = "CHANNEL";
+  st.audits = [];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -160,6 +164,14 @@ describe("asking a teammate in Talk", () => {
     expect(st.turns[0]).toMatchObject({ trigger: "TALK", userText: "@Chief of Staff summarise this", origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 2 } });
     expect(st.states).toEqual([expect.objectContaining({ messageId: "m1", id: "a-cos", state: "answered", answerId: "m2" })]);
     expect(st.lines[0]).toMatchObject({ sessionId: "s-cos", event: "talk_asked", text: "Asked in #proof: @Chief of Staff summarise this", link: { kind: "talk", conversationId: "c1", messageId: "m1" } });
+  });
+
+  it("records a direct message's answer for admins in the third person (review round 4)", async () => {
+    await ask(ASK);
+    expect(st.audits.at(-1)).toMatchObject({ what: "Answered in #proof" });
+    st.convType = "DM";
+    await ask({ ...ASK, clientId: "temp-dm000001" });
+    expect(st.audits.at(-1)).toMatchObject({ what: "Answered in a direct message" });
   });
 
   it("answers another person's private teammate exactly as an unknown one", async () => {

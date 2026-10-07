@@ -114,6 +114,8 @@ export interface CatalogAction {
   description: string;
   safeToRetry: boolean;
   available: boolean;
+  /** Why an action that exists can't be used by this viewer: "ai_off" for an AI teammate step when AI is off for them. */
+  unavailableReason?: "ai_off" | null;
   requiresConnection: string | null;
   params: CatalogActionParam[];
 }

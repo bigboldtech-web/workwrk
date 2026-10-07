@@ -46,6 +46,12 @@ const COLUMN = "mx-auto w-[min(720px,100%-32px)]";
 const ACTION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MESSAGE_MAX = 20000;
 
+/** What an empty group says about who answers: the composer's words before anything is typed. */
+function emptyHint(members: readonly GroupMemberView[]): string {
+  const lead = leadOf(rulesMembers(members));
+  return lead ? GROUP_COPY.composerHintLead(lead.name) : GROUP_COPY.composerHint;
+}
+
 /** The rules' members, from the page's view of them (group-chat.ts). */
 function rulesMembers(members: readonly GroupMemberView[]): GroupMember[] {
   return members.map((m) => ({
@@ -283,7 +289,8 @@ export function GroupChat({
         <StackedAvatars members={members} variant="header" />
         <h2 className="mt-3 text-xl font-semibold text-ink">{g.name}</h2>
         <p className="mt-2 max-w-[480px] text-base text-ink-2">{titleList(members.map((m) => m.name), 5)}</p>
-        <p className="mt-1 max-w-[480px] text-sm text-ink-2">{GROUP_COPY.composerHint}</p>
+        {/* The composer's own rule: the group's lead by name, when it has one (review round 4). */}
+        <p className="mt-1 max-w-[480px] text-sm text-ink-2">{emptyHint(members)}</p>
         {errorRow ? <div className="mt-4 self-stretch text-start">{errorRow}</div> : null}
       </div>
     );
@@ -445,10 +452,7 @@ function GroupComposer({
   // Who answers the words so far: the named ones that can, else the lead;
   // named ones that can't say so (review of step 4).
   const hint = useMemo(() => {
-    if (!value.trim()) {
-      const lead = leadOf(rules);
-      return lead ? GROUP_COPY.composerHintLead(lead.name) : GROUP_COPY.composerHint;
-    }
+    if (!value.trim()) return emptyHint(members);
     const pick = pickAnswerers(value, rules);
     if (!pick.named) {
       const lead = leadOf(rules);
@@ -457,7 +461,7 @@ function GroupComposer({
     const can = pick.answerers.filter((a) => a.skip === null).map((a) => a.member.name);
     if (can.length === 0) return GROUP_COPY.noOneCanAnswer(titleList(pick.answerers.map((a) => a.member.name)));
     return GROUP_COPY.answersFrom(titleList(can));
-  }, [value, rules]);
+  }, [value, rules, members]);
 
   function choose(m: GroupMemberView) {
     if (!mention) return;

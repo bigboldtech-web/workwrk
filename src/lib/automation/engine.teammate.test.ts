@@ -92,7 +92,7 @@ describe("an Ask an AI teammate step in a run", () => {
     ];
     await fire();
     expect(st.seen.map((s) => s.key)).toEqual(["ask_teammate", "ask_teammate", "add_comment"]);
-    expect(st.seen[2].ctx.stepData).toEqual({});
+    expect(st.seen[2].ctx.stepData).toEqual({ teammateFailed: true });
   });
 
   it("gives a run whose teammate step failed no retry state", async () => {
@@ -105,7 +105,8 @@ describe("an Ask an AI teammate step in a run", () => {
     const done = st.finished.at(-1) ?? {};
     expect(done.status).toBe("PARTIAL");
     expect(done.triggerPayload).toBeUndefined();
-    expect(st.seen[1].ctx.stepData).toEqual({});
+    expect(st.seen[1].ctx.stepData).toEqual({ teammateFailed: true });
+    expect(st.seen[1].ctx.teammateInRun).toBe(true);
   });
 
   it("reads an output's answer and name, and nothing else", () => {
@@ -123,9 +124,15 @@ describe("stepDataBefore (a retried step, src/lib/automation/retry.ts)", () => {
       { order: 3, stepType: "ACTION", stepKey: "create_notification", status: "FAILED", outputJson: {} },
       { order: 4, stepType: "ACTION", stepKey: "ask_teammate", status: "SUCCESS", outputJson: { answer: "Later", teammate: "Triage" } },
     ];
-    expect(stepDataBefore(steps, 3)).toEqual({});
+    expect(stepDataBefore(steps, 3)).toEqual({ teammateFailed: true });
     expect(stepDataBefore(steps, 2)).toEqual({ teammate: { answer: "First", name: "Triage" } });
     expect(stepDataBefore(steps, 5)).toEqual({ teammate: { answer: "Later", name: "Triage" } });
     expect(stepDataBefore(steps, 1)).toEqual({});
+  });
+
+  it("knows a run has a teammate step wherever it sits (review round 4)", async () => {
+    const { teammateInSteps } = await import("./retry");
+    expect(teammateInSteps([{ stepType: "ACTION", stepKey: "assign_user" }, { stepType: "ACTION", stepKey: "ask_teammate" }])).toBe(true);
+    expect(teammateInSteps([{ stepType: "CONDITION", stepKey: "ask_teammate" }, { stepType: "ACTION", stepKey: "assign_user" }])).toBe(false);
   });
 });

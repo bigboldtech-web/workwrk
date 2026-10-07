@@ -549,7 +549,7 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
 - `src/lib/agents/teammate-copy.ts`, `LEGACY_COPY`:
   - `routineName: "Scheduled check"`
   - `defaultPrompt: "Run your usual scheduled check. Summarize what you found and call any tools you need to keep things moving."` (the old default line, `autonomous.ts` line 170)
-  - `movedLine(when)`: `Your schedule from Workspace agents is now a routine: Scheduled check · ${when}. It works as you and asks before anything other people will see.`
+  - `movedLine(name, when)`: `The schedule ${name} had in Workspace agents is now your routine: Scheduled check · ${when}. It works as you and asks before anything other people will see.` (review round 4: the person who hears it may not have set the schedule up, so it never says "Your schedule")
   - `routineFor(name)`: `Routine for ${name}`; `routineForYou: "Your routine"`; `stoppedChip: "Stopped"`
   - `scheduleLine(name)`: `Now a routine for ${name}`; `scheduleLineYou: "Now your routine"`
   - `stopped(reason)`: `Its schedule stopped: ${reason} Anyone who wants it on a schedule can set up a routine in its chat.`
@@ -1005,7 +1005,7 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
   - `notMember: "Join this conversation to ask a teammate here."`
   - `archived: "This conversation is archived."`
   - `notAddressed: "Pick the teammate from the @ list to ask it."`
-  - `tooMany(s)`: `You've asked teammates 5 times in a minute. Try again in ${s} seconds.`
+  - `tooMany(s)`: `You've tried to ask teammates 5 times in a minute. Try again in ${s} seconds.`
 
 **Tests**
 - `src/lib/agents/talk-address.test.ts`:
@@ -1125,7 +1125,7 @@ Run `npx prisma generate` and `node scripts/check-schema-sql.mjs`.
   - `creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run."`
   - `noTeammate: "The person who made this automation can no longer use that teammate."`
   - `paused(n)`: `${n} is paused, so it didn't run.`
-  - `dailyCap(n)`: `This automation has asked its teammates ${n} times today, the most one automation may. It asks again tomorrow (UTC).`
+  - `dailyCap(n)`: `This automation has asked its teammates ${n} times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again.`
   - `noAnswer(n)`: `${n} didn't answer.`
   - `answerHidden(n)`: `Only the person who made this automation and admins can read what ${n} answered.`
   - `teammateNotFound: "Pick a teammate you can use."`
@@ -1424,3 +1424,29 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     - Group chats:
       - Removing a teammate asks first.
       - A failed rename's Try again keeps the typed name.
+- **Step 8, review round 4** (three read-only reviewers: round 3's fixes, a fresh pass on the spec against the code, a fresh pass on copy and tests): 23 found (1 high, no medium), all fixed or recorded.
+  - High:
+    1. A Talk turn's task search checked each reader in the workspace they last switched to, so a reader who works here through a second membership was checked against the wrong workspace and private tasks could get through. Each reader is now read by id, their level here comes from their membership here, and a reader who can't be read makes the search find nothing.
+  - Low:
+    - What a Talk or automation turn is given:
+      - list_my_sops joins the personal records those turns never get; list_forms and list_data_tables join the tools a Talk turn never gets.
+      - In those turns, search_employees never shows levels.
+      - Their cards never offer "Approve and don't ask again", which those turns never read.
+    - Automations:
+      - An automation with an AI teammate step anywhere in it never assigns a Guest, before the step or after it, on a run or a retry.
+      - Publish reads the automation again under its lock and sends a publish back when anything changed in between.
+      - Publish refuses a step that uses the teammate's answer with no teammate step before it, in the builder and on the server. A run says which of the two happened: no teammate step before it, or one that didn't answer.
+      - A step that returned nothing claims no hidden answer in the Logs drawer.
+      - The builder keeps Publish for the creator while the live version has a teammate step, and says why.
+      - With AI off for the viewer, the builder says so instead of "Coming soon" or "not available yet".
+    - Copy:
+      - The daily cap says this run's request was not asked.
+      - The moved schedule line never calls the schedule "your schedule": the person who hears it may not have set it up.
+      - The Talk per-minute limit says "tried to ask", since it counts every try.
+      - The audit line for a Talk answer in a direct message reads "a direct message", not "your chat with".
+      - An empty group names its lead, as the composer does.
+      - A continue for a group member says removed only when it was removed, and "you can no longer use it" otherwise.
+      - Three changelog lines: the schedule exception for Don't ask, any teammate given "Ask your other teammates", and the whole automation being the creator's once it has the step.
+      - The tool counts in comments: 39 names, 11 teammate tools.
+    - Tests added: src/lib/agents/run-now.test.ts (Run now with the real engine and executor: one PENDING invite, the tool never runs), src/lib/agents/autonomous.test.ts (computeNextRunAt), src/app/api/automation/runs/[id]/run-detail.test.ts (a manager reads the answers hidden; the creator and an Admin read them whole).
+    - Recorded, not changed: a Talk answer is audited by auditTalkAnswer in talk-turn.ts, not through a shared auditAgentLine helper in executor.ts as step 6 said. The row reads the same, and its metadata names the message and the run rather than an action, since a Talk answer is no action card.

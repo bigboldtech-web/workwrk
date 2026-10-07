@@ -155,7 +155,7 @@ export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["re
  * what everyone in the conversation may open: a Talk answer draws only on
  * what they all may read (search_tasks is held to it; review round 3).
  */
-export const UNCHECKED_FOR_TALK: ReadonlySet<ToolName> = new Set<ToolName>(["search_sops"]);
+export const UNCHECKED_FOR_TALK: ReadonlySet<ToolName> = new Set<ToolName>(["search_sops", "list_forms", "list_data_tables"]);
 
 export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
   "list_my_kras",
@@ -167,6 +167,8 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
   // manager; meetings: 1:1 agendas and attendees (review round 2).
   "search_okrs",
   "search_meetings",
+  // The SOPs assigned to the person, with their own completion and score (review round 4).
+  "list_my_sops",
 ]);
 
 /**

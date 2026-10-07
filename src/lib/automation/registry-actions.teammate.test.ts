@@ -77,8 +77,12 @@ describe("{{teammate.answer}}", () => {
   });
 
   it("fails a step that needs an answer when no teammate step before it answered, and posts nothing", async () => {
-    await expect(getAction("create_task")!.execute(ctx({ stepData: {} }), { boardId: "b1", title: "{{teammate.name}} says: {{teammate.answer}}" })).rejects.toThrow(
+    await expect(getAction("create_task")!.execute(ctx({ stepData: { teammateFailed: true } }), { boardId: "b1", title: "{{teammate.name}} says: {{teammate.answer}}" })).rejects.toThrow(
       "the AI teammate step before it didn't answer",
+    );
+    // With no teammate step before it at all, it says that instead (review round 4).
+    await expect(getAction("create_task")!.execute(ctx({ stepData: {} }), { boardId: "b1", title: "{{teammate.answer}}" })).rejects.toThrow(
+      "no AI teammate step comes before it",
     );
     expect(st.created).toEqual([]);
   });
@@ -115,6 +119,13 @@ describe("{{teammate.answer}}", () => {
   it("never assigns a Guest in a run that asked a teammate (review round 3)", async () => {
     st.guests = new Set(["u-gil"]);
     await expect(getAction("assign_user")!.execute(ctx(), { userId: "u-gil" })).rejects.toThrow("never sent to Guests");
+  });
+
+  it("nor where the teammate step failed or comes later in the run (review round 4)", async () => {
+    st.guests = new Set(["u-gil"]);
+    await expect(getAction("assign_user")!.execute(ctx({ stepData: {}, teammateInRun: true }), { userId: "u-gil" })).rejects.toThrow("never sent to Guests");
+    // A run with no teammate step assigns a Guest as before.
+    await expect(getAction("assign_user")!.execute(ctx({ stepData: {}, teammateInRun: false }), { userId: "u-gil" })).resolves.toMatchObject({ assigneeId: "u-gil" });
   });
 
   it("reads as written without an earlier teammate step", () => {

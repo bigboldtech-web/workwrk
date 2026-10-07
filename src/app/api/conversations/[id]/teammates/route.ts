@@ -307,7 +307,7 @@ export async function POST(req: Request, { params }: Params) {
             // Its Inbox notices go to its readers only: someone added since never gets its opening words (review round 2).
             onlyUserIds: answerReaders,
           });
-          await auditTalkAnswer({ person, agent, what: TALK_TEAMMATE_COPY.answeredIn(place), conversationId: id, messageId: answered.message.id, runId: claim.runId }).catch(() => {});
+          await auditTalkAnswer({ person, agent, what: TALK_TEAMMATE_COPY.answeredIn(placeKind === "dm" ? TALK_TEAMMATE_COPY.auditDmPlace : place), conversationId: id, messageId: answered.message.id, runId: claim.runId }).catch(() => {});
         }
       }
     }

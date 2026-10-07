@@ -17,7 +17,9 @@ import { teammateStepProblem } from "@/lib/automation/teammate-step";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
 import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
-import { firstConditionMissingValue } from "@/lib/automation/builder-state";
+import { ANSWER_WITHOUT_TEAMMATE, firstAnswerWithoutTeammate, firstConditionMissingValue } from "@/lib/automation/builder-state";
+
+class ChangedWhilePublishing extends Error {}
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -57,6 +59,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: `"${impl.name}" is not available yet. Remove it or choose another action.`, section: "then", index, issues: { section: "then", index } }, { status: 400 });
     }
   }
+  // A step that uses a teammate's answer with no teammate step before it would fail on every run.
+  const early = firstAnswerWithoutTeammate(def.actions);
+  if (early !== null) {
+    return NextResponse.json({ error: ANSWER_WITHOUT_TEAMMATE, section: "then", index: early, issues: { section: "then", index: early } }, { status: 400 });
+  }
   // An AI teammate step works as the creator: only they may publish one, and
   // only with a teammate they can use (the version records its publisher,
   // and a run checks both again).
@@ -89,6 +96,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   try {
     result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${workflow.id} FOR UPDATE`;
+    // Everything above was checked on a read made before the lock. A save or
+    // publish that landed in between (a teammate step added, the live version
+    // replaced) must not go live unchecked: the row is read again under the
+    // lock, and any change sends this publish back (review round 4).
+    const now = await tx.automationWorkflow.findFirst({
+      where: { id: workflow.id, organizationId: ctx.orgId },
+      select: { status: true, definition: true, createdById: true, publishedVersionId: true },
+    });
+    if (
+      !now ||
+      now.status === "ARCHIVED" ||
+      now.createdById !== workflow.createdById ||
+      now.publishedVersionId !== workflow.publishedVersionId ||
+      JSON.stringify(now.definition ?? null) !== JSON.stringify(workflow.definition ?? null)
+    ) {
+      throw new ChangedWhilePublishing();
+    }
     const latest = await tx.automationWorkflowVersion.aggregate({
       where: { workflowId: workflow.id },
       _max: { versionNumber: true },
@@ -126,6 +150,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     return { workflow: updated, version };
     });
   } catch (err) {
+    if (err instanceof ChangedWhilePublishing) {
+      return NextResponse.json({ error: "This automation changed while it was being published. Reload and publish again.", code: "changed" }, { status: 409 });
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return NextResponse.json({ error: "Somebody published this automation at the same moment. Reload to see the live version." }, { status: 409 });
     }

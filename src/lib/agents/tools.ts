@@ -23,7 +23,7 @@ import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
-import { listReader, memberViewer, readableItemsVia } from "@/lib/list-links-server";
+import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { viewerHeldIn } from "@/lib/access/viewer";
@@ -229,19 +229,35 @@ const createTask: ToolDefinition = {
 
 /**
  * Whether every one of these people can open a List (a Talk answer's
- * readers): each read once, each List checked once. Someone who can no longer
- * sign in reads nothing and is not counted (a Guest is never among them:
- * teammates are not asked where one reads).
+ * readers): each read at the level they hold HERE (a member anchored in
+ * another workspace included, as the asker is read), each List checked once.
+ * It fails closed: a reader whose level cannot be read, while still a person
+ * here, makes every List unreadable. Only someone who can no longer sign in
+ * (deactivated, deleted) is left out: they read nothing (review round 4).
  */
 async function everyoneReadsListFor(orgId: string, userIds: readonly string[]): Promise<(listId: string) => Promise<boolean>> {
-  const viewers = await Promise.all([...new Set(userIds)].slice(0, 250).map((id) => memberViewer(id, orgId).catch(() => null)));
-  const readers = viewers.filter((v): v is NonNullable<typeof v> => v !== null).map((v) => listReader(v));
+  const closed = async () => false;
+  const ids = [...new Set(userIds)].slice(0, 250);
+  const rows = await prisma.user
+    .findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true } })
+    .catch(() => null);
+  if (!rows) return closed;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const readers: Array<ReturnType<typeof listReader>> = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) return closed;
+    if (row.deletedAt || RULE_1_DENIED_STATUSES.has(String(row.status))) continue;
+    const level = await levelHeldIn(id, orgId, { organizationId: row.organizationId, accessLevel: row.accessLevel }).catch(() => null);
+    if (!level) return closed;
+    readers.push(listReader({ userId: id, organizationId: orgId, accessLevel: level }));
+  }
   const memo = new Map<string, Promise<boolean>>();
   return (listId) => {
     let known = memo.get(listId);
     if (!known) {
       known = (async () => {
-        for (const r of readers) if (!(await r.canRead(listId))) return false;
+        for (const r of readers) if (!(await r.canRead(listId).catch(() => false))) return false;
         return true;
       })();
       memo.set(listId, known);
@@ -527,7 +543,11 @@ const searchEmployees: ToolDefinition = {
       visibleIds = [...new Set(shared.map((r) => r.userId))];
       if (visibleIds.length === 0) return { count: 0, employees: [] };
     }
-    const seesLevels = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true;
+    // Levels only to those who see them in the directory, and never in an
+    // answer that posts with no card to others (a Talk or automation turn;
+    // review round 4).
+    const outward = ctx.teammate?.trigger === "TALK" || ctx.teammate?.trigger === "AUTOMATION";
+    const seesLevels = !outward && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
     const employees = await prisma.user.findMany({
       where: {
         organizationId: ctx.orgId,
@@ -1732,7 +1752,7 @@ const getTeamAlignmentRollup: ToolDefinition = {
 
 // The registry, typed against the one name list (tool-names.ts): a missing or
 // extra entry is a compile error, which is what keeps the chat thread's verb
-// map and this table the same 38 names (the 28 Ask AI tools and the 10 AI
+// map and this table the same 39 names (the 28 Ask AI tools and the 11 AI
 // teammate tools, src/lib/agents/teammate-tools.ts).
 //
 // The Ask AI loops look a tool up here by the name the model sent. A
@@ -1779,7 +1799,8 @@ const REGISTRY = {
   list_my_weekly_reviews: listMyWeeklyReviews,
   get_team_alignment_rollup: getTeamAlignmentRollup,
   // AI teammates: update_task, comment_on_task, move_task, post_in_talk,
-  // update_doc, remember, forget, create_routine, list_my_inbox, read_talk.
+  // update_doc, remember, forget, create_routine, list_my_inbox, read_talk,
+  // ask_teammate.
   ...TEAMMATE_TOOLS,
 } satisfies Record<ToolName, ToolDefinition>;
 
