@@ -27,6 +27,7 @@ const db = vi.hoisted(() => ({
   subtasks: 0,
   lists: [] as Array<{ id: string; name: string; statuses: unknown; productSlug: string | null; space: { name: string } | null }>,
   contribute: new Set<string>(),
+  contracts: {} as Record<string, { id: string; organizationId: string; title: string; ownerId: string | null }>,
 }));
 
 vi.mock("@/lib/item-gate", () => ({
@@ -51,6 +52,8 @@ vi.mock("./acting", async (importOriginal) => {
   // The real invitation rule, from the mocked person's level (legacyLevelRow).
   inviteLevelAs: actual.inviteLevelAs,
   inviteInput: actual.inviteInput,
+  // The real contract tiers, from the mocked person's level.
+  contractsChangeableBy: actual.contractsChangeableBy,
   };
 });
 vi.mock("@/lib/talk-gate", () => ({
@@ -90,6 +93,13 @@ vi.mock("@/lib/prisma", () => ({
       findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, name: `KRA ${id}` })),
     },
     sOP: { findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, title: `SOP ${id}` })) },
+    contract: {
+      findFirst: async (a: { where: { id: string; organizationId: string; AND: Array<{ ownerId?: string }> } }) => {
+        const c = db.contracts[a.where.id];
+        if (!c || c.organizationId !== a.where.organizationId) return null;
+        return a.where.AND.every((w) => w.ownerId === undefined || w.ownerId === c.ownerId) ? { id: c.id, title: c.title } : null;
+      },
+    },
   },
 }));
 // Whether the invited address already has an account, and where (invite-facts.server.ts).
@@ -330,5 +340,26 @@ describe("the card's choices", () => {
     expect(await prepareCall("create_routine", { name: "Brief", instructions: "x", schedule: { kind: "daily", time: "09:00" } }, inRoutine)).toEqual({ ok: false, error: "A routine can't set up another routine." });
     const r = await prepareCall("create_routine", { name: "Brief", instructions: "x", schedule: { kind: "weekdays", time: "9:00" } }, ctx());
     expect(r).toMatchObject({ ok: true, risk: "INTERNAL", preview: { title: 'Set up routine "Brief"', lines: ["Weekdays at 9:00"] } });
+  });
+});
+
+describe("update_contract: the card names the contract and each change (follow-up 1.5c review)", () => {
+  it("names the contract and every field the call changes, and runs exactly that", async () => {
+    db.contracts = { c1: { id: "c1", organizationId: "org", title: "Acme MSA", ownerId: "me" } };
+    const out = await prepareCall("update_contract", { contractId: "c1", status: "TERMINATED", value: 0, expiresAt: "", autoRenew: false }, ctx());
+    expect(out).toMatchObject({
+      ok: true,
+      risk: "OUTWARD",
+      input: { contractId: "c1", status: "TERMINATED", value: 0, expiresAt: "", autoRenew: false },
+      preview: { title: 'Change contract "Acme MSA"', lines: ["Status: Terminated", "Value: 0", "Expires: None", "Renews by itself: No"], target: { label: "Acme MSA" } },
+    });
+  });
+
+  it("refuses a contract the person may not change exactly like a missing one, and lets the manager tier change any", async () => {
+    db.contracts = { c2: { id: "c2", organizationId: "org", title: "Lea's NDA", ownerId: "lea" } };
+    expect(await prepareCall("update_contract", { contractId: "c2", status: "SIGNED" }, ctx())).toMatchObject({ ok: false, error: "Contract not found in this org" });
+    expect(await prepareCall("update_contract", { contractId: "nope", status: "SIGNED" }, ctx())).toMatchObject({ ok: false, error: "Contract not found in this org" });
+    expect(await prepareCall("update_contract", { status: "SIGNED" }, ctx())).toMatchObject({ ok: false, error: "Contract not found in this org" });
+    expect(await prepareCall("update_contract", { contractId: "c2", status: "SIGNED" }, ctx("manager"))).toMatchObject({ ok: true, preview: { title: 'Change contract "Lea\'s NDA"', lines: ["Status: Signed"] } });
   });
 });

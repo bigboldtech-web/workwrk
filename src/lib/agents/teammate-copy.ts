@@ -458,6 +458,23 @@ export const CHANGE_LABELS = {
   owner: "Owner",
 } as const;
 
+/** What a contract change card lists, one line per field it changes (update_contract). */
+export const CONTRACT_CHANGE_LABELS = {
+  status: "Status",
+  value: "Value",
+  effectiveDate: "Effective date",
+  expiresAt: "Expires",
+  autoRenew: "Renews by itself",
+  counterparty: "Counterparty",
+  description: "Description",
+} as const;
+
+/** A contract the person may not change, or none by that id: the tool's own words. */
+export const CONTRACT_NOT_FOUND = "Contract not found in this org";
+
+/** A contract change line's words for a yes, a no and a cleared field. */
+export const CONTRACT_VALUE_WORDS = { yes: "Yes", no: "No", none: "None" } as const;
+
 export const NO_DUE_DATE = "No due date";
 export const NO_PRIORITY = "No priority";
 

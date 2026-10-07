@@ -71,6 +71,18 @@ export async function viewerForUser(organizationId: string, userId: string): Pro
   return viewer ? hydrate(viewer) : null;
 }
 
+/**
+ * The Viewer for a person in ONE workspace at the level they hold there
+ * (acting-workspace.ts levelHeldIn, read by the caller), hydrated: what their
+ * own session in that workspace is, whether they are anchored there or work
+ * there through a second membership. For code that acts for someone other
+ * than the session (an AI teammate, Ask AI's approvals).
+ */
+export async function viewerHeldIn(organizationId: string, userId: string, heldLevel: string): Promise<Viewer | null> {
+  const viewer = viewerFromSessionObject({ user: { id: userId, organizationId, accessLevel: heldLevel } });
+  return viewer ? hydrate(viewer) : null;
+}
+
 /** The server-side entry point every API route and page gate uses. */
 export async function viewerFromSession(): Promise<Viewer | null> {
   const session = (await getServerSession(authOptions)) as SessionLike | null;

@@ -57,7 +57,9 @@ export async function GET(req: Request) {
 
   const [rows, waitingTotal, limits, modules] = await Promise.all([
     teammateRows(usable, viewer),
-    waitingCount(viewer.organizationId, viewer.userId),
+    // Teammates' requests only: Ask AI's own wait on cards in their chats,
+    // which this page never lists.
+    waitingCount(viewer.organizationId, viewer.userId, new Date(), { teammatesOnly: true }),
     teammateLimits(viewer.organizationId, viewer.userId),
     workspaceModules(viewer.organizationId),
   ]);

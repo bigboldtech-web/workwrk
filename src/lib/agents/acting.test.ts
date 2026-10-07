@@ -14,19 +14,21 @@ const db = vi.hoisted(() => ({
   zone: null as string | null,
   orgZone: null as string | null,
   reads: 0,
+  where: null as unknown,
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
-      findFirst: async () => {
+      findFirst: async (a: { where: unknown }) => {
         db.reads += 1;
+        db.where = a.where;
         return db.row;
       },
     },
   },
 }));
-vi.mock("@/lib/access/viewer", () => ({ viewerForUser: async () => db.viewer }));
+vi.mock("@/lib/access/viewer", () => ({ viewerHeldIn: async () => db.viewer }));
 vi.mock("@/lib/access", () => ({ can: async () => ({ allowed: db.aiAllowed }) }));
 vi.mock("@/lib/access/acting-workspace", () => ({ levelHeldIn: async () => db.level }));
 vi.mock("@/lib/preferences", () => ({ getEffectivePreferences: async () => ({ home: { locale: { timezone: db.zone } } }) }));
@@ -67,6 +69,18 @@ describe("resolveActingPerson", () => {
     db.aiAllowed = true;
     db.level = null;
     expect(await resolveActingPerson("org", "me")).toEqual({ ok: false, reason: "gone" });
+  });
+
+  it("acts for a person working here through a second membership at that membership's level", async () => {
+    // Anchored in another workspace (they last switched there); a Manager here.
+    db.row = { id: "me", organizationId: "home", ...legacyLevelRow("ADMIN"), status: "ACTIVE", deletedAt: null, firstName: "Priya", lastName: "Shah", email: "priya@x.com" };
+    db.level = "MANAGER";
+    const r = await resolveActingPerson("org", "me");
+    if (!r.ok) throw new Error("expected a person");
+    expect(r.person).toMatchObject({ userId: "me", organizationId: "org" });
+    expect(legacyLevelOf({ user: r.person })).toBe("MANAGER");
+    // Read by id, never by the anchored workspace.
+    expect(db.where).toEqual({ id: "me" });
   });
 
   it("answers the person, their names and their own zone, else the workspace's, else UTC", async () => {

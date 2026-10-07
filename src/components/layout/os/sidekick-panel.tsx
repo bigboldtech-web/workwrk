@@ -37,8 +37,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Maximize2, Plus, X } from "lucide-react";
 import { AskAiThread } from "@/components/ai/ask-ai-thread";
-import { useAiSession } from "@/lib/ai/session-store";
-import { contextFromPath } from "@/lib/ai/thread";
+import { aiSession, useAiSession } from "@/lib/ai/session-store";
+import { contextFromPath, withPromptAbove } from "@/lib/ai/thread";
 import { useLayer, useOsShell } from "./shell-context";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 
@@ -73,13 +73,14 @@ export function OsSidekickPanel() {
     return undefined;
   }, [sidekickOpen]);
   // A prompt handed over while the panel is open (or as it opens) lands in
-  // the composer; consumeSidekickInitialPrompt changes identity with it.
+  // the composer, above anything typed there, never in place of it;
+  // consumeSidekickInitialPrompt changes identity with it.
   const { setDraft } = ai;
   useEffect(() => {
     if (!sidekickOpen) return;
     const seed = consumeSidekickInitialPrompt();
     if (seed) {
-      setDraft(seed);
+      setDraft(withPromptAbove(aiSession.getState().draft, seed));
       requestAnimationFrame(() => composerRef.current?.focus());
     }
   }, [sidekickOpen, consumeSidekickInitialPrompt, setDraft]);

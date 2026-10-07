@@ -23,23 +23,27 @@
 // the item-gate precedent (eslint-access-allowlist.mjs): the other teammate
 // files never read it themselves.
 //
-// LIMITATION, stated so nobody relies on the opposite: viewerForUser (and
-// the legacy tools' callerLevel in tools.ts) need the person ANCHORED in the
-// workspace (User.organizationId), so a person who works here through a
-// second membership is "gone" for a teammate exactly as they already are for
-// Ask AI tools and Talk updates. The follow-up is to read the level with
-// levelHeldIn everywhere, callerLevel included.
+// A SECOND WORKSPACE. A person who works here through a second membership is
+// anchored elsewhere (User.organizationId is the workspace they last switched
+// to). resolveActingPerson reads them by id, takes the level they hold HERE
+// (levelHeldIn) and builds their viewer at it (viewerHeldIn), exactly as their
+// own session here is built, so they are acted for at that membership's role,
+// never the anchor's (review of follow-up 1.5c: Ask AI's approvals and its
+// calls need the person). LIMITATION, stated so nobody relies on the opposite:
+// the legacy tools' callerLevel in tools.ts still needs the anchor, so those
+// tools still answer such a person with their own refusal.
 //
 // Server-only: imports prisma.
 
-import type { AccessLevel } from "@/generated/prisma";
+import type { AccessLevel, Prisma } from "@/generated/prisma";
+import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/access";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { nodeCtxFromLevel, type NodeCtx } from "@/lib/access/node-rules";
 import type { OrgRole, Viewer } from "@/lib/access/types";
-import { viewerForUser } from "@/lib/access/viewer";
+import { viewerHeldIn } from "@/lib/access/viewer";
 import { goalRightsActor } from "@/lib/alignment-scope";
 import { hasPermission } from "@/lib/api-helpers";
 import { canContributeBoard, getBoardForReader } from "@/lib/board";
@@ -67,7 +71,7 @@ export interface ActingPerson {
   email: string;
   /** prefs.home.locale.timezone, else the workspace's working calendar, else "UTC". */
   timezone: string;
-  /** viewerForUser(organizationId, userId), hydrated. */
+  /** The person's viewer here at the level they hold here (viewerHeldIn), hydrated. */
   viewer: Viewer;
 }
 
@@ -97,20 +101,24 @@ export async function personZone(userId: string, organizationId: string): Promis
  * at the next thing those teammates would have done.
  */
 export async function resolveActingPerson(organizationId: string, userId: string): Promise<ActingResult> {
+  // By id: a person working here through a second membership is anchored in
+  // another workspace (see A SECOND WORKSPACE above).
   const row = await prisma.user.findFirst({
-    where: { id: userId, organizationId },
+    where: { id: userId },
     select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true, firstName: true, lastName: true, email: true },
   });
   if (!row || row.deletedAt) return { ok: false, reason: "gone" };
   if (row.status === "INACTIVE") return { ok: false, reason: "inactive" };
-  const viewer = await viewerForUser(organizationId, userId);
+  // The level held HERE: the anchored row's own, a membership's role
+  // anywhere else, none where they hold neither.
+  const accessLevel = await levelHeldIn(userId, organizationId, { organizationId: row.organizationId, accessLevel: row.accessLevel });
+  if (!accessLevel) return { ok: false, reason: "gone" };
+  const viewer = await viewerHeldIn(organizationId, userId, accessLevel);
   if (!viewer) return { ok: false, reason: "gone" };
   if (viewer.orgRole === "GUEST") return { ok: false, reason: "guest" };
   if (viewer.isAgent) return { ok: false, reason: "agent_account" };
   const ai = await can(viewer, "view", { type: "app", key: "ai" });
   if (!ai.allowed) return { ok: false, reason: "ai_off" };
-  const accessLevel = await levelHeldIn(userId, organizationId, { organizationId: row.organizationId, accessLevel: row.accessLevel });
-  if (!accessLevel) return { ok: false, reason: "gone" };
   const name = `${row.firstName ?? ""} ${row.lastName ?? ""}`.trim() || row.email;
   return {
     ok: true,
@@ -231,5 +239,14 @@ export function inviteLevelAs(person: ActingPerson, raw: Record<string, unknown>
 /** An invitation's checked input: its email and the level it gives; the checked ids are added to it. */
 export function inviteInput(email: string, level: string): Record<string, unknown> {
   return { email, accessLevel: level };
+}
+
+/**
+ * The contracts this person may change (the older Contract table's tiers,
+ * legacyContractWhere: the manager tier every one, anyone else their own),
+ * so the card of a contract change names the contract that will change.
+ */
+export function contractsChangeableBy(person: ActingPerson): Prisma.ContractWhereInput {
+  return legacyContractWhere({ user: { id: person.userId, accessLevel: person.accessLevel } });
 }
 

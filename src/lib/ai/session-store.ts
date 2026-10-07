@@ -38,6 +38,7 @@ import {
   draftAfterFailure,
   lastTurn,
   messageFromApi,
+  withPromptAbove,
   settleDone,
   splitSse,
   titleFromFirstMessage,
@@ -134,14 +135,39 @@ let windowBound = false;
 // a new chat not made yet.
 const drafts = new Map<string, string>();
 
+/**
+ * The key the open chat's words are kept under: its id, or the landing's
+ * ("") for a chat with nothing saved in it yet (no list shows such a chat,
+ * so words kept under its id could never be opened again).
+ */
+function draftKey(): string {
+  const id = state.sessionId;
+  if (!id) return "";
+  const empty = state.messages.length === 0 && !state.loading && !state.loadError && !state.missing;
+  return empty ? "" : id;
+}
+
 /** Keep the open chat's unsent words for when it is opened again, beside any kept before. */
 function stashDraft(): void {
-  const key = state.sessionId ?? "";
+  const key = draftKey();
   const now = state.draft.trim() ? state.draft : "";
   const before = drafts.get(key) ?? "";
   const kept = now && before && now !== before ? `${now}\n\n${before}` : now || before;
   if (kept) drafts.set(key, kept);
   else drafts.delete(key);
+}
+
+/**
+ * Words a send gave up on because the person moved to another chat before
+ * the server had them: back in the composer when the chat they were sent
+ * from is the one showing, else kept for it, above anything kept before.
+ */
+function keepUnsent(key: string, text: string): void {
+  if (draftKey() === key) {
+    set((s) => ({ draft: draftAfterFailure(s.draft, text, false) }));
+    return;
+  }
+  drafts.set(key, draftAfterFailure(drafts.get(key) ?? "", text, false));
 }
 
 /** A chat's kept words, handed back once. */
@@ -287,14 +313,7 @@ async function start(opts: { agentSlug?: string | null; q?: string | null } = {}
   const q = opts.q?.trim();
   // The caller's prompt goes above any words the landing kept, never in
   // place of them, and only once when the same prompt arrives again.
-  if (q) {
-    set((s) => {
-      const held = s.draft.trim() ? s.draft : "";
-      if (!held) return { draft: q };
-      if (held === q || held.startsWith(`${q}\n\n`)) return { draft: held };
-      return { draft: `${q}\n\n${held}` };
-    });
-  }
+  if (q) set((s) => ({ draft: withPromptAbove(s.draft, q) }));
   const gen = generation;
   if (opts.agentSlug) {
     set({ agent: { slug: opts.agentSlug, name: null } });
@@ -327,14 +346,30 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   if (!text || state.streaming) return;
   if (state.meta?.archived) return;
   const gen = generation;
-  set({ error: null, streaming: true, draft: "" });
+  // Where the words go back if this send is given up after the person moved
+  // on: the chat it was sent from, or the landing for a chat not made yet.
+  const homeKey = draftKey();
+  let given = false;
+  const giveBack = () => {
+    if (given) return;
+    given = true;
+    keepUnsent(homeKey, text);
+  };
+  // The composer empties only when it held what is sent: a starter sent
+  // while other words wait in it leaves them there.
+  set((s) => ({ error: null, streaming: true, draft: s.draft.trim() === text ? "" : s.draft }));
 
   let sessionId = state.sessionId;
   if (!sessionId) {
     const body: Record<string, unknown> = { ...(context ?? {}) };
     if (state.agent) body.agentSlug = state.agent.slug;
     const r = await apiFetch<{ session: { id: string; title: string | null } }>("/api/sidekick/sessions", { method: "POST", json: body });
-    if (gen !== generation) return;
+    if (gen !== generation) {
+      // The person opened another chat while this one was being made: the
+      // question was never sent, so its words are kept for the landing.
+      giveBack();
+      return;
+    }
     if (!r.ok) {
       // Typed more while the chat was being made: both stay (draftAfterFailure).
       set((s) => ({
@@ -371,7 +406,11 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   let sawError = false;
   let sawDone = false;
   const fail = (kind: AiSendError) => {
-    if (gen !== generation) return;
+    if (gen !== generation) {
+      // Moved on before the server had it: the words are kept, never dropped.
+      if (!serverHasMessage) giveBack();
+      return;
+    }
     if (serverHasMessage && kind === "stopped" && sessionId) {
       // The route saves the answer even after the connection drops, so read
       // the chat again before offering Try again (which would ask twice).
@@ -497,7 +536,10 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       patchLive((m) => (m.streaming ? { ...m, streaming: false } : m));
     }
   } catch (e) {
-    if (gen !== generation) return;
+    if (gen !== generation) {
+      if (!serverHasMessage) giveBack();
+      return;
+    }
     const aborted = e instanceof DOMException && e.name === "AbortError";
     if (!aborted && typeof window !== "undefined" && navigator.onLine === false) {
       window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));

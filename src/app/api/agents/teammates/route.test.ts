@@ -14,7 +14,8 @@ vi.mock("@/lib/app-gate", async () => (await import("@/lib/agents/teammate-route
 vi.mock("@/lib/entitlements", () => ({
   isModuleActive: async (_organizationId: string, slug: string) => (slug === "workwrk-talk" ? modules.talkOn : modules.tablesOn),
 }));
-vi.mock("@/lib/agents/actions", () => ({ waitingCount: async () => 0 }));
+const waiting = vi.hoisted(() => ({ calls: [] as unknown[][] }));
+vi.mock("@/lib/agents/actions", () => ({ waitingCount: async (...a: unknown[]) => (waiting.calls.push(a), 0) }));
 vi.mock("@/lib/agents/budget", () => ({ agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }) }));
 const audits: Array<{ action: string; agent: { slug: string } }> = [];
 vi.mock("@/lib/agents/audit", () => ({ auditAgent: async (a: { action: string; agent: { slug: string } }) => void audits.push(a) }));
@@ -161,6 +162,8 @@ describe("GET /api/agents/teammates", () => {
     expect(body.teammates.map((t: { slug: string }) => t.slug).sort()).toEqual(["priya-hr", "status-reporter", "t-maxs-aaaaaa"]);
     expect(body.teammates.find((t: { slug: string }) => t.slug === "priya-hr")).toMatchObject({ legacy: true, canManage: false, hue: "sky" });
     expect(body).toMatchObject({ canCreateWorkspace: false, talkOn: true, tablesOn: true, waitingTotal: 0 });
+    // Teammates' requests only: Ask AI's own are never on this page.
+    expect(waiting.calls.at(-1)?.[3]).toEqual({ teammatesOnly: true });
     expect(body.limits).toEqual({ personal: { used: 1, max: 3 }, workspace: { used: 1, max: 3 } });
 
     // An Admin manages workspace teammates, and still never sees a private one.
