@@ -55,7 +55,7 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   const slug = typeof params.teammate === "string" ? params.teammate : "";
   const agent = slug ? await loadTeammate(slug, person.viewer) : null;
   if (!agent) throw new Error(AUTOMATION_TEAMMATE_COPY.noTeammate);
-  if (agent.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.paused(agent.name));
+  if (agent.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.paused);
 
   // 5. AI set up, and something to ask.
   if (!(await isAiConfigured(person.organizationId))) throw new Error(TEAMMATE_CHAT.notSetUp);
@@ -77,7 +77,8 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
     rateLimit: false,
     workflow: { id: ctx.workflowId, runId: ctx.runId, dailyCap: AUTOMATION_TEAMMATE_DAILY_CAP },
   });
-  if (!claim.ok) throw new Error(claim.message);
+  // The teammate's own monthly limit names it: the step says it without the name.
+  if (!claim.ok) throw new Error(claim.code === "agent_cap" ? AUTOMATION_TEAMMATE_COPY.agentCap : claim.message);
 
   // 7. The line, then the turn. The line never stops a turn already paid for.
   await writeEventLine(session.id, {
@@ -117,11 +118,11 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // A turn that ended early (cut short, declined) gives later steps no half
   // answer to post or send: the step fails with its reason, and the words
   // stay in the creator's chat.
-  if (!turn || turn.failedBeforeAnything || turn.error) throw new Error(turn?.error ?? AUTOMATION_TEAMMATE_COPY.noAnswer(agent.name));
+  if (!turn || turn.failedBeforeAnything || turn.error) throw new Error(turn?.error ?? AUTOMATION_TEAMMATE_COPY.noAnswer);
   // No words to use (it only called tools, or nothing was left once cleaned)
   // is no answer: later steps never post around an empty one.
   const answer = cleanOutwardText(turn.text, { talk: true, max: AUTOMATION_ANSWER_MAX });
-  if (!answer.trim()) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswer(agent.name));
+  if (!answer.trim()) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswer);
 
   return {
     teammate: agent.name,

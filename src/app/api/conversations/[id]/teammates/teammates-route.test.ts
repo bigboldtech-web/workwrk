@@ -25,6 +25,8 @@ const st = vi.hoisted(() => ({
   nudged: [] as string[],
   removed: [] as string[],
   insertThrows: false,
+  readerIds: ["u-olivia", "u-sam"] as string[],
+  tooMany: false,
   userN: 0,
 }));
 
@@ -80,6 +82,7 @@ vi.mock("@/lib/agents/engine", () => ({
 }));
 vi.mock("@/lib/agents/talk-turn", () => ({
   conversationHasGuests: async () => st.guests.shift() ?? false,
+  conversationReaderIds: async () => ({ ids: st.readerIds, tooMany: st.tooMany }),
   talkContext: async () => [],
   setRequestState: async (messageId: string, state: Row) => void st.states.push({ messageId, ...state }),
   noticeTalkApprovals: async (userId: string, agent: { slug: string }, ids: string[]) =>
@@ -127,6 +130,8 @@ beforeEach(() => {
   st.nudged = [];
   st.removed = [];
   st.insertThrows = false;
+  st.readerIds = ["u-olivia", "u-sam"];
+  st.tooMany = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -145,6 +150,8 @@ describe("asking a teammate in Talk", () => {
       body: "Summary for Olivia: see the plan.",
       metadata: { kind: "agent_post", agent: { id: "a-cos", name: "Chief of Staff" }, replyTo: "m1", runId: "run1", via: "talk" },
     });
+    // Who was here when it posted, the asker first: nobody added later reads it (review round 1).
+    expect((st.inserted[1].metadata as Row).readers).toEqual([`u-${st.userN}`, "u-olivia", "u-sam"]);
     expect(st.turns[0]).toMatchObject({ trigger: "TALK", userText: "@Chief of Staff summarise this", origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 2 } });
     expect(st.states).toEqual([expect.objectContaining({ messageId: "m1", id: "a-cos", state: "answered", answerId: "m2" })]);
     expect(st.lines[0]).toMatchObject({ sessionId: "s-cos", event: "talk_asked", text: "Asked in #proof: @Chief of Staff summarise this", link: { kind: "talk", conversationId: "c1", messageId: "m1" } });
@@ -243,6 +250,20 @@ describe("asking a teammate in Talk", () => {
     st.already = { id: "m-old", body: "@Chief of Staff summarise this" };
     const again = await ask(ASK);
     expect(again.events).toEqual([{ type: "message", message: { id: "m-old", body: "@Chief of Staff summarise this" } }]);
+  });
+
+  it("is asked only where at most 250 people read, and posts nothing past it", async () => {
+    st.tooMany = true;
+    expect(await ask(ASK)).toMatchObject({ status: 403, json: { code: "too_many_people" } });
+    expect(st.claims).toEqual([]);
+  });
+
+  it("answers a key that already landed before any refusal, as a plain send does", async () => {
+    st.already = { id: "m-old", body: "@Chief of Staff summarise this" };
+    st.guests = [true];
+    st.teammates = {};
+    const out = await ask(ASK);
+    expect(out.events).toEqual([{ type: "message", message: { id: "m-old", body: "@Chief of Staff summarise this" } }]);
   });
 
   it("always stops the keep-alive", async () => {

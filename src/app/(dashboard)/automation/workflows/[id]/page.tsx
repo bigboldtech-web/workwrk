@@ -1323,12 +1323,13 @@ export default function AutomationBuilderPage() {
             {dirty ? <span>· Unsaved changes</span> : wf.unpublishedChanges && canEdit ? <span>· Saved, not published yet</span> : null}
           </span>
         ),
-        right: canEdit && !archived ? (
+        // Nothing a locked view could only have refused (review round 1).
+        right: canEdit && !archived && !teammateLocked ? (
           <button type="button" onClick={() => void save()} disabled={busy || !dirty || offline} title={offlineTitle} className={BTN.secondary}>
             {saving && !publishing ? "Saving" : "Save draft"}
           </button>
         ) : undefined,
-        primary: canEdit && !archived ? {
+        primary: canEdit && !archived && !teammateLocked ? {
           label: published ? "Republish" : "Publish",
           icon: null,
           onClick: () => void publish(),
@@ -1697,7 +1698,7 @@ export default function AutomationBuilderPage() {
         </div>
       </div>
 
-      <VersionHistory open={historyOpen} versions={versions} canRestore={canEdit && !archived} onClose={() => setHistoryOpen(false)} onRestore={(n) => void restore(n)} />
+      <VersionHistory open={historyOpen} versions={versions} canRestore={canEdit && !archived && !teammateLocked} onClose={() => setHistoryOpen(false)} onRestore={(n) => void restore(n)} />
       <LeaveDialog open={leaveOpen} onDecide={decideLeave} />
     </>
   );

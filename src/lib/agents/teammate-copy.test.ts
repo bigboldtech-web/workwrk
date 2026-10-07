@@ -247,6 +247,7 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
     lastLineAgent: [["Triage", "Two are late."], "Triage: Two are late."],
     groupDefaultName: [[["Chief of Staff", "Market Analyst", "Triage"]], "Chief of Staff, Market Analyst and Triage"],
     leftToast: [["Offsite crew"], "You left Offsite crew"],
+    composerHintLead: [["Chief of Staff"], "Name a teammate with @ to ask it. Otherwise Chief of Staff answers."],
   };
   const g = copy.GROUP_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -268,6 +269,10 @@ describe("LEGACY_COPY (old schedules moved onto routines, Phase 2)", () => {
     scheduleLine: [["Olivia"], "Now a routine for Olivia"],
     stopped: [["the person who set it up is a guest now."], "Its schedule stopped: the person who set it up is a guest now. Anyone who wants it on a schedule can set up a routine in its chat."],
     runNowWaiting: [["Deal desk"], "Deal desk is waiting for your approval"],
+    movedLineKept: [["Weekdays at 9:00"], "Your schedule from Workspace agents is now a routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see, except what you chose not to be asked about."],
+    routinePausedFor: [["Olivia"], "Routine for Olivia, paused"],
+    scheduleLinePaused: [["Olivia", "Olivia is no longer in this workspace."], "Now a routine for Olivia, paused: Olivia is no longer in this workspace."],
+    scheduleLinePausedYou: [[null], "Now your routine, paused."],
   };
   const l = copy.LEGACY_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -299,6 +304,9 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
     answeredIn: [["#proof"], "Answered in #proof"],
     tooMany: [[12], "You've asked teammates 5 times in a minute. Try again in 12 seconds."],
   };
+  it("says one second as one (review round 1)", () => {
+    expect(copy.TALK_TEAMMATE_COPY.tooMany(1)).toBe("You've asked teammates 5 times in a minute. Try again in 1 second.");
+  });
   const t = copy.TALK_TEAMMATE_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
     expect(Object.keys(t).filter((k) => typeof t[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
@@ -314,10 +322,7 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
 
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
-    paused: [["Triage"], "Triage is paused, so it didn't run."],
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may. It asks again tomorrow (UTC)."],
-    noAnswer: [["Triage"], "Triage didn't answer."],
-    answerHidden: [["Triage"], "Only the person who made this automation and admins can read what Triage answered."],
     askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],
   };
   const t = copy.AUTOMATION_TEAMMATE_COPY as unknown as Record<string, unknown>;

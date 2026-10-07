@@ -49,7 +49,7 @@ import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { TALK_FMTBAR_KEY, readTalkKey } from "@/components/talk/talk-keys";
 import type { ChatAttachment } from "@/components/talk/message-feed";
 import { TeammateAvatar } from "@/components/agents/teammate-avatar";
-import { pickTeammateInBody, type PickedTeammate } from "@/components/talk/teammate-address";
+import { picksStillNamed, pickTeammateInBody, type PickedTeammate } from "@/components/talk/teammate-address";
 import type { TeammateHue } from "@/lib/agents/hues";
 import { TALK_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
@@ -556,6 +556,9 @@ export function MessageBox({
           disabled={disabled}
           onChange={(e) => {
             setInput(e.target.value);
+            // A teammate stays picked only while the draft still names it (review round 1).
+            const v = e.target.value;
+            setPickedTeammates((prev) => (prev.length === 0 ? prev : picksStillNamed(v, prev)));
             refreshMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
           }}
           onKeyDown={(e) => {

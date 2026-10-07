@@ -161,7 +161,7 @@ const STOP_READ_FOR_MS = 10 * 60_000;
  * person's words, and when it stopped. Kept per chat, every one of them: a
  * new send clears the error, never an earlier stop.
  */
-interface StoppedTurn {
+export interface StoppedTurn {
   questionId: string | null;
   liveId: string;
   known: ReadonlySet<string>;
@@ -171,6 +171,8 @@ interface StoppedTurn {
   expect?: string[];
   /** A group turn: the teammate whose answer was being drawn when it stopped. */
   liveAgentId?: string | null;
+  /** A group continue (said, never guessed from what came back; review round 1). */
+  continued?: boolean;
 }
 const stoppedTurns = new Map<string, StoppedTurn[]>();
 /** The stop the chat's "The answer stopped" belongs to, per chat. */
@@ -198,17 +200,34 @@ function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTu
  * ends the stop; a continue's ends at a new continue answer. Never at once
  * on an empty list (review of step 4).
  */
-function groupStopAnswered(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+export function groupStopAnswered(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
+  let questionId = stop.questionId;
+  // The stream broke before the saved message arrived: it is the newest
+  // saved message with these words, sent at or after this send began
+  // (review round 1: else the stop waited for a continue's answer, which a
+  // message's answers never are, and never ended).
+  if (!questionId && !stop.continued && stop.text) {
+    const words = stop.text.trim();
+    const since = stop.startedAt - STOP_CLOCK_SLACK_MS;
+    const found = [...messages]
+      .reverse()
+      .find((m) => m.kind === "user" && !isTempMessage(m) && !stop.known.has(m.id) && m.text.trim() === words && Date.parse(m.createdAt) >= since);
+    questionId = found?.id ?? null;
+  }
   let expect = stop.expect ?? [];
-  if (expect.length === 0 && stop.questionId) {
-    const question = messages.find((m) => m.kind === "user" && m.id === stop.questionId);
+  if (expect.length === 0 && questionId) {
+    const question = messages.find((m) => m.kind === "user" && m.id === questionId);
     expect = question?.kind === "user" ? (question.answerers ?? []) : [];
   }
-  if (expect.length > 0) return groupAnsweredSince(messages, { questionId: stop.questionId, known: stop.known, expect });
+  if (expect.length > 0) return groupAnsweredSince(messages, { questionId, known: stop.known, expect });
   const saved = messages.filter((m) => !isTempMessage(m) && !stop.known.has(m.id));
-  if (stop.questionId) return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
+  if (questionId) return saved.some((m) => m.kind === "agent" && m.replyTo === questionId);
+  if (!stop.continued) return false;
   return saved.some((m) => m.kind === "agent" && m.resume === true && (!stop.liveAgentId || m.agentId === stop.liveAgentId));
 }
+
+/** How far the server's clock may be behind this device's when matching a send to its saved message. */
+const STOP_CLOCK_SLACK_MS = 2 * 60_000;
 
 /** Whether a group stop's own drawn answer is saved now: its row then goes, whatever the others are doing. */
 function drawnAnswerSaved(page: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
@@ -478,6 +497,8 @@ async function resume(slug: string, agentSlug: string | null = null): Promise<vo
   if (groupIdOf(slug)) {
     if (!agentSlug) return;
     const self = s.members.find((m) => m.slug === agentSlug);
+    // A teammate no longer in this group has nothing to continue here (review round 1).
+    if (!self && s.members.length > 0) return;
     bump(slug);
     set(slug, { error: null, errorText: null, streaming: true });
     await streamGroup(slug, { resume: true, agentSlug }, { userId: null, liveId: null, agentId: null }, null, self ? [self.agentId] : []);
@@ -633,6 +654,8 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   let sawDone = false;
   let broke: string | null = null;
   let expect: string[] = resumeExpect ?? [];
+  const sentAt = Date.now();
+  const continued = body.resume === true;
   // An answer that ended early (cut short, declined, not saved, or nothing back): its sentence shows (review of step 4).
   let endedEarly: string | null = null;
   let savedRows = false;
@@ -668,9 +691,10 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
         liveId: drawn.liveId,
         known: new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id)),
         text,
-        startedAt: Date.now(),
+        startedAt: sentAt,
         expect,
         liveAgentId: ids.agentId,
+        continued,
       };
       stoppedTurns.set(slug, [...(stoppedTurns.get(slug) ?? []), me]);
       errorStop.set(slug, me);

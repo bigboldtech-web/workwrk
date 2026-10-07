@@ -450,8 +450,9 @@ async function runWorkflow(args: {
     let failed = 0;
     let failedUnretryable = 0;
     let firstError: string | null = null;
-    // What the latest "Ask an AI teammate" step that succeeded answered, for
-    // the steps after it ({{teammate.answer}}).
+    // What the latest "Ask an AI teammate" step answered, for the steps after
+    // it ({{teammate.answer}}). One that failed leaves no answer at all, never
+    // an earlier step's, which was written for another use (review round 1).
     let stepData: NonNullable<ActionContext["stepData"]> = {};
 
     for (const action of def.actions) {
@@ -498,6 +499,7 @@ async function runWorkflow(args: {
         });
       } catch (err) {
         failed++;
+        if (action.key === "ask_teammate") stepData = {};
         if (!impl.safeToRetry) failedUnretryable++;
         const message = err instanceof Error ? err.message.slice(0, 500) : "Action failed";
         firstError ??= message;

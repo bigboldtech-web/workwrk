@@ -44,20 +44,20 @@ function readRetryState(payload: Record<string, unknown>): RetryState | null {
 }
 
 /**
- * What the run's last "Ask an AI teammate" step that succeeded before `order`
- * answered: a retried step reads {{teammate.answer}} as it would have.
+ * What the run's latest "Ask an AI teammate" step before `order` answered,
+ * when it succeeded: a retried step reads {{teammate.answer}} as it would have.
  */
 export function stepDataBefore(
   steps: ReadonlyArray<{ order: number; stepType: string; stepKey: string; status: string; outputJson: unknown }>,
   order: number,
 ): NonNullable<ActionContext["stepData"]> {
-  // The engine's own rule: a teammate step that failed leaves the answer of
-  // the one before it in place.
+  // The engine's own rule: the latest teammate step before it, and only if
+  // it answered (one that failed leaves no answer, never an earlier one's).
   const earlier = steps
-    .filter((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate" && s.status === "SUCCESS" && s.order < order)
+    .filter((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate" && s.order < order)
     .sort((a, b) => a.order - b.order)
     .at(-1);
-  if (!earlier) return {};
+  if (!earlier || earlier.status !== "SUCCESS") return {};
   return teammateStepData(earlier.outputJson && typeof earlier.outputJson === "object" ? (earlier.outputJson as Record<string, unknown>) : null);
 }
 

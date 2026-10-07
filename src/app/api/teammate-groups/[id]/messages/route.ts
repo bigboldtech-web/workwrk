@@ -40,7 +40,7 @@ import { claimUnreportedOutcomes, writeEventLine } from "@/lib/agents/actions";
 import { abandonTurn, claimTeammateTurn, giveBackTurn, type TurnClaim } from "@/lib/agents/budget";
 import { runTeammateTurn, teammateAgentFrom, type GroupTurn, type TurnResult } from "@/lib/agents/engine";
 import { pickAnswerers, type GroupMember, type SkipReason } from "@/lib/agents/group-chat";
-import { cancelLeftRequests, groupMembersFor, groupNameOf, groupStillOpen, loadGroup, memberViews, namesLine, type GroupRecord } from "@/lib/agents/group-server";
+import { cancelLeftRequests, cancelRemovedRequests, groupMembersFor, groupNameOf, groupStillOpen, loadGroup, memberViews, namesLine, stillInGroup, type GroupRecord } from "@/lib/agents/group-server";
 import { ACTION_ERRORS, GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
 import { MESSAGE_SELECT, invalidRequest, loadTeammate, messagesPage, teammateError } from "@/lib/agents/teammate-server";
 import { messageViewFromRow, type AgentActionRow, type GroupStreamEvent, type TeammateMessageView, type TeammateStreamEvent } from "@/lib/agents/teammate-thread";
@@ -114,7 +114,9 @@ export async function POST(req: Request, { params }: Params) {
   // ── A continue: only the teammate whose request was decided ──
   if (resume) {
     const self = members.find((m) => m.slug === parsed.data.agentSlug);
-    if (!self) return notFound();
+    // A teammate removed from the group has nothing to continue here: its
+    // own refusal, never "the group chat can't be found" (review round 1).
+    if (!self) return teammateError(409, "not_in_group", GROUP_COPY.notInGroup);
     if (self.status === "DISABLED" && self.usable) return teammateError(409, "agent_paused", pausedNotSent(self.name));
     if (self.status !== "ENABLED" || !self.usable) return teammateError(409, "agent_removed", removedComposer(self.name));
     const claim = await claimFor(self, "AI teammate continue", "RESUME");
@@ -209,6 +211,11 @@ export async function POST(req: Request, { params }: Params) {
       let record = records.get(member.agentId)!;
       let skipNow: SkipReason | null = skip;
       if (!first && !skipNow) {
+        // Removed from this group meanwhile: it does not answer, and spends nothing (review round 1).
+        if (!(await stillInGroup(g.id, member.agentId).catch(() => true))) {
+          await skipLine(member, GROUP_COPY.notMemberReason);
+          continue;
+        }
         const now = await loadTeammate(member.slug, person.viewer, { includeRemoved: true }).catch(() => null);
         if (!now) skipNow = "no_access";
         else {
@@ -255,8 +262,13 @@ export async function POST(req: Request, { params }: Params) {
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       if (result) all.push(...result.messages);
       send({ type: "answer_done", agentId: member.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
-      // An answer that got nothing back leaves a line, so the chat says who did not answer.
+      // An answer that got nothing back, or came back and could not be saved,
+      // leaves a line, so the chat says who did not answer and why (review
+      // round 1: a failed save left no trace, and the page waited for it).
       if (!result || result.failedBeforeAnything) await skipLine(member, GROUP_COPY.noAnswerReason);
+      else if (result.error === TURN_ERRORS.notSaved) await skipLine(member, GROUP_COPY.notSavedReason);
+      // Removed from the group while it answered: what it asked is cancelled.
+      if (!(await stillInGroup(g.id, member.agentId).catch(() => true))) await cancelRemovedRequests(g.id, person.userId, member.agentId).catch(() => 0);
       // The person left the group while this one answered: what it asked is
       // cancelled (nothing can show it now), and nobody else answers.
       if (!(await groupStillOpen(person.viewer, g.id).catch(() => true))) {

@@ -9,15 +9,17 @@
 //
 // docs/plans/ai-teammates-phase2.md step 6, Decisions 8 to 12, 24, 27, 30
 // and 32. IN ORDER, and nothing is posted or spent before its step:
-//   1. the conversation, with the right to post (requireConversation)
+//   1. the conversation, with the right to post (requireConversation); a
+//      message already sent with this key answers with that one, before any
+//      refusal, and starts no turn (and spends none of the limit below)
 //   2. a teammate may be asked here (talkAddressRefusal): a member, no
-//      Guests, not archived, a direct message, a group or a private channel
+//      Guests, at most 250 people, not archived, a direct message, a group
+//      or a private channel
 //   3. the person, as a teammate acts for them
 //   4. the teammate, one this person may use (another person's private one
 //      answers as one that does not exist), and on
 //   5. the body names it ("@<Name>"): it was picked from the @ list
-//   6. a message already sent with this key answers with that one, and
-//      starts no turn (and spends none of the limit below)
+//   6. (the key, read with step 1)
 //   7. five asks a minute per person
 //   8. AI is set up
 //   9. mentions and the thread, checked as a plain message's
@@ -27,7 +29,9 @@
 //  12. the turn; its answer is posted as the person, marked as from the
 //      teammate, where the request was, if the turn finished, the request
 //      (and its thread) is still there, they may still post there and no
-//      Guest has joined; else it stays in their chat with the teammate.
+//      Guest has joined; else it stays in their chat with the teammate. The
+//      answer keeps the list of who was here (readers): anyone added later
+//      sees that a teammate answered, never what it said.
 // The turn runs to the end when the client leaves. Every refusal is
 // { error: "<sentence>", code }.
 
@@ -46,7 +50,7 @@ import { clampText } from "@/lib/agents/clamp";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TalkPlaceKind, type TurnResult } from "@/lib/agents/engine";
 import { hueForAgent } from "@/lib/agents/hues";
 import { TALK_TEAMMATE_LIMITS, addressedIn, talkAddressRefusal, type TalkAddressRefusal } from "@/lib/agents/talk-address";
-import { auditTalkAnswer, conversationHasGuests, noticeTalkApprovals, setRequestState, talkContext } from "@/lib/agents/talk-turn";
+import { auditTalkAnswer, conversationHasGuests, conversationReaderIds, noticeTalkApprovals, setRequestState, talkContext } from "@/lib/agents/talk-turn";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
 import { ACTION_ERRORS, TALK_TEAMMATE_COPY, TEAMMATE_CHAT, TURN_ERRORS, pausedNotSent } from "@/lib/agents/teammate-copy";
 import { invalidRequest, loadTeammate, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
@@ -64,6 +68,7 @@ const REFUSAL: Record<TalkAddressRefusal, { status: number; code: string; error:
   has_guests: { status: 403, code: "has_guests", error: TALK_TEAMMATE_COPY.hasGuests },
   not_member: { status: 403, code: "not_member", error: TALK_TEAMMATE_COPY.notMember },
   archived: { status: 403, code: "archived", error: TALK_TEAMMATE_COPY.archived },
+  too_many_people: { status: 403, code: "too_many_people", error: TALK_TEAMMATE_COPY.tooManyPeople },
 };
 
 export async function GET(_req: Request, { params }: Params) {
@@ -73,8 +78,8 @@ export async function GET(_req: Request, { params }: Params) {
   const app = await requireApp("ai");
   if ("error" in app) return NextResponse.json({ addressable: false, reason: "ai_off", teammates: [] });
   const viewer = app.viewer;
-  const hasGuests = await conversationHasGuests(id, ctx.gate.organizationId);
-  const reason = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests });
+  const [hasGuests, readers] = await Promise.all([conversationHasGuests(id, ctx.gate.organizationId), conversationReaderIds(id)]);
+  const reason = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests, tooManyPeople: readers.tooMany });
   if (reason) return NextResponse.json({ addressable: false, reason, teammates: [] });
   const rows = await prisma.agent.findMany({
     where: { organizationId: viewer.organizationId, status: "ENABLED", ...agentUsableWhere(viewer.userId) },
@@ -101,9 +106,18 @@ export async function POST(req: Request, { params }: Params) {
   const clientId = typeof payload?.clientId === "string" && CLIENT_ID.test(payload.clientId) ? payload.clientId : null;
   if (!body || body.length > MAX_BODY || !slug || slug.length > 200 || !clientId) return invalidRequest();
 
+  // Sent already with this key: that message, and no second turn, before
+  // any refusal, as a plain send answers it (a Retry of a send whose answer
+  // was lost must get its message back even if the teammate was paused or a
+  // Guest joined since). It spends none of the per-minute limit. A removed
+  // one is refused: its words stay in the person's "Not sent" row.
+  const already = await sentWith(id, ctx.gate.userId, clientId);
+  if (already?.deletedAt) return teammateError(409, "removed", TALK_TEAMMATE_COPY.removedAfterSent);
+  if (already) return stream(async (send) => send({ type: "message", message: already }));
+
   // 2. A teammate may be asked here.
-  const hasGuests = await conversationHasGuests(id, ctx.gate.organizationId);
-  const refusal = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests });
+  const [hasGuests, readers] = await Promise.all([conversationHasGuests(id, ctx.gate.organizationId), conversationReaderIds(id)]);
+  const refusal = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests, tooManyPeople: readers.tooMany });
   if (refusal) return teammateError(REFUSAL[refusal].status, REFUSAL[refusal].code, REFUSAL[refusal].error);
 
   // 3 to 5. The person, the teammate, and that the body names it.
@@ -114,14 +128,6 @@ export async function POST(req: Request, { params }: Params) {
   if (!agent) return teammateNotFound();
   if (agent.status !== "ENABLED") return teammateError(409, "agent_paused", pausedNotSent(agent.name));
   if (!addressedIn(body, agent.name)) return teammateError(400, "not_addressed", TALK_TEAMMATE_COPY.notAddressed);
-
-  // 6. Sent already with this key: that message, and no second turn. A
-  // retry of a message that landed spends none of the limit below. A
-  // removed one is refused, as a plain message's is: its words stay in the
-  // person's "Not sent" row, never swapped for a blank.
-  const already = await sentWith(id, person.userId, clientId);
-  if (already?.deletedAt) return teammateError(409, "removed", TALK_TEAMMATE_COPY.removedAfterSent);
-  if (already) return stream(async (send) => send({ type: "message", message: already }));
 
   // 7, 8. Its own per-minute limit, and AI set up.
   const limited = rateLimit(`talk-teammate:${person.userId}`, { max: TALK_TEAMMATE_LIMITS.perMinute, windowMs: 60_000 });
@@ -243,12 +249,14 @@ export async function POST(req: Request, { params }: Params) {
     if (text) {
       const still = await loadConversationRole(id, ctx.gate).catch(() => null);
       const guestsNow = await conversationHasGuests(id, ctx.gate.organizationId).catch(() => true);
+      // Who reads it now: the answer keeps this list and reaches only them.
+      const readersNow = await conversationReaderIds(id).catch(() => ({ ids: [] as string[], tooMany: true }));
       const standing = await requestStanding(id, request.id, parentId).catch(() => false);
       const allowed =
         standing &&
         still !== null &&
         canPost(still.conversation, still.role) &&
-        talkAddressRefusal(still.conversation, still.viewer, { isMember: still.viewer.isMember, hasGuests: guestsNow }) === null;
+        talkAddressRefusal(still.conversation, still.viewer, { isMember: still.viewer.isMember, hasGuests: guestsNow, tooManyPeople: readersNow.tooMany }) === null;
       if (allowed) {
         const at = new Date();
         answered = await insertConversationMessage({
@@ -258,7 +266,14 @@ export async function POST(req: Request, { params }: Params) {
           membershipId: null,
           body: text,
           parentId,
-          metadata: { kind: "agent_post", agent: { id: agent.id, name: agent.name }, replyTo: request.id, runId: claim.runId, via: "talk" },
+          metadata: {
+            kind: "agent_post",
+            agent: { id: agent.id, name: agent.name },
+            replyTo: request.id,
+            runId: claim.runId,
+            via: "talk",
+            readers: [...new Set([person.userId, ...readersNow.ids])],
+          },
           clientId: `tm_${request.id}`,
           now: at,
         }).catch((err: unknown) => {

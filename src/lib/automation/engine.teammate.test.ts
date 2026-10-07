@@ -83,7 +83,7 @@ describe("an Ask an AI teammate step in a run", () => {
     expect(st.seen[1].ctx).toMatchObject({ workflowName: "Support triage", publisherId: "u-max", workflowCreatorId: "u-max" });
   });
 
-  it("keeps the last answer that came back when a later teammate step fails", async () => {
+  it("leaves no answer when a later teammate step fails, never the earlier one's (review round 1)", async () => {
     st.failAt = 2;
     st.actions = [
       { key: "ask_teammate", params: {} },
@@ -92,7 +92,7 @@ describe("an Ask an AI teammate step in a run", () => {
     ];
     await fire();
     expect(st.seen.map((s) => s.key)).toEqual(["ask_teammate", "ask_teammate", "add_comment"]);
-    expect(st.seen[2].ctx.stepData).toEqual({ teammate: { answer: "Answer 1", name: "Triage" } });
+    expect(st.seen[2].ctx.stepData).toEqual({});
   });
 
   it("gives a run whose teammate step failed no retry state", async () => {
@@ -115,7 +115,7 @@ describe("an Ask an AI teammate step in a run", () => {
 });
 
 describe("stepDataBefore (a retried step, src/lib/automation/retry.ts)", () => {
-  it("rebuilds the answer of the last teammate step that succeeded before the step", async () => {
+  it("rebuilds the latest teammate step's answer before the step, and none when that one failed", async () => {
     const { stepDataBefore } = await import("./retry");
     const steps = [
       { order: 1, stepType: "ACTION", stepKey: "ask_teammate", status: "SUCCESS", outputJson: { answer: "First", teammate: "Triage" } },
@@ -123,7 +123,9 @@ describe("stepDataBefore (a retried step, src/lib/automation/retry.ts)", () => {
       { order: 3, stepType: "ACTION", stepKey: "create_notification", status: "FAILED", outputJson: {} },
       { order: 4, stepType: "ACTION", stepKey: "ask_teammate", status: "SUCCESS", outputJson: { answer: "Later", teammate: "Triage" } },
     ];
-    expect(stepDataBefore(steps, 3)).toEqual({ teammate: { answer: "First", name: "Triage" } });
+    expect(stepDataBefore(steps, 3)).toEqual({});
+    expect(stepDataBefore(steps, 2)).toEqual({ teammate: { answer: "First", name: "Triage" } });
+    expect(stepDataBefore(steps, 5)).toEqual({ teammate: { answer: "Later", name: "Triage" } });
     expect(stepDataBefore(steps, 1)).toEqual({});
   });
 });

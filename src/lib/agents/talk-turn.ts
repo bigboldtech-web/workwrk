@@ -48,6 +48,22 @@ export async function conversationHasGuests(conversationId: string, organization
 }
 
 /**
+ * Who reads the conversation now: its members' ids, at most
+ * TALK_TEAMMATE_LIMITS.maxReaders, and whether there are more. A teammate's
+ * answer keeps this list and reaches only them (talk-updates.ts serveAiUpdate).
+ */
+export async function conversationReaderIds(conversationId: string): Promise<{ ids: string[]; tooMany: boolean }> {
+  const rows = await prisma.conversationMember.findMany({
+    where: { conversationId },
+    select: { userId: true },
+    orderBy: { id: "asc" },
+    take: TALK_TEAMMATE_LIMITS.maxReaders + 1,
+  });
+  const ids = [...new Set(rows.map((r) => r.userId))];
+  return { ids: ids.slice(0, TALK_TEAMMATE_LIMITS.maxReaders), tooMany: rows.length > TALK_TEAMMATE_LIMITS.maxReaders };
+}
+
+/**
  * What the conversation said before the request, as the person may read it
  * (an AI update they are not a reader of is left out, as read_talk does),
  * oldest first: for a top-level request the 30 top-level messages before it,

@@ -5,12 +5,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown>;
-const st = vi.hoisted(() => ({ created: [] as Row[], emails: [] as Row[], hooks: [] as Row[] }));
+const st = vi.hoisted(() => ({ created: [] as Row[], emails: [] as Row[], hooks: [] as Row[], notes: [] as Row[], guests: new Set<string>() }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     board: { findFirst: async () => ({ id: "b1", schema: { fields: [{ key: "sev", type: "DROPDOWN", options: { choices: [{ value: "s1", label: "Sev 1" }] } }] } }) },
     item: { findFirst: async () => ({ id: "i0", boardId: "b1", title: "T", status: null, ownerId: null, priority: null, archivedAt: null, metadata: {} }) },
+    user: { findFirst: async (a: { where: { id: string } }) => ({ id: a.where.id, email: `${a.where.id}@x.test`, firstName: "G", lastName: "H", status: "ACTIVE" }) },
+    notification: { create: async (a: { data: Row }) => (st.notes.push(a.data), { id: "n1" }) },
   },
 }));
 vi.mock("@/lib/board-items", () => ({
@@ -22,6 +24,7 @@ vi.mock("@/lib/board-items", () => ({
 }));
 vi.mock("@/lib/email", () => ({ queueEmail: async (a: Row) => void st.emails.push(a) }));
 vi.mock("@/services/webhookDispatcher", () => ({ dispatchEvent: async () => {} }));
+vi.mock("@/lib/access/guests", () => ({ anyGuestHere: async (_org: string, ids: string[]) => ids.some((i) => st.guests.has(i)) }));
 vi.mock("./webhook-server", () => ({ sendThroughWebhook: async (_org: string, _ev: string, body: Row) => (st.hooks.push(body), { ok: true, httpStatus: 200, durationMs: 1 }) }));
 
 import { getAction, interpolate, type ActionContext } from "./registry-actions";
@@ -43,6 +46,8 @@ beforeEach(() => {
   st.created = [];
   st.emails = [];
   st.hooks = [];
+  st.notes = [];
+  st.guests = new Set();
 });
 
 describe("{{teammate.answer}}", () => {
@@ -65,14 +70,14 @@ describe("{{teammate.answer}}", () => {
 
   it("fails a step that needs an answer when no teammate step before it answered, and posts nothing", async () => {
     await expect(getAction("create_task")!.execute(ctx({ stepData: {} }), { boardId: "b1", title: "{{teammate.name}} says: {{teammate.answer}}" })).rejects.toThrow(
-      "no AI teammate step before it answered",
+      "the AI teammate step before it didn't answer",
     );
     expect(st.created).toEqual([]);
   });
 
   it("fails a step that needs the answer when the answer was empty", async () => {
     await expect(getAction("create_task")!.execute(ctx({ stepData: { teammate: { answer: "  ", name: "Triage" } } }), { boardId: "b1", title: "{{teammate.answer}}" })).rejects.toThrow(
-      "no AI teammate step before it answered",
+      "the AI teammate step before it didn't answer",
     );
   });
 
@@ -85,6 +90,18 @@ describe("{{teammate.answer}}", () => {
     // A value the creator typed keeps its own error.
     const typed = await getAction("set_field")!.execute(secret, { field: "priority", value: "Soon" }).then(() => null, (e: Error) => e.message);
     expect(typed).toContain('"Soon" is not a priority');
+  });
+
+  it("never sends the answer to a Guest, by notification or email (review round 1)", async () => {
+    st.guests = new Set(["u-gil"]);
+    await expect(getAction("create_notification")!.execute(ctx(), { userId: "u-gil", message: "{{teammate.answer}}" })).rejects.toThrow("never sent to Guests");
+    await expect(getAction("send_email")!.execute(ctx(), { to: "u-gil", subject: "Re", body: "{{teammate.answer}}" })).rejects.toThrow("never sent to Guests");
+    expect(st.notes).toEqual([]);
+    expect(st.emails).toEqual([]);
+    // A member gets it; a Guest gets a step that does not use it.
+    await getAction("create_notification")!.execute(ctx(), { userId: "u-max", message: "{{teammate.answer}}" });
+    await getAction("create_notification")!.execute(ctx(), { userId: "u-gil", message: "A task was created" });
+    expect(st.notes.map((n) => n.userId)).toEqual(["u-max", "u-gil"]);
   });
 
   it("reads as written without an earlier teammate step", () => {

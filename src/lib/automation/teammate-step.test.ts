@@ -52,16 +52,19 @@ describe("hideTeammateAnswers", () => {
   const steps = [
     { order: 0, stepType: "TRIGGER", stepKey: "task.created", outputJson: {} },
     { order: 1, stepType: "ACTION", stepKey: "create_notification", outputJson: { notificationId: "n1" } },
-    { order: 2, stepType: "ACTION", stepKey: "ask_teammate", outputJson: { teammate: "Triage", answer: "Max's 1:1 notes say...", agentRunId: "r1" } },
+    { order: 2, stepType: "ACTION", stepKey: "ask_teammate", inputJson: { teammate: "t-salary-coach", request: "Summarise {{title}}" } as unknown, outputJson: { teammate: "Salary Coach", answer: "Max's 1:1 notes say...", agentRunId: "r1" } },
     { order: 3, stepType: "ACTION", stepKey: "create_task", outputJson: { title: "Max's 1:1 notes say..." } },
   ];
 
   it("hides the answer and what every later action returned, and keeps the rest", () => {
     const out = hideTeammateAnswers(steps);
     expect(out[1].outputJson).toEqual({ notificationId: "n1" });
-    expect(out[2].outputJson).toEqual({ teammate: "Triage", answerHidden: true });
+    // Nor which teammate: its name and slug are its person's (review round 1).
+    expect(out[2].outputJson).toEqual({ answerHidden: true });
     expect(out[3].outputJson).toEqual({ answerHidden: true });
     expect(JSON.stringify(out)).not.toContain("1:1 notes");
+    expect(out[2].inputJson).toEqual({ teammate: null, request: "Summarise {{title}}" });
+    expect(JSON.stringify(out)).not.toMatch(/Salary Coach|t-salary-coach/);
   });
 
   it("changes nothing in a run without a teammate step", () => {

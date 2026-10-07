@@ -781,7 +781,7 @@ export function ConversationView({
     void deliver(temp.id, wirePayload(payload, open.parentId), "thread", temp.createdAt);
   };
 
-  const retry = (m: FeedMessage) => {
+  const retry = (m: FeedMessage, opts?: { withoutTeammate?: boolean }) => {
     // An EDIT that would not save wears the same "Not sent · Retry · Delete"
     // row as a message that would not send, and on it Retry means "save my
     // rewrite". Posting it instead would push somebody's correction into the
@@ -793,12 +793,13 @@ export function ConversationView({
       if (place === "top") setMessages((prev) => prev.map((x) => (x.id === m.id ? fn(x) : x)));
       else setThread((prev) => prev ? { ...prev, replies: prev.replies.map((x) => (x.id === m.id ? fn(x) : x)) } : prev);
     };
-    apply((x) => ({ ...x, pending: true, failed: false }));
+    // Sent without the teammate, the row no longer asks one.
+    apply((x) => ({ ...x, pending: true, failed: false, ...(opts?.withoutTeammate && x.metadata ? { metadata: { ...x.metadata, askTeammate: undefined } } : {}) }));
     const payload: MessagePayload = {
       body: m.body,
       mentions: m.metadata?.mentions ?? [],
       attachments: m.metadata?.attachments ?? [],
-      ...(typeof m.metadata?.askTeammate === "string" && m.metadata.askTeammate ? { teammate: m.metadata.askTeammate } : {}),
+      ...(typeof m.metadata?.askTeammate === "string" && m.metadata.askTeammate && !opts?.withoutTeammate ? { teammate: m.metadata.askTeammate } : {}),
     };
     if (m.metadata?.kind === "call") void deliver(m.id, { body: m.body, metadata: { kind: "call" } }, place, m.createdAt);
     else void deliver(m.id, wirePayload(payload, m.parentId ?? undefined), place, m.createdAt);

@@ -173,4 +173,23 @@ describe("ask_teammate", () => {
     expect(r.record.state).toBe("failed");
     expect(dataOf(r.modelContent)).toEqual({ error: DELEGATION_COPY.delegateNoAnswer("Project Manager") });
   });
+
+  it("still says what waits when the delegate left a card but no words (review round 1)", async () => {
+    const card = seedAction({ id: "x2", toolName: "post_in_talk", sessionId: `chat:a-pm:${PERSON.userId}`, preview: { title: "Post in #team" } });
+    st.turnAnswer = { text: "", error: "The AI service didn't answer. Try again.", giveBack: false, proposedActionIds: [card.id], messages: [] };
+    const r = await call(ASK);
+    expect(r.record.state).toBe("failed");
+    expect(dataOf(r.modelContent)).toEqual({
+      error: DELEGATION_COPY.delegateNoAnswer("Project Manager"),
+      waiting: [{ title: "Post in #team" }],
+      note: DELEGATION_COPY.waitingNote(PERSON.firstName, "Project Manager"),
+    });
+  });
+
+  it("refuses a request too long to pass on, asking nobody (review round 1)", async () => {
+    const r = await call({ ...ASK, request: "x".repeat(4001) });
+    expect(r.record.state).toBe("failed");
+    expect(dataOf(r.modelContent)).toMatchObject({ error: DELEGATION_COPY.requestTooLong(4000) });
+    expect(st.claims).toEqual([]);
+  });
 });

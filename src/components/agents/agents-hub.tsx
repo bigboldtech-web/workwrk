@@ -173,8 +173,18 @@ export function AgentsHub() {
         onOpenSettings={openSettings}
       />
       {newMenuOpen ? (
-        <MorePortal anchorRef={newRef} width={220} open placement="below" onClose={() => setNewMenuOpen(false)}>
-          <MenuList aria-label={TEAMMATES_PAGE.newMenu}>
+        <MorePortal
+          anchorRef={newRef}
+          width={220}
+          open
+          placement="below"
+          onClose={() => {
+            setNewMenuOpen(false);
+            newRef.current?.focus();
+          }}
+        >
+          {/* Reachable by keyboard: focus moves in, the arrows move through it (review round 1). */}
+          <MenuList aria-label={TEAMMATES_PAGE.newMenu} keyboard>
             <MenuItem
               icon={Bot}
               label={TEAMMATES_PAGE.newTeammate}
@@ -198,6 +208,8 @@ export function AgentsHub() {
         open={newGroupOpen}
         onOpenChange={setNewGroupOpen}
         teammates={list.data?.teammates ?? null}
+        loadFailed={Boolean(list.error) && !list.data}
+        onRetry={() => void list.reload()}
         onCreated={(g) => {
           setNewGroupOpen(false);
           notifyAiChatsChanged();

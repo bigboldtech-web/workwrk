@@ -215,10 +215,13 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
       // A schedule moved onto a routine names whose it is; a stopped one says why on hover.
       const s = a.schedule;
       if (s?.state === "stopped") return <span title={LEGACY_COPY.stopped(s.reason ?? "")}><StatusChip color={RUN_TONE_COLOR.neutral} label={LEGACY_COPY.stoppedChip} /></span>;
+      const who = s?.personName ?? LEGACY_COPY.itsCreator;
       const words = s?.state === "routine"
-        ? s.isYou ? LEGACY_COPY.routineForYou : LEGACY_COPY.routineFor(s.personName ?? LEGACY_COPY.itsCreator)
+        ? s.paused
+          ? s.isYou ? LEGACY_COPY.routinePausedYou : LEGACY_COPY.routinePausedFor(who)
+          : s.isYou ? LEGACY_COPY.routineForYou : LEGACY_COPY.routineFor(who)
         : wordsInZone(runsOnWords(a.scheduleCron, a.autonomousEnabled), scheduleZone(a.scheduleCron, serverZone), viewerZone);
-      return <span className="truncate text-sm text-ink-2" title={words}>{words}</span>;
+      return <span className="truncate text-sm text-ink-2" title={s?.paused && s.pausedText ? `${words}: ${s.pausedText}` : words}>{words}</span>;
     } },
     { key: "last", label: "Last run", width: "130px", render: (a) => a.lastRunAt && a.lastRunId ? (
       <Link
@@ -235,7 +238,11 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
     // a run due today, so that day reads "Today, 11:30 PM" rather than the
     // time twice.
     { key: "next", label: "Next run", width: "160px", render: (a) => {
-      if (a.schedule?.state === "routine") return <span className="text-sm text-ink-3">{LEGACY_COPY.nextInRoutine}</span>;
+      if (a.schedule?.state === "routine") {
+        return a.schedule.paused
+          ? <span className="text-sm text-ink-3" title={a.schedule.pausedText ?? undefined}>Not scheduled</span>
+          : <span className="text-sm text-ink-3">{LEGACY_COPY.nextInRoutine}</span>;
+      }
       if (!(a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled)) return <span className="text-sm text-ink-3">Not scheduled</span>;
       const day = formatDate(a.nextRunAt, datePrefs, "smart");
       const time = formatDate(a.nextRunAt, datePrefs, "time");
@@ -674,7 +681,9 @@ function AgentDrawer({
 function ScheduleLine({ agent, zone, viewerZone }: { agent: Agent; zone: string | null; viewerZone: string | null }) {
   const s = agent.schedule;
   const words = s?.state === "routine"
-    ? s.isYou ? LEGACY_COPY.scheduleLineYou : LEGACY_COPY.scheduleLine(s.personName ?? LEGACY_COPY.itsCreator)
+    ? s.paused
+      ? s.isYou ? LEGACY_COPY.scheduleLinePausedYou(s.pausedText) : LEGACY_COPY.scheduleLinePaused(s.personName ?? LEGACY_COPY.itsCreator, s.pausedText)
+      : s.isYou ? LEGACY_COPY.scheduleLineYou : LEGACY_COPY.scheduleLine(s.personName ?? LEGACY_COPY.itsCreator)
     : s?.state === "stopped" ? LEGACY_COPY.stopped(s.reason ?? "")
     : wordsInZone(runsOnWords(agent.scheduleCron, agent.autonomousEnabled), zone, viewerZone);
   const href = s?.routinesHref ?? `/agents?chat=${encodeURIComponent(agent.slug)}&settings=routines`;

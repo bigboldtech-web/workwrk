@@ -14,6 +14,7 @@ import { teammateToolNames } from "./teammate-tools";
 import { ALL_TOOL_NAMES, GIVABLE_TOOLS, TOOL_MODULE, agentScheduleView, cleanToolNames, editedPersonRules, routineViewFromRow, toolSettings, type RoutineRowLike } from "./teammate-views";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
 import type { ToolName } from "./tool-names";
+import { serverTimeZone, zoneName } from "./schedule-words";
 
 describe("the tools a teammate may be given", () => {
   it("are every tool but the excluded ones", () => {
@@ -127,6 +128,13 @@ describe("routineViewFromRow", () => {
     expect(routineViewFromRow(row, "America/New_York").when).toBe("Weekdays at 9:00, Kolkata time");
   });
 
+  it("reads a schedule with no zone of its own in the server's, which it runs on (review round 1)", () => {
+    const server = serverTimeZone();
+    const other = /New_York|Detroit|Toronto/.test(server) ? "Asia/Tokyo" : "America/New_York";
+    expect(routineViewFromRow({ ...row, schedule: "0 9 * * 1-5" }, other).when).toBe(`Weekdays at 9:00, ${zoneName(server)}`);
+    expect(routineViewFromRow({ ...row, schedule: "0 9 * * 1-5" }, server).when).toBe("Weekdays at 9:00");
+  });
+
   it("reads a paused routine with its reason and no next run", () => {
     expect(routineViewFromRow({ ...row, status: "paused", pausedReason: "agent_removed" }, null)).toMatchObject({
       status: "paused",
@@ -150,11 +158,13 @@ describe("agentScheduleView (Workspace agents, Phase 2)", () => {
   const href = "/agents?chat=deal-desk&settings=routines";
 
   it("reads a schedule never moved as none", () => {
-    expect(agentScheduleView(base, null, null, "u-olivia")).toEqual({ state: null, personName: null, isYou: false, reason: null, routinesHref: href });
+    expect(agentScheduleView(base, null, null, "u-olivia")).toEqual({ state: null, personName: null, isYou: false, reason: null, routinesHref: href, paused: false, pausedText: null });
   });
   it("names whose routine it is now, and whether it is the viewer's", () => {
     const moved = { ...base, scheduleMovedAt: MOVED, scheduleRoutineId: "r1" };
-    expect(agentScheduleView(moved, { actingForId: "u-olivia" }, "Olivia", "u-olivia")).toEqual({ state: "routine", personName: "Olivia", isYou: true, reason: null, routinesHref: href });
+    expect(agentScheduleView(moved, { actingForId: "u-olivia" }, "Olivia", "u-olivia")).toEqual({ state: "routine", personName: "Olivia", isYou: true, reason: null, routinesHref: href, paused: false, pausedText: null });
+    // A paused routine says so, with its reason (review round 1).
+    expect(agentScheduleView(moved, { actingForId: "u-olivia", status: "paused", pausedReason: "person_gone" }, "Olivia", "u-max")).toMatchObject({ state: "routine", paused: true, pausedText: expect.any(String) });
     expect(agentScheduleView(moved, { actingForId: "u-olivia" }, "Olivia", "u-max")).toMatchObject({ state: "routine", personName: "Olivia", isYou: false });
   });
   it("reads a routine deleted since as never moved, so the row says what is true", () => {
@@ -163,7 +173,7 @@ describe("agentScheduleView (Workspace agents, Phase 2)", () => {
   it("gives each stop its reason", () => {
     for (const [reason, words] of Object.entries(LEGACY_COPY.stopReason)) {
       expect(agentScheduleView({ ...base, scheduleMovedAt: MOVED, scheduleMoveReason: reason }, null, null, "u-olivia")).toEqual({
-        state: "stopped", personName: null, isYou: false, reason: words, routinesHref: href,
+        state: "stopped", personName: null, isYou: false, reason: words, routinesHref: href, paused: false, pausedText: null,
       });
     }
     expect(agentScheduleView({ ...base, scheduleMovedAt: MOVED, scheduleMoveReason: "from_the_future" }, null, null, "u-olivia")).toMatchObject({ state: "stopped", reason: null });
