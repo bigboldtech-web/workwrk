@@ -81,6 +81,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
   const saved = await updateMemory(found.memory, parsed.data, viewer.userId);
+  if (!saved.ok && saved.gone) return memoryNotFound();
   if (!saved.ok) return teammateError(400, saved.error === TEAMMATE_TOOL_ERRORS.memoryEmpty ? "invalid" : "limit", saved.error);
   return NextResponse.json({ memory: saved.memory });
 }

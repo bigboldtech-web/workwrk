@@ -259,6 +259,11 @@ const SQL_MANIFEST = [
   // kept questions by teammate and start (each claim's month count). Index
   // only, IF NOT EXISTS: safe before or after the reload.
   "2026-10-08-ai-teammates-round8.sql",
+  // AI teammates, Phase 2 review round 10: a nullable "AgentRoutine"."teammatePrint"
+  // column, the fingerprint of a routine's teammate as its person last chose
+  // it. Before the reload: Prisma selects every column on a read with no
+  // select, and the routine runner reads it.
+  "2026-10-08-ai-teammates-routine-print.sql",
 ];
 
 /**

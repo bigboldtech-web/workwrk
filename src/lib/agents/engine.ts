@@ -55,7 +55,7 @@ import { memoriesForPrompt } from "./memory";
 import { APPROVAL_CARD, ROUTINE_FALLBACK_NAME, TURN_ERRORS, waitingForApprovalLine } from "./teammate-copy";
 import { actionViewFromRow, messageViewFromRow, type AgentActionRow, type TeammateMessageView, type TeammateStreamEvent } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
-import { MAX_TOOL_CALLS_PER_TURN, TEAMMATE_EXCLUDED, honoursDontAsk, sanitizeRules, toolsForTrigger, type ApprovalRules } from "./tool-policy";
+import { MAX_TOOL_CALLS_PER_TURN, OUTCOMES_PER_TURN, TEAMMATE_EXCLUDED, honoursDontAsk, sanitizeRules, toolsForTrigger, type ApprovalRules } from "./tool-policy";
 import type { ToolName } from "./tool-names";
 import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
 import { TOOLS } from "./tools";
@@ -701,7 +701,10 @@ export function outcomeNote(rows: readonly AgentActionRow[], firstName: string):
     }
   }
   if (lines.length === 0) return null;
-  return [`[WorkwrK] ${oneLine(firstName, 80)} decided on your requests.`, "<workspace_note>", ...lines, "</workspace_note>"].join("\n");
+  // A full turn's worth: more wait, told at the next turn, so this is never
+  // read as everything (review round 10).
+  const more = rows.length >= OUTCOMES_PER_TURN ? [`[WorkwrK] More of ${oneLine(firstName, 80)}'s decisions are waiting; they come with the next turn.`] : [];
+  return [`[WorkwrK] ${oneLine(firstName, 80)} decided on your requests.`, "<workspace_note>", ...lines, "</workspace_note>", ...more].join("\n");
 }
 
 /**
@@ -1087,8 +1090,10 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     // them for the next turn the person has with it (Phase 2 step 5).
     // Only the person's own message hears what a Talk, automation or
     // delegated turn's cards did: a continue or a routine does not (review round 8).
-    if (honoursDontAsk(a.trigger)) {
-      for (const row of await claimUnreportedOutcomes(a.sessionId, a.agent.id, { continuable: a.trigger !== "CHAT" })) if (!claimed.has(row.id)) claimed.set(row.id, row);
+    // At most OUTCOMES_PER_TURN in all, with what the caller claimed already (review round 10).
+    const room = OUTCOMES_PER_TURN - claimed.size;
+    if (honoursDontAsk(a.trigger) && room > 0) {
+      for (const row of await claimUnreportedOutcomes(a.sessionId, a.agent.id, { continuable: a.trigger !== "CHAT", limit: room })) if (!claimed.has(row.id)) claimed.set(row.id, row);
     }
     const at = (v: Date | string) => new Date(v).getTime();
     const outcomes = [...claimed.values()].sort((x, y) => at(x.createdAt) - at(y.createdAt));

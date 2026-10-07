@@ -107,6 +107,10 @@ export async function processAutomationRetries(): Promise<{
   // retries waited behind them (review round 8). A partial index answers it
   // (prisma/sql/2026-10-08-ai-teammates-round8.sql).
   const since = new Date(now - 48 * 3_600_000);
+  // nextAttemptAt is always written as toISOString() (UTC), which sorts as
+  // text: compared as text, no cast can throw on a bad row and no regex can
+  // lose its backslashes on the way through the template (review round 10).
+  const dueBy = new Date(now).toISOString();
   // Nor runs the loop below always skips: a paused or archived automation's,
   // or one whose next try is not due yet. They stayed at the head of the
   // order and held its places too (review round 9).
@@ -115,9 +119,7 @@ export async function processAutomationRetries(): Promise<{
     JOIN "AutomationWorkflow" w ON w."id" = r."workflowId" AND w."status" = 'ACTIVE'
     WHERE r."status" IN ('FAILED', 'PARTIAL') AND r."completedAt" >= ${since}
       AND r."triggerPayload" ? '__retryState'
-      AND (CASE WHEN (r."triggerPayload"->'__retryState'->>'nextAttemptAt') ~ '^\d{4}-\d{2}-\d{2}T'
-                THEN (r."triggerPayload"->'__retryState'->>'nextAttemptAt')::timestamptz
-                ELSE '-infinity'::timestamptz END) <= now()
+      AND (r."triggerPayload"->'__retryState'->>'nextAttemptAt') <= ${dueBy}
     ORDER BY r."completedAt" ASC
     LIMIT 100`;
   if (due.length === 0) return { scanned: 0, retried: 0, recovered: 0 };

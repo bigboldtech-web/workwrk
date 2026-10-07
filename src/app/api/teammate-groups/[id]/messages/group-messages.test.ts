@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
-  /** Whether the person can be acted for now. */
+  /** Whether the person can be acted for now, and for how many reads. */
   actingOk: true,
+  actingCalls: 0,
+  actingOkCalls: Infinity,
   /** What the route told the person's other tabs. */
   published: [] as Array<{ userId: string; event: Record<string, unknown> }>,
   /** The runs whose question went back (giveBackTurn). */
@@ -53,7 +55,10 @@ vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, event: Re
 vi.mock("@/lib/app-gate", () => ({ requireApp: async () => ({ viewer: VIEWER }) }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 vi.mock("@/lib/agents/acting", () => ({
-  resolveActingPerson: async () => (st.actingOk ? { ok: true, person: { userId: "u-max", organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: VIEWER } } : { ok: false, reason: "inactive" }),
+  resolveActingPerson: async () => {
+    st.actingCalls += 1;
+    return st.actingOk && st.actingCalls <= st.actingOkCalls ? { ok: true, person: { userId: "u-max", organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: VIEWER } } : { ok: false, reason: "inactive" };
+  },
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -141,6 +146,8 @@ const TRIAGE = agent("triage", "Triage");
 
 beforeEach(() => {
   st.actingOk = true;
+  st.actingCalls = 0;
+  st.actingOkCalls = Infinity;
   st.published = [];
   st.givenBack = [];
   st.removedFromGroup = new Set();
@@ -289,6 +296,18 @@ describe("a person who can no longer be acted for (review round 9)", () => {
     await send({ message: "@Project Manager @Triage go" });
     expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
     expect(st.lines.map((l) => l.text)).toContain("Triage didn't answer: you can no longer be acted for here.");
+  });
+});
+
+describe("the first answerer, already claimed (review round 10)", () => {
+  it("runs as claimed when only a skipped member came before it, and the skip keeps its own reason", async () => {
+    // Triage is paused and comes first in the words; PM answers first. The person's re-read would fail.
+    st.group = groupOf([agent("triage", "Triage", { status: "DISABLED" }), PM]);
+    st.actingOkCalls = 1;
+    await send({ message: "@Triage @Project Manager status" });
+    expect(st.turns.map((t) => (t.agent as Row).slug)).toEqual(["pm"]);
+    expect(st.lines.map((l) => l.text)).toContain("Triage didn't answer: it is paused.");
+    expect(st.abandoned).toEqual([]);
   });
 });
 

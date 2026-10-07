@@ -217,12 +217,17 @@ export async function POST(req: Request, { params }: Params) {
         await skipLine(member, outOfQuestions);
         continue;
       }
+      const first = member.agentId === firstUp.agentId;
       if (actorGone !== null) {
+        // The first answerer's question was claimed before the stream began:
+        // it goes back, never left spent with no turn (review round 10).
+        if (first) await abandonTurn(firstClaim.runId, firstClaim.questionId).catch(() => {});
         await skipLine(member, actorGone);
         continue;
       }
-      const first = member.agentId === firstUp.agentId;
-      if (!first) {
+      // Read again only before a later answerer that would claim: one skipped
+      // anyway (paused, removed) keeps its own reason (review round 10).
+      if (!first && !skip) {
         const fresh = await resolveActingPerson(person.organizationId, person.userId).catch(() => null);
         if (!fresh?.ok) {
           actorGone = GROUP_COPY.personCannotReason;

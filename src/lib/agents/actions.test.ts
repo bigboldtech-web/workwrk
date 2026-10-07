@@ -441,6 +441,13 @@ describe("claimUnreportedOutcomes, a turn's worth at a time (review round 9)", (
     expect((await claimUnreportedOutcomes("s1")).map((r) => r.id)).toEqual(all.slice(OUTCOMES_PER_TURN).map((r) => r.id));
     expect(fx.sql.at(-1)).toContain("LIMIT");
   });
+
+  it("takes fewer when asked, never more than a turn's worth (review round 10)", async () => {
+    const base = Date.now() - 1_000_000;
+    const all = Array.from({ length: OUTCOMES_PER_TURN + 10 }, (_, i) => talkPost({ status: "EXPIRED", createdAt: new Date(base + i * 1000) }));
+    expect((await claimUnreportedOutcomes("s1", null, { limit: 3 })).map((r) => r.id)).toEqual(all.slice(0, 3).map((r) => r.id));
+    expect(await claimUnreportedOutcomes("s1", null, { limit: OUTCOMES_PER_TURN * 5 })).toHaveLength(OUTCOMES_PER_TURN);
+  });
 });
 
 describe("claimUnreportedOutcomes for a continue (review round 8)", () => {

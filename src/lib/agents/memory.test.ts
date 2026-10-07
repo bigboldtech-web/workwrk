@@ -22,7 +22,11 @@ const db = vi.hoisted(() => ({ rows: [] as Row[], clock: 0, locks: [] as unknown
 
 vi.mock("@/lib/prisma", () => {
   const matches = (r: Row, w: Record<string, unknown>) =>
-    Object.entries(w).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v);
+    Object.entries(w).every(([k, v]) => {
+      const got = (r as unknown as Record<string, unknown>)[k];
+      if (v && typeof v === "object" && "in" in v) return (v as { in: unknown[] }).in.includes(got);
+      return got === v;
+    });
   const tick = () => new Date(Date.UTC(2026, 9, 6, 9, 0, db.clock++));
   const prisma: Record<string, unknown> = {
       // Each remember holds its memories' lock for its transaction (review round 9).
@@ -66,7 +70,8 @@ vi.mock("@/lib/prisma", () => {
   return { prisma };
 });
 
-import { MEMORY_LIMITS, forgetFact, listMemories, memoriesForPrompt, normaliseKey, rememberFact } from "./memory";
+import { MEMORY_LIMITS, forgetFact, listMemories, memoriesForPrompt, normaliseKey, rememberFact, updateMemory } from "./memory";
+import { TEAMMATE_ROUTE_ERRORS } from "./teammate-copy";
 
 const AGENT = "agent-ws";
 
@@ -176,5 +181,21 @@ describe("remembering under a lock (review round 9)", () => {
     await save("u-1", "report  day", "Monday");
     expect(db.locks).toEqual([`agent-memory:${AGENT}:person:u-1`, `agent-memory:${AGENT}:person:u-1`]);
     expect(db.rows.filter((r) => normaliseKey(String(r.key)) === normaliseKey("report day"))).toHaveLength(1);
+  });
+
+  it("edits and forgets under the same lock, reading the memories again inside it (review round 10)", async () => {
+    await save("u-1", "Report day", "Friday");
+    const tabRead = { ...db.rows[0], scopeId: "u-1" } as Row & { scopeId: string; scope: "person" };
+    // A chat remembers the new key after the tab read: the edit still finds and replaces it.
+    await save("u-1", "Standup", "9am");
+    db.locks = [];
+    const saved = await updateMemory(tabRead, { key: "standup" }, "u-1");
+    expect(saved.ok).toBe(true);
+    expect(db.rows.map((r) => r.key)).toEqual(["standup"]);
+    expect(await forgetFact({ agentId: AGENT, userId: "u-1", key: "STANDUP" })).toEqual({ removed: true, key: "standup" });
+    expect(db.locks).toEqual([`agent-memory:${AGENT}:person:u-1`, `agent-memory:${AGENT}:person:u-1`]);
+    // Forgotten since the tab read it: nothing changes, and it says so.
+    expect(await updateMemory(tabRead, { value: "Monday" }, "u-1")).toEqual({ ok: false, error: TEAMMATE_ROUTE_ERRORS.memoryNotFound, gone: true });
+    expect(db.rows).toEqual([]);
   });
 });

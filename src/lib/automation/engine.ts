@@ -460,6 +460,7 @@ async function runWorkflow(args: {
       workflowName: workflow.name,
       teammateInRun: def.actions.some((a) => a.key === "ask_teammate"),
       teammatePrints: teammatePrintsOf(workflow.definition),
+      teammateFieldPrints: asRecord(asRecord(workflow.definition).__teammateFields),
     };
 
     let succeeded = 0;

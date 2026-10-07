@@ -1300,6 +1300,16 @@ export const TALK_TEAMMATE_COPY = {
 } as const;
 
 /** An AI teammate step in an automation (docs/plans/ai-teammates-phase2.md step 7). */
+/** The parts of a teammate a fingerprint covers, as a person reads them (teammate-print.ts PRINT_FIELDS). */
+export const PRINT_FIELD_WORDS: Record<string, string> = {
+  name: "name",
+  job: "job",
+  instructions: "instructions",
+  tools: "tools",
+  rules: "approval rules",
+  model: "model",
+};
+
 export const AUTOMATION_TEAMMATE_COPY = {
   actionName: "Ask an AI teammate",
   actionDescription: "One of your AI teammates does one thing or answers one question, as you. Anything else it does that other people would see waits for your approval. Later steps can use its answer as {{teammate.answer}}.",
@@ -1317,8 +1327,23 @@ export const AUTOMATION_TEAMMATE_COPY = {
   creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run.",
   aiOffForCreator: "AI is turned off for the person who made this automation, so its teammate didn't run.",
   noTeammate: "The person who made this automation can no longer use that teammate.",
-  /** A workspace teammate changed after the version was published (review round 9). */
-  teammateChanged: "The teammate this step asks was changed after this automation was published, so it didn't run. Open the automation and publish it again.",
+  /**
+   * A workspace teammate changed after the version was published (review
+   * rounds 9 and 10): who changed it, and what to check before publishing
+   * again, which accepts the change.
+   */
+  teammateChanged: (fields: readonly string[]) =>
+    `Whoever manages the teammate this step asks changed its ${fields.length > 0 ? titleList(fields.map((f) => PRINT_FIELD_WORDS[f] ?? f), 6) : "settings"} after this automation was published, so it didn't run. Check the teammate in AI teammates before you publish the automation again.`,
+  /**
+   * After the turn ran and spent its question, the creator or the teammate
+   * changed: it did answer, and its words wait in the creator's chat, but no
+   * later step uses them (review round 10: these said it "didn't run").
+   */
+  answeredCreatorCannot: "The teammate answered, but the person who made this automation can no longer be acted for here, so later steps don't use its answer. The answer is in their chat with it.",
+  answeredAiOff: "The teammate answered, but AI is now turned off for the person who made this automation, so later steps don't use its answer. The answer is in their chat with it.",
+  answeredTeammateGone: "The teammate answered, but it was paused or removed meanwhile, so later steps don't use its answer. The answer is in their chat with it.",
+  /** A version published before teammate steps were checked for changes (review round 10). */
+  publishedUnchecked: "This automation was published before AI teammate steps were checked for changes, so it didn't run. Open it and publish it again.",
   // The step's own sentences never name the teammate: every reader of the
   // automation's runs reads them, and a private teammate's name is its
   // person's (review round 1). The creator knows which one the step asks.
@@ -1334,7 +1359,7 @@ export const AUTOMATION_TEAMMATE_COPY = {
   teammatesFailed: "Couldn't load your teammates.",
   pausedLabel: (name: string) => `${name} (paused: it won't run until it is turned back on)`,
   noRequest: "Write what the teammate should do.",
-  noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it didn't answer, so it didn't run.",
+  noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it gave none to use, so it didn't run.",
   noTeammateBefore: "This step uses the AI teammate's answer, and no AI teammate step comes before it, so it didn't run.",
   /** set_field with an answer the field can't take: never repeats the answer (the run's errors are read more widely). */
   answerNotAValue: "The AI teammate's answer isn't a value this field takes, so it was left alone.",

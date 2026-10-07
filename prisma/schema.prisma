@@ -5390,6 +5390,10 @@ model AgentRoutine {
   lastReason     String?
   /// "chat" | "settings" | "legacy" (moved from Workspace agents)
   createdVia     String    @default("chat")
+  /// Its teammate's fingerprint as its person last chose it (made, moved or
+  /// resumed): a workspace teammate changed since pauses the routine.
+  /// prisma/sql/2026-10-08-ai-teammates-routine-print.sql
+  teammatePrint  String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
 

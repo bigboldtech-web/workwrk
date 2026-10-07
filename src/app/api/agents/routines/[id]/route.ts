@@ -16,7 +16,7 @@ import type { Prisma } from "@/generated/prisma";
 import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
 import { personZone } from "@/lib/agents/acting";
-import { nextRoutineRun } from "@/lib/agents/routines-server";
+import { nextRoutineRun, routineTeammatePrint } from "@/lib/agents/routines-server";
 import { scheduleForSave } from "@/lib/agents/cron";
 import { ROUTINE_LIMITS, routineScheduleProblem } from "@/lib/agents/routines";
 import { canUseAgent } from "@/lib/agents/teammate-access";
@@ -46,7 +46,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const { id } = await params;
   const routine = await prisma.agentRoutine.findFirst({
     where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId },
-    select: { ...ROUTINE_VIEW_SELECT, agent: { select: { name: true, status: true, organizationId: true, visibility: true, ownerId: true } } },
+    select: { ...ROUTINE_VIEW_SELECT, agentId: true, agent: { select: { name: true, status: true, organizationId: true, visibility: true, ownerId: true } } },
   });
   if (!routine || !canUseAgent(routine.agent, viewer)) return routineNotFound();
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -79,6 +79,10 @@ export async function PATCH(req: Request, { params }: Params) {
     data.status = "active";
     data.pausedReason = null;
     data.nextRunAt = next;
+    // Resumed by its person: the teammate as it is now is the one they chose
+    // (a routine paused because its teammate changed tells them to check it
+    // first; review round 10).
+    data.teammatePrint = await routineTeammatePrint(viewer.organizationId, routine.agentId);
   } else if (b.status === "paused" && active) {
     // Paused by its person: no reason, and no next run until they resume it.
     data.status = "paused";

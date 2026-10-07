@@ -43,7 +43,7 @@ import { parseCron, splitScheduleZone, withScheduleZone } from "./cron";
 import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "./engine";
 import { LEGACY_AGENT } from "./legacy-agents";
 import { ROUTINE_LIMITS, legacyRoutineSchedule } from "./routines";
-import { nextRoutineRun } from "./routines-server";
+import { nextRoutineRun, routineTeammatePrint } from "./routines-server";
 import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
 import { canUseAgent } from "./teammate-access";
 import { ACTION_ERRORS, LEGACY_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, type LegacyStopReason } from "./teammate-copy";
@@ -182,6 +182,9 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
   }
   const outcome = await legacyScheduleOutcome(agent, now);
   const reason = outcome.kind === "stop" ? outcome.reason : null;
+  // The teammate as the old schedule ran it, at the move: a change by
+  // someone else after it pauses the routine (review round 10).
+  const teammatePrint = outcome.kind === "routine" ? await routineTeammatePrint(agent.organizationId, agent.id) : null;
   const routineId = await prisma.$transaction(async (tx): Promise<string | null | false> => {
     const cas = await tx.agent.updateMany({
       // The instructions too: one an Admin saved meanwhile is moved on the next tick, never lost (review round 3).
@@ -206,6 +209,7 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
         status: "active",
         nextRunAt: kept ?? nextRoutineRun(outcome.schedule, now),
         createdVia: "legacy",
+        teammatePrint,
       },
       select: { id: true },
     });

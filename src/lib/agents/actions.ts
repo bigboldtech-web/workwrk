@@ -84,7 +84,9 @@ import {
   type TeammateMessageView,
 } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
-import { ACTION_TTL_MS, EDITABLE_FIELD, alwaysKeyFor, sanitizeRules, type ApprovalRules } from "./tool-policy";
+import { ACTION_TTL_MS, EDITABLE_FIELD, OUTCOMES_PER_TURN, alwaysKeyFor, sanitizeRules, type ApprovalRules } from "./tool-policy";
+
+export { OUTCOMES_PER_TURN };
 import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, isToolName, type ToolName } from "./tool-names";
 import { clampText } from "./clamp";
 
@@ -711,10 +713,8 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
  * call the person's own rule ran was reported in its own turn (reportedAt is
  * set when it is recorded), so only decisions and expiries come back here.
  */
-/** The most decided outcomes one turn is told (claimUnreportedOutcomes); the rest wait for the next. */
-export const OUTCOMES_PER_TURN = 50;
-
-export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean } = {}): Promise<AgentActionRow[]> {
+export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean; limit?: number } = {}): Promise<AgentActionRow[]> {
+  const limit = Math.max(1, Math.min(OUTCOMES_PER_TURN, opts.limit ?? OUTCOMES_PER_TURN));
   // One teammate's only, when named: in a group chat each hears its own
   // (docs/plans/ai-teammates-phase2.md step 3). A one-teammate chat holds
   // only that teammate's rows, and Ask AI names none.
@@ -740,7 +740,7 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
         WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent} ${onlyContinuable}
           AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
         ORDER BY "createdAt" ASC
-        LIMIT ${OUTCOMES_PER_TURN}
+        LIMIT ${limit}
       )
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
       "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;

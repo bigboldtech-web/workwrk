@@ -129,6 +129,9 @@ export function honoursDontAsk(t: PolicyTrigger): boolean {
   return t === "CHAT" || t === "RESUME" || t === "ROUTINE";
 }
 
+/** The most decided outcomes one turn is told (claimUnreportedOutcomes); the rest wait for the next. */
+export const OUTCOMES_PER_TURN = 50;
+
 /** Tools only a turn the person watches is offered: their lines land in a chat nobody may be reading (Decision 18). */
 export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["remember", "forget", "create_routine", "ask_teammate"]);
 

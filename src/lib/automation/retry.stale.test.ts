@@ -24,6 +24,10 @@ describe("processAutomationRetries' scan (review round 8)", () => {
     expect(await processAutomationRetries()).toEqual({ scanned: 0, retried: 0, recovered: 0 });
     expect(st.sql[0]).toContain(`"triggerPayload" ? '__retryState'`);
     expect(st.sql[0]).toContain("LIMIT 100");
+    // Not yet due is compared as text against a value, never a regex inside the template (review round 10).
+    expect(st.sql[0]).toContain(`->>'nextAttemptAt') <= ?`);
+    expect(st.sql[0]).not.toMatch(/~ '/);
+    expect(st.sql[0]).toContain(`w."status" = 'ACTIVE'`);
     // Nothing due: no run is loaded.
     expect(st.reads).toBe(0);
   });
