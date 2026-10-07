@@ -1286,3 +1286,27 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     2. A delegate kept read_talk and list_my_inbox, so one teammate could read DMs through another and post them where the person chose "Don't ask". Decided by its worst case, a delegated turn now reads nobody else's words, as Talk and automation turns don't. The cost is that a Chief of Staff can't get an Inbox summary through another teammate; the person asks that teammate directly. Decision 12 now covers delegated turns.
     3. The changelog said "the first one answers" and "asks before anything other people would see" without its exceptions. It now names the lead and the person's own "Don't ask".
   - Known, not fixed: ask_teammate sits under "Look things up" in the tool picker with no approval control, because asking runs nothing itself and the delegate's own calls ask for themselves.
+- **Step 6** (teammates in Talk) proved locally against a real dev server and the stand-in model:
+  - In a private channel, "@Chief of Staff summarise this" posted the person's message (`teammate.state running`), then one answer under the person's name (`agent_post`, `clientId tm_<id>`, no mentions). The state became answered, one AI question was spent, and the AgentRun has trigger TALK.
+  - The model got the channel's earlier messages inside `<workspace_note>`, before the person's words, and only the teammate's own tools: no remember, ask_teammate, read_talk or list_my_inbox.
+  - The person's chat with it holds "Asked in #proof: ..." and the answer. The audit row reads "Chief of Staff (for Ola Owner): Answered in #proof".
+  - Picked from the composer's @ list (under "AI teammates"), the answer showed in the asker's feed within three seconds, and another member's feed showed it with "via Chief of Staff".
+  - Asked to post in another channel, the teammate's card waited in the person's chat with it, with one `agent_approval` Inbox row. Nothing was posted.
+  - A public channel answered `addressable false, reason public_channel`, and its POST 403. Another person's private teammate answered 404, the same as an unknown one, and was not in the @ list. With a Guest in the channel the picker answered `has_guests` and the POST 403, with nothing posted. The same key sent twice gave one message and no new question.
+  - A request left running for over ten minutes (a turn whose server died) reads "didn't answer here".
+  - Found while proving, fixed:
+    1. A Guest is marked by the stored org role (the Guest invitation writes it; Guest is not a level), and the Guest check read only the level, so it would have missed every invited Guest. It now reads both, and can only refuse more.
+    2. The feed dropped a refresh that arrived while one was running. A teammate's answer lands about 100 ms after the request, so the asker's tab missed it until the next message. A refresh that arrives mid-read now runs once more when it ends.
+    3. A turn that posted nothing changed the request's state without telling anyone, so "working on it" stayed on every screen until the ten-minute mark. Open tabs are now told.
+    4. Everyone in the channel read "See your chat with it", but only the asker has that chat. Others now read "didn't answer here", and the asker gets a link to their chat.
+    5. The block 2 line said "where 1 people read". It now says "1 person reads".
+  - Review (one read-only reviewer, findings re-read against the code), 7 found, 7 fixed, plus 2 of its minor points:
+    1. Removing the request did not stop the answer, so words sent to the wrong place were answered there anyway. The answer is now posted only while the request, and its thread, are still there.
+    2. The Guest check read only the first 2,000 members. It now reads every member a page at a time, and a conversation larger than it reads counts as having a Guest.
+    3. The place's name (set by a channel's Full holder, a group's members, or the other person in a direct message) reached the model inside the server's own lines. Those lines now say "a private channel", "a group conversation" or "a direct message", and the name is inside `<workspace_note>`. The same held for the asking teammate's name in a delegated turn (step 5), now fixed the same way, and the history leads no longer carry either name.
+    4. Retry on a request that had not sent posted the words as a plain message nobody answered. The row and the "Not sent" outbox now keep the teammate, so Retry asks it again (proved live: refused at the per-minute limit, then answered on Retry).
+    5. A failed save of the request kept its question and left the run "Running now". The question is now given back. The asked line and the place's name can no longer stop a turn that has started, and a failed answer post leaves the request as "didn't answer here".
+    6. The request's state was stamped with the database clock while the feed pages on the app's. It now takes the app's clock.
+    7. A thread reply could not ask a teammate. The thread composer now has the same @ list.
+    - Also fixed: a half answer (cut short or declined) is no longer posted as the person, only kept in their chat. A message that already landed no longer counts against the five asks a minute, and a removed one answers 409, as a plain send does.
+    - Also: the local gate gives its type check the heap CI uses (it had aborted with no type error), and says so when the type check crashes rather than listing no errors.

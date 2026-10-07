@@ -289,3 +289,25 @@ describe("LEGACY_COPY (old schedules moved onto routines, Phase 2)", () => {
     );
   });
 });
+
+describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    working: [["Chief of Staff"], "Chief of Staff is working on it"],
+    didntAnswer: [["Chief of Staff"], "Chief of Staff didn't answer here. See your chat with it."],
+    didntAnswerHere: [["Chief of Staff"], "Chief of Staff didn't answer here."],
+    askedLine: [["#proof", "Sum this up"], "Asked in #proof: Sum this up"],
+    answeredIn: [["#proof"], "Answered in #proof"],
+    tooMany: [[12], "You've asked teammates 5 times in a minute. Try again in 12 seconds."],
+  };
+  const t = copy.TALK_TEAMMATE_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(t).filter((k) => typeof t[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what the spec says`, () => {
+      const made = (t[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+});

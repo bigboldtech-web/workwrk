@@ -5,6 +5,7 @@
 // mention highlighting, call cards, edit-in-place, and thread chips.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bot, Check, ClipboardCopy, Link2, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone,
   Smile, Sparkles, Trash2, Video, X,
@@ -17,6 +18,8 @@ import { startsGroup, type ChatUserLite } from "@/components/talk/conversation-u
 import { QUICK_REACTIONS as QUICK_THREE } from "@/lib/emoji-data";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { dayKey, type DateFormatPrefs } from "@/lib/format/date";
+import { teammateRequestState } from "@/lib/agents/talk-address";
+import { TALK_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 export type ChatAttachment = { url: string; name: string; type: string; size: number; s3Key?: string };
 
@@ -50,6 +53,12 @@ export type FeedMessage = {
     /// post_in_talk). Only the server writes this kind. Once the person edits
     /// it the words are theirs: kind "agent_post_edited", with no label.
     agent?: { id?: string; name?: string };
+    /// AI teammates in Talk (Phase 2 step 6): a message that asked a
+    /// teammate carries the request's state; its answer names the request.
+    teammate?: { id?: string; slug?: string; name?: string; state?: string; answerId?: string };
+    /** On this device only: the teammate a message that has not sent yet asks, so Retry asks it again. */
+    askTeammate?: string;
+    replyTo?: string;
   } | null;
   author: ChatUserLite;
   /** Client-only send states. */
@@ -93,6 +102,13 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   showDayDividers?: boolean;
 }) {
   const { date: fmtDate, relative: fmtRelative, prefs } = useFormat();
+  // A clock read a minute at a time (never during render): a teammate
+  // request still "working" after ten minutes reads as not answered.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const liveCardId = useMemo(() => {
     if (!activeCall) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -160,13 +176,14 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
           onDiscardFailed={onDiscardFailed}
           fmtDate={fmtDate}
           fmtRelative={fmtRelative}
+          now={now}
         />
       ))}
     </div>
   );
 }
 
-function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, highlighted, readOnly, canReact, onCopyLink, onDiscardFailed, fmtDate, fmtRelative }: {
+function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, highlighted, readOnly, canReact, onCopyLink, onDiscardFailed, fmtDate, fmtRelative, now }: {
   msg: FeedMessage;
   head: boolean;
   live: { participants: { identity: string; name: string }[]; startedAt: string } | null;
@@ -186,6 +203,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   onDiscardFailed?: (m: FeedMessage) => void;
   fmtDate: (v: Date | string | number | null | undefined, style?: "smart" | "date" | "datetime" | "time" | "weekday") => string;
   fmtRelative: (v: Date | string | number | null | undefined) => string;
+  /** The feed's clock, a minute at a time: a teammate request "working" past its time reads as not answered. */
+  now: number;
 }) {
   const [reactOpen, setReactOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -226,6 +245,10 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   const aiEdited = msg.metadata?.kind === "ai_update_edited";
   // Said on the post itself too: the person approved it, their AI teammate wrote it.
   const agentPost = msg.metadata?.kind === "agent_post" ? msg.metadata.agent?.name?.trim() || "an AI teammate" : null;
+  // A request to an AI teammate: its state, read with a stale "running" as not answered.
+  const requestState = teammateRequestState(msg.metadata, msg.createdAt, now);
+  const teammateName = msg.metadata?.teammate?.name?.trim() || "The teammate";
+  const teammateSlug = msg.metadata?.teammate?.slug?.trim() || null;
   const reactions = msg.metadata?.reactions ?? {};
   const attachments = msg.metadata?.attachments ?? [];
   const deleted = Boolean(msg.deletedAt);
@@ -372,6 +395,27 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         )}
 
         {/* Reaction chips */}
+        {/* A message that asked an AI teammate: while it works, then if no answer was posted (Decision 30). */}
+        {!deleted && requestState === "running" ? (
+          <p className="m-0 mt-0.5 flex items-center gap-1.5 text-sm text-ink-2">
+            <Dots variant="pending" label={TALK_TEAMMATE_COPY.working(teammateName)} />
+            {TALK_TEAMMATE_COPY.working(teammateName)}
+          </p>
+        ) : !deleted && (requestState === "no_answer" || requestState === "failed" || requestState === "stale") ? (
+          <p className="m-0 mt-0.5 text-sm text-ink-2">
+            {TALK_TEAMMATE_COPY.didntAnswerHere(teammateName)}
+            {/* Only the asker has a chat with it: another member's "your chat" is not this one. */}
+            {mine && teammateSlug ? (
+              <>
+                {" "}
+                <Link href={`/agents?chat=${encodeURIComponent(teammateSlug)}`} className="text-[var(--os-brand)] hover:underline">
+                  {TALK_TEAMMATE_COPY.seeYourChat}
+                </Link>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+
         {!deleted && Object.keys(reactions).length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {Object.entries(reactions).map(([emoji, users]) => (

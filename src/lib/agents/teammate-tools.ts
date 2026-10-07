@@ -485,7 +485,7 @@ async function otherMemberName(conversationId: string, me: string): Promise<stri
   return `${row.user.firstName ?? ""} ${row.user.lastName ?? ""}`.trim() || row.user.email;
 }
 
-async function placeOf(c: { id: string; type: "DM" | "GROUP" | "CHANNEL"; name: string | null }, me: string, dmName?: string | null): Promise<string> {
+export async function placeOf(c: { id: string; type: "DM" | "GROUP" | "CHANNEL"; name: string | null }, me: string, dmName?: string | null): Promise<string> {
   if (c.type === "CHANNEL") return channelPlace(c.name ?? "channel");
   if (c.type === "GROUP") return c.name?.trim() || GROUP_FALLBACK;
   const other = dmName ?? (await otherMemberName(c.id, me));

@@ -80,6 +80,7 @@ function scanWrittenTypes(): Map<string, string[]> {
  * really is, so this list can never become a quiet escape hatch.
  */
 const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
+  "agent.talk_answer": "an ActivityLog type (the audit line of a teammate's answer posted in Talk) beside the agent_approval notice in lib/agents/talk-turn",
   "access.request.granted": "an ActivityLog type beside the access_declined notification in api/access-requests/[id]",
   "access.request.declined": "an ActivityLog type beside the access_declined notification in api/access-requests/[id]",
   BOARD_ITEM: "EntityLink / Reminder entityType, beside the mention write in api/items/[id]/updates",

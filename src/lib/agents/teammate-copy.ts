@@ -1204,3 +1204,30 @@ export const DELEGATION_COPY = {
   /** The Run history label of a delegated turn. */
   triggerLabel: "Asked by a teammate",
 } as const;
+
+/** Asking an AI teammate in Talk (docs/plans/ai-teammates-phase2.md step 6). */
+export const TALK_TEAMMATE_COPY = {
+  pickerHeading: "AI teammates",
+  pickerHint: "It answers here as you, marked as from the teammate.",
+  working: (n: string) => `${n} is working on it`,
+  didntAnswer: (n: string) => `${n} didn't answer here. See your chat with it.`,
+  /** The same line in the feed: everyone reads it, but only the asker has that chat. */
+  didntAnswerHere: (n: string) => `${n} didn't answer here.`,
+  seeYourChat: "See your chat with it",
+  /** A message sent with this key that was removed since (the plain send's own words, messages/route.ts). */
+  removedAfterSent: "This message was removed after it was sent.",
+  /** Where it was asked, when the place's name can't be read. */
+  placeFallback: "Talk",
+  askedLine: (place: string, req: string) => `Asked in ${place}: ${req}`,
+  answeredIn: (place: string) => `Answered in ${place}`,
+  guestCannot: "Guests can't ask AI teammates.",
+  publicChannel: "AI teammates can't be asked in public channels. Ask in a private channel, a group or a direct message.",
+  hasGuests: "AI teammates can't be asked in a conversation with guests.",
+  notMember: "Join this conversation to ask a teammate here.",
+  archived: "This conversation is archived.",
+  notAddressed: "Pick the teammate from the @ list to ask it.",
+  tooMany: (s: number) => `You've asked teammates 5 times in a minute. Try again in ${s} seconds.`,
+  noFiles: "Files can't go in a message that asks a teammate. Send them in a message of their own.",
+  threadGone: "That thread no longer exists.",
+  notSent: "Your message wasn't sent. Try again.",
+} as const;

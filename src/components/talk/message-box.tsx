@@ -34,7 +34,7 @@
 // upload puts the text back without clobbering anything typed since. A message
 // that fails to send is never silently dropped.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   AtSign, Bold, Code, Italic, Link2, List, ListOrdered,
   Paperclip, Send, Smile, SquareCode, Strikethrough, TextQuote, Type, Underline, X,
@@ -48,6 +48,10 @@ import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { TALK_FMTBAR_KEY, readTalkKey } from "@/components/talk/talk-keys";
 import type { ChatAttachment } from "@/components/talk/message-feed";
+import { TeammateAvatar } from "@/components/agents/teammate-avatar";
+import { pickTeammateInBody, type PickedTeammate } from "@/components/talk/teammate-address";
+import type { TeammateHue } from "@/lib/agents/hues";
+import { TALK_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 /** An upload the server answered with a refusal (status and its own sentence). */
 class UploadRefused extends Error {
@@ -59,7 +63,11 @@ class UploadRefused extends Error {
 const MAX_FILES = 10;
 const MAX_FILE_MB = 25;
 
-export type MessagePayload = { body: string; mentions: string[]; attachments: ChatAttachment[] };
+/** `teammate`: the slug of the AI teammate the message asks (picked from the @ list; Phase 2 step 6). */
+export type MessagePayload = { body: string; mentions: string[]; attachments: ChatAttachment[]; teammate?: string };
+
+/** An AI teammate the @ list offers (GET /api/conversations/[id]/teammates). */
+export type MentionTeammate = { slug: string; name: string; hue: TeammateHue | null; avatar: string | null };
 
 export function MessageBox({
   members,
@@ -74,6 +82,7 @@ export function MessageBox({
   initialValue = "",
   onCancel,
   disabled = false,
+  teammates = [],
 }: {
   members: { userId: string; user: ChatUserLite }[];
   meId: string | null;
@@ -94,6 +103,8 @@ export function MessageBox({
   /** Archived or read-only: the box renders but refuses, never disappears
    *  mid-typing. Callers that must hide it entirely simply do not mount it. */
   disabled?: boolean;
+  /** The person's AI teammates that can be asked here: the @ list offers them under their own heading. */
+  teammates?: readonly MentionTeammate[];
 }) {
   const [input, setInput] = useState(initialValue);
   const [files, setFiles] = useState<File[]>([]);
@@ -104,6 +115,8 @@ export function MessageBox({
   useDirtyGuard(refusedDraft && (input.trim() !== "" || files.length > 0));
   const [uploading, setUploading] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  // Teammates picked from the @ list for this message: only these can be asked (Decision 10).
+  const [pickedTeammates, setPickedTeammates] = useState<PickedTeammate[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -143,6 +156,19 @@ export function MessageBox({
     const q = mentionQuery.toLowerCase();
     return roster.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 6);
   }, [mentionQuery, roster]);
+  const teammateMatches = useMemo(() => {
+    if (mentionQuery === null || teammates.length === 0) return [];
+    const q = mentionQuery.toLowerCase();
+    return teammates.filter((t) => t.name.toLowerCase().includes(q)).slice(0, 4);
+  }, [mentionQuery, teammates]);
+  // One list for the keys: people first, then teammates.
+  const allMatches = useMemo(
+    () => [
+      ...mentionMatches.map((p) => ({ kind: "person" as const, key: p.id, name: p.name, person: p })),
+      ...teammateMatches.map((t) => ({ kind: "teammate" as const, key: `t:${t.slug}`, name: t.name, teammate: t })),
+    ],
+    [mentionMatches, teammateMatches],
+  );
 
   /* ── mention detection: the word containing the caret ─────────── */
   const refreshMentionState = (value: string, caret: number) => {
@@ -157,6 +183,12 @@ export function MessageBox({
     setMentionQuery(fragment);
     setMentionIndex(0);
   };
+
+  const pickTeammate = (t: MentionTeammate) => {
+    setPickedTeammates((prev) => (prev.some((x) => x.slug === t.slug) ? prev : [...prev, { slug: t.slug, name: t.name }]));
+    pickMention({ id: `t:${t.slug}`, name: t.name });
+  };
+  const pickEntry = (e: (typeof allMatches)[number]) => (e.kind === "teammate" ? pickTeammate(e.teammate) : pickMention(e.person));
 
   const pickMention = (person: { id: string; name: string }) => {
     const el = inputRef.current;
@@ -199,6 +231,15 @@ export function MessageBox({
     const mentions = roster
       .filter((r) => r.name && new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`).test(body))
       .map((r) => r.id);
+
+    // The teammate it asks: one picked from the @ list whose name is still in
+    // the words. Its answer is posted here; files go in a message of their
+    // own (the teammate route takes words only), so nothing is ever dropped.
+    const teammate = pickTeammateInBody(body, pickedTeammates);
+    if (teammate && batch.length > 0) {
+      onError(TALK_TEAMMATE_COPY.noFiles);
+      return;
+    }
 
     // The message leaves the box NOW. Anything typed during a slow upload
     // belongs to the next message and is never wiped by this one.
@@ -266,7 +307,8 @@ export function MessageBox({
     }
 
     setRefusedDraft(false);
-    onSend({ body, mentions, attachments });
+    setPickedTeammates([]);
+    onSend({ body, mentions, attachments, ...(teammate ? { teammate } : {}) });
   };
 
   const setSelection = (next: string, selStart: number, selEnd: number) => {
@@ -418,18 +460,28 @@ export function MessageBox({
       ) : null}
 
       {/* Mention autocomplete */}
-      {mentionMatches.length > 0 && (
+      {allMatches.length > 0 && (
         <div className="absolute bottom-full start-2 z-20 mb-1 w-64 rounded-lg border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]">
-          {mentionMatches.map((p, i) => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); pickMention(p); }}
-              className={`flex h-8 w-full items-center gap-2 px-2.5 text-start text-sm ${i === mentionIndex ? "bg-hover text-ink-strong" : "text-ink hover:bg-subtle"}`}
-            >
-              <TeamAvatar name={p.name} avatar={p.avatar} size={20} />
-              {p.name}
-            </button>
+          {allMatches.map((m, i) => (
+            <Fragment key={m.key}>
+              {m.kind === "teammate" && (i === 0 || allMatches[i - 1].kind !== "teammate") ? (
+                <div className="px-2.5 pb-1 pt-1.5 text-micro uppercase tracking-[0.06em] text-ink-2" title={TALK_TEAMMATE_COPY.pickerHint}>
+                  {TALK_TEAMMATE_COPY.pickerHeading}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); pickEntry(m); }}
+                className={`flex h-8 w-full items-center gap-2 px-2.5 text-start text-sm ${i === mentionIndex ? "bg-hover text-ink-strong" : "text-ink hover:bg-subtle"}`}
+              >
+                {m.kind === "teammate" ? (
+                  <TeammateAvatar name={m.teammate.name} hue={m.teammate.hue} avatar={m.teammate.avatar} size="md" />
+                ) : (
+                  <TeamAvatar name={m.person.name} avatar={m.person.avatar} size={20} />
+                )}
+                {m.name}
+              </button>
+            </Fragment>
           ))}
         </div>
       )}
@@ -507,10 +559,10 @@ export function MessageBox({
             refreshMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
           }}
           onKeyDown={(e) => {
-            if (mentionMatches.length > 0) {
-              if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionMatches.length); return; }
-              if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
-              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMention(mentionMatches[mentionIndex]); return; }
+            if (allMatches.length > 0) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => (i + 1) % allMatches.length); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => (i - 1 + allMatches.length) % allMatches.length); return; }
+              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickEntry(allMatches[Math.min(mentionIndex, allMatches.length - 1)]); return; }
               if (e.key === "Escape") { setMentionQuery(null); return; }
             }
             const chord = formatChord(e);

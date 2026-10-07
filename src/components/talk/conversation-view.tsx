@@ -50,7 +50,8 @@ import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { AddPeopleDialog } from "@/components/talk/add-people-dialog";
 import { conversationTitle, editedKind, type ChatUserLite } from "@/components/talk/conversation-utils";
 import { MessageFeed, type FeedMessage } from "@/components/talk/message-feed";
-import { MessageBox, type MessagePayload } from "@/components/talk/message-box";
+import { MessageBox, type MentionTeammate, type MessagePayload } from "@/components/talk/message-box";
+import { splitSse } from "@/lib/ai/thread";
 import {
   ConversationGlyph, DetailsPanel, RightPanel, SearchPanel, ThreadView,
   type PanelConversation, type PanelKind,
@@ -461,9 +462,16 @@ export function ConversationView({
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
+    // A nudge that lands while a read is in flight asks for one more read
+    // when it ends. Dropping it lost the last of two quick messages (an AI
+    // teammate's answer lands about 100 ms after the request) until the
+    // next message, since the interval is off while the stream is up.
+    let again = false;
     const tick = async () => {
-      if (document.hidden || !cursor.current || polling.current) return;
+      if (document.hidden || !cursor.current) return;
+      if (polling.current) { again = true; return; }
       polling.current = true;
+      again = false;
       try {
         // A 200-row page means more changes are waiting: drain them now
         // rather than one page per tick.
@@ -485,7 +493,10 @@ export function ConversationView({
           if (!d.more) break;
         }
       } catch { /* the next tick retries */ }
-      finally { polling.current = false; }
+      finally {
+        polling.current = false;
+        if (again) void tick();
+      }
     };
 
     const startPolling = () => { if (!timer) timer = setInterval(() => void tick(), POLL_MS); };
@@ -598,10 +609,29 @@ export function ConversationView({
     } finally { setLoadingOlder(false); }
   };
 
+  /* ── AI teammates that can be asked here (Phase 2 step 6) ───── */
+
+  // Read once per conversation: the @ list offers them only where asking one
+  // is allowed (a member, no Guests, not a public channel, not archived).
+  const [askable, setAskable] = useState<MentionTeammate[]>([]);
+  useEffect(() => {
+    let alive = true;
+    setAskable([]);
+    void fetch(`/api/conversations/${id}/teammates`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { addressable?: boolean; teammates?: MentionTeammate[] } | null) => {
+        if (alive && d?.addressable && Array.isArray(d.teammates)) setAskable(d.teammates);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
   /* ── sending ────────────────────────────────────────────────── */
 
   const deliver = useCallback(async (tempId: string, payload: {
-    body: string; parentId?: string; metadata?: Record<string, unknown>;
+    body: string; parentId?: string; metadata?: Record<string, unknown>; teammate?: string;
   }, place: "top" | "thread", writtenAt: string) => {
     const applyFail = () => {
       // The words survive the page. Without this the "Not sent" row lived
@@ -616,7 +646,9 @@ export function ConversationView({
         body: payload.body,
         parentId: payload.parentId ?? null,
         createdAt: writtenAt,
-        metadata: payload.metadata,
+        // A teammate request keeps its teammate: Retry asks it again, never
+        // posts the words as a plain message nobody answers.
+        metadata: payload.teammate ? { ...(payload.metadata ?? {}), askTeammate: payload.teammate } : payload.metadata,
       });
       if (place === "top") setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
       else {
@@ -637,6 +669,46 @@ export function ConversationView({
       if (place === "top") setMessages((prev) => swap(prev));
       else setThread((prev) => (prev ? { ...prev, replies: swap(prev.replies) } : prev));
     };
+    // A message that asks an AI teammate (Phase 2 step 6) goes to the
+    // teammate route: the same key and the same optimistic row, and the
+    // message is sent once the stream's first event says it was saved. The
+    // answer is posted by the server and arrives with the feed's own read.
+    if (payload.teammate) {
+      try {
+        const res = await fetch(`/api/conversations/${id}/teammates`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, clientId: tempId }),
+          keepalive: true,
+        });
+        if (!res.ok || !res.body) {
+          const said = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          if (typeof said?.error === "string" && said.error) toast(said.error, { tone: "danger" });
+          throw new Error("send failed");
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let saved: FeedMessage | null = null;
+        while (!saved) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parsed = splitSse<{ type: string; message?: unknown }>(buffer);
+          buffer = parsed.rest;
+          const first = parsed.events.find((e) => e.type === "message" && e.message && typeof e.message === "object");
+          if (first) saved = first.message as FeedMessage;
+        }
+        // The turn runs on in the server whether this tab reads on or not.
+        void reader.cancel().catch(() => {});
+        if (!saved) throw new Error("send failed");
+        applyOk(saved);
+        window.dispatchEvent(new Event(WINDOW_EVENTS.chatChanged));
+      } catch {
+        applyFail();
+      }
+      return;
+    }
     try {
       const res = await fetch(`/api/conversations/${id}/messages`, {
         method: "POST",
@@ -667,6 +739,7 @@ export function ConversationView({
     metadata: {
       ...(payload.attachments.length > 0 ? { attachments: payload.attachments } : {}),
       ...(payload.mentions.length > 0 ? { mentions: payload.mentions } : {}),
+      ...(payload.teammate ? { askTeammate: payload.teammate } : {}),
     },
     author: meLite,
     pending: true,
@@ -681,6 +754,7 @@ export function ConversationView({
       body: payload.body,
       ...(parentId ? { parentId } : {}),
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+      ...(payload.teammate ? { teammate: payload.teammate } : {}),
     };
   };
 
@@ -724,6 +798,7 @@ export function ConversationView({
       body: m.body,
       mentions: m.metadata?.mentions ?? [],
       attachments: m.metadata?.attachments ?? [],
+      ...(typeof m.metadata?.askTeammate === "string" && m.metadata.askTeammate ? { teammate: m.metadata.askTeammate } : {}),
     };
     if (m.metadata?.kind === "call") void deliver(m.id, { body: m.body, metadata: { kind: "call" } }, place, m.createdAt);
     else void deliver(m.id, wirePayload(payload, m.parentId ?? undefined), place, m.createdAt);
@@ -1630,6 +1705,7 @@ export function ConversationView({
                 meId={meId}
                 placeholder={`Message ${title}`}
                 sendVariant={primarySend ? "primary" : "ghost"}
+                teammates={askable}
                 onSend={sendMain}
                 onError={(msg) => toast(msg, { tone: "danger" })}
                 onJumpToLast={() => {
@@ -1652,6 +1728,7 @@ export function ConversationView({
               meId={meId}
               memberNames={memberNames}
               members={meta.members}
+              teammates={askable}
               canWrite={reactable}
               loading={thread.loading}
               onSend={sendThreadReply}
