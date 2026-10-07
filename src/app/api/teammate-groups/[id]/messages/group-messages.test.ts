@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  /** What the route told the person's other tabs. */
+  published: [] as Array<{ userId: string; event: Record<string, unknown> }>,
   /** The runs whose question went back (giveBackTurn). */
   givenBack: [] as string[],
   removedFromGroup: new Set<string>(),
@@ -45,6 +47,7 @@ function agent(slug: string, name: string, over: Row = {}): Row {
 
 const VIEWER = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false };
 
+vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, event: Record<string, unknown>) => void st.published.push({ userId, event }), publishToConversation: () => {} }));
 vi.mock("@/lib/app-gate", () => ({ requireApp: async () => ({ viewer: VIEWER }) }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 vi.mock("@/lib/agents/acting", () => ({
@@ -135,6 +138,7 @@ const PM = agent("pm", "Project Manager");
 const TRIAGE = agent("triage", "Triage");
 
 beforeEach(() => {
+  st.published = [];
   st.givenBack = [];
   st.removedFromGroup = new Set();
   st.removedCancels = [];
@@ -273,6 +277,14 @@ describe("a group message", () => {
     const cleared = vi.spyOn(globalThis, "clearInterval");
     await send({ message: "Status?" });
     expect(cleared).toHaveBeenCalled();
+  });
+});
+
+describe("telling the person's other tabs (review round 8)", () => {
+  it("publishes as each answer lands, so a page opened again meanwhile reads the group", async () => {
+    await send({ message: "@Project Manager @Triage go" });
+    const changed = st.published.filter((p) => p.event.type === "agent.changed" && p.event.sessionId === "g1");
+    expect(changed.map((p) => p.event.agentId)).toEqual(["a-pm", "a-triage"]);
   });
 });
 

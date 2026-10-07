@@ -90,6 +90,11 @@ export function parseDefinition(definition: unknown): ParsedDefinition {
   return { conditions: def.conditions ?? null, actions };
 }
 
+/** Whether a definition holds an "Ask an AI teammate" step. */
+export function asksTeammate(definition: unknown): boolean {
+  return parseDefinition(definition as Prisma.JsonValue).actions.some((a) => a.key === "ask_teammate");
+}
+
 /** A teammate step's output as later steps read it. */
 export function teammateStepData(output: Record<string, unknown> | null | undefined): NonNullable<ActionContext["stepData"]> {
   const o = output ?? {};
@@ -255,9 +260,12 @@ async function runMatched(args: {
   });
 
   // Sequential per workflow: keeps per-record write ordering sane and
-  // the DB load bounded. Each workflow's failure is isolated.
+  // the DB load bounded. Each workflow's failure is isolated. One that asks
+  // an AI teammate runs after the others: its turn takes a minute or more,
+  // and a quick sibling (assign, notify) never waits on it (review round 8).
+  const ordered = [...runnable].sort((x, y) => Number(asksTeammate(x.live)) - Number(asksTeammate(y.live)));
   let ran = 0;
-  for (const wf of runnable) {
+  for (const wf of ordered) {
     try {
       const created = await runWorkflow({
         workflow: { ...wf, definition: wf.live },

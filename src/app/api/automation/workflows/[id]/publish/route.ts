@@ -17,7 +17,7 @@ import { teammateCreatorGone, teammateStepProblem } from "@/lib/automation/teamm
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
 import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
-import { ANSWER_WITHOUT_TEAMMATE, firstAnswerWithoutTeammate, firstConditionMissingValue } from "@/lib/automation/builder-state";
+import { firstAnswerProblem, firstConditionMissingValue } from "@/lib/automation/builder-state";
 
 class ChangedWhilePublishing extends Error {}
 
@@ -60,9 +60,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
   }
   // A step that uses a teammate's answer with no teammate step before it would fail on every run.
-  const early = firstAnswerWithoutTeammate(def.actions);
-  if (early !== null) {
-    return NextResponse.json({ error: ANSWER_WITHOUT_TEAMMATE, section: "then", index: early, issues: { section: "then", index: early } }, { status: 400 });
+  const early = firstAnswerProblem(def.actions);
+  if (early) {
+    return NextResponse.json({ error: early.error, section: "then", index: early.index, issues: { section: "then", index: early.index } }, { status: 400 });
   }
   // An AI teammate step works as the creator: only they may publish one, and
   // only with a teammate they can use (the version records its publisher,

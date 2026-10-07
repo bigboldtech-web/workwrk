@@ -50,7 +50,7 @@ import { clampText } from "@/lib/agents/clamp";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TalkPlaceKind, type TurnResult } from "@/lib/agents/engine";
 import { hueForAgent } from "@/lib/agents/hues";
 import { TALK_TEAMMATE_LIMITS, addressedIn, talkAddressRefusal, type TalkAddressRefusal } from "@/lib/agents/talk-address";
-import { auditTalkAnswer, conversationHasGuests, conversationReaderIds, noticeTalkApprovals, recordTalkOutcome, setRequestState, talkContext } from "@/lib/agents/talk-turn";
+import { auditTalkAnswer, conversationAudience, noticeTalkApprovals, recordTalkOutcome, setRequestState, talkContext } from "@/lib/agents/talk-turn";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
 import { ACTION_ERRORS, TALK_TEAMMATE_COPY, TEAMMATE_CHAT, TURN_ERRORS, pausedNotSent } from "@/lib/agents/teammate-copy";
 import { invalidRequest, loadTeammate, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
@@ -78,8 +78,12 @@ export async function GET(_req: Request, { params }: Params) {
   const app = await requireApp("ai");
   if ("error" in app) return NextResponse.json({ addressable: false, reason: "ai_off", teammates: [] });
   const viewer = app.viewer;
-  const [hasGuests, readers] = await Promise.all([conversationHasGuests(id, ctx.gate.organizationId), conversationReaderIds(id)]);
-  const reason = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests, tooManyPeople: readers.tooMany });
+  // What needs no member read first: a public channel of any size answers
+  // without one (review round 8). Then one bounded read.
+  const early = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: false });
+  if (early) return NextResponse.json({ addressable: false, reason: early, teammates: [] });
+  const audience = await conversationAudience(id, ctx.gate.organizationId);
+  const reason = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: audience.hasGuests, tooManyPeople: audience.tooMany });
   if (reason) return NextResponse.json({ addressable: false, reason, teammates: [] });
   const rows = await prisma.agent.findMany({
     where: { organizationId: viewer.organizationId, status: "ENABLED", ...agentUsableWhere(viewer.userId) },
@@ -115,9 +119,15 @@ export async function POST(req: Request, { params }: Params) {
   if (already?.deletedAt) return teammateError(409, "removed", TALK_TEAMMATE_COPY.removedAfterSent);
   if (already) return stream(async (send) => send({ type: "message", message: already }));
 
-  // 2. A teammate may be asked here.
-  const [hasGuests, readers] = await Promise.all([conversationHasGuests(id, ctx.gate.organizationId), conversationReaderIds(id)]);
-  const refusal = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests, tooManyPeople: readers.tooMany });
+  // 2. A teammate may be asked here: what needs no member read first, then
+  // this person's per-minute limit, so no script can make every try read a
+  // big conversation's members (review round 8), then one bounded read.
+  const early = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: false });
+  if (early) return teammateError(REFUSAL[early].status, REFUSAL[early].code, REFUSAL[early].error);
+  const limited = rateLimit(`talk-teammate:${ctx.gate.userId}`, { max: TALK_TEAMMATE_LIMITS.perMinute, windowMs: 60_000 });
+  if (!limited.ok) return teammateError(429, "rate_limited", TALK_TEAMMATE_COPY.tooMany(limited.retryAfter), { "Retry-After": String(limited.retryAfter) });
+  const readers = await conversationAudience(id, ctx.gate.organizationId);
+  const refusal = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: readers.hasGuests, tooManyPeople: readers.tooMany });
   if (refusal) return teammateError(REFUSAL[refusal].status, REFUSAL[refusal].code, REFUSAL[refusal].error);
 
   // 3 to 5. The person, the teammate, and that the body names it.
@@ -129,9 +139,7 @@ export async function POST(req: Request, { params }: Params) {
   if (agent.status !== "ENABLED") return teammateError(409, "agent_paused", pausedNotSent(agent.name));
   if (!addressedIn(body, agent.name)) return teammateError(400, "not_addressed", TALK_TEAMMATE_COPY.notAddressed);
 
-  // 7, 8. Its own per-minute limit, and AI set up.
-  const limited = rateLimit(`talk-teammate:${person.userId}`, { max: TALK_TEAMMATE_LIMITS.perMinute, windowMs: 60_000 });
-  if (!limited.ok) return teammateError(429, "rate_limited", TALK_TEAMMATE_COPY.tooMany(limited.retryAfter), { "Retry-After": String(limited.retryAfter) });
+  // 8. AI set up (the per-minute limit was spent above, before any member read).
   if (!(await isAiConfigured(person.organizationId))) return teammateError(503, "not_configured", TEAMMATE_CHAT.notSetUp);
 
   // 9. Mentions and the thread, as a plain message checks them.
@@ -252,9 +260,9 @@ export async function POST(req: Request, { params }: Params) {
     let answered: Awaited<ReturnType<typeof insertConversationMessage>> | null = null;
     if (text) {
       const still = await loadConversationRole(id, ctx.gate).catch(() => null);
-      const guestsNow = await conversationHasGuests(id, ctx.gate.organizationId).catch(() => true);
       // Who reads it now: the answer keeps this list and reaches only them.
-      const readersNow = await conversationReaderIds(id).catch(() => ({ ids: [] as string[], tooMany: true }));
+      const readersNow = await conversationAudience(id, ctx.gate.organizationId).catch(() => ({ ids: [] as string[], tooMany: true, hasGuests: true }));
+      const guestsNow = readersNow.hasGuests;
       const standing = await requestStanding(id, request.id, parentId).catch(() => false);
       // The person may still be acted for, and the teammate is still on and
       // theirs to use: one deactivated, or a teammate removed or paused,

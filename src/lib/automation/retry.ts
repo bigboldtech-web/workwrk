@@ -100,14 +100,23 @@ export async function processAutomationRetries(): Promise<{
   const now = Date.now();
 
   // Candidate scan: retry state only exists on runs the engine judged
-  // retry-safe; the 48h window keeps the scan cheap and bounded.
+  // retry-safe, and is taken off when the retries run out; the 48h window
+  // keeps the scan bounded. Only runs that still hold it are read: failures
+  // that can never be retried (an AI teammate step past its daily cap, a
+  // spent plan) filled the 100 places before, and every workspace's real
+  // retries waited behind them (review round 8). A partial index answers it
+  // (prisma/sql/2026-10-08-ai-teammates-round8.sql).
+  const since = new Date(now - 48 * 3_600_000);
+  const due = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AutomationRun"
+    WHERE "status" IN ('FAILED', 'PARTIAL') AND "completedAt" >= ${since}
+      AND "triggerPayload" ? '__retryState'
+    ORDER BY "completedAt" ASC
+    LIMIT 100`;
+  if (due.length === 0) return { scanned: 0, retried: 0, recovered: 0 };
   const candidates = await prisma.automationRun.findMany({
-    where: {
-      status: { in: ["FAILED", "PARTIAL"] },
-      completedAt: { gte: new Date(now - 48 * 3_600_000) },
-    },
+    where: { id: { in: due.map((d) => d.id) } },
     orderBy: { completedAt: "asc" },
-    take: 100,
     include: {
       steps: { orderBy: { order: "asc" } },
       workflow: { select: { status: true, name: true, createdById: true, updatedById: true } },

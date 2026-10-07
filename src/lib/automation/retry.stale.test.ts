@@ -5,17 +5,29 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ updates: [] as Array<Record<string, unknown>> }));
+const st = vi.hoisted(() => ({ updates: [] as Array<Record<string, unknown>>, sql: [] as string[], reads: 0 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     automationRun: {
       updateMany: async (a: Record<string, unknown>) => (st.updates.push(a), { count: 2 }),
+      findMany: async () => (st.reads++, []),
     },
+    $queryRaw: async (strings: TemplateStringsArray) => (st.sql.push(strings.join("?")), []),
   },
 }));
 
-import { RUN_STALE_MS, STALE_RUN_MESSAGE, failStaleRuns } from "./retry";
+import { RUN_STALE_MS, STALE_RUN_MESSAGE, failStaleRuns, processAutomationRetries } from "./retry";
+
+describe("processAutomationRetries' scan (review round 8)", () => {
+  it("reads only runs that still hold retry state, so failures that can't be retried never fill its places", async () => {
+    expect(await processAutomationRetries()).toEqual({ scanned: 0, retried: 0, recovered: 0 });
+    expect(st.sql[0]).toContain(`"triggerPayload" ? '__retryState'`);
+    expect(st.sql[0]).toContain("LIMIT 100");
+    // Nothing due: no run is loaded.
+    expect(st.reads).toBe(0);
+  });
+});
 
 describe("failStaleRuns", () => {
   it("fails only RUNNING runs started before the window, saying they didn't finish", async () => {

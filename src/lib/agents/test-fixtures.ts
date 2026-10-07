@@ -229,14 +229,18 @@ export const prismaFake = {
   // claimUnreportedOutcomes' one statement, as Postgres runs it: it stamps
   // what it returns, so a second run returns nothing.
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
-    // A Prisma.sql fragment (one teammate's filter) arrives as a value.
-    const frag = values.find((v): v is { strings: string[]; values: unknown[] } => Boolean(v) && typeof v === "object" && "strings" in (v as object) && "values" in (v as object));
-    const sql = strings.join("?") + (frag ? ` [${frag.strings.join("?")}]` : "");
+    // Prisma.sql fragments (one teammate's filter, the continuable filter) arrive as values.
+    const frags = values.filter((v): v is { strings: string[]; values: unknown[] } => Boolean(v) && typeof v === "object" && "strings" in (v as object) && "values" in (v as object));
+    const sql = strings.join("?") + frags.map((f) => ` [${f.strings.join("?")}]`).join("");
     fx.sql.push(sql);
     if (!sql.includes('UPDATE "AgentAction"')) return [];
-    const agentId = frag && frag.strings.join("?").includes('"agentId"') ? frag.values[0] : null;
+    const ofAgent = frags.find((f) => f.strings.join("?").includes('"agentId"'));
+    const agentId = ofAgent ? ofAgent.values[0] : null;
+    // The continuable filter: a card a Talk, automation or delegated run made is left (review round 8).
+    const continuable = frags.some((f) => f.strings.join("?").includes('"AgentRun"'));
+    const outside = (r: ActionRowFx) => Boolean(r.runId) && ["TALK", "AUTOMATION", "DELEGATED"].includes(fx.runTriggers[r.runId as string] ?? "");
     const decided = ["EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"];
-    const hit = fx.actions.filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId));
+    const hit = fx.actions.filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId) && !(continuable && outside(r)));
     for (const r of hit) r.reportedAt = new Date();
     return hit.map((r) => ({ ...r }));
   },

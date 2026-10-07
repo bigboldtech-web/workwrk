@@ -430,6 +430,10 @@ async function read(slug: string, first: boolean): Promise<boolean> {
         : {}),
     };
   });
+  // Continues decided while this chat was off screen wait for it to show
+  // again, then run (review round 8: they were dropped, and a group's
+  // teammate never heard what its approved card did).
+  if (resumeAfter.get(slug)?.length && (shown.get(slug) ?? 0) > 0 && !stateOf(slug).streaming) void afterTurn(slug);
   return true;
 }
 
@@ -560,6 +564,10 @@ function retry(slug: string): Promise<void> {
   if (failedContinues.has(slug)) {
     const agentSlug = failedContinues.get(slug) ?? null;
     failedContinues.delete(slug);
+    // The row that offered it goes now: a continue that can no longer run
+    // (its teammate left the group meanwhile) leaves nothing a second Try
+    // again could take for a send of the composer's words (review round 8).
+    set(slug, { error: null, errorText: null });
     return resume(slug, agentSlug);
   }
   const text = stateOf(slug).draft;
@@ -691,7 +699,13 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     }
   } catch {
     if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
-    if (serverHas || text === null) fail(serverHas ? "stopped" : "not_sent", null);
+    // A continue that threw may have reached the server and be running: it
+    // is watched as a turn that broke off, never said to have failed
+    // (review round 8). Try again still continues if nothing was running.
+    if (text === null) {
+      serverHas = true;
+      fail("stopped", null);
+    } else if (serverHas) fail("stopped", null);
     else unknown = true;
   } finally {
     set(slug, (c) => ({
@@ -855,7 +869,13 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
     // The connection dropping after the turn said it was done changes nothing.
     if (!sawDone) {
       if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
-      if (serverHas || text === null) fail(serverHas ? "stopped" : "not_sent", null);
+      // A continue that threw may have reached the server and be running: it
+      // is watched as a turn that broke off, never said to have failed
+      // (review round 8). Try again still continues if nothing was running.
+      if (text === null) {
+        serverHas = true;
+        fail("stopped", null);
+      } else if (serverHas) fail("stopped", null);
       else unknown = true;
     }
   } finally {
@@ -898,8 +918,9 @@ async function afterTurn(slug: string): Promise<void> {
     if (rest.length > 0) resumeAfter.set(slug, rest);
     else resumeAfter.delete(slug);
     // The next one waits for this one's end, and runs from its own afterTurn.
+    // Off screen, all of them wait for the chat to show again (read() runs them).
     if ((shown.get(slug) ?? 0) > 0) await resume(slug, agentSlug ?? null);
-    else resumeAfter.delete(slug);
+    else resumeAfter.set(slug, queued);
   }
 }
 

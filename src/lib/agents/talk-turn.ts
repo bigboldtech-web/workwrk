@@ -20,55 +20,33 @@ import { actionHref } from "./actions";
 import { APPROVAL_CARD, agentAuditLine, approvalNoticeMessage, approvalNoticeTitle } from "./teammate-copy";
 import { actionViewFromRow } from "./teammate-thread";
 
-/** Members read per page by the Guest check, and the most pages it reads. */
-export const GUEST_CHECK_PAGE = 2000;
-export const GUEST_CHECK_MAX_PAGES = 50;
 
 /**
- * Whether any member of the conversation is a Guest now: a teammate is never
- * asked where one reads (Decision 8). A member whose access cannot be read
- * counts as one. Every member is read, a page at a time: reading only the
- * first page let a Guest past it go unseen. A conversation larger than the
- * pages read counts as having one, so the check never passes unread.
+ * Who reads the conversation, read once and bounded (review round 8: the
+ * Guest check paged through every member of a channel of any size, on every
+ * composer refresh, before the refusals that need no read). At most
+ * maxReaders + 1 members are read, in no order (the index answers it): more
+ * than maxReaders is refused anyway, so neither who they are nor whether one
+ * is a Guest is read. Else the Guest check runs once over them all, a read
+ * that fails counting as a Guest, and `ids` are those who can sign in now
+ * (a member deactivated or deleted reads nothing, and is left off an
+ * answer's readers so nobody let back in later reads it; review round 5).
  */
-export async function conversationHasGuests(conversationId: string, organizationId: string): Promise<boolean> {
-  let after: string | null = null;
-  for (let page = 0; page < GUEST_CHECK_MAX_PAGES; page += 1) {
-    const members: Array<{ id: string; userId: string }> = await prisma.conversationMember.findMany({
-      where: { conversationId, ...(after ? { id: { gt: after } } : {}) },
-      select: { id: true, userId: true },
-      orderBy: { id: "asc" },
-      take: GUEST_CHECK_PAGE,
-    });
-    if (members.length === 0) return false;
-    if (await anyGuestHere(organizationId, members.map((m) => m.userId))) return true;
-    if (members.length < GUEST_CHECK_PAGE) return false;
-    after = members[members.length - 1].id;
-  }
-  return true;
-}
-
-/**
- * Who reads the conversation now: its members' ids, at most
- * TALK_TEAMMATE_LIMITS.maxReaders, and whether there are more. A teammate's
- * answer keeps this list and reaches only them (talk-updates.ts serveAiUpdate).
- * A member who can't sign in now (deactivated, deleted, or no account) is
- * left out, as a scheduled AI update leaves them out: the answer is held to
- * what its readers can open, and someone let back in later was never checked
- * (review round 5). They see the hidden line, as anyone added later does.
- */
-export async function conversationReaderIds(conversationId: string): Promise<{ ids: string[]; tooMany: boolean }> {
+export async function conversationAudience(conversationId: string, organizationId: string): Promise<{ ids: string[]; tooMany: boolean; hasGuests: boolean }> {
   const rows = await prisma.conversationMember.findMany({
     where: { conversationId },
     select: { userId: true },
-    orderBy: { id: "asc" },
     take: TALK_TEAMMATE_LIMITS.maxReaders + 1,
   });
-  const tooMany = rows.length > TALK_TEAMMATE_LIMITS.maxReaders;
-  const members = [...new Set(rows.map((r) => r.userId))].slice(0, TALK_TEAMMATE_LIMITS.maxReaders);
-  const users = await prisma.user.findMany({ where: { id: { in: members } }, select: { id: true, status: true, deletedAt: true } });
+  if (rows.length > TALK_TEAMMATE_LIMITS.maxReaders) return { ids: [], tooMany: true, hasGuests: false };
+  const members = [...new Set(rows.map((r) => r.userId))];
+  if (members.length === 0) return { ids: [], tooMany: false, hasGuests: false };
+  const [hasGuests, users] = await Promise.all([
+    anyGuestHere(organizationId, members).catch(() => true),
+    prisma.user.findMany({ where: { id: { in: members } }, select: { id: true, status: true, deletedAt: true } }),
+  ]);
   const canSignIn = new Set(users.filter((u) => !u.deletedAt && !RULE_1_DENIED_STATUSES.has(String(u.status))).map((u) => u.id));
-  return { ids: members.filter((id) => canSignIn.has(id)), tooMany };
+  return { ids: members.filter((id) => canSignIn.has(id)), tooMany: false, hasGuests };
 }
 
 /**

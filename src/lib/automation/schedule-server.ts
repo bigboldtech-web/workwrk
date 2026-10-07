@@ -8,7 +8,15 @@
 import { prisma } from "@/lib/prisma";
 import { isEverywhere, liveDefinition, readScope, readWhen } from "./definition";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
-import { runAutomationForWorkflow } from "./engine";
+import { asksTeammate, runAutomationForWorkflow } from "./engine";
+
+/**
+ * How long one tick may keep starting scheduled automations that ask an AI
+ * teammate: each is a whole turn. One not started stays due and runs at the
+ * next tick (its instant's idempotency key stops a second run). Every other
+ * automation runs first, so none waits on a model call (review round 8).
+ */
+const TEAMMATE_SCHEDULE_BUDGET_MS = 180_000;
 import { dateArrivesRange, dueScheduleInstant, readDateArrivesWhen } from "./schedule";
 
 /** One page of the task query; the loop walks every page in the window. */
@@ -24,6 +32,8 @@ export interface ScheduleTickResult {
   scheduled: number;
   dateArrives: number;
   errors: number;
+  /** Scheduled automations asking an AI teammate left for the next tick (TEAMMATE_SCHEDULE_BUDGET_MS). */
+  deferred?: number;
 }
 
 export async function processAutomationSchedules(now: Date = new Date()): Promise<ScheduleTickResult> {
@@ -43,14 +53,21 @@ export async function processAutomationSchedules(now: Date = new Date()): Promis
     ? await prisma.automationWorkflowVersion.findMany({ where: { id: { in: versionIds } }, select: { id: true, definitionJson: true } }).catch(() => [])
     : [];
   const versionById = new Map(versions.map((v) => [v.id, v]));
+  const liveOf = (wf: (typeof workflows)[number]) => liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null);
+  const ordered = [...workflows].sort((x, y) => Number(asksTeammate(liveOf(x))) - Number(asksTeammate(liveOf(y))));
+  const started = Date.now();
 
-  for (const wf of workflows) {
+  for (const wf of ordered) {
     try {
-      const live = liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null);
+      const live = liveOf(wf);
       const when = readWhen(live);
       if (wf.triggerEvent === "schedule.every") {
         const at = dueScheduleInstant(when, now, wf.publishedAt);
         if (!at) continue;
+        if (asksTeammate(live) && Date.now() - started > TEAMMATE_SCHEDULE_BUDGET_MS) {
+          result.deferred = (result.deferred ?? 0) + 1;
+          continue;
+        }
         result.scheduled += await runAutomationForWorkflow({
           organizationId: wf.organizationId,
           workflowId: wf.id,

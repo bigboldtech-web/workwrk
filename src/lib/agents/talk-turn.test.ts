@@ -36,7 +36,7 @@ vi.mock("@/lib/activity", () => ({ logActivity: async () => {} }));
 vi.mock("@/lib/access/guests", () => ({ anyGuestHere: async (_org: string, ids: string[]) => ids.some((i) => rows.guests.has(i)) }));
 
 import { AI_UPDATE_HIDDEN_KIND } from "@/lib/talk-updates";
-import { GUEST_CHECK_MAX_PAGES, GUEST_CHECK_PAGE, conversationHasGuests, conversationReaderIds, talkContext } from "./talk-turn";
+import { conversationAudience, talkContext } from "./talk-turn";
 import { TALK_TEAMMATE_LIMITS } from "./talk-address";
 
 const at = new Date("2026-10-07T10:00:00Z");
@@ -80,32 +80,31 @@ describe("talkContext and messages kept for who was there (review round 2)", () 
   });
 });
 
-describe("conversationHasGuests (review of step 6)", () => {
+describe("conversationAudience (review rounds 5 and 8)", () => {
   const people = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `cm${String(i).padStart(6, "0")}`, userId: `u${i}` }));
+  const active = (ids: string[]) => ids.map((id) => ({ id, status: "ACTIVE", deletedAt: null as Date | null }));
 
-  it("finds a Guest past the first page of members", async () => {
-    rows.members = people(GUEST_CHECK_PAGE + 10);
-    rows.guests = new Set([`u${GUEST_CHECK_PAGE + 5}`]);
+  it("reads at most one more than the limit, and refuses a bigger conversation without reading who is in it", async () => {
+    rows.members = people(TALK_TEAMMATE_LIMITS.maxReaders + 1000);
+    rows.guests = new Set(["u5"]);
     rows.pages = 0;
-    expect(await conversationHasGuests("c1", "org1")).toBe(true);
-    expect(rows.pages).toBe(2);
+    expect(await conversationAudience("c1", "org1")).toEqual({ ids: [], tooMany: true, hasGuests: false });
+    expect(rows.pages).toBe(1);
   });
 
-  it("reads every page and finds none", async () => {
-    rows.members = people(GUEST_CHECK_PAGE * 2);
+  it("finds a Guest anywhere among the members it read, in one read", async () => {
+    rows.members = people(TALK_TEAMMATE_LIMITS.maxReaders);
+    rows.users = active(rows.members.map((m) => m.userId));
+    rows.guests = new Set([`u${TALK_TEAMMATE_LIMITS.maxReaders - 1}`]);
+    rows.pages = 0;
+    expect((await conversationAudience("c1", "org1")).hasGuests).toBe(true);
+    expect(rows.pages).toBe(1);
     rows.guests = new Set();
-    expect(await conversationHasGuests("c1", "org1")).toBe(false);
+    expect((await conversationAudience("c1", "org1")).hasGuests).toBe(false);
   });
 
-  it("counts a conversation larger than it reads as having one", async () => {
-    rows.members = people(GUEST_CHECK_PAGE * GUEST_CHECK_MAX_PAGES + 1);
-    rows.guests = new Set();
-    expect(await conversationHasGuests("c1", "org1")).toBe(true);
-  });
-});
-
-describe("conversationReaderIds (review round 5)", () => {
   it("leaves out a member who can't sign in now, so nobody let back in later reads an answer they were never checked for", async () => {
+    rows.guests = new Set();
     rows.members = [
       { id: "1", userId: "u-olivia" },
       { id: "2", userId: "u-eve" },
@@ -119,7 +118,7 @@ describe("conversationReaderIds (review round 5)", () => {
       { id: "u-gone", status: "ACTIVE", deletedAt: new Date("2026-10-01T00:00:00Z") },
       { id: "u-max", status: "ACTIVE", deletedAt: null },
     ];
-    expect(await conversationReaderIds("c1")).toEqual({ ids: ["u-olivia", "u-max"], tooMany: false });
+    expect(await conversationAudience("c1", "org1")).toEqual({ ids: ["u-olivia", "u-max"], tooMany: false, hasGuests: false });
   });
 });
 

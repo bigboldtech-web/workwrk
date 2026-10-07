@@ -67,11 +67,23 @@ export function GroupMembersMenu({
   }
 
   // A failed rename tries again with the name typed, never the old one (review round 3).
+  // A name that follows the members starts empty, its current form as the
+  // hint: saving it unchanged freezes nothing, and clearing a name of the
+  // group's own makes it follow its members again (review round 8).
   async function rename(typed?: string) {
     onClose();
-    const next = await prompt({ title: GROUP_COPY.rename, defaultValue: typed ?? g.name, placeholder: GROUP_COPY.namePlaceholder, submitLabel: GROUP_COPY.rename, cancelLabel: GROUP_COPY.cancel });
+    const own = g.ownName !== false;
+    const next = await prompt({
+      title: GROUP_COPY.rename,
+      defaultValue: typed ?? (own ? g.name : ""),
+      placeholder: own ? GROUP_COPY.namePlaceholder : g.name,
+      required: false,
+      submitLabel: GROUP_COPY.rename,
+      cancelLabel: GROUP_COPY.cancel,
+    });
     if (next === null) return;
-    const name = next.slice(0, GROUP_LIMITS.nameMax);
+    const name = next.trim().slice(0, GROUP_LIMITS.nameMax);
+    if (own ? name === g.name : name === "" || name === g.name) return;
     await patch({ name }, () => void rename(name));
   }
 

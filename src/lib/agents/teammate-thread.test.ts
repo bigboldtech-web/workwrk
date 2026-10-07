@@ -663,6 +663,14 @@ describe("the card's parts", () => {
   });
 });
 
+describe("a Run now message (review round 8)", () => {
+  it("reads as sent by Run now in the list, never as the person's own words", () => {
+    const at = "2026-10-08T10:00:00.000Z";
+    expect(lastLineFor({ id: "m1", kind: "user", text: "Flag deals stuck a week.", practice: false, runNow: true, createdAt: at })).toBe("Run now: Flag deals stuck a week.");
+    expect(lastLineFor({ id: "m2", kind: "user", text: "What is due?", practice: false, createdAt: at })).toBe("You: What is due?");
+  });
+});
+
 describe("a request on the Activity tab", () => {
   const view = (over: Partial<AgentActionRow>) => activityActionView(actionViewFromRow(action(over)), "status-reporter");
   it("opens a request's card in the chat, with the card's own chip", () => {
@@ -678,6 +686,11 @@ describe("a request on the Activity tab", () => {
     // One that failed keeps the card's "Didn't work", and still opens its run.
     expect(view({ status: "FAILED", decidedVia: "rule", groupKey: "run7:post_in_talk" })).toEqual({ chip: null, href: "/agents?tab=runs&agent=status-reporter&run=run7" });
   });
+  it("opens a card that waits in a group chat in that group, as the server says (review round 8)", () => {
+    const card = { ...actionViewFromRow(action({ status: "PENDING" })), href: "/agents?group=g1&action=a1" };
+    expect(activityActionView(card, "status-reporter")).toEqual({ chip: null, href: "/agents?group=g1&action=a1" });
+  });
+
   it("opens the chat when the run can't be read from the groupKey", () => {
     for (const groupKey of [null, "", "post_in_talk", ":post_in_talk"]) {
       expect(view({ status: "EXECUTED", decidedVia: "rule", groupKey }).href).toBe("/agents?chat=status-reporter");

@@ -57,11 +57,15 @@ import { formatDuration } from "@/lib/format/duration";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import { LEGACY_COPY, TEAMMATE_RUN_DRAWER } from "@/lib/agents/teammate-copy";
+import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import type { AgentScheduleView } from "@/lib/agents/teammate-views";
 import { useSurfaceState } from "@/lib/use-surface-state";
 import { pick } from "@/lib/surface-prefs";
 import type { HubHeader } from "./agents-hub";
 import { PAGE_SIZES, RUN_SORTS, RUN_SORT_LABEL, RunHistory, TRIGGER_LABEL, type RunRow } from "./run-history-view";
+
+/** The longest a Run now's turn runs: Run now is offered again after it even if its end was never heard. */
+const RUN_NOW_MAX_MS = 5 * 60 * 1000;
 
 export type Agent = {
   id: string;
@@ -163,6 +167,27 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
   // old number until the window is refocused. Same pattern as the workflows page.
   const changed = useCallback(() => { void load(); setRunsVersion((v) => v + 1); notifyAiChatsChanged(); }, [load]);
 
+  // A Run now whose answer was cut off: its run ends with agent.changed for
+  // that agent (finishRunNow), and only then is Run now offered again.
+  const runningUntilChanged = useRef(new Map<string, string>());
+  useEffect(() => {
+    const onRealtime = (e: Event) => {
+      const ev = (e as CustomEvent<{ type?: string; agentId?: string } | null>).detail;
+      if (ev?.type !== "agent.changed" || !ev.agentId) return;
+      const slug = runningUntilChanged.current.get(ev.agentId);
+      if (!slug) return;
+      runningUntilChanged.current.delete(ev.agentId);
+      setRunning((prev) => {
+        const next = new Set(prev);
+        next.delete(slug);
+        return next;
+      });
+      changed();
+    };
+    window.addEventListener(WINDOW_EVENTS.realtime, onRealtime);
+    return () => window.removeEventListener(WINDOW_EVENTS.realtime, onRealtime);
+  }, [changed]);
+
   async function setStatus(a: Agent, status: "ENABLED" | "DISABLED") {
     setBusy(a.slug);
     const r = await apiFetch(`/api/agents/${a.slug}`, { method: "PATCH", json: { status } });
@@ -177,11 +202,24 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
     setRunning((r) => new Set(r).add(a.slug));
     toast(`${a.name} is running`);
     const r = await apiFetch<{ result: { runId: string; status: string; errorText?: string; waiting?: number; chatHref?: string } }>(`/api/agents/${a.slug}/schedule`, { method: "POST" });
-    setRunning((prev) => {
-      const next = new Set(prev);
-      next.delete(a.slug);
-      return next;
-    });
+    const done = () =>
+      setRunning((prev) => {
+        const next = new Set(prev);
+        next.delete(a.slug);
+        return next;
+      });
+    // The answer began (200) and its end never came, a dropped connection:
+    // the run started and goes on in the person's chat. Run now stays off
+    // until it ends, never offered again to ask and pay twice (review round 8).
+    if (!r.ok && r.status === 200) {
+      toast(LEGACY_COPY.runNowStarted(a.name), { action: { label: LEGACY_COPY.openChat, onClick: () => router.push(`/agents?chat=${encodeURIComponent(a.slug)}`) } });
+      runningUntilChanged.current.set(a.id, a.slug);
+      setTimeout(() => {
+        if (runningUntilChanged.current.delete(a.id)) done();
+      }, RUN_NOW_MAX_MS);
+      return;
+    }
+    done();
     if (!r.ok) { toast(r.error || "The run didn't start", { tone: "danger" }); return; }
     // It ran as the person who clicked, in their chat with it: what it asked
     // to do waits there for their approval.

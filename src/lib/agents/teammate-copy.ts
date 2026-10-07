@@ -186,6 +186,12 @@ export function lastLineYou(text: string): string {
   return `You: ${text}`;
 }
 
+/** A message Run now sent from the agent's saved instructions, which the person may never have typed (review round 8). */
+export const RUN_NOW_SENT = "Sent by Run now";
+export function lastLineRunNow(text: string): string {
+  return `Run now: ${text}`;
+}
+
 /** A list row's last line when a routine reported last. */
 export function lastLineReport(routine: string, text: string): string {
   return `${routine}: ${text}`;
@@ -1104,6 +1110,8 @@ export const GROUP_COPY = {
   tooMany: "A group chat has at most five teammates.",
   // Words a Member can follow: a workspace teammate is renamed only by an Owner or Admin (review round 7).
   duplicateName: "Two teammates in a group can't share a name. Leave one out, or rename it first.",
+  /** A group with no name of its own and no members left to name it after. */
+  unnamedGroup: "Group chat",
   removedCantJoin: (name: string) => `${name} was removed, so it can't join a group.`,
   limit: (n: number) => `You have ${n} group chats, the most one person can have. Leave one first.`,
   minMembers: "A group chat needs at least two teammates. Leave it instead.",
@@ -1209,6 +1217,8 @@ export const LEGACY_COPY = {
   /** Under "What to do each run" once the schedule is a routine: the routine kept its own copy. */
   promptRunNowOnly: "This is what Run now sends. Its routine has its own instructions, in its chat.",
   runNowWaiting: (name: string) => `${name} is waiting for your approval`,
+  /** Run now's answer was cut off after it began: the run goes on in the person's chat (review round 8). */
+  runNowStarted: (name: string) => `${name} started its run. It goes on in your chat with it.`,
   openChat: "Open the chat",
   agentPaused: "Agent is disabled; enable it before running.",
 } as const;

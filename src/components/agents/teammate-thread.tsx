@@ -26,7 +26,7 @@ import { OsMarkdown } from "@/components/layout/os/markdown";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { Dots } from "@/components/ui/dots";
 import type { TeammateHue } from "@/lib/agents/hues";
-import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { RUN_NOW_SENT, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import {
   groupApprovals,
   type ActionView,
@@ -111,7 +111,9 @@ export function TeammateThread({
 
 export function UserBubble({ m }: { m: Extract<TeammateMessageView, { kind: "user" }> }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-col items-end gap-0.5">
+      {/* Run now sent the agent's saved instructions, which the person may never have typed (review round 8). */}
+      {m.runNow ? <span className="text-xs text-ink-2">{RUN_NOW_SENT}</span> : null}
       <div className="max-w-[560px] whitespace-pre-wrap break-words rounded-lg bg-subtle px-4 py-3 text-base text-ink">{m.text}</div>
     </div>
   );

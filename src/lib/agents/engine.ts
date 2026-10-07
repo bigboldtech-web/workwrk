@@ -1085,8 +1085,10 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     // Only this teammate's: in a group, another's outcome is not its to hear.
     // A turn the person did not start here (another teammate's ask) leaves
     // them for the next turn the person has with it (Phase 2 step 5).
+    // Only the person's own message hears what a Talk, automation or
+    // delegated turn's cards did: a continue or a routine does not (review round 8).
     if (honoursDontAsk(a.trigger)) {
-      for (const row of await claimUnreportedOutcomes(a.sessionId, a.agent.id)) if (!claimed.has(row.id)) claimed.set(row.id, row);
+      for (const row of await claimUnreportedOutcomes(a.sessionId, a.agent.id, { continuable: a.trigger !== "CHAT" })) if (!claimed.has(row.id)) claimed.set(row.id, row);
     }
     const at = (v: Date | string) => new Date(v).getTime();
     const outcomes = [...claimed.values()].sort((x, y) => at(x.createdAt) - at(y.createdAt));

@@ -14,6 +14,10 @@ const st = vi.hoisted(() => ({
   givenBack: [] as string[],
   /** Runs while the turn runs. */
   duringTurn: null as null | (() => void),
+  /** How often the members were read. */
+  audienceReads: 0,
+  /** A private channel (false: public). */
+  restricted: true,
   /** Whether the person can still be acted for. */
   actingOk: true,
   teammates: {} as Record<string, Row | null>,
@@ -40,7 +44,7 @@ const st = vi.hoisted(() => ({
   audits: [] as Row[],
 }));
 
-const conversation = () => ({ id: "c1", type: st.convType, name: st.convType === "DM" ? null : "proof", restricted: true, archivedAt: null });
+const conversation = () => ({ id: "c1", type: st.convType, name: st.convType === "DM" ? null : "proof", restricted: st.restricted, archivedAt: null });
 const viewerFor = () => ({ userId: `u-${st.userN}`, organizationId: "org1", orgRole: "MEMBER", isAgent: false });
 
 vi.mock("@/lib/talk-gate", () => ({
@@ -94,8 +98,11 @@ vi.mock("@/lib/agents/engine", () => ({
   runTeammateTurn: async (a: Row) => (st.turns.push(a), st.duringTurn?.(), st.turnAnswer ?? { text: "Summary for @Olivia: see [the plan](https://x.test).", error: null, giveBack: false, proposedActionIds: [], messages: [] }),
 }));
 vi.mock("@/lib/agents/talk-turn", () => ({
-  conversationHasGuests: async () => st.guests.shift() ?? false,
-  conversationReaderIds: async () => st.readerQueue.shift() ?? { ids: st.readerIds, tooMany: st.tooMany },
+  conversationAudience: async () => {
+    st.audienceReads += 1;
+    const readers = st.readerQueue.shift() ?? { ids: st.readerIds, tooMany: st.tooMany };
+    return { ...readers, hasGuests: st.guests.shift() ?? false };
+  },
   talkContext: async () => [],
   setRequestState: async (messageId: string, state: Row) => void st.states.push({ messageId, ...state }),
   noticeTalkApprovals: async (userId: string, agent: { slug: string }, ids: string[]) =>
@@ -129,6 +136,8 @@ const ASK = { body: "@Chief of Staff summarise this", teammate: "t-cos", clientI
 
 beforeEach(() => {
   st.givenBack = [];
+  st.audienceReads = 0;
+  st.restricted = true;
   st.duringTurn = null;
   st.actingOk = true;
   st.userN += 1;
@@ -201,8 +210,17 @@ describe("asking a teammate in Talk", () => {
 
   it("takes five asks a minute from one person", async () => {
     for (let i = 0; i < 5; i += 1) expect((await ask({ ...ASK, clientId: `temp-0000000${i}` })).status).toBe(200);
+    const reads = st.audienceReads;
     const sixth = await ask({ ...ASK, clientId: "temp-00000009" });
     expect(sixth).toMatchObject({ status: 429, json: { code: "rate_limited" } });
+    // Refused before any member read (review round 8).
+    expect(st.audienceReads).toBe(reads);
+  });
+
+  it("refuses a public channel without reading who is in it (review round 8)", async () => {
+    st.restricted = false;
+    expect(await ask(ASK)).toMatchObject({ status: 403, json: { code: "public_channel" } });
+    expect(st.audienceReads).toBe(0);
   });
 
   it("posts nothing when the question is refused", async () => {

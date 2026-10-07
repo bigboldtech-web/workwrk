@@ -31,6 +31,7 @@
 // Every refusal is { error: "<sentence>", code }.
 
 import { NextResponse } from "next/server";
+import { publishToUser } from "@/lib/realtime-bus";
 import { z } from "zod";
 import { requireApp } from "@/lib/app-gate";
 import { isAiConfigured } from "@/lib/ai-client";
@@ -125,7 +126,7 @@ export async function POST(req: Request, { params }: Params) {
     if (!claim.ok) return claimRefusal(claim);
     let outcomes: AgentActionRow[];
     try {
-      outcomes = await claimUnreportedOutcomes(g.id, self.agentId);
+      outcomes = await claimUnreportedOutcomes(g.id, self.agentId, { continuable: true });
     } catch (err) {
       console.error(`[agents] group continue ${claim.runId} not started: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
       await abandonTurn(claim.runId, claim.questionId);
@@ -161,6 +162,8 @@ export async function POST(req: Request, { params }: Params) {
       else if (!(await stillInGroup(g.id, self.agentId).catch(() => true))) await cancelRemovedRequests(g.id, person.userId, self.agentId).catch(() => 0);
       send({ type: "answer_done", agentId: self.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
       send({ type: "done", messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
+      // Other tabs, and a page opened again meanwhile, read the group again (review round 8).
+      publishToUser(person.userId, { type: "agent.changed", agentId: self.agentId, sessionId: g.id });
     });
   }
 
@@ -201,6 +204,7 @@ export async function POST(req: Request, { params }: Params) {
       if (line) {
         all.push(line);
         send({ type: "skipped", agentId: m.agentId, message: line });
+        publishToUser(person.userId, { type: "agent.changed", agentId: m.agentId, sessionId: g.id });
       }
     };
     for (const { member, skip } of pick.answerers) {
@@ -266,6 +270,8 @@ export async function POST(req: Request, { params }: Params) {
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       if (result) all.push(...result.messages);
       send({ type: "answer_done", agentId: member.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
+      // Each answer as it lands: other tabs, and a page opened again meanwhile, read the group again (review round 8).
+      publishToUser(person.userId, { type: "agent.changed", agentId: member.agentId, sessionId: g.id });
       // An answer that got nothing back, or came back and could not be saved,
       // leaves a line, so the chat says who did not answer and why (review
       // round 1: a failed save left no trace, and the page waited for it).

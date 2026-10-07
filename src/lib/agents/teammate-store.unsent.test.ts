@@ -85,13 +85,14 @@ describe("a send that failed before the answer began", () => {
 });
 
 describe("a continue that failed (review round 6)", () => {
-  it("says it couldn't carry on, and Try again continues: never the composer's words as a new message", async () => {
+  it("is watched as a stop, and Try again continues: never the composer's words as a new message", async () => {
     try {
       await store.open(slug);
       store.setDraft(slug, "@Triage also check");
       await store.resume(slug);
-      expect(store.stateOf(slug).error).toBe("not_sent");
-      expect(store.stateOf(slug).errorText).toBe("Couldn't carry on after your decision. Try again.");
+      // It may have reached the server: watched as a turn that broke off, never said to have failed (review round 8).
+      expect(store.stateOf(slug).error).toBe("stopped");
+      expect(store.stateOf(slug).errorText).toBeNull();
       // As the error row's button runs it (review round 7): the continue
       // first, never clearing it away before it asks.
       const pressTryAgain = async () => {

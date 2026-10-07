@@ -22,7 +22,7 @@ import { GROUP_LIMITS, groupNameFrom, leadOf, memberProblem, skipReasonOf, type 
 import { hueForAgent } from "./hues";
 import { canUseAgent } from "./teammate-access";
 import { GROUP_COPY, TEAMMATE_ROUTE_ERRORS, titleList } from "./teammate-copy";
-import { MESSAGE_SELECT, SHOWN_MESSAGES, TEAMMATE_SELECT, loadTeammate, type TeammateRecord } from "./teammate-server";
+import { TEAMMATE_SELECT, loadTeammate, newestAnswerPerChat, newestShownPerChat, type TeammateRecord } from "./teammate-server";
 import { lastLineFor, messageViewFromRow, type GroupDetail, type GroupMemberView, type GroupRow } from "./teammate-thread";
 
 export { groupActionHref } from "./teammate-thread";
@@ -122,7 +122,11 @@ export function memberViews(g: Pick<GroupRecord, "members">, viewer: Viewer): Gr
  */
 export function groupNameOf(g: Pick<GroupRecord, "title" | "members">): string {
   const own = (g.title ?? "").trim();
-  return own || GROUP_COPY.groupDefaultName(g.members.filter((m) => m.agent.status !== "ARCHIVED").map((m) => m.agent.name).slice(0, 3));
+  if (own) return own;
+  // With none left (all removed), its last members' names, never an empty name (review round 8).
+  const live = g.members.filter((m) => m.agent.status !== "ARCHIVED");
+  const names = (live.length > 0 ? live : g.members).map((m) => m.agent.name).slice(0, 3);
+  return names.length > 0 ? GROUP_COPY.groupDefaultName(names) : GROUP_COPY.unnamedGroup;
 }
 
 /** The name to store: the person's own, or none, so the name follows the members. */
@@ -301,36 +305,29 @@ export async function leaveGroup(g: GroupRecord, viewer: Viewer, now: Date = new
 
 /**
  * The list's rows for these groups, for their person: the requests waiting
- * in each, an answer after its read cursor, and its last line. Four queries
- * however many groups.
+ * in each, an answer after its read cursor, and its last line. One query,
+ * then two short index reads per group (review round 8).
  */
 export async function groupRowsFor(groups: readonly GroupRecord[], viewer: Viewer, now: Date = new Date()): Promise<GroupRow[]> {
   if (groups.length === 0) return [];
   const ids = groups.map((g) => g.id);
-  const [waiting, lastShown, lastAnswer] = await Promise.all([
+  const [waiting, lastBySession, answeredAt] = await Promise.all([
     prisma.agentAction.groupBy({
       by: ["sessionId"],
       where: { organizationId: viewer.organizationId, actingForId: viewer.userId, status: "PENDING", expiresAt: { gt: now }, sessionId: { in: ids } },
       _count: { _all: true },
     }),
-    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: ids }, AND: [SHOWN_MESSAGES] }, _max: { createdAt: true } }),
-    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: ids }, role: "ASSISTANT" }, _max: { createdAt: true } }),
+    newestShownPerChat(ids),
+    newestAnswerPerChat(ids),
   ]);
-  const pairs = lastShown.flatMap((r) => (r._max.createdAt ? [{ sessionId: r.sessionId, createdAt: r._max.createdAt }] : []));
-  const lastRows = pairs.length > 0 ? await prisma.chatMessage.findMany({ where: { AND: [SHOWN_MESSAGES, { OR: pairs }] }, select: { ...MESSAGE_SELECT, sessionId: true } }) : [];
-  const lastBySession = new Map<string, (typeof lastRows)[number]>();
-  for (const row of lastRows) {
-    const seen = lastBySession.get(row.sessionId);
-    if (!seen || row.id > seen.id) lastBySession.set(row.sessionId, row);
-  }
   const waitingOf = new Map(waiting.flatMap((w) => (w.sessionId ? [[w.sessionId, w._count._all] as const] : [])));
-  const answeredAt = new Map(lastAnswer.map((r) => [r.sessionId, r._max.createdAt]));
   return groups.map((g): GroupRow => {
     const last = lastBySession.get(g.id);
     const answered = answeredAt.get(g.id) ?? null;
     return {
       id: g.id,
       name: groupNameOf(g),
+      ownName: Boolean((g.title ?? "").trim()),
       members: memberViews(g, viewer),
       waiting: waitingOf.get(g.id) ?? 0,
       unread: Boolean(answered && (!g.lastReadAt || answered.getTime() > g.lastReadAt.getTime())),
@@ -357,7 +354,7 @@ export async function groupDetail(g: GroupRecord, viewer: Viewer, now: Date = ne
   return { ...row, createdAt: g.createdAt.toISOString() };
 }
 
-/** Whether any live group has an answer the person has not read: the AI sidebar's dot. Two queries. */
+/** Whether any live group has an answer the person has not read: the AI sidebar's dot. One query, then one short index read per group. */
 export async function anyGroupUnread(viewer: Pick<Viewer, "organizationId" | "userId">): Promise<boolean> {
   const groups = await prisma.chatSession.findMany({
     where: { organizationId: viewer.organizationId, userId: viewer.userId, kind: GROUP_KIND, archivedAt: null },
@@ -365,12 +362,10 @@ export async function anyGroupUnread(viewer: Pick<Viewer, "organizationId" | "us
     take: GROUP_LIMITS.perPerson,
   });
   if (groups.length === 0) return false;
-  const lastAnswer = await prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: groups.map((g) => g.id) }, role: "ASSISTANT" }, _max: { createdAt: true } });
-  const readAt = new Map(groups.map((g) => [g.id, g.lastReadAt]));
-  return lastAnswer.some((r) => {
-    const answered = r._max.createdAt;
-    const read = readAt.get(r.sessionId) ?? null;
-    return Boolean(answered && (!read || answered.getTime() > read.getTime()));
+  const answeredAt = await newestAnswerPerChat(groups.map((g) => g.id));
+  return groups.some((g) => {
+    const answered = answeredAt.get(g.id);
+    return Boolean(answered && (!g.lastReadAt || answered.getTime() > g.lastReadAt.getTime()));
   });
 }
 

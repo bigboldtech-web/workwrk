@@ -139,6 +139,9 @@ describe("createGroup", () => {
     const g = { title: null, members: [m("Chief of Staff"), m("Triage", "ARCHIVED"), m("Support desk"), m("Analyst")] } as never;
     expect(groupNameOf(g)).toBe("Chief of Staff, Support desk and Analyst");
     expect(groupNameOf({ title: " Offsite crew ", members: [] } as never)).toBe("Offsite crew");
+    // All removed: their names still, never an empty name (review round 8).
+    expect(groupNameOf({ title: null, members: [m("Triage", "ARCHIVED"), m("PM", "ARCHIVED")] } as never)).toBe("Triage and PM");
+    expect(groupNameOf({ title: null, members: [] } as never)).toBe("Group chat");
   });
 
   it("refuses too few, too many and two sharing a name", async () => {
@@ -212,6 +215,16 @@ describe("updateGroup", () => {
       where: { sessionId: g.id, actingForId: "u-max", agentId: { in: ["a-pm"] }, status: "PENDING" },
       data: { status: "CANCELLED", decidedVia: "system", error: GROUP_COPY.cancelledRemoved },
     });
+  });
+
+  it("clearing a group's own name makes it follow its members again (review round 8)", async () => {
+    const g = await group(["pm", "triage"]);
+    expect(await updateGroup(g, MAX, { name: "" })).toMatchObject({ ok: true });
+    const again = await loadGroup(g.id, MAX);
+    if (!again) throw new Error("gone");
+    expect(again.title).toBeNull();
+    expect(groupNameOf(again)).toBe("pm and triage");
+    expect(st.lines.at(-1)).toEqual({ sessionId: g.id, text: "Renamed to pm and triage", event: "group_renamed" });
   });
 
   it("never blocks a change over a shared name it did not bring, and still refuses adding one (review round 7)", async () => {

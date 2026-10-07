@@ -254,6 +254,11 @@ const SQL_MANIFEST = [
   // the cron sweeps that close a run whose process stopped part way. Index
   // only, IF NOT EXISTS: safe before or after the reload.
   "2026-10-08-ai-teammates-stale-runs.sql",
+  // AI teammates, Phase 2 review round 8: two partial indexes, "AutomationRun"
+  // runs still holding retry state (the retry cron's scan) and "AgentRun"
+  // kept questions by teammate and start (each claim's month count). Index
+  // only, IF NOT EXISTS: safe before or after the reload.
+  "2026-10-08-ai-teammates-round8.sql",
 ];
 
 /**

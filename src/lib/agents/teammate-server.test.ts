@@ -99,6 +99,15 @@ describe("usableTeammatesNamed", () => {
   });
 });
 
+describe("usableTeammatesNamed, a name typed back as the model read it (review round 8)", () => {
+  it("finds a teammate whose name holds characters the model never sees", async () => {
+    seedAgent({ slug: "ops-lead", name: "Ops \u2039Lead\u203A\u200B" });
+    expect((await usableTeammatesNamed(viewer, "Ops <Lead>")).map((t) => t.slug)).toEqual(["ops-lead"]);
+    expect((await usableTeammatesNamed(viewer, "Ops &lt;Lead&gt;")).map((t) => t.slug)).toEqual(["ops-lead"]);
+    expect(await usableTeammatesNamed(viewer, "Ops")).toEqual([]);
+  });
+});
+
 describe("askableTeammates", () => {
   it("lists the others that are on and usable, never itself, a paused one or someone else's private one", async () => {
     seedAgent({ slug: "cos", name: "Chief of Staff" });

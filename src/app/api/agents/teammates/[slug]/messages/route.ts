@@ -28,6 +28,7 @@
 // docs/plans/ai-teammates.md 4. Every refusal is { error: "<sentence>", code }.
 
 import { NextResponse } from "next/server";
+import { publishToUser } from "@/lib/realtime-bus";
 import { z } from "zod";
 import { requireApp } from "@/lib/app-gate";
 import { isAiConfigured } from "@/lib/ai-client";
@@ -121,7 +122,8 @@ export async function POST(req: Request, { params }: Params) {
   let userView: TeammateMessageView | null = null;
   try {
     if (resume) {
-      outcomes = await claimUnreportedOutcomes(chat.id);
+      // Never a Talk, automation or delegated turn's card: those wait for the person's next message (review round 8).
+      outcomes = await claimUnreportedOutcomes(chat.id, null, { continuable: true });
     } else {
       const row = await prisma.chatMessage.create({
         data: { sessionId: chat.id, role: "USER", content: message, ...(practice ? { meta: { practice: true } } : {}) },
@@ -195,6 +197,8 @@ export async function POST(req: Request, { params }: Params) {
       // Only a turn the model never answered gives its question back (TurnResult.giveBack).
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       send(result ? { type: "done", messages: result.messages, error: result.error } : { type: "error", message: TURN_ERRORS.noAnswer });
+      // The answer is saved: other tabs, and a page opened again meanwhile, read the chat (review round 8).
+      publishToUser(person.userId, { type: "agent.changed", agentId: agent.id });
 
       if (!clientGone) {
         try {
