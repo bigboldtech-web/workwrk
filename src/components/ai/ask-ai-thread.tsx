@@ -105,7 +105,8 @@ export function AskAiThread({
   const starters = s.agent?.examplePrompts?.length ? s.agent.examplePrompts.slice(0, 6) : ASK_AI_STARTERS;
 
   function sendDraft() {
-    if (!s.draft.trim() || s.streaming || s.offline) return;
+    // Not while the chat loads: the store refuses a send then too.
+    if (!s.draft.trim() || s.streaming || s.offline || s.loading) return;
     void s.send(s.draft, context);
   }
 
@@ -198,7 +199,7 @@ export function AskAiThread({
         <button
           type="button"
           onClick={sendDraft}
-          disabled={!s.draft.trim() || s.streaming || s.offline}
+          disabled={!s.draft.trim() || s.streaming || s.offline || s.loading}
           aria-label={s.streaming ? "Answering" : "Send"}
           title={s.offline ? OFFLINE_TEXT : "Send · Enter"}
           className={
