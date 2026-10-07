@@ -189,6 +189,19 @@ export async function POST(req: Request, { params }: Params) {
           clientGone = true;
         }
       }
+      // A comment line every 15 s while the turn runs: a long tool input
+      // streams no text, and a proxy cuts a silent connection, which broke
+      // turns off mid-answer (as in Ask AI's stream route). The client's
+      // parser (splitSse) skips comment lines.
+      const beat = setInterval(() => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          clientGone = true;
+        }
+      }, 15_000);
+      try {
 
       // The saved message first, so the thread can swap its optimistic bubble.
       if (userView) send({ type: "user_message", message: userView });
@@ -225,6 +238,9 @@ export async function POST(req: Request, { params }: Params) {
         } catch {
           // Closed by the client already.
         }
+      }
+      } finally {
+        clearInterval(beat);
       }
     },
     cancel() {

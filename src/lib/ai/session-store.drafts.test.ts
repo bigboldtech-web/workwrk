@@ -21,6 +21,8 @@ const net = vi.hoisted(() => ({
   streams: 0,
   /** The events a stream sends before its connection breaks (no done). */
   breakAfter: null as null | string[],
+  /** The events a stream sends before it ends normally. */
+  closeAfter: null as null | string[],
   /** chat-s holds the saved answer and its card. */
   savedAnswer: false,
   /** chat-t holds the answer (with its card) to its first and its second question. */
@@ -77,12 +79,14 @@ vi.mock("@/lib/api-fetch", () => ({
 // not sent, or hangs until the client gives it up.
 vi.stubGlobal("fetch", async (_url: string, init?: { signal?: AbortSignal }) => {
   net.streams += 1;
-  if (net.breakAfter) {
-    const chunks = net.breakAfter.map((e) => new TextEncoder().encode(`data: ${e}\n\n`));
+  if (net.breakAfter || net.closeAfter) {
+    const ends = net.closeAfter ? "close" : "break";
+    const chunks = (net.closeAfter ?? net.breakAfter ?? []).map((e) => new TextEncoder().encode(`data: ${e}\n\n`));
     let i = 0;
     const body = new ReadableStream<Uint8Array>({
       pull(c) {
         if (i < chunks.length) c.enqueue(chunks[i++]);
+        else if (ends === "close") c.close();
         else c.error(new TypeError("the connection broke"));
       },
     });
@@ -393,6 +397,61 @@ describe("Ask AI drafts", () => {
     } finally {
       net.breakAfter = null;
       net.savedAnswer = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads a second stop soon even while an earlier one is still being waited on", async () => {
+    vi.useFakeTimers();
+    try {
+      await aiSession.open("chat-t");
+      net.breakAfter = [JSON.stringify({ type: "user_message", message: { id: "t-u1", content: "Call Acme and thank Max" } })];
+      aiSession.setDraft("Call Acme and thank Max");
+      await aiSession.send("Call Acme and thank Max");
+      // The first answer is never saved; well into the minute-long reads, a second one breaks off.
+      await vi.advanceTimersByTimeAsync(2_500 + 10_000 + 30_000 + 60_000 + 20_000);
+      net.breakAfter = [JSON.stringify({ type: "user_message", message: { id: "t-u2", content: "Call Acme and thank Max" } })];
+      await aiSession.send(aiSession.getState().draft);
+      expect(aiSession.getState().error).toBe("stopped");
+      net.savedT2 = true;
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(aiSession.getState().error).toBeNull();
+      expect(aiSession.getState().messages.map((m) => m.id)).toContain("t-a2");
+    } finally {
+      net.breakAfter = null;
+      net.savedT2 = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("still brings in an earlier stopped answer that drew nothing after a follow-up went through", async () => {
+    vi.useFakeTimers();
+    try {
+      await aiSession.open("chat-t");
+      // Q1 breaks off before anything was drawn.
+      net.breakAfter = [JSON.stringify({ type: "user_message", message: { id: "t-u1", content: "Call Acme and thank Max" } })];
+      aiSession.setDraft("Call Acme and thank Max");
+      await aiSession.send("Call Acme and thank Max");
+      // Q2 is answered as usual.
+      net.breakAfter = null;
+      net.savedT2 = true;
+      net.closeAfter = [
+        JSON.stringify({ type: "user_message", message: { id: "t-u2", content: "What is due?" } }),
+        JSON.stringify({ type: "done", message: { id: "t-a2", content: "Answer 2" }, approval: null }),
+      ];
+      aiSession.setDraft("What is due?");
+      await aiSession.send("What is due?");
+      net.closeAfter = null;
+      expect(aiSession.getState().error).toBeNull();
+      // Q1's answer and card are saved later: they still arrive, under Q1.
+      net.savedT1 = true;
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(aiSession.getState().messages.map((m) => m.id)).toEqual(["t-u1", "t-a1", "t-card1", "t-u2", "t-a2", "t-card2"]);
+    } finally {
+      net.breakAfter = null;
+      net.closeAfter = null;
+      net.savedT1 = false;
+      net.savedT2 = false;
       vi.useRealTimers();
     }
   });
