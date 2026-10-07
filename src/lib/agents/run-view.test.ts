@@ -82,6 +82,10 @@ describe("run-view", () => {
   it("summarises with the agent's own first line, or the tool sentence", () => {
     expect(runSummary({ status: "SUCCEEDED", startedAt: start, endedAt: end, input: { trigger: "MANUAL" }, output: { text: "## Weekly check\n\n- **3** tasks are late" }, error: null })).toBe("Weekly check");
     expect(runSummary({ status: "SUCCEEDED", startedAt: start, endedAt: end, input: { toolName: "create_task", input: { title: "Fix PDF" } }, output: { ok: true }, error: null })).toBe('Created task "Fix PDF"');
+    // A call that only asked the person never reads as done (Ask AI's waiting requests, follow-up 1.5c).
+    expect(
+      runSummary({ status: "SUCCEEDED", startedAt: start, endedAt: end, input: { toolName: "send_kudos", input: { receiverEmail: "max@acme.com" } }, output: { status: "waiting_for_approval", actionId: "a1", title: "Send kudos to Max" }, error: null }),
+    ).toBe("Waiting for your approval: Send kudos to Max");
     expect(runSummary({ status: "FAILED", startedAt: start, endedAt: end, input: { trigger: "MANUAL" }, output: null, error: "boom" })).toBe("The run didn't finish.");
     expect(runSummary({ status: "PENDING", startedAt: start, endedAt: null, input: { trigger: "SCHEDULED" }, output: null, error: null })).toBe("Running now.");
   });

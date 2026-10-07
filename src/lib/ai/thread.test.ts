@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { actionIdsOf, callFromLog, contextFromPath, draftAfterFailure, lastTurn, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
+import { actionIdsOf, callFromLog, contextFromPath, draftAfterFailure, lastTurn, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withPromptAbove, withToolResult, withToolUse, type AiMessage } from "./thread";
 
 describe("splitSse", () => {
   it("returns whole events and keeps the unfinished tail", () => {
@@ -122,7 +122,8 @@ describe("draftAfterFailure: what Ask AI's composer holds after a send failed", 
     const store = readFileSync(fileURLToPath(new URL("./session-store.ts", import.meta.url)), "utf8");
     expect(store).not.toContain("s.draft || text");
     expect(store).not.toMatch(/draft: text,/);
-    expect(store.match(/draft: draftAfterFailure\(s\.draft, text, (true|false)\)/g)).toHaveLength(3);
+    // The three failed sends, and keepUnsent (a send given up after the person moved on).
+    expect(store.match(/draft: draftAfterFailure\(s\.draft, text, (true|false)\)/g)).toHaveLength(4);
   });
 });
 
@@ -162,5 +163,23 @@ describe("Ask AI's approval cards in the thread (follow-up 1.5c)", () => {
     expect(waiting).toMatchObject({ pending: false, failed: false, outcome: { state: "waiting", title: "Send kudos to Max" } });
     const [ran] = withToolResult(withToolUse([], "create_task", { title: "x" }), "create_task", false);
     expect(ran.outcome).toBeNull();
+  });
+});
+
+describe("withPromptAbove: a prompt put in the composer never replaces what is there", () => {
+  it("goes into an empty composer as given, so a starter that wants more waits for it", () => {
+    expect(withPromptAbove("", "Create a task from this note: ")).toBe("Create a task from this note: ");
+    expect(withPromptAbove("  \n", "What is due?")).toBe("What is due?");
+  });
+  it("goes above words already there, a blank line between", () => {
+    expect(withPromptAbove("my pasted note", "Create a task from this note: ")).toBe("Create a task from this note:\n\nmy pasted note");
+    expect(withPromptAbove("and invite Lea", "Book a room")).toBe("Book a room\n\nand invite Lea");
+  });
+  it("adds the same prompt only once", () => {
+    expect(withPromptAbove("Book a room", "Book a room")).toBe("Book a room");
+    expect(withPromptAbove("Book a room\n\nand invite Lea", "Book a room")).toBe("Book a room\n\nand invite Lea");
+  });
+  it("changes nothing for an empty prompt", () => {
+    expect(withPromptAbove("my words", "  ")).toBe("my words");
   });
 });

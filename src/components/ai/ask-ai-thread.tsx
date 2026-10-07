@@ -30,7 +30,7 @@ import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { useAiSession, type AiMessage, type AiSendError, type ChatContext } from "@/lib/ai/session-store";
-import { isStoppedAnswer, unansweredQuestion } from "@/lib/ai/thread";
+import { isStoppedAnswer, unansweredQuestion, withPromptAbove } from "@/lib/ai/thread";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { ASK_AI_STARTERS, starterLabel, starterWantsMore } from "@/lib/ai/starters";
 import { ASK_AI_CARDS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
@@ -265,8 +265,9 @@ export function AskAiThread({
                         type="button"
                         disabled={s.streaming || s.status === null || s.offline}
                         onClick={() => {
-                          // A starter that ends in a space wants the rest typed.
-                          if (starterWantsMore(q)) { s.setDraft(q); focusComposer(); }
+                          // A starter that ends in a space wants the rest typed; it goes
+                          // above what is already in the composer, never in place of it.
+                          if (starterWantsMore(q)) { s.setDraft(withPromptAbove(s.draft, q)); focusComposer(); }
                           else void s.send(q, context);
                         }}
                         className="inline-flex h-9 min-w-0 items-center rounded-md border border-line bg-raised px-3 text-start text-base text-ink hover:bg-hover disabled:opacity-60"
@@ -321,7 +322,7 @@ export function AskAiThread({
                   <span>{unanswered.recent ? "The answer may still be on its way." : "The answer stopped before it was saved."}</span>
                   <button type="button" className={LINK} onClick={() => s.sessionId && void s.refresh(s.sessionId)}>Check again</button>
                   {!s.meta?.archived && !unavailable ? (
-                    <button type="button" className={LINK} onClick={() => { s.setDraft(unanswered.text); focusComposer(); }}>Ask again</button>
+                    <button type="button" className={LINK} onClick={() => { s.setDraft(withPromptAbove(s.draft, unanswered.text)); focusComposer(); }}>Ask again</button>
                   ) : null}
                 </div>
               ) : null}

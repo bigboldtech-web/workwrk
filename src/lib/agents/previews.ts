@@ -33,7 +33,7 @@ import { canPost } from "@/lib/talk-access";
 import { talkGateForUser } from "@/lib/talk-gate";
 // The person's legacy level is read only in acting.ts, which hands it to the
 // permission matrix, the List helpers and the goal rules.
-import { canContributeAs, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
+import { canContributeAs, contractsChangeableBy, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
 import { splitScheduleZone } from "./cron";
 import { routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
 import { describeSchedule, wordsInZone, zoneName } from "./schedule-words";
@@ -41,6 +41,9 @@ import {
   ACTION_VERB,
   APPROVAL_CARD,
   CHANGE_LABELS,
+  CONTRACT_CHANGE_LABELS,
+  CONTRACT_NOT_FOUND,
+  CONTRACT_VALUE_WORDS,
   GOAL_LEVEL_LINES,
   PREVIEW_LINES,
   INVITE_CARD,
@@ -150,6 +153,18 @@ function verb(tool: ToolName): string {
 /** A title with its subject quoted, or the bare verb when there is no subject. */
 function titled(tool: ToolName, subject: string): string {
   return subject ? quotedTitle(verb(tool), short(subject)) : verb(tool);
+}
+
+/** The fields a contract change card names, in the order it lists them. */
+const CONTRACT_FIELDS = ["status", "value", "effectiveDate", "expiresAt", "autoRenew", "counterparty", "description"] as const;
+
+/** A contract field's new value as its card line reads it: "Terminated", "Yes", "None". */
+function contractValue(field: (typeof CONTRACT_FIELDS)[number], v: unknown): string {
+  if (v === null || v === "") return CONTRACT_VALUE_WORDS.none;
+  if (field === "autoRenew") return v === true ? CONTRACT_VALUE_WORDS.yes : CONTRACT_VALUE_WORDS.no;
+  if (field === "status" && typeof v === "string") return v.charAt(0) + v.slice(1).toLowerCase().replace(/_/g, " ");
+  if (typeof v === "number") return String(v);
+  return typeof v === "string" ? short(v) : CONTRACT_VALUE_WORDS.none;
 }
 
 function fail(error: string, detail?: Record<string, unknown>): { ok: false; error: string; detail?: Record<string, unknown> } {
@@ -588,8 +603,24 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "create_sprint":
     case "create_contract":
       return { input: raw, preview: { title: titled(tool, str(raw.title) || str(raw.name)) } };
-    case "update_contract":
-      return { input: raw, preview: { title: verb(tool) } };
+    case "update_contract": {
+      // Ask AI's card (follow-up 1.5c review): the contract that will change,
+      // found as the tool finds it (only one the person may change; any other
+      // id reads as not found), and one line per field the call changes.
+      const id = str(raw.contractId);
+      const contract = id
+        ? await prisma.contract.findFirst({
+            where: { id, organizationId: person.organizationId, AND: [contractsChangeableBy(person)] },
+            select: { id: true, title: true },
+          })
+        : null;
+      if (!contract) return { error: CONTRACT_NOT_FOUND };
+      const lines = CONTRACT_FIELDS.flatMap((f) => (raw[f] === undefined ? [] : [changeLine(CONTRACT_CHANGE_LABELS[f], contractValue(f, raw[f]))]));
+      return {
+        input: { ...raw, contractId: contract.id },
+        preview: { title: titled(tool, contract.title), ...(lines.length > 0 ? { lines } : {}), target: { label: short(contract.title) } },
+      };
+    }
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

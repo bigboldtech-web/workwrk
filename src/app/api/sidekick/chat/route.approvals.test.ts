@@ -16,6 +16,9 @@ const s = vi.hoisted(() => ({
   requests: [] as Array<Record<string, unknown>>,
   /** One scripted model answer per call, in order; the last repeats. */
   answers: [] as Array<Record<string, unknown>>,
+  /** The agent an Ask AI chat is bound to (null: plain Ask AI). */
+  chatAgent: null as Record<string, unknown> | null,
+  runs: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/lib/app-gate", () => ({
@@ -66,7 +69,7 @@ vi.mock("@/lib/prisma", async () => {
         findFirst: async (a: { where: Record<string, unknown> }) =>
           // The route's own read (by session and person), else the queue's.
           a.where.archivedAt === null
-            ? { id: "s1", userId: "me", organizationId: "org", title: "A chat", kind: null, agentId: null, agent: null, productContext: null, boardContext: null, archivedAt: null }
+            ? { id: "s1", userId: "me", organizationId: "org", title: "A chat", kind: null, agentId: s.chatAgent ? "a1" : null, agent: s.chatAgent, productContext: null, boardContext: null, archivedAt: null }
             : prismaFake.chatSession.findFirst(),
         update: async () => ({}),
       },
@@ -77,7 +80,12 @@ vi.mock("@/lib/prisma", async () => {
         },
         findMany: async () => [{ id: "m-user", role: "USER", content: "Thank Max for the launch", createdAt: new Date() }],
       },
-      agentRun: { create: async () => ({}) },
+      agentRun: {
+        create: async (a: { data: Record<string, unknown> }) => {
+          s.runs.push(a.data);
+          return {};
+        },
+      },
     },
   };
 });
@@ -113,6 +121,8 @@ beforeEach(() => {
   s.created = [];
   s.requests = [];
   s.answers = [];
+  s.chatAgent = null;
+  s.runs = [];
   fx.cards.send_kudos = { title: "Send kudos to Max" };
 });
 
@@ -162,6 +172,19 @@ for (const [name, route, streaming] of ROUTES) {
       } else {
         expect(body).toMatchObject({ approval: { actionIds: [action.id] } });
       }
+    });
+
+    it("records no agent run for a call that only waits, in a chat bound to a workspace agent", async () => {
+      s.chatAgent = { id: "a1", name: "Planner", systemPrompt: "Plan things.", modelOverride: null, status: "ENABLED", productSlug: null, organizationId: "org", visibility: "WORKSPACE", ownerId: null };
+      s.answers = [toolUse("send_kudos", { email: "max@x.com", message: "Thanks" }), said("I asked.")];
+      await ((await route(send())) as Response).text();
+      expect(fx.actions).toHaveLength(1);
+      expect(s.runs).toEqual([]);
+
+      s.requests = [];
+      s.answers = [toolUse("create_task", { title: "Call Acme" }), said("Done.")];
+      await ((await route(send())) as Response).text();
+      expect(s.runs).toEqual([expect.objectContaining({ agentId: "a1", status: "SUCCEEDED", input: { toolName: "create_task", input: { title: "Call Acme" } } })]);
     });
 
     it("runs the person's own work at once, in their own context, as before", async () => {

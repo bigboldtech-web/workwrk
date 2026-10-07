@@ -309,7 +309,9 @@ export async function POST(req: Request) {
         }
 
         // Log to AgentRun if agent-scoped, for telemetry.
-        if (agentScoped) {
+        // A call that waits for the person is no run of the agent's: its
+        // request is the record, and an approval audits what it did.
+        if (agentScoped && call.state !== "waiting") {
           prisma.agentRun
             .create({
               data: {

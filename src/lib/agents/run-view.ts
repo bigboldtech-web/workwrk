@@ -18,7 +18,7 @@
 // own decision in it. A routine's run reads as its own trigger.
 
 import type { CallState } from "./teammate-thread";
-import { toolSentence } from "./tool-verbs";
+import { toolOutcome, toolOutcomeSentence, toolSentence } from "./tool-verbs";
 
 export type RunTrigger = "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE";
 export type RunStatus = "SUCCEEDED" | "FAILED" | "RUNNING";
@@ -130,6 +130,10 @@ export function runSummary(row: RunRowLike): string {
   const status = runStatus(row.status);
   const input = rec(row.input);
   if (input && typeof input.toolName === "string") {
+    // A call that only asked the person (Ask AI's waiting requests) never
+    // reads as done: "Would send kudos to Max".
+    const outcome = toolOutcome(input.toolName, row.output);
+    if (outcome.state === "waiting") return toolOutcomeSentence(input.toolName, rec(input.input), outcome).text;
     const err = row.error ?? resultError(row.output);
     return toolSentence(input.toolName, rec(input.input), Boolean(err)).text;
   }

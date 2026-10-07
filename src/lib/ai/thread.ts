@@ -233,6 +233,20 @@ export function unansweredQuestion(
 }
 
 /**
+ * A prompt put in the composer (a starter, ?q=, Ask again, a page's Ask AI
+ * button) goes above what the composer already holds, never in place of it,
+ * and only once when the same prompt arrives again. Into an empty composer it
+ * goes as given, so a starter that ends in a space waits for the rest.
+ */
+export function withPromptAbove(held: string, prompt: string): string {
+  if (!prompt.trim()) return held;
+  if (!held.trim()) return prompt;
+  const q = prompt.trimEnd();
+  if (held.trim() === q.trim() || held.startsWith(`${q}\n\n`)) return held;
+  return `${q}\n\n${held}`;
+}
+
+/**
  * What the composer holds after a turn failed; `text` is the person's words
  * (null for a continue). When the server never had the message its bubble
  * leaves the thread, so the words always come back: above anything typed
