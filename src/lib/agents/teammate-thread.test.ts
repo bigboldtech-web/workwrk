@@ -11,6 +11,7 @@ import {
   decidedLine,
   draftAfterFailure,
   editStartText,
+  eventLinkHref,
   failedTurnMessages,
   filterTeammates,
   groupApprovals,
@@ -116,10 +117,71 @@ describe("messageViewFromRow", () => {
     expect(many?.kind === "approval" ? many.actionIds.length : 0).toBe(50);
     expect(messageViewFromRow(row({ role: "SYSTEM", kind: "APPROVAL", meta: { actionIds: "a1" } }))).toMatchObject({ actionIds: [] });
   });
+  it("reads a group message's answerers and Run now (Phase 2), dropping wrong types", () => {
+    expect(messageViewFromRow(row({ meta: { answerers: ["a1", "a2", "a1", 7, ""], runNow: true } }))).toEqual({
+      id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Hi", kind: "user", practice: false, answerers: ["a1", "a2"], runNow: true,
+    });
+    expect(messageViewFromRow(row({ meta: { answerers: ["a1", "a2", "a3", "a4"] } }))).toMatchObject({ answerers: ["a1", "a2", "a3"] });
+    const plain = messageViewFromRow(row({ meta: { answerers: "a1", runNow: "yes" } }));
+    expect(plain).toEqual({ id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Hi", kind: "user", practice: false });
+  });
+  it("reads which teammate answered, from where, and a continue (Phase 2)", () => {
+    const answer = (meta: Record<string, unknown>) => messageViewFromRow(row({ role: "ASSISTANT", content: "Done.", meta }));
+    expect(answer({ agentId: "a2", agentName: "Market Analyst", replyTo: "u1", resume: true })).toMatchObject({
+      kind: "agent", agentId: "a2", agentName: "Market Analyst", replyTo: "u1", resume: true,
+    });
+    expect(answer({ origin: { kind: "delegated", byName: "Chief of Staff", byAgentId: "a9" } })).toMatchObject({ origin: { kind: "delegated", byName: "Chief of Staff" } });
+    expect(answer({ origin: { kind: "talk", place: "#proof", conversationId: "c1", messageId: "m9" } })).toMatchObject({
+      origin: { kind: "talk", place: "#proof", conversationId: "c1", messageId: "m9", postedMessageId: null },
+    });
+    expect(answer({ origin: { kind: "automation", workflowName: "Triage new tasks", workflowId: "w1", runId: "r1" } })).toMatchObject({
+      origin: { kind: "automation", workflowName: "Triage new tasks", workflowId: "w1", runId: "r1" },
+    });
+    // A wrong-typed id, a name with no id, an unknown or broken origin: each dropped.
+    const dropped = answer({ agentId: 42, agentName: "Ghost", resume: "true", origin: { kind: "email", from: "x" } });
+    expect(dropped).toEqual({ id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Done.", kind: "agent", practice: false, toolCalls: [] });
+    expect(answer({ agentName: "Ghost" })).not.toHaveProperty("agentName");
+    expect(answer({ origin: { kind: "talk", place: "#proof" } })).not.toHaveProperty("origin");
+    expect(answer({ origin: "delegated" })).not.toHaveProperty("origin");
+    expect(answer({ origin: { kind: "delegated", byName: "x".repeat(201) } })).not.toHaveProperty("origin");
+  });
+  it("reads an event line's teammate, message and link, and builds the link's address itself (Phase 2)", () => {
+    const line = (meta: Record<string, unknown>) => messageViewFromRow(row({ role: "SYSTEM", kind: "EVENT", content: "Asked by Chief of Staff: which tasks are stuck", meta }));
+    expect(line({ event: "delegate_waiting", agentId: "a1", replyTo: "u1", link: { kind: "chat", slug: "t-pm-abc", actionId: "x1" } })).toMatchObject({
+      kind: "event", event: "delegate_waiting", agentId: "a1", replyTo: "u1", link: { kind: "chat", slug: "t-pm-abc", actionId: "x1" },
+    });
+    expect(line({ event: "talk_asked", link: { kind: "talk", conversationId: "c1", messageId: "m1" } })).toMatchObject({ link: { kind: "talk", conversationId: "c1", messageId: "m1" } });
+    expect(line({ event: "automation_asked", link: { kind: "automation", workflowId: "w1", runId: "r1" } })).toMatchObject({ link: { kind: "automation", workflowId: "w1", runId: "r1" } });
+    for (const event of ["schedule_moved", "group_skipped", "group_member_added", "group_member_removed", "group_renamed", "delegated_asked"]) {
+      expect(line({ event })).toMatchObject({ event });
+    }
+    // A link to another origin, a raw address, a link of a kind it does not know, a missing id: dropped.
+    for (const link of ["https://evil.example/x", { kind: "url", href: "https://evil.example" }, { kind: "talk", conversationId: "c1" }, { kind: "chat", slug: 7 }, { href: "/agents" }]) {
+      expect(line({ event: "talk_asked", link })).not.toHaveProperty("link");
+    }
+    expect(line({ event: "talk_asked", agentId: 5, replyTo: ["u1"] })).toEqual({
+      id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Asked by Chief of Staff: which tasks are stuck", kind: "event", event: "talk_asked", routineId: null, actionId: null,
+    });
+  });
+  it("reads which teammate an approval card belongs to (Phase 2)", () => {
+    expect(messageViewFromRow(row({ role: "SYSTEM", kind: "APPROVAL", meta: { actionIds: ["x1"], agentId: "a2", replyTo: "u1" } }))).toMatchObject({ agentId: "a2", replyTo: "u1" });
+    expect(messageViewFromRow(row({ role: "SYSTEM", kind: "APPROVAL", meta: { actionIds: ["x1"], agentId: {} } }))).not.toHaveProperty("agentId");
+  });
   it("renders nothing for a tool row, a system row with no kind, or a kind it does not know", () => {
     expect(messageViewFromRow(row({ role: "TOOL" }))).toBeNull();
     expect(messageViewFromRow(row({ role: "SYSTEM" }))).toBeNull();
     expect(messageViewFromRow(row({ role: "ASSISTANT", kind: "POLL" }))).toBeNull();
+  });
+});
+
+describe("eventLinkHref", () => {
+  it("always gives a path in this app, its ids encoded", () => {
+    expect(eventLinkHref({ kind: "chat", slug: "t-pm-abc" })).toBe("/agents?chat=t-pm-abc");
+    expect(eventLinkHref({ kind: "chat", slug: "t-pm-abc", actionId: "x1" })).toBe("/agents?chat=t-pm-abc&action=x1");
+    expect(eventLinkHref({ kind: "talk", conversationId: "c1", messageId: "m1" })).toBe("/tlk/c1?m=m1");
+    expect(eventLinkHref({ kind: "automation", workflowId: "w1", runId: "r1" })).toBe("/automation/logs?workflowId=w1&runId=r1");
+    expect(eventLinkHref({ kind: "talk", conversationId: "//evil.example", messageId: "a&b" })).toBe("/tlk/%2F%2Fevil.example?m=a%26b");
+    expect(eventLinkHref({ kind: "chat", slug: "x&action=y" })).toBe("/agents?chat=x%26action%3Dy");
   });
 });
 

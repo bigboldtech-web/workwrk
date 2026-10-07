@@ -5,6 +5,7 @@ import {
   ROUTINE_LIMITS,
   ROUTINE_REASON_TEXT,
   ROUTINE_STALE_MS,
+  legacyRoutineSchedule,
   routineReasonForPerson,
   routineReasonText,
   routineScheduleFrom,
@@ -118,3 +119,29 @@ describe("a schedule with no next time", () => {
   });
 });
 
+
+describe("legacyRoutineSchedule (an old Workspace agents schedule moving onto a routine)", () => {
+  const NOW = new Date("2026-10-07T10:00:00.000Z");
+  it("rounds a schedule that ran more often than hourly down to one a routine can run", () => {
+    expect(legacyRoutineSchedule("every 10 minutes", NOW)).toEqual({ ok: true, schedule: "hourly", changed: true });
+    expect(legacyRoutineSchedule("Every 1 minute", NOW)).toEqual({ ok: true, schedule: "hourly", changed: true });
+    expect(legacyRoutineSchedule("0,30 9-17 * * 1-5", NOW)).toEqual({ ok: true, schedule: "0 9-17 * * 1-5", changed: true });
+    expect(legacyRoutineSchedule("*/15 * * * *", NOW)).toEqual({ ok: true, schedule: "0 * * * *", changed: true });
+  });
+  it("keeps the schedule's own zone when it keeps only the first minute", () => {
+    expect(legacyRoutineSchedule("CRON_TZ=Asia/Kolkata 15,45 9 * * *", NOW)).toEqual({ ok: true, schedule: "CRON_TZ=Asia/Kolkata 15 9 * * *", changed: true });
+  });
+  it("leaves a schedule a routine can already run as it is", () => {
+    expect(legacyRoutineSchedule("0 9 * * 1-5", NOW)).toEqual({ ok: true, schedule: "0 9 * * 1-5", changed: false });
+    expect(legacyRoutineSchedule("daily", NOW)).toEqual({ ok: true, schedule: "daily", changed: false });
+    expect(legacyRoutineSchedule("every 6 hours", NOW)).toEqual({ ok: true, schedule: "every 6 hours", changed: false });
+    expect(legacyRoutineSchedule("  hourly ", NOW)).toEqual({ ok: true, schedule: "hourly", changed: false });
+  });
+  it("stops a schedule no routine can run", () => {
+    for (const s of ["every 48 hours", "0 0 31 2 *", "", "   ", "sometimes", "CRON_TZ=Nowhere/Land 0,30 9 * * *", "0,30 0 31 2 *"]) {
+      expect(legacyRoutineSchedule(s, NOW)).toEqual({ ok: false });
+    }
+    expect(legacyRoutineSchedule(null, NOW)).toEqual({ ok: false });
+    expect(legacyRoutineSchedule(undefined, NOW)).toEqual({ ok: false });
+  });
+});

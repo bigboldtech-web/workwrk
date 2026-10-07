@@ -5218,6 +5218,14 @@ model Agent {
   /// The most AI questions it may use in a UTC calendar month, on top of the
   /// plan's allowance and never instead of it. Null: no limit of its own.
   monthlyQuestionCap Int?
+  /// Phase 2 (prisma/sql/2026-10-07-ai-teammates-phase2.sql): when its old
+  /// Workspace agents schedule was moved (src/lib/agents/legacy-schedules.ts),
+  /// the routine it became, or why it stopped instead (a word, CHECK in SQL).
+  /// scheduleCron and autonomousPrompt are kept as they were.
+  scheduleMovedAt    DateTime?
+  scheduleRoutineId  String?
+  /// no_creator | person_gone | guest | agent_account | no_access | unsupported_schedule | no_schedule | agent_removed
+  scheduleMoveReason String?
 
   runs         AgentRun[]
   memories     AgentMemory[]
@@ -5227,6 +5235,8 @@ model Agent {
   actions        AgentAction[]
   routines       AgentRoutine[]
   personSettings AgentPersonSetting[]
+  // Phase 2: the group chats it is in.
+  groupMemberships ChatSessionTeammate[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, status])
@@ -5264,6 +5274,13 @@ model AgentRun {
   routineId   String?
   actingForId String?
   questionId  String?
+  /// Phase 2: the caller's turn when another teammate asked for this one
+  /// (ask_teammate), and the automation and run of an "Ask an AI teammate"
+  /// step. A PARTIAL index on (automationWorkflowId, startedAt) lives in
+  /// prisma/sql/2026-10-07-ai-teammates-phase2.sql, so it is not declared here.
+  parentRunId          String?
+  automationWorkflowId String?
+  automationRunId      String?
 
   @@index([agentId, startedAt])
   @@index([status])
@@ -5371,7 +5388,7 @@ model AgentRoutine {
   /// "SUCCEEDED" | "FAILED" | "SKIPPED"
   lastStatus     String?
   lastReason     String?
-  /// "chat" | "settings"
+  /// "chat" | "settings" | "legacy" (moved from Workspace agents)
   createdVia     String    @default("chat")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
@@ -6165,12 +6182,33 @@ model ChatSession {
   /// (agentId, userId), by a PARTIAL unique index in
   /// prisma/sql/2026-10-06-ai-teammates.sql, so it is not declared here. Ask AI
   /// lists and routes skip TEAMMATE chats; the teammate routes read only them.
+  /// "TEAMMATE_GROUP": one person's group chat with 2 to 5 teammates (members
+  /// in ChatSessionTeammate; agentId null).
   kind           String?
+  /// Phase 2: a group chat's read cursor (its unread dot). Null elsewhere.
+  lastReadAt     DateTime?
 
-  messages ChatMessage[]
+  messages  ChatMessage[]
+  teammates ChatSessionTeammate[]
 
   @@index([organizationId, userId, updatedAt])
   @@index([userId, pinned, updatedAt])
+  @@index([agentId])
+}
+
+/// One teammate in one person's group chat (ChatSession.kind "TEAMMATE_GROUP").
+/// position orders the members (0 is the first added); removing a teammate
+/// from the workspace (ARCHIVED) keeps the row, which then reads "Removed".
+/// prisma/sql/2026-10-07-ai-teammates-phase2.sql
+model ChatSessionTeammate {
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agentId   String
+  agent     Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  position  Int
+  createdAt DateTime    @default(now())
+
+  @@id([sessionId, agentId])
   @@index([agentId])
 }
 

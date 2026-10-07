@@ -230,3 +230,32 @@ describe("the invitation card", () => {
   });
 });
 
+
+describe("GROUP_COPY (group chats, Phase 2)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    removedCantJoin: [["Triage"], "Triage was removed, so it can't join a group."],
+    limit: [[20], "You have 20 group chats, the most one person can have. Leave one first."],
+    noOneCanAnswer: [["Triage and Project Manager"], "Triage and Project Manager can't answer now."],
+    skippedLine: [["Triage", "it is paused."], "Triage didn't answer: it is paused."],
+    renamedLine: [["Offsite crew"], "Renamed to Offsite crew"],
+    addedLine: [["Triage"], "Added Triage"],
+    removedLine: [["Triage"], "Removed Triage"],
+    membersButton: [[3], "3 teammates"],
+    leaveTitle: [["Offsite crew"], "Leave Offsite crew?"],
+    answersFrom: [["Triage and Project Manager"], "Answers: Triage and Project Manager"],
+    placeholder: [["Offsite crew"], "Message Offsite crew…"],
+    lastLineAgent: [["Triage", "Two are late."], "Triage: Two are late."],
+    groupDefaultName: [[["Chief of Staff", "Market Analyst", "Triage"]], "Chief of Staff, Market Analyst and Triage"],
+  };
+  const g = copy.GROUP_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(g).filter((k) => typeof g[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what the spec says`, () => {
+      const made = (g[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+});

@@ -10,7 +10,7 @@
 //
 // A line whose event this code does not know still shows its words.
 
-import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Info, type LucideIcon } from "lucide-react";
+import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Info, MessageSquare, PenLine, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
 import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import type { TeammateEventKind, TeammateMessageView, TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 
@@ -24,6 +24,15 @@ const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   action_denied: Ban,
   action_expired: Clock,
   action_failed: CircleAlert,
+  schedule_moved: CalendarClock,
+  group_skipped: SkipForward,
+  group_member_added: UserPlus,
+  group_member_removed: UserMinus,
+  group_renamed: PenLine,
+  delegated_asked: Users,
+  delegate_waiting: Clock,
+  talk_asked: MessageSquare,
+  automation_asked: Workflow,
 };
 
 const LINK = "whitespace-nowrap font-medium text-brand-deep hover:underline";

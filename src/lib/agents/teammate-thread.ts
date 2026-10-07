@@ -71,6 +71,16 @@ export const TEAMMATE_EVENT_KINDS = [
   "action_denied",
   "action_expired",
   "action_failed",
+  // Phase 2 (docs/plans/ai-teammates-phase2.md).
+  "schedule_moved",
+  "group_skipped",
+  "group_member_added",
+  "group_member_removed",
+  "group_renamed",
+  "delegated_asked",
+  "delegate_waiting",
+  "talk_asked",
+  "automation_asked",
 ] as const;
 
 /** What an EVENT line is about (meta.event). */
@@ -98,13 +108,64 @@ export interface TeammateRoutineRef {
   dueAt: string | null;
 }
 
+/**
+ * Where an answer was asked from when it was not the person in this chat
+ * (meta.origin, Phase 2): another teammate (ask_teammate), a Talk message,
+ * or an automation's step.
+ */
+export type MessageOrigin =
+  | { kind: "delegated"; byName: string }
+  | { kind: "talk"; place: string; conversationId: string; messageId: string; postedMessageId: string | null }
+  | { kind: "automation"; workflowName: string; workflowId: string; runId: string };
+
+/** What an EVENT line's Open goes to (meta.link). The address is built here, never read from the row. */
+export type EventLink =
+  | { kind: "chat"; slug: string; actionId?: string }
+  | { kind: "talk"; conversationId: string; messageId: string }
+  | { kind: "automation"; workflowId: string; runId: string };
+
+/** The page an EVENT line's link opens: always a path in this app. */
+export function eventLinkHref(l: EventLink): string {
+  const e = encodeURIComponent;
+  if (l.kind === "chat") return `/agents?chat=${e(l.slug)}${l.actionId ? `&action=${e(l.actionId)}` : ""}`;
+  if (l.kind === "talk") return `/tlk/${e(l.conversationId)}?m=${e(l.messageId)}`;
+  return `/automation/logs?workflowId=${e(l.workflowId)}&runId=${e(l.runId)}`;
+}
+
 /** One row of the thread. */
 export type TeammateMessageView =
-  | (MessageBase & { kind: "user"; practice: boolean })
-  | (MessageBase & { kind: "agent"; practice: boolean; toolCalls: AiToolCall[]; streaming?: boolean; replyTo?: string })
+  | (MessageBase & {
+      kind: "user";
+      practice: boolean;
+      /** A group chat: the teammates asked to answer it, in order (agent ids). */
+      answerers?: string[];
+      /** Sent by Run now in Workspace agents. */
+      runNow?: boolean;
+    })
+  | (MessageBase & {
+      kind: "agent";
+      practice: boolean;
+      toolCalls: AiToolCall[];
+      streaming?: boolean;
+      replyTo?: string;
+      /** A group chat: the teammate that answered. */
+      agentId?: string;
+      agentName?: string;
+      origin?: MessageOrigin;
+      /** A continue after the person decided a card. */
+      resume?: boolean;
+    })
   | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef })
-  | (MessageBase & { kind: "event"; event: TeammateEventKind | null; routineId: string | null; actionId: string | null })
-  | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string });
+  | (MessageBase & {
+      kind: "event";
+      event: TeammateEventKind | null;
+      routineId: string | null;
+      actionId: string | null;
+      agentId?: string | null;
+      replyTo?: string;
+      link?: EventLink | null;
+    })
+  | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string; agentId?: string });
 
 export const AGENT_ACTION_STATUSES = ["PENDING", "RUNNING", "EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"] as const;
 
@@ -262,6 +323,62 @@ function idsFrom(raw: unknown): string[] {
   return out;
 }
 
+/** A group message names at most this many answerers (GROUP_LIMITS.maxAnswerers). */
+const MAX_ANSWERERS = 3;
+/** The longest id or name a link or origin may carry; anything longer is not one this app wrote. */
+const REF_MAX = 200;
+
+function ref(v: unknown): string | null {
+  const s = str(v);
+  return s && s.length <= REF_MAX ? s : null;
+}
+
+/** meta.origin, or null when it is not one this app writes (an unknown kind, a missing part). */
+function originFrom(raw: unknown): MessageOrigin | null {
+  const o = rec(raw);
+  if (!o) return null;
+  if (o.kind === "delegated") {
+    const byName = ref(o.byName);
+    return byName ? { kind: "delegated", byName } : null;
+  }
+  if (o.kind === "talk") {
+    const place = ref(o.place);
+    const conversationId = ref(o.conversationId);
+    const messageId = ref(o.messageId);
+    return place && conversationId && messageId ? { kind: "talk", place, conversationId, messageId, postedMessageId: ref(o.postedMessageId) } : null;
+  }
+  if (o.kind === "automation") {
+    const workflowName = ref(o.workflowName);
+    const workflowId = ref(o.workflowId);
+    const runId = ref(o.runId);
+    return workflowName && workflowId && runId ? { kind: "automation", workflowName, workflowId, runId } : null;
+  }
+  return null;
+}
+
+/** meta.link, or null. Only its ids are read; eventLinkHref builds the address. */
+function linkFrom(raw: unknown): EventLink | null {
+  const l = rec(raw);
+  if (!l) return null;
+  if (l.kind === "chat") {
+    const slug = ref(l.slug);
+    if (!slug) return null;
+    const actionId = ref(l.actionId);
+    return actionId ? { kind: "chat", slug, actionId } : { kind: "chat", slug };
+  }
+  if (l.kind === "talk") {
+    const conversationId = ref(l.conversationId);
+    const messageId = ref(l.messageId);
+    return conversationId && messageId ? { kind: "talk", conversationId, messageId } : null;
+  }
+  if (l.kind === "automation") {
+    const workflowId = ref(l.workflowId);
+    const runId = ref(l.runId);
+    return workflowId && runId ? { kind: "automation", workflowId, runId } : null;
+  }
+  return null;
+}
+
 /** A saved message as the thread renders it, or null for one it does not render. */
 export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView | null {
   const meta = rec(row.meta);
@@ -269,11 +386,33 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
   const practice = meta?.practice === true;
   switch (row.kind ?? null) {
     case null:
-      if (row.role === "USER") return { ...base, kind: "user", practice };
+      if (row.role === "USER") {
+        const answerers = Array.isArray(meta?.answerers) ? idsFrom(meta.answerers).slice(0, MAX_ANSWERERS) : [];
+        return {
+          ...base,
+          kind: "user",
+          practice,
+          ...(answerers.length > 0 ? { answerers } : {}),
+          ...(meta?.runNow === true ? { runNow: true } : {}),
+        };
+      }
       if (row.role === "ASSISTANT") {
         // The person's message this answers (meta.replyTo), when the turn named it.
         const replyTo = str(meta?.replyTo);
-        return { ...base, kind: "agent", practice, toolCalls: callsFrom(row.toolCalls), ...(replyTo ? { replyTo } : {}) };
+        const agentId = str(meta?.agentId);
+        const agentName = str(meta?.agentName);
+        const origin = originFrom(meta?.origin);
+        return {
+          ...base,
+          kind: "agent",
+          practice,
+          toolCalls: callsFrom(row.toolCalls),
+          ...(replyTo ? { replyTo } : {}),
+          ...(agentId ? { agentId } : {}),
+          ...(agentId && agentName ? { agentName } : {}),
+          ...(origin ? { origin } : {}),
+          ...(meta?.resume === true ? { resume: true } : {}),
+        };
       }
       return null;
     case "REPORT":
@@ -291,11 +430,24 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
       };
     case "EVENT": {
       const event = meta?.event;
-      return { ...base, kind: "event", event: isTeammateEventKind(event) ? event : null, routineId: str(meta?.routineId), actionId: str(meta?.actionId) };
+      const agentId = str(meta?.agentId);
+      const replyTo = str(meta?.replyTo);
+      const link = linkFrom(meta?.link);
+      return {
+        ...base,
+        kind: "event",
+        event: isTeammateEventKind(event) ? event : null,
+        routineId: str(meta?.routineId),
+        actionId: str(meta?.actionId),
+        ...(agentId ? { agentId } : {}),
+        ...(replyTo ? { replyTo } : {}),
+        ...(link ? { link } : {}),
+      };
     }
     case "APPROVAL": {
       const replyTo = str(meta?.replyTo);
-      return { ...base, kind: "approval", actionIds: idsFrom(meta?.actionIds), ...(replyTo ? { replyTo } : {}) };
+      const agentId = str(meta?.agentId);
+      return { ...base, kind: "approval", actionIds: idsFrom(meta?.actionIds), ...(replyTo ? { replyTo } : {}), ...(agentId ? { agentId } : {}) };
     }
     default:
       return null;
