@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANSWER_IN_REQUEST,
   ANSWER_WITHOUT_TEAMMATE,
   draftSnapshot,
+  firstAnswerProblem,
   firstAnswerWithoutTeammate,
   hasProblems,
   moveItem,
@@ -145,6 +147,9 @@ describe("publishProblems", () => {
     expect(hasProblems(publishProblems(after, withAsk))).toBe(false);
     expect(firstAnswerWithoutTeammate([{ key: "add_comment", params: { body: "{{teammate.name}}" } }])).toBe(0);
     expect(firstAnswerWithoutTeammate([{ key: "add_comment", params: { body: "{{title}}" } }])).toBeNull();
+    // Nor inside a teammate step's own request, where it is never filled (review round 8).
+    expect(firstAnswerProblem([{ key: "ask_teammate", params: { request: "Summarise {{teammate.answer}}" } }])).toEqual({ index: 0, error: ANSWER_IN_REQUEST });
+    expect(firstAnswerProblem([{ key: "ask_teammate", params: { request: "a" } }, { key: "ask_teammate", params: { request: "Check {{teammate.answer}}" } }])).toEqual({ index: 1, error: ANSWER_IN_REQUEST });
   });
 });
 

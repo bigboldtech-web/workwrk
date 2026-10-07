@@ -50,6 +50,8 @@ const db = vi.hoisted(() => ({
   executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown }>,
   /** The chat's rows can't be written. */
   saveThrows: false,
+  /** What each claim asked for. */
+  claimOpts: [] as Array<{ continuable?: boolean }>,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -175,8 +177,9 @@ vi.mock("./executor", () => ({
 }));
 
 vi.mock("./actions", () => ({
-  claimUnreportedOutcomes: async (sessionId: string, agentId?: string | null) => {
+  claimUnreportedOutcomes: async (sessionId: string, agentId?: string | null, opts?: { continuable?: boolean }) => {
     db.claims += 1;
+    db.claimOpts.push(opts ?? {});
     db.claimAgents.push(agentId ?? null);
     const decided = ["EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"];
     const hit = db.outcomes.filter(
@@ -297,6 +300,7 @@ beforeEach(() => {
   db.outcomes = [];
   db.claims = 0;
   db.claimAgents = [];
+  db.claimOpts = [];
   db.released = [];
   db.replies = [];
   db.requests = [];
@@ -1030,6 +1034,17 @@ describe("a turn an automation asked for (Phase 2 step 7)", () => {
     await runTeammateTurn(turn());
     expect(JSON.stringify(db.requests[0].system)).toContain("90k");
     expect(JSON.stringify(db.requests[0].messages)).toContain("Olivia's DMs");
+  });
+});
+
+describe("which outcomes a turn hears (review round 8)", () => {
+  it("a chat turn hears every outcome; a continue or a routine never a Talk, automation or delegated turn's", async () => {
+    for (const [trigger, continuable] of [["CHAT", false], ["RESUME", true], ["ROUTINE", true]] as const) {
+      db.claimOpts = [];
+      db.replies = [reply([say("Ok.")], "end_turn")];
+      await runTeammateTurn(turn({ trigger, ...(trigger === "ROUTINE" ? { routine: { id: "r1", name: "Brief" } as never } : {}) }));
+      expect(db.claimOpts).toEqual([{ continuable }]);
+    }
   });
 });
 

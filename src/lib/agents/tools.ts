@@ -243,27 +243,57 @@ async function everyoneReadsListFor(orgId: string, userIds: readonly string[]): 
     .catch(() => null);
   if (!rows) return closed;
   const byId = new Map(rows.map((r) => [r.id, r]));
+  if (ids.some((id) => !byId.has(id))) return closed;
+  const live = ids.filter((id) => {
+    const row = byId.get(id)!;
+    return !row.deletedAt && !RULE_1_DENIED_STATUSES.has(String(row.status));
+  });
+  // Each reader's level, a few at a time rather than one after another
+  // (review round 8: a 250-person channel read them in sequence).
   const readers: Array<ReturnType<typeof listReader>> = [];
-  for (const id of ids) {
-    const row = byId.get(id);
-    if (!row) return closed;
-    if (row.deletedAt || RULE_1_DENIED_STATUSES.has(String(row.status))) continue;
-    const level = await levelHeldIn(id, orgId, { organizationId: row.organizationId, accessLevel: row.accessLevel }).catch(() => null);
-    if (!level) return closed;
-    readers.push(listReader({ userId: id, organizationId: orgId, accessLevel: level }));
+  for (let i = 0; i < live.length; i += READER_BATCH) {
+    const levels = await Promise.all(
+      live.slice(i, i + READER_BATCH).map((id) => {
+        const row = byId.get(id)!;
+        return levelHeldIn(id, orgId, { organizationId: row.organizationId, accessLevel: row.accessLevel }).catch(() => null);
+      }),
+    );
+    if (levels.some((l) => !l)) return closed;
+    live.slice(i, i + READER_BATCH).forEach((id, k) => readers.push(listReader({ userId: id, organizationId: orgId, accessLevel: levels[k]! })));
   }
   const memo = new Map<string, Promise<boolean>>();
   return (listId) => {
     let known = memo.get(listId);
     if (!known) {
       known = (async () => {
-        for (const r of readers) if (!(await r.canRead(listId).catch(() => false))) return false;
+        for (let i = 0; i < readers.length; i += READER_BATCH) {
+          const verdicts = await Promise.all(readers.slice(i, i + READER_BATCH).map((r) => r.canRead(listId).catch(() => false)));
+          if (verdicts.some((v) => !v)) return false;
+        }
         return true;
       })();
       memo.set(listId, known);
     }
     return known;
   };
+}
+
+/** Readers checked at once (everyoneReadsListFor). */
+const READER_BATCH = 10;
+
+/**
+ * One turn's filter, built once: the turn hands every tool call the same
+ * audience list, so a second search in the turn reuses the readers and the
+ * Lists already checked instead of loading them all again (review round 8).
+ */
+const audienceFilters = new WeakMap<readonly string[], Promise<(listId: string) => Promise<boolean>>>();
+function everyoneReadsListForTurn(orgId: string, audience: readonly string[]): Promise<(listId: string) => Promise<boolean>> {
+  let filter = audienceFilters.get(audience);
+  if (!filter) {
+    filter = everyoneReadsListFor(orgId, audience);
+    audienceFilters.set(audience, filter);
+  }
+  return filter;
 }
 
 const searchTasks: ToolDefinition = {
@@ -306,7 +336,7 @@ const searchTasks: ToolDefinition = {
     const reader = listReader(viewer);
     // A Talk answer posts with no card to everyone there: only tasks in a
     // List every one of them can open (review round 3).
-    const audienceReads = ctx.teammate?.audience?.length ? await everyoneReadsListFor(ctx.orgId, ctx.teammate.audience) : null;
+    const audienceReads = ctx.teammate?.audience?.length ? await everyoneReadsListForTurn(ctx.orgId, ctx.teammate.audience) : null;
     const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.item.findMany({
         where: {
           organizationId: ctx.orgId,

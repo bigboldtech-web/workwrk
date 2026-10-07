@@ -432,6 +432,18 @@ describe("claimUnreportedOutcomes", () => {
   });
 });
 
+describe("claimUnreportedOutcomes for a continue (review round 8)", () => {
+  it("leaves a Talk, automation or delegated turn's outcomes for the person's next message", async () => {
+    fx.runTriggers = { "run-talk": "TALK", "run-chat": "CHAT" };
+    const fromTalk = talkPost({ status: "EXECUTED", runId: "run-talk" });
+    const fromChat = talkPost({ status: "EXECUTED", runId: "run-chat" });
+    expect((await claimUnreportedOutcomes("s1", null, { continuable: true })).map((r) => r.id)).toEqual([fromChat.id]);
+    expect(fx.sql.at(-1)).toContain("'TALK', 'AUTOMATION', 'DELEGATED'");
+    // The person's own message hears it.
+    expect((await claimUnreportedOutcomes("s1")).map((r) => r.id)).toEqual([fromTalk.id]);
+  });
+});
+
 describe("group chats (Phase 2)", () => {
   it("claims one teammate's outcomes only, so another's is never told to it", async () => {
     const mine = talkPost({ status: "EXECUTED", sessionId: "g1", agentId: "a1" });

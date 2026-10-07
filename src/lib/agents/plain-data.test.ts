@@ -13,6 +13,13 @@ describe("plainData", () => {
     expect(plainData("a‮b​c⁦d\u{E0041}\u{E0042}e")).toBe("abcde");
   });
 
+  it("keeps what real text needs: joiners, direction marks and letters that look like brackets (review round 8)", () => {
+    // Persian with a zero-width non-joiner, an emoji sequence with joiners, a right-to-left mark.
+    for (const name of ["برنامه\u200Cریز", "\u{1F469}\u200D\u{1F4BB} Dev", "\u200FOps", "co\u00ADop"]) expect(plainData(name)).toBe(name);
+    // Canadian Syllabics PA and PO are letters, not brackets.
+    expect(plainData("\u1438\u1433")).toBe("\u1438\u1433");
+  });
+
   it("changes nothing else, a fullwidth quote included", () => {
     expect(plainData("Café ＂quoted＂ 2×3 ok")).toBe("Café ＂quoted＂ 2×3 ok");
   });

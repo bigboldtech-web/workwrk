@@ -711,15 +711,21 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
  * call the person's own rule ran was reported in its own turn (reportedAt is
  * set when it is recorded), so only decisions and expiries come back here.
  */
-export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null): Promise<AgentActionRow[]> {
+export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean } = {}): Promise<AgentActionRow[]> {
   // One teammate's only, when named: in a group chat each hears its own
   // (docs/plans/ai-teammates-phase2.md step 3). A one-teammate chat holds
   // only that teammate's rows, and Ask AI names none.
   const ofAgent = agentId ? Prisma.sql`AND "agentId" = ${agentId}` : Prisma.empty;
+  // A continue or a routine never hears a card a Talk, automation or
+  // delegated turn made: it would take that turn up with this chat's tools
+  // and "Don't ask". Those wait for the person's next message (review round 8).
+  const onlyContinuable = opts.continuable
+    ? Prisma.sql`AND ("runId" IS NULL OR NOT EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "AgentAction"."runId" AND r."input"->>'trigger' IN ('TALK', 'AUTOMATION', 'DELEGATED')))`
+    : Prisma.empty;
   const rows = await prisma.$queryRaw<AgentActionRow[]>`
     UPDATE "AgentAction"
     SET "reportedAt" = now() AT TIME ZONE 'UTC', "updatedAt" = now() AT TIME ZONE 'UTC'
-    WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent}
+    WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent} ${onlyContinuable}
       AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
       "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;

@@ -49,6 +49,7 @@ import {
   didntWorkLine,
   expiredAt,
   lastLineReport,
+  lastLineRunNow,
   lastLineYou,
   pausedNotSent,
   removedComposer,
@@ -286,6 +287,8 @@ export interface GroupMemberView {
 export interface GroupRow {
   id: string;
   name: string;
+  /** The name is one the person gave it; else it follows its members (review round 8). */
+  ownName?: boolean;
   members: GroupMemberView[];
   waiting: number;
   unread: boolean;
@@ -656,7 +659,7 @@ const LAST_LINE_MAX = 120;
 export function lastLineFor(m: TeammateMessageView | null | undefined): string | null {
   if (!m) return null;
   const line = plainLine(m.text, LAST_LINE_MAX);
-  if (m.kind === "user") return line ? lastLineYou(line) : null;
+  if (m.kind === "user") return line ? (m.runNow ? lastLineRunNow(line) : lastLineYou(line)) : null;
   if (m.kind === "report") return line ? lastLineReport(m.routine.name, line) : m.routine.name;
   // A group's answer names who answered.
   if (m.kind === "agent" && m.agentName && line) return GROUP_COPY.lastLineAgent(m.agentName, line);
@@ -1306,9 +1309,10 @@ export interface ActivityActionView {
  * opens the run that made it, as a Recent runs row does. Its run is the part
  * of its groupKey before the colon ("<runId>:<tool>"); without one, the chat.
  */
-export function activityActionView(a: Pick<ActionView, "id" | "status" | "decidedVia" | "groupKey">, slug: string): ActivityActionView {
+export function activityActionView(a: Pick<ActionView, "id" | "status" | "decidedVia" | "groupKey" | "href">, slug: string): ActivityActionView {
   const chat = `/agents?chat=${encodeURIComponent(slug)}`;
-  if (a.decidedVia !== "rule") return { chip: null, href: `${chat}&action=${encodeURIComponent(a.id)}` };
+  // Where the card lives, as the server says (a group's waits in the group; review round 8).
+  if (a.decidedVia !== "rule") return { chip: null, href: a.href || `${chat}&action=${encodeURIComponent(a.id)}` };
   const colon = a.groupKey ? a.groupKey.indexOf(":") : -1;
   const runId = a.groupKey && colon > 0 ? a.groupKey.slice(0, colon) : null;
   const chip: ActivityActionView["chip"] =

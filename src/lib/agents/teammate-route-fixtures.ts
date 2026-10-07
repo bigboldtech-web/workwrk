@@ -247,7 +247,7 @@ export const routeDb = {
   chatMessage: {
     groupBy: async (a: Args) => groupMax(db.messages.filter((r) => matches(r, a.where)), (a.by ?? ["sessionId"])[0], "createdAt"),
     findMany: async (a: Args) => pickMany(db.messages, a),
-    findFirst: async (a: Args) => copy(db.messages.find((r) => matches(r, a.where))),
+    findFirst: async (a: Args) => copy(sorted(db.messages.filter((r) => matches(r, a.where)), a.orderBy)[0]),
     create: async (a: Args) => {
       routeDb.writes.push("chatMessage.create");
       const row = { id: `m${++seq}`, kind: null, meta: null, toolCalls: null, createdAt: new Date(), ...a.data };

@@ -255,17 +255,32 @@ export const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
 /** A step that uses a teammate's answer with nothing before it to ask one (review round 4). */
 export const ANSWER_WITHOUT_TEAMMATE = 'This step uses the AI teammate\'s answer, so put an "Ask an AI teammate" step before it.';
 
+/** An AI teammate step that asks with another teammate's answer in its request (review round 8). */
+export const ANSWER_IN_REQUEST = "An AI teammate step can't put a teammate's answer in its request. Use it in a later step instead.";
+
 /**
- * The index of the first step that uses a teammate's answer with no "Ask an
- * AI teammate" step before it, so it could never have an answer to use, or
- * null. The builder and the publish route both refuse it.
+ * The first step that uses a teammate's answer where it can't: before any
+ * "Ask an AI teammate" step, so it could never have one, or inside such a
+ * step's own request, where it is never filled and reaches the teammate as
+ * braces (review round 8). The builder and the publish route both refuse it.
  */
-export function firstAnswerWithoutTeammate(actions: ReadonlyArray<{ key: unknown; params?: unknown }>): number | null {
+export function firstAnswerProblem(actions: ReadonlyArray<{ key: unknown; params?: unknown }>): { index: number; error: string } | null {
+  let asked = false;
   for (const [index, a] of actions.entries()) {
-    if (a.key === "ask_teammate") return null;
-    if (Object.values(asRecord(a.params)).some((v) => typeof v === "string" && TEAMMATE_TOKEN.test(v))) return index;
+    const uses = Object.values(asRecord(a.params)).some((v) => typeof v === "string" && TEAMMATE_TOKEN.test(v));
+    if (a.key === "ask_teammate") {
+      if (uses) return { index, error: ANSWER_IN_REQUEST };
+      asked = true;
+      continue;
+    }
+    if (!asked && uses) return { index, error: ANSWER_WITHOUT_TEAMMATE };
   }
   return null;
+}
+
+/** The index of the first step that uses a teammate's answer where it can't (firstAnswerProblem), or null. */
+export function firstAnswerWithoutTeammate(actions: ReadonlyArray<{ key: unknown; params?: unknown }>): number | null {
+  return firstAnswerProblem(actions)?.index ?? null;
 }
 
 /** What stops a publish, said under the section it belongs to (never a toast alone). */
@@ -295,8 +310,8 @@ export function publishProblems(
     const missing = impl.params.filter((p) => p.required && !(a.params[p.key] ?? "").trim());
     if (missing.length) out.actions[a.id] = `Fill in ${missing.map((p) => p.label.toLowerCase()).join(" and ")}.`;
   }
-  const early = firstAnswerWithoutTeammate(d.actions);
-  if (early !== null && !out.actions[d.actions[early].id]) out.actions[d.actions[early].id] = ANSWER_WITHOUT_TEAMMATE;
+  const early = firstAnswerProblem(d.actions);
+  if (early && !out.actions[d.actions[early.index].id]) out.actions[d.actions[early.index].id] = early.error;
   // A condition with an operator that needs a value and no value would go
   // live comparing against "" and never match, so the automation silently
   // never runs. Opaque rows are API-authored groups the builder cannot edit,

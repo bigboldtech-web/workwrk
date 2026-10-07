@@ -20,6 +20,7 @@ import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
 import { UNLIMITED_AI } from "@/lib/ai-allowance";
 import { isModuleActive } from "@/lib/entitlements";
+import { plainData } from "./plain-data";
 import { TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
 import { actionViews } from "./actions";
@@ -112,7 +113,25 @@ export async function usableTeammatesNamed(viewer: Viewer, name: string): Promis
     orderBy: { id: "asc" },
     take: 5,
   });
-  return rows.filter((r) => canUseAgent(r, viewer));
+  const exact = rows.filter((r) => canUseAgent(r, viewer));
+  if (exact.length > 0) return exact;
+  // The model reads names made plain (plain-data.ts) and may type one back
+  // that way: matched in that form too, among the person's own teammates
+  // (review round 8).
+  const plain = plainName(wanted);
+  if (!plain) return [];
+  const usable = await prisma.agent.findMany({
+    where: { organizationId: viewer.organizationId, status: { not: "ARCHIVED" }, ...agentUsableWhere(viewer.userId) },
+    select: TEAMMATE_SELECT,
+    orderBy: { id: "asc" },
+    take: 500,
+  });
+  return usable.filter((r) => canUseAgent(r, viewer) && plainName(r.name) === plain).slice(0, 5);
+}
+
+/** A name as the model reads it, for matching: invisible marks gone, brackets plain, case folded. */
+function plainName(name: string): string {
+  return plainData(name).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 /** The teammates another one may ask (on, usable, not itself), by name, at most 20: block 2's list for ask_teammate. */
@@ -141,6 +160,41 @@ export const SHOWN_MESSAGES: Prisma.ChatMessageWhereInput = {
 
 /** The ChatMessage columns a thread reads. */
 export const MESSAGE_SELECT = { id: true, role: true, content: true, toolCalls: true, kind: true, meta: true, createdAt: true } as const;
+
+/** Chats read at once by perChat. */
+const CHATS_AT_ONCE = 10;
+
+/** One read per chat, a few chats at a time: a map of what each answered. */
+async function perChat<R>(ids: readonly string[], one: (id: string) => Promise<R | null | undefined>): Promise<Map<string, R>> {
+  const out = new Map<string, R>();
+  for (let i = 0; i < ids.length; i += CHATS_AT_ONCE) {
+    const got = await Promise.all(ids.slice(i, i + CHATS_AT_ONCE).map(async (id) => [id, await one(id)] as const));
+    for (const [id, r] of got) if (r) out.set(id, r);
+  }
+  return out;
+}
+
+/**
+ * Each chat's newest shown row: one short walk of its (sessionId, createdAt)
+ * index per chat. A groupBy for each chat's latest time read every row of
+ * every chat, and Talk asks, automations and groups make these chats grow
+ * for good (review round 8). Two rows at one instant: the larger id, as the
+ * thread orders them.
+ */
+export function newestShownPerChat(sessionIds: readonly string[]) {
+  return perChat(sessionIds, (id) =>
+    prisma.chatMessage.findFirst({
+      where: { sessionId: id, AND: [SHOWN_MESSAGES] },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { ...MESSAGE_SELECT, sessionId: true },
+    }),
+  );
+}
+
+/** When each chat's newest answer or report came: what the unread dot is for (review round 8). */
+export function newestAnswerPerChat(sessionIds: readonly string[]): Promise<Map<string, Date>> {
+  return perChat(sessionIds, async (id) => (await prisma.chatMessage.findFirst({ where: { sessionId: id, role: "ASSISTANT" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }))?.createdAt);
+}
 
 const PAGE_DEFAULT = 50;
 const PAGE_MAX = 100;
@@ -190,8 +244,8 @@ function statusOf(s: string): TeammateStatus {
 /**
  * The list's rows for these teammates, as this person sees them: the
  * requests waiting for them, an answer or report after their read cursor
- * (AgentPersonSetting.lastReadAt), and the chat's last line. Six queries
- * however many teammates there are. Unsorted (teammate-thread.ts
+ * (AgentPersonSetting.lastReadAt), and the chat's last line. Four queries,
+ * then two short index reads per chat (newestShownPerChat, newestAnswerPerChat). Unsorted (teammate-thread.ts
  * sortTeammates orders them).
  */
 export async function teammateRows(agents: readonly TeammateRecord[], viewer: Viewer, now: Date = new Date()): Promise<TeammateRow[]> {
@@ -219,26 +273,11 @@ export async function teammateRows(agents: readonly TeammateRecord[], viewer: Vi
     }),
   ]);
   const sessionIds = sessions.map((s) => s.id);
-  const [lastShown, lastAnswer] = await Promise.all([
-    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: sessionIds }, AND: [SHOWN_MESSAGES] }, _max: { createdAt: true } }),
-    // An answer or a routine's report: what the unread dot is for.
-    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: sessionIds }, role: "ASSISTANT" }, _max: { createdAt: true } }),
-  ]);
-  const pairs = lastShown.flatMap((g) => (g._max.createdAt ? [{ sessionId: g.sessionId, createdAt: g._max.createdAt }] : []));
-  const lastRows =
-    pairs.length > 0
-      ? await prisma.chatMessage.findMany({ where: { AND: [SHOWN_MESSAGES, { OR: pairs }] }, select: { ...MESSAGE_SELECT, sessionId: true } })
-      : [];
-  // Two rows at one instant: the larger id, as the thread orders them.
-  const lastBySession = new Map<string, (typeof lastRows)[number]>();
-  for (const row of lastRows) {
-    const seen = lastBySession.get(row.sessionId);
-    if (!seen || row.id > seen.id) lastBySession.set(row.sessionId, row);
-  }
+  // Each chat's last line, and its newest answer or report (the unread dot).
+  const [lastBySession, answeredAt] = await Promise.all([newestShownPerChat(sessionIds), newestAnswerPerChat(sessionIds)]);
   const sessionOf = new Map(sessions.map((s) => [s.agentId, s.id]));
   const readAt = new Map(settings.map((s) => [s.agentId, s.lastReadAt]));
   const waitingOf = new Map(waiting.map((w) => [w.agentId, w._count._all]));
-  const answeredAt = new Map(lastAnswer.map((g) => [g.sessionId, g._max.createdAt]));
 
   return agents.map((a): TeammateRow => {
     const sessionId = sessionOf.get(a.id) ?? null;
@@ -269,7 +308,8 @@ export async function teammateRows(agents: readonly TeammateRecord[], viewer: Vi
 /**
  * Whether any teammate this person may use, and that was not removed, has an
  * answer or report they have not read: a row's unread dot (teammateRows), for
- * every teammate at once. The AI sidebar's dot. Three queries at most.
+ * every teammate at once. The AI sidebar's dot. Two queries, then one short
+ * index read per chat.
  */
 export async function anyTeammateUnread(viewer: Viewer): Promise<boolean> {
   const sessions = await prisma.chatSession.findMany({
@@ -284,12 +324,11 @@ export async function anyTeammateUnread(viewer: Viewer): Promise<boolean> {
   });
   const live = sessions.flatMap((s) => (s.agentId ? [{ id: s.id, agentId: s.agentId }] : []));
   if (live.length === 0) return false;
-  const [settings, lastAnswer] = await Promise.all([
+  const [settings, answeredAt] = await Promise.all([
     prisma.agentPersonSetting.findMany({ where: { userId: viewer.userId, agentId: { in: live.map((s) => s.agentId) } }, select: { agentId: true, lastReadAt: true } }),
-    prisma.chatMessage.groupBy({ by: ["sessionId"], where: { sessionId: { in: live.map((s) => s.id) }, role: "ASSISTANT" }, _max: { createdAt: true } }),
+    newestAnswerPerChat(live.map((s) => s.id)),
   ]);
   const readAt = new Map(settings.map((s) => [s.agentId, s.lastReadAt]));
-  const answeredAt = new Map(lastAnswer.map((g) => [g.sessionId, g._max.createdAt]));
   return live.some((s) => {
     const answered = answeredAt.get(s.id);
     const read = readAt.get(s.agentId) ?? null;
