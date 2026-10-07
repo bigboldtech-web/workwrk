@@ -17,14 +17,16 @@
 
 import { prisma } from "@/lib/prisma";
 import { addressHref } from "@/lib/nav/object-href";
-import { nodeCtxForUser, nodeRoles } from "@/lib/access/node-access";
-import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
+import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { refKey, roleAtLeast, type NodeCtx, type NodeRef } from "@/lib/access/node-rules";
+import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
-import { viewerForUser } from "@/lib/access/viewer";
+import { viewerHeldIn } from "@/lib/access/viewer";
 import { giveKudos } from "@/lib/kudos-give";
 import { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, askAiToolNames, type ToolName } from "./tool-names";
 import { TEAMMATE_TOOLS } from "./teammate-tools";
@@ -88,12 +90,28 @@ export interface ToolDefinition {
 // never read or write past what that person could do in the UI.
 // ─────────────────────────────────────────────────────────
 
+/**
+ * The level the caller holds in THIS workspace, read fresh: their own where
+ * they are anchored, their membership's role where they work through a
+ * second membership (src/lib/access/acting-workspace.ts levelHeldIn), the
+ * level their own session here holds, never the anchor's. Null when they
+ * hold none here, or left, or were deactivated.
+ */
 async function callerLevel(ctx: ToolContext): Promise<string | null> {
-  const row = await prisma.user.findFirst({
-    where: { id: ctx.userId, organizationId: ctx.orgId },
-    select: { accessLevel: true },
+  const row = await prisma.user.findUnique({
+    where: { id: ctx.userId },
+    select: { organizationId: true, accessLevel: true, status: true, deletedAt: true },
   });
-  return row?.accessLevel ?? null;
+  if (!row || row.deletedAt || RULE_1_DENIED_STATUSES.has(String(row.status))) return null;
+  return levelHeldIn(ctx.userId, ctx.orgId, { organizationId: row.organizationId, accessLevel: row.accessLevel });
+}
+
+/** The caller's node context here, at the level they hold here; denied when they hold none. */
+async function callerNodeCtx(ctx: ToolContext): Promise<NodeCtx> {
+  const level = await callerLevel(ctx);
+  const nodeCtx = nodeCtxFromLevel(ctx.userId, ctx.orgId, level);
+  if (!level) nodeCtx.denied = true;
+  return nodeCtx;
 }
 
 /** The caller shaped like a session, for the shared goal rules (canSeeGoal,
@@ -235,7 +253,7 @@ const searchTasks: ToolDefinition = {
     // over-fetched batch filtered afterwards could leave a narrow reader in a
     // big workspace with nothing while readable tasks existed further down.
     // A denied or departed person reads nothing; the level is read fresh.
-    const nodeCtx = await nodeCtxForUser(ctx.userId, ctx.orgId);
+    const nodeCtx = await callerNodeCtx(ctx);
     if (nodeCtx.denied) return { count: 0, tasks: [] };
     const level = await callerLevel(ctx);
     if (!level) return { count: 0, tasks: [] };
@@ -463,7 +481,8 @@ const searchEmployees: ToolDefinition = {
     // already share a conversation with (the people picker's rule), and only
     // an admin or the People team sees anyone's access level (the directory
     // card leaves it out for everyone else).
-    const viewer = await viewerForUser(ctx.orgId, ctx.userId);
+    const level = await callerLevel(ctx);
+    const viewer = level ? await viewerHeldIn(ctx.orgId, ctx.userId, level) : null;
     if (!viewer) return { count: 0, employees: [] };
     let visibleIds: string[] | null = null;
     if (viewer.orgRole === "GUEST") {
@@ -1177,8 +1196,9 @@ const invitePersonWithRole: ToolDefinition = {
     // an admin unless the inviter is one; a refused level is an error the
     // model reports, never a silent downgrade), the company-domain lock,
     // the seat, the email with the workspace's real expiry, the audit row.
-    const me = await prisma.user.findFirst({
-      where: { id: ctx.userId, organizationId: ctx.orgId },
+    // By id: the inviter may work here through a second membership.
+    const me = await prisma.user.findUnique({
+      where: { id: ctx.userId },
       select: { email: true, firstName: true, lastName: true },
     });
     const outcome = await sendInvitation({
@@ -1287,7 +1307,7 @@ const createForm: ToolDefinition = {
 async function readableIds(ctx: ToolContext, refs: NodeRef[]): Promise<Set<string>> {
   const out = new Set<string>();
   if (refs.length === 0) return out;
-  const decisions = await nodeRoles(await nodeCtxForUser(ctx.userId, ctx.orgId), refs);
+  const decisions = await nodeRoles(await callerNodeCtx(ctx), refs);
   for (const [key, d] of decisions) if (roleAtLeast(d.role, "VIEW")) out.add(key);
   return out;
 }

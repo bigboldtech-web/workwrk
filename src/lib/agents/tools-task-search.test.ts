@@ -20,12 +20,22 @@ let rows: Row[] = all;
 let reads = 0;
 let denied = false;
 let level: string | null = "EMPLOYEE";
+/** The workspace the caller is anchored in; "org-1" is this one. */
+let home = "org-1";
+/** Their membership's role here when anchored elsewhere. */
+let membership: string | null = null;
 let afterRead: ((page: Row[]) => void) | null = null;
 
 type Keyset = { updatedAt: Date | { lt: Date }; id?: { lt: string } };
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findFirst: async () => (level ? legacyLevelRow(level) : null) },
+    user: {
+      findFirst: async () => (level ? legacyLevelRow(level) : null),
+      // The caller, by id (tools.ts callerLevel): anchored here, or in another
+      // workspace for a person here through a membership. A denied one is deactivated.
+      findUnique: async () => (level ? { organizationId: home, ...legacyLevelRow(level), status: denied ? "INACTIVE" : "ACTIVE", deletedAt: null } : null),
+    },
+    organizationMembership: { findUnique: async () => (membership ? { role: membership } : null) },
     item: {
       // Applies the keyset the tool sends (where.AND[0].OR), as the database would.
       findMany: async (args: { take: number; where: { AND?: Array<{ OR?: Keyset[] }> } }) => {
@@ -39,7 +49,10 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/access/node-access", () => ({ nodeCtxForUser: async () => ({ denied }), nodeRoles: async () => new Map() }));
+vi.mock("@/lib/access/node-access", () => ({
+  nodeCtxFromLevel: (userId: string, organizationId: string) => ({ userId, organizationId, orgAdmin: false, orgGuest: false, isAgent: false, denied: false }),
+  nodeRoles: async () => new Map(),
+}));
 vi.mock("@/lib/list-links-server", () => ({
   listReader: () => ({}),
   readableItemsVia: async (_v: unknown, items: Row[]) => new Map(items.map((it) => [it.id, { readable: it.boardId === "L-mine", via: null }])),
@@ -48,7 +61,7 @@ vi.mock("@/lib/list-links-server", () => ({
 const { TOOLS } = await import("./tools");
 const ctx = { orgId: "org-1", userId: "u-1" };
 
-beforeEach(() => { rows = all; reads = 0; denied = false; level = "EMPLOYEE"; afterRead = null; });
+beforeEach(() => { rows = all; reads = 0; denied = false; level = "EMPLOYEE"; home = "org-1"; membership = null; afterRead = null; });
 
 describe("search_tasks", () => {
   it("finds the readable tasks far down the workspace, one batch would have found none", async () => {
@@ -100,6 +113,19 @@ describe("search_tasks", () => {
     expect(await TOOLS.search_tasks.handler(ctx, {})).toEqual({ count: 0, tasks: [] });
     denied = false;
     level = null;
+    expect(await TOOLS.search_tasks.handler(ctx, {})).toEqual({ count: 0, tasks: [] });
+    expect(reads).toBe(0);
+  });
+
+  it("a person here through a second membership reads at that membership's level, never as nobody", async () => {
+    // Anchored in another workspace, a Member here: they read their tasks here.
+    home = "org-home";
+    membership = "EMPLOYEE";
+    const out = (await TOOLS.search_tasks.handler(ctx, {})) as { count: number };
+    expect(out.count).toBeGreaterThan(0);
+    // Without a membership here they read nothing, and nothing is queried.
+    membership = null;
+    reads = 0;
     expect(await TOOLS.search_tasks.handler(ctx, {})).toEqual({ count: 0, tasks: [] });
     expect(reads).toBe(0);
   });

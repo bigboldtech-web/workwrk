@@ -170,6 +170,27 @@ function keepUnsent(key: string, text: string): void {
   drafts.set(key, draftAfterFailure(drafts.get(key) ?? "", text, false));
 }
 
+/** How long after giving up on a send that had left the chat is read to see whether the server took it. */
+const UNSENT_CHECK_MS = 2500;
+
+/**
+ * Words a send gave up on AFTER its request left: the server may hold the
+ * question already (the stream route saves it first and carries on when the
+ * client goes), so a moment later the chat is read again and only words it
+ * does not hold come back (keepUnsent). A read that fails gives them back:
+ * seeing them twice is better than losing them.
+ */
+function keepUnlessSaved(chatId: string, key: string, text: string, sentAt: number): void {
+  setTimeout(() => {
+    void apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(chatId)}`, { cache: "no-store" }).then((r) => {
+      const saved =
+        r.ok &&
+        r.data.messages.some((m) => m.role === "USER" && (m.content ?? "").trim() === text && Date.parse(m.createdAt) >= sentAt - 60_000);
+      if (!saved) keepUnsent(key, text);
+    });
+  }, UNSENT_CHECK_MS);
+}
+
 /** A chat's kept words, handed back once. */
 function takeDraft(key: string): string {
   const d = drafts.get(key) ?? "";
@@ -350,10 +371,13 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   // on: the chat it was sent from, or the landing for a chat not made yet.
   const homeKey = draftKey();
   let given = false;
+  // Set when the stream request leaves: from then on the server may have it.
+  let sent: { chatId: string; at: number } | null = null;
   const giveBack = () => {
     if (given) return;
     given = true;
-    keepUnsent(homeKey, text);
+    if (sent) keepUnlessSaved(sent.chatId, homeKey, text, sent.at);
+    else keepUnsent(homeKey, text);
   };
   // The composer empties only when it held what is sent: a starter sent
   // while other words wait in it leaves them there.
@@ -446,6 +470,7 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   const ctrl = new AbortController();
   streamAbort = ctrl;
   try {
+    sent = { chatId: sessionId, at: Date.now() };
     const res = await fetch("/api/sidekick/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

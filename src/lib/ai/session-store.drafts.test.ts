@@ -6,7 +6,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const net = vi.hoisted(() => ({ failing: new Set<string>(), creating: null as null | Promise<void> }));
+const net = vi.hoisted(() => ({
+  failing: new Set<string>(),
+  creating: null as null | Promise<void>,
+  /** What the server holds of chat-x's newest question, when it took one. */
+  savedQuestion: null as null | string,
+  /** The stream request hangs until the client gives it up (aborts). */
+  hangStream: false,
+}));
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string, init?: { method?: string }) => {
     // Making a chat (the first send from the landing) can be held open.
@@ -16,12 +23,21 @@ vi.mock("@/lib/api-fetch", () => ({
     }
     const id = decodeURIComponent(url.split("/").pop() ?? "");
     if (net.failing.has(id)) return { ok: false, status: 500, error: "Something went wrong" };
-    // Each chat has one saved message, as every chat a list shows does.
-    return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages: [{ id: `${id}-m1`, role: "USER", content: "hi", createdAt: "2026-10-07T10:00:00.000Z" }] } };
+    // Each chat has one saved message, as every chat a list shows does, and
+    // chat-x the question the server took, when it took one.
+    const messages = [{ id: `${id}-m1`, role: "USER", content: "hi", createdAt: "2026-10-07T10:00:00.000Z" }];
+    if (id === "chat-x" && net.savedQuestion) messages.push({ id: "chat-x-m2", role: "USER", content: net.savedQuestion, createdAt: new Date().toISOString() });
+    return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages } };
   },
 }));
-// The stream itself never answers here: a send that reaches it is refused as not sent.
-vi.stubGlobal("fetch", async () => {
+// The stream itself never answers here: a send that reaches it is refused as
+// not sent, or hangs until the client gives it up.
+vi.stubGlobal("fetch", async (_url: string, init?: { signal?: AbortSignal }) => {
+  if (net.hangStream) {
+    return new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    });
+  }
   throw new TypeError("no network in tests");
 });
 vi.mock("@/lib/ai/events", () => ({ notifyAiChatsChanged: () => {} }));
@@ -120,5 +136,38 @@ describe("Ask AI drafts", () => {
     await aiSession.send("What is due this week?");
     // The starter never reached the model (no network here) and came back above them.
     expect(draft()).toBe("What is due this week?\n\nmy own notes");
+  });
+
+  it("gives a question back after moving on mid-send only when the server does not hold it", async () => {
+    vi.useFakeTimers();
+    try {
+      net.hangStream = true;
+      // The server took it: nothing comes back, so it is never asked twice.
+      await aiSession.open("chat-x");
+      net.savedQuestion = "Add a task for me: call Acme";
+      aiSession.setDraft("Add a task for me: call Acme");
+      const first = aiSession.send("Add a task for me: call Acme");
+      await vi.advanceTimersByTimeAsync(0);
+      await aiSession.open("chat-b");
+      await first;
+      await vi.advanceTimersByTimeAsync(3000);
+      await aiSession.open("chat-x");
+      expect(draft()).toBe("");
+
+      // The server never got it: it comes back to chat-x's composer.
+      net.savedQuestion = null;
+      aiSession.setDraft("Book the room");
+      const second = aiSession.send("Book the room");
+      await vi.advanceTimersByTimeAsync(0);
+      await aiSession.open("chat-b");
+      await second;
+      await vi.advanceTimersByTimeAsync(3000);
+      await aiSession.open("chat-x");
+      expect(draft()).toBe("Book the room");
+    } finally {
+      net.hangStream = false;
+      net.savedQuestion = null;
+      vi.useRealTimers();
+    }
   });
 });
