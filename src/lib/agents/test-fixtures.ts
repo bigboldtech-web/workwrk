@@ -279,7 +279,7 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
 }
 
 const FAKE_TOOL_PROPS: Record<string, unknown> = Object.fromEntries(
-  ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message"].map((k) => [k, { type: "string" }]),
+  ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request"].map((k) => [k, { type: "string" }]),
 );
 
 /** Every tool, each recording its call and answering fx.answers[tool]. */

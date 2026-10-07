@@ -186,7 +186,8 @@ const errorStop = new Map<string, StoppedTurn>();
 function answeredSince(messages: readonly TeammateMessageView[], stop: StoppedTurn): boolean {
   if (stop.expect) return groupStopAnswered(messages, stop);
   const saved = messages.filter((m) => !isTempMessage(m));
-  if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !stop.known.has(m.id));
+  // A delegated answer (origin) landing in this chat is never its continue's answer (Phase 2 step 5).
+  if (stop.questionId === null) return saved.some((m) => m.kind === "agent" && !m.replyTo && !m.origin && !stop.known.has(m.id));
   return saved.some((m) => m.kind === "agent" && m.replyTo === stop.questionId);
 }
 

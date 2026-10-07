@@ -110,6 +110,20 @@ beforeEach(() => {
 });
 
 describe("claimTeammateTurn", () => {
+  it("records the caller's run on a delegated turn (Phase 2 step 5)", async () => {
+    db.used = 0;
+    const r = await turn({ trigger: "DELEGATED", parentRunId: "caller-run", what: "AI teammate delegation" });
+    expect(r).toMatchObject({ ok: true });
+    expect(db.runs.at(-1)).toMatchObject({ parentRunId: "caller-run", input: { trigger: "DELEGATED", practice: false, routineId: null, parentRunId: "caller-run" } });
+  });
+
+  it("refuses a delegate at its own monthly limit before any question is claimed", async () => {
+    db.used = 40;
+    const r = await turn({ trigger: "DELEGATED", parentRunId: "caller-run" });
+    expect(r).toMatchObject({ ok: false, code: "agent_cap" });
+    expect(db.questions).toEqual([]);
+  });
+
   it("under the teammate's limit, claims one question and records the turn's run with it", async () => {
     db.used = 39;
     const r = await turn({ userId: "priya", trigger: "ROUTINE", routineId: "r1", practice: true, what: "AI teammate routine" });

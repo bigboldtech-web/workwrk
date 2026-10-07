@@ -36,7 +36,7 @@ function call(name: string, input: Record<string, unknown>, o: Partial<ExecuteAr
     agentRules: {},
     personRules: {},
     practice: false,
-    counters: { calls: 0, proposals: 0 },
+    counters: { calls: 0, proposals: 0, delegations: 0 },
     emit: (e) => events.push(e),
     ...o,
   });
@@ -242,7 +242,7 @@ describe("refusals", () => {
 
 describe("the turn's caps", () => {
   it("stops asking at the most requests one turn may make, or that may wait for one person", async () => {
-    const full = await call("post_in_talk", { channel: "#general", text: "x" }, { counters: { calls: 0, proposals: MAX_PROPOSALS_PER_TURN } });
+    const full = await call("post_in_talk", { channel: "#general", text: "x" }, { counters: { calls: 0, proposals: MAX_PROPOSALS_PER_TURN, delegations: 0 } });
     expect(dataOf(full.modelContent)).toEqual({ error: "Too many things are waiting for Priya's approval." });
     expect(fx.actions).toEqual([]);
 
@@ -253,7 +253,7 @@ describe("the turn's caps", () => {
   });
 
   it("counts every call, and refuses past the most one turn may make", async () => {
-    const counters = { calls: 0, proposals: 0 };
+    const counters = { calls: 0, proposals: 0, delegations: 0 };
     for (let i = 0; i < MAX_TOOL_CALLS_PER_TURN; i += 1) expect((await call("search_tasks", {}, { counters })).record.state).toBe("ran");
     const over = await call("search_tasks", {}, { counters });
     expect(over.record.state).toBe("failed");
@@ -261,10 +261,10 @@ describe("the turn's caps", () => {
   });
 
   it("counts the requests it makes", async () => {
-    const counters = { calls: 0, proposals: 0 };
+    const counters = { calls: 0, proposals: 0, delegations: 0 };
     await call("post_in_talk", { channel: "#general", text: "x" }, { counters });
     await call("send_kudos", { receiverEmail: "max@x.com", message: "Thanks" }, { counters });
-    expect(counters).toEqual({ calls: 2, proposals: 2 });
+    expect(counters).toEqual({ calls: 2, proposals: 2, delegations: 0 });
   });
 });
 

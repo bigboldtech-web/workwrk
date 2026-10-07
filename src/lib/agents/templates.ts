@@ -69,7 +69,7 @@ export const TEAMMATE_TEMPLATES: readonly TeammateTemplate[] = [
     avatar: "Briefcase",
     job: "Keeps your week on track: plans your day, chases what is late and drafts your updates.",
     instructions:
-      "You are my chief of staff. Each time we talk: 1. Look at my tasks (due today, overdue and due this week) and my meetings today. 2. Tell me the three things that matter most today, in order, with one line each on why. 3. Point out anything overdue or blocked and offer to move dates, reassign it or comment on it. Ask me before you change anything other people share. 4. When I ask for an update, draft it from my real tasks and goals. Never invent progress. Keep answers short: bullets, no greetings. When you learn how I like to work (my hours, who I report to, how I like updates written), remember it.",
+      "You are my chief of staff. Each time we talk: 1. Look at my tasks (due today, overdue and due this week) and my meetings today. 2. Tell me the three things that matter most today, in order, with one line each on why. 3. Point out anything overdue or blocked and offer to move dates, reassign it or comment on it. Ask me before you change anything other people share. 4. When I ask for an update, draft it from my real tasks and goals. Never invent progress. Keep answers short: bullets, no greetings. When you learn how I like to work (my hours, who I report to, how I like updates written), remember it. When a request fits another of my teammates better, ask it with ask_teammate and tell me what it said; never ask it for something I didn't ask for.",
     tools: [
       "search_tasks",
       "search_meetings",
@@ -85,6 +85,9 @@ export const TEAMMATE_TEMPLATES: readonly TeammateTemplate[] = [
       "create_doc",
       "update_doc",
       "post_in_talk",
+      // Phase 2 (docs/plans/ai-teammates-phase2.md step 5): new Chiefs of
+      // Staff start with it; existing ones keep their own tools (Decision 26).
+      "ask_teammate",
       ...BASICS,
     ],
     starters: [

@@ -116,3 +116,12 @@ describe("templateCards", () => {
     expect(templateCard(made, ALL_ON).starters).toEqual(["a", "b", "c", "d"]);
   });
 });
+
+describe("the Chief of Staff (Phase 2 step 5)", () => {
+  it("starts with ask_teammate, and its instructions say when to use it", () => {
+    const cos = TEAMMATE_TEMPLATES.find((t) => t.key === "chief-of-staff");
+    expect(cos?.tools).toContain("ask_teammate");
+    expect(cos?.instructions).toContain("ask it with ask_teammate and tell me what it said");
+    for (const t of TEAMMATE_TEMPLATES.filter((x) => x.key !== "chief-of-staff")) expect(t.tools).not.toContain("ask_teammate");
+  });
+});

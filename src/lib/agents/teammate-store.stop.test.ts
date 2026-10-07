@@ -151,4 +151,21 @@ describe("a teammate turn that broke off", () => {
       vi.useRealTimers();
     }
   });
+
+  it("never takes a delegated answer that lands in this chat for its stopped continue's answer (Phase 2 step 5)", async () => {
+    try {
+      await store.open(slug);
+      net.breakAfter = [JSON.stringify({ type: "tool_use", name: "create_task", input: { title: "Call Acme" } })];
+      await store.resume(slug);
+      expect(store.stateOf(slug).error).toBe("stopped");
+      net.rows = [{ id: "d1", kind: "agent", text: "Two are stuck.", practice: false, toolCalls: [], origin: { kind: "delegated", byName: "Chief of Staff" }, createdAt: AT }];
+      await store.refresh(slug);
+      expect(store.stateOf(slug).error).toBe("stopped");
+      net.rows = [...net.rows, { id: "c1", kind: "agent", text: "Done.", practice: false, toolCalls: [], createdAt: AT }];
+      await store.refresh(slug);
+      expect(store.stateOf(slug).error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

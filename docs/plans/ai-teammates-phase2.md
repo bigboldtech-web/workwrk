@@ -1275,3 +1275,9 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     8. A late skipped line could read under a later message. It now orders under its own.
     9. Two continues decided during one answer collapsed into one. Both now run, one after the other.
     10. The "Answers:" hint named a paused teammate. It now names only those that can answer, and says when none can.
+- **Step 5** (ask_teammate) proved locally against a real dev server and the stand-in model:
+  - A Chief of Staff asked Proof PM, making two runs. PM's run has `parentRunId` set to the Chief of Staff's run, and two AI questions were spent.
+  - PM's chat holds "Asked by Chief of Staff: ..." and its answer (`origin.delegated`). PM's request had no remember, forget, create_routine or ask_teammate, and carried the delegated block 2 line.
+  - A delegated card waited in PM's own chat, and the Chief of Staff's chat got the "waiting for your approval" line with a link to it. Approving answered `chat: teammate PM`, and PM continued in its own chat, with no new Chief of Staff run.
+  - A practice run said "Ask Proof PM" and ran nothing. A delegate at its monthly limit gave a failed result, with no run, and the caller's answer still finished.
+  - Found while proving, fixed: a delegated turn took the "what you decided" notes waiting in the delegate's own chat. Only the person's own turns and routines take them now.

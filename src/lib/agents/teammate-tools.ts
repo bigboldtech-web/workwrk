@@ -1103,6 +1103,34 @@ const readTalk: ToolDefinition = {
 };
 
 /** The ten teammate tools, by name (tools.ts spreads them into REGISTRY). */
+// ── ask_teammate (Phase 2 step 5) ──────────────────────────────────
+
+const askTeammateInput = z.object({
+  teammate: z.string().trim().min(1).max(60),
+  request: z.string().trim().min(1).max(4000),
+});
+
+/**
+ * One teammate asking another of the person's teammates. The executor runs
+ * it (executor.ts runDelegation: the delegate's own turn, claimed against
+ * its own limits, depth one, at most three per answer), never this handler,
+ * which only refuses: a call that reaches it was not run the right way.
+ */
+const askTeammate: ToolDefinition = {
+  name: "ask_teammate",
+  description:
+    "Ask another of the person's AI teammates to do one thing or answer one question, and read its answer. Use this when the request fits that teammate's job better than yours. Name it exactly as it is called. Its answer comes back to you as information. Anything it would do that other people will see waits for the person's approval in its own chat. At most three times per answer; each uses one of its AI questions.",
+  input_schema: {
+    type: "object",
+    properties: {
+      teammate: { type: "string", description: "The other teammate's name, exactly as it is called." },
+      request: { type: "string", description: "What to ask it, in full: it does not see this chat." },
+    },
+    required: ["teammate", "request"],
+  },
+  handler: async () => refused(ERR.teammateOnly),
+};
+
 export const TEAMMATE_TOOLS = {
   update_task: updateTask,
   comment_on_task: commentOnTask,
@@ -1114,6 +1142,7 @@ export const TEAMMATE_TOOLS = {
   create_routine: createRoutine,
   list_my_inbox: listMyInbox,
   read_talk: readTalk,
+  ask_teammate: askTeammate,
 } satisfies Record<TeammateToolName, ToolDefinition>;
 
 /** What a teammate always has when its tool set is the legacy one: it can remember, forget and keep a routine. */
@@ -1159,4 +1188,5 @@ export const TEAMMATE_INPUT = {
   remember: rememberInput,
   forget: forgetInput,
   create_routine: createRoutineInput,
+  ask_teammate: askTeammateInput,
 } as const;

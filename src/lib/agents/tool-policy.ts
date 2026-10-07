@@ -57,6 +57,9 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   get_team_alignment_rollup: "READ",
   list_my_inbox: "READ",
   read_talk: "READ",
+  // It never asks itself: what the teammate it asks would do asks for itself
+  // (docs/plans/ai-teammates-phase2.md step 5).
+  ask_teammate: "READ",
   // The person's own work, or something new nobody is told about.
   create_task: "INTERNAL",
   create_sop: "INTERNAL",
@@ -105,6 +108,45 @@ export const MAX_PENDING_PER_PERSON = 100;
 
 /** The most tool calls one turn may make. */
 export const MAX_TOOL_CALLS_PER_TURN = 30;
+
+/** The most other teammates one answer may ask (ask_teammate; Decision 16). */
+export const MAX_DELEGATIONS_PER_TURN = 3;
+
+/**
+ * What started a turn, as the policy reads it (Phase 2): the person's own
+ * chats (CHAT, RESUME), a routine, another teammate's ask (DELEGATED), a
+ * Talk message (TALK) or an automation's step (AUTOMATION).
+ */
+export type PolicyTrigger = "CHAT" | "RESUME" | "ROUTINE" | "DELEGATED" | "TALK" | "AUTOMATION";
+
+/**
+ * Whether the person's own "Don't ask" applies (Decision 17): only in their
+ * own chats and their routines. A turn they are not watching, started by
+ * another teammate, a Talk message or an automation, asks for everything
+ * above INTERNAL.
+ */
+export function honoursDontAsk(t: PolicyTrigger): boolean {
+  return t === "CHAT" || t === "RESUME" || t === "ROUTINE";
+}
+
+/** Tools only a turn the person watches is offered: their lines land in a chat nobody may be reading (Decision 18). */
+export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["remember", "forget", "create_routine", "ask_teammate"]);
+
+/** Tools that read other people's words to the person: never offered where the answer posts or flows on (Decision 12). */
+export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["read_talk", "list_my_inbox"]);
+
+/**
+ * The tools a turn is offered, by what started it: a routine never asks
+ * another teammate (it would fan out unattended); a delegated turn has
+ * none of the watched-only tools; a Talk or automation turn also reads no
+ * one else's words. A chat and its continue keep everything.
+ */
+export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
+  if (t === "CHAT" || t === "RESUME") return [...enabled];
+  if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
+  if (t === "DELEGATED") return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n));
+  return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n));
+}
 
 /**
  * Tools no teammate is given, whatever its saved tool set says (legacy

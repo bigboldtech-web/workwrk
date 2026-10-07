@@ -47,6 +47,8 @@ const CONCEPT_ICON: Record<ToolConcept, LucideIcon> = {
   memory: Brain,
   routine: CalendarClock,
   inbox: Inbox,
+  // One teammate asking another (ask_teammate, Phase 2).
+  teammate: Users,
 };
 
 /** A teammate's call that did not run: waiting for approval, or a practice run. */

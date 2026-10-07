@@ -6,6 +6,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTION_TTL_MS,
+  MAX_DELEGATIONS_PER_TURN,
+  honoursDontAsk,
+  toolsForTrigger,
   ALWAYS_ASK,
   BASE_RISK,
   EDITABLE_FIELD,
@@ -42,11 +45,12 @@ describe("every tool has a class", () => {
     // A new doc, form or table is open to every member: making one is outward (review round 1).
     expect(by("OUTWARD")).toEqual(["create_data_table", "create_doc", "create_form", "create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
     expect(by("READ")).toEqual([
-      "get_team_alignment_rollup", "list_data_tables", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
+      // ask_teammate never asks itself: what the teammate it asks would do asks for itself (Phase 2).
+      "ask_teammate", "get_team_alignment_rollup", "list_data_tables", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
       "list_my_sops", "list_my_weekly_reviews", "read_talk", "search_contracts", "search_employees", "search_meetings",
       "search_okrs", "search_sops", "search_tasks",
     ]);
-    expect(by("INTERNAL")).toHaveLength(ALL.length - 15 - 9 - 1);
+    expect(by("INTERNAL")).toHaveLength(ALL.length - 16 - 9 - 1);
   });
 
   it("an escalation never lowers a class, and an unknown tool is the strictest", () => {
@@ -218,5 +222,28 @@ describe("the limits and the lists", () => {
     }
     expect(EDITABLE_FIELD.post_in_talk?.field).toBe("text");
     expect(EDITABLE_FIELD.send_kudos?.field).toBe("message");
+  });
+});
+
+describe("what a turn is offered, by what started it (Phase 2)", () => {
+  const ALL_TEAMMATE: ToolName[] = ["search_tasks", "post_in_talk", "remember", "forget", "create_routine", "ask_teammate", "read_talk", "list_my_inbox"];
+  it("keeps everything in the person's own chats", () => {
+    expect(toolsForTrigger(ALL_TEAMMATE, "CHAT")).toEqual(ALL_TEAMMATE);
+    expect(toolsForTrigger(ALL_TEAMMATE, "RESUME")).toEqual(ALL_TEAMMATE);
+  });
+  it("never lets a routine ask another teammate", () => {
+    expect(toolsForTrigger(ALL_TEAMMATE, "ROUTINE")).toEqual(ALL_TEAMMATE.filter((t) => t !== "ask_teammate"));
+  });
+  it("gives a delegated turn none of the watched-only tools", () => {
+    expect(toolsForTrigger(ALL_TEAMMATE, "DELEGATED")).toEqual(["search_tasks", "post_in_talk", "read_talk", "list_my_inbox"]);
+  });
+  it("gives a Talk or automation turn nobody else's words either", () => {
+    expect(toolsForTrigger(ALL_TEAMMATE, "TALK")).toEqual(["search_tasks", "post_in_talk"]);
+    expect(toolsForTrigger(ALL_TEAMMATE, "AUTOMATION")).toEqual(["search_tasks", "post_in_talk"]);
+  });
+  it("honours the person's Don't ask only where they watch, and in their routines", () => {
+    expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
+    expect(BASE_RISK.ask_teammate).toBe("READ");
+    expect(MAX_DELEGATIONS_PER_TURN).toBe(3);
   });
 });

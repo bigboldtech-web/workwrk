@@ -38,7 +38,8 @@ export type ToolConcept =
   | "talk"
   | "memory"
   | "routine"
-  | "inbox";
+  | "inbox"
+  | "teammate";
 
 export interface ToolVerb {
   concept: ToolConcept;
@@ -88,9 +89,10 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   create_routine: { concept: "routine", done: "Created routine", failed: "Couldn't create the routine" },
   list_my_inbox: { concept: "inbox", done: "Checked your Inbox", failed: "Couldn't check your Inbox" },
   read_talk: { concept: "talk", done: "Read Talk messages", failed: "Couldn't read Talk" },
+  ask_teammate: { concept: "teammate", done: "Asked", failed: "Couldn't ask the teammate" },
 };
 
-const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key"] as const;
+const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key", "teammate"] as const;
 
 /** The subject a sentence names, from the call's own input. */
 export function toolSubject(input: Record<string, unknown> | null | undefined): string | null {

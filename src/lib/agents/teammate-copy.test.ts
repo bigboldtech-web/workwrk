@@ -195,7 +195,7 @@ describe("the builders", () => {
 });
 
 describe("labels", () => {
-  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk"];
+  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk", "ask_teammate"];
 
   it("name every tool a teammate may be given", () => {
     expect(Object.keys(copy.TOOL_PICKER_COPY).sort()).toEqual([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].sort());
@@ -203,7 +203,7 @@ describe("labels", () => {
     for (const c of Object.values(copy.TOOL_PICKER_COPY)) expect(c.label.trim()).not.toBe("");
   });
   it("give every tool but the reads a card verb", () => {
-    const reads = ["search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status", "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk"];
+    const reads = ["search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status", "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk", "ask_teammate"];
     // move_task's title is its own builder (moveTitle).
     const expected = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].filter((t) => !reads.includes(t) && t !== "move_task").sort();
     expect(Object.keys(copy.ACTION_VERB).sort()).toEqual(expected);
