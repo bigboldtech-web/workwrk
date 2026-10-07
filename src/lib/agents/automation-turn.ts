@@ -19,6 +19,7 @@
 // Server-only: imports prisma through its helpers.
 
 import { isAiConfigured } from "@/lib/ai-client";
+import { withAutomationDepth } from "@/lib/automation/chain-depth";
 import { publishToUser } from "@/lib/realtime-bus";
 import type { ActionContext } from "@/lib/automation/registry-actions";
 import { resolveActingPerson } from "./acting";
@@ -90,7 +91,9 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
 
   let turn: TurnResult | null = null;
   try {
-    turn = await runTeammateTurn({
+    // What the teammate's own edits dispatch counts toward this automation's
+    // chain, so the depth limit holds (review round 3).
+    turn = await withAutomationDepth(ctx.depth + 1, () => runTeammateTurn({
       agent: teammateAgentFrom(agent),
       person,
       sessionId: session.id,
@@ -102,7 +105,7 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
       questionId: claim.questionId,
       streaming: false,
       origin: { kind: "automation", workflowId: ctx.workflowId, workflowName, automationRunId: ctx.runId, instruction, values },
-    });
+    }));
   } catch (err) {
     // runTeammateTurn answers its own failures; what this one did is unknown, so its question is kept.
     console.error(`[agents] automation turn ${claim.runId} threw: ${errorLine(err)}`);

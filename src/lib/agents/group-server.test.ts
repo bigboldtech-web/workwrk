@@ -90,7 +90,8 @@ vi.mock("@/lib/prisma", () => {
           return { count: 2 };
         },
       },
-      $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+      // Both forms: a callback, or a list of statements run together (leaveGroup).
+      $transaction: async (fn: ((t: typeof tx) => Promise<unknown>) | Promise<unknown>[]) => (Array.isArray(fn) ? Promise.all(fn) : fn(tx)),
     },
   };
 });

@@ -1406,3 +1406,21 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
       - Menus take focus after the portal shows them.
       - Each panel refocuses after Add teammate, Back and Remove.
       - The members menu shows a list that failed to load, with Try again.
+- **Step 8, review round 3** (three read-only reviewers: round 2's fixes, a fresh pass on lost or changed content, a fresh pass on races): 13 found (no high, 3 medium; 1 found twice), 12 fixed.
+  - Medium:
+    1. Someone else's save or publish could take the creator's AI teammate step out of the draft, or publish it away. Only the creator may now remove the step, by save or publish, as restore already required.
+    2. A Talk turn's task search reached the asker's private Lists, and its answer posts with no card. In a Talk turn search_tasks now finds only tasks in Lists every reader of the answer can open, the rule a scheduled AI update already follows. search_sops, whose finds can't be held to every reader, is not given to Talk turns. An automation's turn keeps both, since its creator chooses where its answer goes (round 1, decided).
+    3. An automation's teammate re-fired automations through its own edits at chain depth 0, so the chain limit never applied. Everything a teammate step dispatches now carries the run's depth plus one (`src/lib/automation/chain-depth.ts`, stamped in dispatchEvent).
+  - Low:
+    - Locks and writes:
+      - The claim takes the teammate's and the automation's rows FOR NO KEY UPDATE. Claims still wait for each other, but an insert's key check never waits on them, which could deadlock with FOR UPDATE.
+      - Leaving a group archives it and cancels its cards in one transaction.
+      - A Talk answer's request reads answered right after the answer is saved, and the feed reads a request whose answer is shown as answered.
+      - The schedule move's compare-and-swap covers its instructions.
+    - Automations:
+      - A run that asked a teammate never assigns a Guest.
+      - The builder's turn-on lock follows the live version, as the server does.
+      - A paused teammate reads by name, marked paused.
+    - Group chats:
+      - Removing a teammate asks first.
+      - A failed rename's Try again keeps the typed name.

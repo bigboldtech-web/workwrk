@@ -220,6 +220,8 @@ export type TurnOrigin =
       /** What kind of place: the words the server's own lines use. */
       placeKind: TalkPlaceKind;
       audience: number;
+      /** Who will read the answer (the asker first): what its tools find is held to what they all may open (review round 3). */
+      readerIds?: readonly string[];
       context: ReadonlyArray<{ from: string; text: string }>;
     }
   | AutomationOrigin;
@@ -874,7 +876,13 @@ async function runLoop(
 ): Promise<void> {
   const counters = { calls: 0, proposals: 0, delegations: 0 };
   const agent = { id: a.agent.id, slug: a.agent.slug, name: a.agent.name };
-  const turn = { sessionId: a.sessionId, routineId: a.trigger === "ROUTINE" ? (a.routine?.id ?? null) : null, trigger: a.trigger, runId: a.runId };
+  const turn = {
+    sessionId: a.sessionId,
+    routineId: a.trigger === "ROUTINE" ? (a.routine?.id ?? null) : null,
+    trigger: a.trigger,
+    runId: a.runId,
+    ...(a.origin?.kind === "talk" && a.origin.readerIds ? { audience: a.origin.readerIds } : {}),
+  };
   let waiting = false;
   for (let call = 0; call < MAX_MODEL_CALLS; call += 1) {
     // The last word: once a request waits for the person, at the last call

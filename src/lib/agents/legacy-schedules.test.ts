@@ -170,7 +170,7 @@ describe("moving an old schedule", () => {
     st.people["u-olivia"] = person("u-olivia");
     st.agents = [agent()];
     expect(await convertLegacySchedules(NOW, { limit: 100 })).toEqual({ found: 1, moved: 1, stopped: 0, taken: 0, failed: 0 });
-    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes" }]);
+    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes", autonomousPrompt: "Flag deals stuck a week." }]);
     expect(st.casData).toEqual([{ autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: NOW, scheduleMoveReason: null }]);
     expect(st.routines).toEqual([
       {

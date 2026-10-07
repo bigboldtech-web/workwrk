@@ -99,7 +99,7 @@ function turn(o: Partial<Parameters<typeof claimTeammateTurn>[0]> = {}) {
   });
 }
 
-const lockOf = (table: string) => db.sql.findIndex((s) => s.includes(`FROM "${table}"`) && s.includes("FOR UPDATE"));
+const lockOf = (table: string) => db.sql.findIndex((s) => s.includes(`FROM "${table}"`) && /FOR (NO KEY )?UPDATE/.test(s));
 
 beforeEach(() => {
   db.agent = { name: "Status Reporter", cap: 40 };
@@ -136,6 +136,12 @@ describe("claimTeammateTurn for an automation (Phase 2 step 7)", () => {
     const count = db.sql.find((x) => x.includes('"automationWorkflowId"')) ?? "";
     expect(count).toContain('"questionId" IS NOT NULL');
     expect(count).toContain("date_trunc('day', now() AT TIME ZONE 'UTC')");
+  });
+
+  it("takes the teammate's and the automation's rows FOR NO KEY UPDATE, so a key check never waits on them (review round 3)", async () => {
+    await turn({ trigger: "AUTOMATION", workflow: WORKFLOW });
+    expect(db.sql[lockOf("Agent")]).toContain("FOR NO KEY UPDATE");
+    expect(db.sql[lockOf("AutomationWorkflow")]).toContain("FOR NO KEY UPDATE");
   });
 
   it("locks the automation's row after the teammate's, before the plan's", async () => {

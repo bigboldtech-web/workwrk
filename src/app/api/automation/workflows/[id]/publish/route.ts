@@ -28,7 +28,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const workflow = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, status: true, triggerEvent: true, definition: true, createdById: true },
+    select: { id: true, status: true, triggerEvent: true, definition: true, createdById: true, publishedVersionId: true },
   });
   if (!workflow) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   if (workflow.status === "ARCHIVED") {
@@ -60,7 +60,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   // An AI teammate step works as the creator: only they may publish one, and
   // only with a teammate they can use (the version records its publisher,
   // and a run checks both again).
-  const teammate = await teammateStepProblem(workflow.definition, { saverId: ctx.userId, creatorId: workflow.createdById, viewer: ctx.viewer });
+  let teammate = await teammateStepProblem(workflow.definition, { saverId: ctx.userId, creatorId: workflow.createdById, viewer: ctx.viewer });
+  // Nor publish one away: a live version that holds one is the creator's to replace (review round 3).
+  if (!teammate && workflow.publishedVersionId) {
+    const live = await prisma.automationWorkflowVersion.findFirst({ where: { id: workflow.publishedVersionId, organizationId: ctx.orgId }, select: { definitionJson: true } });
+    const p = await teammateStepProblem(live?.definitionJson ?? null, { saverId: ctx.userId, creatorId: workflow.createdById, viewer: ctx.viewer });
+    if (p?.status === 403) teammate = p;
+  }
   if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
   // A condition such as "priority equals" with no value would go live and
   // compare against "" on every event, never matching, so the automation

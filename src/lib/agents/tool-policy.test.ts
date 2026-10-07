@@ -249,6 +249,11 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     expect(toolsForTrigger(withRecords, "DELEGATED")).toEqual(withRecords);
     expect(toolsForTrigger(withRecords, "CHAT")).toEqual(withRecords);
   });
+  it("gives a Talk turn no SOP search, whose finds can't be held to every reader (review round 3)", () => {
+    expect(toolsForTrigger(["search_tasks", "search_sops"], "TALK")).toEqual(["search_tasks"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops"], "AUTOMATION")).toEqual(["search_tasks", "search_sops"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops"], "CHAT")).toEqual(["search_tasks", "search_sops"]);
+  });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
     expect(BASE_RISK.ask_teammate).toBe("READ");

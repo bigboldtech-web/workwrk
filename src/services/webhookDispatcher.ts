@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
+import { automationDepthNow } from "@/lib/automation/chain-depth";
 
 /**
  * Webhook dispatcher.
@@ -39,7 +40,14 @@ export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
   // product write-path that dispatched this event. Kicked off before the
   // subscription gate below so automations run even when the org has no
   // webhook subscribers.
-  runAutomationsForEvent({ organizationId, event, payload }).catch(() => {});
+  // Inside an automation's teammate step, the event counts toward that
+  // automation's chain (src/lib/automation/chain-depth.ts; review round 3).
+  const depth = automationDepthNow();
+  const chained =
+    depth !== null && payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).__automationDepth !== "number"
+      ? { ...(payload as Record<string, unknown>), __automationDepth: depth }
+      : payload;
+  runAutomationsForEvent({ organizationId, event, payload: chained }).catch(() => {});
 
   const subs = await prisma.webhookSubscription.findMany({
     where: {

@@ -184,7 +184,8 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
   const reason = outcome.kind === "stop" ? outcome.reason : null;
   const routineId = await prisma.$transaction(async (tx): Promise<string | null | false> => {
     const cas = await tx.agent.updateMany({
-      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron },
+      // The instructions too: one an Admin saved meanwhile is moved on the next tick, never lost (review round 3).
+      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron, autonomousPrompt: agent.autonomousPrompt },
       data: { autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: now, scheduleMoveReason: reason },
     });
     if (cas.count !== 1) return false;

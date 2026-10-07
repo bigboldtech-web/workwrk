@@ -248,6 +248,7 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
     groupDefaultName: [[["Chief of Staff", "Market Analyst", "Triage"]], "Chief of Staff, Market Analyst and Triage"],
     leftToast: [["Offsite crew"], "You left Offsite crew"],
     composerHintLead: [["Chief of Staff"], "Name a teammate with @ to ask it. Otherwise Chief of Staff answers."],
+    removeTitle: [["Triage"], "Remove Triage from this group chat?"],
   };
   const g = copy.GROUP_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -323,6 +324,7 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may. It asks again tomorrow (UTC)."],
+    pausedLabel: [["Triage"], "Triage (paused: it won't run until it is turned back on)"],
     askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],
   };
   const t = copy.AUTOMATION_TEAMMATE_COPY as unknown as Record<string, unknown>;

@@ -1113,6 +1113,8 @@ export const GROUP_COPY = {
   removedLine: (name: string) => `Removed ${name}`,
   cancelledLeft: "Cancelled: you left the group chat.",
   leaveUnsent: "The message you were writing in it will not be kept.",
+  removeTitle: (name: string) => `Remove ${name} from this group chat?`,
+  removeBody: "Anything it is still waiting on for your approval here is cancelled. Its answers so far stay.",
   teammatesLoadFailed: "Couldn't load your teammates.",
   teammatesNotLoaded: "Loading your teammates…",
   cancelledRemoved: "Cancelled: this teammate was removed from the group chat.",
@@ -1281,6 +1283,7 @@ export const AUTOMATION_TEAMMATE_COPY = {
   answerHidden: "Only the person who made this automation and admins can read what the teammate answered.",
   outputHidden: "What this step returned can carry the AI teammate's answer, so only the person who made this automation and admins can read it.",
   teammateNotFound: "Pick a teammate you can use.",
+  pausedLabel: (name: string) => `${name} (paused: it won't run until it is turned back on)`,
   noRequest: "Write what the teammate should do.",
   noAnswerToUse: "This step uses the AI teammate's answer, and the AI teammate step before it didn't answer, so it didn't run.",
   /** set_field with an answer the field can't take: never repeats the answer (the run's errors are read more widely). */

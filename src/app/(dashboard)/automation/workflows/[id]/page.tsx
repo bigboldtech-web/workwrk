@@ -138,6 +138,8 @@ interface ApiWorkflow {
   can: { edit: boolean; archive: boolean };
   /** The viewer made it: only they may add or change an AI teammate step (it works as them). */
   viewerIsCreator?: boolean;
+  /** What runs holds an AI teammate step: only its creator may turn it back on. */
+  liveHasTeammateStep?: boolean;
 }
 
 interface PlaceField { key: string; label: string; type: string; choices?: Array<{ value: string; label: string }> }
@@ -455,7 +457,7 @@ export default function AutomationBuilderPage() {
   const [named, setNamed] = useState<PersonRef[]>([]);
   const [recipientQuery, setRecipientQuery] = useState("");
   // The creator's own AI teammates, for an "Ask an AI teammate" step.
-  const [teammates, setTeammates] = useState<Array<{ value: string; label: string }>>([]);
+  const [teammates, setTeammates] = useState<Array<{ value: string; label: string; paused: boolean }>>([]);
   const [conditionQuery, setConditionQuery] = useState("");
   // Each list grows from its first page and its searches, merged by id and
   // kept in name order.
@@ -530,7 +532,9 @@ export default function AutomationBuilderPage() {
     let alive = true;
     void apiFetch<{ teammates: Array<{ slug: string; name: string; status: string }> }>("/api/agents/teammates", { cache: "no-store" }).then((r) => {
       if (alive && r.ok && Array.isArray(r.data.teammates)) {
-        setTeammates(r.data.teammates.filter((t) => t.status === "ENABLED").map((t) => ({ value: t.slug, label: t.name })));
+        // Paused ones too: a step that asks one reads it by name, marked paused,
+        // never "a teammate you can't use" (review round 3). Only ENABLED ones are offered.
+        setTeammates(r.data.teammates.filter((t) => t.status === "ENABLED" || t.status === "DISABLED").map((t) => ({ value: t.slug, label: t.name, paused: t.status !== "ENABLED" })));
       }
     });
     return () => {
@@ -592,6 +596,8 @@ export default function AutomationBuilderPage() {
   // automation (the server refuses their save); its on/off switch stays theirs.
   const teammateLocked = Boolean(wf && !wf.viewerIsCreator && draft?.actions.some((a) => a.key === TEAMMATE_STEP_KEY));
   const readOnly = !canEdit || teammateLocked;
+  // Turning it back on is the creator's when what RUNS holds the step (the activate route's rule).
+  const onLocked = Boolean(wf && !wf.viewerIsCreator && wf.liveHasTeammateStep);
   const dirty = Boolean(draft && canEdit && draftSnapshot(draft) !== baseline);
 
   const triggerByKey = useMemo(() => new Map(catalog.triggers.map((t) => [t.key, t])), [catalog.triggers]);
@@ -1226,8 +1232,9 @@ export default function AutomationBuilderPage() {
         sections={peopleSections(recipients, recipientQuery, true, allowAdmins, action.key === "send_email")} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
     }
     if (p.type === "teammate") {
-      return <Token label={value ? teammates.find((t) => t.value === value)?.label ?? AUTOMATION_TEAMMATE_COPY.teammateNotFound : null} placeholder="Pick a teammate" ariaLabel={p.label} readOnly={false}
-        sections={[{ options: teammates }]} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
+      const chosen = value ? teammates.find((t) => t.value === value) : undefined;
+      return <Token label={value ? (chosen ? (chosen.paused ? AUTOMATION_TEAMMATE_COPY.pausedLabel(chosen.label) : chosen.label) : AUTOMATION_TEAMMATE_COPY.teammateNotFound) : null} placeholder="Pick a teammate" ariaLabel={p.label} readOnly={false}
+        sections={[{ options: teammates.filter((t) => !t.paused).map((t) => ({ value: t.value, label: t.label })) }]} selected={value} onSelect={set} invalid={Boolean(problems?.actions[row.id]) && p.required && !value} />;
     }
     if (p.type === "board") {
       return <Token label={value ? listLabel(value) ?? "A List you can't open" : null} placeholder="Pick a List" ariaLabel={p.label} readOnly={false}
@@ -1381,8 +1388,8 @@ export default function AutomationBuilderPage() {
             {/* A locked view can pause it, never turn it back on (the server refuses that; review round 2). */}
             <Switch
               checked={wf.status === "ACTIVE"}
-              disabled={toggling || offline || (teammateLocked && wf.status !== "ACTIVE")}
-              title={teammateLocked && wf.status !== "ACTIVE" ? AUTOMATION_TEAMMATE_COPY.creatorOnlyOn : undefined}
+              disabled={toggling || offline || (onLocked && wf.status !== "ACTIVE")}
+              title={onLocked && wf.status !== "ACTIVE" ? AUTOMATION_TEAMMATE_COPY.creatorOnlyOn : undefined}
               onChange={(v) => void setActive(v)}
               aria-label="Turn the automation on"
             />
@@ -1446,7 +1453,7 @@ export default function AutomationBuilderPage() {
                 with nothing to give. What every Member can do is copy it. */}
             <span className="min-w-0 truncate">
               {teammateLocked && canEdit
-                ? `View only. Its AI teammate step works as ${wf.createdByName ?? "its creator"}, so only they can change it${wf.status === "ACTIVE" ? ". You can still pause it." : " or turn it back on."}`
+                ? `View only. Its AI teammate step works as ${wf.createdByName ?? "its creator"}, so only they can change it${wf.status === "ACTIVE" ? ". You can still pause it." : onLocked ? " or turn it back on." : "."}`
                 : `View only. ${wf.createdByName ? `${wf.createdByName} made this one.` : ""} You can change the automations you make.`}
             </span>
             {canCreate ? (
