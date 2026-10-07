@@ -118,11 +118,15 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // answer to post or send: the step fails with its reason, and the words
   // stay in the creator's chat.
   if (!turn || turn.failedBeforeAnything || turn.error) throw new Error(turn?.error ?? AUTOMATION_TEAMMATE_COPY.noAnswer(agent.name));
+  // No words to use (it only called tools, or nothing was left once cleaned)
+  // is no answer: later steps never post around an empty one.
+  const answer = cleanOutwardText(turn.text, { talk: true, max: AUTOMATION_ANSWER_MAX });
+  if (!answer.trim()) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswer(agent.name));
 
   return {
     teammate: agent.name,
     teammateSlug: agent.slug,
-    answer: cleanOutwardText(turn.text, { talk: true, max: AUTOMATION_ANSWER_MAX }),
+    answer,
     waiting: turn.proposedActionIds.length,
     agentRunId: claim.runId,
   };

@@ -79,6 +79,9 @@ const MAX_TOKENS = 4096;
 
 /** The most chat rows the model reads back... */
 export const HISTORY_TURNS = 30;
+
+/** An automation's answer in the creator's chat (Phase 2 step 7): shown in the thread, never read back as a turn. */
+export const AUTOMATION_ANSWER_KIND = "AUTOMATION";
 /** ...and the most characters of each. */
 export const HISTORY_CHARS = 4000;
 
@@ -457,12 +460,11 @@ export async function buildHistory(
       ...(exclude.length > 0 ? { id: { notIn: exclude } } : {}),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    // An automation's answers (up to 20 a day) are left out, so read more
-    // and keep the window after them. A JS filter: a negated JSON path in
-    // SQL also drops the rows that lack the key (run-query.ts).
-    take: HISTORY_TURNS * 3,
+    take: HISTORY_TURNS,
     select: HISTORY_SELECT,
   });
+  // An automation's answers have their own kind, which the query leaves
+  // out; one saved without it is left out here too.
   const kept = rows.filter((r) => !isAutomationRow(r)).slice(0, HISTORY_TURNS);
   return historyMessages([...kept].reverse(), { selfAgentId: opts.selfAgentId, answeringId: opts.answeringId });
 }
@@ -733,18 +735,26 @@ function askOnly(rules: ApprovalRules): ApprovalRules {
 /** Steps 1 to 4: the tools, the rules, the system blocks, the history and the client. */
 async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   const org = a.person.organizationId;
+  // A turn whose answer goes out with no card (posted in Talk, or used by an
+  // automation's later steps) stands alone: it reads neither the person's
+  // chat with the teammate nor what it remembers for them, either of which
+  // can hold what it read of other people's words in a chat they watched
+  // (review of step 7). The request carries what it needs.
+  const standsAlone = a.trigger === "TALK" || a.trigger === "AUTOMATION";
   const [tablesOn, talkOn, setting, workspace, memory, history] = await Promise.all([
     isModuleActive(org, "workwrk-tables"),
     isModuleActive(org, "workwrk-talk"),
     prisma.agentPersonSetting.findUnique({ where: { agentId_userId: { agentId: a.agent.id, userId: a.person.userId } }, select: { approvalRules: true } }),
     prisma.organization.findUnique({ where: { id: org }, select: { name: true } }),
-    memoriesForPrompt(a.agent.id, a.person.userId),
+    standsAlone ? Promise.resolve(null) : memoriesForPrompt(a.agent.id, a.person.userId),
     // A group keeps the person's message in the history: every answerer reads it there.
-    buildHistory(a.sessionId, {
-      excludeIds: a.userMessageId && !a.group ? [a.userMessageId] : [],
-      selfAgentId: a.group?.selfAgentId,
-      answeringId: a.group && a.trigger === "CHAT" ? (a.group.messageId ?? a.userMessageId ?? null) : null,
-    }),
+    standsAlone
+      ? Promise.resolve([] as Anthropic.MessageParam[])
+      : buildHistory(a.sessionId, {
+          excludeIds: a.userMessageId && !a.group ? [a.userMessageId] : [],
+          selfAgentId: a.group?.selfAgentId,
+          answeringId: a.group && a.trigger === "CHAT" ? (a.group.messageId ?? a.userMessageId ?? null) : null,
+        }),
   ]);
   // teammateToolNames already sorts and drops the excluded tools; held here
   // too, since this list is what the model is offered.
@@ -937,7 +947,7 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       : a.origin?.kind === "talk"
         ? { origin: { kind: "talk", place: a.origin.place, conversationId: a.origin.conversationId, messageId: a.origin.messageId } }
         : a.origin?.kind === "automation"
-          ? { origin: { kind: "automation", workflowId: a.origin.workflowId, workflowName: a.origin.workflowName, automationRunId: a.origin.automationRunId } }
+          ? { origin: { kind: "automation", workflowId: a.origin.workflowId, workflowName: a.origin.workflowName, runId: a.origin.automationRunId } }
           : {};
   const extra = { ...reply, ...who, ...from };
   const answerMeta = meta || Object.keys(extra).length > 0 ? { ...(meta ?? {}), ...extra } : null;
@@ -946,7 +956,9 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       sessionId: a.sessionId,
       role: "ASSISTANT",
       content: text,
-      ...(report ? { kind: "REPORT" } : {}),
+      // An automation's answer has its own kind: the history query reads
+      // only the chat's own turns, so up to 20 a day never push them out.
+      ...(report ? { kind: "REPORT" } : a.origin?.kind === "automation" ? { kind: AUTOMATION_ANSWER_KIND } : {}),
       ...(answerMeta ? { meta: json(answerMeta) } : {}),
       modelUsed: s.model,
       tokensIn: s.tokensIn || null,

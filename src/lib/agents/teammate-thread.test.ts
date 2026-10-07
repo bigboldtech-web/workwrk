@@ -77,6 +77,11 @@ const action = (over: Partial<AgentActionRow> = {}): AgentActionRow => ({
 });
 
 describe("messageViewFromRow", () => {
+  it("shows an automation's answer as the teammate's own, with where it was asked from (Phase 2 step 7)", () => {
+    const view = messageViewFromRow(row({ role: "ASSISTANT", kind: "AUTOMATION", content: "Restart it.", meta: { origin: { kind: "automation", workflowId: "wf1", workflowName: "Support triage", runId: "arun1" } } }));
+    expect(view).toMatchObject({ kind: "agent", text: "Restart it.", origin: { kind: "automation", workflowId: "wf1", workflowName: "Support triage", runId: "arun1" } });
+  });
+
   it("reads the person's message, practice included", () => {
     expect(messageViewFromRow(row())).toEqual({ id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Hi", kind: "user", practice: false });
     expect(messageViewFromRow(row({ meta: { practice: true } }))).toMatchObject({ kind: "user", practice: true });

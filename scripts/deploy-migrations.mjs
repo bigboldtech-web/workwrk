@@ -244,6 +244,11 @@ const SQL_MANIFEST = [
   // reload: Prisma selects every column on a read with no select, and every
   // Ask AI read touches ChatSession.
   "2026-10-07-ai-teammates-phase2.sql",
+  // AI teammates, Phase 2 step 7: the CHECK on "ChatMessage"."kind" widened
+  // to a superset ('AUTOMATION', an automation's answer in its creator's
+  // chat), replaced only while it lacks the value. Before the reload: the new
+  // build writes such rows.
+  "2026-10-07-ai-teammates-automation-kind.sql",
 ];
 
 /**

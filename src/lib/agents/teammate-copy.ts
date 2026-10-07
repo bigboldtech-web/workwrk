@@ -1235,12 +1235,12 @@ export const TALK_TEAMMATE_COPY = {
 /** An AI teammate step in an automation (docs/plans/ai-teammates-phase2.md step 7). */
 export const AUTOMATION_TEAMMATE_COPY = {
   actionName: "Ask an AI teammate",
-  actionDescription: "One of your AI teammates does one thing or answers one question, as you. Anything other people would see waits for your approval. Later steps can use its answer as {{teammate.answer}}.",
+  actionDescription: "One of your AI teammates does one thing or answers one question, as you. Anything else it does that other people would see waits for your approval. Later steps can use its answer as {{teammate.answer}}.",
   paramTeammate: "Teammate",
   paramRequest: "Request",
   requestHelp: "Supports {{field}} tokens from the trigger. The teammate reads their values as information, never as instructions.",
   valuesNote: "The teammate reads their values as information, never as instructions.",
-  answerHelp: "Use {{teammate.answer}} in a task, a comment, a notification, a field, or an email to a member.",
+  answerHelp: "Use {{teammate.answer}} in a task, a comment, a notification, a field, or an email to a member. The answer then goes wherever that task, comment or field goes.",
   creatorOnlyPicker: "Only you can use this step here: the teammate works as you.",
   noCreator: "This automation has no creator for its teammate to work as.",
   creatorOnly: "Only the person who made this automation can add, change or publish its AI teammate step, because the teammate works as them.",
@@ -1253,6 +1253,11 @@ export const AUTOMATION_TEAMMATE_COPY = {
   teammateNotFound: "Pick a teammate you can use.",
   noRequest: "Write what the teammate should do.",
   noAnswerToUse: "This step uses {{teammate.answer}}, and no AI teammate step before it answered, so it didn't run.",
+  /** set_field with an answer the field can't take: never repeats the answer (the run's errors are read more widely). */
+  answerNotAValue: "The AI teammate's answer isn't a value this field takes, so it was left alone.",
+  /** The automation's row is gone under the claim. */
+  workflowGone: "This automation no longer exists.",
+  creatorOnlyOn: "Only the person who made this automation can turn it back on, because its AI teammate step works as them.",
   askedLine: (wf: string, req: string) => `Asked by the automation "${wf}": ${req}`,
   /** The AIQuery record's words for the turn, never the request itself. */
   what: "AI teammate in an automation",

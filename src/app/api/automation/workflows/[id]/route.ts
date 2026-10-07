@@ -174,14 +174,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const restored = restoreHiddenScope({ stored, submitted, hidden, readable, everywhere: parsed.data.definition.everywhere });
       if (!restored.ok) return NextResponse.json({ error: SCOPE_REFUSAL[restored.error], code: restored.error, section: "where", issues: { section: "where" } }, { status: 400 });
       next = await definitionWithScopeInOrg(ctx.orgId, definitionForSave({ ...parsed.data.definition, scope: restored.scope }));
-      // An AI teammate step works as the creator: only they may save one.
-      const teammate = await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer });
-      if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
     } else {
       next = { ...((existing.definition as Record<string, unknown> | null) ?? {}) };
     }
     const trigger = bodyTrigger !== undefined ? bodyTrigger : draftTrigger(existing.definition, existing.triggerEvent);
     next.trigger = trigger;
+    // An AI teammate step works as the creator: only they may change what it
+    // asks, where it runs or what starts it (a trigger alone included).
+    const teammate = await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer });
+    if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
     data.definition = next as Prisma.InputJsonValue;
     // Before the first publish nothing runs, so the column follows the
     // draft. After it, the column is the LIVE trigger and waits for Republish.

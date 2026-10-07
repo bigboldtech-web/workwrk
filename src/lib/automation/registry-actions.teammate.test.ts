@@ -7,7 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 const st = vi.hoisted(() => ({ created: [] as Row[], emails: [] as Row[], hooks: [] as Row[] }));
 
-vi.mock("@/lib/prisma", () => ({ prisma: { board: { findFirst: async () => ({ id: "b1" }) } } }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    board: { findFirst: async () => ({ id: "b1", schema: { fields: [{ key: "sev", type: "DROPDOWN", options: { choices: [{ value: "s1", label: "Sev 1" }] } }] } }) },
+    item: { findFirst: async () => ({ id: "i0", boardId: "b1", title: "T", status: null, ownerId: null, priority: null, archivedAt: null, metadata: {} }) },
+  },
+}));
 vi.mock("@/lib/board-items", () => ({
   createBoardItem: async (a: Row) => (st.created.push(a), { id: "i1", boardId: "b1", title: a.title, status: null, ownerId: null, priority: null, dueAt: null, createdAt: new Date() }),
   archiveBoardItem: async () => {},
@@ -63,6 +68,23 @@ describe("{{teammate.answer}}", () => {
       "no AI teammate step before it answered",
     );
     expect(st.created).toEqual([]);
+  });
+
+  it("fails a step that needs the answer when the answer was empty", async () => {
+    await expect(getAction("create_task")!.execute(ctx({ stepData: { teammate: { answer: "  ", name: "Triage" } } }), { boardId: "b1", title: "{{teammate.answer}}" })).rejects.toThrow(
+      "no AI teammate step before it answered",
+    );
+  });
+
+  it("never repeats the answer in a field's error (the run's errors are read more widely)", async () => {
+    const secret = ctx({ stepData: { teammate: { answer: "Acme renewal, 480k, from Max's private Space", name: "Triage" } } });
+    for (const field of ["priority", "sev"]) {
+      const err = await getAction("set_field")!.execute(secret, { field, value: "{{teammate.answer}}" }).then(() => null, (e: Error) => e.message);
+      expect(err).toBe("The AI teammate's answer isn't a value this field takes, so it was left alone.");
+    }
+    // A value the creator typed keeps its own error.
+    const typed = await getAction("set_field")!.execute(secret, { field: "priority", value: "Soon" }).then(() => null, (e: Error) => e.message);
+    expect(typed).toContain('"Soon" is not a priority');
   });
 
   it("reads as written without an earlier teammate step", () => {

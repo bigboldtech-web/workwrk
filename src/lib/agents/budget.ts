@@ -131,7 +131,7 @@ export async function claimTeammateTurn(a: {
         SELECT "id" FROM "AutomationWorkflow"
         WHERE "id" = ${a.workflow.id} AND "organizationId" = ${a.organizationId}
         FOR UPDATE`;
-      if (wf.length === 0) return { ok: false, code: "not_found", message: ROUTINE_REASON_TEXT.agent_removed };
+      if (wf.length === 0) return { ok: false, code: "not_found", message: AUTOMATION_TEAMMATE_COPY.workflowGone };
       const [{ used }] = await tx.$queryRaw<Array<{ used: number }>>`
         SELECT COUNT(*)::int AS "used" FROM "AgentRun"
         WHERE "automationWorkflowId" = ${a.workflow.id}

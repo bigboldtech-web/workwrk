@@ -118,8 +118,12 @@ const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
  * than posting, sending or setting the words around an empty answer.
  */
 function needsAnswer(ctx: ActionContext, template: string): void {
-  if (TEAMMATE_TOKEN.test(template) && !ctx.stepData?.teammate) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswerToUse);
+  if (!TEAMMATE_TOKEN.test(template)) return;
+  const t = ctx.stepData?.teammate;
+  if (!t || (ANSWER_TOKEN.test(template) && !t.answer.trim())) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswerToUse);
 }
+
+const ANSWER_TOKEN = /\{\{\s*teammate\.answer\s*\}\}/;
 
 /**
  * Resolve a user-ish param: an explicit user id, or the special values
@@ -561,13 +565,19 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const key = paramString(params, "field", ctx.payload);
       if (!key) throw new Error("Pick the field to set");
       if (typeof params.value === "string") needsAnswer(ctx, params.value);
+      // A value made of a teammate's answer is never repeated in an error: a
+      // step's error is read by everyone who reads the automation's runs,
+      // and the answer only by its creator and admins (review of step 7).
+      const fromAnswer = typeof params.value === "string" && TEAMMATE_TOKEN.test(params.value);
       const raw = typeof params.value === "string" ? interpolate(params.value, ctx.payload, ctx.stepData) : params.value;
       const item = await resolveItem(ctx, params);
       await assertCanWrite(ctx, item.boardId);
       if (key === "priority") {
         const p = typeof raw === "string" ? raw.trim().toUpperCase() : "";
         const next = p === "" ? null : p;
-        if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) throw new Error(`"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
+        if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) {
+          throw new Error(fromAnswer ? AUTOMATION_TEAMMATE_COPY.answerNotAValue : `"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
+        }
         if (item.priority === next) return { itemId: item.id, field: key, changed: false };
         await updateBoardItem(item.id, { priority: next }, null);
         await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, next, item.priority));
@@ -578,7 +588,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       if (!def) throw new Error("That field is not on this task's List");
       const choices = def.options?.choices?.map((c) => ({ value: String(c.value), label: String(c.label) }));
       const coerced = coerceSetFieldValue({ key, type: def.type, choices }, raw);
-      if (!coerced.ok) throw new Error(coerced.error);
+      if (!coerced.ok) throw new Error(fromAnswer ? AUTOMATION_TEAMMATE_COPY.answerNotAValue : coerced.error);
       const previous = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? (item.metadata as Record<string, unknown>)[key] : undefined) ?? null;
       await updateBoardItem(item.id, {}, null, {
         metadataFn: (stored) => ({ ...stored, [key]: coerced.value }),

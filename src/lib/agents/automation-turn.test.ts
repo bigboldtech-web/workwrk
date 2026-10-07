@@ -136,6 +136,11 @@ describe("runAutomationTeammateStep", () => {
     expect(st.givenBack).toEqual(["run-a"]);
   });
 
+  it("calls a turn with no words left once cleaned no answer", async () => {
+    st.turn = { text: "", error: null, giveBack: false, failedBeforeAnything: false, proposedActionIds: [], messages: [] };
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noAnswer("Triage"));
+  });
+
   it("refuses an empty request before anything is spent", async () => {
     await expect(runAutomationTeammateStep(ctx(), { ...PARAMS, request: "  " })).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noRequest);
     expect(st.claims).toEqual([]);

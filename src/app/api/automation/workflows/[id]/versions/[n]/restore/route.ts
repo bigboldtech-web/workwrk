@@ -27,6 +27,8 @@ import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { SCOPE_REFUSAL, definitionWithScope, draftTrigger, isEverywhere, readScope, restoreHiddenScope, splitScope, stableJson, withoutSnapshotNote } from "@/lib/automation/definition";
 import { livePlaces, scopeReadable } from "@/lib/automation/places-server";
+import { teammateStepSlugs } from "@/lib/automation/teammate-step";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 const EVERYWHERE_OVER_HIDDEN = "That version runs everywhere, and this draft also runs in places you can't open. Restoring it would drop them, so choose Everywhere in Where it runs yourself, or ask someone who can open them to restore it.";
 const HIDDEN_VERSION = "That version runs only in places you can't open, so it can't be restored here without making it run everywhere. Someone who can open them can restore it.";
@@ -42,10 +44,19 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const wf = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true },
+    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true, createdById: true },
   });
   if (!wf) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   if (wf.status === "ARCHIVED") return NextResponse.json({ error: "Archived workflows cannot be edited" }, { status: 400 });
+
+  // An AI teammate step works as the creator: only they may put an older
+  // request in its place, or take the step out of the draft.
+  if (ctx.userId !== wf.createdById) {
+    const target = await prisma.automationWorkflowVersion.findFirst({ where: { workflowId: wf.id, organizationId: ctx.orgId, versionNumber: number }, select: { definitionJson: true } });
+    if (teammateStepSlugs(wf.definition).length > 0 || teammateStepSlugs(target?.definitionJson ?? null).length > 0) {
+      return NextResponse.json({ error: AUTOMATION_TEAMMATE_COPY.creatorOnly, code: "teammate_step_creator_only", section: "then", issues: { section: "then" } }, { status: 403 });
+    }
+  }
 
   // The workflow row is locked for the transaction (as publish does), so a
   // restore and a publish at the same moment number their versions in turn.

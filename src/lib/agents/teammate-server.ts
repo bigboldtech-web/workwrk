@@ -136,7 +136,7 @@ export function liveChatWhere(agent: { id: string; organizationId: string }, use
 
 /** The messages a thread shows (teammate-thread.ts messageViewFromRow): turns, reports, lines and cards. */
 export const SHOWN_MESSAGES: Prisma.ChatMessageWhereInput = {
-  OR: [{ kind: null, role: { in: ["USER", "ASSISTANT"] } }, { kind: { in: ["REPORT", "EVENT", "APPROVAL"] } }],
+  OR: [{ kind: null, role: { in: ["USER", "ASSISTANT"] } }, { kind: { in: ["REPORT", "EVENT", "APPROVAL", "AUTOMATION"] } }],
 };
 
 /** The ChatMessage columns a thread reads. */
