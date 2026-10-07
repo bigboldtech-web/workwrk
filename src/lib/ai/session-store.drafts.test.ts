@@ -13,6 +13,8 @@ const net = vi.hoisted(() => ({
   savedQuestion: null as null | string,
   /** The stream request hangs until the client gives it up (aborts). */
   hangStream: false,
+  /** A question chat-x held before the send, with the same words. */
+  earlierQuestion: null as null | string,
 }));
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string, init?: { method?: string }) => {
@@ -26,7 +28,9 @@ vi.mock("@/lib/api-fetch", () => ({
     // Each chat has one saved message, as every chat a list shows does, and
     // chat-x the question the server took, when it took one.
     const messages = [{ id: `${id}-m1`, role: "USER", content: "hi", createdAt: "2026-10-07T10:00:00.000Z" }];
-    if (id === "chat-x" && net.savedQuestion) messages.push({ id: "chat-x-m2", role: "USER", content: net.savedQuestion, createdAt: new Date().toISOString() });
+    if (id === "chat-x" && net.earlierQuestion) messages.push({ id: "chat-x-m0", role: "USER", content: net.earlierQuestion, createdAt: "2026-10-07T09:00:00.000Z" });
+    // Written by the server's clock, which need not agree with the browser's: hours "earlier" here.
+    if (id === "chat-x" && net.savedQuestion) messages.push({ id: "chat-x-m2", role: "USER", content: net.savedQuestion, createdAt: "2026-01-01T00:00:00.000Z" });
     return { ok: true, status: 200, data: { session: { id, title: id, pinned: false, archived: false }, messages } };
   },
 }));
@@ -167,6 +171,47 @@ describe("Ask AI drafts", () => {
     } finally {
       net.hangStream = false;
       net.savedQuestion = null;
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives a question back when the chat only holds an earlier one with the same words", async () => {
+    vi.useFakeTimers();
+    try {
+      net.hangStream = true;
+      net.earlierQuestion = "yes";
+      await aiSession.open("chat-x");
+      aiSession.setDraft("yes");
+      const sending = aiSession.send("yes");
+      await vi.advanceTimersByTimeAsync(0);
+      await aiSession.open("chat-b");
+      await sending;
+      await vi.advanceTimersByTimeAsync(3000);
+      await aiSession.open("chat-x");
+      expect(draft()).toBe("yes");
+    } finally {
+      net.hangStream = false;
+      net.earlierQuestion = null;
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps words typed while a first message is in flight for the landing, never for a chat no list shows", async () => {
+    vi.useFakeTimers();
+    try {
+      net.hangStream = true;
+      aiSession.setDraft("Draft the Q3 plan");
+      const sending = aiSession.send("What is due this week?");
+      await vi.advanceTimersByTimeAsync(0);
+      aiSession.reset();
+      await sending;
+      // At once: the landing keeps the words that waited in the composer.
+      expect(draft()).toBe("Draft the Q3 plan");
+      // A moment later the server shows it never took the starter: it comes back above them.
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(draft()).toBe("What is due this week?\n\nDraft the Q3 plan");
+    } finally {
+      net.hangStream = false;
       vi.useRealTimers();
     }
   });

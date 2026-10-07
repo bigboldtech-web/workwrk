@@ -143,8 +143,17 @@ const drafts = new Map<string, string>();
 function draftKey(): string {
   const id = state.sessionId;
   if (!id) return "";
-  const empty = state.messages.length === 0 && !state.loading && !state.loadError && !state.missing;
+  // Only rows the server holds count: a first message still in flight shows
+  // its local bubbles, but no list shows the chat until the server has it.
+  const empty = !state.messages.some((m) => !isLocalRow(m.id)) && !state.loading && !state.loadError && !state.missing;
   return empty ? "" : id;
+}
+
+/** The ids of the rows a send shows before the server has them (its question, its live answer, its card). */
+const LOCAL_ROW = /^(opt-user-|streaming-|card-)/;
+
+function isLocalRow(id: string): boolean {
+  return LOCAL_ROW.test(id);
 }
 
 /** Keep the open chat's unsent words for when it is opened again, beside any kept before. */
@@ -177,15 +186,16 @@ const UNSENT_CHECK_MS = 2500;
  * Words a send gave up on AFTER its request left: the server may hold the
  * question already (the stream route saves it first and carries on when the
  * client goes), so a moment later the chat is read again and only words it
- * does not hold come back (keepUnsent). A read that fails gives them back:
- * seeing them twice is better than losing them.
+ * does not hold come back (keepUnsent). The question counts as taken when
+ * the chat now holds a question with these words that was not in it when
+ * the request left (`before`, by id: no clock, the browser's or the
+ * server's, is compared). A read that fails gives them back: seeing them
+ * twice is better than losing them.
  */
-function keepUnlessSaved(chatId: string, key: string, text: string, sentAt: number): void {
+function keepUnlessSaved(chatId: string, key: string, text: string, before: ReadonlySet<string>): void {
   setTimeout(() => {
     void apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(chatId)}`, { cache: "no-store" }).then((r) => {
-      const saved =
-        r.ok &&
-        r.data.messages.some((m) => m.role === "USER" && (m.content ?? "").trim() === text && Date.parse(m.createdAt) >= sentAt - 60_000);
+      const saved = r.ok && r.data.messages.some((m) => m.role === "USER" && (m.content ?? "").trim() === text && !before.has(m.id));
       if (!saved) keepUnsent(key, text);
     });
   }, UNSENT_CHECK_MS);
@@ -372,11 +382,11 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   const homeKey = draftKey();
   let given = false;
   // Set when the stream request leaves: from then on the server may have it.
-  let sent: { chatId: string; at: number } | null = null;
+  let sent: { chatId: string; before: ReadonlySet<string> } | null = null;
   const giveBack = () => {
     if (given) return;
     given = true;
-    if (sent) keepUnlessSaved(sent.chatId, homeKey, text, sent.at);
+    if (sent) keepUnlessSaved(sent.chatId, homeKey, text, sent.before);
     else keepUnsent(homeKey, text);
   };
   // The composer empties only when it held what is sent: a starter sent
@@ -470,7 +480,9 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   const ctrl = new AbortController();
   streamAbort = ctrl;
   try {
-    sent = { chatId: sessionId, at: Date.now() };
+    // The questions the chat already holds, by id: the check after a give-up
+    // looks for one that is not among them.
+    sent = { chatId: sessionId, before: new Set(state.messages.filter((m) => m.role === "USER" && !isLocalRow(m.id)).map((m) => m.id)) };
     const res = await fetch("/api/sidekick/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
