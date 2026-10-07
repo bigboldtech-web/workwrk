@@ -48,6 +48,8 @@ export type FeedMessage = {
     /// Batch 8: a scheduled AI update (kind "ai_update"), written by AI and
     /// posted as the person who set it up. Only the server writes this kind.
     update?: { id?: string; kind?: string; scope?: string; tasks?: number };
+    /** On a hidden message: "teammate" when it is an AI teammate's answer, not an AI update. */
+    hidden?: string;
     /// AI teammates: a post an AI teammate made for this person after they
     /// approved it (kind "agent_post", src/lib/agents/teammate-tools.ts
     /// post_in_talk). Only the server writes this kind. Once the person edits
@@ -77,7 +79,8 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   meId: string | null;
   /** userId -> display name, for reaction tooltips and mention highlighting. */
   memberNames: Map<string, string>;
-  onRetry: (m: FeedMessage) => void;
+  /** `withoutTeammate`: post the words as a plain message (a teammate request refused for good; review round 1). */
+  onRetry: (m: FeedMessage, opts?: { withoutTeammate?: boolean }) => void;
   onJoinCall: () => void;
   onReact: (m: FeedMessage, emoji: string) => void;
   onEdit: (m: FeedMessage, newBody: string) => void;
@@ -190,7 +193,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   mine: boolean;
   meId: string | null;
   memberNames: Map<string, string>;
-  onRetry: (m: FeedMessage) => void;
+  /** `withoutTeammate`: post the words as a plain message (a teammate request refused for good; review round 1). */
+  onRetry: (m: FeedMessage, opts?: { withoutTeammate?: boolean }) => void;
   onJoinCall: () => void;
   onReact: (m: FeedMessage, emoji: string) => void;
   onEdit: (m: FeedMessage, newBody: string) => void;
@@ -242,6 +246,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // An update this reader was not checked against arrives with no words
   // (src/lib/talk-updates.ts serveAiUpdate); an edited one is the person's.
   const aiHidden = msg.metadata?.kind === "ai_update_hidden";
+  // A teammate's answer written for the people here when it posted (talk-updates.ts serveAiUpdate).
+  const teammateHidden = aiHidden && msg.metadata?.hidden === "teammate";
   const aiEdited = msg.metadata?.kind === "ai_update_edited";
   // Said on the post itself too: the person approved it, their AI teammate wrote it.
   const agentPost = msg.metadata?.kind === "agent_post" ? msg.metadata.agent?.name?.trim() || "an AI teammate" : null;
@@ -281,9 +287,14 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             <span className="text-base font-semibold text-ink-strong">
               {mine ? "You" : `${author.firstName} ${author.lastName}`.trim()}
             </span>
-            {aiUpdate || aiHidden ? (
+            {aiUpdate || (aiHidden && !teammateHidden) ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--os-brand-deep)]">
                 <Sparkles className="h-3 w-3" aria-hidden /> AI update
+              </span>
+            ) : null}
+            {teammateHidden ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--os-brand-soft)] px-2 py-0.5 text-micro font-semibold text-[var(--os-brand-deep)]">
+                <Bot className="h-3 w-3" aria-hidden /> via an AI teammate
               </span>
             ) : null}
             {agentPost ? (
@@ -354,7 +365,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         ) : (
           <>
             {aiHidden && !deleted ? (
-              <p className="text-sm leading-6 text-ink-3">This AI update was written for the people who were here when it was posted.</p>
+              <p className="text-sm leading-6 text-ink-3">{teammateHidden ? TALK_TEAMMATE_COPY.hiddenAnswer : "This AI update was written for the people who were here when it was posted."}</p>
             ) : null}
             {(msg.body || deleted) && (
               deleted ? (
@@ -474,6 +485,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           <span className="mt-0.5 inline-flex items-center gap-2 text-xs font-medium text-danger-text">
             Not sent
             <button type="button" onClick={() => onRetry(msg)} className="underline underline-offset-2 hover:no-underline">Retry</button>
+            {msg.metadata?.askTeammate ? (
+              <button type="button" onClick={() => onRetry(msg, { withoutTeammate: true })} className="underline underline-offset-2 hover:no-underline">
+                {TALK_TEAMMATE_COPY.sendWithout}
+              </button>
+            ) : null}
             {onDiscardFailed ? (
               <button type="button" onClick={() => onDiscardFailed(msg)} className="text-ink-3 underline underline-offset-2 hover:no-underline">Delete</button>
             ) : null}

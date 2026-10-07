@@ -275,12 +275,30 @@ function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
-/** True when this viewer may not read this message's words (only AI updates are ever hidden). */
+/**
+ * An AI teammate's answer asked for in Talk (docs/plans/ai-teammates-phase2.md
+ * step 6) was written for the people in the conversation when it posted, the
+ * same way: it keeps their list (`readers`, the asker included), edited or
+ * not, and anyone added later, or reading after a channel was made public,
+ * sees that a teammate answered, never what it said. Posts a person approved
+ * (agent_post without a list) are theirs and are never hidden.
+ */
+export const TEAMMATE_ANSWER_KINDS: ReadonlySet<string> = new Set(["agent_post", "agent_post_edited"]);
+
+function readersOf(m: Record<string, unknown>): unknown[] | null {
+  if (typeof m.kind !== "string") return null;
+  if (AI_UPDATE_KINDS.has(m.kind)) {
+    const r = obj(m.update).readers;
+    return Array.isArray(r) ? r : [];
+  }
+  if (TEAMMATE_ANSWER_KINDS.has(m.kind) && Array.isArray(m.readers)) return m.readers;
+  return null;
+}
+
+/** True when this viewer may not read this message's words (AI updates and teammate answers in Talk). */
 export function aiUpdateHiddenFor(metadata: unknown, viewerId: string): boolean {
-  const m = obj(metadata);
-  if (typeof m.kind !== "string" || !AI_UPDATE_KINDS.has(m.kind)) return false;
-  const readers = obj(m.update).readers;
-  return !(Array.isArray(readers) && readers.includes(viewerId));
+  const readers = readersOf(obj(metadata));
+  return readers !== null && !readers.includes(viewerId);
 }
 
 /**
@@ -290,8 +308,16 @@ export function aiUpdateHiddenFor(metadata: unknown, viewerId: string): boolean 
  */
 export function serveAiUpdate<T extends { body: string; metadata?: unknown }>(m: T, viewerId: string): T {
   const meta = obj(m.metadata);
-  if (typeof meta.kind !== "string" || !AI_UPDATE_KINDS.has(meta.kind)) return m;
-  if (aiUpdateHiddenFor(meta, viewerId)) return { ...m, body: "", metadata: { kind: AI_UPDATE_HIDDEN_KIND } };
+  if (readersOf(meta) === null) return m;
+  const teammate = typeof meta.kind === "string" && TEAMMATE_ANSWER_KINDS.has(meta.kind);
+  if (aiUpdateHiddenFor(meta, viewerId)) {
+    return { ...m, body: "", metadata: { kind: AI_UPDATE_HIDDEN_KIND, ...(teammate ? { hidden: "teammate" } : {}) } };
+  }
+  if (teammate) {
+    const rest = { ...meta };
+    delete rest.readers;
+    return { ...m, metadata: rest };
+  }
   const update = { ...obj(meta.update) };
   delete update.readers;
   return { ...m, metadata: { ...meta, update } };

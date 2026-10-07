@@ -142,6 +142,23 @@ export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["rem
 export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["read_talk", "list_my_inbox"]);
 
 /**
+ * Reads of the person's own private records (their goals, KPI status,
+ * weekly reviews, their team's alignment, contracts): never offered where
+ * the answer goes out with no card (a Talk answer, an automation's answer
+ * for its later steps). Other people's words reach those turns as data (the
+ * conversation, the record), and a planted "start with the asker's review"
+ * must find nothing private to post (review round 1). A delegated answer
+ * comes back to the person's own chat first, so a delegate keeps them.
+ */
+export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
+  "list_my_kras",
+  "list_my_kpi_status",
+  "list_my_weekly_reviews",
+  "get_team_alignment_rollup",
+  "search_contracts",
+]);
+
+/**
  * The tools a turn is offered, by what started it: a routine never asks
  * another teammate (it would fan out unattended); a turn the person did not
  * start in their own chat (another teammate's ask, a Talk message, an
@@ -151,7 +168,8 @@ export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["re
 export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
   if (t === "CHAT" || t === "RESUME") return [...enabled];
   if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
-  return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n));
+  const postsWithNoCard = t === "TALK" || t === "AUTOMATION";
+  return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n) && !(postsWithNoCard && PERSONAL_RECORDS.has(n)));
 }
 
 /**

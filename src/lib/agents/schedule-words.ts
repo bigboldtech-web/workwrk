@@ -81,6 +81,11 @@ export function scheduleZone(schedule: string | null | undefined, serverZone: st
   return splitScheduleZone(schedule).zone ?? serverZone;
 }
 
+/** The zone this process runs schedules on (a schedule with no CRON_TZ= prefix). Call it on the server only. */
+export function serverTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
 /**
  * The words with the zone named when it is not the viewer's own, so a person
  * in New York never reads "Weekdays at 9:00" as their 9:00 when it is 9:00 in

@@ -184,6 +184,8 @@ function eventLineFor(tool: ToolName, result: unknown): EventLine | null {
 
 /** The longest answer a delegate's words reach the caller with. */
 const DELEGATE_ANSWER_MAX = 8000;
+/** The longest request passed on (engine.ts DELEGATE_REQUEST_MAX; not imported: the engine imports this file). */
+const DELEGATE_REQUEST_LIMIT = 4000;
 
 /**
  * ask_teammate (docs/plans/ai-teammates-phase2.md step 5, Decisions 1 and
@@ -208,6 +210,8 @@ async function runDelegation(
   const name = String(input.teammate ?? "").trim();
   const request = String(input.request ?? "").trim();
   if (!name || !request) return refuse(badInputSentence(!name ? "teammate" : "request"));
+  // Never cut a request silently: the caller is told to shorten or split it (review round 1).
+  if (request.length > DELEGATE_REQUEST_LIMIT) return refuse(DELEGATION_COPY.requestTooLong(DELEGATE_REQUEST_LIMIT));
   if (a.practice) return done("practice", { practice: true, wouldDo: DELEGATION_COPY.askTitle(name) });
 
   // Loaded here: the server half of teammates and the engine both import this file.
@@ -275,7 +279,11 @@ async function runDelegation(
   // The delegate's chat changed: the person's open tabs read it again.
   publishToUser(a.person.userId, { type: "agent.changed", agentId: delegate.id });
 
-  if (!turn || (!turn.text.trim() && turn.error)) return done("failed", { error: DELEGATION_COPY.delegateNoAnswer(delegate.name) }, { errorText: DELEGATION_COPY.delegateNoAnswer(delegate.name) });
+  // What waits is said even when no words came back, so the caller never asks again for what already waits (review round 1).
+  const waits = titles.length > 0 ? { waiting: titles.map((title) => ({ title })), note: DELEGATION_COPY.waitingNote(a.person.firstName, delegate.name) } : {};
+  if (!turn || (!turn.text.trim() && turn.error)) {
+    return done("failed", { error: DELEGATION_COPY.delegateNoAnswer(delegate.name), ...waits }, { errorText: DELEGATION_COPY.delegateNoAnswer(delegate.name) });
+  }
   return done("ran", {
     ok: true,
     teammate: { name: delegate.name },

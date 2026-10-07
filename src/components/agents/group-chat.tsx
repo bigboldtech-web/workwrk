@@ -87,8 +87,12 @@ export function GroupChat({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const membersRef = useRef<HTMLButtonElement>(null);
   const [membersOpen, setMembersOpen] = useState(false);
-  // The members as the newest read names them, else as the list does.
-  const members = chat.members.length > 0 ? chat.members : g.members;
+  // The members a change just answered with, until the next read (put off
+  // while an answer streams) brings its own: a removal shows at once
+  // (review round 1). Else the members as the newest read names them, else
+  // as the list does.
+  const [changedTo, setChangedTo] = useState<{ members: GroupDetail["members"]; over: GroupDetail["members"] } | null>(null);
+  const members = changedTo && changedTo.over === chat.members ? changedTo.members : chat.members.length > 0 ? chat.members : g.members;
   const byId = useMemo(() => new Map(members.map((m) => [m.agentId, m])), [members]);
 
   const { open, refresh, markRead } = chat;
@@ -180,12 +184,14 @@ export function GroupChat({
   // teammate's chat, and Pause pauses the routine (review of step 4).
   function openSettingsFrom(tab?: TeammateSettingsTab, from?: TeammateMessageView) {
     const agentId = from && from.kind === "event" ? from.agentId : undefined;
-    const member = agentId ? byId.get(agentId) : undefined;
-    if (!member) {
-      onOpenSettings(tab);
+    // A teammate no longer in the group is found in the person's own list
+    // (review round 1); with neither, the link has nowhere to go and does nothing.
+    const slug = agentId ? byId.get(agentId)?.slug ?? teammates?.find((t) => t.id === agentId)?.slug : undefined;
+    if (!slug) {
+      if (!agentId) onOpenSettings(tab);
       return;
     }
-    router.push(`/agents?chat=${encodeURIComponent(member.slug)}&settings=${encodeURIComponent(tab ?? "instructions")}`);
+    router.push(`/agents?chat=${encodeURIComponent(slug)}&settings=${encodeURIComponent(tab ?? "instructions")}`);
   }
   async function pauseRoutine(routineId: string) {
     const r = await apiFetch(`/api/agents/routines/${encodeURIComponent(routineId)}`, { method: "PATCH", json: { status: "paused" } });
@@ -263,7 +269,7 @@ export function GroupChat({
           {GROUP_COPY.notFound} ·
           <button type="button" className={LINK} onClick={onBack}>{TEAMMATE_CHAT.back}</button>
         </div>
-        {chat.draft.trim() ? <UnsentDraft text={chat.draft} className="mt-2" /> : null}
+        {/* The unsent words show once, at the foot (review round 1). */}
       </>
     );
   } else if (chat.messages.length === 0) {
@@ -325,14 +331,25 @@ export function GroupChat({
         </button>
       </header>
       {membersOpen ? (
-        <MorePortal anchorRef={membersRef} width={280} open placement="below" onClose={() => setMembersOpen(false)}>
+        <MorePortal
+          anchorRef={membersRef}
+          width={280}
+          open
+          placement="below"
+          onClose={() => {
+            setMembersOpen(false);
+            membersRef.current?.focus();
+          }}
+        >
           <GroupMembersMenu
             group={{ ...g, members }}
             teammates={teammates}
             onChanged={(next) => {
+              setChangedTo({ members: next.members, over: chat.members });
               onChanged(next);
               void refresh();
             }}
+            draft={chat.draft}
             onLeft={() => {
               setMembersOpen(false);
               onLeft();
@@ -421,7 +438,10 @@ function GroupComposer({
   // Who answers the words so far: the named ones that can, else the lead;
   // named ones that can't say so (review of step 4).
   const hint = useMemo(() => {
-    if (!value.trim()) return GROUP_COPY.composerHint;
+    if (!value.trim()) {
+      const lead = leadOf(rules);
+      return lead ? GROUP_COPY.composerHintLead(lead.name) : GROUP_COPY.composerHint;
+    }
     const pick = pickAnswerers(value, rules);
     if (!pick.named) {
       const lead = leadOf(rules);

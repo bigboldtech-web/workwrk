@@ -63,14 +63,15 @@ export async function teammateStepProblem(
  * it returned, which can carry it (a task's title, an email's subject).
  * What went in is the step as written, never the answer, and stays.
  */
-export function hideTeammateAnswers<T extends { order: number; stepType: string; stepKey: string; outputJson: unknown }>(steps: readonly T[]): T[] {
+export function hideTeammateAnswers<T extends { order: number; stepType: string; stepKey: string; outputJson: unknown; inputJson?: unknown }>(steps: readonly T[]): T[] {
   const first = steps.find((s) => s.stepType === "ACTION" && s.stepKey === TEAMMATE_STEP_KEY);
   if (!first) return [...steps];
   return steps.map((s) => {
     if (s.stepType !== "ACTION" || s.order < first.order) return s;
     if (s.stepKey === TEAMMATE_STEP_KEY) {
-      const out = asRecord(s.outputJson);
-      return { ...s, outputJson: { teammate: typeof out.teammate === "string" ? out.teammate : null, answerHidden: true } };
+      // Nor which teammate: a private one's name and slug are its person's (review round 1).
+      const input = asRecord(s.inputJson);
+      return { ...s, outputJson: { answerHidden: true }, ...(s.inputJson !== undefined ? { inputJson: { ...input, teammate: null } } : {}) };
     }
     return { ...s, outputJson: { answerHidden: true } };
   });

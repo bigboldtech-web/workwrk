@@ -178,3 +178,24 @@ describe("who reads a posted update", () => {
     expect(aiUpdateHiddenFor(null, "c")).toBe(false);
   });
 });
+
+describe("a teammate's answer in Talk (Phase 2 review round 1)", () => {
+  const answer = { body: "Max's team: 3 reviews open.", metadata: { kind: "agent_post", via: "talk", agent: { id: "a1", name: "Chief of Staff" }, readers: ["max", "olivia"] } };
+
+  it("reaches only who was there when it posted, and never sends the list", () => {
+    expect(serveAiUpdate(answer, "olivia")).toEqual({ body: answer.body, metadata: { kind: "agent_post", via: "talk", agent: { id: "a1", name: "Chief of Staff" } } });
+    expect(serveAiUpdate(answer, "guest-added-later")).toEqual({ body: "", metadata: { kind: "ai_update_hidden", hidden: "teammate" } });
+    expect(aiUpdateHiddenFor(answer.metadata, "guest-added-later")).toBe(true);
+  });
+
+  it("stays theirs after the asker edits it", () => {
+    const edited = { ...answer, metadata: { ...answer.metadata, kind: "agent_post_edited" } };
+    expect(serveAiUpdate(edited, "newcomer").body).toBe("");
+  });
+
+  it("never hides a post a person approved (no reader list)", () => {
+    const approved = { body: "Hello team", metadata: { kind: "agent_post", agent: { id: "a1", name: "Triage" } } };
+    expect(serveAiUpdate(approved, "anyone")).toBe(approved);
+    expect(aiUpdateHiddenFor(approved.metadata, "anyone")).toBe(false);
+  });
+});

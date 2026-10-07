@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  removedFromGroup: new Set<string>(),
+  removedCancels: [] as unknown[][],
   group: null as Row | null,
   claims: [] as Row[],
   claimAnswers: [] as Row[],
@@ -103,7 +105,12 @@ vi.mock("@/lib/agents/engine", () => ({
 }));
 vi.mock("@/lib/agents/group-server", async () => {
   const real = await vi.importActual<typeof import("@/lib/agents/group-server")>("@/lib/agents/group-server");
-  return { ...real, loadGroup: async () => st.group };
+  return {
+    ...real,
+    loadGroup: async () => st.group,
+    stillInGroup: async (_sessionId: string, agentId: string) => !st.removedFromGroup.has(agentId),
+    cancelRemovedRequests: async (...a: unknown[]) => (st.removedCancels.push(a), 1),
+  };
 });
 
 import { POST } from "./route";
@@ -126,6 +133,8 @@ const PM = agent("pm", "Project Manager");
 const TRIAGE = agent("triage", "Triage");
 
 beforeEach(() => {
+  st.removedFromGroup = new Set();
+  st.removedCancels = [];
   st.group = groupOf([PM, TRIAGE]);
   st.claims = [];
   st.claimAnswers = [];
@@ -217,6 +226,19 @@ describe("a group message", () => {
     expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
   });
 
+  it("never runs a teammate removed from the group while the first answered, and spends nothing for it (review round 1)", async () => {
+    st.removedFromGroup = new Set(["a-triage"]);
+    await send({ message: "@Project Manager @Triage go" });
+    expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
+    expect(st.lines.map((l) => l.text)).toEqual(["Triage didn't answer: it was removed from this group chat."]);
+  });
+
+  it("leaves a line for an answer that came back but could not be saved (review round 1)", async () => {
+    st.turnAnswers = [{ assistantMessageId: null, text: "Here.", error: "The answer couldn't be saved. Check what it did before asking again." }];
+    await send({ message: "Status?" });
+    expect(st.lines.map((l) => l.text)).toEqual(["Project Manager didn't answer: its answer couldn't be saved."]);
+  });
+
   it("runs a later answerer as it is now, its new instructions included", async () => {
     st.fresh = { triage: agent("triage", "Triage", { systemPrompt: "Changed meanwhile." }) };
     await send({ message: "@Project Manager @Triage go" });
@@ -267,7 +289,8 @@ describe("a group continue", () => {
   });
 
   it("refuses a teammate that is not in the group, or is paused", async () => {
-    expect((await send({ resume: true, agentSlug: "someone-else" })).status).toBe(404);
+    // Its own refusal, never "the group chat can't be found" (review round 1).
+    expect(await send({ resume: true, agentSlug: "someone-else" })).toMatchObject({ status: 409, json: { code: "not_in_group" } });
     st.group = groupOf([PM, agent("triage", "Triage", { status: "DISABLED" })]);
     expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "agent_paused" });
     expect(st.claims).toEqual([]);

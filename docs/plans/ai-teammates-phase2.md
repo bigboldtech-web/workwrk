@@ -1333,3 +1333,46 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     6. An answer with no words left once cleaned counted as an answer, and later steps posted around it. It now fails the step, and a step that uses {{teammate.answer}} needs a non-empty one.
     - Also fixed: the saved origin named its run `automationRunId`, but the thread reads `runId`, so the chat never showed where an answer came from. A missing automation now has its own sentence. The action's description and the changelog are exact ("anything else it would do", "marked as information, not instructions", "turn back on").
     - Found while re-proving the fixes live: the database's CHECK on `ChatMessage.kind` allowed only EVENT, APPROVAL and REPORT, so an automation's answer failed to save ("The answer couldn't be saved"). `prisma/sql/2026-10-07-ai-teammates-automation-kind.sql` widens it to a superset with AUTOMATION, replacing it only while it lacks the value (applied twice locally, the second run changed nothing). It is in the manifest, so it runs before the reload. Then the answer saved with its own kind and showed in the thread, linked to its run. Also live: Ola (an Owner) could pause Eve's automation but not turn it back on (403) or change only its trigger (403); Eve could turn it back on.
+- **Step 8, review round 1** (six read-only reviewers, one per area, over all of Phase 2: add0287c to d7312d17; each finding re-read against the code): 32 found (1 high, 5 medium), 32 fixed.
+  - High:
+    1. A teammate's answer in Talk stayed readable by anyone added later: a Guest, or the whole workspace once a private channel went public. The answer now keeps the list of who was there when it posted (`readers`, the asker first), edited or not. Everyone else sees "An AI teammate answered here", never the words, on every read path (feed, thread, search, the conversation list, read_talk, the Talk context), as an AI update already did. Like an AI update, a teammate can now be asked only where at most 250 people read (`too_many_people`).
+  - Medium:
+    1. Moved schedules with no zone of their own read as the creator's local time but ran on the server's clock. A bare cron is now pinned to the server's zone when moved (its times do not change), and every schedule with no zone reads in the server's.
+    2. A delegated turn still read the delegate's chat history and memory, either of which can hold what it read of other people's words. Delegated turns now stand alone, as Talk and automation turns do.
+    3. Talk and automation turns, whose answers go out with no card, were still offered reads of the person's private records. They now never get the person's goals, KPI status, weekly reviews, team alignment rollup or contracts, so a planted "start with the asker's review" finds nothing private to post. A delegate keeps them, since its answer comes back to the person's own chat first.
+       - Decision 12, made exact: no non-chat turn reads anyone's Talk messages or Inbox through a tool. Talk turns do read the conversation before the request, as data.
+    4. When a later teammate step failed, the steps after it used an earlier step's answer, written for another use. A failed teammate step now leaves no answer for later steps, in a run and in its retries.
+    5. A teammate's answer could reach a Guest by notification or email. A step that uses the answer now refuses a Guest recipient, with a sentence that does not repeat the answer.
+  - Low:
+    - Group chats:
+      - A group's name (which can be made of names other people set) is now inside `<workspace_note>`.
+      - A group turn's history is bounded at the message it answers in the query, not after the window.
+      - A teammate removed from the group while another answered no longer answers, and spends nothing.
+      - Removing a teammate cancels what it still asked in the group, and a continue for it answers 409 `not_in_group` with its own sentence (the page sends none).
+      - An answer that came back but could not be saved leaves a line.
+    - Delegation:
+      - A delegate that left cards but no words still tells the caller what waits.
+      - A request over 4,000 characters is refused, not silently cut, and its line breaks are kept.
+    - Moved schedules:
+      - Workspace agents shows a moved routine that paused as paused, with its reason.
+      - A schedule an older build turned back on after its move is turned off again, never moved twice.
+      - The moved line says when the person chose "Don't ask" for some actions.
+    - Talk:
+      - A key that already landed answers before any refusal.
+      - The teammate asked is the picked one named first in the message, with "@PM Lead" never read as "@PM". Picks the draft no longer names are forgotten.
+      - A teammate request refused for good can be sent as a plain message ("Send without the teammate").
+      - "Try again in 1 second" reads right.
+    - Automations:
+      - The step's sentences, its "What went in" slug and its hidden answer never name the teammate to other readers.
+      - A locked view shows no Save, Publish or restore.
+      - The help text says the values are "marked as information".
+    - The page:
+      - A group stop whose stream broke before the saved message arrived ends when that message is answered.
+      - Members show at once after a change made while an answer streams.
+      - A gone group shows the unsent words once.
+      - The "New" and members menus can be reached and moved through by keyboard.
+      - The group hint names the real lead.
+      - Leaving with words typed says they will not be kept.
+      - "See memory" finds a removed teammate.
+      - A teammate list that failed to load says so, with Try again.
+    - Proved live: an answer posted while only Ola was in #proof kept readers [Ola]. Eve, added after, read it as hidden (no words), and Ola read the words without the list.

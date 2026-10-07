@@ -212,7 +212,15 @@ export async function updateGroup(
 
   const top = g.members.reduce((max, m) => Math.max(max, m.position), -1);
   await prisma.$transaction(async (tx) => {
-    if (removeIds.size > 0) await tx.chatSessionTeammate.deleteMany({ where: { sessionId: g.id, agentId: { in: [...removeIds] } } });
+    if (removeIds.size > 0) {
+      await tx.chatSessionTeammate.deleteMany({ where: { sessionId: g.id, agentId: { in: [...removeIds] } } });
+      // What a removed teammate still asked in this group is cancelled: no
+      // continue can follow it here (review round 1, as leaving does).
+      await tx.agentAction.updateMany({
+        where: { sessionId: g.id, actingForId: viewer.userId, agentId: { in: [...removeIds] }, status: "PENDING" },
+        data: { status: "CANCELLED", decidedVia: "system", decidedAt: new Date(), error: GROUP_COPY.cancelledRemoved },
+      });
+    }
     if (found.agents.length > 0) {
       await tx.chatSessionTeammate.createMany({ data: found.agents.map((a, i) => ({ sessionId: g.id, agentId: a.id, position: Math.min(99, top + 1 + i) })), skipDuplicates: true });
     }
@@ -234,6 +242,20 @@ export async function cancelLeftRequests(sessionId: string, userId: string, now:
     data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: GROUP_COPY.cancelledLeft },
   });
   return done.count;
+}
+
+/** Cancel what a teammate asked in a group it was removed from while it answered. */
+export async function cancelRemovedRequests(sessionId: string, userId: string, agentId: string, now: Date = new Date()): Promise<number> {
+  const done = await prisma.agentAction.updateMany({
+    where: { sessionId, actingForId: userId, agentId, status: "PENDING" },
+    data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: GROUP_COPY.cancelledRemoved },
+  });
+  return done.count;
+}
+
+/** Whether this teammate is still a member of the group (not removed meanwhile). */
+export async function stillInGroup(sessionId: string, agentId: string): Promise<boolean> {
+  return (await prisma.chatSessionTeammate.count({ where: { sessionId, agentId } })) > 0;
 }
 
 /** Whether the person's group is still theirs and live (not left meanwhile). */

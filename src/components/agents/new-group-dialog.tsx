@@ -30,6 +30,9 @@ export function NewGroupDialog(props: {
   onOpenChange: (open: boolean) => void;
   /** The person's teammates (the list's rows); null while the list loads. */
   teammates: readonly TeammateRow[] | null;
+  /** The list could not be read: say so with Try again, never a skeleton for ever (review round 1). */
+  loadFailed?: boolean;
+  onRetry?: () => void;
   onCreated: (group: GroupDetail) => void;
 }) {
   // Mounted only while open, so every open starts empty.
@@ -40,10 +43,14 @@ export function NewGroupDialog(props: {
 function NewGroupFlow({
   onOpenChange,
   teammates,
+  loadFailed = false,
+  onRetry,
   onCreated,
 }: {
   onOpenChange: (open: boolean) => void;
   teammates: readonly TeammateRow[] | null;
+  loadFailed?: boolean;
+  onRetry?: () => void;
   onCreated: (group: GroupDetail) => void;
 }) {
   const shell = useContext(OsShellContext);
@@ -129,7 +136,19 @@ function NewGroupFlow({
             </label>
             <fieldset className="flex min-w-0 flex-col gap-1.5">
               <legend className="mb-1.5 text-sm font-medium text-ink">{GROUP_COPY.members}</legend>
-              {teammates === null ? (
+              {teammates === null && loadFailed ? (
+                <p className="m-0 text-sm text-ink-2">
+                  {GROUP_COPY.teammatesLoadFailed}
+                  {onRetry ? (
+                    <>
+                      {" · "}
+                      <button type="button" onClick={onRetry} className="font-medium text-brand-deep hover:underline">
+                        {GROUP_COPY.tryAgain}
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+              ) : teammates === null ? (
                 <SkeletonRows rows={3} rowHeight="44px" />
               ) : choices.length < GROUP_LIMITS.minMembers ? (
                 <p className="m-0 text-sm text-ink-2">{GROUP_COPY.needTwo}</p>

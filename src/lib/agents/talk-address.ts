@@ -25,15 +25,21 @@ export const TALK_TEAMMATE_LIMITS = {
   answerMax: 8000,
   /** A request still "running" after this reads as not answered (a restart mid-turn; Decision 30). */
   workingStaleMs: 10 * 60_000,
+  /**
+   * The most people a teammate can be asked in front of: its answer keeps
+   * the list of who was there (talk-updates.ts TEAMMATE_ANSWER_KINDS), as an
+   * AI update does, with the same bound (MAX_UPDATE_READERS).
+   */
+  maxReaders: 250,
 } as const;
 
-export type TalkAddressRefusal = "guest" | "public_channel" | "has_guests" | "not_member" | "archived";
+export type TalkAddressRefusal = "guest" | "public_channel" | "has_guests" | "not_member" | "archived" | "too_many_people";
 
 /** Why a teammate can't be asked in this conversation, or null when it can, in this order. */
 export function talkAddressRefusal(
   c: { type: "DM" | "GROUP" | "CHANNEL" | string; restricted: boolean; archivedAt: Date | string | null },
   viewer: { orgRole: string },
-  facts: { isMember: boolean; hasGuests: boolean },
+  facts: { isMember: boolean; hasGuests: boolean; tooManyPeople?: boolean },
 ): TalkAddressRefusal | null {
   if (viewer.orgRole === "GUEST") return "guest";
   if (c.archivedAt) return "archived";
@@ -41,6 +47,7 @@ export function talkAddressRefusal(
   if (c.type !== "CHANNEL" && c.type !== "GROUP" && c.type !== "DM") return "public_channel";
   if (!facts.isMember) return "not_member";
   if (facts.hasGuests) return "has_guests";
+  if (facts.tooManyPeople) return "too_many_people";
   return null;
 }
 

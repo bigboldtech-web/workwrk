@@ -34,6 +34,8 @@ const st = vi.hoisted(() => ({
   givenBack: [] as string[],
   abandoned: [] as string[],
   configured: true,
+  existingRoutine: null as Row | null,
+  personSetting: null as Row | null,
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -62,8 +64,10 @@ vi.mock("@/lib/prisma", () => {
       agent: {
         findMany: async () => st.agents,
         findFirst: async (a: { where: { id: string } }) => st.agents.find((r) => r.id === a.where.id) ?? null,
+        updateMany: async (a: Row) => (st.agentUpdates.push(a), { count: 1 }),
       },
-      agentRoutine: { count: async () => (st.routineCounts += 1, 30) },
+      agentRoutine: { count: async () => (st.routineCounts += 1, 30), findFirst: async () => st.existingRoutine },
+      agentPersonSetting: { findUnique: async () => st.personSetting },
       user: {
         findFirst: async () => (st.userReads += 1, null),
         findMany: async () => (st.userReads += 1, []),
@@ -104,6 +108,7 @@ vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, event: Ro
 
 import { convertLegacySchedules, legacyScheduleOutcome, runLegacyAgentNow, type LegacyScheduleRow } from "./legacy-schedules";
 import { LEGACY_COPY } from "./teammate-copy";
+import { serverTimeZone } from "./schedule-words";
 
 const NOW = new Date("2026-10-07T10:00:00Z");
 
@@ -139,11 +144,21 @@ beforeEach(() => {
 });
 
 describe("moving an old schedule", () => {
+  it("turns off, and never moves twice, a moved schedule an older build turned back on (review round 1)", async () => {
+    st.existingRoutine = { id: "r-old" };
+    st.agents = [agent({ scheduleMovedAt: new Date("2026-10-07T08:00:00Z"), scheduleRoutineId: "r-old" })];
+    expect(await convertLegacySchedules(NOW, { limit: 100 })).toEqual({ found: 1, moved: 0, stopped: 1, taken: 0, failed: 0 });
+    expect(st.routines).toEqual([]);
+    expect(st.agentUpdates.at(-1)).toEqual({ where: { id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes" }, data: { autonomousEnabled: false, nextRunAt: null } });
+    expect(st.audits.at(-1)).toMatchObject({ action: "schedule_stopped", metadata: { routineId: "r-old", reason: "already_moved" } });
+    st.existingRoutine = null;
+  });
+
   it("makes it its creator's routine, at most hourly, and stops the old schedule in the same step", async () => {
     st.people["u-olivia"] = person("u-olivia");
     st.agents = [agent()];
     expect(await convertLegacySchedules(NOW, { limit: 100 })).toEqual({ found: 1, moved: 1, stopped: 0, taken: 0, failed: 0 });
-    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleMovedAt: null, scheduleCron: "every 10 minutes" }]);
+    expect(st.casWhere).toEqual([{ id: "a1", autonomousEnabled: true, scheduleCron: "every 10 minutes" }]);
     expect(st.casData).toEqual([{ autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: NOW, scheduleMoveReason: null }]);
     expect(st.routines).toEqual([
       {
@@ -160,6 +175,15 @@ describe("moving an old schedule", () => {
       },
     ]);
     expect(st.agentUpdates).toEqual([{ id: "a1", scheduleRoutineId: "r1" }]);
+  });
+
+  it("says the routine keeps what the creator chose not to be asked about (review round 1)", async () => {
+    st.people["u-olivia"] = person("u-olivia");
+    st.personSetting = { approvalRules: { comment_on_task: "always" } };
+    st.agents = [agent({ scheduleCron: "CRON_TZ=Asia/Kolkata 0 9 * * 1-5" })];
+    await convertLegacySchedules(NOW, { limit: 100 });
+    expect(st.lines.at(-1)?.line).toMatchObject({ text: LEGACY_COPY.movedLineKept("Weekdays at 9:00") });
+    st.personSetting = null;
   });
 
   it("tells the creator in their own chat with the agent, and audits it as the system", async () => {
@@ -256,9 +280,17 @@ describe("legacyScheduleOutcome", () => {
     expect(await legacyScheduleOutcome(agent(), NOW)).toEqual({ kind: "routine", schedule: "hourly", changed: true, actingForId: "u-olivia" });
     expect(await legacyScheduleOutcome(agent({ visibility: "PRIVATE", ownerId: "u-max" }), NOW)).toEqual({ kind: "stop", reason: "no_access" });
   });
-  it("keeps a schedule a routine can run as it was", async () => {
+  it("keeps a schedule a routine can run as it was, naming the server's zone it ran in (review round 1)", async () => {
     st.people["u-olivia"] = person("u-olivia");
-    expect(await legacyScheduleOutcome(agent({ scheduleCron: "0 9 * * 1-5" }), NOW)).toEqual({ kind: "routine", schedule: "0 9 * * 1-5", changed: false, actingForId: "u-olivia" });
+    expect(await legacyScheduleOutcome(agent({ scheduleCron: "0 9 * * 1-5" }), NOW)).toEqual({
+      kind: "routine",
+      schedule: `CRON_TZ=${serverTimeZone()} 0 9 * * 1-5`,
+      changed: false,
+      actingForId: "u-olivia",
+    });
+    // One that names its zone, and a keyword, are kept as written.
+    expect(await legacyScheduleOutcome(agent({ scheduleCron: "CRON_TZ=Asia/Kolkata 0 9 * * 1-5" }), NOW)).toMatchObject({ schedule: "CRON_TZ=Asia/Kolkata 0 9 * * 1-5" });
+    expect(await legacyScheduleOutcome(agent({ scheduleCron: "daily" }), NOW)).toMatchObject({ schedule: "daily" });
   });
 });
 

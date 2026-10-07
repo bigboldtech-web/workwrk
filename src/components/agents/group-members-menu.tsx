@@ -29,6 +29,7 @@ export function GroupMembersMenu({
   onChanged,
   onLeft,
   onClose,
+  draft = "",
 }: {
   group: GroupRow;
   /** The person's teammates (the list's rows), for Add teammate. */
@@ -36,6 +37,8 @@ export function GroupMembersMenu({
   onChanged: (group: GroupDetail) => void;
   onLeft: () => void;
   onClose: () => void;
+  /** Words typed in the group's composer: leaving says they will not be kept (review round 1). */
+  draft?: string;
 }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
@@ -67,7 +70,12 @@ export function GroupMembersMenu({
 
   async function leave() {
     onClose();
-    const ok = await confirm({ title: GROUP_COPY.leaveTitle(g.name), description: GROUP_COPY.leaveBody, confirmLabel: GROUP_COPY.leave, destructive: true });
+    const ok = await confirm({
+      title: GROUP_COPY.leaveTitle(g.name),
+      description: draft.trim() ? `${GROUP_COPY.leaveBody} ${GROUP_COPY.leaveUnsent}` : GROUP_COPY.leaveBody,
+      confirmLabel: GROUP_COPY.leave,
+      destructive: true,
+    });
     if (!ok) return;
     const r = await apiFetch(`/api/teammate-groups/${encodeURIComponent(g.id)}`, { method: "DELETE" });
     if (!r.ok) {
@@ -80,10 +88,13 @@ export function GroupMembersMenu({
 
   if (adding) {
     return (
-      <MenuList aria-label={GROUP_COPY.addTeammate}>
+      <MenuList aria-label={GROUP_COPY.addTeammate} keyboard>
         <MenuItem icon={ArrowLeft} label={GROUP_COPY.back} onClick={() => setAdding(false)} />
         <MenuSeparator />
-        {addable.length === 0 ? (
+        {teammates === null ? (
+          // Not read yet, or the read failed: never "everyone is already here" (review round 1).
+          <p className="m-0 px-3 py-2 text-sm text-ink-2">{GROUP_COPY.teammatesNotLoaded}</p>
+        ) : addable.length === 0 ? (
           <p className="m-0 px-3 py-2 text-sm text-ink-2">{GROUP_COPY.nobodyToAdd}</p>
         ) : (
           addable.map((t) => (
@@ -111,10 +122,11 @@ export function GroupMembersMenu({
   }
 
   return (
-    <MenuList aria-label={GROUP_COPY.membersButton(g.members.length)}>
+    // Reachable by keyboard; each row's Remove is an item of the menu (review round 1).
+    <MenuList aria-label={GROUP_COPY.membersButton(g.members.length)} keyboard>
       <MenuSectionLabel>{GROUP_COPY.members}</MenuSectionLabel>
       {g.members.map((m) => (
-        <div key={m.agentId} className="flex h-9 min-w-0 items-center gap-2 px-3">
+        <div key={m.agentId} role="presentation" className="flex h-9 min-w-0 items-center gap-2 px-3">
           <TeammateAvatar name={m.name} hue={m.hue} avatar={m.avatar} size="md" />
           <span className="min-w-0 flex-1 truncate text-base text-ink">{m.name}</span>
           {m.status !== "ENABLED" ? (
@@ -122,6 +134,7 @@ export function GroupMembersMenu({
           ) : null}
           <button
             type="button"
+            role="menuitem"
             disabled={busy}
             onClick={() => {
               const again = () => void patch({ remove: [m.slug] }, again);

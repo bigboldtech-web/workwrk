@@ -126,6 +126,18 @@ function needsAnswer(ctx: ActionContext, template: string): void {
 const ANSWER_TOKEN = /\{\{\s*teammate\.answer\s*\}\}/;
 
 /**
+ * A teammate's answer is read from its creator's reach, as a member: it never
+ * goes to a Guest, by notification or email (Decision 8 keeps teammates away
+ * from Guests in Talk too; review round 1). The step fails instead, with a
+ * sentence that does not repeat the answer.
+ */
+async function answerNeverToAGuest(ctx: ActionContext, params: Record<string, unknown>, keys: readonly string[], userId: string): Promise<void> {
+  if (!keys.some((k) => typeof params[k] === "string" && TEAMMATE_TOKEN.test(params[k] as string))) return;
+  const { anyGuestHere } = await import("@/lib/access/guests");
+  if (await anyGuestHere(ctx.organizationId, [userId])) throw new Error(AUTOMATION_TEAMMATE_COPY.answerNotForGuests);
+}
+
+/**
  * Resolve a user-ish param: an explicit user id, or the special values
  * "assignee" / "actor" (read from the trigger payload) / "board_owner"
  * (the owning board's ownerId, via payload.boardId). Verifies org
@@ -414,6 +426,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       }
 
       const user = await resolveUser(ctx, raw);
+      await answerNeverToAGuest(ctx, params, ["title", "message"], user.id);
       // Same shape the board comment mention fan-out writes.
       const created = await prisma.notification.create({
         data: {
@@ -454,6 +467,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       let userId: string | undefined;
       if (!toRaw.includes("@")) {
         const user = await resolveUser(ctx, toRaw);
+        await answerNeverToAGuest(ctx, params, ["subject", "body"], user.id);
         to = user.email;
         userId = user.id;
       }

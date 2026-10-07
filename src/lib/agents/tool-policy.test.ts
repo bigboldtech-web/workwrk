@@ -241,6 +241,14 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     expect(toolsForTrigger(ALL_TEAMMATE, "TALK")).toEqual(["search_tasks", "post_in_talk"]);
     expect(toolsForTrigger(ALL_TEAMMATE, "AUTOMATION")).toEqual(["search_tasks", "post_in_talk"]);
   });
+  it("reads none of the person's private records where the answer goes out with no card (review round 1)", () => {
+    const withRecords: ToolName[] = ["search_tasks", "list_my_kras", "list_my_kpi_status", "list_my_weekly_reviews", "get_team_alignment_rollup", "search_contracts", "search_employees"];
+    expect(toolsForTrigger(withRecords, "TALK")).toEqual(["search_tasks", "search_employees"]);
+    expect(toolsForTrigger(withRecords, "AUTOMATION")).toEqual(["search_tasks", "search_employees"]);
+    // A delegated answer comes back to the person's own chat first.
+    expect(toolsForTrigger(withRecords, "DELEGATED")).toEqual(withRecords);
+    expect(toolsForTrigger(withRecords, "CHAT")).toEqual(withRecords);
+  });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
     expect(BASE_RISK.ask_teammate).toBe("READ");

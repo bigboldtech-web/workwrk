@@ -127,7 +127,7 @@ export function ThreadView({
   onReact: (m: FeedMessage, emoji: string) => void;
   onEdit: (m: FeedMessage, body: string) => void;
   onDelete: (m: FeedMessage) => void;
-  onRetry: (m: FeedMessage) => void;
+  onRetry: (m: FeedMessage, opts?: { withoutTeammate?: boolean }) => void;
   onDiscardFailed: (m: FeedMessage) => void;
   onError: (message: string) => void;
 }) {

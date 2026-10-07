@@ -92,15 +92,9 @@ const SORT_LABEL: Record<(typeof SORTS)[number], string> = { newest: "Newest fir
 const STEP_TYPE_LABEL: Record<RunStep["stepType"], string> = { TRIGGER: "Trigger", CONDITION: "Check", ACTION: "Action" };
 
 
-/**
- * A teammate step's answer hidden from this viewer (runs/[id] route,
- * hideTeammateAnswers): the teammate's name for the sentence, else null.
- */
-function answerHiddenIn(output: unknown): string | null {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
-  const o = output as Record<string, unknown>;
-  if (o.answerHidden !== true) return null;
-  return typeof o.teammate === "string" && o.teammate ? o.teammate : "the teammate";
+/** A teammate step's answer, or what came after it, hidden from this viewer (runs/[id] route, hideTeammateAnswers). */
+function answerHiddenIn(output: unknown): boolean {
+  return Boolean(output) && typeof output === "object" && !Array.isArray(output) && (output as Record<string, unknown>).answerHidden === true;
 }
 
 function runSummary(r: { status: string; errorMessage: string | null; steps?: RunStep[] }): string {
@@ -276,7 +270,7 @@ function RunDrawer({ runId, known, onClose, onRetried, onMissing }: { runId: str
                       <div className="mb-2 flex flex-col gap-2 ps-1">
                         <JsonBlock label="What went in" value={s.inputJson} defaultOpen />
                         {answerHiddenIn(s.outputJson) ? (
-                          <p className="m-0 text-sm text-ink-2">{AUTOMATION_TEAMMATE_COPY.answerHidden(answerHiddenIn(s.outputJson) ?? "")}</p>
+                          <p className="m-0 text-sm text-ink-2">{AUTOMATION_TEAMMATE_COPY.answerHidden}</p>
                         ) : (
                           <JsonBlock label="What came back" value={s.outputJson} defaultOpen />
                         )}

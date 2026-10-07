@@ -11,10 +11,9 @@
 //
 // Pure: no prisma, no fetch.
 
-import { splitScheduleZone } from "./cron";
 import type { TeammateHue } from "./hues";
 import { routineReasonText } from "./routines";
-import { describeSchedule, wordsInZone } from "./schedule-words";
+import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
 import type { TeammateVisibility } from "./teammate-access";
 import { LEGACY_COPY, TOOL_PICKER_COPY, type LegacyStopReason } from "./teammate-copy";
 import {
@@ -331,7 +330,9 @@ export function routineViewFromRow(r: RoutineRowLike, viewerZone: string | null)
     name: r.name,
     prompt: r.prompt,
     schedule: r.schedule,
-    when: wordsInZone(describeSchedule(r.schedule, true), splitScheduleZone(r.schedule).zone, viewerZone),
+    // A schedule with no zone of its own runs on the server's clock: say so
+    // (an old schedule moved onto routines; review round 1).
+    when: wordsInZone(describeSchedule(r.schedule, true), scheduleZone(r.schedule, serverTimeZone()), viewerZone),
     status: paused ? "paused" : "active",
     pausedReason: paused ? r.pausedReason : null,
     pausedText: paused ? routineReasonText(r.pausedReason) : null,
@@ -361,6 +362,10 @@ export interface AgentScheduleView {
   reason: string | null;
   /** Its chat's Routines tab. */
   routinesHref: string;
+  /** The routine it became is paused (its creator left, or paused it): it runs no more until it is resumed. */
+  paused: boolean;
+  /** Why, as the Routines tab says it (routineReasonText), else null. */
+  pausedText: string | null;
 }
 
 const STOP_REASONS: ReadonlySet<string> = new Set(Object.keys(LEGACY_COPY.stopReason));
@@ -372,19 +377,30 @@ const STOP_REASONS: ReadonlySet<string> = new Set(Object.keys(LEGACY_COPY.stopRe
  */
 export function agentScheduleView(
   agent: { slug: string; scheduleMovedAt: Date | string | null; scheduleRoutineId: string | null; scheduleMoveReason: string | null },
-  routine: { actingForId: string } | null,
+  routine: { actingForId: string; status?: string | null; pausedReason?: string | null } | null,
   personName: string | null,
   viewerId: string,
 ): AgentScheduleView {
   const routinesHref = `/agents?chat=${encodeURIComponent(agent.slug)}&settings=routines`;
-  const none: AgentScheduleView = { state: null, personName: null, isYou: false, reason: null, routinesHref };
+  const none: AgentScheduleView = { state: null, personName: null, isYou: false, reason: null, routinesHref, paused: false, pausedText: null };
   if (!agent.scheduleMovedAt) return none;
   if (agent.scheduleMoveReason) {
     const reason = STOP_REASONS.has(agent.scheduleMoveReason) ? LEGACY_COPY.stopReason[agent.scheduleMoveReason as LegacyStopReason] : null;
     return { ...none, state: "stopped", reason };
   }
   if (!agent.scheduleRoutineId || !routine) return none;
-  return { state: "routine", personName, isYou: routine.actingForId === viewerId, reason: null, routinesHref };
+  // A paused routine says so: the only page the whole workspace sees must not
+  // read as running for an agent that will not run again (review round 1).
+  const paused = Boolean(routine.status) && routine.status !== "active";
+  return {
+    state: "routine",
+    personName,
+    isYou: routine.actingForId === viewerId,
+    reason: null,
+    routinesHref,
+    paused,
+    pausedText: paused ? routineReasonText(routine.pausedReason) : null,
+  };
 }
 
 // ── Activity ────────────────────────────────────────────────────────

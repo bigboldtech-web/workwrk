@@ -53,6 +53,9 @@ vi.mock("@/lib/prisma", () => {
         return { count: 1 };
       },
     },
+    agentAction: {
+      updateMany: async (a: { where: Row; data: Row }) => (st.actionUpdates.push(a), { count: 1 }),
+    },
   };
   const groupOf = (row: Row) => ({
     id: row.id,
@@ -194,6 +197,11 @@ describe("updateGroup", () => {
     await updateGroup(again, MAX, { remove: ["pm"] });
     expect(st.members.map((m) => m.agentId)).toEqual(["a-triage", "a-cos"]);
     expect(st.lines.at(-1)).toEqual({ sessionId: g.id, text: "Removed pm", event: "group_member_removed", agentId: "a-pm" });
+    // What it still asked in this group is cancelled with it (review round 1).
+    expect(st.actionUpdates.at(-1)).toMatchObject({
+      where: { sessionId: g.id, actingForId: "u-max", agentId: { in: ["a-pm"] }, status: "PENDING" },
+      data: { status: "CANCELLED", decidedVia: "system", error: GROUP_COPY.cancelledRemoved },
+    });
   });
 
   it("lets the person remove a teammate that was removed from the workspace", async () => {

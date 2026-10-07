@@ -108,7 +108,7 @@ describe("runAutomationTeammateStep", () => {
     st.acting = true;
     await expect(runAutomationTeammateStep(ctx(), { ...PARAMS, teammate: "t-olivias-private" })).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noTeammate);
     st.teammate = { ...st.teammate!, status: "DISABLED" };
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.paused("Triage"));
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.paused);
     expect(st.claims).toEqual([]);
   });
 
@@ -132,13 +132,13 @@ describe("runAutomationTeammateStep", () => {
 
   it("gives the question back when the model never answered", async () => {
     st.turn = { text: "", error: null, giveBack: true, failedBeforeAnything: true, proposedActionIds: [], messages: [] };
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noAnswer("Triage"));
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noAnswer);
     expect(st.givenBack).toEqual(["run-a"]);
   });
 
   it("calls a turn with no words left once cleaned no answer", async () => {
     st.turn = { text: "", error: null, giveBack: false, failedBeforeAnything: false, proposedActionIds: [], messages: [] };
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noAnswer("Triage"));
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noAnswer);
   });
 
   it("refuses an empty request before anything is spent", async () => {

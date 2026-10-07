@@ -60,7 +60,7 @@ export async function GET() {
   // they work for: one query each, however many agents.
   const routineIds = installed.map((a) => a.scheduleRoutineId).filter((id): id is string => Boolean(id));
   const movedTo = routineIds.length
-    ? await prisma.agentRoutine.findMany({ where: { id: { in: routineIds }, organizationId: user.organizationId }, select: { id: true, actingForId: true } })
+    ? await prisma.agentRoutine.findMany({ where: { id: { in: routineIds }, organizationId: user.organizationId }, select: { id: true, actingForId: true, status: true, pausedReason: true } })
     : [];
   const routineBy = new Map(movedTo.map((r) => [r.id, r]));
   const people = movedTo.length

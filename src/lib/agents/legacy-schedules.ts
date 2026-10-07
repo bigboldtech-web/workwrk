@@ -39,12 +39,12 @@ import { writeEventLine } from "./actions";
 import { auditAgent } from "./audit";
 import { abandonTurn, claimTeammateTurn, giveBackTurn } from "./budget";
 import { clampText } from "./clamp";
-import { splitScheduleZone } from "./cron";
+import { parseCron, splitScheduleZone, withScheduleZone } from "./cron";
 import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "./engine";
 import { LEGACY_AGENT } from "./legacy-agents";
 import { ROUTINE_LIMITS, legacyRoutineSchedule } from "./routines";
 import { nextRoutineRun } from "./routines-server";
-import { describeSchedule, wordsInZone } from "./schedule-words";
+import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
 import { canUseAgent } from "./teammate-access";
 import { ACTION_ERRORS, LEGACY_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, type LegacyStopReason } from "./teammate-copy";
 
@@ -73,6 +73,8 @@ export const LEGACY_SCHEDULE_SELECT = {
   scheduleCron: true,
   autonomousPrompt: true,
   nextRunAt: true,
+  scheduleMovedAt: true,
+  scheduleRoutineId: true,
 } as const;
 
 export interface LegacyScheduleRow {
@@ -87,6 +89,9 @@ export interface LegacyScheduleRow {
   scheduleCron: string | null;
   autonomousPrompt: string | null;
   nextRunAt: Date | null;
+  /** Set once moved; on a row read again, an older build turned its schedule back on (a rollback). */
+  scheduleMovedAt?: Date | null;
+  scheduleRoutineId?: string | null;
 }
 
 export type LegacyScheduleOutcome =
@@ -99,7 +104,11 @@ const stop = (reason: LegacyStopReason): LegacyScheduleOutcome => ({ kind: "stop
 export async function legacyScheduleOutcome(agent: LegacyScheduleRow, now: Date): Promise<LegacyScheduleOutcome> {
   if (agent.status === "ARCHIVED") return stop("agent_removed");
   if (!(agent.scheduleCron ?? "").trim()) return stop("no_schedule");
-  const schedule = legacyRoutineSchedule(agent.scheduleCron, now);
+  const moved = legacyRoutineSchedule(agent.scheduleCron, now);
+  // A bare five-field cron ran on the server's clock: it keeps its times,
+  // and now names the zone, so the words and a later edit read it right
+  // (review round 1). The keywords keep reading in that zone (scheduleZone).
+  const schedule = moved.ok && !moved.changed && parseCron(moved.schedule) && !splitScheduleZone(moved.schedule).zone ? { ...moved, schedule: withScheduleZone(moved.schedule, serverTimeZone()) } : moved;
   if (!schedule.ok) return stop("unsupported_schedule");
   const creator = agent.createdById;
   if (!creator) return stop("no_creator");
@@ -126,8 +135,11 @@ function errorLine(err: unknown): string {
  * old way any more (PATCH .../schedule answers use_routines).
  */
 export async function convertLegacySchedules(now: Date, opts: { limit: number }): Promise<LegacyScheduleCounts> {
+  // Every schedule that is on, a moved one included: an older build (after a
+  // rollback) can turn a moved schedule back on, and it must neither run the
+  // old ungated way nor sit unseen (review round 1).
   const rows = await prisma.agent.findMany({
-    where: { ...LEGACY_AGENT, autonomousEnabled: true, scheduleMovedAt: null },
+    where: { ...LEGACY_AGENT, autonomousEnabled: true },
     orderBy: { id: "asc" },
     take: opts.limit,
     select: LEGACY_SCHEDULE_SELECT,
@@ -146,11 +158,32 @@ export async function convertLegacySchedules(now: Date, opts: { limit: number })
 }
 
 async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "stopped" | "taken"> {
+  // Moved before, and turned back on since: its routine still stands, so
+  // there is one routine per agent and the schedule is simply off again.
+  if (agent.scheduleMovedAt && agent.scheduleRoutineId) {
+    const routine = await prisma.agentRoutine.findFirst({ where: { id: agent.scheduleRoutineId, organizationId: agent.organizationId }, select: { id: true } });
+    if (routine) {
+      const off = await prisma.agent.updateMany({
+        where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron },
+        data: { autonomousEnabled: false, nextRunAt: null },
+      });
+      if (off.count !== 1) return "taken";
+      await auditAgent({
+        organizationId: agent.organizationId,
+        actorId: null,
+        actorType: "system",
+        agent: { id: agent.id, name: agent.name, slug: agent.slug },
+        action: "schedule_stopped",
+        metadata: { routineId: routine.id, reason: "already_moved", schedule: agent.scheduleCron },
+      });
+      return "stopped";
+    }
+  }
   const outcome = await legacyScheduleOutcome(agent, now);
   const reason = outcome.kind === "stop" ? outcome.reason : null;
   const routineId = await prisma.$transaction(async (tx): Promise<string | null | false> => {
     const cas = await tx.agent.updateMany({
-      where: { id: agent.id, autonomousEnabled: true, scheduleMovedAt: null, scheduleCron: agent.scheduleCron },
+      where: { id: agent.id, autonomousEnabled: true, scheduleCron: agent.scheduleCron },
       data: { autonomousEnabled: false, nextRunAt: null, scheduleMovedAt: now, scheduleMoveReason: reason },
     });
     if (cas.count !== 1) return false;
@@ -198,9 +231,17 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
   // A notice: the move is done whether or not the line is written.
   try {
     const person = outcome.actingForId;
-    const [session, zone] = await Promise.all([getOrCreateTeammateSession(agent, person), personZone(person, agent.organizationId)]);
-    const when = wordsInZone(describeSchedule(outcome.schedule, true), splitScheduleZone(outcome.schedule).zone, zone);
-    await writeEventLine(session.id, { text: LEGACY_COPY.movedLine(when), event: "schedule_moved", routineId });
+    const [session, zone, setting] = await Promise.all([
+      getOrCreateTeammateSession(agent, person),
+      personZone(person, agent.organizationId),
+      prisma.agentPersonSetting.findUnique({ where: { agentId_userId: { agentId: agent.id, userId: person } }, select: { approvalRules: true } }).catch(() => null),
+    ]);
+    const when = wordsInZone(describeSchedule(outcome.schedule, true), scheduleZone(outcome.schedule, serverTimeZone()), zone);
+    // A routine honours what the person chose not to be asked about in this
+    // chat (Decision 17), so the line says so when they chose any (review round 1).
+    const rules = setting?.approvalRules && typeof setting.approvalRules === "object" && !Array.isArray(setting.approvalRules) ? Object.values(setting.approvalRules as Record<string, unknown>) : [];
+    const text = rules.includes("always") ? LEGACY_COPY.movedLineKept(when) : LEGACY_COPY.movedLine(when);
+    await writeEventLine(session.id, { text, event: "schedule_moved", routineId });
     publishToUser(person, { type: "agent.changed", agentId: agent.id });
   } catch (err) {
     console.error(`[agents] schedule move line for agent ${agent.id} not written: ${errorLine(err)}`);

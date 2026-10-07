@@ -91,18 +91,50 @@ export function MenuSubmenu({
 
 /* ───────────────────────────── container ───────────────────────────── */
 
+const MENU_ITEMS = '[role="menuitem"]:not([aria-disabled="true"]):not(:disabled), [role="menuitemcheckbox"]:not([aria-disabled="true"]):not(:disabled)';
+
 export function MenuList({
   children,
   className,
+  keyboard = false,
+  onKeyDown,
   ...rest
-}: React.HTMLAttributes<HTMLDivElement>) {
+}: React.HTMLAttributes<HTMLDivElement> & {
+  /**
+   * A menu a person opens from a button: its first item takes focus, and
+   * Arrow Up and Down, Home and End move between items (what
+   * aria-haspopup="menu" promises). Off by default, so menus that manage
+   * their own focus are unchanged.
+   */
+  keyboard?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (keyboard) ref.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+  }, [keyboard]);
   return (
     <div
+      ref={ref}
       role="menu"
       className={cn(
         "rounded-lg border border-line bg-raised py-1 text-ink shadow-[var(--os-shadow-pop)]",
         className,
       )}
+      onKeyDown={(e) => {
+        onKeyDown?.(e);
+        if (!keyboard || e.defaultPrevented) return;
+        const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? []);
+        if (items.length === 0) return;
+        const at = items.indexOf(document.activeElement as HTMLElement);
+        const go = (i: number) => {
+          e.preventDefault();
+          items[(i + items.length) % items.length]?.focus();
+        };
+        if (e.key === "ArrowDown") go(at + 1);
+        else if (e.key === "ArrowUp") go(at < 0 ? items.length - 1 : at - 1);
+        else if (e.key === "Home") go(0);
+        else if (e.key === "End") go(items.length - 1);
+      }}
       {...rest}
     >
       {children}

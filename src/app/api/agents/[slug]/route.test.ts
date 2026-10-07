@@ -185,7 +185,7 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
 
     db.viewer = PEOPLE.admin;
     const { body } = await call(listAgents());
-    expect(scheduleOf(body, "deal-desk")).toEqual({ state: "routine", personName: "Max", isYou: false, reason: null, routinesHref: "/agents?chat=deal-desk&settings=routines" });
+    expect(scheduleOf(body, "deal-desk")).toEqual({ state: "routine", personName: "Max", isYou: false, reason: null, routinesHref: "/agents?chat=deal-desk&settings=routines", paused: false, pausedText: null });
     expect(scheduleOf(body, "old-check")).toMatchObject({ state: "stopped", reason: "nobody is on record as having set it up, and it never runs as someone else." });
     expect(scheduleOf(body, "plain")).toMatchObject({ state: null });
 
