@@ -69,6 +69,12 @@ export interface TeammateRef {
   name: string;
 }
 
+/** Who did it, as an audit row names them: a teammate, or Ask AI (no id, no slug). */
+export type AuditAgent = { id: string | null; slug: string | null; name: string };
+
+/** Ask AI in the audit log: "Ask AI (for Priya Shah): Sent kudos to Max". */
+export const ASK_AI_AUDIT: AuditAgent = { id: null, slug: null, name: "Ask AI" };
+
 /**
  * One call as the turn's log keeps it (ChatMessage.toolCalls). The shape
  * Ask AI's log has ({ name, input, result, errorText, durationMs }, read by
@@ -320,7 +326,8 @@ export interface ApprovedRun {
   /** The exact input that runs: prepareCall's, for the stored input or the person's edit. */
   input: Record<string, unknown>;
   person: ActingPerson;
-  agent: TeammateRef;
+  /** Null: Ask AI's own request, run in the person's own context exactly as Ask AI runs a tool. */
+  agent: TeammateRef | null;
   /** "APPROVAL" for a person's approval; the turn's own trigger for a call their rule let run. */
   trigger: TeammateToolContext["trigger"];
   decidedVia: "person" | "rule";
@@ -340,14 +347,16 @@ export type ApprovedOutcome =
 export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome> {
   const name = a.action.toolName;
   const tool = isToolName(name) ? TOOLS[name] : undefined;
-  const ctx = toolCtxFor(a.person, {
-    agentId: a.agent.id,
-    agentName: a.agent.name,
-    sessionId: a.action.sessionId,
-    routineId: a.action.routineId,
-    trigger: a.trigger,
-    actionId: a.action.id,
-  });
+  const ctx: ToolContext = a.agent
+    ? toolCtxFor(a.person, {
+        agentId: a.agent.id,
+        agentName: a.agent.name,
+        sessionId: a.action.sessionId,
+        routineId: a.action.routineId,
+        trigger: a.trigger,
+        actionId: a.action.id,
+      })
+    : { orgId: a.person.organizationId, userId: a.person.userId };
   const ran = tool ? await runHandler(tool, ctx, a.input) : ({ ok: false, error: ACTION_ERRORS.toolOff } as const);
   const data = ran.ok ? ran.result : { error: ran.error };
   const outcome = toolOutcome(name, data);
@@ -362,7 +371,7 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   // action that happened with no record of it (review round 1).
   await auditAgentAction({
     person: a.person,
-    agent: a.agent,
+    agent: a.agent ?? ASK_AI_AUDIT,
     toolName: name,
     input: a.input,
     result: data,
@@ -426,7 +435,7 @@ function auditTarget(result: unknown): { id: string; type: string } | null {
  */
 export async function auditAgentAction(a: {
   person: Pick<ActingPerson, "userId" | "organizationId" | "name">;
-  agent: TeammateRef;
+  agent: AuditAgent;
   toolName: string;
   input: Record<string, unknown> | null;
   result: unknown;

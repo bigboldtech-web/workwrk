@@ -5308,8 +5308,9 @@ model AgentMemory {
 model AgentAction {
   id             String    @id @default(cuid())
   organizationId String
-  agentId        String
-  agent          Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// Null: an Ask AI request (no teammate). prisma/sql/2026-10-07-ask-ai-approvals.sql
+  agentId        String?
+  agent          Agent?    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   actingForId    String
   sessionId      String?
   runId          String?

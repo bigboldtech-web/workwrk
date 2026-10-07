@@ -467,3 +467,51 @@ describe("cancelPendingActionsOf: a removed teammate", () => {
     expect(fx.handlerCalls).toEqual([]);
   });
 });
+
+describe("Ask AI's own requests (no teammate, follow-up 1.5c)", () => {
+  function askAiPost(o: Partial<ActionRowFx> = {}) {
+    return seedAction({ toolName: "send_kudos", agentId: null, sessionId: "s9", input: { email: "max@x.com", message: "Thanks" }, preview: { title: "Send kudos to Max" }, ...o });
+  }
+
+  it("can be denied, writes its line into its chat, and marks no teammate's link", async () => {
+    const row = askAiPost();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "deny" }]);
+    expect(out).toEqual({ results: [{ id: row.id, status: "DENIED" }], resume: false, agentSlug: null });
+    expect(fx.messages).toEqual([expect.objectContaining({ sessionId: "s9", kind: "EVENT", content: "You said no: Send kudos to Max" })]);
+    expect(fx.notifications.at(-1)?.where).toMatchObject({ link: { in: [`/sidekick?session=s9&action=${row.id}`] } });
+    expect(sent("agent.changed")).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "ask-ai" } }]);
+  });
+
+  it("waits, with Ask AI's own sentence, while the person cannot be acted for", async () => {
+    const row = askAiPost();
+    fx.person = { ok: false, reason: "inactive" };
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "person_cannot", error: "Ask AI can't act for you in this workspace now." }]);
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("checks the tool against the chat's offer now: a product tool only where the chat's product has it", async () => {
+    const kra = seedAction({ toolName: "create_kra", agentId: null, sessionId: "s9", input: { title: "Grow" }, preview: { title: "Create KRA" } });
+    fx.chat = { productContext: null, agent: null };
+    const out = await decideActions(viewer, [{ id: kra.id, decision: "approve" }]);
+    expect(out.results[0]).toMatchObject({ status: "CANCELLED", code: "tool_off" });
+    const again = seedAction({ toolName: "create_kra", agentId: null, sessionId: "s8", input: { title: "Grow" }, preview: { title: "Create KRA" } });
+    fx.chat = { productContext: "workwrk-people", agent: null };
+    const ran = await decideActions(viewer, [{ id: again.id, decision: "approve" }]);
+    expect(ran.results[0]).toMatchObject({ status: "EXECUTED" });
+  });
+
+  it("expires in the sweep like any request, published under Ask AI's key", async () => {
+    askAiPost({ expiresAt: new Date(Date.now() - 1000) });
+    await sweepActions(new Date());
+    expect(fx.actions[0].status).toBe("EXPIRED");
+    expect(sent("agent.changed")).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "ask-ai" } }]);
+  });
+
+  it("is never counted on AI teammates, but always against the person's limit", async () => {
+    askAiPost();
+    talkPost();
+    expect(await waitingCount("org", "me")).toBe(2);
+    expect(await waitingCount("org", "me", new Date(), { teammatesOnly: true })).toBe(1);
+  });
+});

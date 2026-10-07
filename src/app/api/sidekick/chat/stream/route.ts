@@ -10,10 +10,20 @@
 //   {type:"user_message",  message:{...}}   , the persisted user msg
 //   {type:"text_delta",    text:"…"}        , incremental text from Claude
 //   {type:"tool_use",      name, input}     , tool invoked by Claude
-//   {type:"tool_result",   name, isError}   , server-side result returned
+//   {type:"tool_result",   name, isError,   , server-side result returned
+//                           state}            ("ran" | "failed" | "waiting")
+//   {type:"approval",      action}          , a request waiting for the
+//                                              person: its card (ActionView)
 //   {type:"done",          message:{...},  , final assistant msg + usage
-//                           tokensIn, tokensOut, finishReason}
+//                           tokensIn, tokensOut, finishReason, approval}
 //   {type:"error",         message:"…"}     , fatal error mid-stream
+//
+// ASK FIRST (follow-up 1.5c): every call goes through executeAskAiCall
+// (src/lib/agents/ask-ai-calls.ts). Anything other people would see waits
+// for the person on a card (the approval event, then an APPROVAL row after
+// the answer), and the call after a waiting one may use no tool, so the
+// model only says what it asked for. What was decided since Ask AI last
+// heard comes once, as a note on the person's message.
 //
 // Prompt caching: the system prompt + tool definitions are stable
 // across turns within a session, so we put a `cache_control: ephemeral`
@@ -29,8 +39,11 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { TOOLS, toolsForSession } from "@/lib/agents/tools";
+import { toolsForSession } from "@/lib/agents/tools";
 import { askAiAgent, teammateChatRefusal } from "@/lib/agents/session-guard";
+import { executeAskAiCall, personOnce, type AskAiCallState, type AskAiTurn } from "@/lib/agents/ask-ai-calls";
+import { ASK_AI_APPROVAL_PROMPT, claimAskAiNote, releaseAskAiNote, saveApprovalRow, withNote } from "@/lib/agents/ask-ai-turn";
+import { wrapToolData } from "@/lib/agents/executor";
 import { isModuleActive } from "@/lib/entitlements";
 import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
 import { aiCostCents } from "@/lib/ai-cost";
@@ -60,6 +73,9 @@ interface ToolCallLog {
   result: unknown;
   errorText: string | null;
   durationMs: number;
+  /** How it ended; "waiting" for a request on a card. */
+  state: AskAiCallState;
+  actionId: string | null;
 }
 
 async function ctxAndSession(sessionId: string) {
@@ -171,7 +187,7 @@ export async function POST(req: Request) {
   const productScope = agentScoped?.productSlug ?? c.chat.productContext ?? null;
   const contextPrefix = await buildContextPrefix(c.chat.productContext, c.chat.boardContext, c.chat.organizationId);
   const basePrompt = agentScoped?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
-  const systemPromptText = contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt;
+  const systemPromptText = `${contextPrefix ? `${contextPrefix}\n${basePrompt}` : basePrompt}\n\n${ASK_AI_APPROVAL_PROMPT}`;
   const availableTools = toolsForSession({ agentProductSlug: productScope, tablesOn: await isModuleActive(c.chat.organizationId, "workwrk-tables") });
   const toolDefs = availableTools.map((t) => ({
     name: t.name,
@@ -214,10 +230,29 @@ export async function POST(req: Request) {
         },
       });
 
-      const messages: Anthropic.MessageParam[] = history.map((m) => ({
-        role: m.role === "USER" ? "user" : "assistant",
-        content: m.content,
-      }));
+      // What was decided on Ask AI's requests since it last heard: told once,
+      // with the person's message.
+      const person = personOnce(c.chat.organizationId, c.userId);
+      const decided = await claimAskAiNote(c.chat.id, (await person())?.firstName ?? "The user");
+      const messages: Anthropic.MessageParam[] = withNote(
+        history.map((m) => ({
+          role: m.role === "USER" ? "user" : "assistant",
+          content: m.content,
+        })),
+        decided.note,
+      );
+      const turn: AskAiTurn = {
+        organizationId: c.chat.organizationId,
+        userId: c.userId,
+        sessionId: c.chat.id,
+        turnKey: userMessage.id,
+        enabled: new Set(toolDefs.map((t) => t.name)),
+        counters: { proposals: 0 },
+        person,
+      };
+      const waitingActions: Array<{ id: string; title: string | null }> = [];
+      // Once a request waits for the person, the model may only say so.
+      let waiting = false;
 
       let assistantText = "";
       let totalTokensIn = 0;
@@ -242,6 +277,7 @@ export async function POST(req: Request) {
               },
             ],
             tools: toolDefs.length > 0 ? (toolDefs as unknown as Anthropic.Tool[]) : undefined,
+            ...(toolDefs.length > 0 && waiting ? { tool_choice: { type: "none" as const } } : {}),
             messages,
           });
 
@@ -295,24 +331,11 @@ export async function POST(req: Request) {
           for (const tu of toolUses) {
             send({ type: "tool_use", name: tu.name, input: tu.input });
 
-            const tool = TOOLS[tu.name];
+            // Runs it, or asks the person first (src/lib/agents/ask-ai-calls.ts).
             const startedAt = Date.now();
-            let outcome: unknown;
-            let execErr: string | null = null;
-            if (!tool) {
-              execErr = `Unknown tool: ${tu.name}`;
-              outcome = { error: execErr };
-            } else {
-              try {
-                outcome = await tool.handler(
-                  { orgId: c.chat.organizationId, userId: c.userId },
-                  tu.input,
-                );
-              } catch (e) {
-                execErr = e instanceof Error ? e.message : "tool execution failed";
-                outcome = { error: execErr };
-              }
-            }
+            const call = await executeAskAiCall(turn, tu.name, tu.input);
+            const outcome = call.result;
+            const execErr = call.state === "failed" ? call.errorText : null;
             const durationMs = Date.now() - startedAt;
 
             toolCallsLog.push({
@@ -322,7 +345,14 @@ export async function POST(req: Request) {
               result: outcome,
               errorText: execErr,
               durationMs,
+              state: call.state,
+              actionId: call.actionId,
             });
+            if (call.action) {
+              waiting = true;
+              waitingActions.push({ id: call.action.id, title: call.action.preview.title });
+              send({ type: "approval", action: call.action });
+            }
 
             if (agentScoped) {
               prisma.agentRun.create({
@@ -339,12 +369,13 @@ export async function POST(req: Request) {
               }).catch(() => {});
             }
 
-            send({ type: "tool_result", name: tu.name, isError: !!execErr });
+            send({ type: "tool_result", name: tu.name, isError: !!execErr, state: call.state, ...(call.action ? { title: call.action.preview.title } : {}) });
 
+            // Read as information inside <tool_data>, never as instructions.
             toolResultBlocks.push({
               type: "tool_result",
               tool_use_id: tu.id,
-              content: JSON.stringify(outcome),
+              content: wrapToolData(tu.name, outcome),
               is_error: !!execErr,
             });
           }
@@ -360,7 +391,11 @@ export async function POST(req: Request) {
         }
         send({ type: "error", message: errorText });
       }
-      if (modelGaveNothing) await releaseAiQuestion(claim.id);
+      if (modelGaveNothing) {
+        await releaseAiQuestion(claim.id);
+        // It never heard them: the next turn tells it.
+        await releaseAskAiNote(c.chat.id, decided.ids);
+      }
 
       // 5. Persist assistant message + usage telemetry.
       const assistantMessage = await prisma.chatMessage.create({
@@ -377,6 +412,9 @@ export async function POST(req: Request) {
             : {}),
         },
       });
+
+      // The card for what it asked, below the answer.
+      const card = await saveApprovalRow(c.chat.id, assistantMessage.createdAt, waitingActions);
 
       const costCents = aiCostCents(totalTokensIn, totalTokensOut);
       await prisma.chatSession.update({
@@ -402,6 +440,7 @@ export async function POST(req: Request) {
           toolCalls: toolCallsLog.map((t) => ({ name: t.name, input: t.input })),
           createdAt: assistantMessage.createdAt,
         },
+        approval: card ? { id: card.id, actionIds: waitingActions.map((w) => w.id), createdAt: card.createdAt } : null,
         error: errorText,
       });
 

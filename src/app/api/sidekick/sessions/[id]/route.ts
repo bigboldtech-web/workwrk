@@ -1,4 +1,6 @@
-// GET /api/sidekick/sessions/[id], session + all messages
+// GET /api/sidekick/sessions/[id], session + all messages + `actions`: the
+//   requests its approval cards name (APPROVAL rows' meta.actionIds), as the
+//   cards show them now, this person's own only (follow-up 1.5c)
 // DELETE /api/sidekick/sessions/[id], soft-archive session
 // PATCH /api/sidekick/sessions/[id], rename / pin / unpin
 
@@ -9,6 +11,8 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { ASK_AI_CHATS } from "@/lib/agents/session-guard";
+import { actionViews } from "@/lib/agents/actions";
+import { actionIdsOf } from "@/lib/ai/thread";
 
 async function ctxAndSession(id: string, opts: { includeArchived?: boolean } = {}) {
   // The ai app key: Guests 404, a hidden app or AI features off 403 app_off.
@@ -53,8 +57,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       finishReason: true,
       toolCalls: true,
       createdAt: true,
+      kind: true,
+      meta: true,
     },
   });
+  // The requests the chat's cards name: the person's own only (actionViews).
+  const cardIds = messages.flatMap((m) => (m.role === "SYSTEM" && m.kind === "APPROVAL" ? actionIdsOf(m.meta) : []));
+  const actions = cardIds.length > 0 ? await actionViews(cardIds, c.userId) : {};
 
   return NextResponse.json({
     session: {
@@ -68,6 +77,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       createdAt: c.session.createdAt,
     },
     messages,
+    actions,
   });
 }
 

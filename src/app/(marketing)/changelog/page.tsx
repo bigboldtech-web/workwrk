@@ -55,6 +55,15 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
   // not listed until it is on.
   {
+    date: "2026-10-07",
+    title: "Ask AI asks first",
+    items: [
+      { type: "security", text: "Ask AI now asks before anything other people would see, such as kudos, an invitation, a new doc, form or table, or a task for someone else. It shows the approval card AI teammates use, and nothing happens until you approve it. A request nobody answers expires after 7 days. Your own work, like a task for yourself, still happens at once." },
+      { type: "improvement", text: "When a teammate's routine asks for your approval, its Inbox row opens as the approval card, so you can approve, change or deny it without leaving the Inbox." },
+      { type: "fix", text: "Ask AI keeps what you type: a message that didn't send comes back above anything you typed since, and each chat keeps its unsent words when you switch to another chat." },
+    ],
+  },
+  {
     date: "2026-10-06",
     title: "AI teammates",
     items: [

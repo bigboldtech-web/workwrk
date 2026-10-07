@@ -1,7 +1,8 @@
 // GET /api/agents/actions/[id]: one of this person's own requests, as its
 // card shows it, with the teammate it came from (the Inbox's approval pane).
 // Anyone else's id, an Admin's view of it included, is the same 404 as a
-// missing one, so an id never says that a request exists.
+// missing one, so an id never says that a request exists. Ask AI's own
+// requests (no teammate) are read with their chat, never here.
 //
 // `actions` is every request the same run asked of this person, in the order
 // it asked, this one among them: a routine that asks several things writes
@@ -24,10 +25,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { viewer } = gate;
   const { id } = await params;
   const row = await prisma.agentAction.findFirst({
-    where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId },
+    where: { id, organizationId: viewer.organizationId, actingForId: viewer.userId, agentId: { not: null } },
     select: { id: true, runId: true, agentId: true, agent: { select: { slug: true, name: true, hue: true, avatar: true } } },
   });
-  if (!row) return teammateError(404, "not_found", TEAMMATE_ROUTE_ERRORS.actionNotFound);
+  const agent = row?.agent;
+  if (!row || !row.agentId || !agent) return teammateError(404, "not_found", TEAMMATE_ROUTE_ERRORS.actionNotFound);
   // The run's requests of this person, as many as one decision may carry.
   const run = row.runId
     ? await prisma.agentAction.findMany({
@@ -44,6 +46,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({
     action,
     actions: ids.flatMap((x) => (views[x] ? [views[x]] : [])),
-    agent: { slug: row.agent.slug, name: row.agent.name, hue: hueForAgent({ hue: row.agent.hue, slug: row.agent.slug }), avatar: row.agent.avatar },
+    agent: { slug: agent.slug, name: agent.name, hue: hueForAgent({ hue: agent.hue, slug: agent.slug }), avatar: agent.avatar },
   });
 }

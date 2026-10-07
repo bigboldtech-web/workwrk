@@ -26,7 +26,7 @@ import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { viewerForUser } from "@/lib/access/viewer";
 import { giveKudos } from "@/lib/kudos-give";
-import { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, type ToolName } from "./tool-names";
+import { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, askAiToolNames, type ToolName } from "./tool-names";
 import { TEAMMATE_TOOLS } from "./teammate-tools";
 import { hasPermission, isOrgAdmin } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
@@ -1744,14 +1744,5 @@ export { CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES };
 //   - Without Tables on (`tablesOn: false`), no Tables tools: a table made
 //     there could not be opened, and on Starter Tables cannot be turned on.
 export function toolsForSession(opts: { agentProductSlug?: string | null; tablesOn?: boolean }): ToolDefinition[] {
-  const available = new Set<ToolName>(CROSS_TOOL_NAMES);
-  if (opts.agentProductSlug) {
-    const productTools = PRODUCT_TOOL_NAMES[opts.agentProductSlug] ?? [];
-    for (const name of productTools) available.add(name);
-  }
-  if (opts.tablesOn === false) {
-    available.delete("create_data_table");
-    available.delete("list_data_tables");
-  }
-  return Array.from(available).map((name) => TOOLS[name]).filter((t): t is ToolDefinition => Boolean(t));
+  return askAiToolNames(opts).map((name) => TOOLS[name]).filter((t): t is ToolDefinition => Boolean(t));
 }

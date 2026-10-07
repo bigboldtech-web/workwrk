@@ -72,7 +72,8 @@ export async function GET() {
     viewer.orgRole === "GUEST"
       ? Promise.resolve(0)
       : countUsableBuildApps(orgId, viewer.userId),
-    ai.allowed ? waitingCount(orgId, viewer.userId) : Promise.resolve(0),
+    // Teammates' only: Ask AI's own requests wait on cards in their chats.
+    ai.allowed ? waitingCount(orgId, viewer.userId, new Date(), { teammatesOnly: true }) : Promise.resolve(0),
     ai.allowed ? anyTeammateUnread(viewer) : Promise.resolve(false),
   ]);
 

@@ -7,7 +7,9 @@
 //
 // It renders the landing (the headline, the one line about what it can see,
 // the six starter prompts, then the composer right under them), the turns,
-// the tool rows, the composer, and every state between: loading, a chat that
+// the tool rows, the approval cards for what Ask AI asked the person first
+// (the cards AI teammates use, follow-up 1.5c) with each decision's line,
+// the composer, and every state between: loading, a chat that
 // failed to load, a chat that is not there any more, an answer that stopped
 // (live, or found on reload as a question with no answer), AI turned off, AI
 // not set up, an archived chat, offline.
@@ -23,6 +25,7 @@ import { OsMarkdown } from "@/components/layout/os/markdown";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
+import { ApprovalCard } from "@/components/agents/approval-card";
 import { Dots } from "@/components/ui/dots";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
@@ -30,7 +33,8 @@ import { useAiSession, type AiMessage, type AiSendError, type ChatContext } from
 import { isStoppedAnswer, unansweredQuestion } from "@/lib/ai/thread";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { ASK_AI_STARTERS, starterLabel, starterWantsMore } from "@/lib/ai/starters";
-import { TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { ASK_AI_CARDS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import type { ActionView, DecideAnswer, TeammateDecision } from "@/lib/agents/teammate-thread";
 import { SUPPORT_EMAIL } from "@/lib/nav/labels";
 import { cn } from "@/lib/utils";
 
@@ -301,7 +305,17 @@ export function AskAiThread({
             </div>
           ) : (
             <div className={cn("flex flex-col", page ? "gap-5" : "gap-4")}>
-              {s.messages.map((m) => <Turn key={m.id} m={m} page={page} />)}
+              {s.messages.map((m) =>
+                m.role === "SYSTEM" ? (
+                  m.kind === "APPROVAL" ? (
+                    <AskAiCard key={m.id} ids={m.actionIds ?? []} actions={s.actions} deciding={s.deciding} onDecide={s.decide} />
+                  ) : (
+                    <p key={m.id} className="text-center text-sm text-ink-2">{m.content}</p>
+                  )
+                ) : (
+                  <Turn key={m.id} m={m} page={page} />
+                ),
+              )}
               {unanswered ? (
                 <div role="status" className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-0.5 ps-7 text-sm text-ink-2">
                   <span>{unanswered.recent ? "The answer may still be on its way." : "The answer stopped before it was saved."}</span>
@@ -322,6 +336,27 @@ export function AskAiThread({
           <div className={cn(column, "py-3")}>{composer}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** What Ask AI asked the person first: the teammates' own card, under the answer that asked. */
+function AskAiCard({
+  ids,
+  actions,
+  deciding,
+  onDecide,
+}: {
+  ids: readonly string[];
+  actions: Readonly<Record<string, ActionView>>;
+  deciding: Readonly<Record<string, "approve" | "deny">>;
+  onDecide: (decisions: TeammateDecision[], opts?: { always?: boolean }) => Promise<DecideAnswer>;
+}) {
+  const list = ids.flatMap((id) => (actions[id] ? [actions[id]] : []));
+  if (list.length === 0) return null;
+  return (
+    <div className="ps-7">
+      <ApprovalCard actions={list} agentName={ASK_AI_CARDS.name} deciding={deciding} onDecide={onDecide} />
     </div>
   );
 }
