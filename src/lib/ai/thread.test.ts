@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { callFromLog, contextFromPath, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { callFromLog, contextFromPath, draftAfterFailure, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
 
 describe("splitSse", () => {
   it("returns whole events and keeps the unfinished tail", () => {
@@ -101,5 +103,25 @@ describe("unansweredQuestion", () => {
     expect(unansweredQuestion([q("2026-09-26T10:00:00Z"), a], { streaming: false, now })).toBeNull();
     expect(unansweredQuestion([q("2026-09-26T10:00:00Z")], { streaming: true, now })).toBeNull();
     expect(unansweredQuestion([], { streaming: false, now })).toBeNull();
+  });
+});
+
+describe("draftAfterFailure: what Ask AI's composer holds after a send failed", () => {
+  it("brings a message the server never had back above what was typed since, never in place of it", () => {
+    expect(draftAfterFailure("and invite Lea", "Book a room for Friday", false)).toBe("Book a room for Friday\n\nand invite Lea");
+    expect(draftAfterFailure("", "Book a room for Friday", false)).toBe("Book a room for Friday");
+  });
+  it("keeps what was typed since when the server has the message (it stays in the thread)", () => {
+    expect(draftAfterFailure("and invite Lea", "Book a room for Friday", true)).toBe("and invite Lea");
+    expect(draftAfterFailure("", "Book a room for Friday", true)).toBe("Book a room for Friday");
+  });
+  it("is the rule every failed send in the store uses", () => {
+    // Before 2026-10-07 two of these were `s.draft || text` and `text`: a
+    // message that never sent was dropped when anything had been typed since,
+    // and words typed while the chat was being made were overwritten.
+    const store = readFileSync(fileURLToPath(new URL("./session-store.ts", import.meta.url)), "utf8");
+    expect(store).not.toContain("s.draft || text");
+    expect(store).not.toMatch(/draft: text,/);
+    expect(store.match(/draft: draftAfterFailure\(s\.draft, text, (true|false)\)/g)).toHaveLength(3);
   });
 });

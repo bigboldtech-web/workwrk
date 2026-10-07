@@ -11,15 +11,17 @@
 //   - closing the panel does not end the chat, reopening resumes it;
 //   - "Open full page" lands on ?session=<id> and the answer keeps arriving,
 //     because the stream lives here, not in a component that unmounts;
-//   - the draft follows the chat between the panel and the page.
+//   - the draft follows the chat between the panel and the page, and each
+//     chat keeps its own unsent words while the tab is open (drafts below).
 //
 // SAVE PATH, unchanged from before this store: a chat is created lazily on
 // the first send (POST /api/sidekick/sessions), the stream route writes the
 // question before it opens the stream and the answer after it closes. This
 // file only reads what the route sends. When a send fails before the server
 // has the question, the question leaves the thread and comes back to the
-// composer; when it fails after, the question stays in the thread and the
-// text comes back to the composer as well, so nothing typed is ever lost.
+// composer, above anything typed since the send; when it fails after, the
+// question stays in the thread and the text comes back to an empty composer
+// as well (thread.ts draftAfterFailure), so nothing typed is ever lost.
 //
 // Offline and a lapsed session are the shell's: JSON calls go through
 // apiFetch (which raises the session-expired dialog and the offline strip);
@@ -30,6 +32,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { markSessionExpired, OFFLINE_EVENT, ONLINE_EVENT } from "@/lib/session-expiry";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import {
+  draftAfterFailure,
   messageFromApi,
   settleDone,
   splitSse,
@@ -113,6 +116,28 @@ let generation = 0;
 let streamAbort: AbortController | null = null;
 let statusInflight: Promise<void> | null = null;
 let windowBound = false;
+// One draft per chat in this tab. Leaving a chat with words in its composer
+// (opening another, or a new chat) keeps them here, and coming back to that
+// chat brings them back, as an AI teammate's chat does. "" is the landing's:
+// a new chat not made yet.
+const drafts = new Map<string, string>();
+
+/** Keep the open chat's unsent words for when it is opened again, beside any kept before. */
+function stashDraft(): void {
+  const key = state.sessionId ?? "";
+  const now = state.draft.trim() ? state.draft : "";
+  const before = drafts.get(key) ?? "";
+  const kept = now && before && now !== before ? `${now}\n\n${before}` : now || before;
+  if (kept) drafts.set(key, kept);
+  else drafts.delete(key);
+}
+
+/** A chat's kept words, handed back once. */
+function takeDraft(key: string): string {
+  const d = drafts.get(key) ?? "";
+  drafts.delete(key);
+  return d;
+}
 
 function set(patch: Partial<AiSessionState> | ((s: AiSessionState) => Partial<AiSessionState>)) {
   const next = typeof patch === "function" ? patch(state) : patch;
@@ -168,23 +193,33 @@ function detach() {
   }
 }
 
-/** Back to the landing. The draft goes too unless `keepDraft`. */
+/**
+ * Back to the landing. The open chat's words are kept for it and the
+ * landing's own come back, unless `keepDraft`: then the words move to the
+ * new chat with the person (Start a new chat with it) instead.
+ */
 function reset(opts: { keepDraft?: boolean } = {}) {
+  if (!opts.keepDraft) stashDraft();
   detach();
+  const draft = opts.keepDraft ? state.draft : takeDraft("");
   set((s) => ({
     ...INITIAL,
     status: s.status,
     offline: s.offline,
-    draft: opts.keepDraft ? s.draft : "",
+    draft,
   }));
 }
 
 /** Show a saved chat. */
 async function open(id: string): Promise<void> {
   if (state.sessionId === id && !state.loadError && !state.missing) return;
+  // Opening it again after a failed load keeps what is in the composer.
+  const same = state.sessionId === id;
+  if (!same) stashDraft();
   detach();
   const gen = generation;
-  set((s) => ({ ...INITIAL, status: s.status, offline: s.offline, sessionId: id, loading: true }));
+  const draft = same ? state.draft : takeDraft(id);
+  set((s) => ({ ...INITIAL, status: s.status, offline: s.offline, sessionId: id, loading: true, draft }));
   const r = await apiFetch<{ session: AiSessionMeta; messages: Array<{ id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }> }>(
     `/api/sidekick/sessions/${encodeURIComponent(id)}`,
     { cache: "no-store" },
@@ -235,7 +270,17 @@ async function refresh(id: string): Promise<boolean> {
  */
 async function start(opts: { agentSlug?: string | null; q?: string | null } = {}): Promise<void> {
   reset();
-  if (opts.q && opts.q.trim()) set({ draft: opts.q.trim() });
+  const q = opts.q?.trim();
+  // The caller's prompt goes above any words the landing kept, never in
+  // place of them, and only once when the same prompt arrives again.
+  if (q) {
+    set((s) => {
+      const held = s.draft.trim() ? s.draft : "";
+      if (!held) return { draft: q };
+      if (held === q || held.startsWith(`${q}\n\n`)) return { draft: held };
+      return { draft: `${q}\n\n${held}` };
+    });
+  }
   const gen = generation;
   if (opts.agentSlug) {
     set({ agent: { slug: opts.agentSlug, name: null } });
@@ -270,11 +315,12 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
     const r = await apiFetch<{ session: { id: string; title: string | null } }>("/api/sidekick/sessions", { method: "POST", json: body });
     if (gen !== generation) return;
     if (!r.ok) {
-      set({
+      // Typed more while the chat was being made: both stay (draftAfterFailure).
+      set((s) => ({
         streaming: false,
-        draft: text,
+        draft: draftAfterFailure(s.draft, text, false),
         error: r.status === 404 && state.agent ? "agent_off" : r.offline ? "not_sent" : "start_failed",
-      });
+      }));
       return;
     }
     sessionId = r.data.session.id;
@@ -318,15 +364,17 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       // keep the tool rows of one that did.
       set((s) => ({
         error: kind,
-        draft: s.draft || text,
+        draft: draftAfterFailure(s.draft, text, true),
         messages: s.messages
           .filter((m) => m.id !== aiTempId || m.content.length > 0 || m.toolCalls.length > 0)
           .map((m) => (m.id === aiTempId ? { ...m, streaming: false, toolCalls: m.toolCalls.map((c) => ({ ...c, pending: false })) } : m)),
       }));
     } else {
+      // The server never had it, so its bubble leaves: the words come back
+      // above anything typed since the send, never in place of it.
       set((s) => ({
         error: kind,
-        draft: s.draft || text,
+        draft: draftAfterFailure(s.draft, text, false),
         messages: s.messages.filter((m) => m.id !== userTempId && m.id !== aiTempId),
       }));
     }
