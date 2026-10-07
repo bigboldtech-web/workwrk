@@ -1103,6 +1103,8 @@ export const GROUP_COPY = {
   noOneCanAnswer: (names: string) => `${names} can't answer now.`,
   skippedLine: (name: string, reason: string) => `${name} didn't answer: ${reason}`,
   skipReason: { paused: "it is paused.", removed: "it was removed.", no_access: "you can no longer use it." },
+  /** A teammate whose turn got nothing back from the AI service. */
+  noAnswerReason: "the AI service didn't answer.",
   renamedLine: (name: string) => `Renamed to ${name}`,
   addedLine: (name: string) => `Added ${name}`,
   removedLine: (name: string) => `Removed ${name}`,

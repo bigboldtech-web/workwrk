@@ -20,6 +20,15 @@ const st = vi.hoisted(() => ({
   outcomeClaims: [] as Array<[string, string | null | undefined]>,
   outcomes: [] as Row[],
   abandoned: [] as string[],
+  /** The teammates as a fresh read finds them now (by slug); absent: as the group holds them. */
+  fresh: {} as Record<string, Row | null>,
+  /** The group is still the person's: false once they left it. */
+  open: true,
+  cancelled: [] as Row[],
+  /** What each turn answers: by default an answer. */
+  turnAnswers: [] as Row[],
+  /** Runs while a turn is answering (to change the world under it). */
+  duringTurn: null as null | (() => void),
 }));
 
 function agent(slug: string, name: string, over: Row = {}): Row {
@@ -45,9 +54,26 @@ vi.mock("@/lib/prisma", () => ({
         return { id: "u1", role: "USER", content: a.data.content, kind: null, meta: a.data.meta, toolCalls: null, createdAt: new Date("2026-10-07T10:00:00Z") };
       },
     },
-    chatSession: { updateMany: async () => ({ count: 1 }) },
+    chatSession: { updateMany: async () => ({ count: 1 }), count: async () => (st.open ? 1 : 0) },
+    agentAction: {
+      updateMany: async (a: Row) => {
+        st.cancelled.push(a);
+        return { count: 1 };
+      },
+    },
   },
 }));
+vi.mock("@/lib/agents/teammate-server", async () => {
+  const real = await vi.importActual<typeof import("@/lib/agents/teammate-server")>("@/lib/agents/teammate-server");
+  return {
+    ...real,
+    loadTeammate: async (slug: string) => {
+      if (slug in st.fresh) return st.fresh[slug];
+      const members = ((st.group?.members ?? []) as Array<{ agent: Row }>).map((m) => m.agent);
+      return members.find((a) => a.slug === slug) ?? null;
+    },
+  };
+});
 vi.mock("@/lib/agents/actions", () => ({
   claimUnreportedOutcomes: async (sessionId: string, agentId?: string | null) => {
     st.outcomeClaims.push([sessionId, agentId]);
@@ -70,7 +96,9 @@ vi.mock("@/lib/agents/engine", () => ({
   teammateAgentFrom: (r: Row) => r,
   runTeammateTurn: async (a: Row) => {
     st.turns.push(a);
-    return { assistantMessageId: `m${st.turns.length}`, approvalMessageId: null, proposedActionIds: [], text: "ok", failedBeforeAnything: false, giveBack: false, tokensIn: 1, tokensOut: 1, error: null, messages: [] };
+    st.duringTurn?.();
+    const custom = st.turnAnswers.shift();
+    return { assistantMessageId: `m${st.turns.length}`, approvalMessageId: null, proposedActionIds: [], text: "ok", failedBeforeAnything: false, giveBack: false, tokensIn: 1, tokensOut: 1, error: null, messages: [], ...custom };
   },
 }));
 vi.mock("@/lib/agents/group-server", async () => {
@@ -107,6 +135,11 @@ beforeEach(() => {
   st.outcomeClaims = [];
   st.outcomes = [];
   st.abandoned = [];
+  st.fresh = {};
+  st.open = true;
+  st.cancelled = [];
+  st.turnAnswers = [];
+  st.duringTurn = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -169,6 +202,44 @@ describe("a group message", () => {
       ["a-cos", "Chief of Staff didn't answer: This workspace has used all its AI questions."],
     ]);
     expect(out.events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("reads each later answerer again: one paused while the first answered does not run (review of step 3)", async () => {
+    st.fresh = { triage: agent("triage", "Triage", { status: "DISABLED" }) };
+    await send({ message: "@Project Manager @Triage go" });
+    expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
+    expect(st.lines).toEqual([{ sessionId: "g1", text: "Triage didn't answer: it is paused.", event: "group_skipped", agentId: "a-triage", replyTo: "u1" }]);
+    st.fresh = { triage: null };
+    st.lines = [];
+    st.claims = [];
+    await send({ message: "@Project Manager @Triage go" });
+    expect(st.lines.map((l) => l.text)).toEqual(["Triage didn't answer: you can no longer use it."]);
+    expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
+  });
+
+  it("runs a later answerer as it is now, its new instructions included", async () => {
+    st.fresh = { triage: agent("triage", "Triage", { systemPrompt: "Changed meanwhile." }) };
+    await send({ message: "@Project Manager @Triage go" });
+    expect((st.turns[1].agent as Row).systemPrompt).toBe("Changed meanwhile.");
+  });
+
+  it("leaves a line for an answerer that got nothing back", async () => {
+    st.turnAnswers = [{ failedBeforeAnything: true, giveBack: true, text: "", error: "The AI service didn't answer. Try again." }];
+    const out = await send({ message: "Status?" });
+    expect(st.lines.map((l) => l.text)).toEqual(["Project Manager didn't answer: the AI service didn't answer."]);
+    expect(out.events.map((e) => e.type)).toEqual(["user_message", "answer_start", "answer_done", "skipped", "done"]);
+  });
+
+  it("cancels what was asked, and stops the rest, when the person left the group mid-turn (review of step 3)", async () => {
+    st.duringTurn = () => {
+      st.open = false;
+    };
+    await send({ message: "@Project Manager @Triage go" });
+    expect(st.turns).toHaveLength(1);
+    expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
+    expect(st.cancelled).toEqual([
+      { where: { sessionId: "g1", actingForId: "u-max", status: "PENDING" }, data: expect.objectContaining({ status: "CANCELLED", decidedVia: "system" }) },
+    ]);
   });
 
   it("always stops the keep-alive", async () => {

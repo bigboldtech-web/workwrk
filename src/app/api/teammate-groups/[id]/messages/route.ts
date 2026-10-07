@@ -21,6 +21,9 @@
 //      the others each claim their own question (the first already has),
 //      answer as themselves, and read the earlier answers as information.
 //      The plan running out of questions stops the rest, each with a line.
+//      Each later answerer is read again just before its turn, and one that
+//      gets nothing back from the AI leaves a line too. A person who left
+//      the group meanwhile stops the rest, and what was asked is cancelled.
 // A continue ({ resume: true, agentSlug }) runs only the teammate whose
 // request was decided, and hears only that teammate's outcomes.
 // The turns run to the end and are saved even when the client goes away.
@@ -37,9 +40,9 @@ import { claimUnreportedOutcomes, writeEventLine } from "@/lib/agents/actions";
 import { abandonTurn, claimTeammateTurn, giveBackTurn, type TurnClaim } from "@/lib/agents/budget";
 import { runTeammateTurn, teammateAgentFrom, type GroupTurn, type TurnResult } from "@/lib/agents/engine";
 import { pickAnswerers, type GroupMember, type SkipReason } from "@/lib/agents/group-chat";
-import { groupMembersFor, groupNameOf, loadGroup, memberViews, namesLine, type GroupRecord } from "@/lib/agents/group-server";
+import { cancelLeftRequests, groupMembersFor, groupNameOf, groupStillOpen, loadGroup, memberViews, namesLine, type GroupRecord } from "@/lib/agents/group-server";
 import { ACTION_ERRORS, GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
-import { MESSAGE_SELECT, invalidRequest, messagesPage, teammateError } from "@/lib/agents/teammate-server";
+import { MESSAGE_SELECT, invalidRequest, loadTeammate, messagesPage, teammateError } from "@/lib/agents/teammate-server";
 import { messageViewFromRow, type AgentActionRow, type GroupStreamEvent, type TeammateMessageView, type TeammateStreamEvent } from "@/lib/agents/teammate-thread";
 
 type Params = { params: Promise<{ id: string }> };
@@ -149,6 +152,7 @@ export async function POST(req: Request, { params }: Params) {
         claim.runId,
       );
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
+      if (!(await groupStillOpen(person.viewer, g.id).catch(() => true))) await cancelLeftRequests(g.id, person.userId).catch(() => 0);
       send({ type: "answer_done", agentId: self.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
       send({ type: "done", messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
     });
@@ -198,11 +202,32 @@ export async function POST(req: Request, { params }: Params) {
         await skipLine(member, outOfQuestions);
         continue;
       }
-      if (skip) {
-        await skipLine(member, GROUP_COPY.skipReason[skip satisfies SkipReason]);
+      const first = member.agentId === firstUp.agentId;
+      // Each later answerer is read again just before its turn: one paused,
+      // removed or no longer the person's to use while the others answered
+      // does not run (review of step 3), and the turn uses it as it is now.
+      let record = records.get(member.agentId)!;
+      let skipNow: SkipReason | null = skip;
+      if (!first && !skipNow) {
+        const now = await loadTeammate(member.slug, person.viewer, { includeRemoved: true }).catch(() => null);
+        if (!now) skipNow = "no_access";
+        else {
+          record = now;
+          skipNow = now.status === "ARCHIVED" ? "removed" : now.status === "DISABLED" ? "paused" : null;
+        }
+      }
+      if (skipNow) {
+        await skipLine(member, GROUP_COPY.skipReason[skipNow]);
         continue;
       }
-      const claim = member.agentId === firstUp.agentId ? firstClaim : await claimFor(member, "AI teammate group message", "CHAT");
+      let claim: TurnClaim;
+      try {
+        claim = first ? firstClaim : await claimFor(member, "AI teammate group message", "CHAT");
+      } catch (err) {
+        console.error(`[agents] group answerer not claimed: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+        await skipLine(member, GROUP_COPY.noAnswerReason);
+        continue;
+      }
       if (!claim.ok) {
         if (claim.code === "ai_limit") outOfQuestions = claim.message;
         await skipLine(member, claim.message);
@@ -211,7 +236,7 @@ export async function POST(req: Request, { params }: Params) {
       send({ type: "answer_start", agentId: member.agentId });
       const result = await runOne(() =>
         runTeammateTurn({
-          agent: teammateAgentFrom(records.get(member.agentId)!),
+          agent: teammateAgentFrom(record),
           person,
           sessionId: g.id,
           trigger: "CHAT",
@@ -230,6 +255,14 @@ export async function POST(req: Request, { params }: Params) {
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       if (result) all.push(...result.messages);
       send({ type: "answer_done", agentId: member.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
+      // An answer that got nothing back leaves a line, so the chat says who did not answer.
+      if (!result || result.failedBeforeAnything) await skipLine(member, GROUP_COPY.noAnswerReason);
+      // The person left the group while this one answered: what it asked is
+      // cancelled (nothing can show it now), and nobody else answers.
+      if (!(await groupStillOpen(person.viewer, g.id).catch(() => true))) {
+        await cancelLeftRequests(g.id, person.userId).catch(() => 0);
+        break;
+      }
     }
     send({ type: "done", messages: all, error: null });
   });

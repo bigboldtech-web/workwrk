@@ -227,13 +227,28 @@ export async function updateGroup(
   return group ? { ok: true, group } : refuse(404, "not_found", GROUP_COPY.notFound);
 }
 
-/** Leave it: it leaves the person's list, and what still waits in it is cancelled (Decision 31). */
-export async function leaveGroup(g: GroupRecord, viewer: Viewer, now: Date = new Date()): Promise<void> {
-  await prisma.chatSession.updateMany({ where: { ...GROUP_SESSION_WHERE(viewer, g.id) }, data: { archivedAt: now } });
-  await prisma.agentAction.updateMany({
-    where: { sessionId: g.id, actingForId: viewer.userId, status: "PENDING" },
+/** Cancel what still waits for the person in a group they left (a compare-and-swap on PENDING). */
+export async function cancelLeftRequests(sessionId: string, userId: string, now: Date = new Date()): Promise<number> {
+  const done = await prisma.agentAction.updateMany({
+    where: { sessionId, actingForId: userId, status: "PENDING" },
     data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: GROUP_COPY.cancelledLeft },
   });
+  return done.count;
+}
+
+/** Whether the person's group is still theirs and live (not left meanwhile). */
+export async function groupStillOpen(viewer: Pick<Viewer, "organizationId" | "userId">, id: string): Promise<boolean> {
+  return (await prisma.chatSession.count({ where: GROUP_SESSION_WHERE(viewer, id) })) > 0;
+}
+
+/**
+ * Leave it: it leaves the person's list, and what still waits in it is
+ * cancelled (Decision 31). A turn still running when they leave cancels
+ * what it asked when it ends (the messages route checks after each turn).
+ */
+export async function leaveGroup(g: GroupRecord, viewer: Viewer, now: Date = new Date()): Promise<void> {
+  await prisma.chatSession.updateMany({ where: { ...GROUP_SESSION_WHERE(viewer, g.id) }, data: { archivedAt: now } });
+  await cancelLeftRequests(g.id, viewer.userId, now);
   publishToUser(viewer.userId, { type: "agent.changed", agentId: g.members[0]?.agent.id ?? GROUP_KIND, sessionId: g.id });
 }
 
