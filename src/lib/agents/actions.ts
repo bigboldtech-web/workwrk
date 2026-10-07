@@ -38,6 +38,13 @@
 // a sweep, each teammate whose cards moved is published to its person
 // (the realtime event agent.changed), once per person and teammate.
 //
+// ASK AI'S OWN REQUESTS (follow-up 1.5c) sit in the same queue with no
+// teammate (agentId null): Ask AI asks first before anything other people
+// would see, through the same card. They are decided the same way, as the
+// person is now, with Ask AI's tools in that chat now, and run exactly as Ask
+// AI runs a tool (the person's own context, no teammate). They never offer
+// "don't ask again" and never make a chat carry on.
+//
 // Server-only: imports prisma.
 
 import type { Prisma } from "@/generated/prisma";
@@ -46,10 +53,13 @@ import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson, type ActingResult } from "./acting";
+import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
 import { prepareCall, type Prepared } from "./previews";
+import { askAiAgent } from "./session-guard";
 import { canUseAgent } from "./teammate-access";
 import {
   ACTION_ERRORS,
+  ASK_AI_CARDS,
   cancelledRemovedLine,
   cancelledToolOffLine,
   didntWorkLine,
@@ -73,7 +83,7 @@ import {
 } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
 import { ACTION_TTL_MS, EDITABLE_FIELD, alwaysKeyFor, sanitizeRules, type ApprovalRules } from "./tool-policy";
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, isToolName, type ToolName } from "./tool-names";
 import { clampText } from "./clamp";
 
 // executor.ts imports this file (proposeAction, waitingCount, the chat
@@ -101,6 +111,19 @@ const ALL_TOOLS: readonly ToolName[] = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAM
  */
 export function actionHref(agentSlug: string, actionId: string): string {
   return `/agents?chat=${encodeURIComponent(agentSlug)}&action=${encodeURIComponent(actionId)}`;
+}
+
+/** The realtime key Ask AI's own requests are published under: they have no teammate. */
+export const ASK_AI_KEY = "ask-ai";
+
+/** Where an Ask AI request's card opens: its chat. */
+export function askAiActionHref(sessionId: string | null, actionId: string): string {
+  return sessionId ? `/sidekick?session=${encodeURIComponent(sessionId)}&action=${encodeURIComponent(actionId)}` : "/sidekick";
+}
+
+/** A request's card: its teammate's chat, or Ask AI's when it has no teammate. */
+function cardHref(row: { id: string; sessionId: string | null; agent: { slug: string } | null }): string {
+  return row.agent ? actionHref(row.agent.slug, row.id) : askAiActionHref(row.sessionId, row.id);
 }
 
 /**
@@ -207,9 +230,11 @@ async function markLinksRead(userId: string, links: readonly string[]): Promise<
  * (realtime-events.ts agent.changed): one event per person and teammate,
  * however many of its cards moved.
  */
-function publishChanged(pairs: Iterable<readonly [userId: string, agentId: string]>): void {
+function publishChanged(pairs: Iterable<readonly [userId: string, agentId: string | null]>): void {
   const seen = new Set<string>();
-  for (const [userId, agentId] of pairs) {
+  for (const [userId, raw] of pairs) {
+    // Ask AI's own requests (no teammate) are published under ASK_AI_KEY.
+    const agentId = raw ?? ASK_AI_KEY;
     const key = `${userId}:${agentId}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -221,7 +246,8 @@ function publishChanged(pairs: Iterable<readonly [userId: string, agentId: strin
 
 export interface ProposeInput {
   organizationId: string;
-  agentId: string;
+  /** Null: Ask AI's own request. */
+  agentId: string | null;
   actingForId: string;
   sessionId: string | null;
   runId: string | null;
@@ -262,9 +288,15 @@ export async function proposeAction(a: ProposeInput): Promise<ActionView> {
   return actionViewFromRow(row);
 }
 
-/** What waits for this person's decision now, across their teammates (the sidebar's count, MAX_PENDING_PER_PERSON). */
-export async function waitingCount(organizationId: string, userId: string, now: Date = new Date()): Promise<number> {
-  return prisma.agentAction.count({ where: { organizationId, actingForId: userId, status: "PENDING", expiresAt: { gt: now } } });
+/**
+ * What waits for this person's decision now: everything, Ask AI's own
+ * included, for MAX_PENDING_PER_PERSON; only their teammates' for the AI
+ * sidebar's count on AI teammates (`teammatesOnly`), where Ask AI's are not.
+ */
+export async function waitingCount(organizationId: string, userId: string, now: Date = new Date(), opts: { teammatesOnly?: boolean } = {}): Promise<number> {
+  return prisma.agentAction.count({
+    where: { organizationId, actingForId: userId, status: "PENDING", expiresAt: { gt: now }, ...(opts.teammatesOnly ? { agentId: { not: null } } : {}) },
+  });
 }
 
 /**
@@ -310,6 +342,8 @@ interface DecideCache {
   person: ActingResult | null;
   modules: { tablesOn: boolean; talkOn: boolean } | null;
   tools: Map<string, ReadonlySet<ToolName>>;
+  /** Ask AI's tools per chat (its product scope), for its own requests. */
+  askAiTools: Map<string, ReadonlySet<ToolName>>;
 }
 
 /**
@@ -323,9 +357,9 @@ export async function decideActions(
   decisions: readonly DecisionInput[],
   opts: { always?: boolean } = {},
 ): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null }> {
-  const cache: DecideCache = { person: null, modules: null, tools: new Map() };
+  const cache: DecideCache = { person: null, modules: null, tools: new Map(), askAiTools: new Map() };
   const results: DecisionResult[] = [];
-  const touched: Array<[string, string]> = [];
+  const touched: Array<[string, string | null]> = [];
   let firstSlug: string | null = null;
   let resumeSlug: string | null = null;
   try {
@@ -338,13 +372,14 @@ export async function decideActions(
         results.push({ id, status: "not_found" });
         continue;
       }
-      firstSlug ??= row.agent.slug;
+      if (row.agent) firstSlug ??= row.agent.slug;
       touched.push([viewer.userId, row.agentId]);
       const r = await decideOne(viewer, row, d, opts, cache);
       // Only what ran (or failed) in this call continues the chat: approving
       // a request decided before (two tabs, a double click) changes nothing,
-      // so the turn after it would have nothing to tell.
-      if ((r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided") resumeSlug ??= row.agent.slug;
+      // so the turn after it would have nothing to tell. Ask AI's own never
+      // continue: its card shows the outcome, and it hears it next turn.
+      if (row.agent && (r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided") resumeSlug ??= row.agent.slug;
       results.push(r);
     }
   } finally {
@@ -358,7 +393,7 @@ export async function decideActions(
 /** The line and the Inbox for a decided row. */
 async function settle(row: DecideRow, userId: string, line: EventLine): Promise<void> {
   await writeEventLine(row.sessionId, { ...line, actionId: row.id });
-  await markLinksRead(userId, [actionHref(row.agent.slug, row.id)]);
+  await markLinksRead(userId, [cardHref(row)]);
 }
 
 async function decideOne(viewer: Viewer, row: DecideRow, d: DecisionInput, opts: { always?: boolean }, cache: DecideCache): Promise<DecisionResult> {
@@ -405,20 +440,51 @@ export async function cancelPendingActionsOf(agent: { id: string; slug: string; 
 /** Close a request that can never run now, with the reason on its card. No line: nobody decided it. */
 async function cancel(row: DecideRow, userId: string, code: "agent_removed" | "tool_off", error: string, now: Date): Promise<DecisionResult> {
   if (!(await swap(row.id, "PENDING", { status: "CANCELLED", decidedVia: "system", decidedAt: now, error }))) return lost(row.id);
-  await markLinksRead(userId, [actionHref(row.agent.slug, row.id)]);
+  await markLinksRead(userId, [cardHref(row)]);
   return { id: row.id, status: "CANCELLED", code, error };
 }
 
-/** The tools this teammate may use now (teammateToolNames, with this workspace's modules). */
-async function toolsOf(agent: DecideRow["agent"], cache: DecideCache): Promise<ReadonlySet<ToolName>> {
-  const known = cache.tools.get(agent.id);
-  if (known) return known;
+/** This workspace's modules, read once per decision request. */
+async function modulesOf(organizationId: string, cache: DecideCache): Promise<{ tablesOn: boolean; talkOn: boolean }> {
   if (!cache.modules) {
-    const [tablesOn, talkOn] = await Promise.all([isModuleActive(agent.organizationId, "workwrk-tables"), isModuleActive(agent.organizationId, "workwrk-talk")]);
+    const [tablesOn, talkOn] = await Promise.all([isModuleActive(organizationId, "workwrk-tables"), isModuleActive(organizationId, "workwrk-talk")]);
     cache.modules = { tablesOn, talkOn };
   }
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, cache.modules));
+  return cache.modules;
+}
+
+/** The tools this teammate may use now (teammateToolNames, with this workspace's modules). */
+async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
+  const known = cache.tools.get(agent.id);
+  if (known) return known;
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, await modulesOf(agent.organizationId, cache)));
   cache.tools.set(agent.id, tools);
+  return tools;
+}
+
+/**
+ * The tools Ask AI offers in this request's chat now, as its chat routes
+ * choose them (askAiToolNames: the chat's agent while the person may still
+ * use it, else its product, and Tables only with Tables on). None when the
+ * chat is gone or is not this person's: nothing of it may run.
+ */
+async function askAiToolsOf(row: DecideRow, viewer: Viewer, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
+  const key = row.sessionId ?? "";
+  const known = cache.askAiTools.get(key);
+  if (known) return known;
+  const chat = row.sessionId
+    ? await prisma.chatSession.findFirst({
+        where: { id: row.sessionId, userId: viewer.userId, organizationId: viewer.organizationId, kind: null },
+        select: { productContext: true, agent: { select: { status: true, productSlug: true, organizationId: true, visibility: true, ownerId: true } } },
+      })
+    : null;
+  let tools: ReadonlySet<ToolName> = new Set();
+  if (chat) {
+    const scoped = askAiAgent(chat.agent, viewer);
+    const { tablesOn } = await modulesOf(viewer.organizationId, cache);
+    tools = new Set(askAiToolNames({ agentProductSlug: scoped?.productSlug ?? chat.productContext ?? null, tablesOn }));
+  }
+  cache.askAiTools.set(key, tools);
   return tools;
 }
 
@@ -431,23 +497,28 @@ async function approve(
   cache: DecideCache,
   now: Date,
 ): Promise<DecisionResult> {
+  // No teammate: Ask AI's own request, checked against Ask AI's tools in its chat.
   const agent = row.agent;
-  if (agent.status === "ARCHIVED" || !canUseAgent(agent, viewer)) return cancel(row, viewer.userId, "agent_removed", cancelledRemovedLine(agent.name), now);
-  if (agent.status === "DISABLED") return { id: row.id, status: "PENDING", code: "agent_paused", error: pausedComposer(agent.name) };
-  const tools = await toolsOf(agent, cache);
+  if (agent && (agent.status === "ARCHIVED" || !canUseAgent(agent, viewer))) return cancel(row, viewer.userId, "agent_removed", cancelledRemovedLine(agent.name), now);
+  if (agent && agent.status === "DISABLED") return { id: row.id, status: "PENDING", code: "agent_paused", error: pausedComposer(agent.name) };
+  const tools = agent ? await toolsOf(agent, cache) : await askAiToolsOf(row, viewer, cache);
   const tool = row.toolName;
-  if (!isToolName(tool) || !tools.has(tool)) return cancel(row, viewer.userId, "tool_off", cancelledToolOffLine(agent.name), now);
+  if (!isToolName(tool) || !tools.has(tool)) return cancel(row, viewer.userId, "tool_off", agent ? cancelledToolOffLine(agent.name) : ASK_AI_CARDS.toolOff, now);
 
   const acting = (cache.person ??= await resolveActingPerson(viewer.organizationId, viewer.userId));
-  if (!acting.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: ACTION_ERRORS.personCannot };
+  if (!acting.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: agent ? ACTION_ERRORS.personCannot : ASK_AI_CARDS.personCannot };
   const person = acting.person;
 
   // Only the tool's one editable field changes, clamped to its length.
   const stored = record(row.input);
   const field = EDITABLE_FIELD[tool];
   const edited = d.edit && field && typeof d.edit.text === "string" ? { ...stored, [field.field]: clampText(d.edit.text, field.maxLength) } : null;
-  const agentRules = sanitizeRules(agent.approvalRules, { level: "agent", allowedTools: [...tools] });
-  const prepared = await prepareCall(tool, edited ?? stored, { person, teammate: { agentId: agent.id, agentName: agent.name, trigger: "APPROVAL" }, agentRules });
+  const agentRules = agent ? sanitizeRules(agent.approvalRules, { level: "agent", allowedTools: [...tools] }) : {};
+  const prepared = await prepareCall(tool, edited ?? stored, {
+    person,
+    teammate: agent ? { agentId: agent.id, agentName: agent.name, trigger: "APPROVAL" } : { ...ASK_AI_PREPARE, trigger: "APPROVAL" },
+    agentRules,
+  });
   if (!prepared.ok) {
     // The person can no longer do it (or the edit left nothing to run): it
     // fails with the reason, and the teammate is told at its next turn.
@@ -464,7 +535,7 @@ async function approve(
     decidedById: viewer.userId,
     decidedAt: now,
     risk,
-    preview: json(prepared.preview),
+    preview: json(agent ? prepared.preview : askAiPreview(prepared.preview)),
     targetKey: prepared.targetKey,
     ...(edited ? { editedInput: json(prepared.input) } : {}),
   });
@@ -475,11 +546,13 @@ async function approve(
     action: { id: row.id, toolName: tool, risk, sessionId: row.sessionId, runId: row.runId, routineId: row.routineId, preview: prepared.preview },
     input: prepared.input,
     person,
-    agent: { id: agent.id, slug: agent.slug, name: agent.name },
+    // Null: Ask AI's own, run in the person's own context as Ask AI runs it.
+    agent: agent ? { id: agent.id, slug: agent.slug, name: agent.name } : null,
     trigger: "APPROVAL",
     decidedVia: "person",
   });
-  const always = opts.always === true && (await storeAlways(agent.id, viewer.userId, tool, prepared));
+  // Ask AI's cards never offer "don't ask again", so nothing is ever stored for them.
+  const always = agent !== null && opts.always === true && (await storeAlways(agent.id, viewer.userId, tool, prepared));
   if (out.status === "EXECUTED") {
     await settle(row, viewer.userId, { text: youApprovedLine(prepared.preview.title, { always }), event: "action_approved" });
     return { id: row.id, status: "EXECUTED", result: { text: out.result.text, href: out.result.href } };
@@ -547,7 +620,7 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
   const linksByPerson = new Map<string, string[]>();
   for (const row of expired) {
     if (row.sessionId) bySession.set(row.sessionId, [...(bySession.get(row.sessionId) ?? []), row]);
-    linksByPerson.set(row.actingForId, [...(linksByPerson.get(row.actingForId) ?? []), actionHref(row.agent.slug, row.id)]);
+    linksByPerson.set(row.actingForId, [...(linksByPerson.get(row.actingForId) ?? []), cardHref(row)]);
   }
   for (const [sessionId, rows] of bySession) {
     const titles = rows.map((r) => actionViewFromRow(r).preview.title);

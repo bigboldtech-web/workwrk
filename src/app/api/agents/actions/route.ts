@@ -2,7 +2,8 @@
 //
 // This person's own requests from their teammates, newest first, each with
 // the teammate it came from: { actions, total }. Only theirs: a request that
-// acts for anyone else is never listed, an Admin's included. `status=PENDING`
+// acts for anyone else is never listed, an Admin's included, and neither is
+// Ask AI's own (no teammate: it is read with its chat). `status=PENDING`
 // is what still waits (a request past its time reads as expired, as its
 // card does).
 //
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
   const takeRaw = parseInt(sp.get("take") ?? "", 10);
   const take = Math.min(TAKE_MAX, Math.max(1, Number.isFinite(takeRaw) ? takeRaw : TAKE_DEFAULT));
 
-  const where: Prisma.AgentActionWhereInput = { organizationId: viewer.organizationId, actingForId: viewer.userId };
+  const where: Prisma.AgentActionWhereInput = { organizationId: viewer.organizationId, actingForId: viewer.userId, agentId: { not: null } };
   if (isAgentActionStatus(status)) where.status = status;
   if (status === "PENDING") where.expiresAt = { gt: new Date() };
   if (slug) where.agent = { slug: slug.slice(0, 200) };
@@ -49,8 +50,9 @@ export async function GET(req: Request) {
   );
   const actions = rows.flatMap((r): Array<ActionView & { agent: { slug: string; name: string; hue: string | null; avatar: string | null } }> => {
     const view = views[r.id];
-    if (!view) return [];
-    return [{ ...view, agent: { slug: r.agent.slug, name: r.agent.name, hue: hueForAgent({ hue: r.agent.hue, slug: r.agent.slug }), avatar: r.agent.avatar } }];
+    const agent = r.agent;
+    if (!view || !agent) return [];
+    return [{ ...view, agent: { slug: agent.slug, name: agent.name, hue: hueForAgent({ hue: agent.hue, slug: agent.slug }), avatar: agent.avatar } }];
   });
   return NextResponse.json({ actions, total });
 }

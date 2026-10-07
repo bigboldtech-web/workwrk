@@ -4,14 +4,22 @@
 // rule here is tested without a browser.
 
 import { toolOutcome, type ToolOutcome } from "@/lib/agents/tool-verbs";
+import type { ActionView } from "@/lib/agents/teammate-thread";
 
 /** One event of POST /api/sidekick/chat/stream (see that route's header). */
 export type StreamEvent =
   | { type: "user_message"; message: { id: string; content?: string; createdAt?: string } }
   | { type: "text_delta"; text: string }
   | { type: "tool_use"; name: string; input?: Record<string, unknown> | null }
-  | { type: "tool_result"; name: string; isError?: boolean }
-  | { type: "done"; message: { id: string; content: string; toolCalls?: Array<{ name: string; input?: unknown }> | null; createdAt?: string } }
+  | { type: "tool_result"; name: string; isError?: boolean; state?: "ran" | "failed" | "waiting"; title?: string }
+  /** A request waiting for the person: its card (follow-up 1.5c). */
+  | { type: "approval"; action: ActionView }
+  | {
+      type: "done";
+      message: { id: string; content: string; toolCalls?: Array<{ name: string; input?: unknown }> | null; createdAt?: string };
+      /** The saved card row for this turn's waiting requests, if any. */
+      approval?: { id: string; actionIds: string[]; createdAt?: string } | null;
+    }
   | { type: "error"; message?: string };
 
 /**
@@ -55,12 +63,17 @@ export interface AiToolCall {
 
 export interface AiMessage {
   id: string;
-  role: "USER" | "ASSISTANT";
+  /** SYSTEM: a row of the chat's own, never a turn (`kind` says which). */
+  role: "USER" | "ASSISTANT" | "SYSTEM";
   content: string;
   toolCalls: AiToolCall[];
   createdAt: string;
   /** The answer is still arriving. */
   streaming?: boolean;
+  /** A SYSTEM row: the card for requests waiting for the person, or a decision's line (follow-up 1.5c). */
+  kind?: "APPROVAL" | "EVENT";
+  /** An APPROVAL row's requests, in the order asked. */
+  actionIds?: string[];
 }
 
 function rec(v: unknown): Record<string, unknown> | null {
@@ -83,11 +96,35 @@ export function callFromLog(entry: unknown): AiToolCall | null {
   };
 }
 
-/** A message from GET /api/sidekick/sessions/[id]; only user and assistant turns render. */
-export function messageFromApi(m: { id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }): AiMessage | null {
+/** The request ids an APPROVAL row's meta names, as strings, at most 50. */
+export function actionIdsOf(meta: unknown): string[] {
+  const ids = rec(meta)?.actionIds;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 50) : [];
+}
+
+/**
+ * A message from GET /api/sidekick/sessions/[id]: the user and assistant
+ * turns, and the chat's own SYSTEM rows Ask AI draws (an approval card, a
+ * decision's line). Any other row is left out.
+ */
+export function messageFromApi(m: { id: string; role: string; content: string; toolCalls?: unknown; createdAt: string; kind?: string | null; meta?: unknown }): AiMessage | null {
+  if (m.role === "SYSTEM") {
+    const base = { id: m.id, role: "SYSTEM" as const, content: m.content ?? "", toolCalls: [], createdAt: String(m.createdAt) };
+    if (m.kind === "APPROVAL") {
+      const actionIds = actionIdsOf(m.meta);
+      return actionIds.length > 0 ? { ...base, kind: "APPROVAL", actionIds } : null;
+    }
+    return m.kind === "EVENT" ? { ...base, kind: "EVENT" } : null;
+  }
   if (m.role !== "USER" && m.role !== "ASSISTANT") return null;
   const calls = Array.isArray(m.toolCalls) ? m.toolCalls.map(callFromLog).filter((c): c is AiToolCall => c !== null) : [];
   return { id: m.id, role: m.role, content: m.content ?? "", toolCalls: calls, createdAt: String(m.createdAt) };
+}
+
+/** The chat's last turn: the last user or assistant message, past any card or line after it. */
+export function lastTurn(messages: readonly AiMessage[]): AiMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role !== "SYSTEM") return messages[i];
+  return null;
 }
 
 /** tool_use: a new pending row. */
@@ -95,12 +132,17 @@ export function withToolUse(calls: AiToolCall[], name: string, input: Record<str
   return [...calls, { name, input: input ?? null, outcome: null, failed: false, pending: true, durationMs: null }];
 }
 
-/** tool_result: settle the most recent pending row of that tool. */
-export function withToolResult(calls: AiToolCall[], name: string, isError: boolean): AiToolCall[] {
+/**
+ * tool_result: settle the most recent pending row of that tool. A call that
+ * waits for the person (`waiting`, with its card's title) reads as waiting
+ * at once ("Would send kudos to Max"), never as done.
+ */
+export function withToolResult(calls: AiToolCall[], name: string, isError: boolean, waiting?: { title?: string | null } | null): AiToolCall[] {
   const next = [...calls];
   for (let i = next.length - 1; i >= 0; i--) {
     if (next[i].name === name && next[i].pending) {
-      next[i] = { ...next[i], pending: false, failed: isError };
+      const outcome = waiting && !isError ? toolOutcome(name, { status: "waiting_for_approval", title: waiting.title ?? undefined }) : next[i].outcome;
+      next[i] = { ...next[i], pending: false, failed: isError, outcome };
       return next;
     }
   }
@@ -183,8 +225,8 @@ export function unansweredQuestion(
   opts: { streaming: boolean; now?: number },
 ): { text: string; recent: boolean } | null {
   if (opts.streaming || messages.length === 0) return null;
-  const last = messages[messages.length - 1];
-  if (last.role !== "USER") return null;
+  const last = lastTurn(messages);
+  if (!last || last.role !== "USER") return null;
   const at = new Date(last.createdAt).getTime();
   const now = opts.now ?? Date.now();
   return { text: last.content, recent: Number.isFinite(at) && now - at < 2 * 60_000 };

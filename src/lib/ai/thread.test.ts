@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { callFromLog, contextFromPath, draftAfterFailure, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
+import { actionIdsOf, callFromLog, contextFromPath, draftAfterFailure, lastTurn, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withToolResult, withToolUse, type AiMessage } from "./thread";
 
 describe("splitSse", () => {
   it("returns whole events and keeps the unfinished tail", () => {
@@ -123,5 +123,44 @@ describe("draftAfterFailure: what Ask AI's composer holds after a send failed", 
     expect(store).not.toContain("s.draft || text");
     expect(store).not.toMatch(/draft: text,/);
     expect(store.match(/draft: draftAfterFailure\(s\.draft, text, (true|false)\)/g)).toHaveLength(3);
+  });
+});
+
+describe("Ask AI's approval cards in the thread (follow-up 1.5c)", () => {
+  const at = "2026-10-07T10:00:00.000Z";
+  it("reads an APPROVAL row as a card naming its requests, and an EVENT row as a line", () => {
+    expect(messageFromApi({ id: "c1", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Send kudos to Max", meta: { actionIds: ["a1", 2, "", "a2"] }, createdAt: at })).toEqual({
+      id: "c1",
+      role: "SYSTEM",
+      kind: "APPROVAL",
+      content: "Waiting for your approval: Send kudos to Max",
+      toolCalls: [],
+      createdAt: at,
+      actionIds: ["a1", "a2"],
+    });
+    expect(messageFromApi({ id: "e1", role: "SYSTEM", kind: "EVENT", content: "You approved: Send kudos to Max", createdAt: at })).toMatchObject({ role: "SYSTEM", kind: "EVENT" });
+  });
+  it("leaves out a card with no requests and any other system row", () => {
+    expect(messageFromApi({ id: "c2", role: "SYSTEM", kind: "APPROVAL", content: "x", meta: { actionIds: [] }, createdAt: at })).toBeNull();
+    expect(messageFromApi({ id: "r1", role: "SYSTEM", kind: "REPORT", content: "x", createdAt: at })).toBeNull();
+    expect(messageFromApi({ id: "s1", role: "SYSTEM", content: "x", createdAt: at })).toBeNull();
+    expect(actionIdsOf(null)).toEqual([]);
+    expect(actionIdsOf({ actionIds: "a1" })).toEqual([]);
+  });
+  it("counts a question as answered when a card or a line follows the answer", () => {
+    const q: AiMessage = { id: "u", role: "USER", content: "Thank Max", toolCalls: [], createdAt: at };
+    const a: AiMessage = { id: "a", role: "ASSISTANT", content: "I asked for your approval.", toolCalls: [], createdAt: at };
+    const card: AiMessage = { id: "c", role: "SYSTEM", kind: "APPROVAL", content: "", toolCalls: [], createdAt: at, actionIds: ["x"] };
+    const line: AiMessage = { id: "e", role: "SYSTEM", kind: "EVENT", content: "You approved: Send kudos to Max", toolCalls: [], createdAt: at };
+    expect(lastTurn([q, a, card, line])?.id).toBe("a");
+    expect(unansweredQuestion([q, a, card, line], { streaming: false })).toBeNull();
+    expect(unansweredQuestion([q], { streaming: false, now: Date.parse(at) })).toEqual({ text: "Thank Max", recent: true });
+  });
+  it("shows a call that waits for the person as waiting the moment it ends, never as done", () => {
+    const calls = withToolUse([], "send_kudos", { email: "max@x.com" });
+    const [waiting] = withToolResult(calls, "send_kudos", false, { title: "Send kudos to Max" });
+    expect(waiting).toMatchObject({ pending: false, failed: false, outcome: { state: "waiting", title: "Send kudos to Max" } });
+    const [ran] = withToolResult(withToolUse([], "create_task", { title: "x" }), "create_task", false);
+    expect(ran.outcome).toBeNull();
   });
 });

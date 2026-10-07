@@ -115,3 +115,23 @@ export const PRODUCT_TOOL_NAMES: Record<string, AskAiToolName[]> = {
   "workwrk-sops": ["create_sop"],
   "workwrk-meetings": ["create_meeting"],
 };
+
+/**
+ * The tools one Ask AI chat offers (tools.ts toolsForSession): the cross set,
+ * the chat's product's own, and no Tables tools without Tables. Names only,
+ * so an approval can check its tool is still offered without loading the
+ * registry. A product slug is read as an own key only: "constructor" is no
+ * product.
+ */
+export function askAiToolNames(opts: { agentProductSlug?: string | null; tablesOn?: boolean }): AskAiToolName[] {
+  const available = new Set<AskAiToolName>(CROSS_TOOL_NAMES);
+  const slug = opts.agentProductSlug;
+  if (slug && Object.prototype.hasOwnProperty.call(PRODUCT_TOOL_NAMES, slug)) {
+    for (const name of PRODUCT_TOOL_NAMES[slug]) available.add(name);
+  }
+  if (opts.tablesOn === false) {
+    available.delete("create_data_table");
+    available.delete("list_data_tables");
+  }
+  return [...available];
+}

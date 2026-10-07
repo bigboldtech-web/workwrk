@@ -1,0 +1,11 @@
+-- 2026-10-07 Ask AI asks first (docs/plans/ai-teammates.md, follow-up 1.5c).
+--
+-- Ask AI now puts anything other people would see behind the same approval
+-- card an AI teammate uses, stored in the same queue. An Ask AI request has
+-- no teammate, so "AgentAction"."agentId" may now be NULL: NULL means Ask AI.
+-- Every existing row keeps its teammate, and the foreign key (ON DELETE
+-- CASCADE) is unchanged for them.
+--
+-- Idempotent: DROP NOT NULL on a column that already allows NULL does
+-- nothing, and it reads no rows (a catalogue change, a brief lock only).
+ALTER TABLE "AgentAction" ALTER COLUMN "agentId" DROP NOT NULL;

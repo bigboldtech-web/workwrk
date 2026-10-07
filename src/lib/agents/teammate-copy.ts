@@ -276,6 +276,19 @@ export const APPROVAL_CARD = {
   cancelled: "Cancelled",
 } as const;
 
+/**
+ * Ask AI's own approval cards (follow-up 1.5c). `name` is the word a card's
+ * lines use for it: "Ask AI again if you still want this."
+ */
+export const ASK_AI_CARDS = {
+  name: "AI",
+  toolOff: "Cancelled: Ask AI can no longer use this tool in this chat.",
+  /** A tool the chat does not offer (the model named another). */
+  notOffered: "Ask AI can't use that tool in this chat.",
+  /** resolveActingPerson refused the person (src/lib/agents/acting.ts). */
+  personCannot: "Ask AI can't act for you in this workspace now.",
+} as const;
+
 /** The Inbox's approval pane (src/components/inbox/inbox-approval-panel.tsx); the card in it is APPROVAL_CARD's. */
 export const INBOX_APPROVAL = {
   loading: "Loading the request…",

@@ -31,8 +31,12 @@ import { useSyncExternalStore } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { markSessionExpired, OFFLINE_EVENT, ONLINE_EVENT } from "@/lib/session-expiry";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
+import { sendDecisions } from "@/lib/agents/decide-client";
+import { applyDecisionResults, type ActionView, type DecideAnswer, type TeammateDecision } from "@/lib/agents/teammate-thread";
+import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
   draftAfterFailure,
+  lastTurn,
   messageFromApi,
   settleDone,
   splitSse,
@@ -86,6 +90,10 @@ export interface AiSessionState {
   /** The server's own sentence for ai_limit and rate_limited. */
   errorText: string | null;
   draft: string;
+  /** The requests this chat's approval cards name, as the cards show them (follow-up 1.5c). */
+  actions: Record<string, ActionView>;
+  /** The requests being approved or denied now. */
+  deciding: Record<string, "approve" | "deny">;
   /** The agent the next new chat is bound to (?agent=<slug>). */
   agent: { slug: string; name: string | null; examplePrompts?: string[] } | null;
   status: AiStatus | null;
@@ -103,12 +111,16 @@ const INITIAL: AiSessionState = {
   error: null,
   errorText: null,
   draft: "",
+  actions: {},
+  deciding: {},
   agent: null,
   status: null,
   offline: false,
 };
 
 let state: AiSessionState = INITIAL;
+// The realtime key Ask AI's own requests are published under (actions.ts ASK_AI_KEY).
+const ASK_AI_KEY = "ask-ai";
 const listeners = new Set<() => void>();
 // Every reset, open or start bumps the generation; a stream or a load that
 // belongs to an older generation stops writing into the store.
@@ -148,6 +160,12 @@ function set(patch: Partial<AiSessionState> | ((s: AiSessionState) => Partial<Ai
 function bindWindow() {
   if (windowBound || typeof window === "undefined") return;
   windowBound = true;
+  // A card of this chat decided in another tab, or expired: read it again.
+  window.addEventListener(WINDOW_EVENTS.realtime, (e) => {
+    const ev = (e as CustomEvent<RealtimeEvent>).detail;
+    if (ev?.type !== "agent.changed" || ev.agentId !== ASK_AI_KEY) return;
+    if (state.sessionId && state.messages.some((m) => m.kind === "APPROVAL")) void refresh(state.sessionId);
+  });
   const off = () => set({ offline: true });
   const on = () => set({ offline: false });
   window.addEventListener(OFFLINE_EVENT, off);
@@ -220,10 +238,7 @@ async function open(id: string): Promise<void> {
   const gen = generation;
   const draft = same ? state.draft : takeDraft(id);
   set((s) => ({ ...INITIAL, status: s.status, offline: s.offline, sessionId: id, loading: true, draft }));
-  const r = await apiFetch<{ session: AiSessionMeta; messages: Array<{ id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }> }>(
-    `/api/sidekick/sessions/${encodeURIComponent(id)}`,
-    { cache: "no-store" },
-  );
+  const r = await apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (gen !== generation) return;
   if (!r.ok) {
     set({ loading: false, loadError: r.status !== 404, missing: r.status === 404 });
@@ -231,6 +246,7 @@ async function open(id: string): Promise<void> {
   }
   set({
     loading: false,
+    actions: r.data.actions ?? {},
     meta: {
       id: r.data.session.id,
       title: r.data.session.title,
@@ -249,17 +265,15 @@ async function open(id: string): Promise<void> {
 async function refresh(id: string): Promise<boolean> {
   if (state.sessionId !== id || state.streaming) return false;
   const gen = generation;
-  const r = await apiFetch<{ session: AiSessionMeta; messages: Array<{ id: string; role: string; content: string; toolCalls?: unknown; createdAt: string }> }>(
-    `/api/sidekick/sessions/${encodeURIComponent(id)}`,
-    { cache: "no-store" },
-  );
+  const r = await apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (gen !== generation || state.streaming || !r.ok) return false;
   const messages = r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null);
   set((s) => ({
     messages,
+    actions: r.data.actions ?? s.actions,
     meta: s.meta ? { ...s.meta, title: r.data.session.title ?? s.meta.title, pinned: r.data.session.pinned, archived: Boolean(r.data.session.archived) } : s.meta,
   }));
-  return messages.length > 0 && messages[messages.length - 1].role === "ASSISTANT";
+  return lastTurn(messages)?.role === "ASSISTANT";
 }
 
 /**
@@ -300,6 +314,13 @@ export interface ChatContext {
   boardContext?: string;
 }
 
+/** GET /api/sidekick/sessions/[id]: the chat, its rows, and the requests its cards name. */
+interface SessionRead {
+  session: AiSessionMeta;
+  messages: Array<{ id: string; role: string; content: string; toolCalls?: unknown; createdAt: string; kind?: string | null; meta?: unknown }>;
+  actions?: Record<string, ActionView>;
+}
+
 /** Send one message: create the chat on the first send, then stream the answer. */
 async function send(raw: string, context?: ChatContext): Promise<void> {
   const text = raw.trim();
@@ -330,6 +351,9 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   const now = new Date().toISOString();
   const userTempId = `opt-user-${Date.now()}`;
   const aiTempId = `streaming-${Date.now()}`;
+  // The card for what this turn asks the person, below its answer, from the
+  // first approval event until the saved row's id arrives with done.
+  const cardTempId = `card-${Date.now()}`;
   set((s) => ({
     messages: [
       ...s.messages,
@@ -435,7 +459,19 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
         } else if (evt.type === "tool_use") {
           patchLive((m) => ({ ...m, toolCalls: withToolUse(m.toolCalls, evt.name, evt.input ?? null) }));
         } else if (evt.type === "tool_result") {
-          patchLive((m) => ({ ...m, toolCalls: withToolResult(m.toolCalls, evt.name, Boolean(evt.isError)) }));
+          const waiting = evt.state === "waiting" ? { title: evt.title ?? null } : null;
+          patchLive((m) => ({ ...m, toolCalls: withToolResult(m.toolCalls, evt.name, Boolean(evt.isError), waiting) }));
+        } else if (evt.type === "approval") {
+          const view = evt.action;
+          if (gen === generation && view && typeof view.id === "string") {
+            set((s) => {
+              const has = s.messages.some((m) => m.id === cardTempId);
+              const messages: AiMessage[] = has
+                ? s.messages.map((m) => (m.id === cardTempId ? { ...m, actionIds: [...(m.actionIds ?? []), view.id] } : m))
+                : [...s.messages, { id: cardTempId, role: "SYSTEM", kind: "APPROVAL", content: "", toolCalls: [], createdAt: new Date().toISOString(), actionIds: [view.id] }];
+              return { actions: { ...s.actions, [view.id]: view }, messages };
+            });
+          }
         } else if (evt.type === "error") {
           sawError = true;
         } else if (evt.type === "done") {
@@ -446,6 +482,10 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
             fail("stopped");
           } else {
             patchLive((m) => settleDone(m, evt.message));
+          }
+          const card = evt.approval;
+          if (card && gen === generation) {
+            set((s) => ({ messages: s.messages.map((m) => (m.id === cardTempId ? { ...m, id: card.id, actionIds: card.actionIds.length ? card.actionIds : m.actionIds } : m)) }));
           }
         }
       }
@@ -482,6 +522,38 @@ function setDraft(draft: string) {
   if (draft !== state.draft) set({ draft });
 }
 
+/**
+ * Approve or deny requests on this chat's cards (POST
+ * /api/agents/actions/decide, the call every card sends). The cards change
+ * at once from the answer, then the chat is read again for the decision's
+ * line. Ask AI never carries on by itself: it hears the outcome with the
+ * person's next message.
+ */
+async function decide(decisions: TeammateDecision[], opts: { always?: boolean } = {}): Promise<DecideAnswer> {
+  if (decisions.length === 0) return { ok: true, results: [] };
+  const ids = decisions.map((d) => d.id);
+  set((s) => {
+    const deciding = { ...s.deciding };
+    for (const d of decisions) deciding[d.id] = d.decision;
+    return { deciding };
+  });
+  const r = await sendDecisions(decisions, opts);
+  const settle = (s: AiSessionState) => {
+    const deciding = { ...s.deciding };
+    for (const id of ids) delete deciding[id];
+    return deciding;
+  };
+  if (!r.ok) {
+    set((s) => ({ deciding: settle(s) }));
+    return { ok: false, error: r.error };
+  }
+  const at = new Date().toISOString();
+  set((s) => ({ deciding: settle(s), actions: applyDecisionResults(s.actions, r.results, at) }));
+  notifyAiChatsChanged();
+  if (state.sessionId) void refresh(state.sessionId);
+  return { ok: true, results: r.results };
+}
+
 function clearError() {
   if (state.error) set({ error: null });
 }
@@ -502,6 +574,7 @@ export const aiSession = {
   send,
   retry,
   setDraft,
+  decide,
   clearError,
   patchMeta,
   /** Stop listening to the answer in flight (the server still saves it). */

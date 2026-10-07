@@ -73,7 +73,8 @@ describe("the AI sidebar's data", () => {
     expect(body.chatsTotal).toBe(1);
     expect(body.agentsEnabled).toBe(2);
     expect(body).toMatchObject({ teammatesWaiting: 3, teammatesUnread: true });
-    expect(s.waitingCount).toHaveBeenCalledWith("org1", "u-max");
+    // Teammates' requests only: Ask AI's own wait on cards in their chats.
+    expect(s.waitingCount).toHaveBeenCalledWith("org1", "u-max", expect.any(Date), { teammatesOnly: true });
     expect(s.anyTeammateUnread).toHaveBeenCalledWith(VIEWER);
   });
 

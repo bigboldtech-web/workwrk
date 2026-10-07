@@ -231,6 +231,11 @@ const SQL_MANIFEST = [
   // tables). Before the reload: Prisma selects every column on a read with no
   // select, and every Ask AI read touches ChatMessage.
   "2026-10-06-ai-teammates.sql",
+  // Ask AI asks first: an Ask AI request in the approval queue has no
+  // teammate, so "AgentAction"."agentId" may be NULL. One DROP NOT NULL: a
+  // catalogue change, idempotent, no row read. Before the reload: the new
+  // build writes such rows.
+  "2026-10-07-ask-ai-approvals.sql",
 ];
 
 /**

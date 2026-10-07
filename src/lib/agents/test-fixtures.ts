@@ -14,7 +14,8 @@ import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName } from "./tool-names";
 export interface ActionRowFx {
   id: string;
   organizationId: string;
-  agentId: string;
+  /** Null: Ask AI's own request. */
+  agentId: string | null;
   actingForId: string;
   sessionId: string | null;
   runId: string | null;
@@ -89,6 +90,8 @@ export const fx = {
   modules: { tablesOn: true, talkOn: true },
   activity: [] as Array<Record<string, unknown>>,
   sql: [] as string[],
+  /** The Ask AI chat an Ask AI request's decision reads (null: gone, or not the person's). */
+  chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { productContext: string | null; agent: Record<string, unknown> | null } | null,
 };
 
 export function resetFixtures(): void {
@@ -105,6 +108,7 @@ export function resetFixtures(): void {
   fx.modules = { tablesOn: true, talkOn: true };
   fx.activity = [];
   fx.sql = [];
+  fx.chat = { productContext: null, agent: null };
 }
 
 /** One request in the table, PENDING for the person unless told otherwise. */
@@ -143,14 +147,16 @@ export function seedAction(o: Partial<ActionRowFx> & { toolName: string }): Acti
 
 // ── prisma ──────────────────────────────────────────────────────────
 
-/** A where clause as the queue writes them: equality, in, lt, lte, gt and OR. */
+/** A where clause as the queue writes them: equality, in, not, lt, lte, gt and OR. */
 function matches(row: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === "OR") return (cond as Array<Record<string, unknown>>).some((c) => matches(row, c));
     const v = row[key];
     if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; lt?: Date; lte?: Date; gt?: Date };
+      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date };
       if (c.in) return c.in.includes(v);
+      // `{ not: null }`: a teammate's request, never Ask AI's own (agentId null).
+      if ("not" in c) return (v ?? null) !== c.not;
       if (!(v instanceof Date)) return false;
       if (c.lt) return v.getTime() < c.lt.getTime();
       if (c.lte) return v.getTime() <= c.lte.getTime();
@@ -163,8 +169,8 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown> = 
 
 const rows = (where?: Record<string, unknown>) => fx.actions.filter((r) => matches(r as unknown as Record<string, unknown>, where));
 
-/** A read hands back a copy, as a database does: a later write never changes what was read. */
-const withAgent = (r: ActionRowFx) => ({ ...r, agent: { ...fx.agent } });
+/** A read hands back a copy, as a database does: a later write never changes what was read. Ask AI's own have no teammate. */
+const withAgent = (r: ActionRowFx) => ({ ...r, agent: r.agentId ? { ...fx.agent } : null });
 
 export const prismaFake = {
   agentAction: {
@@ -184,6 +190,9 @@ export const prismaFake = {
     },
     create: async (a: { data: Partial<ActionRowFx> & { toolName: string } }) => ({ ...seedAction({ ...a.data, id: `act${fx.actions.length + 1}`, createdAt: new Date() }) }),
     count: async (a: { where: Record<string, unknown> }) => rows(a.where).length,
+  },
+  chatSession: {
+    findFirst: async () => (fx.chat ? { ...fx.chat } : null),
   },
   chatMessage: {
     create: async (a: { data: { sessionId: string; role: string; kind: string | null; content: string; meta: Record<string, unknown> } }) => {
