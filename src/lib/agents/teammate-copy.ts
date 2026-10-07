@@ -1122,3 +1122,46 @@ export const GROUP_COPY = {
   /** A group with no name of its own: its first three teammates' names. */
   groupDefaultName: (names: readonly string[]) => titleList(names),
 } as const;
+
+/**
+ * Old Workspace agents schedules, moved onto routines
+ * (docs/plans/ai-teammates-phase2.md step 2; legacy-schedules.ts).
+ */
+export const LEGACY_COPY = {
+  routineName: "Scheduled check",
+  /** The old loop's own line when "What to do each run" was empty. */
+  defaultPrompt: "Run your usual scheduled check. Summarize what you found and call any tools you need to keep things moving.",
+  movedLine: (when: string) =>
+    `Your schedule from Workspace agents is now a routine: Scheduled check · ${when}. It works as you and asks before anything other people will see.`,
+  routineFor: (name: string) => `Routine for ${name}`,
+  routineForYou: "Your routine",
+  stoppedChip: "Stopped",
+  /** The Next run column of an agent whose schedule is a routine now. */
+  nextInRoutine: "Set by its routine",
+  scheduleLine: (name: string) => `Now a routine for ${name}`,
+  scheduleLineYou: "Now your routine",
+  stopped: (reason: string) =>
+    `${reason ? `Its schedule stopped: ${reason}` : "Its schedule stopped."} Anyone who wants it on a schedule can set up a routine in its chat.`,
+  /** Who a routine works for when their name can't be read. */
+  itsCreator: "its creator",
+  stopReason: {
+    no_creator: "nobody is on record as having set it up, and it never runs as someone else.",
+    person_gone: "the person who set it up is no longer in the workspace.",
+    guest: "the person who set it up is a guest now.",
+    agent_account: "it was set up by an agent account.",
+    no_access: "the person who set it up can no longer use it.",
+    unsupported_schedule: "its schedule isn't one a routine can run.",
+    no_schedule: "it had no schedule.",
+    agent_removed: "it was removed.",
+  },
+  openRoutines: "Open routines",
+  setUpRoutine: "Set up a routine",
+  scheduleLabel: "Schedule",
+  useRoutines: "Schedules are routines now. Set one up in the agent's chat, under Routines.",
+  routineMovedVia: "Moved from Workspace agents",
+  runNowWaiting: (name: string) => `${name} is waiting for your approval`,
+  openChat: "Open the chat",
+  agentPaused: "Agent is disabled; enable it before running.",
+} as const;
+
+export type LegacyStopReason = keyof typeof LEGACY_COPY.stopReason;

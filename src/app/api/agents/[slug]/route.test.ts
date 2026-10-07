@@ -22,7 +22,10 @@ const mocks = vi.hoisted(() => ({
   audits: [] as Array<{ action: string; agent: { id: string; slug: string } }>,
   cancelPendingActionsOf: vi.fn<(agent: { id: string; slug: string; name: string }, now?: Date) => Promise<number>>(async () => 0),
   pauseRoutine: vi.fn<(routine: { id: string }, reason: string, agent?: { name: string; slug: string } | null) => Promise<boolean>>(async () => true),
-  runAgentAutonomously: vi.fn(async () => ({ status: "SUCCEEDED", runId: "run1" })),
+  runLegacyAgentNow: vi.fn<(agent: { id: string; slug: string; name: string }, viewer: { userId: string }) => Promise<unknown>>(async () => ({
+    ok: true as const,
+    result: { runId: "run1", status: "SUCCEEDED" as const, waiting: 1, chatHref: "/agents?chat=deal-desk" },
+  })),
 }));
 vi.mock("@/lib/agents/audit", () => ({
   auditAgent: async (a: { action: string; agent: { id: string; slug: string } }) => void mocks.audits.push(a),
@@ -31,8 +34,8 @@ vi.mock("@/lib/agents/actions", () => ({ cancelPendingActionsOf: mocks.cancelPen
 vi.mock("@/lib/agents/routines-server", () => ({ pauseRoutine: mocks.pauseRoutine }));
 vi.mock("@/lib/agents/autonomous", () => ({
   computeNextRunAt: () => new Date("2026-10-07T09:00:00Z"),
-  runAgentAutonomously: mocks.runAgentAutonomously,
 }));
+vi.mock("@/lib/agents/legacy-schedules", () => ({ runLegacyAgentNow: mocks.runLegacyAgentNow }));
 
 import { DELETE as removeAgent, PATCH as patchAgent } from "./route";
 import { POST as installAgent } from "./install/route";
@@ -89,7 +92,7 @@ describe("another person's private teammate is not one of the workspace's agents
       expect(db.agents.find((a) => a.id === mine.id)).toMatchObject({ status: "ENABLED", name: "Planner", systemPrompt: "Plan my week.", autonomousEnabled: false, scheduleCron: null });
       expect(db.agents.find((a) => a.id === removed.id)?.status).toBe("ARCHIVED");
       expect(mocks.audits).toEqual([]);
-      expect(mocks.runAgentAutonomously).not.toHaveBeenCalled();
+      expect(mocks.runLegacyAgentNow).not.toHaveBeenCalled();
       expect(mocks.cancelPendingActionsOf).not.toHaveBeenCalled();
       expect(mocks.pauseRoutine).not.toHaveBeenCalled();
     });
@@ -173,6 +176,24 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
     expect(body.removed).toEqual([expect.objectContaining({ slug: "priya-hr", name: "Leave desk" })]);
   });
 
+  it("says where each old schedule went: whose routine it is now, or why it stopped (Phase 2)", async () => {
+    const moved = seedAgent({ slug: "deal-desk", name: "Deal desk", toolNames: null, scheduleMovedAt: new Date("2026-10-07T10:00:00Z"), scheduleRoutineId: "r-moved", scheduleMoveReason: null });
+    seedAgent({ slug: "old-check", name: "Old check", toolNames: null, scheduleMovedAt: new Date("2026-10-07T10:00:00Z"), scheduleRoutineId: null, scheduleMoveReason: "no_creator" });
+    seedAgent({ slug: "plain", name: "Plain", toolNames: null });
+    db.routines.push({ id: "r-moved", organizationId: "org1", agentId: moved.id, actingForId: "u-max", name: "Scheduled check", status: "active" });
+    const scheduleOf = (body: { installed: Array<{ slug: string; schedule: unknown }> }, slug: string) => body.installed.find((a) => a.slug === slug)?.schedule;
+
+    db.viewer = PEOPLE.admin;
+    const { body } = await call(listAgents());
+    expect(scheduleOf(body, "deal-desk")).toEqual({ state: "routine", personName: "Max", isYou: false, reason: null, routinesHref: "/agents?chat=deal-desk&settings=routines" });
+    expect(scheduleOf(body, "old-check")).toMatchObject({ state: "stopped", reason: "nobody is on record as having set it up, and it never runs as someone else." });
+    expect(scheduleOf(body, "plain")).toMatchObject({ state: null });
+
+    db.viewer = PEOPLE.max;
+    const mine = await call(listAgents());
+    expect(scheduleOf(mine.body, "deal-desk")).toMatchObject({ state: "routine", isYou: true });
+  });
+
   it("never gives a new agent a slug a static route beside /api/agents/[slug] owns", async () => {
     db.viewer = PEOPLE.admin;
     const made = await call(createAgent(jsonRequest("POST", { name: "Runs", description: "Runs things.", systemPrompt: "Be brief." })));
@@ -182,22 +203,42 @@ describe("the workspace's agent list (GET and POST /api/agents)", () => {
 });
 
 describe("a workspace agent", () => {
-  it("still pauses, schedules, runs and comes back as before", async () => {
+  it("still pauses, runs and comes back as before, and a new schedule is a routine now (Phase 2)", async () => {
     seedAgent({ slug: "deal-desk", name: "Deal desk", toolNames: null });
     db.viewer = PEOPLE.admin;
     expect((await call(patchAgent(jsonRequest("PATCH", { status: "DISABLED" }), slugged("deal-desk")))).status).toBe(200);
     expect(db.agents[0].status).toBe("DISABLED");
+    const paused = await call(runNow(jsonRequest("POST"), slugged("deal-desk")));
+    expect(paused).toEqual({ status: 400, body: { error: "Agent is disabled; enable it before running.", code: "agent_paused" } });
     expect((await call(patchAgent(jsonRequest("PATCH", { status: "ENABLED" }), slugged("deal-desk")))).status).toBe(200);
+    // A schedule needs one person it works as: it is set as a routine in the agent's chat.
     const scheduled = await call(patchSchedule(jsonRequest("PATCH", { autonomousEnabled: true, scheduleCron: "0 9 * * 1-5" }), slugged("deal-desk")));
-    expect(scheduled.status).toBe(200);
-    expect(db.agents[0]).toMatchObject({ autonomousEnabled: true, scheduleCron: "0 9 * * 1-5", nextRunAt: new Date("2026-10-07T09:00:00Z") });
-    expect((await call(runNow(jsonRequest("POST"), slugged("deal-desk")))).status).toBe(200);
-    expect(mocks.runAgentAutonomously).toHaveBeenCalledTimes(1);
+    expect(scheduled).toEqual({ status: 409, body: { error: "Schedules are routines now. Set one up in the agent's chat, under Routines.", code: "use_routines" } });
+    expect(db.agents[0]).toMatchObject({ autonomousEnabled: false, scheduleCron: null });
+    // What Run now sends is still edited here.
+    expect((await call(patchSchedule(jsonRequest("PATCH", { autonomousPrompt: "Flag deals stuck a week." }), slugged("deal-desk")))).status).toBe(200);
+    expect(db.agents[0]).toMatchObject({ autonomousPrompt: "Flag deals stuck a week.", autonomousEnabled: false });
+    const ran = await call(runNow(jsonRequest("POST"), slugged("deal-desk")));
+    expect(ran).toEqual({ status: 200, body: { result: { runId: "run1", status: "SUCCEEDED", waiting: 1, chatHref: "/agents?chat=deal-desk" } } });
+    expect(mocks.runLegacyAgentNow).toHaveBeenCalledTimes(1);
+    // It runs as the Admin who clicked, never its creator.
+    expect(mocks.runLegacyAgentNow.mock.calls[0][0]).toMatchObject({ slug: "deal-desk", name: "Deal desk" });
+    expect(mocks.runLegacyAgentNow.mock.calls[0][1]).toMatchObject({ userId: PEOPLE.admin.userId });
 
     db.agents[0].status = "ARCHIVED";
     expect((await call(installAgent(jsonRequest("POST"), slugged("deal-desk")))).status).toBe(200);
     expect(db.agents[0].status).toBe("ENABLED");
     expect(mocks.audits.map((a) => a.action)).toEqual(["paused", "turned_on", "schedule_changed", "run_now", "added"]);
+  });
+
+  it("answers a Run now refusal with its sentence, code and wait (Phase 2)", async () => {
+    seedAgent({ slug: "deal-desk", name: "Deal desk", toolNames: null });
+    db.viewer = PEOPLE.admin;
+    mocks.runLegacyAgentNow.mockImplementationOnce(async () => ({ ok: false, status: 429, code: "rate_limited", error: "Too many AI requests.", retryAfter: 12 }));
+    const r = (await runNow(jsonRequest("POST"), slugged("deal-desk"))) as Response;
+    expect(r.status).toBe(429);
+    expect(r.headers.get("Retry-After")).toBe("12");
+    expect(await r.json()).toEqual({ error: "Too many AI requests.", code: "rate_limited" });
   });
 
   it("never adds a removed workspace teammate back through Workspace agents: its own restore does, within the plan's limit", async () => {
@@ -217,7 +258,7 @@ describe("a workspace agent", () => {
     expect((await call(patchSchedule(jsonRequest("PATCH", { autonomousEnabled: true, scheduleCron: "0 9 * * 1-5" }), slugged("people-ops")))).status).toBe(404);
     expect((await call(patchAgent(jsonRequest("PATCH", { status: "DISABLED" }), slugged("people-ops")))).status).toBe(404);
     expect((await call(removeAgent(jsonRequest("DELETE"), slugged("people-ops")))).status).toBe(404);
-    expect(mocks.runAgentAutonomously).not.toHaveBeenCalled();
+    expect(mocks.runLegacyAgentNow).not.toHaveBeenCalled();
     expect(db.agents[0]).toMatchObject({ status: "ENABLED", autonomousEnabled: false });
   });
 

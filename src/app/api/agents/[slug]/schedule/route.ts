@@ -1,10 +1,16 @@
-// PATCH  /api/agents/[slug]/schedule, set autonomous run config
-// POST   /api/agents/[slug]/run-now, fire one autonomous run immediately
+// PATCH  /api/agents/[slug]/schedule, the agent's "What to do each run" (and clearing an old schedule)
+// POST   /api/agents/[slug]/schedule, Run now
 //
 // Both endpoints scope to the caller's org and need Owner or Admin (the Apps
-// settings gate, access section 9; spec-ai-automation 1.4). POST is Run now.
-// Run-now is the manual sibling of the cron path so a user can hit
-// "Run autonomous now" to dry-run a schedule.
+// settings gate, access section 9; spec-ai-automation 1.4).
+//
+// SCHEDULES ARE ROUTINES NOW (docs/plans/ai-teammates-phase2.md step 2). A
+// schedule needs one person it works as, so PATCH with autonomousEnabled:
+// true answers 409 use_routines: anyone sets a routine in the agent's chat
+// instead. Clearing a schedule and editing the prompt still work: the prompt
+// is what Run now sends. Run now is one chat turn of the Owner or Admin who
+// clicks, as themselves, in their own chat with the agent, with cards for
+// anything other people would see (legacy-schedules.ts runLegacyAgentNow).
 //
 // Workspace agents only (docs/plans/ai-teammates.md 3.15): a PRIVATE AI
 // teammate answers exactly as a slug that does not exist, so an Admin who
@@ -16,10 +22,12 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { requireApp, requireManageApps } from "@/lib/app-gate";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
-import { computeNextRunAt, runAgentAutonomously } from "@/lib/agents/autonomous";
+import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { isValidSchedule } from "@/lib/agents/schedule-words";
 import { auditAgent } from "@/lib/agents/audit";
 import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
+import { runLegacyAgentNow } from "@/lib/agents/legacy-schedules";
+import { LEGACY_COPY } from "@/lib/agents/teammate-copy";
 
 async function resolveAgent(slug: string, organizationId: string) {
   return prisma.agent.findFirst({
@@ -35,7 +43,7 @@ async function resolveAgent(slug: string, organizationId: string) {
 async function ctx() {
   const gate = await requireManageApps();
   if ("error" in gate) return { error: gate.error };
-  return { userId: gate.viewer.userId, organizationId: gate.viewer.organizationId };
+  return { userId: gate.viewer.userId, organizationId: gate.viewer.organizationId, viewer: gate.viewer };
 }
 
 const patchSchema = z.object({
@@ -55,6 +63,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+  }
+  // A new schedule needs a person it works as: that is a routine now.
+  if (parsed.data.autonomousEnabled === true) {
+    return NextResponse.json({ error: LEGACY_COPY.useRoutines, code: "use_routines" }, { status: 409 });
   }
   // An empty schedule clears it; anything else must be one the scheduler
   // reads (a keyword, "every N minutes / hours" or a five-field cron), so a
@@ -115,16 +127,16 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   const agent = await resolveAgent(slug, c.organizationId);
   if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
   if (agent.status !== "ENABLED") {
-    return NextResponse.json({ error: "Agent is disabled; enable it before running." }, { status: 400 });
+    return NextResponse.json({ error: LEGACY_COPY.agentPaused, code: "agent_paused" }, { status: 400 });
   }
 
-  // Long-running model call, let it run on the request thread (the
-  // user clicked Run Now and is waiting). 60–90s typical.
+  // A chat turn of the person who clicked, on the request thread (they are
+  // waiting): 60 to 90 seconds at most.
   await auditAgent({ organizationId: c.organizationId, actorId: c.userId, agent: { id: agent.id, name: agent.name, slug }, action: "run_now" });
-  const result = await runAgentAutonomously({
-    agentId: agent.id,
-    trigger: "MANUAL",
-    triggeredBy: c.userId,
-  });
-  return NextResponse.json({ result });
+  const run = await runLegacyAgentNow({ id: agent.id, slug, name: agent.name }, c.viewer);
+  if (!run.ok) {
+    const headers = run.retryAfter !== undefined ? { "Retry-After": String(run.retryAfter) } : undefined;
+    return NextResponse.json({ error: run.error, code: run.code }, { status: run.status, headers });
+  }
+  return NextResponse.json({ result: run.result });
 }

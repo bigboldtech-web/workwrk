@@ -259,3 +259,32 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
     });
   }
 });
+
+describe("LEGACY_COPY (old schedules moved onto routines, Phase 2)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    movedLine: [["Weekdays at 9:00"], "Your schedule from Workspace agents is now a routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see."],
+    routineFor: [["Olivia"], "Routine for Olivia"],
+    scheduleLine: [["Olivia"], "Now a routine for Olivia"],
+    stopped: [["the person who set it up is a guest now."], "Its schedule stopped: the person who set it up is a guest now. Anyone who wants it on a schedule can set up a routine in its chat."],
+    runNowWaiting: [["Deal desk"], "Deal desk is waiting for your approval"],
+  };
+  const l = copy.LEGACY_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(l).filter((k) => typeof l[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what the spec says`, () => {
+      const made = (l[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+  it("ends a stop with no reason cleanly", () => {
+    expect(copy.LEGACY_COPY.stopped("")).toBe("Its schedule stopped. Anyone who wants it on a schedule can set up a routine in its chat.");
+  });
+  it("gives every reason the database allows a sentence", () => {
+    expect(Object.keys(copy.LEGACY_COPY.stopReason).sort()).toEqual(
+      ["agent_account", "agent_removed", "guest", "no_access", "no_creator", "no_schedule", "person_gone", "unsupported_schedule"],
+    );
+  });
+});

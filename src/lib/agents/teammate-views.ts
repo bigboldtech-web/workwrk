@@ -16,7 +16,7 @@ import type { TeammateHue } from "./hues";
 import { routineReasonText } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
 import type { TeammateVisibility } from "./teammate-access";
-import { TOOL_PICKER_COPY } from "./teammate-copy";
+import { LEGACY_COPY, TOOL_PICKER_COPY, type LegacyStopReason } from "./teammate-copy";
 import {
   ALWAYS_ASK,
   BASE_RISK,
@@ -299,7 +299,9 @@ export interface RoutineView {
   lastStatus: "SUCCEEDED" | "FAILED" | "SKIPPED" | null;
   lastReason: string | null;
   lastReasonText: string | null;
-  createdVia: "chat" | "settings";
+  createdVia: "chat" | "settings" | "legacy";
+  /** A routine moved from Workspace agents says so (LEGACY_COPY.routineMovedVia); null otherwise. */
+  movedVia: string | null;
   createdAt: string;
 }
 
@@ -339,9 +341,50 @@ export function routineViewFromRow(r: RoutineRowLike, viewerZone: string | null)
     lastStatus,
     lastReason: r.lastReason,
     lastReasonText: routineReasonText(r.lastReason),
-    createdVia: r.createdVia === "settings" ? "settings" : "chat",
+    createdVia: r.createdVia === "settings" || r.createdVia === "legacy" ? r.createdVia : "chat",
+    movedVia: r.createdVia === "legacy" ? LEGACY_COPY.routineMovedVia : null,
     createdAt: r.createdAt.toISOString(),
   };
+}
+
+// ── Workspace agents: where an old schedule went ────────────────────
+
+/** What Workspace agents shows for an agent's schedule after Phase 2 (legacy-schedules.ts). */
+export interface AgentScheduleView {
+  /** "routine": its creator's routine now; "stopped": it stopped, with `reason`; null: never moved. */
+  state: "routine" | "stopped" | null;
+  /** The first name of the person the routine works for. */
+  personName: string | null;
+  /** The viewer is that person. */
+  isYou: boolean;
+  /** Why it stopped (LEGACY_COPY.stopReason), else null. */
+  reason: string | null;
+  /** Its chat's Routines tab. */
+  routinesHref: string;
+}
+
+const STOP_REASONS: ReadonlySet<string> = new Set(Object.keys(LEGACY_COPY.stopReason));
+
+/**
+ * One agent's schedule line. `routine` is the moved-to routine as read now
+ * (null when it was deleted since): a deleted routine reads as never moved,
+ * so the row says what is true, "When you ask".
+ */
+export function agentScheduleView(
+  agent: { slug: string; scheduleMovedAt: Date | string | null; scheduleRoutineId: string | null; scheduleMoveReason: string | null },
+  routine: { actingForId: string } | null,
+  personName: string | null,
+  viewerId: string,
+): AgentScheduleView {
+  const routinesHref = `/agents?chat=${encodeURIComponent(agent.slug)}&settings=routines`;
+  const none: AgentScheduleView = { state: null, personName: null, isYou: false, reason: null, routinesHref };
+  if (!agent.scheduleMovedAt) return none;
+  if (agent.scheduleMoveReason) {
+    const reason = STOP_REASONS.has(agent.scheduleMoveReason) ? LEGACY_COPY.stopReason[agent.scheduleMoveReason as LegacyStopReason] : null;
+    return { ...none, state: "stopped", reason };
+  }
+  if (!agent.scheduleRoutineId || !routine) return none;
+  return { state: "routine", personName, isYou: routine.actingForId === viewerId, reason: null, routinesHref };
 }
 
 // ── Activity ────────────────────────────────────────────────────────

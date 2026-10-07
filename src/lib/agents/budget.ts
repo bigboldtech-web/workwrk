@@ -146,3 +146,13 @@ export async function giveBackTurn(runId: string, questionId: string): Promise<v
   await releaseAiQuestion(questionId);
   await prisma.agentRun.updateMany({ where: { id: runId, questionId }, data: { questionId: null } }).catch(() => {});
 }
+
+/**
+ * A turn that never started after its question was claimed: the question
+ * goes back, and its AgentRun goes with it, so the run history never shows a
+ * turn that did not run. Never throws.
+ */
+export async function abandonTurn(runId: string, questionId: string): Promise<void> {
+  await giveBackTurn(runId, questionId);
+  await prisma.agentRun.deleteMany({ where: { id: runId, questionId: null } }).catch(() => {});
+}

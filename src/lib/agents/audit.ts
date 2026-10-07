@@ -4,7 +4,17 @@
 
 import { logActivity } from "@/lib/activity";
 
-export type AgentAuditAction = "added" | "turned_on" | "paused" | "removed" | "schedule_changed" | "run_now" | "edited" | "approvals_changed";
+export type AgentAuditAction =
+  | "added"
+  | "turned_on"
+  | "paused"
+  | "removed"
+  | "schedule_changed"
+  | "run_now"
+  | "edited"
+  | "approvals_changed"
+  | "schedule_moved"
+  | "schedule_stopped";
 
 const WORDS: Record<AgentAuditAction, string> = {
   added: "added the agent",
@@ -17,11 +27,18 @@ const WORDS: Record<AgentAuditAction, string> = {
   // instructions, tools, colour or limit; and what it asks before doing.
   edited: "changed the agent",
   approvals_changed: "changed what the agent asks before doing",
+  // AI teammates, Phase 2 (legacy-schedules.ts): no person did these; the
+  // move of the old Workspace agents schedules did.
+  schedule_moved: "moved the agent's schedule to a routine",
+  schedule_stopped: "stopped the agent's schedule",
 };
 
 export async function auditAgent(args: {
   organizationId: string;
-  actorId: string;
+  /** Null when no person did it (actorType "system"). */
+  actorId: string | null;
+  /** Who did it: the person by default, or the system (a schedule moved). */
+  actorType?: "person" | "system";
   agent: { id: string; name?: string | null; slug: string };
   action: AgentAuditAction;
   metadata?: Record<string, unknown>;
@@ -35,7 +52,8 @@ export async function auditAgent(args: {
       targetId: args.agent.id,
       targetType: "agent",
       // The person acted for themselves; an agent run records its own actor.
-      metadata: { actorType: "person", agentSlug: args.agent.slug, ...(args.metadata ?? {}) },
+      metadata: { actorType: args.actorType ?? "person", agentSlug: args.agent.slug, ...(args.metadata ?? {}) },
+      ...(args.actorType === "system" ? { actorType: "system", actorLabel: "WorkwrK" } : {}),
     });
   } catch {
     /* best effort */

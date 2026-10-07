@@ -56,6 +56,14 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // not listed until it is on.
   {
     date: "2026-10-07",
+    title: "Agent schedules are routines",
+    items: [
+      { type: "security", text: "A scheduled agent in Workspace agents now runs as the person who set it up, as one of their routines, and asks before anything other people would see. Before, it acted without asking, and one with nobody on record as setting it up ran as the first admin it found: such a schedule now stops, with the reason shown. Schedules more often than hourly run hourly." },
+      { type: "improvement", text: "Run now in Workspace agents runs the agent as you, in your own chat with it, so anything it asks to do waits there for your approval. To put an agent on a schedule, set up a routine in its chat." },
+    ],
+  },
+  {
+    date: "2026-10-07",
     title: "Ask AI asks first",
     items: [
       { type: "security", text: "Ask AI now asks before anything other people would see, such as kudos, an invitation, a new doc, form or table, or a task for someone else. It shows the approval card AI teammates use, and nothing happens until you approve it. A request nobody answers expires after 7 days. Your own work, like a task for yourself, still happens at once." },

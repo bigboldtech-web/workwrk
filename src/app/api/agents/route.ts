@@ -24,6 +24,7 @@ import { PRODUCT_TOOL_NAMES } from "@/lib/agents/tools";
 import { isOwnerOrAdmin, requireApp, requireManageApps } from "@/lib/app-gate";
 import { z } from "zod";
 import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
+import { agentScheduleView } from "@/lib/agents/teammate-views";
 
 export async function GET() {
   const gate = await requireApp("ai");
@@ -47,9 +48,25 @@ export async function GET() {
       lastRunAt: true,
       nextRunAt: true,
       createdAt: true,
+      // Where its old schedule went (legacy-schedules.ts).
+      scheduleMovedAt: true,
+      scheduleRoutineId: true,
+      scheduleMoveReason: true,
     },
     orderBy: { createdAt: "asc" },
   });
+
+  // The routines old schedules became, and the first names of the people
+  // they work for: one query each, however many agents.
+  const routineIds = installed.map((a) => a.scheduleRoutineId).filter((id): id is string => Boolean(id));
+  const movedTo = routineIds.length
+    ? await prisma.agentRoutine.findMany({ where: { id: { in: routineIds }, organizationId: user.organizationId }, select: { id: true, actingForId: true } })
+    : [];
+  const routineBy = new Map(movedTo.map((r) => [r.id, r]));
+  const people = movedTo.length
+    ? await prisma.user.findMany({ where: { id: { in: [...new Set(movedTo.map((r) => r.actingForId))] } }, select: { id: true, firstName: true, lastName: true } })
+    : [];
+  const firstNameBy = new Map(people.map((p) => [p.id, (p.firstName ?? "").trim() || (p.lastName ?? "").trim() || null]));
 
   // The Last run column links to the run itself (/agents?agent=&run=): the
   // newest autonomous run per agent, the same run lastRunAt records, and one
@@ -99,6 +116,11 @@ export async function GET() {
     examplePrompts: a.examplePrompts,
   }));
 
+  const scheduleOf = (a: (typeof installed)[number]) => {
+    const routine = a.scheduleRoutineId ? routineBy.get(a.scheduleRoutineId) ?? null : null;
+    return agentScheduleView(a, routine, routine ? firstNameBy.get(routine.actingForId) ?? null : null, gate.viewer.userId);
+  };
+
   // Hydrate installed agents with catalog hue + examplePrompts so the UI
   // has the full picture without a second roundtrip.
   const hydrated = installed.map((a) => {
@@ -110,6 +132,7 @@ export async function GET() {
       isFlagship: catalog?.isFlagship ?? false,
       lastRunId: lastRunBy.get(a.id)?.id ?? null,
       lastRunStatus: lastRunBy.get(a.id)?.status ?? null,
+      schedule: scheduleOf(a),
     };
   });
 

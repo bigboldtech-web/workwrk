@@ -48,6 +48,12 @@ vi.mock("@/lib/agents/engine", () => ({
 vi.mock("@/lib/agents/budget", () => ({
   claimTeammateTurn: m.claimTeammateTurn,
   giveBackTurn: m.giveBackTurn,
+  // budget.ts abandonTurn, over the mocked give-back and the route's database double.
+  abandonTurn: async (runId: string, questionId: string) => {
+    await m.giveBackTurn(runId, questionId);
+    const { routeDb } = await import("@/lib/agents/teammate-route-fixtures");
+    await (routeDb.agentRun as unknown as { deleteMany: (a: unknown) => Promise<unknown> }).deleteMany({ where: { id: runId, questionId: null } }).catch(() => {});
+  },
   agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }),
 }));
 vi.mock("@/lib/agents/actions", () => ({ claimUnreportedOutcomes: m.claimUnreportedOutcomes, actionViews: async () => ({}) }));
