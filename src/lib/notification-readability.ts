@@ -39,7 +39,7 @@ export function targetKey(target: Pick<NotificationTarget, "kind" | "id">): stri
 }
 
 /** The kinds this module resolves. Everything else is left openable. */
-const RESOLVED: readonly TargetKind[] = ["item", "board", "space", "folder", "doc", "sop", "table", "canvas", "form"];
+const RESOLVED: readonly TargetKind[] = ["item", "board", "space", "folder", "doc", "sop", "table", "canvas", "form", "agent"];
 
 /** A row that exists, whether it is archived, and the node it is (a task is its List). */
 interface Found { archived: boolean; ref: NodeRef | null; mine?: boolean }
@@ -73,7 +73,7 @@ export async function readableTargets(
   const where = { organizationId };
 
   // Which rows exist (and are live), one query per kind asked for.
-  const [items, boards, spaces, folders, docs, sops, tables, canvases, forms] = await Promise.all([
+  const [items, boards, spaces, folders, docs, sops, tables, canvases, forms, requests] = await Promise.all([
     ids("item").length ? prisma.item.findMany({ where: { ...where, id: { in: ids("item") } }, select: { id: true, archivedAt: true, ownerId: true, assigneeIds: true, boardId: true, board: { select: { archivedAt: true } } } }) : [],
     // A board link carries the SLUG, not the id, so both are matched.
     ids("board").length ? prisma.board.findMany({ where: { ...where, OR: [{ id: { in: ids("board") } }, { slug: { in: ids("board") } }] }, select: { id: true, slug: true, archivedAt: true } }) : [],
@@ -84,6 +84,9 @@ export async function readableTargets(
     ids("table").length ? prisma.dataTable.findMany({ where: { ...where, id: { in: ids("table") } }, select: { id: true } }) : [],
     ids("canvas").length ? prisma.whiteboard.findMany({ where: { ...where, id: { in: ids("canvas") } }, select: { id: true, archivedAt: true } }) : [],
     ids("form").length ? prisma.formDefinition.findMany({ where: { ...where, id: { in: ids("form") } }, select: { id: true } }) : [],
+    // An AI teammate's request is its person's alone: anyone else's reads as
+    // gone, as GET /api/agents/actions/[id] answers it.
+    ids("agent").length ? prisma.agentAction.findMany({ where: { ...where, id: { in: ids("agent") }, actingForId: userId }, select: { id: true } }) : [],
   ]);
 
   const found = new Map<string, Found>();
@@ -113,6 +116,8 @@ export async function readableTargets(
   for (const r of tables) found.set(`table:${r.id}`, { archived: false, ref: { kind: "table", id: r.id } });
   for (const r of canvases) found.set(`canvas:${r.id}`, { archived: r.archivedAt !== null, ref: { kind: "canvas", id: r.id } });
   for (const r of forms) found.set(`form:${r.id}`, { archived: false, ref: { kind: "form", id: r.id } });
+  // A decided or cancelled request still opens: its card says how it ended.
+  for (const r of requests) found.set(`agent:${r.id}`, { archived: false, ref: null });
 
   const refs = [...found.values()].map((f) => f.ref).filter((r): r is NodeRef => r !== null);
   const decisions = refs.length ? await nodeRoles(nodeCtxFromLevel(userId, organizationId, accessLevel), refs) : new Map();

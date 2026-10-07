@@ -28,6 +28,7 @@ import { TOOLS, toolsForSession } from "@/lib/agents/tools";
 import { askAiAgent, teammateChatRefusal } from "@/lib/agents/session-guard";
 import { isModuleActive } from "@/lib/entitlements";
 import { claimAiAction, releaseAiQuestion } from "@/lib/ai-allowance";
+import { aiCostCents } from "@/lib/ai-cost";
 
 const SIDEKICK_DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 5;
@@ -340,10 +341,8 @@ export async function POST(req: Request) {
     },
   });
 
-  // Sonnet 4.6 pricing (approx): $3/M input, $15/M output.
-  const costCents = totalTokensIn && totalTokensOut
-    ? Math.ceil((totalTokensIn * 0.0003 + totalTokensOut * 0.0015) * 100)
-    : 0;
+  // An estimate at approximate Sonnet prices (src/lib/ai-cost.ts).
+  const costCents = aiCostCents(totalTokensIn, totalTokensOut);
 
   await prisma.chatSession.update({
     where: { id: c.chat.id },

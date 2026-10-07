@@ -645,7 +645,8 @@ describe("what a turn saves", () => {
     expect(card).toMatchObject({ sessionId: "s1", role: "SYSTEM", kind: "APPROVAL", content: "Waiting for your approval: Post in #general", meta: { actionIds: ["act1", "act2"] } });
     expect((card.createdAt as Date).getTime()).toBeGreaterThan((answer.createdAt as Date).getTime());
 
-    const costCents = Math.ceil((200 * 0.0003 + 40 * 0.0015) * 100);
+    // $3 per million in, $15 per million out, rounded up (src/lib/ai-cost.ts).
+    const costCents = 1;
     expect(db.runUpdates).toEqual([
       {
         where: { id: "run1" },

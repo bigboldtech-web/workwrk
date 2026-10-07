@@ -25,6 +25,7 @@
 import { prisma } from "@/lib/prisma";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { claimAiQuestion, releaseAiQuestion } from "@/lib/ai-allowance";
+import { aiCostCents } from "@/lib/ai-cost";
 import type Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, toolsForSession } from "@/lib/agents/tools";
 import { isModuleActive } from "@/lib/entitlements";
@@ -307,10 +308,8 @@ export async function runAgentAutonomously(args: {
   // Nothing answered and nothing done: the question goes back.
   if (claim.ok && errorText && !assistantText && toolCallsLog.length === 0) await releaseAiQuestion(claim.id);
 
-  // Pricing approx — same numbers as the chat route.
-  const costCents = totalTokensIn && totalTokensOut
-    ? Math.ceil((totalTokensIn * 0.0003 + totalTokensOut * 0.0015) * 100)
-    : 0;
+  // An estimate at approximate Sonnet prices, as the chat route records it.
+  const costCents = aiCostCents(totalTokensIn, totalTokensOut);
   const endedAt = new Date();
   const durationMs = endedAt.getTime() - startedAt.getTime();
   const ok = !errorText;

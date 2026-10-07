@@ -276,6 +276,14 @@ export const APPROVAL_CARD = {
   cancelled: "Cancelled",
 } as const;
 
+/** The Inbox's approval pane (src/components/inbox/inbox-approval-panel.tsx); the card in it is APPROVAL_CARD's. */
+export const INBOX_APPROVAL = {
+  loading: "Loading the request…",
+  failed: "Couldn't load this request.",
+  retry: "Try again",
+  openChat: "Open chat",
+} as const;
+
 export function thingsWaiting(n: number): string {
   return n === 1 ? "1 thing is waiting for your approval" : `${n} things are waiting for your approval`;
 }

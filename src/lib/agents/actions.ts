@@ -197,7 +197,9 @@ export async function writeEventLine(sessionId: string | null, line: EventLine):
 /** The person's Inbox notifications that point at these cards, marked read: there is nothing left to decide there. */
 async function markLinksRead(userId: string, links: readonly string[]): Promise<void> {
   if (links.length === 0) return;
-  await prisma.notification.updateMany({ where: { userId, link: { in: [...links] }, read: false }, data: { read: true } }).catch(() => {});
+  const done = await prisma.notification.updateMany({ where: { userId, link: { in: [...links] }, read: false }, data: { read: true } }).catch(() => null);
+  // Their bell and Inbox, in every tab, re-read: the row is read now.
+  if (done && done.count > 0) publishToUser(userId, { type: "notification" });
 }
 
 /**

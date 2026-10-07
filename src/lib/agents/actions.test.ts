@@ -41,6 +41,9 @@ function talkPost(o: Partial<ActionRowFx> = {}) {
 
 const POSTED = { ok: true, message: { id: "msg1", conversationId: "c1" }, conversation: { name: "#general", type: "CHANNEL" } };
 
+/** What was published of one kind: agent.changed for the chats, notification for the bell and Inbox. */
+const sent = (type: string) => published.filter((p) => (p.event as { type: string }).type === type);
+
 beforeEach(() => {
   resetFixtures();
   published.length = 0;
@@ -337,7 +340,7 @@ describe("telling the person's other tabs (agent.changed)", () => {
     const b = talkPost();
     const theirs = talkPost({ actingForId: "max" });
     await decideActions(viewer, [{ id: a.id, decision: "deny" }, { id: b.id, decision: "approve" }, { id: theirs.id, decision: "deny" }]);
-    expect(published).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "a1" } }]);
+    expect(sent("agent.changed")).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "a1" } }]);
 
     published.length = 0;
     await decideActions(viewer, [{ id: theirs.id, decision: "approve" }, { id: "nope", decision: "deny" }]);
@@ -352,7 +355,7 @@ describe("telling the person's other tabs (agent.changed)", () => {
     talkPost({ expiresAt: past, actingForId: "max", sessionId: "s2" });
     talkPost();
     await sweepActions(new Date());
-    expect(published).toEqual([
+    expect(sent("agent.changed")).toEqual([
       { userId: "me", event: { type: "agent.changed", agentId: "a1" } },
       { userId: "me", event: { type: "agent.changed", agentId: "a2" } },
       { userId: "max", event: { type: "agent.changed", agentId: "a1" } },
@@ -361,6 +364,32 @@ describe("telling the person's other tabs (agent.changed)", () => {
     published.length = 0;
     await sweepActions(new Date());
     expect(published).toEqual([]);
+  });
+});
+
+describe("telling the person's bell and Inbox (notification)", () => {
+  it("publishes when a decision marked an Inbox row read, and nothing when no row was unread", async () => {
+    const a = talkPost();
+    await decideActions(viewer, [{ id: a.id, decision: "deny" }]);
+    expect(sent("notification")).toEqual([{ userId: "me", event: { type: "notification" } }]);
+
+    published.length = 0;
+    const none = vi.spyOn(prismaFake.notification, "updateMany").mockResolvedValueOnce({ count: 0 });
+    const b = talkPost();
+    await decideActions(viewer, [{ id: b.id, decision: "deny" }]);
+    expect(sent("notification")).toEqual([]);
+    none.mockRestore();
+  });
+
+  it("publishes for each person whose rows a sweep marked read", async () => {
+    const past = new Date(Date.now() - 1000);
+    talkPost({ expiresAt: past });
+    talkPost({ expiresAt: past, actingForId: "max", sessionId: "s2" });
+    await sweepActions(new Date());
+    expect(sent("notification")).toEqual([
+      { userId: "me", event: { type: "notification" } },
+      { userId: "max", event: { type: "notification" } },
+    ]);
   });
 });
 
