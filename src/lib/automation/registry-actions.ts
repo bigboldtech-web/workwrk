@@ -7,6 +7,7 @@ import { createUpdate } from "@/lib/item-thread";
 import { resolveField } from "./conditions";
 import { coerceSetFieldValue } from "./set-field";
 import { authorCanWrite, loadAuthor, type AutomationAuthor } from "./author-reach";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 /**
  * Action catalog + per-action execute() implementations.
@@ -39,13 +40,21 @@ export interface ActionContext {
   manualRetry?: boolean;
   /** This step's order in the run, so a delivery id is unique per step. */
   stepOrder?: number;
+  /** Who published the version that runs (or last saved the draft an older row runs). */
+  publisherId?: string | null;
+  /** Who clicked Retry, on a manual retry. */
+  retrierId?: string | null;
+  /** The automation's name, for the lines a teammate step writes. */
+  workflowName?: string;
+  /** What an earlier "Ask an AI teammate" step of this run answered ({{teammate.answer}}, {{teammate.name}}). */
+  stepData?: { teammate?: { answer: string; name: string } };
 }
 
 export interface ActionParamField {
   key: string;
   label: string;
-  /** `board` is a List picker; `field` picks one of a List's own fields. */
-  type: "string" | "text" | "user" | "board" | "status" | "number" | "field";
+  /** `board` is a List picker; `field` picks one of a List's own fields; `teammate` one of the creator's AI teammates. */
+  type: "string" | "text" | "user" | "board" | "status" | "number" | "field" | "teammate";
   required: boolean;
   help?: string;
 }
@@ -65,9 +74,16 @@ export interface AutomationAction {
   execute(ctx: ActionContext, params: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
-/** Replace {{dot.path}} tokens with values from the trigger payload. */
-export function interpolate(template: string, payload: Record<string, unknown>): string {
+/**
+ * Replace {{dot.path}} tokens with values from the trigger payload. With
+ * `extra.teammate`, {{teammate.answer}} and {{teammate.name}} are an earlier
+ * teammate step's answer and name, read before the payload.
+ */
+export function interpolate(template: string, payload: Record<string, unknown>, extra?: { teammate?: { answer: string; name: string } }): string {
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path: string) => {
+    if (extra?.teammate && (path === "teammate.answer" || path === "teammate.name")) {
+      return path === "teammate.answer" ? extra.teammate.answer : extra.teammate.name;
+    }
     const v = resolveField(payload, path);
     if (v === null || v === undefined) return "";
     if (v instanceof Date) return v.toISOString();
@@ -80,6 +96,34 @@ function paramString(params: Record<string, unknown>, key: string, payload: Reco
   if (typeof raw !== "string" || raw.trim() === "") return null;
   return interpolate(raw, payload).trim() || null;
 }
+
+/**
+ * A param that may carry an earlier teammate step's answer. Only the fields
+ * that stay inside the workspace use it (a task's title, a comment, an
+ * Inbox notification, a field, an email to a member): never a webhook, an
+ * email to a raw address, or a field that picks a record or a person.
+ */
+function paramStringWithAnswer(ctx: ActionContext, params: Record<string, unknown>, key: string): string | null {
+  const raw = params[key];
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  needsAnswer(ctx, raw);
+  return interpolate(raw, ctx.payload, ctx.stepData).trim() || null;
+}
+
+const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
+
+/**
+ * A step that uses {{teammate.answer}} with no answer to use (the teammate
+ * step before it failed, or there is none) fails with that reason rather
+ * than posting, sending or setting the words around an empty answer.
+ */
+function needsAnswer(ctx: ActionContext, template: string): void {
+  if (!TEAMMATE_TOKEN.test(template)) return;
+  const t = ctx.stepData?.teammate;
+  if (!t || (ANSWER_TOKEN.test(template) && !t.answer.trim())) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswerToUse);
+}
+
+const ANSWER_TOKEN = /\{\{\s*teammate\.answer\s*\}\}/;
 
 /**
  * Resolve a user-ish param: an explicit user id, or the special values
@@ -288,7 +332,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     ],
     async execute(ctx, params) {
       const boardId = paramString(params, "boardId", ctx.payload);
-      const title = paramString(params, "title", ctx.payload);
+      const title = paramStringWithAnswer(ctx, params, "title");
       if (!boardId) throw new Error("create_task requires a boardId param");
       if (!title) throw new Error("create_task requires a title param");
       const board = await prisma.board.findFirst({
@@ -339,14 +383,14 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     ],
     async execute(ctx, params) {
       const raw = paramString(params, "userId", ctx.payload);
-      const message = paramString(params, "message", ctx.payload);
+      const message = paramStringWithAnswer(ctx, params, "message");
       if (!raw) throw new Error("create_notification requires a userId param");
       if (!message) throw new Error("create_notification requires a message param");
       const fallbackTitle = typeof ctx.payload.title === "string" && ctx.payload.title ? ctx.payload.title : "Automation";
       const link =
         paramString(params, "link", ctx.payload) ??
         (ctx.recordType === "task" && ctx.recordId ? `/item/${ctx.recordId}` : null);
-      const title = paramString(params, "title", ctx.payload) ?? fallbackTitle;
+      const title = paramStringWithAnswer(ctx, params, "title") ?? fallbackTitle;
 
       // "admins" fans out to every active workspace admin (idempotent
       // enough for retry: the whole step either wrote or threw before
@@ -398,8 +442,11 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     ],
     async execute(ctx, params) {
       const toRaw = paramString(params, "to", ctx.payload);
-      const subject = paramString(params, "subject", ctx.payload);
-      const body = paramString(params, "body", ctx.payload);
+      // A teammate's answer is read from the creator's own reach: it may go
+      // to a member, never to an address outside the workspace.
+      const toMember = !!toRaw && !toRaw.includes("@");
+      const subject = toMember ? paramStringWithAnswer(ctx, params, "subject") : paramString(params, "subject", ctx.payload);
+      const body = toMember ? paramStringWithAnswer(ctx, params, "body") : paramString(params, "body", ctx.payload);
       if (!toRaw) throw new Error("send_email requires a to param");
       if (!subject) throw new Error("send_email requires a subject param");
       if (!body) throw new Error("send_email requires a body param");
@@ -488,7 +535,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
     ],
     async execute(ctx, params) {
-      const body = paramString(params, "body", ctx.payload);
+      const body = paramStringWithAnswer(ctx, params, "body");
       if (!body) throw new Error("Write the comment to add");
       if (!ctx.workflowCreatorId) throw new Error("This automation has no creator to post the comment as");
       const item = await resolveItem(ctx, params);
@@ -517,13 +564,20 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     async execute(ctx, params) {
       const key = paramString(params, "field", ctx.payload);
       if (!key) throw new Error("Pick the field to set");
-      const raw = typeof params.value === "string" ? interpolate(params.value, ctx.payload) : params.value;
+      if (typeof params.value === "string") needsAnswer(ctx, params.value);
+      // A value made of a teammate's answer is never repeated in an error: a
+      // step's error is read by everyone who reads the automation's runs,
+      // and the answer only by its creator and admins (review of step 7).
+      const fromAnswer = typeof params.value === "string" && TEAMMATE_TOKEN.test(params.value);
+      const raw = typeof params.value === "string" ? interpolate(params.value, ctx.payload, ctx.stepData) : params.value;
       const item = await resolveItem(ctx, params);
       await assertCanWrite(ctx, item.boardId);
       if (key === "priority") {
         const p = typeof raw === "string" ? raw.trim().toUpperCase() : "";
         const next = p === "" ? null : p;
-        if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) throw new Error(`"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
+        if (next !== null && !["URGENT", "HIGH", "NORMAL", "LOW"].includes(next)) {
+          throw new Error(fromAnswer ? AUTOMATION_TEAMMATE_COPY.answerNotAValue : `"${String(raw)}" is not a priority (Urgent, High, Normal or Low)`);
+        }
         if (item.priority === next) return { itemId: item.id, field: key, changed: false };
         await updateBoardItem(item.id, { priority: next }, null);
         await emitChained(ctx, "task.field_changed", fieldChangedPayload(item, key, next, item.priority));
@@ -534,7 +588,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       if (!def) throw new Error("That field is not on this task's List");
       const choices = def.options?.choices?.map((c) => ({ value: String(c.value), label: String(c.label) }));
       const coerced = coerceSetFieldValue({ key, type: def.type, choices }, raw);
-      if (!coerced.ok) throw new Error(coerced.error);
+      if (!coerced.ok) throw new Error(fromAnswer ? AUTOMATION_TEAMMATE_COPY.answerNotAValue : coerced.error);
       const previous = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? (item.metadata as Record<string, unknown>)[key] : undefined) ?? null;
       await updateBoardItem(item.id, {}, null, {
         metadataFn: (stored) => ({ ...stored, [key]: coerced.value }),
@@ -597,6 +651,24 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       // Honest stub: the connection row exists but the send channel
       // ships in a later wave: fail loudly rather than pretend.
       throw new Error("WhatsApp sending is not available yet.");
+    },
+  },
+  {
+    key: "ask_teammate",
+    name: AUTOMATION_TEAMMATE_COPY.actionName,
+    category: "AI",
+    description: AUTOMATION_TEAMMATE_COPY.actionDescription,
+    // NOT retry-safe: a re-run asks again, spends again and may ask for
+    // approval twice.
+    safeToRetry: false,
+    available: true,
+    params: [
+      { key: "teammate", label: AUTOMATION_TEAMMATE_COPY.paramTeammate, type: "teammate", required: true },
+      { key: "request", label: AUTOMATION_TEAMMATE_COPY.paramRequest, type: "text", required: true, help: AUTOMATION_TEAMMATE_COPY.requestHelp },
+    ],
+    async execute(ctx, params) {
+      const { runAutomationTeammateStep } = await import("@/lib/agents/automation-turn");
+      return runAutomationTeammateStep(ctx, params);
     },
   },
 ];

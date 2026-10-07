@@ -22,6 +22,7 @@ import { definitionForViewer } from "@/lib/automation/definition-view";
 import { draftRevision } from "@/lib/automation/draft-revision";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
+import { teammateStepProblem } from "@/lib/automation/teammate-step";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -105,6 +106,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         // The creator is no longer in the workspace: the engine reaches no List for them (author-reach.ts).
         creatorGone: Boolean(workflow.createdById) && !creator,
         can: workflow.status === "ARCHIVED" ? { edit: false, archive: rights.archive } : rights,
+        // An AI teammate step works as the creator: only they may add or change one.
+        viewerIsCreator: Boolean(workflow.createdById) && workflow.createdById === ctx.userId,
       },
     },
     { headers: { "Cache-Control": "private, no-store" } },
@@ -129,7 +132,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const existing = await prisma.automationWorkflow.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true, name: true, description: true, severity: true },
+    select: { id: true, status: true, publishedVersionId: true, triggerEvent: true, definition: true, name: true, description: true, severity: true, createdById: true },
   });
   if (!existing) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   if (parsed.data.baseRevision && draftRevision(existing) !== parsed.data.baseRevision) return staleDraft();
@@ -176,6 +179,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     const trigger = bodyTrigger !== undefined ? bodyTrigger : draftTrigger(existing.definition, existing.triggerEvent);
     next.trigger = trigger;
+    // An AI teammate step works as the creator: only they may change what it
+    // asks, where it runs or what starts it (a trigger alone included).
+    const teammate = await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer });
+    if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
     data.definition = next as Prisma.InputJsonValue;
     // Before the first publish nothing runs, so the column follows the
     // draft. After it, the column is the LIVE trigger and waits for Republish.

@@ -6,6 +6,7 @@
 // implementations stay server-side.
 
 import { NextResponse } from "next/server";
+import { can } from "@/lib/access";
 import { LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { requireAutomation } from "@/lib/automation/gate";
 import { AUTOMATION_ACTIONS } from "@/lib/automation/registry-actions";
@@ -13,6 +14,8 @@ import { AUTOMATION_ACTIONS } from "@/lib/automation/registry-actions";
 export async function GET() {
   const ctx = await requireAutomation();
   if ("error" in ctx) return ctx.error;
+  // An AI teammate step only for someone with AI teammates (private cache: per viewer).
+  const aiOn = (await can(ctx.viewer, "view", { type: "app", key: "ai" })).allowed;
 
   return NextResponse.json(
     {
@@ -22,7 +25,7 @@ export async function GET() {
         category: a.category,
         description: a.description,
         safeToRetry: a.safeToRetry,
-        available: a.available,
+        available: a.available && (a.key !== "ask_teammate" || aiOn),
         requiresConnection: a.requiresConnection ?? null,
         params: a.params,
       })),

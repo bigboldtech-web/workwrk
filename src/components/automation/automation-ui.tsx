@@ -102,7 +102,7 @@ export interface CatalogTrigger {
 export interface CatalogActionParam {
   key: string;
   label: string;
-  type: "string" | "text" | "user" | "board" | "status" | "number" | "field";
+  type: "string" | "text" | "user" | "board" | "status" | "number" | "field" | "teammate";
   required: boolean;
   help?: string;
 }

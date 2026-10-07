@@ -55,7 +55,7 @@ export interface TeammateToolContext {
   agentName: string;
   sessionId: string | null;
   routineId: string | null;
-  trigger: "CHAT" | "RESUME" | "ROUTINE" | "APPROVAL" | "DELEGATED" | "TALK";
+  trigger: "CHAT" | "RESUME" | "ROUTINE" | "APPROVAL" | "DELEGATED" | "TALK" | "AUTOMATION";
   /** The acting person's zone, for the days and times a tool writes. */
   timezone: string;
   /** Set when running an approved action (idempotency keys: a Talk post's clientId). */

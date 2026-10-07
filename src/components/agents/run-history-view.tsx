@@ -22,7 +22,7 @@ export type RunRow = {
   id: string;
   agentName: string;
   agentSlug: string;
-  trigger: "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE" | "DELEGATED" | "TALK";
+  trigger: "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE" | "DELEGATED" | "TALK" | "AUTOMATION";
   status: string;
   startedAt: string;
   durationMs: number | null;
@@ -33,7 +33,7 @@ export type RunRow = {
   detailHidden?: boolean;
 };
 
-export const TRIGGER_LABEL: Record<RunRow["trigger"], string> = { SCHEDULED: "Scheduled", MANUAL: "Manual", CHAT: "From a chat", ROUTINE: "Routine", DELEGATED: "Asked by a teammate", TALK: "From Talk" };
+export const TRIGGER_LABEL: Record<RunRow["trigger"], string> = { SCHEDULED: "Scheduled", MANUAL: "Manual", CHAT: "From a chat", ROUTINE: "Routine", DELEGATED: "Asked by a teammate", TALK: "From Talk", AUTOMATION: "From an automation" };
 export const RUN_SORTS = ["newest", "oldest"] as const;
 export const RUN_SORT_LABEL: Record<(typeof RUN_SORTS)[number], string> = { newest: "Newest first", oldest: "Oldest first" };
 export const PAGE_SIZES = [25, 50, 100];

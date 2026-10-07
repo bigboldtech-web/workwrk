@@ -311,3 +311,27 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
     });
   }
 });
+
+describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    paused: [["Triage"], "Triage is paused, so it didn't run."],
+    dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may. It asks again tomorrow (UTC)."],
+    noAnswer: [["Triage"], "Triage didn't answer."],
+    answerHidden: [["Triage"], "Only the person who made this automation and admins can read what Triage answered."],
+    askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],
+  };
+  const t = copy.AUTOMATION_TEAMMATE_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(t).filter((k) => typeof t[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what the spec says`, () => {
+      const made = (t[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+  it("writes every fixed sentence without a dash", () => {
+    for (const v of Object.values(t)) if (typeof v === "string") expect(BANNED.test(v)).toBe(false);
+  });
+});

@@ -31,7 +31,7 @@ import { prisma } from "@/lib/prisma";
 import { AI_ACTIONS_PER_MINUTE, aiRateLimitMessage, claimAiQuestionIn, releaseAiQuestion } from "@/lib/ai-allowance";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { ROUTINE_REASON_TEXT } from "./routines";
-import { agentCapMessage } from "./teammate-copy";
+import { AUTOMATION_TEAMMATE_COPY, agentCapMessage } from "./teammate-copy";
 import type { TeammateToolContext } from "./tools";
 
 export { agentCapMessage };
@@ -44,7 +44,8 @@ export type TurnClaim =
   | {
       ok: false;
       /** not_found: the teammate's row is gone (its workspace was deleted under the turn). */
-      code: "rate_limited" | "agent_cap" | "ai_limit" | "not_found";
+      /** workflow_cap: an automation asked its teammates its most for the UTC day (Phase 2 step 7). */
+      code: "rate_limited" | "agent_cap" | "ai_limit" | "not_found" | "workflow_cap";
       message: string;
       retryAfter?: number;
       /** For ai_limit: which bound refused (AiClaim.refusedBy). */
@@ -101,6 +102,8 @@ export async function claimTeammateTurn(a: {
   rateLimit: boolean;
   /** Phase 2: the caller's turn when another teammate asked for this one (ask_teammate). */
   parentRunId?: string | null;
+  /** Phase 2 step 7: the automation run that asked, held to its own daily cap. */
+  workflow?: { id: string; runId: string; dailyCap: number } | null;
 }): Promise<TurnClaim> {
   if (a.rateLimit) {
     const limited = rateLimit(`ai:${a.userId}`, { max: AI_ACTIONS_PER_MINUTE, windowMs: 60_000 });
@@ -119,6 +122,23 @@ export async function claimTeammateTurn(a: {
       const usage = await monthUsageIn(tx, a.agentId);
       if (usage.used >= cap) return { ok: false, code: "agent_cap", message: agentCapMessage(agents[0].name, cap, usage.monthStart) };
     }
+    // An automation's own daily cap, counted under its row (lock order:
+    // Agent, then AutomationWorkflow, then the plan's rows in the claim), so
+    // two runs at once cannot both take the last one. Only runs that hold a
+    // question count: a run whose question was given back did not ask.
+    if (a.workflow) {
+      const wf = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AutomationWorkflow"
+        WHERE "id" = ${a.workflow.id} AND "organizationId" = ${a.organizationId}
+        FOR UPDATE`;
+      if (wf.length === 0) return { ok: false, code: "not_found", message: AUTOMATION_TEAMMATE_COPY.workflowGone };
+      const [{ used }] = await tx.$queryRaw<Array<{ used: number }>>`
+        SELECT COUNT(*)::int AS "used" FROM "AgentRun"
+        WHERE "automationWorkflowId" = ${a.workflow.id}
+          AND "questionId" IS NOT NULL
+          AND "startedAt" >= date_trunc('day', now() AT TIME ZONE 'UTC')`;
+      if (used >= a.workflow.dailyCap) return { ok: false, code: "workflow_cap", message: AUTOMATION_TEAMMATE_COPY.dailyCap(a.workflow.dailyCap) };
+    }
     const question = await claimAiQuestionIn(tx, a.organizationId, a.userId, a.what);
     if (!question.ok) return { ok: false, code: "ai_limit", message: question.message, ...(question.refusedBy ? { refusedBy: question.refusedBy } : {}) };
     const run = await tx.agentRun.create({
@@ -131,6 +151,7 @@ export async function claimTeammateTurn(a: {
         questionId: question.id,
         status: "PENDING",
         ...(a.parentRunId ? { parentRunId: a.parentRunId } : {}),
+        ...(a.workflow ? { automationWorkflowId: a.workflow.id, automationRunId: a.workflow.runId } : {}),
         input: { trigger: a.trigger, practice: a.practice, routineId: a.routineId, ...(a.parentRunId ? { parentRunId: a.parentRunId } : {}) },
       },
       select: { id: true },

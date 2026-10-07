@@ -435,7 +435,10 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
   const meta = rec(row.meta);
   const base: MessageBase = { id: row.id, createdAt: iso(row.createdAt) ?? "", text: row.content ?? "" };
   const practice = meta?.practice === true;
-  switch (row.kind ?? null) {
+  // An automation's answer (kind AUTOMATION) reads as the teammate's own,
+  // with where it was asked from; only the history query tells it apart.
+  const kind = row.kind === "AUTOMATION" && row.role === "ASSISTANT" ? null : (row.kind ?? null);
+  switch (kind) {
     case null:
       if (row.role === "USER") {
         const answerers = Array.isArray(meta?.answerers) ? idsFrom(meta.answerers).slice(0, MAX_ANSWERERS) : [];

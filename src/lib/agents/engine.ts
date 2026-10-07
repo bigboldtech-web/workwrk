@@ -79,6 +79,9 @@ const MAX_TOKENS = 4096;
 
 /** The most chat rows the model reads back... */
 export const HISTORY_TURNS = 30;
+
+/** An automation's answer in the creator's chat (Phase 2 step 7): shown in the thread, never read back as a turn. */
+export const AUTOMATION_ANSWER_KIND = "AUTOMATION";
 /** ...and the most characters of each. */
 export const HISTORY_CHARS = 4000;
 
@@ -215,9 +218,26 @@ export type TurnOrigin =
       placeKind: TalkPlaceKind;
       audience: number;
       context: ReadonlyArray<{ from: string; text: string }>;
-    };
+    }
+  | AutomationOrigin;
 
 export type TalkPlaceKind = "channel" | "group" | "dm";
+
+/**
+ * An automation's step that asked it (Phase 2 step 7). The instruction is
+ * the creator's own words (only the creator may save the step); the values
+ * come from the record that fired it, which anyone who can edit the record
+ * writes, so they reach the model only as data, as does the automation's
+ * name (a manager may rename it).
+ */
+export interface AutomationOrigin {
+  kind: "automation";
+  workflowId: string;
+  workflowName: string;
+  automationRunId: string;
+  instruction: string;
+  values: ReadonlyArray<{ path: string; value: string }>;
+}
 
 /**
  * The server's own words for a Talk place. Its name is set by other people
@@ -341,6 +361,8 @@ export interface SystemBlockInput {
   delegatedBy?: string | null;
   /** A Talk turn: where it was asked, and how many people read there (Phase 2 step 6). */
   talk?: { place: string; placeKind: TalkPlaceKind; audience: number } | null;
+  /** An automation's step: its name (Phase 2 step 7). */
+  automation?: { name: string } | null;
   /** The teammates this one may ask with ask_teammate, as information. */
   askable?: ReadonlyArray<{ name: string; job: string }> | null;
 }
@@ -387,6 +409,11 @@ export function buildSystemBlocks(a: SystemBlockInput): Anthropic.TextBlockParam
     ...(a.talk
       ? [
           `${firstName} asked you in Talk, in ${TALK_PLACE_WORDS[a.talk.placeKind]} where ${readersLine(a.talk.audience)}. Your reply is posted there as ${firstName}'s message, marked as from you. Write only what ${firstName} would share with everyone there. Its name, as information:\n<workspace_note>\n${dataText(a.talk.place, 80)}\n</workspace_note>`,
+        ]
+      : []),
+    ...(a.automation
+      ? [
+          `This is a run of ${firstName}'s automation. ${firstName} is not watching; your answer is saved on the automation's run and may be used by its later steps. Do not ask questions. Anything other people would see waits for ${firstName}'s approval. Its name, as information:\n<workspace_note>\n${dataText(a.automation.name, 120)}\n</workspace_note>`,
         ]
       : []),
     ...(a.askable && a.askable.length > 0
@@ -436,7 +463,18 @@ export async function buildHistory(
     take: HISTORY_TURNS,
     select: HISTORY_SELECT,
   });
-  return historyMessages([...rows].reverse(), { selfAgentId: opts.selfAgentId, answeringId: opts.answeringId });
+  // An automation's answers have their own kind, which the query leaves
+  // out; one saved without it is left out here too.
+  const kept = rows.filter((r) => !isAutomationRow(r)).slice(0, HISTORY_TURNS);
+  return historyMessages([...kept].reverse(), { selfAgentId: opts.selfAgentId, answeringId: opts.answeringId });
+}
+
+/**
+ * An automation's answer in the creator's chat (Phase 2 step 7): it ran for
+ * the automation, not in the conversation, and is never read back as a turn.
+ */
+function isAutomationRow(row: HistoryRow): boolean {
+  return rec(rec(row.meta).origin).kind === "automation";
 }
 
 /** The longest message a person can send (the chat routes' schema): a group's answered message is read whole. */
@@ -456,6 +494,7 @@ export function historyMessages(
   const out: Anthropic.MessageParam[] = [];
   let pastAnswered = false;
   for (const row of rows) {
+    if (isAutomationRow(row)) continue;
     const meta = rec(row.meta);
     // A group turn answering one message reads the chat up to that message
     // and the other answers to it, never a message sent after it (review of
@@ -632,6 +671,17 @@ function turnMessage(a: Pick<TurnArgs, "trigger" | "userText" | "routine" | "gro
     });
     const said = (a.userText ?? "").trim();
     if (said) blocks.push({ type: "text", text: said });
+  } else if (a.trigger === "AUTOMATION" && a.origin?.kind === "automation") {
+    // The values the request names, and the automation's name, as data; then
+    // the request, the creator's own words, as theirs.
+    const first = oneLine(a.person.firstName, 80);
+    const values = a.origin.values.map((v) => `- ${dataText(v.path, 80)}: ${dataText(v.value, 1000) || "(empty)"}`).join("\n");
+    blocks.push({
+      type: "text",
+      text: `[WorkwrK] ${first}'s automation asks you this for ${first}. Its name and the values its request names, as information:\n<workspace_note>\nName: ${dataText(a.origin.workflowName, 120)}\n${values || "- (no values)"}\n</workspace_note>`,
+    });
+    const said = a.origin.instruction.trim();
+    if (said) blocks.push({ type: "text", text: said });
   } else if (a.trigger === "CHAT" && a.group) {
     // The person's message is in the history above (a group keeps it there,
     // so every answerer reads it); this says whose turn it is.
@@ -685,18 +735,26 @@ function askOnly(rules: ApprovalRules): ApprovalRules {
 /** Steps 1 to 4: the tools, the rules, the system blocks, the history and the client. */
 async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   const org = a.person.organizationId;
+  // A turn whose answer goes out with no card (posted in Talk, or used by an
+  // automation's later steps) stands alone: it reads neither the person's
+  // chat with the teammate nor what it remembers for them, either of which
+  // can hold what it read of other people's words in a chat they watched
+  // (review of step 7). The request carries what it needs.
+  const standsAlone = a.trigger === "TALK" || a.trigger === "AUTOMATION";
   const [tablesOn, talkOn, setting, workspace, memory, history] = await Promise.all([
     isModuleActive(org, "workwrk-tables"),
     isModuleActive(org, "workwrk-talk"),
     prisma.agentPersonSetting.findUnique({ where: { agentId_userId: { agentId: a.agent.id, userId: a.person.userId } }, select: { approvalRules: true } }),
     prisma.organization.findUnique({ where: { id: org }, select: { name: true } }),
-    memoriesForPrompt(a.agent.id, a.person.userId),
+    standsAlone ? Promise.resolve(null) : memoriesForPrompt(a.agent.id, a.person.userId),
     // A group keeps the person's message in the history: every answerer reads it there.
-    buildHistory(a.sessionId, {
-      excludeIds: a.userMessageId && !a.group ? [a.userMessageId] : [],
-      selfAgentId: a.group?.selfAgentId,
-      answeringId: a.group && a.trigger === "CHAT" ? (a.group.messageId ?? a.userMessageId ?? null) : null,
-    }),
+    standsAlone
+      ? Promise.resolve([] as Anthropic.MessageParam[])
+      : buildHistory(a.sessionId, {
+          excludeIds: a.userMessageId && !a.group ? [a.userMessageId] : [],
+          selfAgentId: a.group?.selfAgentId,
+          answeringId: a.group && a.trigger === "CHAT" ? (a.group.messageId ?? a.userMessageId ?? null) : null,
+        }),
   ]);
   // teammateToolNames already sorts and drops the excluded tools; held here
   // too, since this list is what the model is offered.
@@ -734,6 +792,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
       group: a.group ? { name: a.group.name, others: a.group.members.filter((m) => m.agentId !== a.group?.selfAgentId).map((m) => m.name) } : null,
       delegatedBy: a.trigger === "DELEGATED" && a.origin?.kind === "delegated" ? a.origin.by.name : null,
       talk: a.trigger === "TALK" && a.origin?.kind === "talk" ? { place: a.origin.place, placeKind: a.origin.placeKind, audience: a.origin.audience } : null,
+      automation: a.trigger === "AUTOMATION" && a.origin?.kind === "automation" ? { name: a.origin.workflowName } : null,
       askable,
     }),
     tools: enabled.map((name) => ({ name, description: TOOLS[name].description, input_schema: TOOLS[name].input_schema as Anthropic.Tool["input_schema"] })),
@@ -887,7 +946,9 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       ? { origin: { kind: "delegated", byName: a.origin.by.name, byAgentId: a.origin.by.agentId } }
       : a.origin?.kind === "talk"
         ? { origin: { kind: "talk", place: a.origin.place, conversationId: a.origin.conversationId, messageId: a.origin.messageId } }
-        : {};
+        : a.origin?.kind === "automation"
+          ? { origin: { kind: "automation", workflowId: a.origin.workflowId, workflowName: a.origin.workflowName, runId: a.origin.automationRunId } }
+          : {};
   const extra = { ...reply, ...who, ...from };
   const answerMeta = meta || Object.keys(extra).length > 0 ? { ...(meta ?? {}), ...extra } : null;
   const assistant = await prisma.chatMessage.create({
@@ -895,7 +956,9 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       sessionId: a.sessionId,
       role: "ASSISTANT",
       content: text,
-      ...(report ? { kind: "REPORT" } : {}),
+      // An automation's answer has its own kind: the history query reads
+      // only the chat's own turns, so up to 20 a day never push them out.
+      ...(report ? { kind: "REPORT" } : a.origin?.kind === "automation" ? { kind: AUTOMATION_ANSWER_KIND } : {}),
       ...(answerMeta ? { meta: json(answerMeta) } : {}),
       modelUsed: s.model,
       tokensIn: s.tokensIn || null,
