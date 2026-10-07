@@ -97,7 +97,7 @@ describe("decideActions: what can no longer run", () => {
     expect(out.results).toEqual([{ id: row.id, status: "EXPIRED", code: "expired" }]);
     expect(fx.actions[0]).toMatchObject({ status: "EXPIRED", decidedVia: "expiry" });
     expect(fx.handlerCalls).toEqual([]);
-    expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Expired without an answer: Post in #general", meta: { event: "action_expired", actionId: row.id } }]);
+    expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Expired without an answer: Post in #general", meta: { event: "action_expired", actionId: row.id, agentId: "a1" } }]);
     expect(out.resume).toBe(false);
   });
 
@@ -170,7 +170,7 @@ describe("decideActions: approving", () => {
     fx.cards.post_in_talk = { title: "Post in #general-renamed", input: { conversationId: "c1", text: "Hello team" } };
     const row = talkPost();
     const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
-    expect(out).toEqual({ results: [{ id: row.id, status: "EXECUTED", result: { text: "Posted in Talk", href: null } }], resume: true, agentSlug: AGENT_SLUG });
+    expect(out).toEqual({ results: [{ id: row.id, status: "EXECUTED", result: { text: "Posted in Talk", href: null } }], resume: true, agentSlug: AGENT_SLUG, chat: { kind: "teammate", slug: AGENT_SLUG } });
     expect(fx.prepareCalls[0]).toMatchObject({ tool: "post_in_talk", input: { conversationId: "c1", text: "Hello team" }, ctx: { teammate: { agentId: "a1", trigger: "APPROVAL" } } });
     expect(fx.actions[0]).toMatchObject({ status: "EXECUTED", decidedVia: "person", decidedById: "me", preview: { title: "Post in #general-renamed" }, editedInput: null });
     expect(fx.actions[0].executedAt).toBeInstanceOf(Date);
@@ -218,12 +218,12 @@ describe("decideActions: saying no", () => {
   it("runs nothing, records who said no, writes the line, and does not resume", async () => {
     const row = talkPost();
     const out = await decideActions(viewer, [{ id: row.id, decision: "deny" }]);
-    expect(out).toEqual({ results: [{ id: row.id, status: "DENIED" }], resume: false, agentSlug: AGENT_SLUG });
+    expect(out).toEqual({ results: [{ id: row.id, status: "DENIED" }], resume: false, agentSlug: AGENT_SLUG, chat: null });
     expect(fx.actions[0]).toMatchObject({ status: "DENIED", decidedVia: "person", decidedById: "me" });
     expect(fx.handlerCalls).toEqual([]);
     expect(fx.prepareCalls).toEqual([]);
     expect(fx.activity).toEqual([]);
-    expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "You said no: Post in #general", meta: { event: "action_denied", actionId: row.id } }]);
+    expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "You said no: Post in #general", meta: { event: "action_denied", actionId: row.id, agentId: "a1" } }]);
   });
 
   it("does not resume for a request decided before this call", async () => {
@@ -407,6 +407,36 @@ describe("claimUnreportedOutcomes", () => {
   });
 });
 
+describe("group chats (Phase 2)", () => {
+  it("claims one teammate's outcomes only, so another's is never told to it", async () => {
+    const mine = talkPost({ status: "EXECUTED", sessionId: "g1", agentId: "a1" });
+    const theirs = talkPost({ status: "EXECUTED", sessionId: "g1", agentId: "a2" });
+    const claimed = await claimUnreportedOutcomes("g1", "a1");
+    expect(claimed.map((r) => r.id)).toEqual([mine.id]);
+    expect(fx.sql[0]).toContain('"agentId"');
+    expect(fx.actions.find((r) => r.id === theirs.id)?.reportedAt).toBeNull();
+    // Without a teammate (Ask AI, or a one-teammate chat before Phase 2): the whole chat's, as before.
+    expect((await claimUnreportedOutcomes("g1")).map((r) => r.id)).toEqual([theirs.id]);
+  });
+
+  it("answers which chat continues: the group, with the teammate whose request ran", async () => {
+    fx.chat = { id: "g1", kind: "TEAMMATE_GROUP", productContext: null, agent: null };
+    const row = talkPost({ sessionId: "g1" });
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.chat).toEqual({ kind: "group", id: "g1", agentSlug: AGENT_SLUG });
+    expect(out.agentSlug).toBe(AGENT_SLUG);
+  });
+
+  it("links a group's card to the group, and a teammate's to its chat", async () => {
+    fx.chat = { id: "g1", kind: "TEAMMATE_GROUP", productContext: null, agent: null };
+    const inGroup = talkPost({ sessionId: "g1" });
+    const inChat = talkPost({ sessionId: "s1" });
+    const views = await actionViews([inGroup.id, inChat.id], "me");
+    expect(views[inGroup.id].href).toBe(`/agents?group=g1&action=${inGroup.id}`);
+    expect(views[inChat.id].href).toBe(actionHref(AGENT_SLUG, inChat.id));
+  });
+});
+
 describe("reading the cards", () => {
   it("shows a person only their own cards, and one past its time as expired", async () => {
     const mine = talkPost();
@@ -476,7 +506,7 @@ describe("Ask AI's own requests (no teammate, follow-up 1.5c)", () => {
   it("can be denied, writes its line into its chat, and marks no teammate's link", async () => {
     const row = askAiPost();
     const out = await decideActions(viewer, [{ id: row.id, decision: "deny" }]);
-    expect(out).toEqual({ results: [{ id: row.id, status: "DENIED" }], resume: false, agentSlug: null });
+    expect(out).toEqual({ results: [{ id: row.id, status: "DENIED" }], resume: false, agentSlug: null, chat: null });
     expect(fx.messages).toEqual([expect.objectContaining({ sessionId: "s9", kind: "EVENT", content: "You said no: Send kudos to Max" })]);
     expect(fx.notifications.at(-1)?.where).toMatchObject({ link: { in: [`/sidekick?session=s9&action=${row.id}`] } });
     expect(sent("agent.changed")).toEqual([{ userId: "me", event: { type: "agent.changed", agentId: "ask-ai" } }]);

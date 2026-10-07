@@ -11,6 +11,7 @@ const s = vi.hoisted(() => ({
   sessions: [] as Array<Record<string, unknown>>,
   waitingCount: vi.fn(),
   anyTeammateUnread: vi.fn(),
+  anyGroupUnread: vi.fn(async () => false),
   aiAllowed: true,
 }));
 
@@ -23,6 +24,7 @@ vi.mock("@/lib/access/index", () => ({
 vi.mock("@/lib/build/gate", () => ({ countUsableBuildApps: async () => 0 }));
 vi.mock("@/lib/agents/actions", () => ({ waitingCount: s.waitingCount }));
 vi.mock("@/lib/agents/teammate-server", () => ({ anyTeammateUnread: s.anyTeammateUnread }));
+vi.mock("@/lib/agents/group-server", () => ({ anyGroupUnread: s.anyGroupUnread }));
 vi.mock("@/lib/prisma", async () => {
   const { db, matches } = await import("@/lib/agents/teammate-route-fixtures");
   const sessionMatches = (row: Record<string, unknown>, where: Record<string, unknown>) => {
@@ -76,6 +78,7 @@ describe("the AI sidebar's data", () => {
     // Teammates' requests only: Ask AI's own wait on cards in their chats.
     expect(s.waitingCount).toHaveBeenCalledWith("org1", "u-max", expect.any(Date), { teammatesOnly: true });
     expect(s.anyTeammateUnread).toHaveBeenCalledWith(VIEWER);
+    expect(s.anyGroupUnread).toHaveBeenCalledWith(VIEWER);
   });
 
   it("reads nothing about teammates for a viewer without the AI app", async () => {
@@ -84,5 +87,6 @@ describe("the AI sidebar's data", () => {
     expect(body).toMatchObject({ chats: [], chatsTotal: 0, agentsEnabled: 0, teammatesWaiting: 0, teammatesUnread: false });
     expect(s.waitingCount).not.toHaveBeenCalled();
     expect(s.anyTeammateUnread).not.toHaveBeenCalled();
+    expect(s.anyGroupUnread).not.toHaveBeenCalled();
   });
 });

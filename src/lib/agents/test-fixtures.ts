@@ -91,7 +91,7 @@ export const fx = {
   activity: [] as Array<Record<string, unknown>>,
   sql: [] as string[],
   /** The Ask AI chat an Ask AI request's decision reads (null: gone, or not the person's). */
-  chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { productContext: string | null; agent: Record<string, unknown> | null } | null,
+  chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { id?: string; kind?: string | null; productContext: string | null; agent: Record<string, unknown> | null } | null,
 };
 
 export function resetFixtures(): void {
@@ -193,6 +193,9 @@ export const prismaFake = {
   },
   chatSession: {
     findFirst: async () => (fx.chat ? { ...fx.chat } : null),
+    // actions.ts reads the kind of each card's chat (a group's cards open in the group).
+    findMany: async (a: { where: { id: { in: string[] } } }) =>
+      fx.chat?.id && a.where.id.in.includes(fx.chat.id) ? [{ id: fx.chat.id, kind: fx.chat.kind ?? null }] : [],
   },
   chatMessage: {
     create: async (a: { data: { sessionId: string; role: string; kind: string | null; content: string; meta: Record<string, unknown> } }) => {
@@ -220,11 +223,14 @@ export const prismaFake = {
   // claimUnreportedOutcomes' one statement, as Postgres runs it: it stamps
   // what it returns, so a second run returns nothing.
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
-    const sql = strings.join("?");
+    // A Prisma.sql fragment (one teammate's filter) arrives as a value.
+    const frag = values.find((v): v is { strings: string[]; values: unknown[] } => Boolean(v) && typeof v === "object" && "strings" in (v as object) && "values" in (v as object));
+    const sql = strings.join("?") + (frag ? ` [${frag.strings.join("?")}]` : "");
     fx.sql.push(sql);
     if (!sql.includes('UPDATE "AgentAction"')) return [];
+    const agentId = frag && frag.strings.join("?").includes('"agentId"') ? frag.values[0] : null;
     const decided = ["EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"];
-    const hit = fx.actions.filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status));
+    const hit = fx.actions.filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId));
     for (const r of hit) r.reportedAt = new Date();
     return hit.map((r) => ({ ...r }));
   },

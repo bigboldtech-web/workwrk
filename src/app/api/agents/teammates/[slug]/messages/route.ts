@@ -29,21 +29,20 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@/generated/prisma";
 import { requireApp } from "@/lib/app-gate";
 import { isAiConfigured } from "@/lib/ai-client";
 import { prisma } from "@/lib/prisma";
 import { resolveActingPerson } from "@/lib/agents/acting";
-import { actionViews, claimUnreportedOutcomes } from "@/lib/agents/actions";
+import { claimUnreportedOutcomes } from "@/lib/agents/actions";
 import { abandonTurn, claimTeammateTurn, giveBackTurn } from "@/lib/agents/budget";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "@/lib/agents/engine";
 import { ACTION_ERRORS, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
 import {
   MESSAGE_SELECT,
-  SHOWN_MESSAGES,
   invalidRequest,
   liveChatWhere,
   loadTeammate,
+  messagesPage,
   teammateError,
   teammateNotFound,
 } from "@/lib/agents/teammate-server";
@@ -51,8 +50,6 @@ import { messageViewFromRow, type AgentActionRow, type TeammateMessageView, type
 
 type Params = { params: Promise<{ slug: string }> };
 
-const PAGE_DEFAULT = 50;
-const PAGE_MAX = 100;
 
 export async function GET(req: Request, { params }: Params) {
   const gate = await requireApp("ai");
@@ -64,30 +61,7 @@ export async function GET(req: Request, { params }: Params) {
 
   const chat = await prisma.chatSession.findFirst({ where: liveChatWhere(agent, viewer.userId), select: { id: true } });
   if (!chat) return NextResponse.json({ session: null, messages: [], actions: {}, hasMore: false });
-
-  const sp = new URL(req.url).searchParams;
-  const takeRaw = parseInt(sp.get("take") ?? "", 10);
-  const take = Math.min(PAGE_MAX, Math.max(1, Number.isFinite(takeRaw) ? takeRaw : PAGE_DEFAULT));
-  // The page before a message of this chat; a cursor that names none starts at the newest.
-  const before = sp.get("before");
-  const cursor = before ? await prisma.chatMessage.findFirst({ where: { id: before, sessionId: chat.id }, select: { id: true, createdAt: true } }) : null;
-  const where: Prisma.ChatMessageWhereInput = {
-    sessionId: chat.id,
-    AND: [
-      SHOWN_MESSAGES,
-      ...(cursor ? [{ OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] }] : []),
-    ],
-  };
-  const rows = await prisma.chatMessage.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: take + 1, select: MESSAGE_SELECT });
-  const page = rows.slice(0, take).reverse();
-  const messages = page.map(messageViewFromRow).filter((m): m is TeammateMessageView => m !== null);
-  const actionIds = messages.flatMap((m) => (m.kind === "approval" ? m.actionIds : m.kind === "event" && m.actionId ? [m.actionId] : []));
-  return NextResponse.json({
-    session: { id: chat.id },
-    messages,
-    actions: await actionViews(actionIds, viewer.userId),
-    hasMore: rows.length > take,
-  });
+  return NextResponse.json(await messagesPage(chat.id, viewer.userId, new URL(req.url).searchParams));
 }
 
 const postSchema = z.object({

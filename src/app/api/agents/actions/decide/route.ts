@@ -6,7 +6,9 @@
 // and anyone else's id answers not_found exactly like a missing one, an
 // Admin's included. `always` is "Approve and don't ask again", stored as the
 // person's own rule only where the policy offers it. Answers
-// { results, resume, agentSlug }: when anything ran, the chat continues once.
+// { results, resume, agentSlug, chat }: when anything ran, the chat continues
+// once; `chat` names it, a group chat included (docs/plans/ai-teammates-phase2.md
+// step 3), and agentSlug stays for older pages.
 //
 // At most 60 requests a minute per person: an approval runs a tool, and
 // nobody clicks that fast; a script does.

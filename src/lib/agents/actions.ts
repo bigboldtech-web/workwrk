@@ -47,7 +47,7 @@
 //
 // Server-only: imports prisma.
 
-import type { Prisma } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
@@ -71,6 +71,7 @@ import {
 } from "./teammate-copy";
 import {
   actionViewFromRow,
+  groupActionHref,
   isAgentActionStatus,
   messageViewFromRow,
   type ActionPreview,
@@ -78,6 +79,7 @@ import {
   type ActionView,
   type AgentActionRow,
   type AgentActionStatus,
+  type EventLink,
   type TeammateEventKind,
   type TeammateMessageView,
 } from "./teammate-thread";
@@ -121,10 +123,22 @@ export function askAiActionHref(sessionId: string | null, actionId: string): str
   return sessionId ? `/sidekick?session=${encodeURIComponent(sessionId)}&action=${encodeURIComponent(actionId)}` : "/sidekick";
 }
 
-/** A request's card: its teammate's chat, or Ask AI's when it has no teammate. */
-function cardHref(row: { id: string; sessionId: string | null; agent: { slug: string } | null }): string {
+/** A request's card: its group chat, its teammate's chat, or Ask AI's when it has no teammate. */
+function cardHref(row: { id: string; sessionId: string | null; agent: { slug: string } | null }, kinds?: ReadonlyMap<string, string | null>): string {
+  if (row.sessionId && kinds?.get(row.sessionId) === "TEAMMATE_GROUP") return groupActionHref(row.sessionId, row.id);
   return row.agent ? actionHref(row.agent.slug, row.id) : askAiActionHref(row.sessionId, row.id);
 }
+
+/** The kind of each chat these requests sit in (null: Ask AI's), read once. */
+async function sessionKinds(ids: ReadonlyArray<string | null>): Promise<Map<string, string | null>> {
+  const wanted = [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (wanted.length === 0) return new Map();
+  const rows = await prisma.chatSession.findMany({ where: { id: { in: wanted } }, select: { id: true, kind: true } });
+  return new Map(rows.map((r) => [r.id, r.kind]));
+}
+
+/** The chat a decision continues: a teammate's own, or a group (with the teammate whose request ran). */
+export type ResumeChat = { kind: "teammate"; slug: string } | { kind: "group"; id: string; agentSlug: string };
 
 /**
  * The columns a card reads (teammate-thread.ts AgentActionRow). `input` only
@@ -193,6 +207,12 @@ export interface EventLine {
   event: TeammateEventKind;
   actionId?: string | null;
   routineId?: string | null;
+  /** A group chat: the teammate the line is about. */
+  agentId?: string | null;
+  /** The person's message the line answers (a group's skipped line). */
+  replyTo?: string | null;
+  /** What its Open goes to (teammate-thread.ts EventLink; the address is built when read). */
+  link?: EventLink | null;
 }
 
 /**
@@ -202,12 +222,15 @@ export interface EventLine {
  */
 export async function writeEventLine(sessionId: string | null, line: EventLine): Promise<TeammateMessageView | null> {
   if (!sessionId) return null;
-  const meta: Record<string, string> = { event: line.event };
+  const meta: Record<string, unknown> = { event: line.event };
   if (line.actionId) meta.actionId = line.actionId;
   if (line.routineId) meta.routineId = line.routineId;
+  if (line.agentId) meta.agentId = line.agentId;
+  if (line.replyTo) meta.replyTo = line.replyTo;
+  if (line.link) meta.link = line.link;
   try {
     const row = await prisma.chatMessage.create({
-      data: { sessionId, role: "SYSTEM", kind: "EVENT", content: line.text, meta },
+      data: { sessionId, role: "SYSTEM", kind: "EVENT", content: line.text, meta: json(meta) },
       select: { id: true, role: true, content: true, kind: true, meta: true, createdAt: true },
     });
     return messageViewFromRow(row);
@@ -309,9 +332,10 @@ export async function actionViews(ids: readonly string[], viewerId: string, now:
   const wanted = [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))].slice(0, MAX_VIEWS);
   const out: Record<string, ActionView> = {};
   if (wanted.length === 0) return out;
-  const rows = await prisma.agentAction.findMany({ where: { id: { in: wanted }, actingForId: viewerId }, select: VIEW_SELECT });
+  const rows = await prisma.agentAction.findMany({ where: { id: { in: wanted }, actingForId: viewerId }, select: { ...VIEW_SELECT, agent: { select: { slug: true } } } });
+  const kinds = await sessionKinds(rows.map((r) => r.sessionId));
   for (const row of rows) {
-    const view = actionViewFromRow(row);
+    const view = { ...actionViewFromRow(row), href: cardHref(row, kinds) };
     const overdue = view.status === "PENDING" && Date.parse(view.expiresAt) <= now.getTime();
     out[row.id] = overdue ? { ...view, status: "EXPIRED", always: { allowed: false, label: null } } : view;
   }
@@ -356,12 +380,13 @@ export async function decideActions(
   viewer: Viewer,
   decisions: readonly DecisionInput[],
   opts: { always?: boolean } = {},
-): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null }> {
+): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null; chat: ResumeChat | null }> {
   const cache: DecideCache = { person: null, modules: null, tools: new Map(), askAiTools: new Map() };
   const results: DecisionResult[] = [];
   const touched: Array<[string, string | null]> = [];
   let firstSlug: string | null = null;
   let resumeSlug: string | null = null;
+  let resumeSession: string | null = null;
   try {
     for (const d of decisions.slice(0, MAX_DECISIONS)) {
       const id = typeof d.id === "string" ? d.id : "";
@@ -379,7 +404,10 @@ export async function decideActions(
       // a request decided before (two tabs, a double click) changes nothing,
       // so the turn after it would have nothing to tell. Ask AI's own never
       // continue: its card shows the outcome, and it hears it next turn.
-      if (row.agent && (r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided") resumeSlug ??= row.agent.slug;
+      if (row.agent && (r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided" && resumeSlug === null) {
+        resumeSlug = row.agent.slug;
+        resumeSession = row.sessionId;
+      }
       results.push(r);
     }
   } finally {
@@ -387,12 +415,19 @@ export async function decideActions(
     // tabs re-read the cards, the chat's lines and the sidebar's count.
     publishChanged(touched);
   }
-  return { results, resume: resumeSlug !== null, agentSlug: resumeSlug ?? firstSlug };
+  // The chat that continues: the resumed request's own, a group's included
+  // (so the page resumes the group, never the teammate's other chat).
+  let chat: ResumeChat | null = null;
+  if (resumeSlug) {
+    const kinds = resumeSession ? await sessionKinds([resumeSession]).catch(() => new Map<string, string | null>()) : new Map<string, string | null>();
+    chat = resumeSession && kinds.get(resumeSession) === "TEAMMATE_GROUP" ? { kind: "group", id: resumeSession, agentSlug: resumeSlug } : { kind: "teammate", slug: resumeSlug };
+  }
+  return { results, resume: resumeSlug !== null, agentSlug: resumeSlug ?? firstSlug, chat };
 }
 
 /** The line and the Inbox for a decided row. */
 async function settle(row: DecideRow, userId: string, line: EventLine): Promise<void> {
-  await writeEventLine(row.sessionId, { ...line, actionId: row.id });
+  await writeEventLine(row.sessionId, { ...line, actionId: row.id, agentId: row.agentId });
   await markLinksRead(userId, [cardHref(row)]);
 }
 
@@ -644,11 +679,15 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
  * call the person's own rule ran was reported in its own turn (reportedAt is
  * set when it is recorded), so only decisions and expiries come back here.
  */
-export async function claimUnreportedOutcomes(sessionId: string): Promise<AgentActionRow[]> {
+export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null): Promise<AgentActionRow[]> {
+  // One teammate's only, when named: in a group chat each hears its own
+  // (docs/plans/ai-teammates-phase2.md step 3). A one-teammate chat holds
+  // only that teammate's rows, and Ask AI names none.
+  const ofAgent = agentId ? Prisma.sql`AND "agentId" = ${agentId}` : Prisma.empty;
   const rows = await prisma.$queryRaw<AgentActionRow[]>`
     UPDATE "AgentAction"
     SET "reportedAt" = now() AT TIME ZONE 'UTC', "updatedAt" = now() AT TIME ZONE 'UTC'
-    WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL
+    WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent}
       AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
       "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;

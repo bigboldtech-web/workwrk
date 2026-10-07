@@ -103,9 +103,9 @@ describe("the person's own work", () => {
     await call("forget", { key: "report day" });
     await call("create_routine", { name: "Daily brief", instructions: "Brief me", schedule: { kind: "weekdays", time: "09:00" } });
     expect(fx.messages).toEqual([
-      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Memory updated: Status reports go out on Mondays", meta: { event: "memory_updated" } },
-      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Forgot: report day", meta: { event: "memory_forgotten" } },
-      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Created routine: Daily brief · Weekdays at 9:00", meta: { event: "routine_created", routineId: "r1" } },
+      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Memory updated: Status reports go out on Mondays", meta: { event: "memory_updated", agentId: "a1" } },
+      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Forgot: report day", meta: { event: "memory_forgotten", agentId: "a1" } },
+      { sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "Created routine: Daily brief · Weekdays at 9:00", meta: { event: "routine_created", routineId: "r1", agentId: "a1" } },
     ]);
     expect(events.filter((e) => e.type === "event")).toHaveLength(3);
     expect(fx.activity.map((a) => a.type)).toEqual(["agent.remember", "agent.forget", "agent.create_routine"]);

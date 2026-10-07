@@ -93,10 +93,11 @@ export type ReviewDecidedEvent = { type: "review.decided"; reviewId: string };
  * typing it (docs/plans/ai-teammates.md 3.14): a decision on a request (here
  * or in another tab), a request that expired, a routine's report, or a
  * routine that paused. Published only to the person the teammate acts for.
- * TRIGGER-ONLY: the teammate's id and nothing else, so the list, the open
- * chat and the AI sidebar re-read through their own scoped endpoints.
+ * TRIGGER-ONLY: the teammate's id (and a group chat's id, for a change in
+ * one) and nothing else, so the list, the open chat and the AI sidebar
+ * re-read through their own scoped endpoints.
  */
-export type AgentChangedEvent = { type: "agent.changed"; agentId: string };
+export type AgentChangedEvent = { type: "agent.changed"; agentId: string; sessionId?: string };
 
 /**
  * The same event dispatched by THIS tab about its own write (see

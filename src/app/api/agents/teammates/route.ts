@@ -39,6 +39,7 @@ import { sortTeammates } from "@/lib/agents/teammate-thread";
 import { ALL_TOOL_NAMES, cleanToolNames, editedPersonRules } from "@/lib/agents/teammate-views";
 import { TEMPLATE_KEYS, templateCards } from "@/lib/agents/templates";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
+import { groupRows } from "@/lib/agents/group-server";
 
 /** The most teammates one list reads. */
 const LIST_MAX = 500;
@@ -55,16 +56,20 @@ export async function GET(req: Request) {
   const agents = await prisma.agent.findMany({ where, select: TEAMMATE_SELECT, orderBy: { name: "asc" }, take: LIST_MAX });
   const usable = agents.filter((a) => canUseAgent(a, viewer));
 
-  const [rows, waitingTotal, limits, modules] = await Promise.all([
+  const [rows, waitingTotal, limits, modules, groups] = await Promise.all([
     teammateRows(usable, viewer),
     // Teammates' requests only: Ask AI's own wait on cards in their chats,
     // which this page never lists.
     waitingCount(viewer.organizationId, viewer.userId, new Date(), { teammatesOnly: true }),
     teammateLimits(viewer.organizationId, viewer.userId),
     workspaceModules(viewer.organizationId),
+    // The person's group chats (docs/plans/ai-teammates-phase2.md step 3):
+    // waitingTotal already counts the cards in them.
+    groupRows(viewer),
   ]);
   return NextResponse.json({
     teammates: sortTeammates(rows),
+    groups,
     waitingTotal,
     templates: templateCards(modules),
     canCreateWorkspace: canCreateTeammate(viewer, "WORKSPACE") === "ok",

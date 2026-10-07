@@ -1242,3 +1242,11 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     3. scripts/CRON-SETUP.md described the old loop.
   - Also: under "What to do each run" the drawer now says the routine has its own instructions.
   - Known, not fixed: the Workspace agents "Last run" column reads only the old loop's runs (SCHEDULED or MANUAL). A Run now (a chat turn, seen only by the person it ran as) and a routine's run do not show there. Showing them would link everyone to a run only one person may open. The run is in that person's chat and in their Run history.
+- **Step 3** (group chats, engine and routes) proved locally against a real dev server and the stand-in model:
+  - "Status?" brought one answer (the lead) for one question and one run.
+  - "@Triage @Proof PM" brought two answers in that order, each with its own question. Each teammate read the other's answer only inside `<workspace_note>`, and its own as its own.
+  - Two cards waited in the group, with no Inbox rows. Approving them answered `chat: group`, and the continue heard only its own teammate's outcome.
+  - A paused member got one skipped line and no question; naming only it answered 409 and spent nothing.
+  - Removing below two answered 409 `min_members`, and the read cursor cleared the dot.
+  - Leaving cancelled the waiting card. Six teammates answered 400, and another person's group or private teammate 404. Ask AI on the group's id answered 409.
+  - Deviation from the spec's proof list: a message naming only teammates who cannot answer is refused (409 `no_one_to_answer`, nothing saved), as the route's own flow says, rather than writing a skipped line.

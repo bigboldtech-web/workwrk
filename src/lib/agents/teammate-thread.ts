@@ -29,6 +29,7 @@
 import { callFromLog, withToolUse, type AiToolCall } from "@/lib/ai/thread";
 import type { RunTone } from "@/lib/automation/run-status";
 import { clampText } from "./clamp";
+import type { TeammateHue } from "./hues";
 import { plainLine } from "./run-view";
 import { EDITABLE_FIELD } from "./tool-policy";
 import { isToolName } from "./tool-names";
@@ -37,6 +38,7 @@ import {
   ACTION_ERRORS,
   ACTIVITY_COPY,
   APPROVAL_CARD,
+  GROUP_COPY,
   ROUTINE_FALLBACK_NAME,
   TEAMMATE_CHAT,
   TEAMMATE_ROUTE_ERRORS,
@@ -130,6 +132,11 @@ export function eventLinkHref(l: EventLink): string {
   if (l.kind === "chat") return `/agents?chat=${e(l.slug)}${l.actionId ? `&action=${e(l.actionId)}` : ""}`;
   if (l.kind === "talk") return `/tlk/${e(l.conversationId)}?m=${e(l.messageId)}`;
   return `/automation/logs?workflowId=${e(l.workflowId)}&runId=${e(l.runId)}`;
+}
+
+/** Where a card in a group chat opens: the group, at the card. */
+export function groupActionHref(sessionId: string, actionId: string): string {
+  return `/agents?group=${encodeURIComponent(sessionId)}&action=${encodeURIComponent(actionId)}`;
 }
 
 /** One row of the thread. */
@@ -243,6 +250,8 @@ export interface ActionView {
   executedAt: string | null;
   result: { text: string; href: string | null } | null;
   error: string | null;
+  /** Where the card opens: its group chat, its teammate's chat, or Ask AI's (the server's actionViews). */
+  href?: string | null;
 }
 
 /** One event of POST /api/agents/teammates/[slug]/messages. */
@@ -253,6 +262,48 @@ export type TeammateStreamEvent =
   | { type: "tool_result"; name: string; isError: boolean; state: CallState; title?: string }
   | { type: "approval"; action: ActionView }
   | { type: "event"; message: TeammateMessageView }
+  | { type: "done"; messages: TeammateMessageView[]; error: string | null }
+  | { type: "error"; message: string };
+
+// ── Group chats (docs/plans/ai-teammates-phase2.md step 3) ───────────
+
+/** One teammate of a group chat, as the page shows it. */
+export interface GroupMemberView {
+  agentId: string;
+  slug: string;
+  name: string;
+  hue: TeammateHue | null;
+  avatar: string | null;
+  status: "ENABLED" | "DISABLED" | "ARCHIVED";
+  /** It can answer now: on, not removed, and one the person may still use. */
+  canAnswer: boolean;
+  position: number;
+  /** It answers a message that names nobody (group-chat.ts leadOf). */
+  lead: boolean;
+}
+
+/** One group chat in the list (GET /api/teammate-groups). */
+export interface GroupRow {
+  id: string;
+  name: string;
+  members: GroupMemberView[];
+  waiting: number;
+  unread: boolean;
+  lastAt: string | null;
+  lastLine: string | null;
+}
+
+export interface GroupDetail extends GroupRow {
+  createdAt: string;
+}
+
+/** A group message's stream: the saved message, then each answerer's turn, then done. */
+export type GroupStreamEvent =
+  | { type: "user_message"; message: TeammateMessageView; answerers: GroupMemberView[] }
+  | { type: "answer_start"; agentId: string }
+  | Extract<TeammateStreamEvent, { type: "text_delta" | "tool_use" | "tool_result" | "approval" | "event" }>
+  | { type: "answer_done"; agentId: string; messages: TeammateMessageView[]; error: string | null }
+  | { type: "skipped"; agentId: string; message: TeammateMessageView }
   | { type: "done"; messages: TeammateMessageView[]; error: string | null }
   | { type: "error"; message: string };
 
@@ -604,6 +655,8 @@ export function lastLineFor(m: TeammateMessageView | null | undefined): string |
   const line = plainLine(m.text, LAST_LINE_MAX);
   if (m.kind === "user") return line ? lastLineYou(line) : null;
   if (m.kind === "report") return line ? lastLineReport(m.routine.name, line) : m.routine.name;
+  // A group's answer names who answered.
+  if (m.kind === "agent" && m.agentName && line) return GROUP_COPY.lastLineAgent(m.agentName, line);
   if (m.kind === "agent" && !line) {
     // An answer of tools only reads as what the last one did.
     const last = m.toolCalls[m.toolCalls.length - 1];
@@ -947,6 +1000,7 @@ export function teammateSendFailure(status: number, body: unknown): { error: Tea
   if (status === 403 && (code === "ai_limit" || code === "agent_cap")) return { error: code, text: sentence };
   if (status === 429) return { error: "rate_limited", text: sentence };
   if (status === 409 && code === "nothing_to_continue") return { error: null, text: null };
+  if (status === 409 && code === "no_one_to_answer") return { error: "refused", text: sentence };
   if (status === 409 && code === "agent_paused") return { error: "paused", text: sentence };
   if (status === 409 && code === "agent_removed") return { error: "removed", text: sentence };
   if (status === 503) return { error: "not_configured", text: sentence };

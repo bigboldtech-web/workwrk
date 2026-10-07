@@ -29,6 +29,7 @@ import { waitingCount } from "@/lib/agents/actions";
 import { ASK_AI_CHATS } from "@/lib/agents/session-guard";
 import { agentUsableWhere } from "@/lib/agents/teammate-access";
 import { anyTeammateUnread } from "@/lib/agents/teammate-server";
+import { anyGroupUnread } from "@/lib/agents/group-server";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,8 @@ export async function GET() {
       : countUsableBuildApps(orgId, viewer.userId),
     // Teammates' only: Ask AI's own requests wait on cards in their chats.
     ai.allowed ? waitingCount(orgId, viewer.userId, new Date(), { teammatesOnly: true }) : Promise.resolve(0),
-    ai.allowed ? anyTeammateUnread(viewer) : Promise.resolve(false),
+    // A teammate's chat or a group chat with an answer not yet read.
+    ai.allowed ? Promise.all([anyTeammateUnread(viewer), anyGroupUnread(viewer)]).then(([one, group]) => one || group) : Promise.resolve(false),
   ]);
 
   return NextResponse.json(
