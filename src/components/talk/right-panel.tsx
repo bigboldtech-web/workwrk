@@ -26,7 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { MessageFeed, type FeedMessage } from "@/components/talk/message-feed";
-import { MessageBox, type MessagePayload } from "@/components/talk/message-box";
+import { MessageBox, type MentionTeammate, type MessagePayload } from "@/components/talk/message-box";
 import type { ChatUserLite } from "@/components/talk/conversation-utils";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { apiFetch } from "@/lib/api-fetch";
@@ -102,6 +102,7 @@ export function ThreadView({
   meId,
   memberNames,
   members,
+  teammates = [],
   canWrite,
   loading,
   onSend,
@@ -118,6 +119,8 @@ export function ThreadView({
   meId: string | null;
   memberNames: Map<string, string>;
   members: { userId: string; user: ChatUserLite }[];
+  /** The AI teammates that can be asked here: a thread reply can ask one too. */
+  teammates?: readonly MentionTeammate[];
   canWrite: boolean;
   loading: boolean;
   onSend: (payload: MessagePayload) => void;
@@ -180,6 +183,7 @@ export function ThreadView({
           {/* Ghost Send: the main message box owns the page's one blue thing. */}
           <MessageBox
             members={members}
+            teammates={teammates}
             meId={meId}
             placeholder="Reply…"
             autoFocus

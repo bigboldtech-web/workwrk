@@ -16,17 +16,18 @@
 //   4. the teammate, one this person may use (another person's private one
 //      answers as one that does not exist), and on
 //   5. the body names it ("@<Name>"): it was picked from the @ list
-//   6. five asks a minute per person
-//   7. AI is set up
-//   8. a message already sent with this key answers with that one, and
-//      starts no turn
+//   6. a message already sent with this key answers with that one, and
+//      starts no turn (and spends none of the limit below)
+//   7. five asks a minute per person
+//   8. AI is set up
 //   9. mentions and the thread, checked as a plain message's
 //  10. one AI question for the turn (claimTeammateTurn): refused, nothing
 //      is posted
 //  11. the person's message, posted with the request's state
 //  12. the turn; its answer is posted as the person, marked as from the
-//      teammate, where the request was, if they may still post there and
-//      no Guest has joined; else it stays in their chat with the teammate.
+//      teammate, where the request was, if the turn finished, the request
+//      (and its thread) is still there, they may still post there and no
+//      Guest has joined; else it stays in their chat with the teammate.
 // The turn runs to the end when the client leaves. Every refusal is
 // { error: "<sentence>", code }.
 
@@ -42,7 +43,7 @@ import { resolveActingPerson } from "@/lib/agents/acting";
 import { writeEventLine } from "@/lib/agents/actions";
 import { abandonTurn, claimTeammateTurn, giveBackTurn } from "@/lib/agents/budget";
 import { clampText } from "@/lib/agents/clamp";
-import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "@/lib/agents/engine";
+import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TalkPlaceKind, type TurnResult } from "@/lib/agents/engine";
 import { hueForAgent } from "@/lib/agents/hues";
 import { TALK_TEAMMATE_LIMITS, addressedIn, talkAddressRefusal, type TalkAddressRefusal } from "@/lib/agents/talk-address";
 import { auditTalkAnswer, conversationHasGuests, noticeTalkApprovals, setRequestState, talkContext } from "@/lib/agents/talk-turn";
@@ -114,14 +115,18 @@ export async function POST(req: Request, { params }: Params) {
   if (agent.status !== "ENABLED") return teammateError(409, "agent_paused", pausedNotSent(agent.name));
   if (!addressedIn(body, agent.name)) return teammateError(400, "not_addressed", TALK_TEAMMATE_COPY.notAddressed);
 
-  // 6, 7. Its own per-minute limit, and AI set up.
+  // 6. Sent already with this key: that message, and no second turn. A
+  // retry of a message that landed spends none of the limit below. A
+  // removed one is refused, as a plain message's is: its words stay in the
+  // person's "Not sent" row, never swapped for a blank.
+  const already = await sentWith(id, person.userId, clientId);
+  if (already?.deletedAt) return teammateError(409, "removed", TALK_TEAMMATE_COPY.removedAfterSent);
+  if (already) return stream(async (send) => send({ type: "message", message: already }));
+
+  // 7, 8. Its own per-minute limit, and AI set up.
   const limited = rateLimit(`talk-teammate:${person.userId}`, { max: TALK_TEAMMATE_LIMITS.perMinute, windowMs: 60_000 });
   if (!limited.ok) return teammateError(429, "rate_limited", TALK_TEAMMATE_COPY.tooMany(limited.retryAfter), { "Retry-After": String(limited.retryAfter) });
   if (!(await isAiConfigured(person.organizationId))) return teammateError(503, "not_configured", TEAMMATE_CHAT.notSetUp);
-
-  // 8. Sent already with this key: that message, and no second turn.
-  const already = await sentWith(id, person.userId, clientId);
-  if (already) return stream(async (send) => send({ type: "message", message: already }));
 
   // 9. Mentions and the thread, as a plain message checks them.
   const meta = payload?.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {};
@@ -152,7 +157,8 @@ export async function POST(req: Request, { params }: Params) {
     return teammateError(403, claim.code, claim.message);
   }
 
-  // 11. The person's message, with the request it carries.
+  // 11. The person's message, with the request it carries. A failure that
+  // is not the duplicate key gives the question back: no turn ran.
   const now = new Date();
   const posted = await insertConversationMessage({
     conversationId: id,
@@ -163,7 +169,12 @@ export async function POST(req: Request, { params }: Params) {
     metadata: { ...(mentions.length > 0 ? { mentions } : {}), teammate: { id: agent.id, slug: agent.slug, name: agent.name, state: "running", runId: claim.runId } },
     clientId,
     now,
+  }).catch(async (err: unknown) => {
+    console.error(`[agents] talk request not saved: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+    await abandonTurn(claim.runId, claim.questionId);
+    return null;
   });
+  if (!posted) return teammateError(500, "not_saved", TALK_TEAMMATE_COPY.notSent);
   if (!posted.ok) {
     // Two sends with one key at once: the first one's message, and this turn never runs.
     await abandonTurn(claim.runId, claim.questionId);
@@ -186,13 +197,15 @@ export async function POST(req: Request, { params }: Params) {
 
   return stream(async (send) => {
     send({ type: "message", message: { ...request, replyCount: 0 } });
-    const place = await placeOf({ id, type: ctx.conversation.type, name: ctx.conversation.name }, person.userId);
+    // Neither may stop the turn: the question is spent and the request posted.
+    const placeKind = PLACE_KIND[ctx.conversation.type];
+    const place = await placeOf({ id, type: ctx.conversation.type, name: ctx.conversation.name }, person.userId).catch(() => TALK_TEAMMATE_COPY.placeFallback);
     await writeEventLine(session.id, {
       text: TALK_TEAMMATE_COPY.askedLine(place, clampText(body, 300)),
       event: "talk_asked",
       agentId: agent.id,
       link: { kind: "talk", conversationId: id, messageId: request.id },
-    });
+    }).catch((err: unknown) => console.error(`[agents] talk asked line ${request.id} not saved: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`));
     let result: TurnResult | null = null;
     try {
       const [audience, context] = await Promise.all([
@@ -210,7 +223,7 @@ export async function POST(req: Request, { params }: Params) {
         runId: claim.runId,
         questionId: claim.questionId,
         streaming: false,
-        origin: { kind: "talk", conversationId: id, messageId: request.id, place, audience, context },
+        origin: { kind: "talk", conversationId: id, messageId: request.id, place, placeKind, audience, context },
       });
     } catch (err) {
       console.error(`[agents] talk turn ${claim.runId} threw: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
@@ -220,14 +233,19 @@ export async function POST(req: Request, { params }: Params) {
     // What it asked for waits in the person's chat with it: one Inbox row points there.
     if (result && result.proposedActionIds.length > 0) await noticeTalkApprovals(person.userId, agent, result.proposedActionIds, place);
 
-    // The answer, where the request was, only if the person may still post
-    // there and no Guest has joined meanwhile.
-    const text = result ? cleanOutwardText(result.text, { talk: true, max: TALK_TEAMMATE_LIMITS.answerMax }) : "";
+    // The answer, where the request was, only for a turn that finished (a
+    // half answer, cut short or declined, is never posted as the person),
+    // while the request and its thread are still there (a removed request
+    // was taken back), and only if the person may still post there and no
+    // Guest has joined meanwhile. Else it stays in their chat with it.
+    const text = result && !result.error ? cleanOutwardText(result.text, { talk: true, max: TALK_TEAMMATE_LIMITS.answerMax }) : "";
     let answered: Awaited<ReturnType<typeof insertConversationMessage>> | null = null;
     if (text) {
       const still = await loadConversationRole(id, ctx.gate).catch(() => null);
       const guestsNow = await conversationHasGuests(id, ctx.gate.organizationId).catch(() => true);
+      const standing = await requestStanding(id, request.id, parentId).catch(() => false);
       const allowed =
+        standing &&
         still !== null &&
         canPost(still.conversation, still.role) &&
         talkAddressRefusal(still.conversation, still.viewer, { isMember: still.viewer.isMember, hasGuests: guestsNow }) === null;
@@ -243,8 +261,11 @@ export async function POST(req: Request, { params }: Params) {
           metadata: { kind: "agent_post", agent: { id: agent.id, name: agent.name }, replyTo: request.id, runId: claim.runId, via: "talk" },
           clientId: `tm_${request.id}`,
           now: at,
+        }).catch((err: unknown) => {
+          console.error(`[agents] talk answer to ${request.id} not posted: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+          return null;
         });
-        if (answered.ok) {
+        if (answered?.ok) {
           await afterMessageSent({
             conversationId: id,
             conversation: { type: still.conversation.type, name: still.conversation.name },
@@ -279,6 +300,15 @@ export async function POST(req: Request, { params }: Params) {
     else send({ type: "error", message: TURN_ERRORS.noAnswer });
   });
 }
+
+/** Whether the request, and the thread it is in, are still there (not removed). */
+async function requestStanding(conversationId: string, requestId: string, parentId: string | null): Promise<boolean> {
+  const ids = parentId ? [requestId, parentId] : [requestId];
+  const live = await prisma.conversationMessage.count({ where: { id: { in: ids }, conversationId, deletedAt: null } });
+  return live === ids.length;
+}
+
+const PLACE_KIND: Record<"DM" | "GROUP" | "CHANNEL", TalkPlaceKind> = { DM: "dm", GROUP: "group", CHANNEL: "channel" };
 
 /** The message this person already sent here with this key, or null. */
 async function sentWith(conversationId: string, authorId: string, clientId: string) {

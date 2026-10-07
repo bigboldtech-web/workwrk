@@ -646,7 +646,9 @@ export function ConversationView({
         body: payload.body,
         parentId: payload.parentId ?? null,
         createdAt: writtenAt,
-        metadata: payload.metadata,
+        // A teammate request keeps its teammate: Retry asks it again, never
+        // posts the words as a plain message nobody answers.
+        metadata: payload.teammate ? { ...(payload.metadata ?? {}), askTeammate: payload.teammate } : payload.metadata,
       });
       if (place === "top") setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)));
       else {
@@ -737,6 +739,7 @@ export function ConversationView({
     metadata: {
       ...(payload.attachments.length > 0 ? { attachments: payload.attachments } : {}),
       ...(payload.mentions.length > 0 ? { mentions: payload.mentions } : {}),
+      ...(payload.teammate ? { askTeammate: payload.teammate } : {}),
     },
     author: meLite,
     pending: true,
@@ -795,6 +798,7 @@ export function ConversationView({
       body: m.body,
       mentions: m.metadata?.mentions ?? [],
       attachments: m.metadata?.attachments ?? [],
+      ...(typeof m.metadata?.askTeammate === "string" && m.metadata.askTeammate ? { teammate: m.metadata.askTeammate } : {}),
     };
     if (m.metadata?.kind === "call") void deliver(m.id, { body: m.body, metadata: { kind: "call" } }, place, m.createdAt);
     else void deliver(m.id, wirePayload(payload, m.parentId ?? undefined), place, m.createdAt);
@@ -1724,6 +1728,7 @@ export function ConversationView({
               meId={meId}
               memberNames={memberNames}
               members={meta.members}
+              teammates={askable}
               canWrite={reactable}
               loading={thread.loading}
               onSend={sendThreadReply}

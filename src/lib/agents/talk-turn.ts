@@ -19,14 +19,32 @@ import { actionHref } from "./actions";
 import { APPROVAL_CARD, agentAuditLine, approvalNoticeMessage, approvalNoticeTitle } from "./teammate-copy";
 import { actionViewFromRow } from "./teammate-thread";
 
+/** Members read per page by the Guest check, and the most pages it reads. */
+export const GUEST_CHECK_PAGE = 2000;
+export const GUEST_CHECK_MAX_PAGES = 50;
+
 /**
  * Whether any member of the conversation is a Guest now: a teammate is never
  * asked where one reads (Decision 8). A member whose access cannot be read
- * counts as one.
+ * counts as one. Every member is read, a page at a time: reading only the
+ * first page let a Guest past it go unseen. A conversation larger than the
+ * pages read counts as having one, so the check never passes unread.
  */
 export async function conversationHasGuests(conversationId: string, organizationId: string): Promise<boolean> {
-  const members = await prisma.conversationMember.findMany({ where: { conversationId }, select: { userId: true }, take: 2000 });
-  return anyGuestHere(organizationId, members.map((m) => m.userId));
+  let after: string | null = null;
+  for (let page = 0; page < GUEST_CHECK_MAX_PAGES; page += 1) {
+    const members: Array<{ id: string; userId: string }> = await prisma.conversationMember.findMany({
+      where: { conversationId, ...(after ? { id: { gt: after } } : {}) },
+      select: { id: true, userId: true },
+      orderBy: { id: "asc" },
+      take: GUEST_CHECK_PAGE,
+    });
+    if (members.length === 0) return false;
+    if (await anyGuestHere(organizationId, members.map((m) => m.userId))) return true;
+    if (members.length < GUEST_CHECK_PAGE) return false;
+    after = members[members.length - 1].id;
+  }
+  return true;
 }
 
 /**
@@ -88,14 +106,16 @@ export async function talkContext(a: {
  * Write the request's state into its message (metadata.teammate) in one
  * statement, so a reaction written at the same moment keeps its own keys
  * (Decision 30 covers the worst case: a "stale" line under a message whose
- * answer is posted).
+ * answer is posted). Its time is the app's clock, as every other write to
+ * the row: the feed pages on updatedAt, and a database clock behind the
+ * app's would put the change behind a cursor already past it.
  */
 export async function setRequestState(messageId: string, state: Record<string, unknown>): Promise<void> {
   const json = JSON.stringify(state);
   await prisma.$executeRaw`
     UPDATE "ConversationMessage"
     SET "metadata" = jsonb_set(COALESCE("metadata", '{}'::jsonb), '{teammate}', ${json}::jsonb, true),
-        "updatedAt" = now() AT TIME ZONE 'UTC'
+        "updatedAt" = ${new Date()}
     WHERE "id" = ${messageId}`;
 }
 

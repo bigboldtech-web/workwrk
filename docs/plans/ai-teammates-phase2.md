@@ -1300,3 +1300,13 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     3. A turn that posted nothing changed the request's state without telling anyone, so "working on it" stayed on every screen until the ten-minute mark. Open tabs are now told.
     4. Everyone in the channel read "See your chat with it", but only the asker has that chat. Others now read "didn't answer here", and the asker gets a link to their chat.
     5. The block 2 line said "where 1 people read". It now says "1 person reads".
+  - Review (one read-only reviewer, findings re-read against the code), 7 found, 7 fixed, plus 2 of its minor points:
+    1. Removing the request did not stop the answer, so words sent to the wrong place were answered there anyway. The answer is now posted only while the request, and its thread, are still there.
+    2. The Guest check read only the first 2,000 members. It now reads every member a page at a time, and a conversation larger than it reads counts as having a Guest.
+    3. The place's name (set by a channel's Full holder, a group's members, or the other person in a direct message) reached the model inside the server's own lines. Those lines now say "a private channel", "a group conversation" or "a direct message", and the name is inside `<workspace_note>`. The same held for the asking teammate's name in a delegated turn (step 5), now fixed the same way, and the history leads no longer carry either name.
+    4. Retry on a request that had not sent posted the words as a plain message nobody answered. The row and the "Not sent" outbox now keep the teammate, so Retry asks it again (proved live: refused at the per-minute limit, then answered on Retry).
+    5. A failed save of the request kept its question and left the run "Running now". The question is now given back. The asked line and the place's name can no longer stop a turn that has started, and a failed answer post leaves the request as "didn't answer here".
+    6. The request's state was stamped with the database clock while the feed pages on the app's. It now takes the app's clock.
+    7. A thread reply could not ask a teammate. The thread composer now has the same @ list.
+    - Also fixed: a half answer (cut short or declined) is no longer posted as the person, only kept in their chat. A message that already landed no longer counts against the five asks a minute, and a removed one answers 409, as a plain send does.
+    - Also: the local gate gives its type check the heap CI uses (it had aborted with no type error), and says so when the type check crashes rather than listing no errors.

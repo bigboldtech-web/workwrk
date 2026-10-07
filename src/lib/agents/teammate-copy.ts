@@ -1214,6 +1214,10 @@ export const TALK_TEAMMATE_COPY = {
   /** The same line in the feed: everyone reads it, but only the asker has that chat. */
   didntAnswerHere: (n: string) => `${n} didn't answer here.`,
   seeYourChat: "See your chat with it",
+  /** A message sent with this key that was removed since (the plain send's own words, messages/route.ts). */
+  removedAfterSent: "This message was removed after it was sent.",
+  /** Where it was asked, when the place's name can't be read. */
+  placeFallback: "Talk",
   askedLine: (place: string, req: string) => `Asked in ${place}: ${req}`,
   answeredIn: (place: string) => `Answered in ${place}`,
   guestCannot: "Guests can't ask AI teammates.",

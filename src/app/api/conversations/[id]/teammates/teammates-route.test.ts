@@ -23,6 +23,8 @@ const st = vi.hoisted(() => ({
   lines: [] as Row[],
   notified: [] as Row[],
   nudged: [] as string[],
+  removed: [] as string[],
+  insertThrows: false,
   userN: 0,
 }));
 
@@ -41,7 +43,11 @@ vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: () => {}, publishToConversation: (id: string) => void st.nudged.push(id) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    conversationMessage: { findFirst: async () => st.already, findMany: async () => [] },
+    conversationMessage: {
+      findFirst: async () => st.already,
+      findMany: async () => [],
+      count: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((x) => !st.removed.includes(x)).length,
+    },
     conversationMember: { findMany: async () => [] },
     agentAction: { findFirst: async () => null },
     notification: { create: async (a: Row) => void st.notified.push(a) },
@@ -49,6 +55,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/talk-post", () => ({
   insertConversationMessage: async (a: Row) => {
+    if (st.insertThrows) throw new Error("connection reset");
     st.inserted.push(a);
     return { ok: true, message: { id: `m${st.inserted.length}`, createdAt: new Date("2026-10-07T10:00:00Z"), body: a.body, metadata: a.metadata } };
   },
@@ -118,6 +125,8 @@ beforeEach(() => {
   st.lines = [];
   st.notified = [];
   st.nudged = [];
+  st.removed = [];
+  st.insertThrows = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -136,7 +145,7 @@ describe("asking a teammate in Talk", () => {
       body: "Summary for Olivia: see the plan.",
       metadata: { kind: "agent_post", agent: { id: "a-cos", name: "Chief of Staff" }, replyTo: "m1", runId: "run1", via: "talk" },
     });
-    expect(st.turns[0]).toMatchObject({ trigger: "TALK", userText: "@Chief of Staff summarise this", origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", audience: 2 } });
+    expect(st.turns[0]).toMatchObject({ trigger: "TALK", userText: "@Chief of Staff summarise this", origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 2 } });
     expect(st.states).toEqual([expect.objectContaining({ messageId: "m1", id: "a-cos", state: "answered", answerId: "m2" })]);
     expect(st.lines[0]).toMatchObject({ sessionId: "s-cos", event: "talk_asked", text: "Asked in #proof: @Chief of Staff summarise this", link: { kind: "talk", conversationId: "c1", messageId: "m1" } });
   });
@@ -197,6 +206,43 @@ describe("asking a teammate in Talk", () => {
     await ask(ASK);
     expect(st.notified).toEqual([{ data: expect.objectContaining({ type: "agent_approval", link: "/agents?chat=t-cos&action=x1" }) }]);
     expect(st.inserted).toHaveLength(1);
+  });
+
+  it("posts nothing when the person removed the request during the turn (review of step 6)", async () => {
+    st.removed = ["m1"];
+    const out = await ask(ASK);
+    expect(out.events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    expect(st.inserted).toHaveLength(1);
+    expect(st.states).toEqual([expect.objectContaining({ messageId: "m1", state: "no_answer" })]);
+  });
+
+  it("never posts a half answer: a turn cut short or declined stays in the person's chat", async () => {
+    st.turnAnswer = { text: "Here is the first half of", error: "The answer was cut short.", giveBack: false, proposedActionIds: [], messages: [] };
+    const out = await ask(ASK);
+    expect(out.events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    expect(st.inserted).toHaveLength(1);
+  });
+
+  it("gives the question back when the request cannot be saved", async () => {
+    st.insertThrows = true;
+    const out = await ask(ASK);
+    expect(out).toMatchObject({ status: 500, json: { code: "not_saved" } });
+    expect(st.abandoned).toEqual(["run1"]);
+    expect(st.turns).toEqual([]);
+  });
+
+  it("refuses a key whose message was removed, as a plain send does", async () => {
+    st.already = { id: "m-old", body: "@Chief of Staff summarise this", deletedAt: new Date("2026-10-07T10:00:00Z") };
+    const out = await ask(ASK);
+    expect(out).toMatchObject({ status: 409, json: { code: "removed" } });
+    expect(st.claims).toEqual([]);
+  });
+
+  it("spends none of the per-minute limit on a message that already landed", async () => {
+    for (let i = 0; i < 5; i += 1) expect((await ask({ ...ASK, clientId: `temp-1000000${i}` })).status).toBe(200);
+    st.already = { id: "m-old", body: "@Chief of Staff summarise this" };
+    const again = await ask(ASK);
+    expect(again.events).toEqual([{ type: "message", message: { id: "m-old", body: "@Chief of Staff summarise this" } }]);
   });
 
   it("always stops the keep-alive", async () => {

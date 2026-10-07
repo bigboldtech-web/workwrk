@@ -121,8 +121,12 @@ npx next typegen > /tmp/verify-typegen.log 2>&1 || {
 }
 
 echo "==> type check"
-npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
-  echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30; exit 1;
+# The heap CI's type check needs (ci.yml): Node's default ran out on this
+# tree and aborted with no type error listed.
+NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json > /tmp/verify-tsc.log 2>&1 || {
+  if grep -q "error TS" /tmp/verify-tsc.log; then echo "TYPE ERRORS:"; grep "error TS" /tmp/verify-tsc.log | head -30;
+  else echo "TYPE CHECK CRASHED (no type error). Last lines:"; tail -5 /tmp/verify-tsc.log; fi
+  exit 1;
 }
 echo "   ok, 0 type errors"
 

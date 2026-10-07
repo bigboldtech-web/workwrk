@@ -56,6 +56,8 @@ export type FeedMessage = {
     /// AI teammates in Talk (Phase 2 step 6): a message that asked a
     /// teammate carries the request's state; its answer names the request.
     teammate?: { id?: string; slug?: string; name?: string; state?: string; answerId?: string };
+    /** On this device only: the teammate a message that has not sent yet asks, so Retry asks it again. */
+    askTeammate?: string;
     replyTo?: string;
   } | null;
   author: ChatUserLite;
