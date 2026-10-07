@@ -39,6 +39,13 @@ export const PEOPLE = {
   bot: person("u-bot", "ADMIN", true),
 };
 
+const USERS: Row[] = [
+  { id: "u-max", firstName: "Max", lastName: "Chen" },
+  { id: "u-lea", firstName: "Lea", lastName: "Alpha" },
+  { id: "u-admin", firstName: "Ada", lastName: "Admin" },
+  { id: "u-owner", firstName: "Olivia", lastName: "Owner" },
+];
+
 // ── The where clauses the routes write ──────────────────────────────
 
 const OPS = new Set(["equals", "in", "notIn", "not", "lt", "lte", "gt", "gte", "contains", "mode"]);
@@ -216,7 +223,8 @@ export const routeDb = {
       routeDb.writes.push("agent.update");
       const row = db.agents.find((r) => r.id === a.where?.id);
       if (!row) throw new Error("not found");
-      Object.assign(row, a.data);
+      // As Prisma does: a field left undefined is not written.
+      for (const [k, v] of Object.entries(a.data ?? {})) if (v !== undefined) row[k] = v;
       return copy(row);
     },
     // POST /api/agents/[slug]/install adds a catalog agent by its unique
@@ -320,6 +328,11 @@ export const routeDb = {
   },
   conversationMember: {
     findMany: async () => [],
+  },
+  // The people's names, as the user table holds them (GET /api/agents names
+  // the person a moved schedule's routine works for).
+  user: {
+    findMany: async (a: Args) => pickMany(USERS, a),
   },
 };
 

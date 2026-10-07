@@ -198,6 +198,7 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
                   <div className="min-w-0 flex-1">
                     <p className="m-0 break-words text-base font-medium text-ink">{r.name}</p>
                     <p className="m-0 text-sm text-ink-2">{r.when}</p>
+                    {r.movedVia ? <p className="m-0 text-sm text-ink-3">{r.movedVia}</p> : null}
                     {r.status === "paused" ? (
                       <p className="m-0 text-sm text-ink-2">{r.pausedText ? pausedBecause(r.pausedText) : TEAMMATE_CHIPS.paused}</p>
                     ) : r.nextRunAt ? (

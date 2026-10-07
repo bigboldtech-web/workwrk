@@ -9,8 +9,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
+import { LEGACY_COPY } from "./teammate-copy";
 import { teammateToolNames } from "./teammate-tools";
-import { ALL_TOOL_NAMES, GIVABLE_TOOLS, TOOL_MODULE, cleanToolNames, editedPersonRules, routineViewFromRow, toolSettings, type RoutineRowLike } from "./teammate-views";
+import { ALL_TOOL_NAMES, GIVABLE_TOOLS, TOOL_MODULE, agentScheduleView, cleanToolNames, editedPersonRules, routineViewFromRow, toolSettings, type RoutineRowLike } from "./teammate-views";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
 import type { ToolName } from "./tool-names";
 
@@ -133,5 +134,41 @@ describe("routineViewFromRow", () => {
       pausedText: "This teammate was removed.",
       nextRunAt: null,
     });
+  });
+
+  it("says a routine came from Workspace agents (Phase 2), and nothing for any other", () => {
+    expect(routineViewFromRow({ ...row, createdVia: "legacy" }, null)).toMatchObject({ createdVia: "legacy", movedVia: "Moved from Workspace agents" });
+    expect(routineViewFromRow(row, null)).toMatchObject({ createdVia: "chat", movedVia: null });
+    expect(routineViewFromRow({ ...row, createdVia: "settings" }, null)).toMatchObject({ createdVia: "settings", movedVia: null });
+    expect(routineViewFromRow({ ...row, createdVia: "elsewhere" }, null)).toMatchObject({ createdVia: "chat", movedVia: null });
+  });
+});
+
+describe("agentScheduleView (Workspace agents, Phase 2)", () => {
+  const MOVED = new Date("2026-10-07T10:00:00Z");
+  const base = { slug: "deal-desk", scheduleMovedAt: null, scheduleRoutineId: null, scheduleMoveReason: null };
+  const href = "/agents?chat=deal-desk&settings=routines";
+
+  it("reads a schedule never moved as none", () => {
+    expect(agentScheduleView(base, null, null, "u-olivia")).toEqual({ state: null, personName: null, isYou: false, reason: null, routinesHref: href });
+  });
+  it("names whose routine it is now, and whether it is the viewer's", () => {
+    const moved = { ...base, scheduleMovedAt: MOVED, scheduleRoutineId: "r1" };
+    expect(agentScheduleView(moved, { actingForId: "u-olivia" }, "Olivia", "u-olivia")).toEqual({ state: "routine", personName: "Olivia", isYou: true, reason: null, routinesHref: href });
+    expect(agentScheduleView(moved, { actingForId: "u-olivia" }, "Olivia", "u-max")).toMatchObject({ state: "routine", personName: "Olivia", isYou: false });
+  });
+  it("reads a routine deleted since as never moved, so the row says what is true", () => {
+    expect(agentScheduleView({ ...base, scheduleMovedAt: MOVED, scheduleRoutineId: "r1" }, null, null, "u-olivia")).toMatchObject({ state: null });
+  });
+  it("gives each stop its reason", () => {
+    for (const [reason, words] of Object.entries(LEGACY_COPY.stopReason)) {
+      expect(agentScheduleView({ ...base, scheduleMovedAt: MOVED, scheduleMoveReason: reason }, null, null, "u-olivia")).toEqual({
+        state: "stopped", personName: null, isYou: false, reason: words, routinesHref: href,
+      });
+    }
+    expect(agentScheduleView({ ...base, scheduleMovedAt: MOVED, scheduleMoveReason: "from_the_future" }, null, null, "u-olivia")).toMatchObject({ state: "stopped", reason: null });
+  });
+  it("encodes the slug in the address", () => {
+    expect(agentScheduleView({ ...base, slug: "a&b" }, null, null, "u").routinesHref).toBe("/agents?chat=a%26b&settings=routines");
   });
 });

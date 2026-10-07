@@ -45,20 +45,19 @@ import { Drawer } from "@/components/ui/drawer";
 import { Switch } from "@/components/ui/switch";
 import { Picker } from "@/components/ui/picker";
 import { SkeletonLines, SkeletonRows } from "@/components/ui/skeleton";
-import { SchedulePicker } from "@/components/ai/schedule-picker";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { RunStatusChip, RunStatusDot } from "@/components/automation/run-status-chip";
 import { apiFetch } from "@/lib/api-fetch";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { agentState, runsOnWords, scheduleZone, wordsInZone } from "@/lib/agents/schedule-words";
-import { scheduleForSave } from "@/lib/agents/cron";
 import { toolOutcome } from "@/lib/agents/tool-verbs";
 import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
 import { formatDate, formatRelative } from "@/lib/format/date";
 import { formatDuration } from "@/lib/format/duration";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
-import { TEAMMATE_RUN_DRAWER } from "@/lib/agents/teammate-copy";
+import { LEGACY_COPY, TEAMMATE_RUN_DRAWER } from "@/lib/agents/teammate-copy";
+import type { AgentScheduleView } from "@/lib/agents/teammate-views";
 import { useSurfaceState } from "@/lib/use-surface-state";
 import { pick } from "@/lib/surface-prefs";
 import type { HubHeader } from "./agents-hub";
@@ -77,6 +76,8 @@ export type Agent = {
   lastRunAt: string | null;
   nextRunAt: string | null;
   lastRunId: string | null;
+  /** Where its old schedule went (legacy-schedules.ts); absent from an older server. */
+  schedule?: AgentScheduleView;
 };
 type Available = { slug: string; name: string; persona: string | null; description: string; removed?: boolean };
 /** An agent that was removed: its run history is kept and still opens. */
@@ -172,10 +173,14 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
   async function runNow(a: Agent) {
     setBusy(a.slug);
     toast(`${a.name} is running`);
-    const r = await apiFetch<{ result: { runId: string; status: string; errorText?: string } }>(`/api/agents/${a.slug}/schedule`, { method: "POST" });
+    const r = await apiFetch<{ result: { runId: string; status: string; errorText?: string; waiting?: number; chatHref?: string } }>(`/api/agents/${a.slug}/schedule`, { method: "POST" });
     setBusy(null);
     if (!r.ok) { toast(r.error || "The run didn't start", { tone: "danger" }); return; }
-    if (r.data.result.status === "FAILED") toast(`${a.name} ran into a problem`, { tone: "danger", action: { label: "See the run", onClick: () => setParams({ agent: a.slug, run: r.data.result.runId }) } });
+    // It ran as the person who clicked, in their chat with it: what it asked
+    // to do waits there for their approval.
+    const chatHref = r.data.result.chatHref;
+    if ((r.data.result.waiting ?? 0) > 0 && chatHref) toast(LEGACY_COPY.runNowWaiting(a.name), { action: { label: LEGACY_COPY.openChat, onClick: () => router.push(chatHref) } });
+    else if (r.data.result.status === "FAILED") toast(`${a.name} ran into a problem`, { tone: "danger", action: { label: "See the run", onClick: () => setParams({ agent: a.slug, run: r.data.result.runId }) } });
     else toast(`${a.name} finished`, { action: { label: "See the run", onClick: () => setParams({ agent: a.slug, run: r.data.result.runId }) } });
     changed();
   }
@@ -207,7 +212,12 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
     ) },
     { key: "status", label: "Status", width: "130px", render: (a) => <AgentStatusChip agent={a} /> },
     { key: "runsOn", label: "Runs on", width: "minmax(160px,1fr)", render: (a) => {
-      const words = wordsInZone(runsOnWords(a.scheduleCron, a.autonomousEnabled), scheduleZone(a.scheduleCron, serverZone), viewerZone);
+      // A schedule moved onto a routine names whose it is; a stopped one says why on hover.
+      const s = a.schedule;
+      if (s?.state === "stopped") return <span title={LEGACY_COPY.stopped(s.reason ?? "")}><StatusChip color={RUN_TONE_COLOR.neutral} label={LEGACY_COPY.stoppedChip} /></span>;
+      const words = s?.state === "routine"
+        ? s.isYou ? LEGACY_COPY.routineForYou : LEGACY_COPY.routineFor(s.personName ?? LEGACY_COPY.itsCreator)
+        : wordsInZone(runsOnWords(a.scheduleCron, a.autonomousEnabled), scheduleZone(a.scheduleCron, serverZone), viewerZone);
       return <span className="truncate text-sm text-ink-2" title={words}>{words}</span>;
     } },
     { key: "last", label: "Last run", width: "130px", render: (a) => a.lastRunAt && a.lastRunId ? (
@@ -225,6 +235,7 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
     // a run due today, so that day reads "Today, 11:30 PM" rather than the
     // time twice.
     { key: "next", label: "Next run", width: "160px", render: (a) => {
+      if (a.schedule?.state === "routine") return <span className="text-sm text-ink-3">{LEGACY_COPY.nextInRoutine}</span>;
       if (!(a.nextRunAt && a.status === "ENABLED" && a.autonomousEnabled)) return <span className="text-sm text-ink-3">Not scheduled</span>;
       const day = formatDate(a.nextRunAt, datePrefs, "smart");
       const time = formatDate(a.nextRunAt, datePrefs, "time");
@@ -611,20 +622,10 @@ function AgentDrawer({
               <FieldRow label="On">
                 <Switch checked={on} aria-label={on ? `Pause ${agent.name}` : `Turn on ${agent.name}`} onChange={(next) => void onSetStatus(agent, next ? "ENABLED" : "DISABLED")} />
               </FieldRow>
-              {/* One control for whether it runs by itself and when: Only
-                  when you ask, or a schedule (saved in this person's zone). */}
-              <FieldRow label="Runs on">
-                <SchedulePicker
-                  cron={agent.scheduleCron}
-                  autonomous={agent.autonomousEnabled}
-                  zone={zone}
-                  viewerZone={viewerZone}
-                  onChange={(cron) => patchSchedule(
-                    { autonomousEnabled: true, scheduleCron: scheduleForSave(cron, viewerZone) },
-                    agent.autonomousEnabled ? "Schedule saved" : `${agent.name} runs on its schedule`,
-                  )}
-                  onManual={() => patchSchedule({ autonomousEnabled: false }, `${agent.name} runs only when you ask`)}
-                />
+              {/* A schedule is a routine now: one person it works as, set in
+                  the agent's chat (docs/plans/ai-teammates-phase2.md step 2). */}
+              <FieldRow label={LEGACY_COPY.scheduleLabel}>
+                <ScheduleLine agent={agent} zone={zone} viewerZone={viewerZone} />
               </FieldRow>
               <FieldRow label="What to do each run" top>
                 <div className="flex min-w-0 flex-col gap-2">
@@ -638,6 +639,7 @@ function AgentDrawer({
                     aria-label="What to do each run"
                     className="block w-full resize-none rounded-md border border-line-strong bg-raised px-2 py-1.5 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand"
                   />
+                  {agent.schedule?.state === "routine" ? <p className="m-0 text-sm text-ink-2">{LEGACY_COPY.promptRunNowOnly}</p> : null}
                   {dirty ? (
                     <div className="flex justify-end gap-2">
                       <button type="button" onClick={() => setPrompt(null)} className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
@@ -651,8 +653,8 @@ function AgentDrawer({
             // A Member's drawer is the description, the schedule as words
             // and the run history (spec-ai-automation section 2, /agents).
             <section className="flex flex-col" aria-label="Schedule">
-              <FieldRow label="Runs on">
-                <span className="text-base text-ink">{wordsInZone(runsOnWords(agent.scheduleCron, agent.autonomousEnabled), zone, viewerZone)}</span>
+              <FieldRow label={LEGACY_COPY.scheduleLabel}>
+                <ScheduleLine agent={agent} zone={zone} viewerZone={viewerZone} />
               </FieldRow>
             </section>
           )}
@@ -661,6 +663,28 @@ function AgentDrawer({
         </div>
       )}
     </Drawer>
+  );
+}
+
+/**
+ * Where an agent's schedule went (legacy-schedules.ts): its creator's
+ * routine, or why it stopped, or the old words when it never had one; then a
+ * link to the routines in its chat, where anyone can set up their own.
+ */
+function ScheduleLine({ agent, zone, viewerZone }: { agent: Agent; zone: string | null; viewerZone: string | null }) {
+  const s = agent.schedule;
+  const words = s?.state === "routine"
+    ? s.isYou ? LEGACY_COPY.scheduleLineYou : LEGACY_COPY.scheduleLine(s.personName ?? LEGACY_COPY.itsCreator)
+    : s?.state === "stopped" ? LEGACY_COPY.stopped(s.reason ?? "")
+    : wordsInZone(runsOnWords(agent.scheduleCron, agent.autonomousEnabled), zone, viewerZone);
+  const href = s?.routinesHref ?? `/agents?chat=${encodeURIComponent(agent.slug)}&settings=routines`;
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-base text-ink">{words}</span>
+      <Link href={href} className="w-fit text-sm font-medium text-brand-deep hover:underline">
+        {s?.state === "routine" && s.isYou ? LEGACY_COPY.openRoutines : LEGACY_COPY.setUpRoutine}
+      </Link>
+    </span>
   );
 }
 

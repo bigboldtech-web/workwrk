@@ -127,6 +127,14 @@ describe("legacyRoutineSchedule (an old Workspace agents schedule moving onto a 
     expect(legacyRoutineSchedule("Every 1 minute", NOW)).toEqual({ ok: true, schedule: "hourly", changed: true });
     expect(legacyRoutineSchedule("0,30 9-17 * * 1-5", NOW)).toEqual({ ok: true, schedule: "0 9-17 * * 1-5", changed: true });
     expect(legacyRoutineSchedule("*/15 * * * *", NOW)).toEqual({ ok: true, schedule: "0 * * * *", changed: true });
+    expect(legacyRoutineSchedule("every 60 minutes", NOW)).toEqual({ ok: true, schedule: "hourly", changed: true });
+  });
+  it("never runs a schedule of more than an hour in minutes more often: it rounds up to hours (review of step 2)", () => {
+    expect(legacyRoutineSchedule("every 90 minutes", NOW)).toEqual({ ok: true, schedule: "every 2 hours", changed: true });
+    expect(legacyRoutineSchedule("every 120 minutes", NOW)).toEqual({ ok: true, schedule: "every 2 hours", changed: true });
+    expect(legacyRoutineSchedule("every 1440 minutes", NOW)).toEqual({ ok: true, schedule: "every 24 hours", changed: true });
+    // Longer than a routine can run: the schedule stops instead.
+    expect(legacyRoutineSchedule("every 1500 minutes", NOW)).toEqual({ ok: false });
   });
   it("keeps the schedule's own zone when it keeps only the first minute", () => {
     expect(legacyRoutineSchedule("CRON_TZ=Asia/Kolkata 15,45 9 * * *", NOW)).toEqual({ ok: true, schedule: "CRON_TZ=Asia/Kolkata 15 9 * * *", changed: true });

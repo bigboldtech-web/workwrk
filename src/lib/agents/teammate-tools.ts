@@ -98,7 +98,7 @@ const docSave = () => import("@/lib/docs/doc-save");
 const talkGateMod = () => import("@/lib/talk-gate");
 const talkPost = () => import("@/lib/talk-post");
 const readability = () => import("@/lib/notification-readability");
-// routines-server imports autonomous.ts, which imports the registry.
+// routines-server imports engine.ts, which imports the registry.
 const routinesServer = () => import("./routines-server");
 
 // ── Shared by the handlers and the previews (previews.ts) ───────────

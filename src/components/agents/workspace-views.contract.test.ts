@@ -63,8 +63,9 @@ const CONTROLS: Array<[string, string]> = [
   ["What it does", "What it does"],
   ["the On switch", '<FieldRow label="On">'],
   ["the On switch's name", "aria-label={on ? `Pause ${agent.name}` : `Turn on ${agent.name}`}"],
-  ["the schedule", "<SchedulePicker"],
-  ["Only when you ask", "onManual={() => patchSchedule({ autonomousEnabled: false }, `${agent.name} runs only when you ask`)}"],
+  // The schedule is a routine now (docs/plans/ai-teammates-phase2.md step 2).
+  ["the schedule", "<FieldRow label={LEGACY_COPY.scheduleLabel}>"],
+  ["the schedule's link to the routines", "{s?.state === \"routine\" && s.isYou ? LEGACY_COPY.openRoutines : LEGACY_COPY.setUpRoutine}"],
   ["the instructions", 'aria-label="What to do each run"'],
   ["the instructions' Cancel", 'onClick={() => setPrompt(null)} className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>'],
   ["the instructions' Save", 'onClick={() => void savePrompt()} className={SECONDARY}>Save</button>'],
@@ -139,6 +140,13 @@ describe("what the move changed on purpose", () => {
   it("keeps the view in the address as the drawer opens and closes", () => {
     expect(workspace).toContain('if (!next.get("tab")) next.set("tab", tab === "runs" ? "runs" : "workspace");');
     expect(workspace).toContain('<Link href="/agents?tab=workspace"');
+  });
+
+  it("sets no schedule here: a schedule is a routine, set in the agent's chat (Phase 2)", () => {
+    expect(workspace).not.toContain("<SchedulePicker");
+    expect(workspace).not.toContain("autonomousEnabled: true");
+    expect((workspace.match(/<ScheduleLine agent=\{agent\} zone=\{zone\} viewerZone=\{viewerZone\} \/>/g) ?? []).length).toBe(2);
+    expect(workspace).toContain("toast(LEGACY_COPY.runNowWaiting(a.name), { action: { label: LEGACY_COPY.openChat, onClick: () => router.push(chatHref) } })");
   });
 
   it("names a routine's run", () => {

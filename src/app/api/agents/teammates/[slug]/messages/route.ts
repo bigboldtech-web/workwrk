@@ -35,7 +35,7 @@ import { isAiConfigured } from "@/lib/ai-client";
 import { prisma } from "@/lib/prisma";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { actionViews, claimUnreportedOutcomes } from "@/lib/agents/actions";
-import { claimTeammateTurn, giveBackTurn } from "@/lib/agents/budget";
+import { abandonTurn, claimTeammateTurn, giveBackTurn } from "@/lib/agents/budget";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "@/lib/agents/engine";
 import { ACTION_ERRORS, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
 import {
@@ -95,16 +95,6 @@ const postSchema = z.object({
   practice: z.boolean().optional(),
   resume: z.literal(true).optional(),
 });
-
-/**
- * A turn that never started after its question was claimed: the question
- * goes back, and its AgentRun goes with it, so the run history never shows a
- * turn that did not run.
- */
-async function abandonTurn(runId: string, questionId: string): Promise<void> {
-  await giveBackTurn(runId, questionId);
-  await prisma.agentRun.deleteMany({ where: { id: runId, questionId: null } }).catch(() => {});
-}
 
 export async function POST(req: Request, { params }: Params) {
   const gate = await requireApp("ai");
