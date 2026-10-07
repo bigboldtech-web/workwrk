@@ -112,6 +112,11 @@ describe("{{teammate.answer}}", () => {
     expect(st.notes.map((n) => n.userId)).toEqual(["u-max", "u-gil"]);
   });
 
+  it("never assigns a Guest in a run that asked a teammate (review round 3)", async () => {
+    st.guests = new Set(["u-gil"]);
+    await expect(getAction("assign_user")!.execute(ctx(), { userId: "u-gil" })).rejects.toThrow("never sent to Guests");
+  });
+
   it("reads as written without an earlier teammate step", () => {
     expect(interpolate("A {{teammate.answer}} B", { title: "x" })).toBe("A  B");
   });

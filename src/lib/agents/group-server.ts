@@ -271,8 +271,15 @@ export async function groupStillOpen(viewer: Pick<Viewer, "organizationId" | "us
  * what it asked when it ends (the messages route checks after each turn).
  */
 export async function leaveGroup(g: GroupRecord, viewer: Viewer, now: Date = new Date()): Promise<void> {
-  await prisma.chatSession.updateMany({ where: { ...GROUP_SESSION_WHERE(viewer, g.id) }, data: { archivedAt: now } });
-  await cancelLeftRequests(g.id, viewer.userId, now);
+  // One transaction: a failure between the two left cards no screen could
+  // show, and a retried leave answered 404 (review round 3).
+  await prisma.$transaction([
+    prisma.chatSession.updateMany({ where: { ...GROUP_SESSION_WHERE(viewer, g.id) }, data: { archivedAt: now } }),
+    prisma.agentAction.updateMany({
+      where: { sessionId: g.id, actingForId: viewer.userId, status: "PENDING" },
+      data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: GROUP_COPY.cancelledLeft },
+    }),
+  ]);
   publishToUser(viewer.userId, { type: "agent.changed", agentId: g.members[0]?.agent.id ?? GROUP_KIND, sessionId: g.id });
 }
 

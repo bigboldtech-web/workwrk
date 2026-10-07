@@ -34,7 +34,7 @@ vi.mock("./engine", () => ({
   getOrCreateTeammateSession: async () => ({ id: "s-triage", created: false }),
   teammateAgentFrom: (r: Row) => r,
   runTeammateTurn: async (a: Row) => (
-    st.turns.push(a),
+    st.turns.push({ ...a, depthNow: (await import("@/lib/automation/chain-depth")).automationDepthNow() }),
     st.turn ?? { text: "Restart it. Ask @Olivia, see [the runbook](https://x.test).", error: null, giveBack: false, failedBeforeAnything: false, proposedActionIds: [], messages: [] }
   ),
 }));
@@ -90,6 +90,13 @@ describe("runAutomationTeammateStep", () => {
     expect(st.lines[0]).toMatchObject({ sessionId: "s-triage", event: "automation_asked", text: 'Asked by the automation "Support triage": Summarise [title]', link: { kind: "automation", workflowId: "wf1", runId: "run1" } });
     // Cleaned for later steps: nobody pinged, links reduced to their words.
     expect(out).toEqual({ teammate: "Triage", teammateSlug: "t-triage", answer: "Restart it. Ask Olivia, see the runbook.", waiting: 0, agentRunId: "run-a" });
+  });
+
+  it("runs the teammate's turn one level down the automation chain, so its own edits count (review round 3)", async () => {
+    await runAutomationTeammateStep(ctx({ depth: 1 }), PARAMS);
+    expect(st.turns[0].depthNow).toBe(2);
+    const { automationDepthNow } = await import("@/lib/automation/chain-depth");
+    expect(automationDepthNow()).toBeNull();
   });
 
   it("refuses an automation with no creator", async () => {

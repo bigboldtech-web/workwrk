@@ -108,6 +108,12 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   // A clock read a minute at a time (never during render): a teammate
   // request still "working" after ten minutes reads as not answered.
   const [now, setNow] = useState(() => Date.now());
+  // The requests whose answer is here: they read answered whatever their own
+  // state says (a stop between the two writes; review round 3).
+  const answeredHere = useMemo(
+    () => new Set(messages.flatMap((m) => (m.metadata?.kind === "agent_post" && typeof m.metadata.replyTo === "string" ? [m.metadata.replyTo] : []))),
+    [messages],
+  );
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
@@ -180,13 +186,14 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
           fmtDate={fmtDate}
           fmtRelative={fmtRelative}
           now={now}
+          answered={answeredHere.has(it.msg.id)}
         />
       ))}
     </div>
   );
 }
 
-function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, highlighted, readOnly, canReact, onCopyLink, onDiscardFailed, fmtDate, fmtRelative, now }: {
+function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, highlighted, readOnly, canReact, onCopyLink, onDiscardFailed, fmtDate, fmtRelative, now, answered = false }: {
   msg: FeedMessage;
   head: boolean;
   live: { participants: { identity: string; name: string }[]; startedAt: string } | null;
@@ -209,6 +216,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   fmtRelative: (v: Date | string | number | null | undefined) => string;
   /** The feed's clock, a minute at a time: a teammate request "working" past its time reads as not answered. */
   now: number;
+  /** A teammate request whose answer is in this feed. */
+  answered?: boolean;
 }) {
   const [reactOpen, setReactOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -252,7 +261,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
   // Said on the post itself too: the person approved it, their AI teammate wrote it.
   const agentPost = msg.metadata?.kind === "agent_post" ? msg.metadata.agent?.name?.trim() || "an AI teammate" : null;
   // A request to an AI teammate: its state, read with a stale "running" as not answered.
-  const requestState = teammateRequestState(msg.metadata, msg.createdAt, now);
+  const requestState = answered ? null : teammateRequestState(msg.metadata, msg.createdAt, now);
   const teammateName = msg.metadata?.teammate?.name?.trim() || "The teammate";
   const teammateSlug = msg.metadata?.teammate?.slug?.trim() || null;
   const reactions = msg.metadata?.reactions ?? {};

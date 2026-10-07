@@ -7,15 +7,20 @@
 //
 // TWO LIMITS, ONE TRANSACTION. A teammate may have its own monthly limit
 // (Agent.monthlyQuestionCap), on top of the plan's allowance and never
-// instead of it. claimTeammateTurn locks the teammate's row FOR UPDATE and
+// instead of it. claimTeammateTurn locks the teammate's row and
 // counts the questions its turns kept this month; at the limit it claims
 // nothing at all. Under the limit it claims the plan's question
 // (claimAiQuestionIn: the plan's cap, the free questions per person and the
 // platform's free ceiling, under the workspace's row lock) and records the
 // turn's AgentRun with that question's id, all or nothing. Two turns at once
 // count one after the other, so neither limit can be passed by racing it.
-// The locks are always taken Agent first, then Organization, and nothing
-// else locks an Agent row, so two claims can never wait on each other.
+// The locks are always taken Agent first, then AutomationWorkflow (an
+// automation's step), then Organization. The Agent and AutomationWorkflow
+// rows are taken FOR NO KEY UPDATE: two claims still wait for each other,
+// but an insert that refers to the row (a group's members, an automation's
+// run), whose key check takes KEY SHARE, never does. FOR UPDATE made such an
+// insert and a claim wait on each other's locks in turn, and Postgres
+// cancelled one (review round 3).
 //
 // ONLY KEPT QUESTIONS COUNT. A turn that failed before anything happened
 // gives its question back (giveBackTurn): the AIQuery row is deleted and
@@ -115,7 +120,7 @@ export async function claimTeammateTurn(a: {
     const agents = await tx.$queryRaw<Array<{ name: string; cap: number | null }>>`
       SELECT "name", "monthlyQuestionCap" AS "cap" FROM "Agent"
       WHERE "id" = ${a.agentId} AND "organizationId" = ${a.organizationId}
-      FOR UPDATE`;
+      FOR NO KEY UPDATE`;
     if (agents.length === 0) return { ok: false, code: "not_found", message: ROUTINE_REASON_TEXT.agent_removed };
     const cap = agents[0].cap;
     if (cap !== null && cap !== undefined) {
@@ -130,7 +135,7 @@ export async function claimTeammateTurn(a: {
       const wf = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AutomationWorkflow"
         WHERE "id" = ${a.workflow.id} AND "organizationId" = ${a.organizationId}
-        FOR UPDATE`;
+        FOR NO KEY UPDATE`;
       if (wf.length === 0) return { ok: false, code: "not_found", message: AUTOMATION_TEAMMATE_COPY.workflowGone };
       const [{ used }] = await tx.$queryRaw<Array<{ used: number }>>`
         SELECT COUNT(*)::int AS "used" FROM "AgentRun"

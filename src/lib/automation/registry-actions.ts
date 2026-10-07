@@ -265,6 +265,13 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const item = await resolveItem(ctx, params);
       await assertCanWrite(ctx, item.boardId);
       const user = await resolveUser(ctx, raw);
+      // A run that asked a teammate may have written its answer on this task
+      // (a comment, a field): assigning gives the task, so never to a Guest
+      // (review round 3, as create_task's title).
+      if (ctx.stepData?.teammate) {
+        const { anyGuestHere } = await import("@/lib/access/guests");
+        if (await anyGuestHere(ctx.organizationId, [user.id])) throw new Error(AUTOMATION_TEAMMATE_COPY.answerNotForGuests);
+      }
       if (item.ownerId === user.id) {
         return { itemId: item.id, assigneeId: user.id, changed: false };
       }

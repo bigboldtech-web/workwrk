@@ -22,7 +22,7 @@ import { definitionForViewer } from "@/lib/automation/definition-view";
 import { draftRevision } from "@/lib/automation/draft-revision";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
-import { teammateStepProblem } from "@/lib/automation/teammate-step";
+import { teammateStepProblem, teammateStepSlugs } from "@/lib/automation/teammate-step";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -108,6 +108,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         can: workflow.status === "ARCHIVED" ? { edit: false, archive: rights.archive } : rights,
         // An AI teammate step works as the creator: only they may add or change one.
         viewerIsCreator: Boolean(workflow.createdById) && workflow.createdById === ctx.userId,
+        // Turning it back on is checked against what runs (activate route): the builder's switch reads the same (review round 3).
+        liveHasTeammateStep: live ? teammateStepSlugs(live.definitionJson).length > 0 : false,
       },
     },
     { headers: { "Cache-Control": "private, no-store" } },
@@ -181,7 +183,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     next.trigger = trigger;
     // An AI teammate step works as the creator: only they may change what it
     // asks, where it runs or what starts it (a trigger alone included).
-    const teammate = await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer });
+    // Nor take one out: a draft that holds one is the creator's to change (review round 3, as restore rules).
+    const teammate =
+      (await teammateStepProblem(next, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer })) ??
+      (await teammateStepProblem(existing.definition, { saverId: ctx.userId, creatorId: existing.createdById, viewer: ctx.viewer }).then((p) => (p?.status === 403 ? p : null)));
     if (teammate) return NextResponse.json({ error: teammate.error, code: teammate.code, section: "then", issues: { section: "then" } }, { status: teammate.status });
     data.definition = next as Prisma.InputJsonValue;
     // Before the first publish nothing runs, so the column follows the

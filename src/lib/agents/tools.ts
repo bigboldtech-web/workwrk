@@ -23,7 +23,7 @@ import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { isDoneStatusName } from "@/lib/board-items-shared";
-import { listReader, readableItemsVia } from "@/lib/list-links-server";
+import { listReader, memberViewer, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { viewerHeldIn } from "@/lib/access/viewer";
@@ -60,6 +60,12 @@ export interface TeammateToolContext {
   timezone: string;
   /** Set when running an approved action (idempotency keys: a Talk post's clientId). */
   actionId?: string;
+  /**
+   * A Talk turn: who will read its answer, posted with no card. What a read
+   * tool finds is held to what every one of them may open (review round 3),
+   * as a scheduled AI update's tasks are.
+   */
+  audience?: readonly string[];
 }
 
 export interface ToolContext {
@@ -221,6 +227,29 @@ const createTask: ToolDefinition = {
   },
 };
 
+/**
+ * Whether every one of these people can open a List (a Talk answer's
+ * readers): each read once, each List checked once. Someone who can no longer
+ * sign in reads nothing and is not counted (a Guest is never among them:
+ * teammates are not asked where one reads).
+ */
+async function everyoneReadsListFor(orgId: string, userIds: readonly string[]): Promise<(listId: string) => Promise<boolean>> {
+  const viewers = await Promise.all([...new Set(userIds)].slice(0, 250).map((id) => memberViewer(id, orgId).catch(() => null)));
+  const readers = viewers.filter((v): v is NonNullable<typeof v> => v !== null).map((v) => listReader(v));
+  const memo = new Map<string, Promise<boolean>>();
+  return (listId) => {
+    let known = memo.get(listId);
+    if (!known) {
+      known = (async () => {
+        for (const r of readers) if (!(await r.canRead(listId))) return false;
+        return true;
+      })();
+      memo.set(listId, known);
+    }
+    return known;
+  };
+}
+
 const searchTasks: ToolDefinition = {
   name: "search_tasks",
   description:
@@ -259,6 +288,9 @@ const searchTasks: ToolDefinition = {
     if (!level) return { count: 0, tasks: [] };
     const viewer = { userId: ctx.userId, organizationId: ctx.orgId, accessLevel: level };
     const reader = listReader(viewer);
+    // A Talk answer posts with no card to everyone there: only tasks in a
+    // List every one of them can open (review round 3).
+    const audienceReads = ctx.teammate?.audience?.length ? await everyoneReadsListFor(ctx.orgId, ctx.teammate.audience) : null;
     const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.item.findMany({
         where: {
           organizationId: ctx.orgId,
@@ -283,7 +315,8 @@ const searchTasks: ToolDefinition = {
       // "done" is a status-name rule, not a column, so it is applied here.
       keep: async (batch: Awaited<ReturnType<typeof page>>) => {
         const access = await readableItemsVia(viewer, batch, reader);
-        return batch.filter((r) => access.get(r.id)?.readable && (input.done === undefined || isDoneStatusName(r.status) === Boolean(input.done)));
+        const mine = batch.filter((r) => access.get(r.id)?.readable && (input.done === undefined || isDoneStatusName(r.status) === Boolean(input.done)));
+        return audienceReads ? (await Promise.all(mine.map(async (r) => ((await audienceReads(r.boardId)) ? r : null)))).filter((r): r is (typeof mine)[number] => r !== null) : mine;
       },
     });
     const tasks = filtered.map((r) => ({

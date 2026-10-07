@@ -66,11 +66,27 @@ export function GroupMembersMenu({
     return true;
   }
 
-  async function rename() {
+  // A failed rename tries again with the name typed, never the old one (review round 3).
+  async function rename(typed?: string) {
     onClose();
-    const next = await prompt({ title: GROUP_COPY.rename, defaultValue: g.name, placeholder: GROUP_COPY.namePlaceholder, submitLabel: GROUP_COPY.rename, cancelLabel: GROUP_COPY.cancel });
+    const next = await prompt({ title: GROUP_COPY.rename, defaultValue: typed ?? g.name, placeholder: GROUP_COPY.namePlaceholder, submitLabel: GROUP_COPY.rename, cancelLabel: GROUP_COPY.cancel });
     if (next === null) return;
-    await patch({ name: next.slice(0, GROUP_LIMITS.nameMax) }, () => void rename());
+    const name = next.slice(0, GROUP_LIMITS.nameMax);
+    await patch({ name }, () => void rename(name));
+  }
+
+  // Removing cancels what the teammate still waits on in this group, so it asks first (review round 3).
+  async function remove(m: { slug: string; name: string }) {
+    onClose();
+    const ok = await confirm({
+      title: GROUP_COPY.removeTitle(m.name),
+      description: GROUP_COPY.removeBody,
+      confirmLabel: GROUP_COPY.remove,
+      destructive: true,
+    });
+    if (!ok) return;
+    const again = () => void patch({ remove: [m.slug] }, again);
+    again();
   }
 
   async function leave() {
@@ -146,10 +162,7 @@ export function GroupMembersMenu({
             type="button"
             role="menuitem"
             disabled={busy}
-            onClick={() => {
-              const again = () => void patch({ remove: [m.slug] }, again);
-              again();
-            }}
+            onClick={() => void remove(m)}
             aria-label={`${GROUP_COPY.remove} ${m.name}`}
             title={GROUP_COPY.remove}
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-60"

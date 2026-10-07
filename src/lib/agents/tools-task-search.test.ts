@@ -54,7 +54,9 @@ vi.mock("@/lib/access/node-access", () => ({
   nodeRoles: async () => new Map(),
 }));
 vi.mock("@/lib/list-links-server", () => ({
-  listReader: () => ({}),
+  // A Talk answer's readers (review round 3): Eve opens no List here.
+  listReader: (v?: { userId?: string }) => ({ canRead: async () => v?.userId !== "u-eve" }),
+  memberViewer: async (userId: string) => ({ userId, organizationId: "org-1", email: `${userId}@x.test` }),
   readableItemsVia: async (_v: unknown, items: Row[]) => new Map(items.map((it) => [it.id, { readable: it.boardId === "L-mine", via: null }])),
 }));
 
@@ -132,6 +134,20 @@ describe("search_tasks", () => {
 
   it("a bad limit from the model is clamped, never a crash", async () => {
     const out = await TOOLS.search_tasks.handler(ctx, { limit: "lots" }) as { count: number };
+    expect(out.count).toBe(20);
+  });
+});
+
+describe("search_tasks in a Talk turn (review round 3)", () => {
+  const talk = (audience: string[]) => ({ ...ctx, teammate: { agentId: "a1", agentName: "CoS", sessionId: "s1", routineId: null, trigger: "TALK" as const, timezone: "UTC", audience } });
+
+  it("finds only tasks in Lists every reader of the answer can open", async () => {
+    const out = await TOOLS.search_tasks.handler(talk(["u-1", "u-eve"]), { limit: 20 }) as { count: number };
+    expect(out.count).toBe(0);
+  });
+
+  it("finds what the asker can when everyone there can open it too", async () => {
+    const out = await TOOLS.search_tasks.handler(talk(["u-1", "u-olivia"]), { limit: 20 }) as { count: number };
     expect(out.count).toBe(20);
   });
 });

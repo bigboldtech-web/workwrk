@@ -229,7 +229,7 @@ export async function POST(req: Request, { params }: Params) {
         runId: claim.runId,
         questionId: claim.questionId,
         streaming: false,
-        origin: { kind: "talk", conversationId: id, messageId: request.id, place, placeKind, audience, context },
+        origin: { kind: "talk", conversationId: id, messageId: request.id, place, placeKind, audience, context, readerIds: [...new Set([person.userId, ...readers.ids])] },
       });
     } catch (err) {
       console.error(`[agents] talk turn ${claim.runId} threw: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
@@ -244,6 +244,10 @@ export async function POST(req: Request, { params }: Params) {
     // while the request and its thread are still there (a removed request
     // was taken back), and only if the person may still post there and no
     // Guest has joined meanwhile. Else it stays in their chat with it.
+    const saveState = (state: "answered" | "no_answer" | "failed", answerId: string | null) =>
+      setRequestState(request.id, { id: agent.id, slug: agent.slug, name: agent.name, state, runId: claim.runId, ...(answerId ? { answerId } : {}) }).catch((err) =>
+        console.error(`[agents] talk request ${request.id} state not saved: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`),
+      );
     const text = result && !result.error ? cleanOutwardText(result.text, { talk: true, max: TALK_TEAMMATE_LIMITS.answerMax }) : "";
     let answered: Awaited<ReturnType<typeof insertConversationMessage>> | null = null;
     if (text) {
@@ -286,6 +290,10 @@ export async function POST(req: Request, { params }: Params) {
           return null;
         });
         if (answered?.ok) {
+          // The request reads answered at once, before the notices: a stop
+          // between the two never leaves "didn't answer here" above a
+          // posted answer (review round 3).
+          await saveState("answered", answered.message.id);
           await afterMessageSent({
             conversationId: id,
             conversation: { type: still.conversation.type, name: still.conversation.name },
@@ -303,16 +311,8 @@ export async function POST(req: Request, { params }: Params) {
         }
       }
     }
-    const state = answered?.ok ? "answered" : !result ? "failed" : "no_answer";
     if (result?.assistantMessageId) await recordTalkOutcome(result.assistantMessageId, answered?.ok ? answered.message.id : null);
-    await setRequestState(request.id, {
-      id: agent.id,
-      slug: agent.slug,
-      name: agent.name,
-      state,
-      runId: claim.runId,
-      ...(answered?.ok ? { answerId: answered.message.id } : {}),
-    }).catch((err) => console.error(`[agents] talk request ${request.id} state not saved: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`));
+    if (!answered?.ok) await saveState(!result ? "failed" : "no_answer", null);
     // Every open pane reads the request again: without this a turn that
     // posted nothing kept "working on it" on everyone's screen until the
     // stale mark, since only a new message nudged them.

@@ -101,7 +101,7 @@ export interface ExecuteArgs {
   person: ActingPerson;
   agent: TeammateRef;
   /** The turn: its chat, its routine, what started it, and its AgentRun. */
-  turn: { sessionId: string | null; routineId: string | null; trigger: TurnTrigger; runId: string };
+  turn: { sessionId: string | null; routineId: string | null; trigger: TurnTrigger; runId: string; audience?: readonly string[] };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];
   /** Its managers' tightening (sanitizeRules, level "agent"). */
@@ -325,6 +325,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     sessionId: a.turn.sessionId,
     routineId: a.turn.routineId,
     trigger: a.turn.trigger,
+    ...(a.turn.audience ? { audience: a.turn.audience } : {}),
   };
 
   // Asking another teammate runs that teammate's own turn (runDelegation).

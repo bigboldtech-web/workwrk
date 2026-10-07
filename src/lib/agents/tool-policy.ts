@@ -150,6 +150,13 @@ export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["re
  * must find nothing private to post (review round 1). A delegated answer
  * comes back to the person's own chat first, so a delegate keeps them.
  */
+/**
+ * Reads a Talk turn is not given because what they find cannot be held to
+ * what everyone in the conversation may open: a Talk answer draws only on
+ * what they all may read (search_tasks is held to it; review round 3).
+ */
+export const UNCHECKED_FOR_TALK: ReadonlySet<ToolName> = new Set<ToolName>(["search_sops"]);
+
 export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
   "list_my_kras",
   "list_my_kpi_status",
@@ -173,7 +180,9 @@ export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger):
   if (t === "CHAT" || t === "RESUME") return [...enabled];
   if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
   const postsWithNoCard = t === "TALK" || t === "AUTOMATION";
-  return enabled.filter((n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n) && !(postsWithNoCard && PERSONAL_RECORDS.has(n)));
+  return enabled.filter(
+    (n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n) && !(postsWithNoCard && PERSONAL_RECORDS.has(n)) && !(t === "TALK" && UNCHECKED_FOR_TALK.has(n)),
+  );
 }
 
 /**
