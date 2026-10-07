@@ -84,7 +84,11 @@ jobs:
       # and next-env.d.ts imports them, so tsc on a fresh checkout without
       # them fails on a missing module. This is the pattern Next documents.
       - name: Type check (the only one before production)
-        run: npx next typegen && npx tsc --noEmit -p tsconfig.json
+        # The checker peaks above 2 GB on this codebase (2.36 GB measured on
+        # 2026-10-07), past Node 20's default heap here: without the limit
+        # raised it aborts with exit code 134, which is no type error. The
+        # runner has 16 GB; the builds already raise theirs the same way.
+        run: npx next typegen && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json
 
       - name: Unit tests
         run: npx vitest run
