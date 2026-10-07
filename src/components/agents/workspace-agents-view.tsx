@@ -639,6 +639,7 @@ function AgentDrawer({
                     aria-label="What to do each run"
                     className="block w-full resize-none rounded-md border border-line-strong bg-raised px-2 py-1.5 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand"
                   />
+                  {agent.schedule?.state === "routine" ? <p className="m-0 text-sm text-ink-2">{LEGACY_COPY.promptRunNowOnly}</p> : null}
                   {dirty ? (
                     <div className="flex justify-end gap-2">
                       <button type="button" onClick={() => setPrompt(null)} className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>

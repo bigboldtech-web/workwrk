@@ -114,7 +114,8 @@ export type LegacyRoutineSchedule = { ok: true; schedule: string; changed: boole
 /**
  * The routine schedule an old Workspace agents schedule becomes when it moves
  * (legacy-schedules.ts; docs/plans/ai-teammates-phase2.md Decision 3), never
- * one that runs more often than it did: "every N minutes" becomes "hourly",
+ * one that runs more often than it did: "every N minutes" becomes "hourly"
+ * up to an hour and "every N hours" (rounded up) beyond,
  * a cron naming several minutes of the hour keeps only its first, and
  * anything a routine cannot run (every more than 24 hours, unreadable,
  * blank) is { ok: false }, so the schedule stops instead.
@@ -124,7 +125,16 @@ export function legacyRoutineSchedule(schedule: string | null | undefined, now: 
   if (!raw) return { ok: false };
   const problem = routineScheduleProblem(raw, now);
   if (problem === null) return { ok: true, schedule: raw, changed: false };
-  if (/^every\s+\d+\s+minutes?$/i.test(raw)) return { ok: true, schedule: "hourly", changed: true };
+  const minutes = /^every\s+(\d+)\s+minutes?$/i.exec(raw);
+  if (minutes) {
+    // Up to an hour becomes hourly; longer becomes every N hours, rounded
+    // up, so it never runs more often than it did (review of step 2: "every
+    // 1440 minutes" had become hourly, 24 times as often).
+    const hours = Math.ceil(Number(minutes[1]) / 60);
+    if (hours <= 1) return { ok: true, schedule: "hourly", changed: true };
+    if (hours > ROUTINE_LIMITS.everyHoursMax) return { ok: false };
+    return { ok: true, schedule: `every ${hours} hours`, changed: true };
+  }
   if (problem !== "too_often") return { ok: false };
   const cron = parseCron(raw);
   if (!cron || cron.minutes.size < 2) return { ok: false };

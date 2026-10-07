@@ -81,6 +81,13 @@ describe("one tick", () => {
     expect(out.body).toMatchObject({ actions: null, routines: null, legacySchedules: MOVED });
   });
 
+  it("fails the tick when a schedule did not move, so someone is told (review of step 2)", async () => {
+    st.convertLegacySchedules.mockResolvedValueOnce({ found: 2, moved: 1, stopped: 0, taken: 0, failed: 1 });
+    const out = await run();
+    expect(out.status).toBe(500);
+    expect(out.body.legacySchedules).toMatchObject({ failed: 1 });
+  });
+
   it("fails the tick when the move throws, after the routines ran", async () => {
     st.convertLegacySchedules.mockRejectedValueOnce(new Error("move down"));
     const out = await run();

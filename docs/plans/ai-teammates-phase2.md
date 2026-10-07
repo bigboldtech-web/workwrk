@@ -1229,3 +1229,16 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
 - /Users/bigboldtechnologies/theywrk-agents/src/components/talk/message-box.tsx
 - /Users/bigboldtechnologies/theywrk-agents/src/lib/agents/teammate-store.ts
 - /Users/bigboldtechnologies/theywrk-agents/prisma/schema.prisma
+
+---
+
+## After Phase 2: what was built, and each review round
+
+- **Step 1** (data and pure foundations) live 2026-10-07 as f0e7198b. The SQL was applied twice locally (no change on the second run), and re-running Phase 1's file kept the widened checks.
+- **Step 2** (old schedules onto routines) built as 45d58486 and proved locally: four seeded agents moved or stopped as specified, a second tick moved nothing, the moved routine asked before inviting, Run now ran as the clicker, and a Member saw none of the creator's runs.
+  - Review (one read-only reviewer, findings re-read against the code), 4 found, 3 fixed:
+    1. "every N minutes" above an hour had become hourly (up to 24 times as often). It now rounds up to "every N hours", and more than 24 hours stops the schedule.
+    2. A schedule that failed to move did not fail the tick, so nobody was told. The tick now fails.
+    3. scripts/CRON-SETUP.md described the old loop.
+  - Also: under "What to do each run" the drawer now says the routine has its own instructions.
+  - Known, not fixed: the Workspace agents "Last run" column reads only the old loop's runs (SCHEDULED or MANUAL). A Run now (a chat turn, seen only by the person it ran as) and a routine's run do not show there. Showing them would link everyone to a run only one person may open. The run is in that person's chat and in their Run history.

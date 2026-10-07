@@ -1159,6 +1159,8 @@ export const LEGACY_COPY = {
   scheduleLabel: "Schedule",
   useRoutines: "Schedules are routines now. Set one up in the agent's chat, under Routines.",
   routineMovedVia: "Moved from Workspace agents",
+  /** Under "What to do each run" once the schedule is a routine: the routine kept its own copy. */
+  promptRunNowOnly: "This is what Run now sends. Its routine has its own instructions, in its chat.",
   runNowWaiting: (name: string) => `${name} is waiting for your approval`,
   openChat: "Open the chat",
   agentPaused: "Agent is disabled; enable it before running.",

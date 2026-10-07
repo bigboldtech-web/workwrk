@@ -74,10 +74,11 @@ async function handle(req: Request) {
     console.error(`[cron-failure] run-due-agents: the schedule move threw: ${errorLine(err)}`);
   }
 
-  // A teammate step that threw fails the tick; one routine's failure stays on
-  // the routine and in its chat, and one agent's move left for the next tick
-  // is in the counts.
-  return cronResult("run-due-agents", { actions, routines, legacySchedules: legacy }, stepsFailed);
+  // A step that threw fails the tick, and so does a schedule that did not
+  // move: it is left for the next tick, but nothing runs it until it moves,
+  // so someone is told (review of step 2). One routine's failure stays on
+  // the routine and in its chat.
+  return cronResult("run-due-agents", { actions, routines, legacySchedules: legacy }, stepsFailed + (legacy?.failed ?? 0));
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).
