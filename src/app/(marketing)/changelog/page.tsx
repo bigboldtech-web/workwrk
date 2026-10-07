@@ -56,6 +56,14 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // not listed until it is on.
   {
     date: "2026-10-07",
+    title: "Group chats with your AI teammates",
+    items: [
+      { type: "feature", text: "Group chats: one chat with two to five of your AI teammates, from New in AI teammates. Name a teammate with @ to ask it; otherwise the group's lead answers (its Chief of Staff, when it has one). Each answers as itself, reads what the others said, works as you and asks before anything other people would see, unless you chose Don't ask for it." },
+      { type: "feature", text: "A Chief of Staff made from the template can ask your other teammates for you, at most three per answer. Each ask uses one of that teammate's AI questions, and anything it would do that other people see waits for your approval in its own chat, whatever you chose there. A teammate asked this way never reads your Talk messages or Inbox." },
+    ],
+  },
+  {
+    date: "2026-10-07",
     title: "Agent schedules are routines",
     items: [
       { type: "security", text: "A scheduled agent in Workspace agents now runs as the person who set it up, as one of their routines, and asks before anything other people would see. Before, it acted without asking, and one with nobody on record as setting it up ran as the first admin it found: such a schedule now stops, with the reason shown. Schedules more often than hourly run hourly." },

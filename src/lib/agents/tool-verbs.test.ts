@@ -25,8 +25,8 @@ describe("the Ask AI tool set", () => {
 });
 
 describe("the AI teammate tools", () => {
-  it("are ten, apart from the Ask AI names, and in no Ask AI set", () => {
-    expect(TEAMMATE_TOOL_NAMES).toHaveLength(10);
+  it("are eleven (ask_teammate came with Phase 2), apart from the Ask AI names, and in no Ask AI set", () => {
+    expect(TEAMMATE_TOOL_NAMES).toHaveLength(11);
     for (const t of TEAMMATE_TOOL_NAMES) {
       expect(isToolName(t)).toBe(true);
       expect(isTeammateToolName(t)).toBe(true);
@@ -166,3 +166,9 @@ describe("the subject a sentence names", () => {
   });
 });
 
+
+describe("ask_teammate's sentence (Phase 2)", () => {
+  it("names the teammate it asked", () => {
+    expect(toolSentence("ask_teammate", { teammate: "Project Manager", request: "Which tasks are stuck?" })).toEqual({ concept: "teammate", text: 'Asked "Project Manager"' });
+  });
+});

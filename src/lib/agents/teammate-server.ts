@@ -97,6 +97,38 @@ export async function loadTeammate(slug: string, viewer: Viewer, opts: { include
   return row && canUseAgent(row, viewer) ? row : null;
 }
 
+/**
+ * The person's teammates with exactly this name (without case), that they may
+ * use and that were not removed (ask_teammate's delegate; Phase 2 step 5).
+ * Another person's private teammate is never one of them, so asking for it
+ * reads exactly as asking for a name nobody has. At most five.
+ */
+export async function usableTeammatesNamed(viewer: Viewer, name: string): Promise<TeammateRecord[]> {
+  const wanted = String(name ?? "").trim();
+  if (!wanted || wanted.length > 60) return [];
+  const rows = await prisma.agent.findMany({
+    where: { organizationId: viewer.organizationId, status: { not: "ARCHIVED" }, name: { equals: wanted, mode: "insensitive" }, ...agentUsableWhere(viewer.userId) },
+    select: TEAMMATE_SELECT,
+    orderBy: { id: "asc" },
+    take: 5,
+  });
+  return rows.filter((r) => canUseAgent(r, viewer));
+}
+
+/** The teammates another one may ask (on, usable, not itself), by name, at most 20: block 2's list for ask_teammate. */
+export async function askableTeammates(viewer: Viewer, exceptId: string): Promise<Array<{ name: string; job: string }>> {
+  const rows = await prisma.agent.findMany({
+    where: { organizationId: viewer.organizationId, status: "ENABLED", id: { not: exceptId }, ...agentUsableWhere(viewer.userId) },
+    select: { id: true, name: true, description: true, organizationId: true, visibility: true, ownerId: true },
+    orderBy: { name: "asc" },
+    take: 40,
+  });
+  return rows
+    .filter((r) => canUseAgent(r, viewer))
+    .slice(0, 20)
+    .map((r) => ({ name: r.name, job: r.description }));
+}
+
 /** This person's one live chat with this teammate (engine.ts getOrCreateTeammateSession makes it). */
 export function liveChatWhere(agent: { id: string; organizationId: string }, userId: string): Prisma.ChatSessionWhereInput {
   return { organizationId: agent.organizationId, agentId: agent.id, userId, kind: "TEAMMATE", archivedAt: null };

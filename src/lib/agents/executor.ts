@@ -36,16 +36,18 @@
 import type { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
+import { publishToUser } from "@/lib/realtime-bus";
 import { actorLabelFor, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
-import type { TurnTrigger } from "./budget";
+import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
 import { prepareCall, type Prepared } from "./previews";
-import { ACTION_ERRORS, TEAMMATE_TOOL_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, tooManyWaiting } from "./teammate-copy";
+import { ACTION_ERRORS, DELEGATION_COPY, TEAMMATE_TOOL_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
 import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
 import {
   ACTION_TTL_MS,
   BASE_RISK,
+  MAX_DELEGATIONS_PER_TURN,
   MAX_PENDING_PER_PERSON,
   MAX_PROPOSALS_PER_TURN,
   MAX_TOOL_CALLS_PER_TURN,
@@ -107,8 +109,8 @@ export interface ExecuteArgs {
   /** The person's own choices (sanitizeRules, level "person"). */
   personRules: ApprovalRules;
   practice: boolean;
-  /** The turn's counters, shared by all its calls: each call and each request is counted here. */
-  counters: { calls: number; proposals: number };
+  /** The turn's counters, shared by all its calls: each call, each request and each teammate it asked is counted here. */
+  counters: { calls: number; proposals: number; delegations: number };
   emit?: (e: TeammateStreamEvent) => void;
 }
 
@@ -180,6 +182,109 @@ function eventLineFor(tool: ToolName, result: unknown): EventLine | null {
   return null;
 }
 
+/** The longest answer a delegate's words reach the caller with. */
+const DELEGATE_ANSWER_MAX = 8000;
+
+/**
+ * ask_teammate (docs/plans/ai-teammates-phase2.md step 5, Decisions 1 and
+ * 16): one turn of another of the person's teammates, as the person, in the
+ * person's own chat with it. Only from a turn the person watches (their chat
+ * or its continue), at most three per answer, depth one (the delegate is
+ * never offered ask_teammate), never in practice (which says what it would
+ * ask). The delegate's question is its own (its monthly limit, the plan's,
+ * the person's per-minute limit), traced to the caller's run. Anything the
+ * delegate would do that other people see waits on one card in the
+ * delegate's chat; the caller's chat gets a line that opens it. The answer
+ * reaches the caller as data, inside <tool_data>.
+ */
+async function runDelegation(
+  a: ExecuteArgs,
+  input: Record<string, unknown>,
+  done: (state: CallState, result: unknown, extra?: { errorText?: string; actionId?: string }) => ExecuteResult,
+  refuse: (error: string, detail?: Record<string, unknown>) => ExecuteResult,
+): Promise<ExecuteResult> {
+  if (a.turn.trigger !== "CHAT" && a.turn.trigger !== "RESUME") return refuse(ACTION_ERRORS.toolOff);
+  if (a.counters.delegations >= MAX_DELEGATIONS_PER_TURN) return refuse(DELEGATION_COPY.tooManyAsks);
+  const name = String(input.teammate ?? "").trim();
+  const request = String(input.request ?? "").trim();
+  if (!name || !request) return refuse(badInputSentence(!name ? "teammate" : "request"));
+  if (a.practice) return done("practice", { practice: true, wouldDo: DELEGATION_COPY.askTitle(name) });
+
+  // Loaded here: the server half of teammates and the engine both import this file.
+  const [{ usableTeammatesNamed }, engine] = await Promise.all([import("./teammate-server"), import("./engine")]);
+  const found = await usableTeammatesNamed(a.person.viewer, name);
+  if (found.length === 0) return refuse(DELEGATION_COPY.noTeammateNamed(name));
+  if (found.length > 1) return refuse(DELEGATION_COPY.severalNamed(name));
+  const delegate = found[0];
+  if (delegate.id === a.agent.id) return refuse(DELEGATION_COPY.cantAskItself);
+  if (delegate.status !== "ENABLED") return refuse(DELEGATION_COPY.delegatePaused(delegate.name));
+
+  const session = await engine.getOrCreateTeammateSession(delegate, a.person.userId);
+  const claim = await claimTeammateTurn({
+    organizationId: a.person.organizationId,
+    agentId: delegate.id,
+    userId: a.person.userId,
+    what: "AI teammate delegation",
+    trigger: "DELEGATED",
+    sessionId: session.id,
+    routineId: null,
+    practice: false,
+    rateLimit: true,
+    parentRunId: a.turn.runId,
+  });
+  if (!claim.ok) return refuse(claim.message);
+  a.counters.delegations += 1;
+  await writeEventLine(session.id, { text: DELEGATION_COPY.askedByLine(a.agent.name, clampText(request, 300)), event: "delegated_asked", agentId: delegate.id });
+
+  let turn: Awaited<ReturnType<typeof engine.runTeammateTurn>> | null = null;
+  try {
+    turn = await engine.runTeammateTurn({
+      agent: engine.teammateAgentFrom(delegate),
+      person: a.person,
+      sessionId: session.id,
+      trigger: "DELEGATED",
+      userText: null,
+      practice: false,
+      routine: null,
+      runId: claim.runId,
+      questionId: claim.questionId,
+      streaming: false,
+      origin: { kind: "delegated", by: { agentId: a.agent.id, name: a.agent.name, sessionId: a.turn.sessionId, runId: a.turn.runId }, request },
+    });
+  } catch (err) {
+    // runTeammateTurn answers its own failures; what this one did is unknown, so its question is kept.
+    console.error(`[agents] delegated turn ${claim.runId} threw: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+  }
+  if (turn?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
+
+  // What the delegate asked for waits in its own chat; the caller's chat says so, with a link to the first card.
+  const waitingIds = turn?.proposedActionIds ?? [];
+  const waiting = waitingIds.length
+    ? await prisma.agentAction.findMany({ where: { id: { in: waitingIds } }, select: { id: true, preview: true }, orderBy: { createdAt: "asc" } })
+    : [];
+  const titles = waiting.map((w) => (typeof record(w.preview).title === "string" ? (record(w.preview).title as string) : DELEGATION_COPY.askTitle(delegate.name)));
+  if (titles.length > 0) {
+    const line = await writeEventLine(a.turn.sessionId, {
+      text: DELEGATION_COPY.delegateWaitingLine(delegate.name, titleList(titles)),
+      event: "delegate_waiting",
+      agentId: a.agent.id,
+      link: { kind: "chat", slug: delegate.slug, actionId: waiting[0].id },
+    });
+    if (line) a.emit?.({ type: "event", message: line });
+  }
+  // The delegate's chat changed: the person's open tabs read it again.
+  publishToUser(a.person.userId, { type: "agent.changed", agentId: delegate.id });
+
+  if (!turn || (!turn.text.trim() && turn.error)) return done("failed", { error: DELEGATION_COPY.delegateNoAnswer(delegate.name) }, { errorText: DELEGATION_COPY.delegateNoAnswer(delegate.name) });
+  return done("ran", {
+    ok: true,
+    teammate: { name: delegate.name },
+    answer: clampText(turn.text, DELEGATE_ANSWER_MAX),
+    waiting: titles.map((title) => ({ title })),
+    ...(titles.length > 0 ? { note: DELEGATION_COPY.waitingNote(a.person.firstName, delegate.name) } : {}),
+  });
+}
+
 /**
  * Run one call the model asked for, as the person (see the file header). A
  * refusal, a tool's failure or a tool that throws is a result the model
@@ -213,6 +318,9 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     routineId: a.turn.routineId,
     trigger: a.turn.trigger,
   };
+
+  // Asking another teammate runs that teammate's own turn (runDelegation).
+  if (name === "ask_teammate") return runDelegation(a, checked.input, done, refuse);
 
   // Reads run, in a practice run too: they change nothing.
   if (BASE_RISK[name] === "READ") {

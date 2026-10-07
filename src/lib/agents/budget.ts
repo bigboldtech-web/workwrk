@@ -99,6 +99,8 @@ export async function claimTeammateTurn(a: {
   routineId: string | null;
   practice: boolean;
   rateLimit: boolean;
+  /** Phase 2: the caller's turn when another teammate asked for this one (ask_teammate). */
+  parentRunId?: string | null;
 }): Promise<TurnClaim> {
   if (a.rateLimit) {
     const limited = rateLimit(`ai:${a.userId}`, { max: AI_ACTIONS_PER_MINUTE, windowMs: 60_000 });
@@ -128,7 +130,8 @@ export async function claimTeammateTurn(a: {
         routineId: a.routineId,
         questionId: question.id,
         status: "PENDING",
-        input: { trigger: a.trigger, practice: a.practice, routineId: a.routineId },
+        ...(a.parentRunId ? { parentRunId: a.parentRunId } : {}),
+        input: { trigger: a.trigger, practice: a.practice, routineId: a.routineId, ...(a.parentRunId ? { parentRunId: a.parentRunId } : {}) },
       },
       select: { id: true },
     });

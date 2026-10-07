@@ -1,4 +1,4 @@
-// The tool set, as names only: the 28 Ask AI tools and the 10 AI teammate
+// The tool set, as names only: the 28 Ask AI tools and the 11 AI teammate
 // tools. Pure and client safe, so the chat thread's verb map
 // (tool-verbs.ts), the approval policy (tool-policy.ts) and the server
 // registry (tools.ts) are typed against the same list and a tool with no
@@ -13,7 +13,8 @@
 // assign_ticket). These 28 remain.
 //
 // AI teammates (docs/plans/ai-teammates.md 3.4) add 10 that only a teammate
-// may use (src/lib/agents/teammate-tools.ts). They are in no Ask AI set below
+// may use (src/lib/agents/teammate-tools.ts), and Phase 2 adds ask_teammate
+// (docs/plans/ai-teammates-phase2.md step 5). They are in no Ask AI set below
 // (CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES), so Ask AI is offered exactly what it
 // was offered before.
 
@@ -59,6 +60,7 @@ export const TEAMMATE_TOOL_NAMES = [
   "create_routine",
   "list_my_inbox",
   "read_talk",
+  "ask_teammate",
 ] as const;
 
 export type AskAiToolName = (typeof PPMS_TOOL_NAMES)[number];

@@ -1015,6 +1015,7 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   get_team_alignment_rollup: { label: "Read your team's progress" },
   list_my_inbox: { label: "Read your Inbox" },
   read_talk: { label: "Read your Talk messages", description: "Only conversations you are in. It never marks anything read." },
+  ask_teammate: { label: "Ask your other teammates", description: "Asks one of your other teammates and reads its answer. Each ask uses one of its AI questions." },
   create_task: { label: "Create tasks", description: "Asks first when it is for someone else." },
   update_task: { label: "Change tasks", description: "Status, due date, priority and owner." },
   move_task: { label: "Move tasks between Lists" },
@@ -1184,3 +1185,22 @@ export type LegacyStopReason = keyof typeof LEGACY_COPY.stopReason;
 
 /** What an event line's link says, by where it goes (teammate-thread.ts EventLink; Phase 2). */
 export const LINE_LINKS = { chat: "Open", talk: "Open in Talk", automation: "Open the run" } as const;
+
+/**
+ * One teammate asking another (ask_teammate; docs/plans/ai-teammates-phase2.md
+ * step 5, Decisions 1 and 16).
+ */
+export const DELEGATION_COPY = {
+  askedByLine: (by: string, req: string) => `Asked by ${by}: ${req}`,
+  delegateWaitingLine: (name: string, titles: string) => `${name} is waiting for your approval: ${titles}`,
+  askTitle: (name: string) => `Ask ${name}`,
+  noTeammateNamed: (n: string) => `You don't have a teammate called ${n}.`,
+  severalNamed: (n: string) => `More than one of your teammates is called ${n}. Rename one first.`,
+  cantAskItself: "A teammate can't ask itself.",
+  delegatePaused: (n: string) => `${n} is paused, so it can't be asked.`,
+  tooManyAsks: "That's the most teammates one answer can ask. Send another message to ask more.",
+  delegateNoAnswer: (n: string) => `${n} didn't answer.`,
+  waitingNote: (first: string, n: string) => `These wait for ${first}'s approval in ${n}'s chat. Don't ask for them again.`,
+  /** The Run history label of a delegated turn. */
+  triggerLabel: "Asked by a teammate",
+} as const;
