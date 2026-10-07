@@ -25,6 +25,8 @@ const s = vi.hoisted(() => ({
   published: [] as Array<{ userId: string; event: unknown }>,
   firstAction: null as Record<string, unknown> | null,
   sql: [] as string[],
+  // Runs between the fair pick's two reads, as another tick or a save would.
+  afterPick: null as null | (() => void),
   resolveActingPerson: vi.fn(),
   isAiConfigured: vi.fn(),
   getOrCreateTeammateSession: vi.fn(),
@@ -41,13 +43,17 @@ vi.mock("@/lib/prisma", () => ({
       // The runner's reads: the slots already past the stale mark (active,
       // `lt`, oldest first, at most `take`), and the picked rows by id.
       // Copies, as a database hands back.
-      findMany: async (a: { where: { status?: string; nextRunAt?: { lt: Date }; id?: { in: string[] } }; take?: number }) =>
+      findMany: async (a: { where: { status?: string; nextRunAt?: { lt?: Date; gte?: Date; lte?: Date }; id?: { in: string[] } }; take?: number }) =>
         [...s.routines.values()]
-          .filter((r) =>
-            a.where.id
-              ? a.where.id.in.includes(r.id)
-              : r.status === a.where.status && r.nextRunAt !== null && r.nextRunAt.getTime() < a.where.nextRunAt!.lt.getTime(),
-          )
+          .filter((r) => {
+            if (a.where.id && !a.where.id.in.includes(r.id)) return false;
+            if (a.where.status !== undefined && r.status !== a.where.status) return false;
+            const at = a.where.nextRunAt;
+            if (!at) return true;
+            if (r.nextRunAt === null) return false;
+            const t = r.nextRunAt.getTime();
+            return (!at.lt || t < at.lt.getTime()) && (!at.gte || t >= at.gte.getTime()) && (!at.lte || t <= at.lte.getTime());
+          })
           .sort((x, y) => x.nextRunAt!.getTime() - y.nextRunAt!.getTime() || x.id.localeCompare(y.id))
           .slice(0, a.take ?? Infinity)
           .map((r) => ({ ...r })),
@@ -81,7 +87,9 @@ vi.mock("@/lib/prisma", () => ({
         return { r, rn };
       });
       numbered.sort((x, y) => x.rn - y.rn || x.r.nextRunAt!.getTime() - y.r.nextRunAt!.getTime() || x.r.id.localeCompare(y.r.id));
-      return numbered.filter((n) => n.rn <= limit).slice(0, limit).map((n) => ({ id: n.r.id }));
+      const out = numbered.filter((n) => n.rn <= limit).slice(0, limit).map((n) => ({ id: n.r.id }));
+      s.afterPick?.();
+      return out;
     },
     chatSession: { findFirst: async () => ({ id: "s1" }) },
     agentAction: { findFirst: async () => s.firstAction },
@@ -169,6 +177,7 @@ beforeEach(() => {
   seedRoutine();
   s.updates = [];
   s.sql = [];
+  s.afterPick = null;
   s.lines = [];
   s.notifications = [];
   s.published = [];
@@ -520,9 +529,27 @@ describe("processDueRoutines across workspaces (review rounds 10 and 11)", () =>
     const ran = s.runTeammateTurn.mock.calls.map(([a]) => (a as { routine: { id: string } }).routine.id);
     // Same slot: by id, as the query orders them.
     expect(ran).toEqual(["big-0", "other-0", "small-0", "big-1"]);
-    // Picked in SQL, numbered within each workspace, the times as UTC text.
-    expect(s.sql.at(-1)).toContain('PARTITION BY "organizationId"');
-    expect(s.sql.at(-1)).toContain("::timestamptz AT TIME ZONE 'UTC'");
+    // Picked in SQL over every due slot: numbered within each workspace by
+    // slot, taken by number first, both bounds as UTC text. The stand-in
+    // answers as Postgres would, so the clauses that carry it are pinned here.
+    const sql = s.sql.at(-1)!;
+    expect(sql).toContain('row_number() OVER (PARTITION BY "organizationId" ORDER BY "nextRunAt", "id") AS rn');
+    expect(sql).toContain(`"nextRunAt" <= (?::timestamptz AT TIME ZONE 'UTC')`);
+    expect(sql).toContain(`"nextRunAt" >= (?::timestamptz AT TIME ZONE 'UTC')`);
+    expect(sql).toContain("WHERE d.rn <= ?");
+    expect(sql).toContain('ORDER BY d.rn, d."nextRunAt", d."id"');
+  });
+
+  it("leaves a slot that moved between the pick and its read, never running it at its new time (review round 12)", async () => {
+    s.routines = new Map();
+    seedRoutine({ id: "r1", nextRunAt: DUE });
+    const tomorrow = new Date(DUE.getTime() + 86_400_000);
+    s.afterPick = () => (s.routines.get("r1")!.nextRunAt = tomorrow);
+    const counts = await processDueRoutines(NOW, RUNNER);
+    s.afterPick = null;
+    expect(counts).toMatchObject({ due: 0, succeeded: 0 });
+    expect(s.runTeammateTurn).not.toHaveBeenCalled();
+    expect(s.routines.get("r1")!.nextRunAt).toEqual(tomorrow);
   });
 
   it("clears slots already past the stale mark first, without their taking the places of slots on time", async () => {

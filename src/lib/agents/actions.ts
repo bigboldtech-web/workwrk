@@ -706,13 +706,6 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
   return { expired: expired.length, stuck: stuck.count };
 }
 
-/**
- * The outcomes of this chat's requests the teammate has not been told yet,
- * claimed in ONE statement (UPDATE ... RETURNING), so two turns at once never
- * both report one: the turn that stamped reportedAt has it. Oldest first. A
- * call the person's own rule ran was reported in its own turn (reportedAt is
- * set when it is recorded), so only decisions and expiries come back here.
- */
 /** The rows a claim may take, past the session: one teammate's, and only continuable ones when asked. */
 function outcomeFilters(agentId: string | null | undefined, continuable: boolean | undefined): { ofAgent: Prisma.Sql; onlyContinuable: Prisma.Sql } {
   // One teammate's only, when named: in a group chat each hears its own
@@ -728,6 +721,13 @@ function outcomeFilters(agentId: string | null | undefined, continuable: boolean
   return { ofAgent, onlyContinuable };
 }
 
+/**
+ * The outcomes of this chat's requests the teammate has not been told yet,
+ * claimed in ONE statement (UPDATE ... RETURNING), so two turns at once never
+ * both report one: the turn that stamped reportedAt has it. Oldest first. A
+ * call the person's own rule ran was reported in its own turn (reportedAt is
+ * set when it is recorded), so only decisions and expiries come back here.
+ */
 export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean; limit?: number } = {}): Promise<AgentActionRow[]> {
   const limit = Math.max(1, Math.min(OUTCOMES_PER_TURN, opts.limit ?? OUTCOMES_PER_TURN));
   const { ofAgent, onlyContinuable } = outcomeFilters(agentId, opts.continuable);
