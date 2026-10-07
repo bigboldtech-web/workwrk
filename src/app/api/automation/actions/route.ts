@@ -26,6 +26,8 @@ export async function GET() {
         description: a.description,
         safeToRetry: a.safeToRetry,
         available: a.available && (a.key !== "ask_teammate" || aiOn),
+        // The step exists: the builder says why it can't be used, never "Coming soon" (review round 4).
+        unavailableReason: a.available && a.key === "ask_teammate" && !aiOn ? "ai_off" : null,
         requiresConnection: a.requiresConnection ?? null,
         params: a.params,
       })),

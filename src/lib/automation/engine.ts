@@ -444,6 +444,7 @@ async function runWorkflow(args: {
       author: args.author,
       publisherId: args.publisherId ?? null,
       workflowName: workflow.name,
+      teammateInRun: def.actions.some((a) => a.key === "ask_teammate"),
     };
 
     let succeeded = 0;
@@ -499,7 +500,7 @@ async function runWorkflow(args: {
         });
       } catch (err) {
         failed++;
-        if (action.key === "ask_teammate") stepData = {};
+        if (action.key === "ask_teammate") stepData = { teammateFailed: true };
         if (!impl.safeToRetry) failedUnretryable++;
         const message = err instanceof Error ? err.message.slice(0, 500) : "Action failed";
         firstError ??= message;

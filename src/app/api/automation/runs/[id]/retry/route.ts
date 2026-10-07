@@ -25,7 +25,7 @@ import { notYours, requireAutomation, workflowRights } from "@/lib/automation/ga
 import { getAction, type ActionContext } from "@/lib/automation/registry-actions";
 import { recordUsage } from "@/lib/automation/usage";
 import { loadAuthor, runReach } from "@/lib/automation/author-reach";
-import { stepDataBefore } from "@/lib/automation/retry";
+import { stepDataBefore, teammateInSteps } from "@/lib/automation/retry";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAutomation();
@@ -95,6 +95,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     publisherId,
     retrierId: ctx.userId,
     workflowName: run.workflow.name,
+    teammateInRun: teammateInSteps(run.steps),
   };
 
   let stillFailing = 0;

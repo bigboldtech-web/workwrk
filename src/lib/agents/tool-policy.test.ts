@@ -242,7 +242,7 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     expect(toolsForTrigger(ALL_TEAMMATE, "AUTOMATION")).toEqual(["search_tasks", "post_in_talk"]);
   });
   it("reads none of the person's private records where the answer goes out with no card (review round 1)", () => {
-    const withRecords: ToolName[] = ["search_tasks", "list_my_kras", "list_my_kpi_status", "list_my_weekly_reviews", "get_team_alignment_rollup", "search_contracts", "search_okrs", "search_meetings", "search_employees"];
+    const withRecords: ToolName[] = ["search_tasks", "list_my_kras", "list_my_kpi_status", "list_my_weekly_reviews", "get_team_alignment_rollup", "search_contracts", "search_okrs", "search_meetings", "list_my_sops", "search_employees"];
     expect(toolsForTrigger(withRecords, "TALK")).toEqual(["search_tasks", "search_employees"]);
     expect(toolsForTrigger(withRecords, "AUTOMATION")).toEqual(["search_tasks", "search_employees"]);
     // A delegated answer comes back to the person's own chat first.
@@ -250,7 +250,7 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     expect(toolsForTrigger(withRecords, "CHAT")).toEqual(withRecords);
   });
   it("gives a Talk turn no SOP search, whose finds can't be held to every reader (review round 3)", () => {
-    expect(toolsForTrigger(["search_tasks", "search_sops"], "TALK")).toEqual(["search_tasks"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops", "list_forms", "list_data_tables"], "TALK")).toEqual(["search_tasks"]);
     expect(toolsForTrigger(["search_tasks", "search_sops"], "AUTOMATION")).toEqual(["search_tasks", "search_sops"]);
     expect(toolsForTrigger(["search_tasks", "search_sops"], "CHAT")).toEqual(["search_tasks", "search_sops"]);
   });

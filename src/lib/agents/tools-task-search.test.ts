@@ -34,8 +34,12 @@ vi.mock("@/lib/prisma", () => ({
       // The caller, by id (tools.ts callerLevel): anchored here, or in another
       // workspace for a person here through a membership. A denied one is deactivated.
       findUnique: async () => (level ? { organizationId: home, ...legacyLevelRow(level), status: denied ? "INACTIVE" : "ACTIVE", deletedAt: null } : null),
+      // A Talk answer's readers (review round 4): each read at the level held here.
+      findMany: async (a: { where: { id: { in: string[] } } }) =>
+        a.where.id.in.filter((id) => id !== "u-unknown").map((id) => ({ id, organizationId: id === "u-elsewhere" ? "org-2" : "org-1", ...legacyLevelRow("EMPLOYEE"), status: id === "u-gone" ? "INACTIVE" : "ACTIVE", deletedAt: null })),
     },
-    organizationMembership: { findUnique: async () => (membership ? { role: membership } : null) },
+    // u-elsewhere works here through a second membership (anchored in org-2).
+    organizationMembership: { findUnique: async (a?: { where?: { userId_organizationId?: { userId?: string } } }) => (a?.where?.userId_organizationId?.userId === "u-elsewhere" ? { role: "EMPLOYEE" } : membership ? { role: membership } : null) },
     item: {
       // Applies the keyset the tool sends (where.AND[0].OR), as the database would.
       findMany: async (args: { take: number; where: { AND?: Array<{ OR?: Keyset[] }> } }) => {
@@ -55,8 +59,8 @@ vi.mock("@/lib/access/node-access", () => ({
 }));
 vi.mock("@/lib/list-links-server", () => ({
   // A Talk answer's readers (review round 3): Eve opens no List here.
-  listReader: (v?: { userId?: string }) => ({ canRead: async () => v?.userId !== "u-eve" }),
-  memberViewer: async (userId: string) => ({ userId, organizationId: "org-1", email: `${userId}@x.test` }),
+  listReader: (v?: { userId?: string }) => ({ canRead: async () => v?.userId !== "u-eve" && v?.userId !== "u-elsewhere" }),
+
   readableItemsVia: async (_v: unknown, items: Row[]) => new Map(items.map((it) => [it.id, { readable: it.boardId === "L-mine", via: null }])),
 }));
 
@@ -144,6 +148,17 @@ describe("search_tasks in a Talk turn (review round 3)", () => {
   it("finds only tasks in Lists every reader of the answer can open", async () => {
     const out = await TOOLS.search_tasks.handler(talk(["u-1", "u-eve"]), { limit: 20 }) as { count: number };
     expect(out.count).toBe(0);
+  });
+
+  it("counts a reader anchored in another workspace, never skips them (review round 4)", async () => {
+    // Reads nothing here, and is anchored in another workspace: the old lookup dropped them and passed every List.
+    const out = await TOOLS.search_tasks.handler(talk(["u-1", "u-elsewhere"]), { limit: 20 }) as { count: number };
+    expect(out.count).toBe(0);
+  });
+
+  it("fails closed for a reader who cannot be read, and leaves out one who can no longer sign in", async () => {
+    expect(((await TOOLS.search_tasks.handler(talk(["u-1", "u-unknown"]), { limit: 20 })) as { count: number }).count).toBe(0);
+    expect(((await TOOLS.search_tasks.handler(talk(["u-1", "u-gone"]), { limit: 20 })) as { count: number }).count).toBe(20);
   });
 
   it("finds what the asker can when everyone there can open it too", async () => {

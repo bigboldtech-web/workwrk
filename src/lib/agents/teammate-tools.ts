@@ -1,4 +1,5 @@
-// The ten tools only an AI teammate uses (docs/plans/ai-teammates.md 3.4),
+// The eleven tools only an AI teammate uses (docs/plans/ai-teammates.md 3.4,
+// and ask_teammate from Phase 2, which runs in executor.ts),
 // and the tool set a teammate is given (teammateToolNames).
 //
 // EVERY HANDLER ACTS AS THE PERSON, THROUGH THE PERSON'S OWN PATH:
@@ -557,7 +558,7 @@ export async function talkAudience(conversationId: string): Promise<number> {
   return prisma.conversationMember.count({ where: { conversationId } });
 }
 
-// ── The ten tools ───────────────────────────────────────────────────
+// ── The teammate tools ──────────────────────────────────────────────
 
 /** Ask AI and the legacy agent loops never set ctx.teammate; these tools answer them as an unknown tool did. */
 function teammateOf(ctx: ToolContext): NonNullable<ToolContext["teammate"]> | null {

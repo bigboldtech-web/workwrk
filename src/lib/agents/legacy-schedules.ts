@@ -242,7 +242,7 @@ async function moveOne(agent: LegacyScheduleRow, now: Date): Promise<"moved" | "
     // A routine honours what the person chose not to be asked about in this
     // chat (Decision 17), so the line says so when they chose any (review round 1).
     const rules = setting?.approvalRules && typeof setting.approvalRules === "object" && !Array.isArray(setting.approvalRules) ? Object.values(setting.approvalRules as Record<string, unknown>) : [];
-    const text = rules.includes("always") ? LEGACY_COPY.movedLineKept(when) : LEGACY_COPY.movedLine(when);
+    const text = rules.includes("always") ? LEGACY_COPY.movedLineKept(agent.name, when) : LEGACY_COPY.movedLine(agent.name, when);
     await writeEventLine(session.id, { text, event: "schedule_moved", routineId });
     publishToUser(person, { type: "agent.changed", agentId: agent.id });
   } catch (err) {

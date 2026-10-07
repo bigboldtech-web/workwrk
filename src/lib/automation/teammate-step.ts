@@ -86,13 +86,16 @@ export function hideTeammateAnswers<T extends { order: number; stepType: string;
   if (!first) return [...steps];
   return steps.map((s) => {
     if (s.stepType !== "ACTION" || s.order < first.order) return s;
+    // A step that returned nothing (it failed, or has not run) has nothing to
+    // hide, and saying an answer is hidden would claim one (review round 4).
+    const returned = s.outputJson !== null && s.outputJson !== undefined;
     if (s.stepKey === TEAMMATE_STEP_KEY) {
       // Nor which teammate: a private one's name and slug are its person's (review round 1).
       const input = asRecord(s.inputJson);
-      return { ...s, outputJson: { answerHidden: true }, ...(s.inputJson !== undefined ? { inputJson: { ...input, teammate: null } } : {}) };
+      return { ...s, outputJson: returned ? { answerHidden: true } : s.outputJson, ...(s.inputJson !== undefined ? { inputJson: { ...input, teammate: null } } : {}) };
     }
     // A later step's result is hidden because it can carry the answer, not
     // because it is the answer: it says so (review round 2).
-    return { ...s, outputJson: { outputHidden: true } };
+    return returned ? { ...s, outputJson: { outputHidden: true } } : s;
   });
 }

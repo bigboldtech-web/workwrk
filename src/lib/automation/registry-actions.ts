@@ -5,6 +5,7 @@ import { parseBoardSchema } from "@/lib/field-catalog";
 import { remapStatusOnMove } from "@/lib/item-move";
 import { createUpdate } from "@/lib/item-thread";
 import { resolveField } from "./conditions";
+import { TEAMMATE_TOKEN } from "./builder-state";
 import { coerceSetFieldValue } from "./set-field";
 import { authorCanWrite, loadAuthor, type AutomationAuthor } from "./author-reach";
 import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
@@ -47,7 +48,9 @@ export interface ActionContext {
   /** The automation's name, for the lines a teammate step writes. */
   workflowName?: string;
   /** What an earlier "Ask an AI teammate" step of this run answered ({{teammate.answer}}, {{teammate.name}}). */
-  stepData?: { teammate?: { answer: string; name: string } };
+  stepData?: { teammate?: { answer: string; name: string }; teammateFailed?: boolean };
+  /** The run has an "Ask an AI teammate" step anywhere, before or after this one. */
+  teammateInRun?: boolean;
 }
 
 export interface ActionParamField {
@@ -110,7 +113,7 @@ function paramStringWithAnswer(ctx: ActionContext, params: Record<string, unknow
   return interpolate(raw, ctx.payload, ctx.stepData).trim() || null;
 }
 
-const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
+
 
 /**
  * A step that uses {{teammate.answer}} with no answer to use (the teammate
@@ -120,6 +123,7 @@ const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
 function needsAnswer(ctx: ActionContext, template: string): void {
   if (!TEAMMATE_TOKEN.test(template)) return;
   const t = ctx.stepData?.teammate;
+  if (!t && !ctx.stepData?.teammateFailed) throw new Error(AUTOMATION_TEAMMATE_COPY.noTeammateBefore);
   if (!t || (ANSWER_TOKEN.test(template) && !t.answer.trim())) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswerToUse);
 }
 
@@ -265,10 +269,10 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const item = await resolveItem(ctx, params);
       await assertCanWrite(ctx, item.boardId);
       const user = await resolveUser(ctx, raw);
-      // A run that asked a teammate may have written its answer on this task
-      // (a comment, a field): assigning gives the task, so never to a Guest
-      // (review round 3, as create_task's title).
-      if (ctx.stepData?.teammate) {
+      // A run that asks a teammate may write its answer on this task (a
+      // comment, a field), before this step or after it: assigning gives the
+      // task, so never to a Guest (review rounds 3 and 4, as create_task's title).
+      if (ctx.teammateInRun || ctx.stepData?.teammate) {
         const { anyGuestHere } = await import("@/lib/access/guests");
         if (await anyGuestHere(ctx.organizationId, [user.id])) throw new Error(AUTOMATION_TEAMMATE_COPY.answerNotForGuests);
       }

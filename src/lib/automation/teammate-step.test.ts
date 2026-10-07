@@ -67,6 +67,16 @@ describe("hideTeammateAnswers", () => {
     expect(JSON.stringify(out)).not.toMatch(/Salary Coach|t-salary-coach/);
   });
 
+  it("claims no hidden answer for a step that returned nothing (review round 4)", () => {
+    const failed = [
+      { order: 1, stepType: "ACTION", stepKey: "ask_teammate", inputJson: { teammate: "t-salary-coach", request: "x" } as unknown, outputJson: null },
+      { order: 2, stepType: "ACTION", stepKey: "add_comment", outputJson: null },
+    ];
+    const out = hideTeammateAnswers(failed);
+    expect(out.map((s) => s.outputJson)).toEqual([null, null]);
+    expect(out[0].inputJson).toEqual({ teammate: null, request: "x" });
+  });
+
   it("changes nothing in a run without a teammate step", () => {
     expect(hideTeammateAnswers([steps[0], steps[1]])).toEqual([steps[0], steps[1]]);
   });

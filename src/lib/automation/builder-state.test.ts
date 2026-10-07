@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANSWER_WITHOUT_TEAMMATE,
   draftSnapshot,
+  firstAnswerWithoutTeammate,
   hasProblems,
   moveItem,
   operatorsFor,
@@ -121,6 +123,28 @@ describe("publishProblems", () => {
   it("a complete sentence has none", () => {
     const d = readDraft(wf({ actions: [{ key: "assign_user", params: { userId: "actor" } }] }));
     expect(hasProblems(publishProblems(d, catalog))).toBe(false);
+  });
+  it("says AI is off, not \"not available yet\", for a teammate step when AI is off for the viewer (review round 4)", () => {
+    const off = { ...catalog, actions: [...catalog.actions, { key: "ask_teammate", name: "Ask an AI teammate", available: false, unavailableReason: "ai_off" as const, params: [] }] };
+    const d = readDraft(wf({ actions: [{ key: "ask_teammate", params: {} }] }));
+    expect(publishProblems(d, off).actions[d.actions[0].id]).toBe("AI is turned off for you, so this step can't be added or published.");
+  });
+  it("refuses a step that uses the teammate's answer with no teammate step before it (review round 4)", () => {
+    const withAsk = {
+      ...catalog,
+      actions: [
+        ...catalog.actions,
+        { key: "ask_teammate", name: "Ask an AI teammate", available: true, params: [] },
+        { key: "add_comment", name: "Add a comment", available: true, params: [] },
+      ],
+    };
+    const before = readDraft(wf({ actions: [{ key: "add_comment", params: { body: "{{ teammate.answer }}" } }, { key: "ask_teammate", params: {} }] }));
+    const p = publishProblems(before, withAsk);
+    expect(p.actions[before.actions[0].id]).toBe(ANSWER_WITHOUT_TEAMMATE);
+    const after = readDraft(wf({ actions: [{ key: "ask_teammate", params: {} }, { key: "add_comment", params: { body: "{{teammate.answer}}" } }] }));
+    expect(hasProblems(publishProblems(after, withAsk))).toBe(false);
+    expect(firstAnswerWithoutTeammate([{ key: "add_comment", params: { body: "{{teammate.name}}" } }])).toBe(0);
+    expect(firstAnswerWithoutTeammate([{ key: "add_comment", params: { body: "{{title}}" } }])).toBeNull();
   });
 });
 

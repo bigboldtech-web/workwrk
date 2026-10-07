@@ -194,7 +194,7 @@ describe("moving an old schedule", () => {
     st.personSetting = { approvalRules: { comment_on_task: "always" } };
     st.agents = [agent({ scheduleCron: "CRON_TZ=Asia/Kolkata 0 9 * * 1-5" })];
     await convertLegacySchedules(NOW, { limit: 100 });
-    expect(st.lines.at(-1)?.line).toMatchObject({ text: LEGACY_COPY.movedLineKept("Weekdays at 9:00") });
+    expect(st.lines.at(-1)?.line).toMatchObject({ text: LEGACY_COPY.movedLineKept("Deal desk", "Weekdays at 9:00") });
     st.personSetting = null;
   });
 
@@ -205,7 +205,7 @@ describe("moving an old schedule", () => {
     expect(st.lines).toEqual([
       {
         sessionId: "chat:a1:u-olivia",
-        line: { text: LEGACY_COPY.movedLine("Weekdays at 9:00"), event: "schedule_moved", routineId: "r1" },
+        line: { text: LEGACY_COPY.movedLine("Deal desk", "Weekdays at 9:00"), event: "schedule_moved", routineId: "r1" },
       },
     ]);
     expect(st.published).toEqual([{ userId: "u-olivia", event: { type: "agent.changed", agentId: "a1" } }]);

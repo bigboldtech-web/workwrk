@@ -249,6 +249,7 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
     leftToast: [["Offsite crew"], "You left Offsite crew"],
     composerHintLead: [["Chief of Staff"], "Name a teammate with @ to ask it. Otherwise Chief of Staff answers."],
     removeTitle: [["Triage"], "Remove Triage from this group chat?"],
+    cantContinue: [["Triage", "it was removed."], "Triage can't continue here: it was removed."],
   };
   const g = copy.GROUP_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -265,12 +266,12 @@ describe("GROUP_COPY (group chats, Phase 2)", () => {
 
 describe("LEGACY_COPY (old schedules moved onto routines, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
-    movedLine: [["Weekdays at 9:00"], "Your schedule from Workspace agents is now a routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see."],
+    movedLine: [["Triage", "Weekdays at 9:00"], "The schedule Triage had in Workspace agents is now your routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see."],
     routineFor: [["Olivia"], "Routine for Olivia"],
     scheduleLine: [["Olivia"], "Now a routine for Olivia"],
     stopped: [["the person who set it up is a guest now."], "Its schedule stopped: the person who set it up is a guest now. Anyone who wants it on a schedule can set up a routine in its chat."],
     runNowWaiting: [["Deal desk"], "Deal desk is waiting for your approval"],
-    movedLineKept: [["Weekdays at 9:00"], "Your schedule from Workspace agents is now a routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see, except what you chose not to be asked about."],
+    movedLineKept: [["Triage", "Weekdays at 9:00"], "The schedule Triage had in Workspace agents is now your routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see, except what you chose not to be asked about."],
     routinePausedFor: [["Olivia"], "Routine for Olivia, paused"],
     scheduleLinePaused: [["Olivia", "Olivia is no longer in this workspace."], "Now a routine for Olivia, paused: Olivia is no longer in this workspace."],
     scheduleLinePausedYou: [[null], "Now your routine, paused."],
@@ -303,10 +304,10 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
     didntAnswerHere: [["Chief of Staff"], "Chief of Staff didn't answer here."],
     askedLine: [["#proof", "Sum this up"], "Asked in #proof: Sum this up"],
     answeredIn: [["#proof"], "Answered in #proof"],
-    tooMany: [[12], "You've asked teammates 5 times in a minute. Try again in 12 seconds."],
+    tooMany: [[12], "You've tried to ask teammates 5 times in a minute. Try again in 12 seconds."],
   };
   it("says one second as one (review round 1)", () => {
-    expect(copy.TALK_TEAMMATE_COPY.tooMany(1)).toBe("You've asked teammates 5 times in a minute. Try again in 1 second.");
+    expect(copy.TALK_TEAMMATE_COPY.tooMany(1)).toBe("You've tried to ask teammates 5 times in a minute. Try again in 1 second.");
   });
   const t = copy.TALK_TEAMMATE_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -323,7 +324,8 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
 
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
-    dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may. It asks again tomorrow (UTC)."],
+    dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],
+    creatorOnlyPublish: [["Max Member"], "Its live version has an AI teammate step that works as Max Member, so only they can publish a new version. You can still save the draft."],
     pausedLabel: [["Triage"], "Triage (paused: it won't run until it is turned back on)"],
     askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],
   };

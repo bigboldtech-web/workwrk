@@ -10,6 +10,7 @@
 
 import { CONDITION_OPERATORS } from "./conditions";
 import { stableJson } from "./definition";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 export interface CondRow {
   id: string;
@@ -248,10 +249,29 @@ export function firstConditionMissingValue(conditions: unknown): number | null {
   return null;
 }
 
+/** {{teammate.answer}} or {{teammate.name}} in a step's words. */
+export const TEAMMATE_TOKEN = /\{\{\s*teammate\.(?:answer|name)\s*\}\}/;
+
+/** A step that uses a teammate's answer with nothing before it to ask one (review round 4). */
+export const ANSWER_WITHOUT_TEAMMATE = 'This step uses the AI teammate\'s answer, so put an "Ask an AI teammate" step before it.';
+
+/**
+ * The index of the first step that uses a teammate's answer with no "Ask an
+ * AI teammate" step before it, so it could never have an answer to use, or
+ * null. The builder and the publish route both refuse it.
+ */
+export function firstAnswerWithoutTeammate(actions: ReadonlyArray<{ key: unknown; params?: unknown }>): number | null {
+  for (const [index, a] of actions.entries()) {
+    if (a.key === "ask_teammate") return null;
+    if (Object.values(asRecord(a.params)).some((v) => typeof v === "string" && TEAMMATE_TOKEN.test(v))) return index;
+  }
+  return null;
+}
+
 /** What stops a publish, said under the section it belongs to (never a toast alone). */
 export function publishProblems(
   d: Draft,
-  catalog: { triggers: Array<{ key: string }>; actions: Array<{ key: string; name: string; available: boolean; params: Array<{ key: string; label: string; required: boolean }> }> },
+  catalog: { triggers: Array<{ key: string }>; actions: Array<{ key: string; name: string; available: boolean; unavailableReason?: "ai_off" | null; params: Array<{ key: string; label: string; required: boolean }> }> },
 ): PublishProblems {
   const out: PublishProblems = { conditions: {}, actions: {} };
   if (!d.trigger) out.when = "Choose what starts this automation.";
@@ -269,12 +289,14 @@ export function publishProblems(
       continue;
     }
     if (!impl.available) {
-      out.actions[a.id] = `"${impl.name}" is not available yet. Remove it or choose another action.`;
+      out.actions[a.id] = impl.unavailableReason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.aiOff : `"${impl.name}" is not available yet. Remove it or choose another action.`;
       continue;
     }
     const missing = impl.params.filter((p) => p.required && !(a.params[p.key] ?? "").trim());
     if (missing.length) out.actions[a.id] = `Fill in ${missing.map((p) => p.label.toLowerCase()).join(" and ")}.`;
   }
+  const early = firstAnswerWithoutTeammate(d.actions);
+  if (early !== null && !out.actions[d.actions[early].id]) out.actions[d.actions[early].id] = ANSWER_WITHOUT_TEAMMATE;
   // A condition with an operator that needs a value and no value would go
   // live comparing against "" and never match, so the automation silently
   // never runs. Opaque rows are API-authored groups the builder cannot edit,
