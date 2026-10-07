@@ -164,6 +164,9 @@ for (const [name, route, streaming] of ROUTES) {
       const answer = s.created.find((m) => m.role === "ASSISTANT");
       expect((card?.createdAt as Date).getTime()).toBeGreaterThan(((answer?.createdAt as Date | undefined) ?? new Date(0)).getTime() - 1);
       expect(answer?.toolCalls).toEqual([expect.objectContaining({ name: "send_kudos", state: "waiting", actionId: action.id })]);
+      // Both name the question they answer, so a reader never matches them by order.
+      expect(answer?.meta).toEqual({ replyTo: "m1" });
+      expect(card?.meta).toMatchObject({ replyTo: "m1" });
 
       if (streaming) {
         expect(sse.find((e) => e.type === "approval")).toMatchObject({ action: { id: action.id, status: "PENDING" } });

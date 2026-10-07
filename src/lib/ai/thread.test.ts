@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { actionIdsOf, callFromLog, contextFromPath, draftAfterFailure, lastTurn, messageFromApi, settleDone, splitSse, titleFromFirstMessage, unansweredQuestion, withPromptAbove, withToolResult, withToolUse, type AiMessage } from "./thread";
+import { actionIdsOf, answeredIn, callFromLog, contextFromPath, draftAfterFailure, lastTurn, messageFromApi, settleDone, splitSse, threadOrder, titleFromFirstMessage, unansweredQuestion, withPromptAbove, withToolResult, withToolUse, type AiMessage } from "./thread";
 
 describe("splitSse", () => {
   it("returns whole events and keeps the unfinished tail", () => {
@@ -181,5 +181,31 @@ describe("withPromptAbove: a prompt put in the composer never replaces what is t
   });
   it("changes nothing for an empty prompt", () => {
     expect(withPromptAbove("my words", "  ")).toBe("my words");
+  });
+});
+
+describe("answers matched to their own question (replyTo)", () => {
+  const at = "2026-10-07T10:00:00.000Z";
+  const row = (id: string, role: AiMessage["role"], extra: Partial<AiMessage> = {}): AiMessage => ({ id, role, content: id, toolCalls: [], createdAt: at, ...extra });
+  it("reads replyTo from an answer and from a card", () => {
+    expect(messageFromApi({ id: "a1", role: "ASSISTANT", content: "x", meta: { replyTo: "u1" }, createdAt: at })).toMatchObject({ replyTo: "u1" });
+    expect(messageFromApi({ id: "c1", role: "SYSTEM", kind: "APPROVAL", content: "x", meta: { actionIds: ["k"], replyTo: "u1" }, createdAt: at })).toMatchObject({ replyTo: "u1" });
+    expect(messageFromApi({ id: "u1", role: "USER", content: "x", meta: { replyTo: "zz" }, createdAt: at })).not.toHaveProperty("replyTo");
+  });
+  it("puts an answer saved after a later question back under its own question", () => {
+    const rows = [row("u1", "USER"), row("u2", "USER"), row("a1", "ASSISTANT", { replyTo: "u1" }), row("c1", "SYSTEM", { kind: "APPROVAL", replyTo: "u1" }), row("a2", "ASSISTANT", { replyTo: "u2" })];
+    expect(threadOrder(rows).map((r) => r.id)).toEqual(["u1", "a1", "c1", "u2", "a2"]);
+    // Rows that name no question keep the server's order.
+    const old = [row("u1", "USER"), row("a1", "ASSISTANT"), row("e1", "SYSTEM", { kind: "EVENT" })];
+    expect(threadOrder(old).map((r) => r.id)).toEqual(["u1", "a1", "e1"]);
+  });
+  it("answers per question: by replyTo, else the first unnamed answer before the next question", () => {
+    const rows = [row("u1", "USER"), row("u2", "USER"), row("a1", "ASSISTANT", { replyTo: "u1" })];
+    expect(answeredIn(rows, "u1")).toBe(true);
+    expect(answeredIn(rows, "u2")).toBe(false);
+    const old = [row("u1", "USER"), row("a1", "ASSISTANT"), row("u2", "USER")];
+    expect(answeredIn(old, "u1")).toBe(true);
+    expect(answeredIn(old, "u2")).toBe(false);
+    expect(answeredIn(old, "missing")).toBe(false);
   });
 });

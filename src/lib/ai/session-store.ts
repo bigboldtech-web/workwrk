@@ -35,9 +35,10 @@ import { sendDecisions } from "@/lib/agents/decide-client";
 import { applyDecisionResults, type ActionView, type DecideAnswer, type TeammateDecision } from "@/lib/agents/teammate-thread";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
+  answeredIn,
   draftAfterFailure,
-  lastTurn,
   messageFromApi,
+  threadOrder,
   withPromptAbove,
   settleDone,
   splitSse,
@@ -95,6 +96,8 @@ export interface AiSessionState {
   actions: Record<string, ActionView>;
   /** The requests being approved or denied now. */
   deciding: Record<string, "approve" | "deny">;
+  /** The question whose answer broke off ("The answer stopped"), by its saved id, and its words: any read that finds its answer clears the error. */
+  stopped: { id: string; text: string } | null;
   /** The agent the next new chat is bound to (?agent=<slug>). */
   agent: { slug: string; name: string | null; examplePrompts?: string[] } | null;
   status: AiStatus | null;
@@ -114,12 +117,15 @@ const INITIAL: AiSessionState = {
   draft: "",
   actions: {},
   deciding: {},
+  stopped: null,
   agent: null,
   status: null,
   offline: false,
 };
 
 let state: AiSessionState = INITIAL;
+/** Counts sends, so each one's local row ids are its own. */
+let tempSeq = 0;
 // The realtime key Ask AI's own requests are published under (actions.ts ASK_AI_KEY).
 const ASK_AI_KEY = "ask-ai";
 const listeners = new Set<() => void>();
@@ -310,7 +316,7 @@ async function open(id: string): Promise<void> {
       pinned: r.data.session.pinned,
       archived: Boolean(r.data.session.archived),
     },
-    messages: r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null),
+    messages: threadOrder(r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null)),
   });
 }
 
@@ -324,34 +330,89 @@ async function refresh(id: string): Promise<boolean> {
   const gen = generation;
   const r = await apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (gen !== generation || state.streaming || !r.ok) return false;
-  const fresh = r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null);
+  const fresh = threadOrder(r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null));
+  const answered = state.stopped !== null && answeredIn(fresh, state.stopped.id);
   set((s) => ({
     // The server can be behind a turn this tab already drew: an answer that
     // broke off is saved, with its card, only when the route's loop ends.
-    // Until the server holds an answer after its last question, the rows this
-    // tab drew after that question (the tool rows, the card) stay on screen.
-    messages: [...fresh, ...unsavedTail(s.messages, fresh)],
+    // Each question the server does not hold an answer to keeps, right after
+    // it, the rows this tab drew for it (its tool rows, its card).
+    messages: withUnsaved(s.messages, fresh),
     actions: { ...s.actions, ...(r.data.actions ?? {}) },
     meta: s.meta ? { ...s.meta, title: r.data.session.title ?? s.meta.title, pinned: r.data.session.pinned, archived: Boolean(r.data.session.archived) } : s.meta,
+    // The answer that broke off is saved now: "The answer stopped" is no longer true.
+    ...(answered && s.stopped
+      ? { stopped: null, error: s.error === "stopped" ? null : s.error, draft: s.draft === s.stopped.text ? "" : s.draft }
+      : {}),
   }));
-  return lastTurn(fresh)?.role === "ASSISTANT";
+  return answered;
 }
 
-/** The rows this tab drew after its last question that the server does not hold yet; none once it holds an answer. */
-function unsavedTail(local: readonly AiMessage[], fresh: readonly AiMessage[]): AiMessage[] {
-  if (lastTurn(fresh)?.role === "ASSISTANT") return [];
-  let lastQuestion = -1;
-  for (let i = local.length - 1; i >= 0; i--) {
-    if (local[i].role === "USER") {
-      lastQuestion = i;
-      break;
-    }
+/**
+ * The server's thread with, after each question it holds no answer to, the
+ * rows this tab drew for that question and the server has not saved yet
+ * (local ids: the live answer, its card). A question this tab drew rows for
+ * is matched by its saved id, so no row lands under another question.
+ */
+function withUnsaved(local: readonly AiMessage[], fresh: readonly AiMessage[]): AiMessage[] {
+  const drawn = new Map<string, AiMessage[]>();
+  let question: string | null = null;
+  for (const m of local) {
+    if (m.role === "USER") question = isLocalRow(m.id) ? null : m.id;
+    else if (question && isLocalRow(m.id)) drawn.set(question, [...(drawn.get(question) ?? []), m]);
   }
-  return lastQuestion < 0 ? [] : local.slice(lastQuestion + 1).filter((m) => isLocalRow(m.id));
+  if (drawn.size === 0) return [...fresh];
+  const out: AiMessage[] = [];
+  for (const m of fresh) {
+    out.push(m);
+    const rows = m.role === "USER" ? drawn.get(m.id) : undefined;
+    if (rows && !answeredIn(fresh, m.id)) out.push(...rows);
+  }
+  return out;
 }
 
-/** When an answer that broke off is read again: soon, then less often, until the server holds it. */
-const STOPPED_CHECKS_MS = [2_500, 10_000, 30_000, 60_000];
+/** Whether the open thread shows rows the server has not saved yet under a question it holds. */
+function hasUnsaved(): boolean {
+  let question = false;
+  for (const m of state.messages) {
+    if (m.role === "USER") question = !isLocalRow(m.id);
+    else if (question && isLocalRow(m.id)) return true;
+  }
+  return false;
+}
+
+/** How long to wait before each read again of a thread with unsaved rows: soon, then once a minute. */
+const WATCH_MS = [2_500, 10_000, 30_000, 60_000];
+/** Read again for at most this long: the route's model calls time out within it. */
+const WATCH_FOR_MS = 10 * 60_000;
+let watching: object | null = null;
+
+/**
+ * While the open chat shows rows the server has not saved (an answer that
+ * broke off, its card) or an answer marked stopped, read it again, soon and
+ * then once a minute, for up to WATCH_FOR_MS: the saved turn replaces the
+ * drawn one and clears "The answer stopped" whenever it arrives. One watcher
+ * per chat view; it ends when nothing is left to wait for, when the person
+ * opens another chat, or after WATCH_FOR_MS.
+ */
+function watchUnsaved(): void {
+  const id = state.sessionId;
+  if (!id) return;
+  const me = { gen: generation, startedAt: Date.now() };
+  if (watching && (watching as { gen: number }).gen === generation) return;
+  watching = me;
+  const step = (i: number) => {
+    setTimeout(() => {
+      const over = me.gen !== generation || state.sessionId !== id || Date.now() - me.startedAt > WATCH_FOR_MS || (!hasUnsaved() && !state.stopped);
+      if (watching !== me || over) {
+        if (watching === me) watching = null;
+        return;
+      }
+      void refresh(id).finally(() => step(i + 1));
+    }, WATCH_MS[Math.min(i, WATCH_MS.length - 1)]);
+  };
+  step(0);
+}
 
 /**
  * A new chat: the landing, optionally bound to an agent, optionally with
@@ -415,7 +476,7 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   };
   // The composer empties only when it held what is sent: a starter sent
   // while other words wait in it leaves them there.
-  set((s) => ({ error: null, streaming: true, draft: s.draft.trim() === text ? "" : s.draft }));
+  set((s) => ({ error: null, stopped: null, streaming: true, draft: s.draft.trim() === text ? "" : s.draft }));
 
   let sessionId = state.sessionId;
   if (!sessionId) {
@@ -442,11 +503,14 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   }
 
   const now = new Date().toISOString();
-  const userTempId = `opt-user-${Date.now()}`;
-  const aiTempId = `streaming-${Date.now()}`;
+  // Unique per send, never the clock alone: two sends in one millisecond
+  // must never share a row.
+  const turnSeq = `${Date.now()}-${++tempSeq}`;
+  const userTempId = `opt-user-${turnSeq}`;
+  const aiTempId = `streaming-${turnSeq}`;
   // The card for what this turn asks the person, below its answer, from the
   // first approval event until the saved row's id arrives with done.
-  const cardTempId = `card-${Date.now()}`;
+  const cardTempId = `card-${turnSeq}`;
   set((s) => ({
     messages: [
       ...s.messages,
@@ -461,6 +525,8 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   };
 
   let serverHasMessage = false;
+  /** The question's saved id, from the stream's user_message event. */
+  let ackedId: string | null = null;
   let sawError = false;
   let sawDone = false;
   const fail = (kind: AiSendError) => {
@@ -469,26 +535,14 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       if (!serverHasMessage) giveBack();
       return;
     }
-    if (serverHasMessage && kind === "stopped" && sessionId) {
+    if (serverHasMessage && kind === "stopped" && ackedId) {
       // The route saves the answer even after the connection drops, but only
-      // when its loop ends, so read the chat again, soon and then less often,
-      // until the answer is there (Try again would ask twice). It stops once
-      // the person moves on or does something else with the error.
-      const id = sessionId;
-      const check = (i: number) => {
-        setTimeout(() => {
-          if (gen !== generation || state.error !== "stopped") return;
-          void refresh(id).then((answered) => {
-            if (gen !== generation) return;
-            if (answered) {
-              set((s) => ({ error: s.error === "stopped" ? null : s.error, draft: s.draft === text ? "" : s.draft }));
-            } else if (state.error === "stopped" && i + 1 < STOPPED_CHECKS_MS.length) {
-              check(i + 1);
-            }
-          });
-        }, STOPPED_CHECKS_MS[i]);
-      };
-      check(0);
+      // when its loop ends, so the chat is read again until it is there
+      // (Try again would ask twice): watchUnsaved, and any other read, clears
+      // the error once the server holds the answer to this question.
+      const question = { id: ackedId, text };
+      set({ stopped: question });
+      watchUnsaved();
     }
     if (serverHasMessage) {
       // The question is saved: keep it, drop an answer that never started,
@@ -559,6 +613,7 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
         if (evt.type === "user_message") {
           serverHasMessage = true;
           const saved = evt.message;
+          if (typeof saved?.id === "string") ackedId = saved.id;
           set((s) => ({
             messages: s.messages.map((m) => (m.id === userTempId ? { ...m, id: saved.id ?? m.id } : m)),
             // The server titles an untitled chat from its first message.
@@ -619,6 +674,9 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
   } finally {
     if (streamAbort === ctrl) streamAbort = null;
     if (gen === generation) set({ streaming: false });
+    // An earlier answer that broke off may still be unsaved under its own
+    // question: keep reading until the server holds it.
+    if (gen === generation && hasUnsaved()) watchUnsaved();
     // The sidebar's CHATS section shows the new chat and its title.
     notifyAiChatsChanged();
   }
