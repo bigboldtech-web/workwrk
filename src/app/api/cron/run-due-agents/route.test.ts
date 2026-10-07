@@ -67,7 +67,7 @@ describe("one tick", () => {
     expect(st.order).toEqual(["sweep", "stale", "routines", "legacy"]);
     const now = st.sweepActions.mock.calls[0][0] as Date;
     expect(now.toISOString()).toBe("2026-10-06T09:00:00.000Z");
-    expect(st.processDueRoutines).toHaveBeenCalledWith(now, { limit: 40, budgetMs: 180_000, concurrency: 8 });
+    expect(st.processDueRoutines).toHaveBeenCalledWith(now, { limit: 200, budgetMs: 180_000, concurrency: 10 });
     expect(st.convertLegacySchedules).toHaveBeenCalledWith(now, { limit: 100 });
   });
 

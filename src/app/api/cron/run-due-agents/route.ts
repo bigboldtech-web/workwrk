@@ -34,12 +34,13 @@ import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 
 /**
- * AI teammate routines: 40 a tick, 8 at a time, none started after 180
- * seconds, taken fairly across workspaces (routines-server.ts fairPick;
- * review round 10: 20 at 4 at a time ran about 120 an hour for the whole
- * platform).
+ * AI teammate routines: up to 200 a tick, picked fairly across workspaces
+ * (routines-server.ts pickDueFairly), 10 at a time, none started after 180
+ * seconds. The budget and the 10 at a time set the pace: what has not
+ * started by then stays due for the next tick (review rounds 10 and 11: 20,
+ * then 40, a tick capped the platform well below what the budget can run).
  */
-const ROUTINE_RUNNER = { limit: 40, budgetMs: 180_000, concurrency: 8 } as const;
+const ROUTINE_RUNNER = { limit: 200, budgetMs: 180_000, concurrency: 10 } as const;
 
 /** Old schedules moved per tick: each is one read of its creator and one transaction. */
 const LEGACY_MOVER = { limit: 100 } as const;

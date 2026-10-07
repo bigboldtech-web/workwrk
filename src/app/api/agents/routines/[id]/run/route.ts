@@ -11,7 +11,9 @@
 // missing one. Refusals as POST .../messages: 409 agent_paused or
 // agent_removed, 503 not_configured, 403 agent_cap or ai_limit, 429
 // rate_limited, each { error: "<sentence>", code }. A refusal changes
-// nothing on the routine: the person is right here to read it.
+// nothing on the routine: the person is right here to read it. Except 409
+// teammate_changed: the routine pauses, as its next slot would, so the tab
+// offers Resume, which accepts the teammate as it is now (review round 11).
 //
 // docs/plans/ai-teammates.md 3.9 and 4.
 
@@ -19,7 +21,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
-import { ROUTINE_RUN_SELECT, runRoutine, type RoutineRefusal } from "@/lib/agents/routines-server";
+import { ROUTINE_RUN_SELECT, pauseRoutine, runRoutine, type RoutineRefusal } from "@/lib/agents/routines-server";
 import { ACTION_ERRORS, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { invalidRequest, teammateError } from "@/lib/agents/teammate-server";
 
@@ -50,6 +52,8 @@ function refusalResponse(r: RoutineRefusal): NextResponse {
       return routineNotFound();
     case "ai_off":
       return teammateError(403, "app_off", TEAMMATE_CHAT.aiOff);
+    case "teammate_changed":
+      return teammateError(409, "teammate_changed", r.message);
     default:
       // The person may not be acted for now (gone, a Guest, an agent account).
       return teammateError(403, "person_cannot", ACTION_ERRORS.personCannot);
@@ -71,6 +75,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!routine) return routineNotFound();
 
   const run = await runRoutine(routine, { practice: parsed.data.practice === true, rateLimit: true });
+  if (!run.ok && run.reason === "teammate_changed") await pauseRoutine(routine, "teammate_changed");
   if (!run.ok) return refusalResponse(run);
   return NextResponse.json({ runId: run.runId, status: run.status, messageId: run.messageId });
 }

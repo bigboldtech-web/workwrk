@@ -275,6 +275,7 @@ function refusal(reason: RoutineReason, pause: boolean, message: string = ROUTIN
  *   the teammate is paused                skip    agent_paused
  *   the person may not be acted for now   pause   their reason (resolveActingPerson)
  *   the person can't use the teammate     pause   no_access
+ *   someone else may have changed it      pause   teammate_changed (Run now pauses too)
  *   AI isn't set up                       skip    not_configured
  *   the teammate's month is used          skip    agent_cap
  *   the plan's questions are used         pause   out_of_questions
@@ -403,75 +404,84 @@ export interface DueRoutineCounts {
   deferred: number;
 }
 
-/**
- * Run the routines that are due (3.9), oldest slot first: at most `limit`
- * per tick, `concurrency` at a time, and none started once `budgetMs` has
- * passed (the cron's later steps need the rest of its time). Each slot is
- * claimed by one compare-and-swap on nextRunAt, then run through runRoutine
- * as its person, then paused or skipped as runRoutine's refusal says.
- */
-/** How many times the tick's limit the fair pick reads before it chooses. */
-const FAIR_WINDOW = 10;
+/** Slots already past ROUTINE_STALE_MS cleared per tick: each is two writes and no AI. */
+export const MISSED_PER_TICK = 1000;
 
 /**
- * Up to `limit` of `rows` (already oldest first), taken one workspace at a
- * time in turn, each workspace's own oldest first: the first workspace's
- * oldest, then the second's, and so on, then each one's second oldest.
+ * The slots due now and still on time, at most `limit`, picked in turn
+ * across workspaces in SQL: each workspace's oldest, then each one's second
+ * oldest, and so on, over every due slot, so one large workspace's 9:00
+ * routines never hold every other workspace's places (review rounds 10 and
+ * 11: a pick over only the oldest few hundred did not). The times go in as
+ * UTC text: nextRunAt has no time zone, and the database's own may not be UTC.
  */
-export function fairPick<T extends { organizationId: string }>(rows: readonly T[], limit: number): T[] {
-  const byOrg = new Map<string, T[]>();
-  for (const r of rows) {
-    const list = byOrg.get(r.organizationId);
-    if (list) list.push(r);
-    else byOrg.set(r.organizationId, [r]);
-  }
-  const queues = [...byOrg.values()];
-  const out: T[] = [];
-  for (let i = 0; out.length < limit && queues.some((q) => q.length > i); i += 1) {
-    for (const q of queues) {
-      if (out.length >= limit) break;
-      if (q.length > i) out.push(q[i]);
-    }
-  }
-  return out;
+async function pickDueFairly(now: Date, staleBefore: Date, limit: number): Promise<DueRoutineRow[]> {
+  const picked = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT d."id" FROM (
+      SELECT "id", "nextRunAt", row_number() OVER (PARTITION BY "organizationId" ORDER BY "nextRunAt", "id") AS rn
+      FROM "AgentRoutine"
+      WHERE "status" = 'active'
+        AND "nextRunAt" <= (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+        AND "nextRunAt" >= (${staleBefore.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+    ) d
+    WHERE d.rn <= ${limit}
+    ORDER BY d.rn, d."nextRunAt", d."id"
+    LIMIT ${limit}`;
+  if (picked.length === 0) return [];
+  const rows = await prisma.agentRoutine.findMany({ where: { id: { in: picked.map((p) => p.id) } }, select: DUE_SELECT });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return picked.map((p) => byId.get(p.id)).filter((r): r is DueRoutineRow => Boolean(r));
 }
 
+/**
+ * Run the routines that are due (3.9). First the slots already more than
+ * ROUTINE_STALE_MS late, up to MISSED_PER_TICK: each is recorded as missed
+ * and moved on, running nothing, so a backlog (the cron down for an
+ * afternoon) never holds the places of slots still on time (review round
+ * 11). Then the timely ones, at most `limit`, picked fairly across
+ * workspaces (pickDueFairly). Both `concurrency` at a time, none started
+ * once `budgetMs` has passed (the cron's later steps need the rest of its
+ * time); what is left stays due for the next tick. Each slot is claimed by
+ * one compare-and-swap on nextRunAt, then run through runRoutine as its
+ * person, then paused or skipped as runRoutine's refusal says.
+ */
 export async function processDueRoutines(
   now: Date,
   opts: { limit: number; budgetMs: number; concurrency: number },
 ): Promise<DueRoutineCounts> {
   const started = Date.now();
-  // Fair across workspaces: a wider window of the oldest due slots, taken in
-  // turn from each workspace, oldest first within each, so one large
-  // workspace's 9:00 routines never push every other workspace's past the
-  // stale mark (review round 10).
-  const window = await prisma.agentRoutine.findMany({
-    where: { status: "active", nextRunAt: { lte: now } },
+  const staleBefore = new Date(now.getTime() - ROUTINE_STALE_MS);
+  const counts: DueRoutineCounts = { due: 0, succeeded: 0, failed: 0, skipped: 0, missed: 0, paused: 0, taken: 0, deferred: 0 };
+  const drain = async (queue: DueRoutineRow[]) => {
+    const work = async () => {
+      for (let r = queue.shift(); r; r = queue.shift()) {
+        if (Date.now() - started >= opts.budgetMs) {
+          // Past the budget: nothing more starts. What is left stays due for the next tick.
+          counts.deferred += 1 + queue.length;
+          queue.length = 0;
+          return;
+        }
+        try {
+          await runDueSlot(r, now, counts);
+        } catch (err) {
+          counts.failed += 1;
+          console.error(`[agents] routine ${r.id} failed: ${errorLine(err)}`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency, queue.length)) }, work));
+  };
+  const late = await prisma.agentRoutine.findMany({
+    where: { status: "active", nextRunAt: { lt: staleBefore } },
     orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
-    take: opts.limit * FAIR_WINDOW,
+    take: MISSED_PER_TICK,
     select: DUE_SELECT,
   });
-  const due = fairPick(window, opts.limit);
-  const counts: DueRoutineCounts = { due: due.length, succeeded: 0, failed: 0, skipped: 0, missed: 0, paused: 0, taken: 0, deferred: 0 };
-  const queue = [...due];
-  const work = async () => {
-    for (let r = queue.shift(); r; r = queue.shift()) {
-      if (Date.now() - started >= opts.budgetMs) {
-        // Past the budget: nothing more starts. What is left stays due, and
-        // the next tick takes it well inside ROUTINE_STALE_MS.
-        counts.deferred += 1 + queue.length;
-        queue.length = 0;
-        return;
-      }
-      try {
-        await runDueSlot(r, now, counts);
-      } catch (err) {
-        counts.failed += 1;
-        console.error(`[agents] routine ${r.id} failed: ${errorLine(err)}`);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency, queue.length)) }, work));
+  counts.due += late.length;
+  await drain([...late]);
+  const due = await pickDueFairly(now, staleBefore, opts.limit);
+  counts.due += due.length;
+  await drain([...due]);
   return counts;
 }
 

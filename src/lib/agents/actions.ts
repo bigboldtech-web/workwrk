@@ -713,8 +713,8 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
  * call the person's own rule ran was reported in its own turn (reportedAt is
  * set when it is recorded), so only decisions and expiries come back here.
  */
-export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean; limit?: number } = {}): Promise<AgentActionRow[]> {
-  const limit = Math.max(1, Math.min(OUTCOMES_PER_TURN, opts.limit ?? OUTCOMES_PER_TURN));
+/** The rows a claim may take, past the session: one teammate's, and only continuable ones when asked. */
+function outcomeFilters(agentId: string | null | undefined, continuable: boolean | undefined): { ofAgent: Prisma.Sql; onlyContinuable: Prisma.Sql } {
   // One teammate's only, when named: in a group chat each hears its own
   // (docs/plans/ai-teammates-phase2.md step 3). A one-teammate chat holds
   // only that teammate's rows, and Ask AI names none.
@@ -722,9 +722,15 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
   // A continue or a routine never hears a card a Talk, automation or
   // delegated turn made: it would take that turn up with this chat's tools
   // and "Don't ask". Those wait for the person's next message (review round 8).
-  const onlyContinuable = opts.continuable
+  const onlyContinuable = continuable
     ? Prisma.sql`AND ("runId" IS NULL OR NOT EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "AgentAction"."runId" AND r."input"->>'trigger' IN ('TALK', 'AUTOMATION', 'DELEGATED')))`
     : Prisma.empty;
+  return { ofAgent, onlyContinuable };
+}
+
+export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean; limit?: number } = {}): Promise<AgentActionRow[]> {
+  const limit = Math.max(1, Math.min(OUTCOMES_PER_TURN, opts.limit ?? OUTCOMES_PER_TURN));
+  const { ofAgent, onlyContinuable } = outcomeFilters(agentId, opts.continuable);
   // At most OUTCOMES_PER_TURN, oldest first: outcomes left waiting for months
   // (cards an automation made that expired) are told a turn's worth at a
   // time, never all in one note too large to send (review round 9). The
@@ -746,6 +752,23 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
       "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;
   const at = (v: Date | string) => new Date(v).getTime();
   return [...rows].sort((x, y) => at(x.createdAt) - at(y.createdAt));
+}
+
+/**
+ * Whether outcomes a claim would take are still waiting after one: asked
+ * only when a turn was told a full OUTCOMES_PER_TURN, so it is told more
+ * wait only when they do (review round 11). False when it can't be read.
+ */
+export async function outcomesWaiting(sessionId: string, agentId?: string | null, opts: { continuable?: boolean } = {}): Promise<boolean> {
+  const { ofAgent, onlyContinuable } = outcomeFilters(agentId, opts.continuable);
+  const rows = await prisma
+    .$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "AgentAction"
+      WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent} ${onlyContinuable}
+        AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
+      LIMIT 1`
+    .catch(() => []);
+  return rows.length > 0;
 }
 
 /**

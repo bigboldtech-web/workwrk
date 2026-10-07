@@ -129,6 +129,8 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
     if (!r.ok) {
       // The chat's own refusals: paused, removed, the month's AI questions, too many at once.
       toast(r.code ? r.error : ROUTINE_COPY.runFailed, { tone: "danger" });
+      // Its teammate changed: the routine paused, so its row now offers Resume (review round 11).
+      if (r.code === "teammate_changed") void reload();
       return;
     }
     if (r.data.status === "FAILED") toast(routineDidntFinish(routine.name), { tone: "danger" });

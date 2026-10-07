@@ -182,7 +182,7 @@ export const ROUTINE_REASON_TEXT: Record<RoutineReason, string> = {
   no_answer: "The AI gave no usable answer, so nothing was done.",
   no_next_run: "Its schedule names no time in the next year. Change when it runs to start it again.",
   missed: "Skipped: the scheduler reached it more than three hours late.",
-  teammate_changed: "Its teammate was changed by someone else since this routine was set up, or it was set up before such changes were checked. Check the teammate, then resume the routine.",
+  teammate_changed: "Its teammate's settings changed since this routine was set up or last resumed, or it was set up before such changes were checked. Check the teammate, then resume the routine.",
 };
 
 export function isRoutineReason(v: unknown): v is RoutineReason {
