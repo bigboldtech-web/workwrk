@@ -15,6 +15,10 @@ const net = vi.hoisted(() => ({
   hangStream: false,
   /** A question chat-x held before the send, with the same words. */
   earlierQuestion: null as null | string,
+  /** Reading chat-y waits on this, so a test can act while it loads. */
+  loadingY: null as null | Promise<void>,
+  /** How many stream requests left. */
+  streams: 0,
 }));
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: async (url: string, init?: { method?: string }) => {
@@ -24,6 +28,7 @@ vi.mock("@/lib/api-fetch", () => ({
       return { ok: true, status: 200, data: { session: { id: "made-1", title: null } } };
     }
     const id = decodeURIComponent(url.split("/").pop() ?? "");
+    if (id === "chat-y" && net.loadingY) await net.loadingY;
     if (net.failing.has(id)) return { ok: false, status: 500, error: "Something went wrong" };
     // Each chat has one saved message, as every chat a list shows does, and
     // chat-x the question the server took, when it took one.
@@ -37,6 +42,7 @@ vi.mock("@/lib/api-fetch", () => ({
 // The stream itself never answers here: a send that reaches it is refused as
 // not sent, or hangs until the client gives it up.
 vi.stubGlobal("fetch", async (_url: string, init?: { signal?: AbortSignal }) => {
+  net.streams += 1;
   if (net.hangStream) {
     return new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
@@ -214,5 +220,22 @@ describe("Ask AI drafts", () => {
       net.hangStream = false;
       vi.useRealTimers();
     }
+  });
+
+  it("sends nothing while a chat is still loading, so the load never wipes a question the server took", async () => {
+    let loaded = () => {};
+    net.loadingY = new Promise<void>((r) => (loaded = r));
+    net.streams = 0;
+    const opening = aiSession.open("chat-y");
+    aiSession.setDraft("Plan the launch");
+    await aiSession.send("Plan the launch");
+    // Refused while it loads: nothing left, and the words wait in the composer.
+    expect(net.streams).toBe(0);
+    expect(draft()).toBe("Plan the launch");
+    loaded();
+    await opening;
+    net.loadingY = null;
+    expect(aiSession.getState().loading).toBe(false);
+    expect(draft()).toBe("Plan the launch");
   });
 });
