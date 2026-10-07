@@ -20,7 +20,7 @@
 import type { CallState } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence, toolSentence } from "./tool-verbs";
 
-export type RunTrigger = "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE" | "DELEGATED";
+export type RunTrigger = "SCHEDULED" | "MANUAL" | "CHAT" | "ROUTINE" | "DELEGATED" | "TALK";
 export type RunStatus = "SUCCEEDED" | "FAILED" | "RUNNING";
 
 export interface RunToolCall {
@@ -51,7 +51,7 @@ function rec(v: unknown): Record<string, unknown> | null {
 
 export function runTrigger(input: unknown): RunTrigger {
   const t = rec(input)?.trigger;
-  return t === "SCHEDULED" || t === "MANUAL" || t === "ROUTINE" || t === "DELEGATED" ? t : "CHAT";
+  return t === "SCHEDULED" || t === "MANUAL" || t === "ROUTINE" || t === "DELEGATED" || t === "TALK" ? t : "CHAT";
 }
 
 /** PENDING (the row is written before the model answers) reads as Running. */
