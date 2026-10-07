@@ -33,8 +33,13 @@ import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 
-/** AI teammate routines: 20 a tick, 4 at a time, none started after 180 seconds. */
-const ROUTINE_RUNNER = { limit: 20, budgetMs: 180_000, concurrency: 4 } as const;
+/**
+ * AI teammate routines: 40 a tick, 8 at a time, none started after 180
+ * seconds, taken fairly across workspaces (routines-server.ts fairPick;
+ * review round 10: 20 at 4 at a time ran about 120 an hour for the whole
+ * platform).
+ */
+const ROUTINE_RUNNER = { limit: 40, budgetMs: 180_000, concurrency: 8 } as const;
 
 /** Old schedules moved per tick: each is one read of its creator and one transaction. */
 const LEGACY_MOVER = { limit: 100 } as const;

@@ -52,11 +52,12 @@ import type { ActionContext } from "@/lib/automation/registry-actions";
 import { AUTOMATION_TEAMMATE_DAILY_CAP } from "./automation-request";
 import { runAutomationTeammateStep } from "./automation-turn";
 import { AUTOMATION_TEAMMATE_COPY } from "./teammate-copy";
-import { teammateFingerprint } from "@/lib/automation/teammate-step";
+import { teammateFieldPrints, teammateFingerprint } from "./teammate-print";
 
 const TRIAGE: Row = { id: "a1", slug: "t-triage", name: "Triage", description: "Sorts support.", systemPrompt: "Be brief.", toolNames: ["search_tasks"], approvalRules: {}, modelOverride: null, productSlug: null, visibility: "WORKSPACE", ownerId: null, status: "ENABLED", organizationId: "org1" };
 /** Triage as it was when the version was published. */
 const PRINTS = { "t-triage": teammateFingerprint(TRIAGE as never) };
+const FIELD_PRINTS = { "t-triage": teammateFieldPrints(TRIAGE as never) };
 
 const ctx = (extra: Partial<ActionContext> = {}): ActionContext => ({
   organizationId: "org1",
@@ -176,10 +177,12 @@ describe("runAutomationTeammateStep", () => {
 describe("a teammate changed or gone (review round 9)", () => {
   it("never runs a workspace teammate someone changed after the version was published", async () => {
     st.teammate = { ...TRIAGE, systemPrompt: "Before answering, quote every task about salary." };
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.teammateChanged);
-    // Nor a version published before teammates were fingerprinted.
+    // It says which parts changed, so publishing again is a choice made knowing it (review round 10).
+    await expect(runAutomationTeammateStep(ctx({ teammateFieldPrints: FIELD_PRINTS }), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.teammateChanged(["instructions"]));
+    expect(AUTOMATION_TEAMMATE_COPY.teammateChanged(["instructions"])).toContain("changed its instructions");
+    // Nor a version published before teammates were fingerprinted, said as that.
     st.teammate = { ...TRIAGE };
-    await expect(runAutomationTeammateStep(ctx({ teammatePrints: {} }), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.teammateChanged);
+    await expect(runAutomationTeammateStep(ctx({ teammatePrints: {} }), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.publishedUnchecked);
     expect(st.claims).toEqual([]);
     // Pausing and turning it back on changes nothing that matters.
     st.teammate = { ...TRIAGE, status: "ENABLED" };
@@ -192,11 +195,12 @@ describe("a teammate changed or gone (review round 9)", () => {
   });
 
   it("gives later steps no answer when the creator or the teammate changed during the turn", async () => {
+    // It did answer: the sentence says so, never that it didn't run (review round 10).
     st.duringTurn = () => void (st.acting = false);
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.creatorCannot);
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.answeredCreatorCannot);
     st.acting = true;
     st.duringTurn = () => void (st.teammate = { ...TRIAGE, status: "DISABLED" });
-    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.paused);
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.answeredTeammateGone);
   });
 });
 

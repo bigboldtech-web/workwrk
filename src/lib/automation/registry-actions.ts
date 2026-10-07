@@ -53,6 +53,8 @@ export interface ActionContext {
   teammateInRun?: boolean;
   /** The fingerprint of each teammate the version asks, as it was when published, by slug (review round 9). */
   teammatePrints?: Record<string, string>;
+  /** The same, one fingerprint per part (name, job, instructions, tools, rules, model), so what changed can be said (review round 10). */
+  teammateFieldPrints?: Record<string, unknown>;
 }
 
 export interface ActionParamField {

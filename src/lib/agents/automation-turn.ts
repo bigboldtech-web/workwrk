@@ -20,7 +20,7 @@
 
 import { isAiConfigured } from "@/lib/ai-client";
 import { withAutomationDepth } from "@/lib/automation/chain-depth";
-import { othersMayChange, teammateFingerprint } from "@/lib/automation/teammate-step";
+import { changedFields, othersMayChange, teammateFingerprint } from "./teammate-print";
 import { readAutomationSettings } from "@/lib/automation/settings";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
@@ -65,7 +65,10 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // when the creator published: one rewritten since never works as them
   // unattended (review round 9). Their own private one is theirs alone.
   if (othersMayChange(agent, creator) && ctx.teammatePrints?.[slug] !== teammateFingerprint(agent)) {
-    throw new Error(AUTOMATION_TEAMMATE_COPY.teammateChanged);
+    // Said as what happened: published before teammates were checked, or
+    // changed since, naming the parts that changed (review round 10).
+    if (!ctx.teammatePrints?.[slug]) throw new Error(AUTOMATION_TEAMMATE_COPY.publishedUnchecked);
+    throw new Error(AUTOMATION_TEAMMATE_COPY.teammateChanged(changedFields(ctx.teammateFieldPrints?.[slug], agent)));
   }
 
   // 5. AI set up, and something to ask.
@@ -146,11 +149,11 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // theirs to use, as the Talk route checks after its turn: one deactivated,
   // or a teammate paused or removed, during the turn leaves the answer in
   // the creator's chat and gives later steps none (review round 9).
+  // It did answer: the sentences say so, and where its words are (review round 10).
   const actingNow = await resolveActingPerson(ctx.organizationId, creator).catch(() => null);
-  if (!actingNow?.ok) throw new Error(actingNow && !actingNow.ok && actingNow.reason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.aiOffForCreator : AUTOMATION_TEAMMATE_COPY.creatorCannot);
+  if (!actingNow?.ok) throw new Error(actingNow && !actingNow.ok && actingNow.reason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.answeredAiOff : AUTOMATION_TEAMMATE_COPY.answeredCreatorCannot);
   const agentNow = await loadTeammate(slug, actingNow.person.viewer).catch(() => null);
-  if (!agentNow) throw new Error(AUTOMATION_TEAMMATE_COPY.noTeammate);
-  if (agentNow.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.paused);
+  if (!agentNow || agentNow.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.answeredTeammateGone);
 
   return {
     teammate: agent.name,

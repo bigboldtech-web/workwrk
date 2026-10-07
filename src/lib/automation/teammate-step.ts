@@ -7,9 +7,8 @@
 // teammate must be one the creator can use, read when the step is saved and
 // again on every run (automation-turn.ts).
 
-import { createHash } from "node:crypto";
 import type { Viewer } from "@/lib/access/types";
-import { stableJson } from "./definition";
+import { teammateFieldPrints, teammateFingerprint } from "@/lib/agents/teammate-print";
 import { loadTeammate } from "@/lib/agents/teammate-server";
 import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
@@ -68,45 +67,25 @@ export async function teammateCreatorGone(orgId: string, creatorId: string | nul
   return !acting.ok && acting.reason !== "ai_off";
 }
 
-/**
- * What a teammate does, as a short fingerprint: its name, job, instructions,
- * tools, approval rules and model. An automation's step works as its
- * creator, so a version records the fingerprint of each teammate it asks
- * when it is published, and a run whose teammate someone else changed since
- * does not run (review round 9: an Admin could rewrite a workspace teammate
- * to read what a Member's automation reaches). Its on or off state is not
- * part of it.
- */
-export function teammateFingerprint(a: {
-  name: string;
-  description: string | null;
-  systemPrompt: string | null;
-  toolNames: unknown;
-  approvalRules: unknown;
-  modelOverride: string | null;
-  productSlug: string | null;
-}): string {
-  const body = stableJson([a.name, a.description ?? "", a.systemPrompt ?? "", a.toolNames ?? null, a.approvalRules ?? null, a.modelOverride ?? "", a.productSlug ?? ""]);
-  return createHash("sha256").update(body).digest("hex").slice(0, 32);
-}
+// The fingerprints live in src/lib/agents/teammate-print.ts, shared with routines (review round 10).
+export { othersMayChange, teammateFingerprint } from "@/lib/agents/teammate-print";
 
-/** The key in a version's snapshot that holds its teammates' fingerprints, by slug. */
+/** The keys in a version's snapshot that hold its teammates' fingerprints, by slug: the whole one, and one per part. */
 export const TEAMMATE_PRINTS_KEY = "__teammates";
+export const TEAMMATE_FIELD_PRINTS_KEY = "__teammateFields";
 
-/** Each teammate a definition asks, as the publisher may use it now, by slug: the fingerprints a version keeps. */
-export async function teammatePrintsFor(definition: unknown, viewer: Viewer): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
+/** Each teammate a definition asks, as the publisher may use it now, by slug: what a version keeps. */
+export async function teammatePrintsFor(definition: unknown, viewer: Viewer): Promise<{ prints: Record<string, string>; fields: Record<string, Record<string, string>> }> {
+  const prints: Record<string, string> = {};
+  const fields: Record<string, Record<string, string>> = {};
   for (const slug of new Set(teammateStepSlugs(definition))) {
     if (!slug) continue;
     const agent = await loadTeammate(slug, viewer).catch(() => null);
-    if (agent) out[slug] = teammateFingerprint(agent);
+    if (!agent) continue;
+    prints[slug] = teammateFingerprint(agent);
+    fields[slug] = teammateFieldPrints(agent);
   }
-  return out;
-}
-
-/** Whether someone other than the creator may change this teammate: a workspace one, or anyone else's. */
-export function othersMayChange(agent: { visibility: string; ownerId: string | null }, creatorId: string): boolean {
-  return agent.visibility !== "PRIVATE" || agent.ownerId !== creatorId;
+  return { prints, fields };
 }
 
 export type TeammateStepProblem = { status: 400 | 403; error: string; code: "teammate_step_creator_only" | "teammate_not_found" };

@@ -37,6 +37,7 @@ import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, tea
 import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, ROUTINE_STALE_MS, routineReasonForPerson, routineScheduleProblem, type RoutineReason } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
 import { canUseAgent } from "./teammate-access";
+import { othersMayChange, teammateFingerprint } from "./teammate-print";
 import {
   APPROVAL_CARD,
   TEAMMATE_CHAT,
@@ -112,6 +113,9 @@ export async function createRoutine(a: {
 
   const now = a.now ?? new Date();
   const nextRunAt = computeNextRunAt(schedule, now);
+  // The teammate as its person chooses it now: one changed by someone else
+  // later pauses the routine (review round 10).
+  const teammatePrint = await routineTeammatePrint(a.organizationId, a.agentId);
   const row = await prisma.agentRoutine.create({
     data: {
       organizationId: a.organizationId,
@@ -123,6 +127,7 @@ export async function createRoutine(a: {
       status: "active",
       nextRunAt,
       createdVia: a.createdVia,
+      teammatePrint,
     },
     select: { id: true, name: true, schedule: true, nextRunAt: true },
   });
@@ -199,6 +204,14 @@ export async function pauseRoutine(r: PausableRoutine, reason: RoutineReason, ag
 
 // ── Running one ─────────────────────────────────────────────────────
 
+/** A routine's teammate as it is now, as a fingerprint (teammate-print.ts), or null when it can't be read. */
+export async function routineTeammatePrint(organizationId: string, agentId: string): Promise<string | null> {
+  const agent = await prisma.agent
+    .findFirst({ where: { id: agentId, organizationId }, select: { name: true, description: true, systemPrompt: true, toolNames: true, approvalRules: true, modelOverride: true, productSlug: true } })
+    .catch(() => null);
+  return agent ? teammateFingerprint(agent) : null;
+}
+
 /** The routine columns a run reads. */
 export const ROUTINE_RUN_SELECT = {
   id: true,
@@ -209,6 +222,7 @@ export const ROUTINE_RUN_SELECT = {
   prompt: true,
   schedule: true,
   status: true,
+  teammatePrint: true,
 } as const;
 
 export type RoutineRunRow = Prisma.AgentRoutineGetPayload<{ select: typeof ROUTINE_RUN_SELECT }>;
@@ -292,6 +306,10 @@ export async function runRoutine(
   if (!acting.ok) return refusal(routineReasonForPerson(acting.reason), true);
   const person = acting.person;
   if (!canUseAgent(agent, person.viewer)) return refusal("no_access", true);
+  // A teammate someone else may change runs unattended as this person only
+  // as it was when they last chose it: one changed since (or a routine made
+  // before such changes were checked) pauses, with its reason (review round 10).
+  if (othersMayChange(agent, r.actingForId) && r.teammatePrint !== teammateFingerprint(agent)) return refusal("teammate_changed", true);
   if (!(await isAiConfigured(r.organizationId))) return refusal("not_configured", false);
 
   const session = await getOrCreateTeammateSession(agent, person.userId);
@@ -392,17 +410,48 @@ export interface DueRoutineCounts {
  * claimed by one compare-and-swap on nextRunAt, then run through runRoutine
  * as its person, then paused or skipped as runRoutine's refusal says.
  */
+/** How many times the tick's limit the fair pick reads before it chooses. */
+const FAIR_WINDOW = 10;
+
+/**
+ * Up to `limit` of `rows` (already oldest first), taken one workspace at a
+ * time in turn, each workspace's own oldest first: the first workspace's
+ * oldest, then the second's, and so on, then each one's second oldest.
+ */
+export function fairPick<T extends { organizationId: string }>(rows: readonly T[], limit: number): T[] {
+  const byOrg = new Map<string, T[]>();
+  for (const r of rows) {
+    const list = byOrg.get(r.organizationId);
+    if (list) list.push(r);
+    else byOrg.set(r.organizationId, [r]);
+  }
+  const queues = [...byOrg.values()];
+  const out: T[] = [];
+  for (let i = 0; out.length < limit && queues.some((q) => q.length > i); i += 1) {
+    for (const q of queues) {
+      if (out.length >= limit) break;
+      if (q.length > i) out.push(q[i]);
+    }
+  }
+  return out;
+}
+
 export async function processDueRoutines(
   now: Date,
   opts: { limit: number; budgetMs: number; concurrency: number },
 ): Promise<DueRoutineCounts> {
   const started = Date.now();
-  const due = await prisma.agentRoutine.findMany({
+  // Fair across workspaces: a wider window of the oldest due slots, taken in
+  // turn from each workspace, oldest first within each, so one large
+  // workspace's 9:00 routines never push every other workspace's past the
+  // stale mark (review round 10).
+  const window = await prisma.agentRoutine.findMany({
     where: { status: "active", nextRunAt: { lte: now } },
     orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
-    take: opts.limit,
+    take: opts.limit * FAIR_WINDOW,
     select: DUE_SELECT,
   });
+  const due = fairPick(window, opts.limit);
   const counts: DueRoutineCounts = { due: due.length, succeeded: 0, failed: 0, skipped: 0, missed: 0, paused: 0, taken: 0, deferred: 0 };
   const queue = [...due];
   const work = async () => {

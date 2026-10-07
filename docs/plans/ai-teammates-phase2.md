@@ -1523,3 +1523,15 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     - Remembering is one read-modify-write at a time per teammate and scope (a transaction-scoped advisory lock), so two turns never add one key twice or pass the limit.
     - The Talk route's step list says where the per-minute limit is taken now.
     - Recorded, not changed: the round 8 indexes were built without CONCURRENTLY, as round 6 recorded for round 5's. They ran with the round 8 deploy (green); IF NOT EXISTS makes every later run a no-op.
+- **Step 8, review round 10** (two read-only reviewers: round 9's fixes, and a sweep of all of Phase 2 for high and medium problems only): 10 found, 9 unique (no high, 4 medium), all 9 fixed.
+  - Medium:
+    1. The retry cron's "not due yet" check never matched: its pattern sat inside a Prisma template, which drops backslashes, so every waiting retry still took the scan's places. nextAttemptAt is always written in UTC ISO form, so it is now compared as text with the time now, passed as a value: nothing to cast, no pattern.
+    2. Routines on a workspace teammate (every schedule Phase 2 moved is one) ran unattended with whatever an Owner or Admin last saved. A routine now keeps its teammate's fingerprint from when its person made it, resumed it, or had it moved (prisma/sql/2026-10-08-ai-teammates-routine-print.sql). One whose teammate someone else changed pauses with its reason, and resuming it accepts the teammate as it is now. The person's own private teammate runs as it is.
+    3. "The teammate changed" told the creator only to publish again, and publishing again accepts the change unseen. A version also keeps one fingerprint per part, so the sentence names what changed (instructions, tools, approval rules and so on) and says to check the teammate before publishing again. The whole fingerprint is worked out as round 9 did, so a version published since still matches an unchanged teammate.
+    4. Routines ran about 120 an hour for the whole platform, strictly in due order, so one large workspace's 9:00 routines could push every other workspace's past the stale mark. The cron now takes 40 a tick, 8 at a time, and picks fairly across workspaces within the due window.
+  - Low:
+    - Group chats: a first answerer whose person can no longer be acted for gives its already claimed question back, and a later answerer skipped anyway keeps its own reason without a fresh read.
+    - An automation's recheck after its teammate's turn says the teammate answered, that later steps don't use it, and where the answer is, never that it "didn't run".
+    - A version published before teammate steps were checked says so and asks to publish again, never that its teammate changed.
+    - A turn is told at most 50 decided outcomes in all, counting those a continue's route claimed, and a note that holds a full 50 says more are waiting for the next turn.
+    - Editing a memory in the Memory tab and forgetting one take the same lock as remembering, reading the memories again inside it; an edit of a memory forgotten meanwhile says it can't be found (404).

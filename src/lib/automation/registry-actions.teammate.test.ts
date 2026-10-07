@@ -78,7 +78,7 @@ describe("{{teammate.answer}}", () => {
 
   it("fails a step that needs an answer when no teammate step before it answered, and posts nothing", async () => {
     await expect(getAction("create_task")!.execute(ctx({ stepData: { teammateFailed: true } }), { boardId: "b1", title: "{{teammate.name}} says: {{teammate.answer}}" })).rejects.toThrow(
-      "the AI teammate step before it didn't answer",
+      "the AI teammate step before it gave none to use",
     );
     // With no teammate step before it at all, it says that instead (review round 4).
     await expect(getAction("create_task")!.execute(ctx({ stepData: {} }), { boardId: "b1", title: "{{teammate.answer}}" })).rejects.toThrow(
@@ -89,7 +89,7 @@ describe("{{teammate.answer}}", () => {
 
   it("fails a step that needs the answer when the answer was empty", async () => {
     await expect(getAction("create_task")!.execute(ctx({ stepData: { teammate: { answer: "  ", name: "Triage" } } }), { boardId: "b1", title: "{{teammate.answer}}" })).rejects.toThrow(
-      "the AI teammate step before it didn't answer",
+      "the AI teammate step before it gave none to use",
     );
   });
 

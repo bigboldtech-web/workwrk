@@ -101,7 +101,7 @@ vi.mock("./engine", () => ({
   runTeammateTurn: async (a: Row) => (st.turns.push(a), st.turn),
   teammateAgentFrom: (r: Row) => ({ ...r, fromRow: true }),
 }));
-vi.mock("./routines-server", () => ({ nextRoutineRun: () => new Date("2026-10-07T11:00:00Z") }));
+vi.mock("./routines-server", () => ({ nextRoutineRun: () => new Date("2026-10-07T11:00:00Z"), routineTeammatePrint: async () => "print-at-move" }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => st.configured }));
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, event: Row) => void st.published.push({ userId, event }) }));
 
@@ -184,6 +184,8 @@ describe("moving an old schedule", () => {
         // The schedule changed, so its own next slot, not the old one.
         nextRunAt: new Date("2026-10-07T11:00:00Z"),
         createdVia: "legacy",
+        // The teammate as the old schedule ran it, at the move (review round 10).
+        teammatePrint: "print-at-move",
       },
     ]);
     expect(st.agentUpdates).toEqual([{ id: "a1", scheduleRoutineId: "r1" }]);

@@ -358,6 +358,7 @@ describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],
     creatorOnlyPublish: [["Max Member"], "Its live version has an AI teammate step that works as Max Member, so only they can publish a new version. You can still save the draft."],
+    teammateChanged: [[["instructions", "tools"]], "Whoever manages the teammate this step asks changed its instructions and tools after this automation was published, so it didn't run. Check the teammate in AI teammates before you publish the automation again."],
     creatorGoneRemove: [["Max Member"], "Its AI teammate step works as Max Member, who can no longer be acted for here, so it can't run. Remove that step to change or publish this automation."],
     pausedLabel: [["Triage"], "Triage (paused: it won't run until it is turned back on)"],
     askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],

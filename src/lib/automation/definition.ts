@@ -279,5 +279,6 @@ export function withoutSnapshotNote(definitionJson: unknown): Record<string, unk
   delete d.__snapshot;
   // The teammates' fingerprints belong to the version that was published, never to a draft.
   delete d.__teammates;
+  delete d.__teammateFields;
   return d;
 }

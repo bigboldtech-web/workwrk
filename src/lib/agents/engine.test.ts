@@ -208,7 +208,7 @@ import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, buildSystemBlocks, getO
 import { MEMORY_LIMITS } from "./memory";
 import { TURN_ERRORS } from "./teammate-copy";
 import type { AgentActionRow, TeammateStreamEvent } from "./teammate-thread";
-import { MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
+import { MAX_TOOL_CALLS_PER_TURN, OUTCOMES_PER_TURN } from "./tool-policy";
 import { AGENT_SLUG, PERSON } from "./test-fixtures";
 
 const AGENT = {
@@ -488,6 +488,23 @@ describe("what the person decided", () => {
       { type: "text", text: "[WorkwrK] Priya decided on your requests.\n<workspace_note>\n- Said no: Post in #general\n</workspace_note>" },
       { type: "text", text: "[WorkwrK] Continue the task from where you stopped. If nothing is left, say so in one line." },
     ]);
+  });
+
+  it("is told at most a turn's worth in all, and that more are waiting (review round 10)", async () => {
+    const row = (i: number): AgentActionRow => ({ id: `o${i}`, toolName: "post_in_talk", risk: "OUTWARD", status: "DENIED", preview: { title: `Post ${i}` }, createdAt: new Date(1000 + i), expiresAt: new Date() });
+    // The route claimed a full turn's worth: the engine claims none more.
+    db.replies = [reply([say("Okay.")], "end_turn")];
+    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: Array.from({ length: OUTCOMES_PER_TURN }, (_, i) => row(i)) }));
+    expect(db.claims).toBe(0);
+    const told = (lastMessage(db.requests[0]).content as Array<{ text: string }>)[0].text;
+    expect(told.endsWith("</workspace_note>\n[WorkwrK] More of Priya's decisions are waiting; they come with the next turn.")).toBe(true);
+    // Fewer: it claims only what is left of the turn's worth.
+    db.requests = [];
+    db.claimOpts = [];
+    db.replies = [reply([say("Okay.")], "end_turn")];
+    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: Array.from({ length: OUTCOMES_PER_TURN - 2 }, (_, i) => row(i)) }));
+    expect(db.claimOpts).toEqual([{ continuable: true, limit: 2 }]);
+    expect(JSON.stringify(db.requests[0].messages)).not.toContain("More of Priya");
   });
 });
 
@@ -1043,7 +1060,7 @@ describe("which outcomes a turn hears (review round 8)", () => {
       db.claimOpts = [];
       db.replies = [reply([say("Ok.")], "end_turn")];
       await runTeammateTurn(turn({ trigger, ...(trigger === "ROUTINE" ? { routine: { id: "r1", name: "Brief" } as never } : {}) }));
-      expect(db.claimOpts).toEqual([{ continuable }]);
+      expect(db.claimOpts).toEqual([{ continuable, limit: OUTCOMES_PER_TURN }]);
     }
   });
 });

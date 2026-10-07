@@ -25,7 +25,7 @@
 // Server-only: imports prisma.
 
 import { prisma } from "@/lib/prisma";
-import { TEAMMATE_TOOL_ERRORS, memoryFull } from "./teammate-copy";
+import { TEAMMATE_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS, memoryFull } from "./teammate-copy";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
 
@@ -94,7 +94,20 @@ function viewOf(r: { id: string; key: string; value: unknown; scope: string; sou
 
 export type RememberResult =
   | { ok: true; created: boolean; memory: MemoryView }
-  | { ok: false; error: string };
+  | { ok: false; error: string; gone?: true };
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/**
+ * One read-modify-write at a time for one teammate's memories in one scope:
+ * remembering, editing from the Memory tab and forgetting all take it, so
+ * none of them acts on a read another has since changed (review rounds 9
+ * and 10). Held to the end of the transaction.
+ */
+async function lockMemories(tx: Tx, agentId: string, scope: MemoryScope, scopeId: string): Promise<void> {
+  const lockKey = `agent-memory:${agentId}:${scope}:${scopeId}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+}
 
 /**
  * Remember one fact: the memory with the same key (matched without case) is
@@ -121,9 +134,8 @@ export async function rememberFact(a: {
   // teammate for one person (a group chat and its own chat, at once) never
   // both find no match and both add one, as two keys differing only in case
   // or spacing, or pass the limit (review round 9).
-  const lockKey = `agent-memory:${a.agentId}:${a.scope}:${scopeId}`;
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    await lockMemories(tx, a.agentId, a.scope, scopeId);
     const rows = await tx.agentMemory.findMany({
       where: { agentId: a.agentId, scope: a.scope, scopeId },
       select: { id: true, key: true },
@@ -158,19 +170,26 @@ export async function updateMemory(
   const key = patch.key !== undefined ? clampText(tidyKey(patch.key), MEMORY_LIMITS.keyMax).trim() : row.key;
   const value = patch.value !== undefined ? clampText(String(patch.value).trim(), MEMORY_LIMITS.valueMax).trim() : null;
   if (!key || value === "") return { ok: false, error: TEAMMATE_TOOL_ERRORS.memoryEmpty };
-  const others = await prisma.agentMemory.findMany({
-    where: { agentId: row.agentId, scope: row.scope, scopeId: row.scopeId, id: { not: row.id } },
-    select: { id: true, key: true },
-  });
-  const replaced = others.filter((m) => normaliseKey(m.key) === normaliseKey(key)).map((m) => m.id);
-  const [, updated] = await prisma.$transaction([
-    prisma.agentMemory.deleteMany({ where: { id: { in: replaced }, agentId: row.agentId, scope: row.scope, scopeId: row.scopeId } }),
-    prisma.agentMemory.update({
+  // Under the lock remembering takes, so a fact a chat adds under this key
+  // meanwhile is found and replaced, never left beside it (review round 10).
+  return prisma.$transaction(async (tx): Promise<RememberResult> => {
+    await lockMemories(tx, row.agentId, row.scope, row.scopeId);
+    const rows = await tx.agentMemory.findMany({
+      where: { agentId: row.agentId, scope: row.scope, scopeId: row.scopeId },
+      select: { id: true, key: true },
+    });
+    // Forgotten or replaced since the tab read it: nothing to change.
+    if (!rows.some((m) => m.id === row.id)) return { ok: false, error: TEAMMATE_ROUTE_ERRORS.memoryNotFound, gone: true };
+    const replaced = rows.filter((m) => m.id !== row.id && normaliseKey(m.key) === normaliseKey(key)).map((m) => m.id);
+    if (replaced.length > 0) {
+      await tx.agentMemory.deleteMany({ where: { id: { in: replaced }, agentId: row.agentId, scope: row.scope, scopeId: row.scopeId } });
+    }
+    const updated = await tx.agentMemory.update({
       where: { id: row.id },
       data: { key, ...(value !== null ? { value } : {}), source: "settings", createdById: editorId },
-    }),
-  ]);
-  return { ok: true, created: false, memory: viewOf(updated) };
+    });
+    return { ok: true, created: false, memory: viewOf(updated) };
+  });
 }
 
 /**
@@ -181,14 +200,17 @@ export async function updateMemory(
 export async function forgetFact(a: { agentId: string; userId: string; key: string }): Promise<{ removed: boolean; key: string | null }> {
   const match = normaliseKey(a.key);
   if (!match) return { removed: false, key: null };
-  const rows = await prisma.agentMemory.findMany({
-    where: { agentId: a.agentId, scope: "person", scopeId: a.userId },
-    select: { id: true, key: true },
+  return prisma.$transaction(async (tx) => {
+    await lockMemories(tx, a.agentId, "person", a.userId);
+    const rows = await tx.agentMemory.findMany({
+      where: { agentId: a.agentId, scope: "person", scopeId: a.userId },
+      select: { id: true, key: true },
+    });
+    const hit = rows.find((r) => normaliseKey(r.key) === match);
+    if (!hit) return { removed: false, key: null };
+    const gone = await tx.agentMemory.deleteMany({ where: { id: hit.id, agentId: a.agentId, scope: "person", scopeId: a.userId } });
+    return { removed: gone.count > 0, key: hit.key };
   });
-  const hit = rows.find((r) => normaliseKey(r.key) === match);
-  if (!hit) return { removed: false, key: null };
-  const gone = await prisma.agentMemory.deleteMany({ where: { id: hit.id, agentId: a.agentId, scope: "person", scopeId: a.userId } });
-  return { removed: gone.count > 0, key: hit.key };
 }
 
 /**

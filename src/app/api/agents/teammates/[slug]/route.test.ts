@@ -53,6 +53,8 @@ vi.mock("@/lib/agents/routines-server", async () => {
     ROUTINE_RUN_SELECT: {},
     runRoutine: vi.fn(),
     nextRoutineRun: (schedule: string, now: Date) => (parseCron(schedule) ? nextCronRun(schedule, now) : new Date(now.getTime() + 3_600_000)),
+    // The teammate as the person resumes it (review round 10).
+    routineTeammatePrint: async () => "print-now",
   };
 });
 vi.mock("@/lib/agents/autonomous", () => ({ computeNextRunAt: () => new Date("2026-10-07T09:00:00Z") }));
