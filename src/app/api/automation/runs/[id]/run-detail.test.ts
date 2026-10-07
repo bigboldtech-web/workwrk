@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => ({
           { id: "s0", order: 0, stepType: "TRIGGER", stepKey: "task.created", stepName: "task.created", status: "SUCCESS", inputJson: {}, outputJson: {}, errorMessage: null },
           { id: "s1", order: 1, stepType: "ACTION", stepKey: "ask_teammate", stepName: "ask_teammate", status: "SUCCESS", inputJson: { teammate: "t-salary-coach", request: "Summarise {{title}}" }, outputJson: { teammate: "Salary Coach", answer: ANSWER }, errorMessage: null },
           { id: "s2", order: 2, stepType: "ACTION", stepKey: "add_comment", stepName: "add_comment", status: "SUCCESS", inputJson: { body: "{{teammate.answer}}" }, outputJson: { body: ANSWER }, errorMessage: null },
+          // A later step that failed is stored with output {}: nothing to hide, so it claims nothing (review round 5).
+          { id: "s3", order: 3, stepType: "ACTION", stepKey: "create_notification", stepName: "create_notification", status: "FAILED", inputJson: { message: "x" }, outputJson: {}, errorMessage: "The AI teammate's answer is never sent to Guests, so this step didn't run." },
         ],
       }),
     },
@@ -68,6 +70,7 @@ describe("a run with an AI teammate step, in the Logs drawer", () => {
     expect(run.steps[1].outputJson).toEqual({ answerHidden: true });
     expect(run.steps[1].inputJson).toEqual({ teammate: null, request: "Summarise {{title}}" });
     expect(run.steps[2].outputJson).toEqual({ outputHidden: true });
+    expect(run.steps[3].outputJson).toEqual({});
     expect(JSON.stringify(run)).not.toMatch(/1:1 notes|Salary Coach|t-salary-coach/);
   });
 

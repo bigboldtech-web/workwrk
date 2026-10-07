@@ -36,7 +36,7 @@ import { prisma } from "@/lib/prisma";
 import { AI_ACTIONS_PER_MINUTE, aiRateLimitMessage, claimAiQuestionIn, releaseAiQuestion } from "@/lib/ai-allowance";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { ROUTINE_REASON_TEXT } from "./routines";
-import { AUTOMATION_TEAMMATE_COPY, agentCapMessage } from "./teammate-copy";
+import { AUTOMATION_TEAMMATE_COPY, TURN_ERRORS, agentCapMessage } from "./teammate-copy";
 import type { TeammateToolContext } from "./tools";
 
 export { agentCapMessage };
@@ -163,6 +163,26 @@ export async function claimTeammateTurn(a: {
     });
     return { ok: true, runId: run.id, questionId: question.id };
   });
+}
+
+/** A teammate run still open this long after it started never finished: its process stopped mid-turn. */
+export const RUN_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * A turn whose process stopped (a restart, out of memory, a cut connection
+ * that took the server with it) leaves its run PENDING, read as "Running
+ * now" in Run history for good. Each tick, one open past RUN_STALE_MS
+ * becomes FAILED with that said. Its question is kept: what the turn did
+ * before it stopped is unknown, which is the chat route's rule for a turn
+ * that threw (review round 5). Old Workspace agents runs left RUNNING by the
+ * loop Phase 2 removed are closed the same way.
+ */
+export async function sweepStaleRuns(now: Date = new Date()): Promise<number> {
+  const stale = await prisma.agentRun.updateMany({
+    where: { status: { in: ["PENDING", "RUNNING"] }, startedAt: { lt: new Date(now.getTime() - RUN_STALE_MS) } },
+    data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.didntFinish },
+  });
+  return stale.count;
 }
 
 /**

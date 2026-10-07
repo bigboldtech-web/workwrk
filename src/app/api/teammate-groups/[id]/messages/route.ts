@@ -41,7 +41,7 @@ import { abandonTurn, claimTeammateTurn, giveBackTurn, type TurnClaim } from "@/
 import { runTeammateTurn, teammateAgentFrom, type GroupTurn, type TurnResult } from "@/lib/agents/engine";
 import { pickAnswerers, type GroupMember, type SkipReason } from "@/lib/agents/group-chat";
 import { cancelLeftRequests, cancelRemovedRequests, groupMembersFor, groupNameOf, groupStillOpen, loadGroup, memberViews, namesLine, stillInGroup, type GroupRecord } from "@/lib/agents/group-server";
-import { ACTION_ERRORS, GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent } from "@/lib/agents/teammate-copy";
+import { ACTION_ERRORS, GROUP_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS } from "@/lib/agents/teammate-copy";
 import { MESSAGE_SELECT, invalidRequest, loadTeammate, messagesPage, teammateError } from "@/lib/agents/teammate-server";
 import { messageViewFromRow, type AgentActionRow, type GroupStreamEvent, type TeammateMessageView, type TeammateStreamEvent } from "@/lib/agents/teammate-thread";
 
@@ -117,7 +117,8 @@ export async function POST(req: Request, { params }: Params) {
     // A teammate removed from the group has nothing to continue here: its
     // own refusal, never "the group chat can't be found" (review round 1).
     if (!self) return teammateError(409, "not_in_group", GROUP_COPY.notInGroup);
-    if (self.status === "DISABLED" && self.usable) return teammateError(409, "agent_paused", pausedNotSent(self.name));
+    // A continue carries no message, so never "your message wasn't sent" (review round 5).
+    if (self.status === "DISABLED" && self.usable) return teammateError(409, "agent_paused", GROUP_COPY.cantContinue(self.name, GROUP_COPY.skipReason.paused));
     if (self.status === "ARCHIVED") return teammateError(409, "agent_removed", GROUP_COPY.cantContinue(self.name, GROUP_COPY.skipReason.removed));
     if (self.status !== "ENABLED" || !self.usable) return teammateError(409, "no_access", GROUP_COPY.cantContinue(self.name, GROUP_COPY.skipReason.no_access));
     const claim = await claimFor(self, "AI teammate continue", "RESUME");

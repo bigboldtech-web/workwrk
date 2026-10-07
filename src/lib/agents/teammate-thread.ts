@@ -1134,6 +1134,9 @@ export function teammateSendFailure(status: number, body: unknown): { error: Tea
   if (status === 409 && code === "no_one_to_answer") return { error: "refused", text: sentence };
   if (status === 409 && code === "agent_paused") return { error: "paused", text: sentence };
   if (status === 409 && code === "agent_removed") return { error: "removed", text: sentence };
+  // A group member the person can no longer use: the server's sentence, no
+  // Try again that would send the composer's words instead (review round 5).
+  if (status === 409 && code === "no_access") return { error: "removed", text: sentence };
   if (status === 503) return { error: "not_configured", text: sentence };
   if (status === 404) return { error: "gone", text: null };
   if (status === 403) return { error: "refused", text: sentence };

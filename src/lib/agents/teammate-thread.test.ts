@@ -519,6 +519,8 @@ describe("teammateSendFailure", () => {
     [409, { error: "Priya is paused, so your message wasn't sent.", code: "agent_paused" }, { error: "paused", text: "Priya is paused, so your message wasn't sent." }],
     [409, { error: "Priya was removed. Its chat is kept.", code: "agent_removed" }, { error: "removed", text: "Priya was removed. Its chat is kept." }],
     [409, { error: "There's nothing new to continue from.", code: "nothing_to_continue" }, { error: null, text: null }],
+    // A group continue for a member the person can no longer use: no Try again (review round 5).
+    [409, { error: "Triage can't continue here: you can no longer use it.", code: "no_access" }, { error: "removed", text: "Triage can't continue here: you can no longer use it." }],
     [503, { error: "AI isn't set up for this workspace yet.", code: "not_configured" }, { error: "not_configured", text: "AI isn't set up for this workspace yet." }],
     // The app gate's refusals carry a code in `error`, never a sentence.
     [403, { error: "app_off", app: "ai" }, { error: "ai_off", text: null }],

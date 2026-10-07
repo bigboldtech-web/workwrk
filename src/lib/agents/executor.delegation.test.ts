@@ -186,6 +186,17 @@ describe("ask_teammate", () => {
     });
   });
 
+  it("marks an answer that stopped part way, so the caller never passes it on as whole (review round 5)", async () => {
+    st.turnAnswer = { text: "Stuck: Call Acme, Renew", error: "The answer was cut short.", giveBack: false, proposedActionIds: [], messages: [] };
+    const cut = await call(ASK);
+    expect(cut.record.state).toBe("ran");
+    expect(dataOf(cut.modelContent)).toMatchObject({ answer: "Stuck: Call Acme, Renew", endedEarly: true, note: DELEGATION_COPY.endedEarlyNote("Project Manager") });
+    // Whole, only not saved in the delegate's chat: no mark.
+    st.turnAnswer = { text: "Two are stuck.", error: "The answer couldn't be saved. Check what it did before asking again.", giveBack: false, proposedActionIds: [], messages: [] };
+    const whole = await call(ASK);
+    expect(dataOf(whole.modelContent)).not.toHaveProperty("endedEarly");
+  });
+
   it("refuses a request too long to pass on, asking nobody (review round 1)", async () => {
     const r = await call({ ...ASK, request: "x".repeat(4001) });
     expect(r.record.state).toBe("failed");

@@ -314,6 +314,25 @@ function messagesUrl(slug: string, before?: string): string {
   return `${chatBase(slug)}/messages?${q.toString()}`;
 }
 
+/** How long after a send that may have left the chat is read to see whether the server took it (Ask AI's wait). */
+const UNSENT_CHECK_MS = 2500;
+
+/**
+ * Whether a send whose request may have left was saved anyway: the route
+ * claims the question and saves the message before it answers, and carries
+ * on when the connection drops before its headers come back. A moment later
+ * the chat is read: it was saved when it holds a message with these words
+ * that was not there when the send left (`known`, by id; no clock is
+ * compared). A read that fails says no, so the words come back: seeing them
+ * twice beats losing them (Ask AI's keepUnlessSaved; review round 5).
+ */
+async function sentAnyway(slug: string, text: string, known: ReadonlySet<string>): Promise<boolean> {
+  await new Promise((resolve) => setTimeout(resolve, UNSENT_CHECK_MS));
+  const r = await apiFetch<TeammateMessagesPage>(messagesUrl(slug), { cache: "no-store" });
+  const words = text.trim();
+  return r.ok && r.data.messages.some((m) => m.kind === "user" && m.text.trim() === words && !known.has(m.id));
+}
+
 /** The one reader per chat that waits for its stopped turns; each new stop takes it over. */
 const stopWatchers = new Map<string, object>();
 
@@ -537,6 +556,11 @@ function retry(slug: string): Promise<void> {
 async function stream(slug: string, body: Record<string, unknown>, start: TurnIds, text: string | null): Promise<void> {
   let ids = start;
   let serverHas = false;
+  // What the chat held when the send left, and whether it failed before the
+  // answer began (it may have been saved anyway: sentAnyway).
+  const knownAtSend = new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id));
+  const epochAtSend = epochs.get(slug) ?? 0;
+  let unknown = false;
   let sawDone = false;
   let savedRows = false;
   let broke: string | null = null;
@@ -637,7 +661,8 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     }
   } catch {
     if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
-    fail(serverHas ? "stopped" : "not_sent", null);
+    if (serverHas || text === null) fail(serverHas ? "stopped" : "not_sent", null);
+    else unknown = true;
   } finally {
     set(slug, (c) => ({
       streaming: false,
@@ -647,6 +672,20 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
     // The list's last line and unread dot, and the AI sidebar's count.
     notifyAiChatsChanged();
     void afterTurn(slug);
+  }
+  // Failed before the answer began: "Not sent", with the words back, only
+  // when the server did not take it; else it waits for the answer as a turn
+  // that broke off, so a resend never asks and pays twice.
+  if (unknown && text !== null) {
+    const saved = await sentAnyway(slug, text, knownAtSend);
+    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
+      // Another send began meanwhile: its row is its own. Words the server
+      // never took still come back to the composer.
+      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false) }));
+      return;
+    }
+    serverHas = saved;
+    fail(saved ? "stopped" : "not_sent", null);
   }
 }
 
@@ -662,6 +701,12 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
   let sawDone = false;
   let broke: string | null = null;
   let expect: string[] = resumeExpect ?? [];
+  // As a one-teammate send: a group message that failed before the answers
+  // began may have been saved, and asking again would ask every answerer
+  // twice (review round 5).
+  const knownAtSend = new Set(stateOf(slug).messages.filter((m) => !isTempMessage(m)).map((m) => m.id));
+  const epochAtSend = epochs.get(slug) ?? 0;
+  let unknown = false;
   const sentAt = Date.now();
   const continued = body.resume === true;
   // An answer that ended early (cut short, declined, not saved, or nothing back): its sentence shows (review of step 4).
@@ -758,7 +803,8 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
     // The connection dropping after the turn said it was done changes nothing.
     if (!sawDone) {
       if (typeof window !== "undefined" && navigator.onLine === false) window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
-      fail(serverHas ? "stopped" : "not_sent", null);
+      if (serverHas || text === null) fail(serverHas ? "stopped" : "not_sent", null);
+      else unknown = true;
     }
   } finally {
     set(slug, (c) => ({
@@ -767,6 +813,17 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
     }));
     notifyAiChatsChanged();
     void afterTurn(slug);
+  }
+  if (unknown && text !== null) {
+    const saved = await sentAnyway(slug, text, knownAtSend);
+    if ((epochs.get(slug) ?? 0) !== epochAtSend) {
+      // Another send began meanwhile: its row is its own. Words the server
+      // never took still come back to the composer.
+      if (!saved) set(slug, (c) => ({ draft: draftAfterFailure(c.draft, text, false) }));
+      return;
+    }
+    serverHas = saved;
+    fail(saved ? "stopped" : "not_sent", null);
   }
 }
 

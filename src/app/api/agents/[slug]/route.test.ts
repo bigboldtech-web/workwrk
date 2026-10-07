@@ -22,9 +22,10 @@ const mocks = vi.hoisted(() => ({
   audits: [] as Array<{ action: string; agent: { id: string; slug: string } }>,
   cancelPendingActionsOf: vi.fn<(agent: { id: string; slug: string; name: string }, now?: Date) => Promise<number>>(async () => 0),
   pauseRoutine: vi.fn<(routine: { id: string }, reason: string, agent?: { name: string; slug: string } | null) => Promise<boolean>>(async () => true),
+  // Run now starts (every refusal answers here), then finishes behind a kept-alive connection.
   runLegacyAgentNow: vi.fn<(agent: { id: string; slug: string; name: string }, viewer: { userId: string }) => Promise<unknown>>(async () => ({
     ok: true as const,
-    result: { runId: "run1", status: "SUCCEEDED" as const, waiting: 1, chatHref: "/agents?chat=deal-desk" },
+    finish: async () => ({ ok: true as const, result: { runId: "run1", status: "SUCCEEDED" as const, waiting: 1, chatHref: "/agents?chat=deal-desk" } }),
   })),
 }));
 vi.mock("@/lib/agents/audit", () => ({
@@ -35,7 +36,7 @@ vi.mock("@/lib/agents/routines-server", () => ({ pauseRoutine: mocks.pauseRoutin
 vi.mock("@/lib/agents/autonomous", () => ({
   computeNextRunAt: () => new Date("2026-10-07T09:00:00Z"),
 }));
-vi.mock("@/lib/agents/legacy-schedules", () => ({ runLegacyAgentNow: mocks.runLegacyAgentNow }));
+vi.mock("@/lib/agents/legacy-schedules", () => ({ startLegacyAgentNow: mocks.runLegacyAgentNow }));
 
 import { DELETE as removeAgent, PATCH as patchAgent } from "./route";
 import { POST as installAgent } from "./install/route";
@@ -218,7 +219,10 @@ describe("a workspace agent", () => {
     // What Run now sends is still edited here.
     expect((await call(patchSchedule(jsonRequest("PATCH", { autonomousPrompt: "Flag deals stuck a week." }), slugged("deal-desk")))).status).toBe(200);
     expect(db.agents[0]).toMatchObject({ autonomousPrompt: "Flag deals stuck a week.", autonomousEnabled: false });
-    const ran = await call(runNow(jsonRequest("POST"), slugged("deal-desk")));
+    const ranRes = (await runNow(jsonRequest("POST"), slugged("deal-desk"))) as Response;
+    // Kept alive while the turn runs (review round 5): JSON read past any spaces.
+    expect(ranRes.headers.get("X-Accel-Buffering")).toBe("no");
+    const ran = { status: ranRes.status, body: await ranRes.json() };
     expect(ran).toEqual({ status: 200, body: { result: { runId: "run1", status: "SUCCEEDED", waiting: 1, chatHref: "/agents?chat=deal-desk" } } });
     expect(mocks.runLegacyAgentNow).toHaveBeenCalledTimes(1);
     // It runs as the Admin who clicked, never its creator.
@@ -229,6 +233,25 @@ describe("a workspace agent", () => {
     expect((await call(installAgent(jsonRequest("POST"), slugged("deal-desk")))).status).toBe(200);
     expect(db.agents[0].status).toBe("ENABLED");
     expect(mocks.audits.map((a) => a.action)).toEqual(["paused", "turned_on", "schedule_changed", "run_now", "added"]);
+  });
+
+  it("keeps a long run's connection alive with spaces the result's JSON reads past (review round 5)", async () => {
+    seedAgent({ slug: "deal-desk", name: "Deal desk", toolNames: null });
+    db.viewer = PEOPLE.admin;
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let finish: (v: unknown) => void = () => {};
+      mocks.runLegacyAgentNow.mockImplementationOnce(async () => ({ ok: true, finish: () => new Promise((r) => (finish = r)) }));
+      const res = (await runNow(jsonRequest("POST"), slugged("deal-desk"))) as Response;
+      const reading = res.text();
+      await vi.advanceTimersByTimeAsync(31_000);
+      finish({ ok: true, result: { runId: "run1", status: "SUCCEEDED", waiting: 0, chatHref: "/agents?chat=deal-desk" } });
+      const text = await reading;
+      expect(text.startsWith("  ")).toBe(true);
+      expect(JSON.parse(text)).toEqual({ result: { runId: "run1", status: "SUCCEEDED", waiting: 0, chatHref: "/agents?chat=deal-desk" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("answers a Run now refusal with its sentence, code and wait (Phase 2)", async () => {

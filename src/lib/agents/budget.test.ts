@@ -77,8 +77,8 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import { AI_ACTIONS_PER_MINUTE } from "@/lib/ai-allowance";
-import { agentMonthUsage, claimTeammateTurn, giveBackTurn } from "./budget";
-import { AUTOMATION_TEAMMATE_COPY } from "./teammate-copy";
+import { RUN_STALE_MS, agentMonthUsage, claimTeammateTurn, giveBackTurn, sweepStaleRuns } from "./budget";
+import { AUTOMATION_TEAMMATE_COPY, TURN_ERRORS } from "./teammate-copy";
 
 let n = 0;
 
@@ -274,5 +274,22 @@ describe("giveBackTurn", () => {
     await giveBackTurn("run7", "q7");
     expect(db.deleted).toEqual(["q7"]);
     expect(db.runUpdates).toEqual([{ where: { id: "run7", questionId: "q7" }, data: { questionId: null } }]);
+  });
+});
+
+describe("sweepStaleRuns (review round 5)", () => {
+  it("closes a run left open past the window as not finished, and keeps its question", async () => {
+    db.runUpdates = [];
+    const now = new Date("2026-10-08T10:00:00Z");
+    expect(await sweepStaleRuns(now)).toBe(1);
+    expect(db.runUpdates).toEqual([
+      {
+        where: { status: { in: ["PENDING", "RUNNING"] }, startedAt: { lt: new Date(now.getTime() - RUN_STALE_MS) } },
+        data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.didntFinish },
+      },
+    ]);
+    // The question is kept: nothing touches questionId.
+    expect(db.runUpdates[0].data).not.toHaveProperty("questionId");
+    expect(RUN_STALE_MS).toBe(30 * 60 * 1000);
   });
 });

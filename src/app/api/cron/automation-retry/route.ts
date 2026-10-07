@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { processAutomationRetries } from "@/lib/automation/retry";
+import { failStaleRuns, processAutomationRetries } from "@/lib/automation/retry";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
 
@@ -11,8 +11,10 @@ import { cronJob } from "@/lib/cron-result";
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
+  // A run whose process stopped part way reads FAILED, not "Running" for good.
+  const stale = await failStaleRuns();
   const result = await processAutomationRetries();
-  return Response.json({ ran: true, at: new Date().toISOString(), ...result });
+  return Response.json({ ran: true, at: new Date().toISOString(), ...result, stale });
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

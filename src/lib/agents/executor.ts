@@ -41,7 +41,7 @@ import { actorLabelFor, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
 import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
 import { prepareCall, type Prepared } from "./previews";
-import { ACTION_ERRORS, DELEGATION_COPY, TEAMMATE_TOOL_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
+import { ACTION_ERRORS, DELEGATION_COPY, TALK_TEAMMATE_COPY, TEAMMATE_TOOL_ERRORS, TURN_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
 import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
 import {
@@ -284,12 +284,21 @@ async function runDelegation(
   if (!turn || (!turn.text.trim() && turn.error)) {
     return done("failed", { error: DELEGATION_COPY.delegateNoAnswer(delegate.name), ...waits }, { errorText: DELEGATION_COPY.delegateNoAnswer(delegate.name) });
   }
+  // An answer cut short or declined part way is said to be one, so the
+  // caller never passes it on as whole (review round 5). An answer that only
+  // failed to save in the delegate's chat is whole.
+  const endedEarly = Boolean(turn.error) && turn.error !== TURN_ERRORS.notSaved;
+  const notes = [
+    ...(endedEarly ? [DELEGATION_COPY.endedEarlyNote(delegate.name)] : []),
+    ...(titles.length > 0 ? [DELEGATION_COPY.waitingNote(a.person.firstName, delegate.name)] : []),
+  ];
   return done("ran", {
     ok: true,
     teammate: { name: delegate.name },
     answer: clampText(turn.text, DELEGATE_ANSWER_MAX),
+    ...(endedEarly ? { endedEarly: true } : {}),
     waiting: titles.map((title) => ({ title })),
-    ...(titles.length > 0 ? { note: DELEGATION_COPY.waitingNote(a.person.firstName, delegate.name) } : {}),
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
   });
 }
 
@@ -301,9 +310,12 @@ async function runDelegation(
 export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const started = Date.now();
   const input = record(a.input);
+  // Set once a call is past the reads (below): a Talk turn's writes tell the
+  // model only how they went.
+  let talkWrite = false;
   const done = (state: CallState, result: unknown, extra: { errorText?: string; actionId?: string } = {}): ExecuteResult => ({
     record: { name: a.name, input, result, errorText: extra.errorText ?? null, durationMs: Date.now() - started, state, actionId: extra.actionId ?? null },
-    modelContent: wrapToolData(a.name, result),
+    modelContent: wrapToolData(a.name, talkWrite ? toldInTalk(state, result) : result),
     isError: state === "failed",
   });
   const refuse = (error: string, detail?: Record<string, unknown>) => done("failed", { ...detail, error });
@@ -338,6 +350,12 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     return done(toolOutcome(name, ran.result).failed ? "failed" : "ran", ran.result);
   }
 
+  // A Talk answer posts with no card to people who may not open what a write
+  // names: a task's title, its List, a doc, a channel, or the Lists a
+  // refusal offers. In a Talk turn the model hears only that the call ran,
+  // waits or failed; the names stay on the card and in the person's own chat
+  // (review round 5).
+  talkWrite = a.turn.trigger === "TALK";
   const prepared = await prepareCall(name, checked.input, {
     person: a.person,
     teammate: { agentId: a.agent.id, agentName: a.agent.name, trigger: a.turn.trigger },
@@ -407,6 +425,14 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     if (message) a.emit?.({ type: "event", message });
   }
   return done("ran", ran.result);
+}
+
+/** What a Talk turn's model hears of a write: how it went, never what it names (see executeToolCall). */
+function toldInTalk(state: CallState, result: unknown): Record<string, unknown> {
+  const r = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+  if (state === "waiting") return { status: "waiting_for_approval", actionId: r.actionId ?? null, note: TALK_TEAMMATE_COPY.toldWaiting };
+  if (state === "failed") return { error: TALK_TEAMMATE_COPY.toldFailed };
+  return { ok: true, note: TALK_TEAMMATE_COPY.toldDone };
 }
 
 /** A call the person's own "Don't ask" lets run: on record as decided by their rule, RUNNING, and already reported. */

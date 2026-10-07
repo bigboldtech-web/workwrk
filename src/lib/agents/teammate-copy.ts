@@ -662,6 +662,8 @@ export const TURN_ERRORS = {
   noAnswer: "The AI service didn't answer. Try again.",
   /** The turn ran, but its answer could not be written to the chat. */
   notSaved: "The answer couldn't be saved. Check what it did before asking again.",
+  /** A run its process never finished (budget.ts sweepStaleRuns). */
+  didntFinish: "This run stopped part way and didn't finish. Check what it did before asking again.",
 } as const;
 
 // ── New teammate dialog ──────────────────────────────────────────────
@@ -995,8 +997,8 @@ export interface ToolPickerCopy {
 }
 
 /**
- * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 10
- * teammate tools (tool-names.ts). Typed by ToolName, so a tool with no label
+ * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 11
+ * teammate tools, 39 in all (tool-names.ts). Typed by ToolName, so a tool with no label
  * is a compile error; teammate-copy.test.ts holds it to every name too.
  */
 export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
@@ -1227,6 +1229,8 @@ export const DELEGATION_COPY = {
   delegateNoAnswer: (n: string) => `${n} didn't answer.`,
   requestTooLong: (max: number) => `That request is longer than ${max.toLocaleString("en-US")} characters, so nothing was asked. Shorten it or split it into parts.`,
   waitingNote: (first: string, n: string) => `These wait for ${first}'s approval in ${n}'s chat. Don't ask for them again.`,
+  /** A delegate's answer that stopped part way (cut short, or declined): never passed on as whole (review round 5). */
+  endedEarlyNote: (n: string) => `${n}'s answer stopped part way, so it may be missing something. Say so, and don't pass it on as complete.`,
   /** The Run history label of a delegated turn. */
   triggerLabel: "Asked by a teammate",
 } as const;
@@ -1251,6 +1255,14 @@ export const TALK_TEAMMATE_COPY = {
   tooManyPeople: "AI teammates can be asked only where there are at most 250 people.",
   askedLine: (place: string, req: string) => `Asked in ${place}: ${req}`,
   answeredIn: (place: string) => `Answered in ${place}`,
+  /**
+   * What a Talk turn's model hears of a write (executor.ts toldInTalk): how it
+   * went, never what it names, since the answer posts to everyone there
+   * (review round 5). The names are on the card in the person's own chat.
+   */
+  toldWaiting: "Asked the person to approve it in their chat with you. Don't name what it is for here: not everyone here may open it.",
+  toldDone: "Done. Don't name what changed here: not everyone here may open it.",
+  toldFailed: "That didn't go through, and nothing changed. The details stay out of Talk: the person can ask again in their chat with you.",
   /** The audit log's words for a direct message: admins read it, so never "your chat with" (review round 4). */
   auditDmPlace: "a direct message",
   guestCannot: "Guests can't ask AI teammates.",

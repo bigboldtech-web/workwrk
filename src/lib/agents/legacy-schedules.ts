@@ -34,7 +34,7 @@ import type { Viewer } from "@/lib/access/types";
 import { isAiConfigured } from "@/lib/ai-client";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
-import { personZone, resolveActingPerson } from "./acting";
+import { personZone, resolveActingPerson, type ActingPerson } from "./acting";
 import { writeEventLine } from "./actions";
 import { auditAgent } from "./audit";
 import { abandonTurn, claimTeammateTurn, giveBackTurn } from "./budget";
@@ -269,7 +269,9 @@ export type RunNowAnswer =
 
 const chatHrefOf = (slug: string) => `/agents?chat=${encodeURIComponent(slug)}`;
 
-const refuse = (status: number, code: string, error: string, retryAfter?: number): RunNowAnswer => ({
+type RunNowRefusal = Extract<RunNowAnswer, { ok: false }>;
+
+const refuse = (status: number, code: string, error: string, retryAfter?: number): RunNowRefusal => ({
   ok: false,
   status,
   code,
@@ -284,6 +286,22 @@ const refuse = (status: number, code: string, error: string, retryAfter?: number
  * meta.runNow. The caller has checked the agent is a workspace one and ON.
  */
 export async function runLegacyAgentNow(agent: { id: string; slug: string; name: string }, viewer: Viewer): Promise<RunNowAnswer> {
+  const started = await startLegacyAgentNow(agent, viewer);
+  return started.ok ? started.finish() : started;
+}
+
+/**
+ * Run now in two parts: everything that can refuse it (the person, the
+ * agent, AI set up, the question claimed, the message saved) answers at
+ * once; `finish` runs the turn, which takes up to a minute or two. The route
+ * answers the refusals with their own status, then keeps the connection
+ * alive while the turn runs, so a proxy never cuts a long run short and the
+ * page never says it didn't start while it ran (review round 5).
+ */
+export async function startLegacyAgentNow(
+  agent: { id: string; slug: string; name: string },
+  viewer: Viewer,
+): Promise<RunNowRefusal | { ok: true; finish: () => Promise<RunNowAnswer> }> {
   const acting = await resolveActingPerson(viewer.organizationId, viewer.userId);
   if (!acting.ok) return refuse(403, "person_cannot", ACTION_ERRORS.personCannot);
   const person = acting.person;
@@ -326,6 +344,22 @@ export async function runLegacyAgentNow(agent: { id: string; slug: string; name:
     return refuse(500, "not_saved", TEAMMATE_ROUTE_ERRORS.messageNotSaved);
   }
 
+  return { ok: true, finish: () => finishRunNow({ row, person, sessionId: session.id, prompt, userMessageId, runId: claim.runId, questionId: claim.questionId }) };
+}
+
+/** The turn of a Run now that started (startLegacyAgentNow). Never throws. */
+async function finishRunNow(a: {
+  row: Parameters<typeof teammateAgentFrom>[0];
+  person: ActingPerson;
+  sessionId: string;
+  prompt: string;
+  userMessageId: string;
+  runId: string;
+  questionId: string;
+}): Promise<RunNowAnswer> {
+  const { row, person, prompt, userMessageId } = a;
+  const claim = { runId: a.runId, questionId: a.questionId };
+  const session = { id: a.sessionId };
   let turn: TurnResult;
   try {
     turn = await runTeammateTurn({

@@ -68,12 +68,14 @@ describe("hideTeammateAnswers", () => {
   });
 
   it("claims no hidden answer for a step that returned nothing (review round 4)", () => {
+    // As the engine stores a failed step: status FAILED, output {} (review round 5).
     const failed = [
-      { order: 1, stepType: "ACTION", stepKey: "ask_teammate", inputJson: { teammate: "t-salary-coach", request: "x" } as unknown, outputJson: null },
-      { order: 2, stepType: "ACTION", stepKey: "add_comment", outputJson: null },
+      { order: 1, stepType: "ACTION", stepKey: "ask_teammate", status: "FAILED", inputJson: { teammate: "t-salary-coach", request: "x" } as unknown, outputJson: {} as unknown },
+      { order: 2, stepType: "ACTION", stepKey: "add_comment", status: "FAILED", outputJson: {} as unknown },
+      { order: 3, stepType: "ACTION", stepKey: "add_comment", status: "SUCCESS", outputJson: { body: "x" } as unknown },
     ];
     const out = hideTeammateAnswers(failed);
-    expect(out.map((s) => s.outputJson)).toEqual([null, null]);
+    expect(out.map((s) => s.outputJson)).toEqual([{}, {}, { outputHidden: true }]);
     expect(out[0].inputJson).toEqual({ teammate: null, request: "x" });
   });
 

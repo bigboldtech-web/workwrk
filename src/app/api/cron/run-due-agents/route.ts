@@ -3,7 +3,9 @@
 // Cron-tickable endpoint, call this from Vercel Cron, a server cron, or any
 // scheduler. Each tick, in this order:
 //   1. AI teammates' approval requests nobody answered in time expire, and
-//      one stuck running is failed (src/lib/agents/actions.ts sweepActions).
+//      one stuck running is failed (src/lib/agents/actions.ts sweepActions);
+//      a teammate run whose process stopped mid-turn reads as not finished
+//      (src/lib/agents/budget.ts sweepStaleRuns).
 //   2. AI teammates' routines that are due run, each slot claimed once
 //      (src/lib/agents/routines-server.ts processDueRoutines), within their
 //      own budget: they are time-sensitive (a 9:00 brief), so they go first.
@@ -25,6 +27,7 @@
 // CRON_SECRET for the dev server and send it.
 
 import { sweepActions } from "@/lib/agents/actions";
+import { sweepStaleRuns } from "@/lib/agents/budget";
 import { convertLegacySchedules, type LegacyScheduleCounts } from "@/lib/agents/legacy-schedules";
 import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines-server";
 import { cronRefusal } from "@/lib/cron-auth";
@@ -56,6 +59,15 @@ async function handle(req: Request) {
     console.error(`[cron-failure] run-due-agents: the approval sweep threw: ${errorLine(err)}`);
   }
 
+  // A run whose process stopped mid-turn reads "didn't finish", not "Running now" for good.
+  let staleRuns: number | null = null;
+  try {
+    staleRuns = await sweepStaleRuns(now);
+  } catch (err) {
+    stepsFailed += 1;
+    console.error(`[cron-failure] run-due-agents: the stale run sweep threw: ${errorLine(err)}`);
+  }
+
   // 2. Due routines, first of the work and within their own budget.
   let routines: DueRoutineCounts | null = null;
   try {
@@ -78,7 +90,7 @@ async function handle(req: Request) {
   // move: it is left for the next tick, but nothing runs it until it moves,
   // so someone is told (review of step 2). One routine's failure stays on
   // the routine and in its chat.
-  return cronResult("run-due-agents", { actions, routines, legacySchedules: legacy }, stepsFailed + (legacy?.failed ?? 0));
+  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy }, stepsFailed + (legacy?.failed ?? 0));
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

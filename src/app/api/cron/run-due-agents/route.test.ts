@@ -12,12 +12,14 @@ const st = vi.hoisted(() => ({
   sweepActions: vi.fn(),
   processDueRoutines: vi.fn(),
   convertLegacySchedules: vi.fn(),
+  sweepStaleRuns: vi.fn(),
 }));
 
 vi.mock("@/lib/email", () => ({ queueEmail: async () => {} }));
 vi.mock("@/lib/cron-auth", () => ({ cronRefusal: () => null }));
 vi.mock("@/lib/prisma", () => ({ prisma: { emailLog: { findFirst: async () => null } } }));
 vi.mock("@/lib/agents/actions", () => ({ sweepActions: st.sweepActions }));
+vi.mock("@/lib/agents/budget", () => ({ sweepStaleRuns: st.sweepStaleRuns }));
 vi.mock("@/lib/agents/routines-server", () => ({ processDueRoutines: st.processDueRoutines }));
 vi.mock("@/lib/agents/legacy-schedules", () => ({ convertLegacySchedules: st.convertLegacySchedules }));
 
@@ -39,6 +41,10 @@ beforeEach(() => {
     st.order.push("sweep");
     return { expired: 2, stuck: 1 };
   });
+  st.sweepStaleRuns.mockReset().mockImplementation(async () => {
+    st.order.push("stale");
+    return 1;
+  });
   st.processDueRoutines.mockReset().mockImplementation(async () => {
     st.order.push("routines");
     return COUNTS;
@@ -58,7 +64,7 @@ describe("one tick", () => {
   it("sweeps first, then runs the routines with their own budget, then moves the old schedules", async () => {
     const out = await run();
     expect(out.status).toBe(200);
-    expect(st.order).toEqual(["sweep", "routines", "legacy"]);
+    expect(st.order).toEqual(["sweep", "stale", "routines", "legacy"]);
     const now = st.sweepActions.mock.calls[0][0] as Date;
     expect(now.toISOString()).toBe("2026-10-06T09:00:00.000Z");
     expect(st.processDueRoutines).toHaveBeenCalledWith(now, { limit: 20, budgetMs: 180_000, concurrency: 4 });
@@ -67,18 +73,19 @@ describe("one tick", () => {
 
   it("answers in counts only, naming nobody", async () => {
     const { body } = await run();
-    expect(body).toMatchObject({ actions: { expired: 2, stuck: 1 }, routines: COUNTS, legacySchedules: MOVED });
+    expect(body).toMatchObject({ actions: { expired: 2, stuck: 1 }, staleRuns: 1, routines: COUNTS, legacySchedules: MOVED });
     for (const v of [...Object.values(body.actions), ...Object.values(body.routines), ...Object.values(body.legacySchedules)]) expect(typeof v).toBe("number");
     expect(body).not.toHaveProperty("runs");
   });
 
   it("still runs every later step when one throws, and fails the tick", async () => {
     st.sweepActions.mockRejectedValueOnce(new Error("sweep down"));
+    st.sweepStaleRuns.mockRejectedValueOnce(new Error("stale down"));
     st.processDueRoutines.mockRejectedValueOnce(new Error("routines down"));
     const out = await run();
     expect(st.order).toEqual(["legacy"]);
     expect(out.status).toBe(500);
-    expect(out.body).toMatchObject({ actions: null, routines: null, legacySchedules: MOVED });
+    expect(out.body).toMatchObject({ actions: null, staleRuns: null, routines: null, legacySchedules: MOVED });
   });
 
   it("fails the tick when a schedule did not move, so someone is told (review of step 2)", async () => {
@@ -91,7 +98,7 @@ describe("one tick", () => {
   it("fails the tick when the move throws, after the routines ran", async () => {
     st.convertLegacySchedules.mockRejectedValueOnce(new Error("move down"));
     const out = await run();
-    expect(st.order).toEqual(["sweep", "routines"]);
+    expect(st.order).toEqual(["sweep", "stale", "routines"]);
     expect(out.status).toBe(500);
     expect(out.body).toMatchObject({ routines: COUNTS, legacySchedules: null });
   });
