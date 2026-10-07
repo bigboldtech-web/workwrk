@@ -324,14 +324,34 @@ async function refresh(id: string): Promise<boolean> {
   const gen = generation;
   const r = await apiFetch<SessionRead>(`/api/sidekick/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (gen !== generation || state.streaming || !r.ok) return false;
-  const messages = r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null);
+  const fresh = r.data.messages.map(messageFromApi).filter((m): m is AiMessage => m !== null);
   set((s) => ({
-    messages,
-    actions: r.data.actions ?? s.actions,
+    // The server can be behind a turn this tab already drew: an answer that
+    // broke off is saved, with its card, only when the route's loop ends.
+    // Until the server holds an answer after its last question, the rows this
+    // tab drew after that question (the tool rows, the card) stay on screen.
+    messages: [...fresh, ...unsavedTail(s.messages, fresh)],
+    actions: { ...s.actions, ...(r.data.actions ?? {}) },
     meta: s.meta ? { ...s.meta, title: r.data.session.title ?? s.meta.title, pinned: r.data.session.pinned, archived: Boolean(r.data.session.archived) } : s.meta,
   }));
-  return lastTurn(messages)?.role === "ASSISTANT";
+  return lastTurn(fresh)?.role === "ASSISTANT";
 }
+
+/** The rows this tab drew after its last question that the server does not hold yet; none once it holds an answer. */
+function unsavedTail(local: readonly AiMessage[], fresh: readonly AiMessage[]): AiMessage[] {
+  if (lastTurn(fresh)?.role === "ASSISTANT") return [];
+  let lastQuestion = -1;
+  for (let i = local.length - 1; i >= 0; i--) {
+    if (local[i].role === "USER") {
+      lastQuestion = i;
+      break;
+    }
+  }
+  return lastQuestion < 0 ? [] : local.slice(lastQuestion + 1).filter((m) => isLocalRow(m.id));
+}
+
+/** When an answer that broke off is read again: soon, then less often, until the server holds it. */
+const STOPPED_CHECKS_MS = [2_500, 10_000, 30_000, 60_000];
 
 /**
  * A new chat: the landing, optionally bound to an agent, optionally with
@@ -450,15 +470,25 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       return;
     }
     if (serverHasMessage && kind === "stopped" && sessionId) {
-      // The route saves the answer even after the connection drops, so read
-      // the chat again before offering Try again (which would ask twice).
+      // The route saves the answer even after the connection drops, but only
+      // when its loop ends, so read the chat again, soon and then less often,
+      // until the answer is there (Try again would ask twice). It stops once
+      // the person moves on or does something else with the error.
       const id = sessionId;
-      window.setTimeout(() => {
-        void refresh(id).then((answered) => {
-          if (!answered || gen !== generation) return;
-          set((s) => ({ error: s.error === "stopped" ? null : s.error, draft: s.draft === text ? "" : s.draft }));
-        });
-      }, 2500);
+      const check = (i: number) => {
+        setTimeout(() => {
+          if (gen !== generation || state.error !== "stopped") return;
+          void refresh(id).then((answered) => {
+            if (gen !== generation) return;
+            if (answered) {
+              set((s) => ({ error: s.error === "stopped" ? null : s.error, draft: s.draft === text ? "" : s.draft }));
+            } else if (state.error === "stopped" && i + 1 < STOPPED_CHECKS_MS.length) {
+              check(i + 1);
+            }
+          });
+        }, STOPPED_CHECKS_MS[i]);
+      };
+      check(0);
     }
     if (serverHasMessage) {
       // The question is saved: keep it, drop an answer that never started,
