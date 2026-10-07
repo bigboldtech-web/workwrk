@@ -83,6 +83,7 @@ export function MessageBox({
   onCancel,
   disabled = false,
   teammates = [],
+  teammateHint = null,
 }: {
   members: { userId: string; user: ChatUserLite }[];
   meId: string | null;
@@ -105,6 +106,8 @@ export function MessageBox({
   disabled?: boolean;
   /** The person's AI teammates that can be asked here: the @ list offers them under their own heading. */
   teammates?: readonly MentionTeammate[];
+  /** Why none can be asked here (a Guest is in it, a public channel), for a person who has some: shown under that heading. */
+  teammateHint?: string | null;
 }) {
   const [input, setInput] = useState(initialValue);
   const [files, setFiles] = useState<File[]>([]);
@@ -161,6 +164,9 @@ export function MessageBox({
     const q = mentionQuery.toLowerCase();
     return teammates.filter((t) => t.name.toLowerCase().includes(q)).slice(0, 4);
   }, [mentionQuery, teammates]);
+  // Why no teammate can be asked here, when the person typed "@" alone or a
+  // name no one here has: never under a colleague's name they are mentioning.
+  const showHint = mentionQuery !== null && teammates.length === 0 && Boolean(teammateHint) && (mentionQuery === "" || mentionMatches.length === 0);
   // One list for the keys: people first, then teammates.
   const allMatches = useMemo(
     () => [
@@ -467,7 +473,7 @@ export function MessageBox({
       ) : null}
 
       {/* Mention autocomplete */}
-      {allMatches.length > 0 && (
+      {(allMatches.length > 0 || showHint) && (
         <div className="absolute bottom-full start-2 z-20 mb-1 w-64 rounded-lg border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]">
           {allMatches.map((m, i) => (
             <Fragment key={m.key}>
@@ -490,6 +496,12 @@ export function MessageBox({
               </button>
             </Fragment>
           ))}
+          {showHint ? (
+            <>
+              <div className="px-2.5 pb-1 pt-1.5 text-micro uppercase tracking-[0.06em] text-ink-2">{TALK_TEAMMATE_COPY.pickerHeading}</div>
+              <p className="px-2.5 pb-1.5 text-xs text-ink-2">{teammateHint}</p>
+            </>
+          ) : null}
         </div>
       )}
 

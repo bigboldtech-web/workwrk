@@ -43,6 +43,7 @@ import { prisma } from "@/lib/prisma";
 import { isAiConfigured } from "@/lib/ai-client";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { publishToConversation, publishToUser } from "@/lib/realtime-bus";
+import type { Viewer } from "@/lib/access/types";
 import { canPost } from "@/lib/talk-access";
 import { loadConversationRole, requireConversation } from "@/lib/talk-gate";
 import { afterMessageSent, insertConversationMessage } from "@/lib/talk-post";
@@ -74,6 +75,25 @@ const REFUSAL: Record<TalkAddressRefusal, { status: number; code: string; error:
   too_many_people: { status: 403, code: "too_many_people", error: TALK_TEAMMATE_COPY.tooManyPeople },
 };
 
+/**
+ * Why the @ list offers no teammates here, for a person who has some: the
+ * refusal's own sentence, shown under the list's "AI teammates" heading
+ * (docs/plans/ai-teammates-phase2.md step 6, teammateHint; found by the
+ * Phase 2 live proof). Null for someone with none, so the list never
+ * explains a feature they do not use, and for a Guest.
+ */
+async function refusalHint(reason: TalkAddressRefusal, viewer: Viewer): Promise<string | null> {
+  if (reason === "guest") return null;
+  const rows = await prisma.agent
+    .findMany({
+      where: { organizationId: viewer.organizationId, status: "ENABLED", ...agentUsableWhere(viewer.userId) },
+      select: { organizationId: true, visibility: true, ownerId: true },
+      take: 20,
+    })
+    .catch(() => []);
+  return rows.some((r) => canUseAgent(r, viewer)) ? REFUSAL[reason].error : null;
+}
+
 export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
   const { error, ctx } = await requireConversation(id, { floor: "view" });
@@ -84,10 +104,10 @@ export async function GET(_req: Request, { params }: Params) {
   // What needs no member read first: a public channel of any size answers
   // without one (review round 8). Then one bounded read.
   const early = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: false });
-  if (early) return NextResponse.json({ addressable: false, reason: early, teammates: [] });
+  if (early) return NextResponse.json({ addressable: false, reason: early, teammates: [], hint: await refusalHint(early, viewer) });
   const audience = await conversationAudience(id, ctx.gate.organizationId);
   const reason = talkAddressRefusal(ctx.conversation, ctx.viewer, { isMember: ctx.viewer.isMember, hasGuests: audience.hasGuests, tooManyPeople: audience.tooMany });
-  if (reason) return NextResponse.json({ addressable: false, reason, teammates: [] });
+  if (reason) return NextResponse.json({ addressable: false, reason, teammates: [], hint: await refusalHint(reason, viewer) });
   const rows = await prisma.agent.findMany({
     where: { organizationId: viewer.organizationId, status: "ENABLED", ...agentUsableWhere(viewer.userId) },
     select: { slug: true, name: true, hue: true, avatar: true, organizationId: true, visibility: true, ownerId: true },

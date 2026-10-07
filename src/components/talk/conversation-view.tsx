@@ -617,19 +617,23 @@ export function ConversationView({
   // changes in another tab, so it never offers what the server will refuse
   // (review round 6). A read that fails keeps what was there.
   const [askable, setAskable] = useState<MentionTeammate[]>([]);
+  // Why none can be asked here, for a person who has some (the GET's hint).
+  const [askHint, setAskHint] = useState<string | null>(null);
   const [askTick, setAskTick] = useState(0);
   // Who is here, by id (a member's meta carries the list, not memberCount; review round 7).
   const askKey = meta ? `${meta.members.map((m) => m.userId).sort().join(",")}:${String(meta.restricted)}:${String(meta.archivedAt ?? "")}` : "";
   useEffect(() => {
     setAskable([]);
+    setAskHint(null);
   }, [id]);
   useEffect(() => {
     let alive = true;
     void fetch(`/api/conversations/${id}/teammates`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { addressable?: boolean; teammates?: MentionTeammate[] } | null) => {
+      .then((d: { addressable?: boolean; teammates?: MentionTeammate[]; hint?: string | null } | null) => {
         if (!alive || !d) return;
         setAskable(d.addressable && Array.isArray(d.teammates) ? d.teammates : []);
+        setAskHint(!d.addressable && typeof d.hint === "string" ? d.hint : null);
       })
       .catch(() => {});
     return () => {
@@ -1728,6 +1732,7 @@ export function ConversationView({
                 placeholder={`Message ${title}`}
                 sendVariant={primarySend ? "primary" : "ghost"}
                 teammates={askable}
+                teammateHint={askHint}
                 onSend={sendMain}
                 onError={(msg) => toast(msg, { tone: "danger" })}
                 onJumpToLast={() => {
@@ -1751,6 +1756,7 @@ export function ConversationView({
               memberNames={memberNames}
               members={meta.members}
               teammates={askable}
+              teammateHint={askHint}
               canWrite={reactable}
               loading={thread.loading}
               onSend={sendThreadReply}

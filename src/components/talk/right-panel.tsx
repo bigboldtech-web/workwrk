@@ -103,6 +103,7 @@ export function ThreadView({
   memberNames,
   members,
   teammates = [],
+  teammateHint = null,
   canWrite,
   loading,
   onSend,
@@ -121,6 +122,8 @@ export function ThreadView({
   members: { userId: string; user: ChatUserLite }[];
   /** The AI teammates that can be asked here: a thread reply can ask one too. */
   teammates?: readonly MentionTeammate[];
+  /** Why none can be asked here, for a person who has some. */
+  teammateHint?: string | null;
   canWrite: boolean;
   loading: boolean;
   onSend: (payload: MessagePayload) => void;
@@ -184,6 +187,7 @@ export function ThreadView({
           <MessageBox
             members={members}
             teammates={teammates}
+            teammateHint={teammateHint}
             meId={meId}
             placeholder="Reply…"
             autoFocus
