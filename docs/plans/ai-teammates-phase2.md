@@ -1505,3 +1505,21 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     - A teammate's answer inside an AI teammate step's own request is refused at publish, with its own sentence.
     - A Run now message shows "Sent by Run now", and the list reads "Run now:", never "You:"; a Run now whose answer was cut off says it started and keeps Run now off until the run ends.
     - Recorded, not changed: the Talk five-a-minute limit and the shared AI per-minute limit are kept in each server process, as every limit in rate-limit-memory.ts is. Spend stays bounded by the plan's questions and each teammate's month, which the database holds. A shared store is a platform change for when the app runs more than one process (founder list).
+- **Step 8, review round 9** (three read-only reviewers: round 8's fixes, a fresh pass on route authorization, a fresh pass on races): 19 found, 16 unique (no high, 7 medium), 15 fixed and 1 recorded.
+  - Medium:
+    1. A group message's later answerers, and each teammate a Chief of Staff asks, started new turns as the person read at the start: someone deactivated, made a Guest or with AI turned off meanwhile kept having turns in their name. The person is read again before each later answerer and each delegation, and one who can no longer be acted for starts nothing more.
+    2. An Admin could rewrite a workspace teammate that a Member's automation runs as that Member, unattended. A published version now keeps a fingerprint of each teammate it asks (name, job, instructions, tools, rules, model); a step whose workspace teammate changed since does not run and says to publish again. The creator's own private teammate is theirs alone and runs as it is.
+    3. A paused automation, or every automation paused, still asked its teammate for events matched before the pause. The claim reads the automation's status under its lock, and the step checks the workspace pause right before it.
+    4. Scale and schedules: the schedule cron's teammate budget now also covers "A task's date arrives", its clock starts at the first teammate fire, and a fire about to leave the look-back window runs anyway, so a deferral never drops one.
+    5. The retry cron's scan leaves out runs it would always skip (a paused automation's, a retry not yet due), so they no longer hold its places.
+    6. A turn is told at most 50 decided outcomes, oldest first: months of expired cards an automation left are told a turn's worth at a time, never in one note too large to send.
+  - Low:
+    - A Talk-style recheck after an automation's turn: a creator deactivated, or a teammate paused or removed, during it gives later steps no answer.
+    - Version restore, and a save with no base revision, check the teammate-step rule again on the draft read under the row lock.
+    - Run now: its audit row is written only once the run started, naming the run; "Run now" comes back only on the run's own end (an agent.changed marked runNowDone), with a 20-minute backstop.
+    - The teammate list reads again once a burst of changes settles (400 ms), not once per change.
+    - The plain-name fallback reads names only, then loads the one that matched.
+    - The group route publishes after cancelling what a removed member or a left group asked, never before.
+    - Remembering is one read-modify-write at a time per teammate and scope (a transaction-scoped advisory lock), so two turns never add one key twice or pass the limit.
+    - The Talk route's step list says where the per-minute limit is taken now.
+    - Recorded, not changed: the round 8 indexes were built without CONCURRENTLY, as round 6 recorded for round 5's. They ran with the round 8 deploy (green); IF NOT EXISTS makes every later run a no-op.

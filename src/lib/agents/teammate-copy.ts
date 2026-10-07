@@ -1135,6 +1135,8 @@ export const GROUP_COPY = {
   cancelledRemoved: "Cancelled: this teammate was removed from the group chat.",
   /** A later answerer removed from the group while an earlier one answered. */
   notMemberReason: "it was removed from this group chat.",
+  /** The person can no longer be acted for (deactivated, a Guest now, AI off) while others answered (review round 9). */
+  personCannotReason: "you can no longer be acted for here.",
   /** A teammate whose answer came back but could not be saved. */
   notSavedReason: "its answer couldn't be saved.",
   /** A continue for a teammate no longer in the group. */
@@ -1315,6 +1317,8 @@ export const AUTOMATION_TEAMMATE_COPY = {
   creatorCannot: "The person who made this automation can't be acted for in this workspace now, so its teammate didn't run.",
   aiOffForCreator: "AI is turned off for the person who made this automation, so its teammate didn't run.",
   noTeammate: "The person who made this automation can no longer use that teammate.",
+  /** A workspace teammate changed after the version was published (review round 9). */
+  teammateChanged: "The teammate this step asks was changed after this automation was published, so it didn't run. Open the automation and publish it again.",
   // The step's own sentences never name the teammate: every reader of the
   // automation's runs reads them, and a private teammate's name is its
   // person's (review round 1). The creator knows which one the step asks.
@@ -1338,6 +1342,8 @@ export const AUTOMATION_TEAMMATE_COPY = {
   answerMembersOnly: "The AI teammate's answer is sent only to members, never to an outside address, so this step didn't run.",
   /** The automation's row is gone under the claim. */
   workflowGone: "This automation no longer exists.",
+  /** Paused, or every automation paused, after its event matched (review round 9). */
+  automationPaused: "This automation was paused, so its teammate didn't run.",
   creatorOnlyOn: "Only the person who made this automation can turn it back on, because its AI teammate step works as them.",
   /** Its creator can no longer be acted for here: the step can never run, and anyone who may edit it takes it out first (review round 7). */
   creatorGoneRemove: (name: string | null) =>

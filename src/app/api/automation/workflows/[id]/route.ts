@@ -23,6 +23,7 @@ import { draftRevision } from "@/lib/automation/draft-revision";
 import { listVersions } from "@/lib/automation/versions-server";
 import { definitionWithScopeInOrg, scopeNamer, scopeReadable } from "@/lib/automation/places-server";
 import { teammateCreatorGone, teammateStepProblem, teammateStepSlugs } from "@/lib/automation/teammate-step";
+import { AUTOMATION_TEAMMATE_COPY } from "@/lib/agents/teammate-copy";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200).optional(),
@@ -201,18 +202,28 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!published) data.triggerEvent = trigger;
   }
 
-  // With a base revision the check is made again under a row lock, so two
-  // saves from two tabs at the same moment cannot both pass it.
+  // Under a row lock: a base revision is checked again there, so two saves
+  // from two tabs at the same moment cannot both pass it; and a save of the
+  // definition by anyone but the creator is checked against the draft as it
+  // is under the lock, so a teammate step the creator saved meanwhile is
+  // never taken out by someone else (review round 9).
   const baseRevision = parsed.data.baseRevision;
-  const workflow = baseRevision
-    ? await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${id} FOR UPDATE`;
-        const now = await tx.automationWorkflow.findUnique({ where: { id }, select: { name: true, description: true, severity: true, definition: true } });
-        if (!now || draftRevision(now) !== baseRevision) return null;
-        return tx.automationWorkflow.update({ where: { id }, data });
-      })
-    : await prisma.automationWorkflow.update({ where: { id }, data });
-  if (!workflow) return staleDraft();
+  const checkTeammateUnderLock = data.definition !== undefined && ctx.userId !== existing.createdById;
+  const saved = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${id} FOR UPDATE`;
+    const now = await tx.automationWorkflow.findUnique({ where: { id }, select: { name: true, description: true, severity: true, definition: true } });
+    if (!now) return { stale: true as const };
+    if (baseRevision && draftRevision(now) !== baseRevision) return { stale: true as const };
+    if (checkTeammateUnderLock && teammateStepSlugs(now.definition).length > 0 && teammateStepSlugs(data.definition ?? null).length === 0 && !(await teammateCreatorGone(ctx.orgId, existing.createdById))) {
+      return { teammateRefused: true as const };
+    }
+    return { workflow: await tx.automationWorkflow.update({ where: { id }, data }) };
+  });
+  if ("teammateRefused" in saved) {
+    return NextResponse.json({ error: AUTOMATION_TEAMMATE_COPY.creatorOnly, code: "teammate_step_creator_only", section: "then", issues: { section: "then" } }, { status: 403 });
+  }
+  if ("stale" in saved) return staleDraft();
+  const workflow = saved.workflow;
   // Answered as the builder reads it, so the hidden places never reach the page.
   const forViewer = await definitionForViewer(ctx.viewer, workflow.definition, workflow.createdById);
   return NextResponse.json({ workflow: { ...workflow, definition: forViewer.definition, scopeHidden: forViewer.scopeHidden, scopeKept: forViewer.scopeKept, triggerEvent: draftTrigger(workflow.definition, workflow.triggerEvent), revision: draftRevision(workflow) } });

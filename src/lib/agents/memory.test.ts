@@ -18,14 +18,16 @@ interface Row {
   updatedAt: Date;
 }
 
-const db = vi.hoisted(() => ({ rows: [] as Row[], clock: 0 }));
+const db = vi.hoisted(() => ({ rows: [] as Row[], clock: 0, locks: [] as unknown[] }));
 
 vi.mock("@/lib/prisma", () => {
   const matches = (r: Row, w: Record<string, unknown>) =>
     Object.entries(w).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v);
   const tick = () => new Date(Date.UTC(2026, 9, 6, 9, 0, db.clock++));
-  return {
-    prisma: {
+  const prisma: Record<string, unknown> = {
+      // Each remember holds its memories' lock for its transaction (review round 9).
+      $executeRaw: async (_s: TemplateStringsArray, ...values: unknown[]) => (db.locks.push(values[0]), 1),
+      $transaction: async (fn: (tx: unknown) => unknown) => fn(prisma),
       agentMemory: {
         findMany: async (a: { where: Record<string, unknown>; orderBy?: { updatedAt: "desc" }; take?: number }) => {
           let out = db.rows.filter((r) => matches(r, a.where));
@@ -60,8 +62,8 @@ vi.mock("@/lib/prisma", () => {
           return { count: before - db.rows.length };
         },
       },
-    },
   };
+  return { prisma };
 });
 
 import { MEMORY_LIMITS, forgetFact, listMemories, memoriesForPrompt, normaliseKey, rememberFact } from "./memory";
@@ -164,5 +166,15 @@ describe("forgetFact", () => {
       ["person", "olivia", "Fridays"],
     ]);
     expect(await forgetFact({ agentId: AGENT, userId: "max", key: "report day" })).toEqual({ removed: false, key: null });
+  });
+});
+
+describe("remembering under a lock (review round 9)", () => {
+  it("holds one lock per teammate and scope for each remember, so two turns never both add a key", async () => {
+    db.locks = [];
+    await save("u-1", "Report day", "Friday");
+    await save("u-1", "report  day", "Monday");
+    expect(db.locks).toEqual([`agent-memory:${AGENT}:person:u-1`, `agent-memory:${AGENT}:person:u-1`]);
+    expect(db.rows.filter((r) => normaliseKey(String(r.key)) === normaliseKey("report day"))).toHaveLength(1);
   });
 });

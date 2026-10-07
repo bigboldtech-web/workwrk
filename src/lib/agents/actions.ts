@@ -711,6 +711,9 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
  * call the person's own rule ran was reported in its own turn (reportedAt is
  * set when it is recorded), so only decisions and expiries come back here.
  */
+/** The most decided outcomes one turn is told (claimUnreportedOutcomes); the rest wait for the next. */
+export const OUTCOMES_PER_TURN = 50;
+
 export async function claimUnreportedOutcomes(sessionId: string, agentId?: string | null, opts: { continuable?: boolean } = {}): Promise<AgentActionRow[]> {
   // One teammate's only, when named: in a group chat each hears its own
   // (docs/plans/ai-teammates-phase2.md step 3). A one-teammate chat holds
@@ -722,11 +725,23 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
   const onlyContinuable = opts.continuable
     ? Prisma.sql`AND ("runId" IS NULL OR NOT EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "AgentAction"."runId" AND r."input"->>'trigger' IN ('TALK', 'AUTOMATION', 'DELEGATED')))`
     : Prisma.empty;
+  // At most OUTCOMES_PER_TURN, oldest first: outcomes left waiting for months
+  // (cards an automation made that expired) are told a turn's worth at a
+  // time, never all in one note too large to send (review round 9). The
+  // outer check runs again on each row, so two claims at once never take
+  // one twice.
   const rows = await prisma.$queryRaw<AgentActionRow[]>`
     UPDATE "AgentAction"
     SET "reportedAt" = now() AT TIME ZONE 'UTC', "updatedAt" = now() AT TIME ZONE 'UTC'
     WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent} ${onlyContinuable}
       AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
+      AND "id" IN (
+        SELECT "id" FROM "AgentAction"
+        WHERE "sessionId" = ${sessionId} AND "reportedAt" IS NULL ${ofAgent} ${onlyContinuable}
+          AND "status" IN ('EXECUTED', 'FAILED', 'DENIED', 'EXPIRED', 'CANCELLED')
+        ORDER BY "createdAt" ASC
+        LIMIT ${OUTCOMES_PER_TURN}
+      )
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
       "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;
   const at = (v: Date | string) => new Date(v).getTime();

@@ -240,7 +240,11 @@ export const prismaFake = {
     const continuable = frags.some((f) => f.strings.join("?").includes('"AgentRun"'));
     const outside = (r: ActionRowFx) => Boolean(r.runId) && ["TALK", "AUTOMATION", "DELEGATED"].includes(fx.runTriggers[r.runId as string] ?? "");
     const decided = ["EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"];
-    const hit = fx.actions.filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId) && !(continuable && outside(r)));
+    const limit = values.find((v): v is number => typeof v === "number") ?? Infinity;
+    const hit = fx.actions
+      .filter((r) => r.sessionId === values[0] && r.reportedAt === null && decided.includes(r.status) && (!agentId || r.agentId === agentId) && !(continuable && outside(r)))
+      .sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime())
+      .slice(0, limit);
     for (const r of hit) r.reportedAt = new Date();
     return hit.map((r) => ({ ...r }));
   },

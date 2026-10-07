@@ -20,6 +20,9 @@
 
 import { isAiConfigured } from "@/lib/ai-client";
 import { withAutomationDepth } from "@/lib/automation/chain-depth";
+import { othersMayChange, teammateFingerprint } from "@/lib/automation/teammate-step";
+import { readAutomationSettings } from "@/lib/automation/settings";
+import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import type { ActionContext } from "@/lib/automation/registry-actions";
 import { resolveActingPerson } from "./acting";
@@ -58,11 +61,22 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   const agent = slug ? await loadTeammate(slug, person.viewer) : null;
   if (!agent) throw new Error(AUTOMATION_TEAMMATE_COPY.noTeammate);
   if (agent.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.paused);
+  // A teammate someone else may change (a workspace one) runs only as it was
+  // when the creator published: one rewritten since never works as them
+  // unattended (review round 9). Their own private one is theirs alone.
+  if (othersMayChange(agent, creator) && ctx.teammatePrints?.[slug] !== teammateFingerprint(agent)) {
+    throw new Error(AUTOMATION_TEAMMATE_COPY.teammateChanged);
+  }
 
   // 5. AI set up, and something to ask.
   if (!(await isAiConfigured(person.organizationId))) throw new Error(TEAMMATE_CHAT.notSetUp);
   const { instruction, values } = automationRequest(typeof params.request === "string" ? params.request : "", ctx.payload);
   if (!instruction) throw new Error(AUTOMATION_TEAMMATE_COPY.noRequest);
+
+  // Every automation paused since its event matched: no teammate is asked
+  // (the claim checks this automation's own pause under its lock; review round 9).
+  const org = await prisma.organization.findUnique({ where: { id: person.organizationId }, select: { settings: true } }).catch(() => null);
+  if (readAutomationSettings(org?.settings).paused) throw new Error(AUTOMATION_TEAMMATE_COPY.automationPaused);
 
   // 6. One question, in the creator's own chat with the teammate.
   const workflowName = ctx.workflowName?.trim() || AUTOMATION_TEAMMATE_COPY.workflowFallback;
@@ -127,6 +141,16 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   // is no answer: later steps never post around an empty one.
   const answer = cleanOutwardText(turn.text, { talk: true, max: AUTOMATION_ANSWER_MAX });
   if (!answer.trim()) throw new Error(AUTOMATION_TEAMMATE_COPY.noAnswer);
+
+  // The creator may still be acted for, and the teammate is still on and
+  // theirs to use, as the Talk route checks after its turn: one deactivated,
+  // or a teammate paused or removed, during the turn leaves the answer in
+  // the creator's chat and gives later steps none (review round 9).
+  const actingNow = await resolveActingPerson(ctx.organizationId, creator).catch(() => null);
+  if (!actingNow?.ok) throw new Error(actingNow && !actingNow.ok && actingNow.reason === "ai_off" ? AUTOMATION_TEAMMATE_COPY.aiOffForCreator : AUTOMATION_TEAMMATE_COPY.creatorCannot);
+  const agentNow = await loadTeammate(slug, actingNow.person.viewer).catch(() => null);
+  if (!agentNow) throw new Error(AUTOMATION_TEAMMATE_COPY.noTeammate);
+  if (agentNow.status !== "ENABLED") throw new Error(AUTOMATION_TEAMMATE_COPY.paused);
 
   return {
     teammate: agent.name,

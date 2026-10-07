@@ -26,6 +26,8 @@ const db = vi.hoisted(() => ({
   /** The automation's row, and its runs holding a question today (Phase 2 step 7). */
   workflow: true,
   wfUsed: 0,
+  /** The automation's status under the claim's lock. */
+  wfStatus: "ACTIVE",
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -34,7 +36,7 @@ vi.mock("@/lib/prisma", () => {
     db.sql.push(sql);
     db.values.push(values);
     if (sql.includes('FROM "Agent"')) return db.agent ? [db.agent] : [];
-    if (sql.includes('FROM "AutomationWorkflow"')) return db.workflow ? [{ id: values[0] }] : [];
+    if (sql.includes('FROM "AutomationWorkflow"')) return db.workflow ? [{ id: values[0], status: db.wfStatus }] : [];
     if (sql.includes('"automationWorkflowId"')) return [{ used: db.wfUsed }];
     if (sql.includes('FROM "AgentRun"')) return [{ used: db.used, month: db.month }];
     if (sql.includes('FROM "Organization"')) return [{ plan: db.plan, createdAt: null }];
@@ -114,6 +116,7 @@ beforeEach(() => {
   db.deleted = [];
   db.runUpdates = [];
   db.workflow = true;
+  db.wfStatus = "ACTIVE";
   db.wfUsed = 0;
 });
 
@@ -158,6 +161,12 @@ describe("claimTeammateTurn for an automation (Phase 2 step 7)", () => {
     expect(agent).toBeGreaterThanOrEqual(0);
     expect(wf).toBeGreaterThan(agent);
     expect(org).toBeGreaterThan(wf);
+  });
+
+  it("refuses once the automation was paused, under its lock, with no question claimed (review round 9)", async () => {
+    db.wfStatus = "INACTIVE";
+    expect(await turn({ trigger: "AUTOMATION", workflow: WORKFLOW })).toMatchObject({ ok: false, code: "workflow_paused", message: AUTOMATION_TEAMMATE_COPY.automationPaused });
+    expect(db.questions).toEqual([]);
   });
 
   it("checks nothing of the kind for a turn no automation asked for", async () => {

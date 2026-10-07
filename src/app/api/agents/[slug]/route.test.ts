@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   // Run now starts (every refusal answers here), then finishes behind a kept-alive connection.
   runLegacyAgentNow: vi.fn<(agent: { id: string; slug: string; name: string }, viewer: { userId: string }) => Promise<unknown>>(async () => ({
     ok: true as const,
+    runId: "run1",
     finish: async () => ({ ok: true as const, result: { runId: "run1", status: "SUCCEEDED" as const, waiting: 1, chatHref: "/agents?chat=deal-desk" } }),
   })),
 }));
@@ -262,6 +263,8 @@ describe("a workspace agent", () => {
     expect(r.status).toBe(429);
     expect(r.headers.get("Retry-After")).toBe("12");
     expect(await r.json()).toEqual({ error: "Too many AI requests.", code: "rate_limited" });
+    // A refused click ran nothing, so nothing says it ran (review round 9).
+    expect(mocks.audits.map((a) => a.action)).not.toContain("run_now");
   });
 
   it("never adds a removed workspace teammate back through Workspace agents: its own restore does, within the plan's limit", async () => {

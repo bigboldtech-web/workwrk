@@ -207,12 +207,30 @@ export async function POST(req: Request, { params }: Params) {
         publishToUser(person.userId, { type: "agent.changed", agentId: m.agentId, sessionId: g.id });
       }
     };
+    // Who each turn acts for, read again before every later answerer: a
+    // person deactivated, made a Guest or with AI turned off while the
+    // others answered starts no new turn in their name (review round 9).
+    let actor = person;
+    let actorGone: string | null = null;
     for (const { member, skip } of pick.answerers) {
       if (outOfQuestions !== null) {
         await skipLine(member, outOfQuestions);
         continue;
       }
+      if (actorGone !== null) {
+        await skipLine(member, actorGone);
+        continue;
+      }
       const first = member.agentId === firstUp.agentId;
+      if (!first) {
+        const fresh = await resolveActingPerson(person.organizationId, person.userId).catch(() => null);
+        if (!fresh?.ok) {
+          actorGone = GROUP_COPY.personCannotReason;
+          await skipLine(member, actorGone);
+          continue;
+        }
+        actor = fresh.person;
+      }
       // Each later answerer is read again just before its turn: one paused,
       // removed or no longer the person's to use while the others answered
       // does not run (review of step 3), and the turn uses it as it is now.
@@ -224,7 +242,7 @@ export async function POST(req: Request, { params }: Params) {
           await skipLine(member, GROUP_COPY.notMemberReason);
           continue;
         }
-        const now = await loadTeammate(member.slug, person.viewer, { includeRemoved: true }).catch(() => null);
+        const now = await loadTeammate(member.slug, actor.viewer, { includeRemoved: true }).catch(() => null);
         if (!now) skipNow = "no_access";
         else {
           record = now;
@@ -252,7 +270,7 @@ export async function POST(req: Request, { params }: Params) {
       const result = await runOne(() =>
         runTeammateTurn({
           agent: teammateAgentFrom(record),
-          person,
+          person: actor,
           sessionId: g.id,
           trigger: "CHAT",
           userText: null,
@@ -270,8 +288,6 @@ export async function POST(req: Request, { params }: Params) {
       if (result?.giveBack) await giveBackTurn(claim.runId, claim.questionId);
       if (result) all.push(...result.messages);
       send({ type: "answer_done", agentId: member.agentId, messages: result?.messages ?? [], error: result ? result.error : TURN_ERRORS.noAnswer });
-      // Each answer as it lands: other tabs, and a page opened again meanwhile, read the group again (review round 8).
-      publishToUser(person.userId, { type: "agent.changed", agentId: member.agentId, sessionId: g.id });
       // An answer that got nothing back, or came back and could not be saved,
       // leaves a line, so the chat says who did not answer and why (review
       // round 1: a failed save left no trace, and the page waited for it).
@@ -281,10 +297,13 @@ export async function POST(req: Request, { params }: Params) {
       if (!(await stillInGroup(g.id, member.agentId).catch(() => true))) await cancelRemovedRequests(g.id, person.userId, member.agentId).catch(() => 0);
       // The person left the group while this one answered: what it asked is
       // cancelled (nothing can show it now), and nobody else answers.
-      if (!(await groupStillOpen(person.viewer, g.id).catch(() => true))) {
-        await cancelLeftRequests(g.id, person.userId).catch(() => 0);
-        break;
-      }
+      const left = !(await groupStillOpen(person.viewer, g.id).catch(() => true));
+      if (left) await cancelLeftRequests(g.id, person.userId).catch(() => 0);
+      // Each answer as it lands, after what it asked was cancelled if it was:
+      // other tabs, and a page opened again meanwhile, read the group again
+      // and never show a card already cancelled as waiting (review rounds 8 and 9).
+      publishToUser(person.userId, { type: "agent.changed", agentId: member.agentId, sessionId: g.id });
+      if (left) break;
     }
     send({ type: "done", messages: all, error: null });
   });

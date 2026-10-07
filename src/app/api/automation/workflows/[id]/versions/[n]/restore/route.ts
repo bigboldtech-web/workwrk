@@ -63,7 +63,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   // The workflow row is locked for the transaction (as publish does), so a
   // restore and a publish at the same moment number their versions in turn.
-  let result: { notFound: true } | { refused: { error: string; code: string } } | { notFound: false; keptVersion: number | null };
+  let result: { notFound: true } | { refused: { error: string; code: string }; status?: 403 } | { notFound: false; keptVersion: number | null };
   try {
     result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AutomationWorkflow" WHERE "id" = ${wf.id} FOR UPDATE`;
@@ -71,6 +71,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     // read above is the draft that is kept, never lost.
     const current = await tx.automationWorkflow.findUnique({ where: { id: wf.id }, select: { definition: true, triggerEvent: true } });
     if (current) { wf.definition = current.definition; wf.triggerEvent = current.triggerEvent; }
+    // The draft-side rule again, on the draft read under the lock: a teammate
+    // step the creator saved after the check above is theirs to take out
+    // (review round 9), unless they can no longer be acted for.
+    if (ctx.userId !== wf.createdById && current && teammateStepSlugs(current.definition).length > 0 && !(await teammateCreatorGone(ctx.orgId, wf.createdById))) {
+      return { refused: { error: AUTOMATION_TEAMMATE_COPY.creatorOnly, code: "teammate_step_creator_only" }, status: 403 as const };
+    }
     const versions = await tx.automationWorkflowVersion.findMany({
       where: { workflowId: wf.id, organizationId: ctx.orgId },
       select: { versionNumber: true, definitionJson: true },
@@ -149,7 +155,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     throw err;
   }
 
-  if ("refused" in result) return NextResponse.json({ ...result.refused, section: "where", issues: { section: "where" } }, { status: 400 });
+  if ("refused" in result) {
+    if (result.status === 403) return NextResponse.json({ ...result.refused, section: "then", issues: { section: "then" } }, { status: 403 });
+    return NextResponse.json({ ...result.refused, section: "where", issues: { section: "where" } }, { status: 400 });
+  }
   if (result.notFound) return NextResponse.json({ error: "Version not found" }, { status: 404 });
   return NextResponse.json({ ok: true, draftUpdated: true, keptVersion: result.keptVersion });
 }

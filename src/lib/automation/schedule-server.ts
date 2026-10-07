@@ -17,7 +17,10 @@ import { asksTeammate, runAutomationForWorkflow } from "./engine";
  * automation runs first, so none waits on a model call (review round 8).
  */
 const TEAMMATE_SCHEDULE_BUDGET_MS = 180_000;
-import { dateArrivesRange, dueScheduleInstant, readDateArrivesWhen } from "./schedule";
+
+/** A deferred fire this close to leaving the look-back window runs anyway, so a deferral never drops a run for good. */
+const LAST_CHANCE_MS = 20 * 60 * 1000;
+import { SCHEDULE_LOOKBACK_MS, dateArrivesRange, dueScheduleInstant, readDateArrivesWhen } from "./schedule";
 
 /** One page of the task query; the loop walks every page in the window. */
 const TASK_PAGE = 200;
@@ -55,19 +58,27 @@ export async function processAutomationSchedules(now: Date = new Date()): Promis
   const versionById = new Map(versions.map((v) => [v.id, v]));
   const liveOf = (wf: (typeof workflows)[number]) => liveDefinition(wf, wf.publishedVersionId ? versionById.get(wf.publishedVersionId) : null);
   const ordered = [...workflows].sort((x, y) => Number(asksTeammate(liveOf(x))) - Number(asksTeammate(liveOf(y))));
-  const started = Date.now();
+  // The budget's clock starts at the first teammate fire, so the time the
+  // quicker automations took never defers them (review round 9).
+  let teammateStarted: number | null = null;
+  /** Whether to leave this teammate fire for the next tick; never one about to leave the look-back window. */
+  const deferTeammate = (fireAt: Date): boolean => {
+    teammateStarted ??= Date.now();
+    if (Date.now() - teammateStarted <= TEAMMATE_SCHEDULE_BUDGET_MS) return false;
+    if (now.getTime() - fireAt.getTime() > SCHEDULE_LOOKBACK_MS - LAST_CHANCE_MS) return false;
+    result.deferred = (result.deferred ?? 0) + 1;
+    return true;
+  };
 
   for (const wf of ordered) {
     try {
       const live = liveOf(wf);
       const when = readWhen(live);
+      const teammate = asksTeammate(live);
       if (wf.triggerEvent === "schedule.every") {
         const at = dueScheduleInstant(when, now, wf.publishedAt);
         if (!at) continue;
-        if (asksTeammate(live) && Date.now() - started > TEAMMATE_SCHEDULE_BUDGET_MS) {
-          result.deferred = (result.deferred ?? 0) + 1;
-          continue;
-        }
+        if (teammate && deferTeammate(at)) continue;
         result.scheduled += await runAutomationForWorkflow({
           organizationId: wf.organizationId,
           workflowId: wf.id,
@@ -121,6 +132,10 @@ export async function processAutomationSchedules(now: Date = new Date()): Promis
             if (isDoneStatus(statuses, t.status)) continue;
           }
           const fireAt = new Date(date.getTime() + range.offsetMs);
+          // As "On a schedule": a teammate fire waits for the next tick once
+          // the budget is spent (review round 9). Its window and idempotency
+          // key hold it there.
+          if (teammate && deferTeammate(fireAt)) continue;
           result.dateArrives += await runAutomationForWorkflow({
             organizationId: wf.organizationId,
             workflowId: wf.id,

@@ -302,7 +302,7 @@ export async function runLegacyAgentNow(agent: { id: string; slug: string; name:
 export async function startLegacyAgentNow(
   agent: { id: string; slug: string; name: string },
   viewer: Viewer,
-): Promise<RunNowRefusal | { ok: true; finish: () => Promise<RunNowAnswer> }> {
+): Promise<RunNowRefusal | { ok: true; runId: string; finish: () => Promise<RunNowAnswer> }> {
   const acting = await resolveActingPerson(viewer.organizationId, viewer.userId);
   if (!acting.ok) return refuse(403, "person_cannot", ACTION_ERRORS.personCannot);
   const person = acting.person;
@@ -345,7 +345,7 @@ export async function startLegacyAgentNow(
     return refuse(500, "not_saved", TEAMMATE_ROUTE_ERRORS.messageNotSaved);
   }
 
-  return { ok: true, finish: () => finishRunNow({ row, person, sessionId: session.id, prompt, userMessageId, runId: claim.runId, questionId: claim.questionId }) };
+  return { ok: true, runId: claim.runId, finish: () => finishRunNow({ row, person, sessionId: session.id, prompt, userMessageId, runId: claim.runId, questionId: claim.questionId }) };
 }
 
 /** The turn of a Run now that started (startLegacyAgentNow). Never throws. */
@@ -380,13 +380,13 @@ async function finishRunNow(a: {
     // runTeammateTurn answers its own failures; this is anything else. What
     // it did is unknown, so its question is kept (the chat route's rule).
     console.error(`[agents] run now ${claim.runId} threw: ${errorLine(err)}`);
-    publishToUser(person.userId, { type: "agent.changed", agentId: row.id });
+    publishToUser(person.userId, { type: "agent.changed", agentId: row.id, runNowDone: true });
     return { ok: true, result: { runId: claim.runId, status: "FAILED", errorText: TURN_ERRORS.noAnswer, waiting: 0, chatHref: chatHrefOf(row.slug) } };
   }
   // Only a turn the model never answered gives its question back (TurnResult.giveBack).
   if (turn.giveBack) await giveBackTurn(claim.runId, claim.questionId);
   // The message, its answer and any card are in the chat now: the person's open tabs re-read it.
-  publishToUser(person.userId, { type: "agent.changed", agentId: row.id });
+  publishToUser(person.userId, { type: "agent.changed", agentId: row.id, runNowDone: true });
   return {
     ok: true,
     result: {

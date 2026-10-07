@@ -277,5 +277,7 @@ export function readSnapshotNote(definitionJson: unknown): VersionSnapshotNote |
 export function withoutSnapshotNote(definitionJson: unknown): Record<string, unknown> {
   const d = { ...asRecord(definitionJson) };
   delete d.__snapshot;
+  // The teammates' fingerprints belong to the version that was published, never to a draft.
+  delete d.__teammates;
   return d;
 }

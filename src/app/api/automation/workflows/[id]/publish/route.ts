@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { refuseWorkflowWrite, requireAutomation } from "@/lib/automation/gate";
 import { parseDefinition } from "@/lib/automation/engine";
 import { getAction } from "@/lib/automation/registry-actions";
-import { teammateCreatorGone, teammateStepProblem } from "@/lib/automation/teammate-step";
+import { TEAMMATE_PRINTS_KEY, teammateCreatorGone, teammatePrintsFor, teammateStepProblem, teammateStepSlugs } from "@/lib/automation/teammate-step";
 import { getTrigger } from "@/lib/automation/registry-triggers";
 import { draftTrigger } from "@/lib/automation/definition";
 import { versionForViewer, workflowForViewer } from "@/lib/automation/definition-view";
@@ -87,7 +87,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       { status: 400 },
     );
   }
-  const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger };
+  // What each teammate it asks does now, so a run can tell when someone else changed one (review round 9).
+  const prints = teammateStepSlugs(workflow.definition).length > 0 ? await teammatePrintsFor(workflow.definition, ctx.viewer) : null;
+  const snapshot = { ...((workflow.definition as Record<string, unknown> | null) ?? {}), trigger, ...(prints ? { [TEAMMATE_PRINTS_KEY]: prints } : {}) };
 
   // Two publishes at once (a double click on Republish, two editors) must
   // not both compute the same next versionNumber: the workflow row is locked

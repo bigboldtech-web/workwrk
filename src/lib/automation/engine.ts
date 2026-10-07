@@ -90,6 +90,12 @@ export function parseDefinition(definition: unknown): ParsedDefinition {
   return { conditions: def.conditions ?? null, actions };
 }
 
+/** The fingerprints of the teammates a published version asks (teammate-step.ts TEAMMATE_PRINTS_KEY), by slug. */
+function teammatePrintsOf(definition: unknown): Record<string, string> {
+  const raw = asRecord(asRecord(definition).__teammates);
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
 /** Whether a definition holds an "Ask an AI teammate" step. */
 export function asksTeammate(definition: unknown): boolean {
   return parseDefinition(definition as Prisma.JsonValue).actions.some((a) => a.key === "ask_teammate");
@@ -453,6 +459,7 @@ async function runWorkflow(args: {
       publisherId: args.publisherId ?? null,
       workflowName: workflow.name,
       teammateInRun: def.actions.some((a) => a.key === "ask_teammate"),
+      teammatePrints: teammatePrintsOf(workflow.definition),
     };
 
     let succeeded = 0;

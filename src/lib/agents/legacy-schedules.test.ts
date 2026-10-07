@@ -324,7 +324,8 @@ describe("Run now", () => {
     expect(st.turns).toHaveLength(1);
     expect(st.turns[0]).toMatchObject({ trigger: "CHAT", userText: "Flag deals stuck a week.", userMessageId: "u1", streaming: false, practice: false, routine: null });
     expect((st.turns[0].person as Row).userId).toBe("u-admin");
-    expect(st.published).toEqual([{ userId: "u-admin", event: { type: "agent.changed", agentId: "a1" } }]);
+    // Marked as the run's own end, which offers Run now again (review round 9).
+    expect(st.published).toEqual([{ userId: "u-admin", event: { type: "agent.changed", agentId: "a1", runNowDone: true } }]);
   });
 
   it("refuses before spending anything when the person cannot be acted for or AI is not set up", async () => {

@@ -1083,6 +1083,9 @@ export interface TeammateListData {
 }
 
 /** The teammates this person can use; `removed` adds the removed ones (Show removed). */
+/** How long the list waits after a change for more before it reads again (useTeammateList). */
+const LIST_RELOAD_MS = 400;
+
 export function useTeammateList(opts: { removed: boolean }) {
   const { removed } = opts;
   const [data, setData] = useState<TeammateListData | null>(null);
@@ -1104,17 +1107,28 @@ export function useTeammateList(opts: { removed: boolean }) {
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 0);
-    const onChange = () => void load();
+    // Changes come in bursts (a group message's answers each publish): one
+    // read after the burst settles, never one per change (review round 9).
+    let soon: ReturnType<typeof setTimeout> | null = null;
+    const loadSoon = () => {
+      if (soon) clearTimeout(soon);
+      soon = setTimeout(() => {
+        soon = null;
+        void load();
+      }, LIST_RELOAD_MS);
+    };
+    const onChange = () => loadSoon();
     // A teammate changed without the person typing: what waits for them, or
     // what they have not read, may have moved.
     const onRealtime = (e: Event) => {
-      if ((e as CustomEvent<RealtimeEvent>).detail?.type === "agent.changed") void load();
+      if ((e as CustomEvent<RealtimeEvent>).detail?.type === "agent.changed") loadSoon();
     };
     window.addEventListener("focus", onChange);
     window.addEventListener(AI_CHATS_CHANGED_EVENT, onChange);
     window.addEventListener(WINDOW_EVENTS.realtime, onRealtime);
     return () => {
       clearTimeout(t);
+      if (soon) clearTimeout(soon);
       window.removeEventListener("focus", onChange);
       window.removeEventListener(AI_CHATS_CHANGED_EVENT, onChange);
       window.removeEventListener(WINDOW_EVENTS.realtime, onRealtime);

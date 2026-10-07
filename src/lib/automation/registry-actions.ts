@@ -51,6 +51,8 @@ export interface ActionContext {
   stepData?: { teammate?: { answer: string; name: string }; teammateFailed?: boolean };
   /** The run has an "Ask an AI teammate" step anywhere, before or after this one. */
   teammateInRun?: boolean;
+  /** The fingerprint of each teammate the version asks, as it was when published, by slug (review round 9). */
+  teammatePrints?: Record<string, string>;
 }
 
 export interface ActionParamField {

@@ -97,7 +97,13 @@ export type ReviewDecidedEvent = { type: "review.decided"; reviewId: string };
  * one) and nothing else, so the list, the open chat and the AI sidebar
  * re-read through their own scoped endpoints.
  */
-export type AgentChangedEvent = { type: "agent.changed"; agentId: string; sessionId?: string };
+export type AgentChangedEvent = {
+  type: "agent.changed";
+  agentId: string;
+  sessionId?: string;
+  /** A Run now's turn ended (legacy-schedules.ts finishRunNow): the Workspace agents page offers Run now again (review round 9). */
+  runNowDone?: true;
+};
 
 /**
  * The same event dispatched by THIS tab about its own write (see

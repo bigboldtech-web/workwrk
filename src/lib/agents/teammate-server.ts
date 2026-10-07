@@ -120,13 +120,18 @@ export async function usableTeammatesNamed(viewer: Viewer, name: string): Promis
   // (review round 8).
   const plain = plainName(wanted);
   if (!plain) return [];
-  const usable = await prisma.agent.findMany({
+  // Names only, then the one or two that match read in full (review round 9:
+  // the whole row of up to 500 teammates was read for every unmatched ask).
+  const names = await prisma.agent.findMany({
     where: { organizationId: viewer.organizationId, status: { not: "ARCHIVED" }, ...agentUsableWhere(viewer.userId) },
-    select: TEAMMATE_SELECT,
+    select: { id: true, name: true },
     orderBy: { id: "asc" },
-    take: 500,
+    take: 2000,
   });
-  return usable.filter((r) => canUseAgent(r, viewer) && plainName(r.name) === plain).slice(0, 5);
+  const ids = names.filter((r) => plainName(r.name) === plain).slice(0, 5).map((r) => r.id);
+  if (ids.length === 0) return [];
+  const rows2 = await prisma.agent.findMany({ where: { id: { in: ids }, organizationId: viewer.organizationId }, select: TEAMMATE_SELECT, orderBy: { id: "asc" } });
+  return rows2.filter((r) => canUseAgent(r, viewer));
 }
 
 /** A name as the model reads it, for matching: invisible marks gone, brackets plain, case folded. */
