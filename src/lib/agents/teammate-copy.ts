@@ -1079,3 +1079,46 @@ export const INVITE_CARD = {
 
 /** The card line for a new doc, form or table: a root one is open to every member (review round 1). */
 export const NEW_OPEN_TO_ALL = "Everyone in the workspace can open and edit it.";
+
+/**
+ * Group chats: one person with two to five of their teammates
+ * (docs/plans/ai-teammates-phase2.md, steps 1 to 4; group-chat.ts).
+ */
+export const GROUP_COPY = {
+  newGroup: "New group chat",
+  title: "New group chat",
+  intro: "Pick two to five of your teammates. Each answers as itself, works as you and asks you first, as in its own chat.",
+  name: "Name",
+  namePlaceholder: "For example, Offsite crew",
+  members: "Teammates",
+  create: "Create group chat",
+  cancel: "Cancel",
+  pickMore: "Pick at least two teammates.",
+  tooMany: "A group chat has at most five teammates.",
+  duplicateName: "Two teammates in a group can't share a name. Rename one first.",
+  removedCantJoin: (name: string) => `${name} was removed, so it can't join a group.`,
+  limit: (n: number) => `You have ${n} group chats, the most one person can have. Leave one first.`,
+  minMembers: "A group chat needs at least two teammates. Leave it instead.",
+  notFound: "That group chat can't be found.",
+  noOneCanAnswer: (names: string) => `${names} can't answer now.`,
+  skippedLine: (name: string, reason: string) => `${name} didn't answer: ${reason}`,
+  skipReason: { paused: "it is paused.", removed: "it was removed.", no_access: "you can no longer use it." },
+  renamedLine: (name: string) => `Renamed to ${name}`,
+  addedLine: (name: string) => `Added ${name}`,
+  removedLine: (name: string) => `Removed ${name}`,
+  cancelledLeft: "Cancelled: you left the group chat.",
+  membersButton: (n: number) => `${n} teammates`,
+  addTeammate: "Add teammate",
+  remove: "Remove",
+  rename: "Rename",
+  leave: "Leave group chat",
+  leaveTitle: (name: string) => `Leave ${name}?`,
+  leaveBody: "It leaves your list. Anything still waiting for your approval in it is cancelled.",
+  answersFrom: (names: string) => `Answers: ${names}`,
+  placeholder: (name: string) => `Message ${name}…`,
+  composerHint: "Name a teammate with @ to ask it. Otherwise the first teammate answers.",
+  removedChip: "Removed",
+  lastLineAgent: (name: string, text: string) => `${name}: ${text}`,
+  /** A group with no name of its own: its first three teammates' names. */
+  groupDefaultName: (names: readonly string[]) => titleList(names),
+} as const;

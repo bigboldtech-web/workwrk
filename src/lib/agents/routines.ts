@@ -17,7 +17,7 @@
 // minute of the hour.
 
 import { isValidTimeZone } from "@/lib/reports/schedule";
-import { nextCronRun, parseCron, withScheduleZone } from "./cron";
+import { nextCronRun, parseCron, splitScheduleZone, withScheduleZone } from "./cron";
 import { isValidSchedule } from "./schedule-words";
 
 export const ROUTINE_LIMITS = {
@@ -107,6 +107,32 @@ export function routineScheduleProblem(schedule: string | null | undefined, now:
   // schedule: the runner's hourly fallback would run it every hour (review
   // round 1).
   return schedule && nextCronRun(schedule, now) ? null : "invalid";
+}
+
+export type LegacyRoutineSchedule = { ok: true; schedule: string; changed: boolean } | { ok: false };
+
+/**
+ * The routine schedule an old Workspace agents schedule becomes when it moves
+ * (legacy-schedules.ts; docs/plans/ai-teammates-phase2.md Decision 3), never
+ * one that runs more often than it did: "every N minutes" becomes "hourly",
+ * a cron naming several minutes of the hour keeps only its first, and
+ * anything a routine cannot run (every more than 24 hours, unreadable,
+ * blank) is { ok: false }, so the schedule stops instead.
+ */
+export function legacyRoutineSchedule(schedule: string | null | undefined, now: Date = new Date()): LegacyRoutineSchedule {
+  const raw = (schedule ?? "").trim();
+  if (!raw) return { ok: false };
+  const problem = routineScheduleProblem(raw, now);
+  if (problem === null) return { ok: true, schedule: raw, changed: false };
+  if (/^every\s+\d+\s+minutes?$/i.test(raw)) return { ok: true, schedule: "hourly", changed: true };
+  if (problem !== "too_often") return { ok: false };
+  const cron = parseCron(raw);
+  if (!cron || cron.minutes.size < 2) return { ok: false };
+  const { zone, body } = splitScheduleZone(raw);
+  const fields = body.split(/\s+/);
+  fields[0] = String(Math.min(...cron.minutes));
+  const next = zone ? withScheduleZone(fields.join(" "), zone) : fields.join(" ");
+  return routineScheduleProblem(next, now) === null ? { ok: true, schedule: next, changed: true } : { ok: false };
 }
 
 /** Why a routine paused or skipped a run (AgentRoutine.pausedReason, lastReason). */

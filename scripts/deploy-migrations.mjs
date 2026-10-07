@@ -236,6 +236,14 @@ const SQL_MANIFEST = [
   // catalogue change, idempotent, no row read. Before the reload: the new
   // build writes such rows.
   "2026-10-07-ask-ai-approvals.sql",
+  // AI teammates, Phase 2 (docs/plans/ai-teammates-phase2.md): the new
+  // "ChatSessionTeammate" table (group chats), nullable columns on
+  // "ChatSession", "Agent" and "AgentRun", a partial index on "AgentRun", and
+  // two CHECKs widened to supersets ('TEAMMATE_GROUP', routines made
+  // 'legacy'), each replaced only while it lacks the new value. Before the
+  // reload: Prisma selects every column on a read with no select, and every
+  // Ask AI read touches ChatSession.
+  "2026-10-07-ai-teammates-phase2.sql",
 ];
 
 /**
