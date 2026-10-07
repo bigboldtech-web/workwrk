@@ -291,3 +291,36 @@ describe("wrapToolData", () => {
     expect(wrapToolData("search_tasks", undefined)).toBe('<tool_data tool="search_tasks">null</tool_data>');
   });
 });
+
+describe("a Talk turn's writes (review round 5)", () => {
+  const talk = { sessionId: "s1", routineId: null, trigger: "TALK" as const, runId: "run1" };
+
+  it("tells the model a card waits, never what it names; the card and the person's chat keep the title", async () => {
+    fx.cards.post_in_talk = { title: 'Post in #legal: "Acme acquisition: legal review"', input: { conversationId: "c-legal", text: "x" } };
+    const r = await call("post_in_talk", { conversationId: "c-legal", text: "x" }, { turn: talk });
+    expect(r.record.state).toBe("waiting");
+    expect(JSON.stringify(dataOf(r.modelContent))).not.toMatch(/Acme|legal/);
+    expect(dataOf(r.modelContent)).toMatchObject({ status: "waiting_for_approval", actionId: fx.actions[0].id });
+    expect(r.record.result).toMatchObject({ title: 'Post in #legal: "Acme acquisition: legal review"' });
+  });
+
+  it("tells the model only that the person's own work ran, or that a refusal stopped it", async () => {
+    fx.cards.create_task = { title: 'Create task "Acme acquisition: legal review"', input: { title: "Acme acquisition: legal review", assigneeEmail: "priya@x.com" } };
+    fx.answers.create_task = { ok: true, task: { id: "t1", title: "Acme acquisition: legal review", list: "Deals (private)" } };
+    const ran = await call("create_task", { title: "Acme acquisition: legal review" }, { turn: talk });
+    expect(ran.record.state).toBe("ran");
+    expect(JSON.stringify(dataOf(ran.modelContent))).not.toMatch(/Deals|t1/);
+    expect(dataOf(ran.modelContent)).toMatchObject({ ok: true });
+
+    fx.cards.create_task = { ok: false, error: "That task is already in Deals (private)." };
+    const refused = await call("create_task", { title: "x" }, { turn: talk });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(dataOf(refused.modelContent))).not.toContain("Deals");
+  });
+
+  it("leaves a chat turn's results whole", async () => {
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "x" } };
+    const r = await call("post_in_talk", { conversationId: "c1", text: "x" });
+    expect(dataOf(r.modelContent)).toMatchObject({ title: "Post in #general" });
+  });
+});

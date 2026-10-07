@@ -7,6 +7,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import { anyGuestHere } from "@/lib/access/guests";
+import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { logActivity } from "@/lib/activity";
 import { stripMarkup } from "@/lib/chat-markup";
 import { prisma } from "@/lib/prisma";
@@ -51,6 +52,10 @@ export async function conversationHasGuests(conversationId: string, organization
  * Who reads the conversation now: its members' ids, at most
  * TALK_TEAMMATE_LIMITS.maxReaders, and whether there are more. A teammate's
  * answer keeps this list and reaches only them (talk-updates.ts serveAiUpdate).
+ * A member who can't sign in now (deactivated, deleted, or no account) is
+ * left out, as a scheduled AI update leaves them out: the answer is held to
+ * what its readers can open, and someone let back in later was never checked
+ * (review round 5). They see the hidden line, as anyone added later does.
  */
 export async function conversationReaderIds(conversationId: string): Promise<{ ids: string[]; tooMany: boolean }> {
   const rows = await prisma.conversationMember.findMany({
@@ -59,8 +64,11 @@ export async function conversationReaderIds(conversationId: string): Promise<{ i
     orderBy: { id: "asc" },
     take: TALK_TEAMMATE_LIMITS.maxReaders + 1,
   });
-  const ids = [...new Set(rows.map((r) => r.userId))];
-  return { ids: ids.slice(0, TALK_TEAMMATE_LIMITS.maxReaders), tooMany: rows.length > TALK_TEAMMATE_LIMITS.maxReaders };
+  const tooMany = rows.length > TALK_TEAMMATE_LIMITS.maxReaders;
+  const members = [...new Set(rows.map((r) => r.userId))].slice(0, TALK_TEAMMATE_LIMITS.maxReaders);
+  const users = await prisma.user.findMany({ where: { id: { in: members } }, select: { id: true, status: true, deletedAt: true } });
+  const canSignIn = new Set(users.filter((u) => !u.deletedAt && !RULE_1_DENIED_STATUSES.has(String(u.status))).map((u) => u.id));
+  return { ids: members.filter((id) => canSignIn.has(id)), tooMany };
 }
 
 /**

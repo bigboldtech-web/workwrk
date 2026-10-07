@@ -81,14 +81,20 @@ export async function teammateStepProblem(
  * it returned, which can carry it (a task's title, an email's subject).
  * What went in is the step as written, never the answer, and stays.
  */
-export function hideTeammateAnswers<T extends { order: number; stepType: string; stepKey: string; outputJson: unknown; inputJson?: unknown }>(steps: readonly T[]): T[] {
+function emptyOutput(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0);
+}
+
+export function hideTeammateAnswers<T extends { order: number; stepType: string; stepKey: string; outputJson: unknown; inputJson?: unknown; status?: string }>(steps: readonly T[]): T[] {
   const first = steps.find((s) => s.stepType === "ACTION" && s.stepKey === TEAMMATE_STEP_KEY);
   if (!first) return [...steps];
   return steps.map((s) => {
     if (s.stepType !== "ACTION" || s.order < first.order) return s;
     // A step that returned nothing (it failed, or has not run) has nothing to
     // hide, and saying an answer is hidden would claim one (review round 4).
-    const returned = s.outputJson !== null && s.outputJson !== undefined;
+    // The engine stores a failed step's output as {}, so its status and an
+    // empty output both count as nothing returned (review round 5).
+    const returned = (s.status === undefined || s.status === "SUCCESS") && !emptyOutput(s.outputJson);
     if (s.stepKey === TEAMMATE_STEP_KEY) {
       // Nor which teammate: a private one's name and slug are its person's (review round 1).
       const input = asRecord(s.inputJson);

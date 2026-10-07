@@ -563,6 +563,17 @@ async function approve(
     return { id: row.id, status: "FAILED", code: "failed", error: prepared.error };
   }
 
+  // The card as the person saw it decides whether "don't ask again" was on
+  // offer: one made where that choice is never read (a Talk, automation or
+  // delegated turn) never showed it, and re-preparing it as APPROVAL must
+  // not add it, to the card or to the person's rules (review round 5).
+  const offered = record(row.preview).alwaysKey;
+  if (typeof offered !== "string" || offered !== prepared.preview.alwaysKey) {
+    const preview = { ...prepared.preview };
+    delete preview.alwaysKey;
+    delete preview.alwaysLabel;
+    prepared.preview = preview;
+  }
   const risk = prepared.risk === "READ" ? row.risk : prepared.risk;
   const claimed = await swap(row.id, "PENDING", {
     status: "RUNNING",

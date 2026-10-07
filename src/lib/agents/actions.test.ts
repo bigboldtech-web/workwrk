@@ -277,7 +277,7 @@ describe("decideActions: don't ask again", () => {
 
   it("stores the escalated key for a call above its tool's own class, never the tool-wide one", async () => {
     fx.cards.create_task = { risk: "OUTWARD", title: 'Create task "Call Acme" for Max Chen' };
-    const forMax = seedAction({ toolName: "create_task", input: { title: "Call Acme", assigneeEmail: "max@x.com" }, preview: { title: 'Create task "Call Acme" for Max Chen' } });
+    const forMax = seedAction({ toolName: "create_task", input: { title: "Call Acme", assigneeEmail: "max@x.com" }, preview: { title: 'Create task "Call Acme" for Max Chen', alwaysKey: "create_task:outward" } });
     await decideActions(viewer, [{ id: forMax.id, decision: "approve" }], { always: true });
     expect(fx.settings.get("a1:me")).toEqual({ "create_task:outward": "always" });
   });
@@ -288,6 +288,18 @@ describe("decideActions: don't ask again", () => {
     await decideActions(viewer, [{ id: row.id, decision: "approve" }], { always: true });
     expect(fx.actions[0].status).toBe("EXECUTED");
     expect(fx.settings.size).toBe(0);
+  });
+
+  it("stores nothing for a card that never offered it, and never adds it to the card (review round 5)", async () => {
+    // A card made in a Talk, automation or delegated turn has no alwaysKey.
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello team" } };
+    const row = talkPost();
+    row.preview = { title: "Post in #general" };
+    await decideActions(viewer, [{ id: row.id, decision: "approve" }], { always: true });
+    expect(fx.actions[0].status).toBe("EXECUTED");
+    expect(fx.settings.size).toBe(0);
+    expect(fx.actions[0].preview).toEqual({ title: "Post in #general" });
+    expect(fx.messages.map((m) => m.content)).toEqual(["You approved: Post in #general"]);
   });
 
   it("stores nothing without the choice", async () => {

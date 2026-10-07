@@ -67,6 +67,27 @@ export function teammateInSteps(steps: ReadonlyArray<{ stepType: string; stepKey
   return steps.some((s) => s.stepType === "ACTION" && s.stepKey === "ask_teammate");
 }
 
+/** A run still RUNNING this long after it started never finished: its process stopped mid-run. */
+export const RUN_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * A run whose process stopped part way (a restart, out of memory) stays
+ * RUNNING and reads "Running" in Logs for good; nothing retries it, since it
+ * has no retry state. Each tick, one RUNNING past RUN_STALE_MS becomes
+ * FAILED with that said. An AI teammate step can keep a run going for
+ * minutes, so the window is wide (review round 5). Steps it already logged
+ * are kept as they are.
+ */
+export async function failStaleRuns(now: Date = new Date()): Promise<number> {
+  const stale = await prisma.automationRun.updateMany({
+    where: { status: "RUNNING", startedAt: { lt: new Date(now.getTime() - RUN_STALE_MS) } },
+    data: { status: "FAILED", completedAt: now, errorMessage: STALE_RUN_MESSAGE },
+  });
+  return stale.count;
+}
+
+export const STALE_RUN_MESSAGE = "This run didn't finish: it stopped part way, so a step may not have run. Check the steps before running it again.";
+
 export async function processAutomationRetries(): Promise<{
   scanned: number;
   retried: number;

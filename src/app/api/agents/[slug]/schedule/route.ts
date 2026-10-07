@@ -26,7 +26,7 @@ import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { isValidSchedule } from "@/lib/agents/schedule-words";
 import { auditAgent } from "@/lib/agents/audit";
 import { LEGACY_AGENT } from "@/lib/agents/legacy-agents";
-import { runLegacyAgentNow } from "@/lib/agents/legacy-schedules";
+import { startLegacyAgentNow } from "@/lib/agents/legacy-schedules";
 import { LEGACY_COPY } from "@/lib/agents/teammate-copy";
 
 async function resolveAgent(slug: string, organizationId: string) {
@@ -131,12 +131,46 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   }
 
   // A chat turn of the person who clicked, on the request thread (they are
-  // waiting): 60 to 90 seconds at most.
+  // waiting): 60 to 90 seconds, sometimes more. What can refuse it answers
+  // with its own status; then the connection is kept alive with a space
+  // every 15 seconds until the turn's result, which JSON reads past, so a
+  // proxy never cuts a long run and the page never says it didn't start
+  // while it ran (review round 5). A client that leaves changes nothing:
+  // the turn finishes and saves itself in the person's chat.
   await auditAgent({ organizationId: c.organizationId, actorId: c.userId, agent: { id: agent.id, name: agent.name, slug }, action: "run_now" });
-  const run = await runLegacyAgentNow({ id: agent.id, slug, name: agent.name }, c.viewer);
-  if (!run.ok) {
-    const headers = run.retryAfter !== undefined ? { "Retry-After": String(run.retryAfter) } : undefined;
-    return NextResponse.json({ error: run.error, code: run.code }, { status: run.status, headers });
+  const started = await startLegacyAgentNow({ id: agent.id, slug, name: agent.name }, c.viewer);
+  if (!started.ok) {
+    const headers = started.retryAfter !== undefined ? { "Retry-After": String(started.retryAfter) } : undefined;
+    return NextResponse.json({ error: started.error, code: started.code }, { status: started.status, headers });
   }
-  return NextResponse.json({ result: run.result });
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (text: string) => {
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          // The client left: the turn carries on.
+        }
+      };
+      const beat = setInterval(() => send(" "), RUN_NOW_KEEP_ALIVE_MS);
+      try {
+        const run = await started.finish();
+        send(JSON.stringify(run.ok ? { result: run.result } : { error: run.error, code: run.code }));
+      } finally {
+        clearInterval(beat);
+        try {
+          controller.close();
+        } catch {
+          // Already closed by a client that left.
+        }
+      }
+    },
+  });
+  return new Response(body, {
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" },
+  });
 }
+
+/** A space this often keeps a long Run now's connection open (the chat streams' beat). */
+const RUN_NOW_KEEP_ALIVE_MS = 15_000;

@@ -3,10 +3,17 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-const rows = vi.hoisted(() => ({ list: [] as Array<Record<string, unknown>>, members: [] as Array<{ id: string; userId: string }>, guests: new Set<string>(), pages: 0 }));
+const rows = vi.hoisted(() => ({
+  list: [] as Array<Record<string, unknown>>,
+  members: [] as Array<{ id: string; userId: string }>,
+  guests: new Set<string>(),
+  pages: 0,
+  users: [] as Array<{ id: string; status: string; deletedAt: Date | null }>,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     conversationMessage: { findMany: async () => rows.list },
+    user: { findMany: async (a: { where: { id: { in: string[] } } }) => rows.users.filter((u) => a.where.id.in.includes(u.id)) },
     conversationMember: {
       findMany: async (a: { where: { id?: { gt: string } }; take: number }) => {
         rows.pages += 1;
@@ -20,7 +27,7 @@ vi.mock("@/lib/activity", () => ({ logActivity: async () => {} }));
 vi.mock("@/lib/access/guests", () => ({ anyGuestHere: async (_org: string, ids: string[]) => ids.some((i) => rows.guests.has(i)) }));
 
 import { AI_UPDATE_HIDDEN_KIND } from "@/lib/talk-updates";
-import { GUEST_CHECK_MAX_PAGES, GUEST_CHECK_PAGE, conversationHasGuests, talkContext } from "./talk-turn";
+import { GUEST_CHECK_MAX_PAGES, GUEST_CHECK_PAGE, conversationHasGuests, conversationReaderIds, talkContext } from "./talk-turn";
 import { TALK_TEAMMATE_LIMITS } from "./talk-address";
 
 const at = new Date("2026-10-07T10:00:00Z");
@@ -85,5 +92,24 @@ describe("conversationHasGuests (review of step 6)", () => {
     rows.members = people(GUEST_CHECK_PAGE * GUEST_CHECK_MAX_PAGES + 1);
     rows.guests = new Set();
     expect(await conversationHasGuests("c1", "org1")).toBe(true);
+  });
+});
+
+describe("conversationReaderIds (review round 5)", () => {
+  it("leaves out a member who can't sign in now, so nobody let back in later reads an answer they were never checked for", async () => {
+    rows.members = [
+      { id: "1", userId: "u-olivia" },
+      { id: "2", userId: "u-eve" },
+      { id: "3", userId: "u-gone" },
+      { id: "4", userId: "u-max" },
+      { id: "5", userId: "u-nobody" },
+    ];
+    rows.users = [
+      { id: "u-olivia", status: "ACTIVE", deletedAt: null },
+      { id: "u-eve", status: "INACTIVE", deletedAt: null },
+      { id: "u-gone", status: "ACTIVE", deletedAt: new Date("2026-10-01T00:00:00Z") },
+      { id: "u-max", status: "ACTIVE", deletedAt: null },
+    ];
+    expect(await conversationReaderIds("c1")).toEqual({ ids: ["u-olivia", "u-max"], tooMany: false });
   });
 });

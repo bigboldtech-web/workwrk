@@ -292,7 +292,7 @@ describe("a group continue", () => {
     // Its own refusal, never "the group chat can't be found" (review round 1).
     expect(await send({ resume: true, agentSlug: "someone-else" })).toMatchObject({ status: 409, json: { code: "not_in_group" } });
     st.group = groupOf([PM, agent("triage", "Triage", { status: "DISABLED" })]);
-    expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "agent_paused" });
+    expect((await send({ resume: true, agentSlug: "triage" })).json).toMatchObject({ code: "agent_paused", error: "Triage can't continue here: it is paused." });
     expect(st.claims).toEqual([]);
   });
 

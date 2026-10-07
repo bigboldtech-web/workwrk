@@ -249,6 +249,11 @@ const SQL_MANIFEST = [
   // chat), replaced only while it lacks the value. Before the reload: the new
   // build writes such rows.
   "2026-10-07-ai-teammates-automation-kind.sql",
+  // AI teammates, Phase 2 review round 5: two partial indexes over the runs
+  // still open ("AgentRun" PENDING or RUNNING, "AutomationRun" RUNNING), for
+  // the cron sweeps that close a run whose process stopped part way. Index
+  // only, IF NOT EXISTS: safe before or after the reload.
+  "2026-10-08-ai-teammates-stale-runs.sql",
 ];
 
 /**

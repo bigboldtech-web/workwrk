@@ -142,6 +142,13 @@ export const WATCHED_ONLY_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(["rem
 export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["read_talk", "list_my_inbox"]);
 
 /**
+ * Reads a Talk turn is not given because what they find cannot be held to
+ * what everyone in the conversation may open: a Talk answer draws only on
+ * what they all may read (search_tasks is held to it; review round 3).
+ */
+export const UNCHECKED_FOR_TALK: ReadonlySet<ToolName> = new Set<ToolName>(["search_sops", "list_forms", "list_data_tables"]);
+
+/**
  * Reads of the person's own private records (their goals and KRAs, KPI
  * status, weekly reviews, their team's alignment, contracts, meetings):
  * never offered where the answer goes out with no card (a Talk answer, an
@@ -150,13 +157,6 @@ export const OTHER_PEOPLES_WORDS: ReadonlySet<ToolName> = new Set<ToolName>(["re
  * must find nothing private to post (review round 1). A delegated answer
  * comes back to the person's own chat first, so a delegate keeps them.
  */
-/**
- * Reads a Talk turn is not given because what they find cannot be held to
- * what everyone in the conversation may open: a Talk answer draws only on
- * what they all may read (search_tasks is held to it; review round 3).
- */
-export const UNCHECKED_FOR_TALK: ReadonlySet<ToolName> = new Set<ToolName>(["search_sops", "list_forms", "list_data_tables"]);
-
 export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
   "list_my_kras",
   "list_my_kpi_status",
