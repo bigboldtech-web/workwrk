@@ -54,6 +54,7 @@ describe("POST /api/agents/actions/decide: whose request it is", () => {
         ],
         resume: false,
         agentSlug: null,
+        chat: null,
       });
     }
     expect(fx.actions[0].status).toBe("PENDING");

@@ -109,6 +109,7 @@ export function runToolCalls(row: Pick<RunRowLike, "input" | "output" | "error" 
  */
 export function runChatHref(sessionId: string | null, kind: string | null | undefined, agentSlug: string): string | null {
   if (!sessionId) return null;
+  if (kind === "TEAMMATE_GROUP") return `/agents?group=${encodeURIComponent(sessionId)}`;
   return kind === "TEAMMATE" ? `/agents?chat=${encodeURIComponent(agentSlug)}` : `/sidekick?session=${encodeURIComponent(sessionId)}`;
 }
 

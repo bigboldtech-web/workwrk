@@ -9,7 +9,7 @@ vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./teammate-route-f
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 
-import { anyTeammateUnread } from "./teammate-server";
+import { anyTeammateUnread, teammateRows } from "./teammate-server";
 import { PEOPLE, db, resetRouteDb, seedAgent, type Row } from "./teammate-route-fixtures";
 
 const viewer = PEOPLE.max as never;
@@ -65,5 +65,22 @@ describe("anyTeammateUnread", () => {
     const leas = chatWith(seedAgent({ slug: "planner" }), { id: "s-lea", userId: "u-lea" });
     say(leas.id, "ASSISTANT", "2026-10-06T09:00:05Z");
     expect(await anyTeammateUnread(viewer)).toBe(false);
+  });
+});
+
+describe("teammateRows (Phase 2)", () => {
+  it("never counts a card that lives in a group chat on the teammate's own row", async () => {
+    const pm = seedAgent({ slug: "pm", name: "Project Manager" });
+    chatWith(pm);
+    db.sessions.push({ id: "g1", organizationId: "org1", userId: "u-max", kind: "TEAMMATE_GROUP", archivedAt: null, agentId: null });
+    const later = new Date(Date.now() + 86_400_000);
+    db.actions.push(
+      { id: "x1", organizationId: "org1", actingForId: "u-max", agentId: pm.id, status: "PENDING", expiresAt: later, sessionId: "s-pm" },
+      { id: "x2", organizationId: "org1", actingForId: "u-max", agentId: pm.id, status: "PENDING", expiresAt: later, sessionId: "g1" },
+      // A request with no chat (an old row) still counts, as before.
+      { id: "x3", organizationId: "org1", actingForId: "u-max", agentId: pm.id, status: "PENDING", expiresAt: later, sessionId: null },
+    );
+    const [row] = await teammateRows([pm as never], viewer);
+    expect(row.waiting).toBe(2);
   });
 });

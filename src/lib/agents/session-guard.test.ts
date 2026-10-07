@@ -26,6 +26,13 @@ describe("teammateChatRefusal", () => {
     expect(teammateChatRefusal({})).toBeNull();
     expect(teammateChatRefusal({ kind: "SOMETHING_NEW" })?.status).toBe(409);
   });
+
+  it("refuses a group chat: Ask AI never runs one (Phase 2)", async () => {
+    const res = teammateChatRefusal({ kind: "TEAMMATE_GROUP" });
+    expect(res?.status).toBe(409);
+    expect(await res?.json()).toMatchObject({ code: USE_TEAMMATE_CHAT });
+    expect(ASK_AI_CHATS).toEqual({ kind: null });
+  });
 });
 
 describe("ASK_AI_CHATS", () => {

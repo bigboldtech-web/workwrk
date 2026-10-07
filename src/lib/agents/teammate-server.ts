@@ -22,11 +22,12 @@ import { UNLIMITED_AI } from "@/lib/ai-allowance";
 import { isModuleActive } from "@/lib/entitlements";
 import { TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
+import { actionViews } from "./actions";
 import { agentMonthUsage } from "./budget";
 import { hueForAgent } from "./hues";
 import { agentUsableWhere, canManageAgent, canUseAgent, type TeammateVisibility } from "./teammate-access";
 import { GROUP_FALLBACK, TEAMMATE_ROUTE_ERRORS, TEAMMATE_SETTINGS, channelPlace, dmPlace, teammateLimitMessage } from "./teammate-copy";
-import { lastLineFor, messageViewFromRow } from "./teammate-thread";
+import { lastLineFor, messageViewFromRow, type ActionView, type TeammateMessageView } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
 import { toolSettings, type TeammateDetail, type TeammateLimits, type TeammateRow, type TeammateStatus, type ToolSetting } from "./teammate-views";
 
@@ -109,6 +110,39 @@ export const SHOWN_MESSAGES: Prisma.ChatMessageWhereInput = {
 /** The ChatMessage columns a thread reads. */
 export const MESSAGE_SELECT = { id: true, role: true, content: true, toolCalls: true, kind: true, meta: true, createdAt: true } as const;
 
+const PAGE_DEFAULT = 50;
+const PAGE_MAX = 100;
+
+/**
+ * A page of one chat the person owns, oldest first (?before=<messageId>,
+ * ?take=1..100), with the cards its approval rows and lines name (the
+ * person's own only). The caller has checked the chat is theirs: a
+ * teammate's (liveChatWhere) or a group's (group-server.ts loadGroup).
+ */
+export async function messagesPage(
+  sessionId: string,
+  viewerId: string,
+  sp: URLSearchParams,
+): Promise<{ session: { id: string }; messages: TeammateMessageView[]; actions: Record<string, ActionView>; hasMore: boolean }> {
+  const takeRaw = parseInt(sp.get("take") ?? "", 10);
+  const take = Math.min(PAGE_MAX, Math.max(1, Number.isFinite(takeRaw) ? takeRaw : PAGE_DEFAULT));
+  // The page before a message of this chat; a cursor that names none starts at the newest.
+  const before = sp.get("before");
+  const cursor = before ? await prisma.chatMessage.findFirst({ where: { id: before, sessionId }, select: { id: true, createdAt: true } }) : null;
+  const where: Prisma.ChatMessageWhereInput = {
+    sessionId,
+    AND: [
+      SHOWN_MESSAGES,
+      ...(cursor ? [{ OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] }] : []),
+    ],
+  };
+  const rows = await prisma.chatMessage.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: take + 1, select: MESSAGE_SELECT });
+  const page = rows.slice(0, take).reverse();
+  const messages = page.map(messageViewFromRow).filter((m): m is TeammateMessageView => m !== null);
+  const actionIds = messages.flatMap((m) => (m.kind === "approval" ? m.actionIds : m.kind === "event" && m.actionId ? [m.actionId] : []));
+  return { session: { id: sessionId }, messages, actions: await actionViews(actionIds, viewerId), hasMore: rows.length > take };
+}
+
 /** Talk and Tables, which some tools need. */
 export async function workspaceModules(organizationId: string): Promise<{ tablesOn: boolean; talkOn: boolean }> {
   const [tablesOn, talkOn] = await Promise.all([isModuleActive(organizationId, "workwrk-tables"), isModuleActive(organizationId, "workwrk-talk")]);
@@ -131,6 +165,15 @@ function statusOf(s: string): TeammateStatus {
 export async function teammateRows(agents: readonly TeammateRecord[], viewer: Viewer, now: Date = new Date()): Promise<TeammateRow[]> {
   if (agents.length === 0) return [];
   const ids = agents.map((a) => a.id);
+  // A card that lives in a group chat is the group row's to count, never the
+  // teammate's own row (docs/plans/ai-teammates-phase2.md step 3).
+  const groups = await prisma.chatSession.findMany({
+    where: { organizationId: viewer.organizationId, userId: viewer.userId, kind: "TEAMMATE_GROUP" },
+    select: { id: true },
+    take: 500,
+  });
+  const notInGroups: Prisma.AgentActionWhereInput =
+    groups.length > 0 ? { OR: [{ sessionId: null }, { sessionId: { notIn: groups.map((g) => g.id) } }] } : {};
   const [sessions, settings, waiting] = await Promise.all([
     prisma.chatSession.findMany({
       where: { organizationId: viewer.organizationId, userId: viewer.userId, kind: "TEAMMATE", archivedAt: null, agentId: { in: ids } },
@@ -139,7 +182,7 @@ export async function teammateRows(agents: readonly TeammateRecord[], viewer: Vi
     prisma.agentPersonSetting.findMany({ where: { userId: viewer.userId, agentId: { in: ids } }, select: { agentId: true, lastReadAt: true } }),
     prisma.agentAction.groupBy({
       by: ["agentId"],
-      where: { organizationId: viewer.organizationId, actingForId: viewer.userId, status: "PENDING", expiresAt: { gt: now }, agentId: { in: ids } },
+      where: { organizationId: viewer.organizationId, actingForId: viewer.userId, status: "PENDING", expiresAt: { gt: now }, agentId: { in: ids }, ...notInGroups },
       _count: { _all: true },
     }),
   ]);

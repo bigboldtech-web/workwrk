@@ -1242,3 +1242,19 @@ The `claimUnreportedOutcomes` filter by teammate changes nothing in a one-teamma
     3. scripts/CRON-SETUP.md described the old loop.
   - Also: under "What to do each run" the drawer now says the routine has its own instructions.
   - Known, not fixed: the Workspace agents "Last run" column reads only the old loop's runs (SCHEDULED or MANUAL). A Run now (a chat turn, seen only by the person it ran as) and a routine's run do not show there. Showing them would link everyone to a run only one person may open. The run is in that person's chat and in their Run history.
+- **Step 3** (group chats, engine and routes) proved locally against a real dev server and the stand-in model:
+  - "Status?" brought one answer (the lead) for one question and one run.
+  - "@Triage @Proof PM" brought two answers in that order, each with its own question. Each teammate read the other's answer only inside `<workspace_note>`, and its own as its own.
+  - Two cards waited in the group, with no Inbox rows. Approving them answered `chat: group`, and the continue heard only its own teammate's outcome.
+  - A paused member got one skipped line and no question; naming only it answered 409 and spent nothing.
+  - Removing below two answered 409 `min_members`, and the read cursor cleared the dot.
+  - Leaving cancelled the waiting card. Six teammates answered 400, and another person's group or private teammate 404. Ask AI on the group's id answered 409.
+  - Deviation from the spec's proof list: a message naming only teammates who cannot answer is refused (409 `no_one_to_answer`, nothing saved), as the route's own flow says, rather than writing a skipped line.
+  - Review (one read-only reviewer, findings re-read against the code), 6 found, 6 fixed:
+    1. A group answer read only the first 4,000 characters of the person's message. It now reads it whole, up to the 20,000 a message may have.
+    2. A turn could read a message sent while it waited its turn as "the last message". A group turn now reads the chat only up to the message it answers, plus the other answers to it.
+    3. A teammate paused, removed or no longer the person's to use while an earlier one answered still ran. Each later answerer is now read again just before its turn, and runs as it is now.
+    4. Leaving a group while a turn ran left its new cards counted but impossible to show. They are now cancelled when the turn ends, and nobody else answers.
+    5. An answerer that got nothing back left no trace, and the page would wait for it for ten minutes. It now leaves a line. A claim that throws leaves one too.
+    6. A teammate's name (which someone else may set) reached the model inside the server's own line. Names are now inside `<workspace_note>`, both in the history and in block 2.
+  - Not fixed, not material: the 20-group limit is not counted under a lock (a race can make a 21st group, which spends nothing); concurrent member edits can briefly leave one or six members (at most three answer any message).

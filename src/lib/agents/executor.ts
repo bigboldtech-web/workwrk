@@ -285,7 +285,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   });
   const line = eventLineFor(name, ran.result);
   if (line) {
-    const message = await writeEventLine(a.turn.sessionId, line);
+    // The teammate the line is about: a group chat holds several.
+    const message = await writeEventLine(a.turn.sessionId, { ...line, agentId: a.agent.id });
     if (message) a.emit?.({ type: "event", message });
   }
   return done("ran", ran.result);
