@@ -140,6 +140,8 @@ interface ApiWorkflow {
   viewerIsCreator?: boolean;
   /** What runs holds an AI teammate step: only its creator may turn it back on. */
   liveHasTeammateStep?: boolean;
+  /** Its creator can no longer be acted for: the teammate step can never run, and anyone who may edit it may take that step out (review round 7). */
+  teammateCreatorGone?: boolean;
 }
 
 interface PlaceField { key: string; label: string; type: string; choices?: Array<{ value: string; label: string }> }
@@ -602,10 +604,16 @@ export default function AutomationBuilderPage() {
   const canEdit = Boolean(wf?.can.edit);
   // An AI teammate step works as the creator, so anyone else reads the
   // automation (the server refuses their save); its on/off switch stays theirs.
-  const teammateLocked = Boolean(wf && !wf.viewerIsCreator && draft?.actions.some((a) => a.key === TEAMMATE_STEP_KEY));
+  const draftHasTeammate = Boolean(draft?.actions.some((a) => a.key === TEAMMATE_STEP_KEY));
+  // Unless its creator can no longer be acted for: then the step is for anyone who may edit it to take out (review round 7).
+  const teammateLocked = Boolean(wf && !wf.viewerIsCreator && draftHasTeammate && !wf.teammateCreatorGone);
+  const removeTeammateFirst = Boolean(wf && !wf.viewerIsCreator && draftHasTeammate && wf.teammateCreatorGone);
   const readOnly = !canEdit || teammateLocked;
   // Turning it back on is the creator's when what RUNS holds the step (the activate route's rule).
   const onLocked = Boolean(wf && !wf.viewerIsCreator && wf.liveHasTeammateStep);
+  // Publishing over a live teammate step is the creator's, unless they can no longer be acted for;
+  // a draft that still holds a gone creator's step can't be published by anyone else either.
+  const publishLocked = (onLocked && !wf?.teammateCreatorGone) || removeTeammateFirst;
   const dirty = Boolean(draft && canEdit && draftSnapshot(draft) !== baseline);
 
   const triggerByKey = useMemo(() => new Map(catalog.triggers.map((t) => [t.key, t])), [catalog.triggers]);
@@ -1223,7 +1231,8 @@ export default function AutomationBuilderPage() {
     const value = row.params[p.key] ?? "";
     const set = (v: string) => setParam(row.id, p.key, v);
     if (p.key === "itemId") return null; // The triggering task: the builder never asks for an id.
-    if (readOnly) {
+    // A teammate step only its creator changes: anyone else sees its words, and may only remove it.
+    if (readOnly || (action.key === TEAMMATE_STEP_KEY && !wf?.viewerIsCreator)) {
       const shown =
         p.type === "user" ? personLabel(value)
         : p.type === "board" ? (value ? listLabel(value) ?? "A List you can't open" : null)
@@ -1255,7 +1264,8 @@ export default function AutomationBuilderPage() {
                 setTeammatesTick((n) => n + 1);
               }}
             >
-              {AUTOMATION_TEAMMATE_COPY.teammatesFailed} Try again
+              {/* The token says it already when a teammate is saved (review round 7). */}
+              {value && !chosen ? "Try again" : `${AUTOMATION_TEAMMATE_COPY.teammatesFailed} Try again`}
             </button>
           ) : null}
         </span>
@@ -1367,8 +1377,8 @@ export default function AutomationBuilderPage() {
           onClick: () => void publish(),
           busy: publishing,
           // The server refuses a new version over a live teammate step from anyone but its creator (review round 4).
-          disabled: busy || offline || onLocked || (published && !dirty && !wf.unpublishedChanges),
-          title: offlineTitle ?? (onLocked ? AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null) : published ? "The live automation keeps running the old version until you republish." : "Publishing checks the sentence and turns the automation on."),
+          disabled: busy || offline || publishLocked || (published && !dirty && !wf.unpublishedChanges),
+          title: offlineTitle ?? (removeTeammateFirst ? AUTOMATION_TEAMMATE_COPY.creatorGoneRemove(wf.createdByName ?? null) : publishLocked ? AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null) : published ? "The live automation keeps running the old version until you republish." : "Publishing checks the sentence and turns the automation on."),
         } : undefined,
       }}
     />
@@ -1487,10 +1497,10 @@ export default function AutomationBuilderPage() {
             ) : null}
           </div>
         </div>
-      ) : onLocked && canEdit && !archived ? (
+      ) : (removeTeammateFirst || (onLocked && !wf.teammateCreatorGone)) && canEdit && !archived ? (
         <div className="px-6">
           <div className="os-chrome mb-2 flex min-h-11 items-center gap-2 rounded-lg bg-subtle px-3 py-2 text-row text-ink-2" role="status">
-            <span className="min-w-0">{AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null)}</span>
+            <span className="min-w-0">{removeTeammateFirst ? AUTOMATION_TEAMMATE_COPY.creatorGoneRemove(wf.createdByName ?? null) : AUTOMATION_TEAMMATE_COPY.creatorOnlyPublish(wf.createdByName ?? null)}</span>
           </div>
         </div>
       ) : null}

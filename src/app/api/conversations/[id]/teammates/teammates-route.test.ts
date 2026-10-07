@@ -12,6 +12,10 @@ type Row = Record<string, unknown>;
 const st = vi.hoisted(() => ({
   /** The runs whose question went back (giveBackTurn). */
   givenBack: [] as string[],
+  /** Runs while the turn runs. */
+  duringTurn: null as null | (() => void),
+  /** Whether the person can still be acted for. */
+  actingOk: true,
   teammates: {} as Record<string, Row | null>,
   inserted: [] as Row[],
   already: null as Row | null,
@@ -73,7 +77,7 @@ vi.mock("@/lib/talk-post", () => ({
   afterMessageSent: async (a: Row) => void st.afterSent.push(a),
 }));
 vi.mock("@/lib/agents/acting", () => ({
-  resolveActingPerson: async () => ({ ok: true, person: { userId: `u-${st.userN}`, organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: viewerFor() } }),
+  resolveActingPerson: async () => (st.actingOk ? { ok: true, person: { userId: `u-${st.userN}`, organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: viewerFor() } } : { ok: false, reason: "inactive" }),
 }));
 vi.mock("@/lib/agents/actions", () => ({
   actionHref: (slug: string, id: string) => `/agents?chat=${slug}&action=${id}`,
@@ -87,7 +91,7 @@ vi.mock("@/lib/agents/budget", () => ({
 vi.mock("@/lib/agents/engine", () => ({
   getOrCreateTeammateSession: async () => ({ id: "s-cos", created: false }),
   teammateAgentFrom: (r: Row) => r,
-  runTeammateTurn: async (a: Row) => (st.turns.push(a), st.turnAnswer ?? { text: "Summary for @Olivia: see [the plan](https://x.test).", error: null, giveBack: false, proposedActionIds: [], messages: [] }),
+  runTeammateTurn: async (a: Row) => (st.turns.push(a), st.duringTurn?.(), st.turnAnswer ?? { text: "Summary for @Olivia: see [the plan](https://x.test).", error: null, giveBack: false, proposedActionIds: [], messages: [] }),
 }));
 vi.mock("@/lib/agents/talk-turn", () => ({
   conversationHasGuests: async () => st.guests.shift() ?? false,
@@ -125,6 +129,8 @@ const ASK = { body: "@Chief of Staff summarise this", teammate: "t-cos", clientI
 
 beforeEach(() => {
   st.givenBack = [];
+  st.duringTurn = null;
+  st.actingOk = true;
   st.userN += 1;
   st.teammates = { "t-cos": COS };
   st.inserted = [];
@@ -255,6 +261,19 @@ describe("asking a teammate in Talk", () => {
     expect(st.inserted).toHaveLength(1);
   });
 
+  it("posts nothing as the person when they were deactivated, or the teammate removed or paused, during the turn (review round 7)", async () => {
+    st.duringTurn = () => void (st.actingOk = false);
+    expect((await ask(ASK)).events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    st.actingOk = true;
+    st.duringTurn = () => void (st.teammates["t-cos"] = { ...COS, status: "DISABLED" });
+    expect((await ask({ ...ASK, clientId: "temp-paused01" })).events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    st.duringTurn = () => void (st.teammates["t-cos"] = null);
+    st.teammates["t-cos"] = COS;
+    expect((await ask({ ...ASK, clientId: "temp-removed1" })).events.map((e) => e.type)).toEqual(["message", "no_answer"]);
+    // Only the requests: no answer was posted.
+    expect(st.inserted.every((m) => (m.metadata as Row | undefined)?.kind !== "agent_post")).toBe(true);
+  });
+
   it("posts nothing when the person removed the request during the turn (review of step 6)", async () => {
     st.removed = ["m1"];
     const out = await ask(ASK);
@@ -302,6 +321,9 @@ describe("asking a teammate in Talk", () => {
   it("sends the answer's Inbox notices to its readers only (review round 2)", async () => {
     await ask(ASK);
     expect(st.afterSent.at(-1)).toMatchObject({ onlyUserIds: [`u-${st.userN}`, "u-olivia", "u-sam"] });
+    // Naming the teammate, never the person alone (review round 7); the request itself is the person's own.
+    expect(st.afterSent.at(-1)).toMatchObject({ senderLabel: "Chief of Staff for Max Chen" });
+    expect(st.afterSent[0]).not.toHaveProperty("senderLabel");
   });
 
   it("is asked only where at most 250 people read, and posts nothing past it", async () => {

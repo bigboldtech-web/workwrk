@@ -27,6 +27,7 @@
 import { prisma } from "@/lib/prisma";
 import { TEAMMATE_TOOL_ERRORS, memoryFull } from "./teammate-copy";
 import { clampText } from "./clamp";
+import { plainData } from "./plain-data";
 
 export const MEMORY_LIMITS = {
   keyMax: 80,
@@ -218,7 +219,7 @@ export async function listMemories(agentId: string, userId: string, opts: { incl
 
 /** One memory as one prompt line: one line, and nothing that can open or close a block. */
 function promptLine(m: MemoryView): string {
-  const flat = (s: string) => s.replace(/\s+/g, " ").trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const flat = (s: string) => plainData(s).replace(/\s+/g, " ").trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `- ${flat(m.key)}: ${flat(m.value)}`;
 }
 

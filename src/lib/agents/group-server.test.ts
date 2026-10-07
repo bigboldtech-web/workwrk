@@ -105,7 +105,7 @@ vi.mock("./actions", () => ({ writeEventLine: async (sessionId: string, line: Ro
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, e: Row) => void st.published.push({ userId, ...e }) }));
 
 import { GROUP_LIMITS } from "./group-chat";
-import { createGroup, leaveGroup, loadGroup, updateGroup } from "./group-server";
+import { createGroup, groupNameOf, leaveGroup, loadGroup, updateGroup } from "./group-server";
 import { GROUP_COPY } from "./teammate-copy";
 
 const MAX = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false } as never;
@@ -128,8 +128,17 @@ describe("createGroup", () => {
   it("makes the person's group with its teammates at positions 0 to n-1, named after them when it has no name", async () => {
     const made = await createGroup(MAX, { name: "", agentSlugs: ["pm", "triage", "cos", "analyst"] });
     expect(made.ok).toBe(true);
-    expect(st.sessions[0]).toMatchObject({ organizationId: "org1", userId: "u-max", kind: "TEAMMATE_GROUP", agentId: null, title: "pm, triage and cos" });
+    // No name of its own is stored: its name follows its members (review round 7).
+    expect(st.sessions[0]).toMatchObject({ organizationId: "org1", userId: "u-max", kind: "TEAMMATE_GROUP", agentId: null, title: null });
     expect(st.members.map((m) => [m.agentId, m.position])).toEqual([["a-pm", 0], ["a-triage", 1], ["a-cos", 2], ["a-analyst", 3]]);
+    if (made.ok) expect(groupNameOf(made.group)).toBe("pm, triage and cos");
+  });
+
+  it("names an unnamed group after its live members as they are now, never one removed (review round 7)", () => {
+    const m = (name: string, status = "ENABLED") => ({ agent: { name, status } });
+    const g = { title: null, members: [m("Chief of Staff"), m("Triage", "ARCHIVED"), m("Support desk"), m("Analyst")] } as never;
+    expect(groupNameOf(g)).toBe("Chief of Staff, Support desk and Analyst");
+    expect(groupNameOf({ title: " Offsite crew ", members: [] } as never)).toBe("Offsite crew");
   });
 
   it("refuses too few, too many and two sharing a name", async () => {
@@ -203,6 +212,19 @@ describe("updateGroup", () => {
       where: { sessionId: g.id, actingForId: "u-max", agentId: { in: ["a-pm"] }, status: "PENDING" },
       data: { status: "CANCELLED", decidedVia: "system", error: GROUP_COPY.cancelledRemoved },
     });
+  });
+
+  it("never blocks a change over a shared name it did not bring, and still refuses adding one (review round 7)", async () => {
+    const g = await group(["pm", "triage"]);
+    // An Admin renamed Triage to "PM" elsewhere.
+    st.teammates.triage.name = "PM";
+    const again = await loadGroup(g.id, MAX);
+    if (!again) throw new Error("gone");
+    expect(await updateGroup(again, MAX, { add: ["cos"] })).toMatchObject({ ok: true });
+    st.teammates.analyst.name = "cos";
+    const third = await loadGroup(g.id, MAX);
+    if (!third) throw new Error("gone");
+    expect(await updateGroup(third, MAX, { add: ["analyst"] })).toMatchObject({ ok: false, code: "duplicate_name" });
   });
 
   it("lets the person remove a teammate that was removed from the workspace", async () => {

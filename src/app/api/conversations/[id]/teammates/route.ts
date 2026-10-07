@@ -256,12 +256,18 @@ export async function POST(req: Request, { params }: Params) {
       // Who reads it now: the answer keeps this list and reaches only them.
       const readersNow = await conversationReaderIds(id).catch(() => ({ ids: [] as string[], tooMany: true }));
       const standing = await requestStanding(id, request.id, parentId).catch(() => false);
+      // The person may still be acted for, and the teammate is still on and
+      // theirs to use: one deactivated, or a teammate removed or paused,
+      // during the turn posts nothing as them (review round 7).
+      const actingNow = await resolveActingPerson(ctx.gate.organizationId, ctx.gate.userId).catch(() => null);
+      const agentNow = actingNow?.ok ? await loadTeammate(slug, actingNow.person.viewer).catch(() => null) : null;
       // Nobody who joined during the turn reads an answer drawn from a
       // context checked against the people here when it began (review round 2).
       const sameReaders = readersNow.ids.every((uid) => uid === person.userId || readers.ids.includes(uid));
       const allowed =
         standing &&
         sameReaders &&
+        agentNow?.status === "ENABLED" &&
         still !== null &&
         canPost(still.conversation, still.role) &&
         talkAddressRefusal(still.conversation, still.viewer, { isMember: still.viewer.isMember, hasGuests: guestsNow, tooManyPeople: readersNow.tooMany }) === null;
@@ -306,6 +312,8 @@ export async function POST(req: Request, { params }: Params) {
             now: at,
             // Its Inbox notices go to its readers only: someone added since never gets its opening words (review round 2).
             onlyUserIds: answerReaders,
+            // And name the teammate, as the feed's "via" does: the person never read these words first (review round 7).
+            senderLabel: TALK_TEAMMATE_COPY.noticeSender(agent.name, person.name),
           });
           await auditTalkAnswer({ person, agent, what: TALK_TEAMMATE_COPY.answeredIn(placeKind === "dm" ? TALK_TEAMMATE_COPY.auditDmPlace : place), conversationId: id, messageId: answered.message.id, runId: claim.runId }).catch(() => {});
         }

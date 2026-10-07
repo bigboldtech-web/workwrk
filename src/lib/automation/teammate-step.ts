@@ -50,6 +50,22 @@ export async function teammateSlugsUsableBy(definition: Record<string, unknown>,
   return { ...definition, actions };
 }
 
+/**
+ * Whether the person who made an automation can no longer be acted for here
+ * (gone, deactivated, a Guest now, an agent account, or nobody on record).
+ * Its teammate step can never run again, so whoever may edit the automation
+ * may take that step out; adding or changing one stays theirs alone (review
+ * round 7: else a working automation stayed broken for good). AI turned off
+ * is not this: it can come back on. A read that fails keeps the lock.
+ */
+export async function teammateCreatorGone(orgId: string, creatorId: string | null): Promise<boolean> {
+  if (!creatorId) return true;
+  const { resolveActingPerson } = await import("@/lib/agents/acting");
+  const acting = await resolveActingPerson(orgId, creatorId).catch(() => null);
+  if (!acting) return false;
+  return !acting.ok && acting.reason !== "ai_off";
+}
+
 export type TeammateStepProblem = { status: 400 | 403; error: string; code: "teammate_step_creator_only" | "teammate_not_found" };
 
 /**

@@ -128,7 +128,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { TEAMMATE_TOOLS, teammateToolNames } from "./teammate-tools";
+import { TEAMMATE_TOOLS, cleanOutwardText, teammateToolNames } from "./teammate-tools";
 import { CROSS_TOOL_NAMES } from "./tool-names";
 import type { ToolContext } from "./tools";
 
@@ -374,5 +374,16 @@ describe("teammateToolNames", () => {
     expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: true, talkOn: true })).toEqual(["list_data_tables", "post_in_talk", "read_talk", "remember"]);
     expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: false, talkOn: false })).toEqual(["remember"]);
     expect(teammateToolNames({ toolNames: { not: "a list" }, productSlug: null }, { tablesOn: true, talkOn: true })).toEqual([]);
+  });
+});
+
+describe("cleanOutwardText (review round 7)", () => {
+  it("drops an @ that starts a word in Talk, and keeps one inside an email address or a link", () => {
+    const t = (x: string) => cleanOutwardText(x, { talk: true, max: 4000 });
+    expect(t("@Olivia see (@Max) and \"@Sam\"")).toBe("Olivia see (Max) and \"Sam\"");
+    expect(t("Email max@acme.com about it")).toBe("Email max@acme.com about it");
+    expect(t("Read https://medium.com/@ola/post first")).toBe("Read https://medium.com/@ola/post first");
+    // Outside Talk nothing changes but the links.
+    expect(cleanOutwardText("@Olivia [the plan](https://x.test)", { talk: false, max: 4000 })).toBe("@Olivia the plan");
   });
 });

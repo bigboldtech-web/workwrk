@@ -404,7 +404,7 @@ export async function decideActions(
       // a request decided before (two tabs, a double click) changes nothing,
       // so the turn after it would have nothing to tell. Ask AI's own never
       // continue: its card shows the outcome, and it hears it next turn.
-      if (row.agent && (r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided" && resumeSlug === null) {
+      if (row.agent && (r.status === "EXECUTED" || r.status === "FAILED") && r.code !== "already_decided" && resumeSlug === null && (await continuesInChat(row.runId))) {
         resumeSlug = row.agent.slug;
         resumeSession = row.sessionId;
       }
@@ -605,6 +605,27 @@ async function approve(
   }
   await settle(row, viewer.userId, { text: didntWorkLine(prepared.preview.title, out.error), event: "action_failed" });
   return { id: row.id, status: "FAILED", code: "failed", error: out.error };
+}
+
+/**
+ * Whether deciding a card continues the chat at once. A card a Talk,
+ * automation or delegated turn made never does: a continue here would run
+ * with this chat's tools and the person's "Don't ask", picking up a turn
+ * whose words may carry what others planted where it read (review round 7).
+ * Its outcome is told at the person's next message, as the Inbox path tells
+ * it. A card with no run on record (Ask AI's, an older row) keeps today's rule.
+ */
+async function continuesInChat(runId: string | null): Promise<boolean> {
+  if (!runId) return true;
+  let trigger: unknown = null;
+  try {
+    const run = await prisma.agentRun.findUnique({ where: { id: runId }, select: { input: true } });
+    trigger = record(run?.input).trigger;
+  } catch {
+    // Unread: no continue, the safe side (the outcome is told at the next message).
+    return false;
+  }
+  return trigger !== "TALK" && trigger !== "AUTOMATION" && trigger !== "DELEGATED";
 }
 
 /**

@@ -99,6 +99,12 @@ export async function afterMessageSent(args: {
    * was checked against). Absent: every member, as for any message.
    */
   onlyUserIds?: readonly string[];
+  /**
+   * Who the notice names as sending it, in place of the author's name: a
+   * teammate's answer posted as the person ("Chief of Staff for Ola Owner"),
+   * which the person never read before it went out (review round 7).
+   */
+  senderLabel?: string;
 }): Promise<void> {
   const { conversationId: id, conversation: conversationFacts, message, authorId: userId, text, parentId, isCallCard, now } = args;
 
@@ -125,7 +131,7 @@ export async function afterMessageSent(args: {
   // "Direct messages off" is about volume, not about being ignored.
   try {
     const link = `/tlk/${id}`;
-    const senderName = `${message.author.firstName} ${message.author.lastName}`.trim();
+    const senderName = args.senderLabel?.trim() || `${message.author.firstName} ${message.author.lastName}`.trim();
     const convoLabel = conversationFacts.type === "DM"
       ? senderName
       : conversationFacts.type === "CHANNEL"

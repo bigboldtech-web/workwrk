@@ -269,7 +269,7 @@ describe("LEGACY_COPY (old schedules moved onto routines, Phase 2)", () => {
     movedLine: [["Triage", "Weekdays at 9:00"], "The schedule Triage had in Workspace agents is now your routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see."],
     routineFor: [["Olivia"], "Routine for Olivia"],
     scheduleLine: [["Olivia"], "Now a routine for Olivia"],
-    stopped: [["the person who set it up is a guest now."], "Its schedule stopped: the person who set it up is a guest now. Anyone who wants it on a schedule can set up a routine in its chat."],
+    stopped: [["when schedules moved to routines, the person who set it up was a guest."], "Its schedule stopped: when schedules moved to routines, the person who set it up was a guest. Anyone who wants it on a schedule can set up a routine in its chat."],
     runNowWaiting: [["Deal desk"], "Deal desk is waiting for your approval"],
     movedLineKept: [["Triage", "Weekdays at 9:00"], "The schedule Triage had in Workspace agents is now your routine: Scheduled check · Weekdays at 9:00. It works as you and asks before anything other people will see, except what you chose not to be asked about."],
     routinePausedFor: [["Olivia"], "Routine for Olivia, paused"],
@@ -305,6 +305,7 @@ describe("TALK_TEAMMATE_COPY (teammates in Talk, Phase 2)", () => {
     askedLine: [["#proof", "Sum this up"], "Asked in #proof: Sum this up"],
     answeredIn: [["#proof"], "Answered in #proof"],
     tooMany: [[12], "You've tried to ask teammates 5 times in a minute. Try again in 12 seconds."],
+    noticeSender: [["Chief of Staff", "Ola Owner"], "Chief of Staff for Ola Owner"],
   };
   it("says one second as one (review round 1)", () => {
     expect(copy.TALK_TEAMMATE_COPY.tooMany(1)).toBe("You've tried to ask teammates 5 times in a minute. Try again in 1 second.");
@@ -328,7 +329,7 @@ describe("DELEGATION_COPY (one teammate asking another, Phase 2; review round 6)
     delegateWaitingLine: [["Project Manager", "Move \"Call Acme\" to Backlog"], "Project Manager is waiting for your approval: Move \"Call Acme\" to Backlog"],
     askTitle: [["Project Manager"], "Ask Project Manager"],
     noTeammateNamed: [["Planner"], "You don't have a teammate called Planner."],
-    severalNamed: [["Planner"], "More than one of your teammates is called Planner. Rename one first."],
+    severalNamed: [["Planner"], "More than one of your teammates is called Planner, so it isn't clear which to ask. One needs another name: the person can rename their own, and an Owner or Admin can rename a workspace one."],
     delegatePaused: [["Planner"], "Planner is paused, so it can't be asked."],
     delegateNoAnswer: [["Planner"], "Planner didn't answer."],
     requestTooLong: [[4000], "That request is longer than 4,000 characters, so nothing was asked. Shorten it or split it into parts."],
@@ -355,6 +356,7 @@ describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],
     creatorOnlyPublish: [["Max Member"], "Its live version has an AI teammate step that works as Max Member, so only they can publish a new version. You can still save the draft."],
+    creatorGoneRemove: [["Max Member"], "Its AI teammate step works as Max Member, who can no longer be acted for here, so it can't run. Remove that step to change or publish this automation."],
     pausedLabel: [["Triage"], "Triage (paused: it won't run until it is turned back on)"],
     askedLine: [["Support triage", "Summarise [title]"], 'Asked by the automation "Support triage": Summarise [title]'],
   };

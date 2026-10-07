@@ -226,6 +226,19 @@ describe("decideActions: saying no", () => {
     expect(fx.messages).toEqual([{ sessionId: "s1", role: "SYSTEM", kind: "EVENT", content: "You said no: Post in #general", meta: { event: "action_denied", actionId: row.id, agentId: "a1" } }]);
   });
 
+  it("never continues at once for a card a Talk, automation or delegated turn made (review round 7)", async () => {
+    for (const trigger of ["TALK", "AUTOMATION", "DELEGATED"]) {
+      fx.runTriggers = { [`run-${trigger}`]: trigger };
+      const row = talkPost({ runId: `run-${trigger}` });
+      const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+      expect(out.results[0]).toMatchObject({ status: "EXECUTED" });
+      expect(out.resume).toBe(false);
+    }
+    // A chat's own card continues, as before.
+    fx.runTriggers = { "run-chat": "CHAT" };
+    expect((await decideActions(viewer, [{ id: talkPost({ runId: "run-chat" }).id, decision: "approve" }])).resume).toBe(true);
+  });
+
   it("does not resume for a request decided before this call", async () => {
     const row = talkPost();
     expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).resume).toBe(true);

@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 const st = vi.hoisted(() => ({
   acting: true,
+  /** Why the creator can't be acted for, when they can't. */
+  refusal: "gone",
   teammate: { id: "a1", slug: "t-triage", name: "Triage", status: "ENABLED", organizationId: "org1" } as Row | null,
   claims: [] as Row[],
   claim: null as Row | null,
@@ -23,7 +25,7 @@ vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: () => {} }));
 vi.mock("./acting", () => ({
   resolveActingPerson: async (org: string, userId: string) =>
-    st.acting ? { ok: true, person: { userId, organizationId: org, firstName: "Max", name: "Max Chen", viewer: { userId, organizationId: org } } } : { ok: false, reason: "gone" },
+    st.acting ? { ok: true, person: { userId, organizationId: org, firstName: "Max", name: "Max Chen", viewer: { userId, organizationId: org } } } : { ok: false, reason: st.refusal },
 }));
 vi.mock("./actions", () => ({ writeEventLine: async (sessionId: string, line: Row) => void st.lines.push({ sessionId, ...line }) }));
 vi.mock("./budget", () => ({
@@ -112,6 +114,10 @@ describe("runAutomationTeammateStep", () => {
   it("refuses a creator who can't be acted for, or a teammate they can no longer use", async () => {
     st.acting = false;
     await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.creatorCannot);
+    // AI turned off is said as such (review round 7).
+    st.refusal = "ai_off";
+    await expect(runAutomationTeammateStep(ctx(), PARAMS)).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.aiOffForCreator);
+    st.refusal = "gone";
     st.acting = true;
     await expect(runAutomationTeammateStep(ctx(), { ...PARAMS, teammate: "t-olivias-private" })).rejects.toThrow(AUTOMATION_TEAMMATE_COPY.noTeammate);
     st.teammate = { ...st.teammate!, status: "DISABLED" };
