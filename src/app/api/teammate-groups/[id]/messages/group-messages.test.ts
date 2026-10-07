@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown>;
 
 const st = vi.hoisted(() => ({
+  /** Whether the person can be acted for now. */
+  actingOk: true,
   /** What the route told the person's other tabs. */
   published: [] as Array<{ userId: string; event: Record<string, unknown> }>,
   /** The runs whose question went back (giveBackTurn). */
@@ -51,7 +53,7 @@ vi.mock("@/lib/realtime-bus", () => ({ publishToUser: (userId: string, event: Re
 vi.mock("@/lib/app-gate", () => ({ requireApp: async () => ({ viewer: VIEWER }) }));
 vi.mock("@/lib/ai-client", () => ({ isAiConfigured: async () => true }));
 vi.mock("@/lib/agents/acting", () => ({
-  resolveActingPerson: async () => ({ ok: true, person: { userId: "u-max", organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: VIEWER } }),
+  resolveActingPerson: async () => (st.actingOk ? { ok: true, person: { userId: "u-max", organizationId: "org1", firstName: "Max", name: "Max Chen", viewer: VIEWER } } : { ok: false, reason: "inactive" }),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -138,6 +140,7 @@ const PM = agent("pm", "Project Manager");
 const TRIAGE = agent("triage", "Triage");
 
 beforeEach(() => {
+  st.actingOk = true;
   st.published = [];
   st.givenBack = [];
   st.removedFromGroup = new Set();
@@ -277,6 +280,15 @@ describe("a group message", () => {
     const cleared = vi.spyOn(globalThis, "clearInterval");
     await send({ message: "Status?" });
     expect(cleared).toHaveBeenCalled();
+  });
+});
+
+describe("a person who can no longer be acted for (review round 9)", () => {
+  it("starts no later answerer's turn in their name", async () => {
+    st.duringTurn = () => void (st.actingOk = false);
+    await send({ message: "@Project Manager @Triage go" });
+    expect(st.claims.map((c) => c.agentId)).toEqual(["a-pm"]);
+    expect(st.lines.map((l) => l.text)).toContain("Triage didn't answer: you can no longer be acted for here.");
   });
 });
 

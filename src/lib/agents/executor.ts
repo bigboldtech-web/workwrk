@@ -37,7 +37,7 @@ import type { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
-import { actorLabelFor, toolCtxFor, type ActingPerson } from "./acting";
+import { actorLabelFor, resolveActingPerson, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
 import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
 import { prepareCall, type Prepared } from "./previews";
@@ -216,20 +216,27 @@ async function runDelegation(
   if (request.length > DELEGATE_REQUEST_LIMIT) return refuse(DELEGATION_COPY.requestTooLong(DELEGATE_REQUEST_LIMIT));
   if (a.practice) return done("practice", { practice: true, wouldDo: DELEGATION_COPY.askTitle(name) });
 
+  // Who the delegate works for, read now: a long turn can ask its second or
+  // third teammate minutes later, and a person deactivated, made a Guest or
+  // with AI turned off meanwhile starts no new turn in their name (review round 9).
+  const acting = await resolveActingPerson(a.person.organizationId, a.person.userId).catch(() => null);
+  if (!acting?.ok) return refuse(ACTION_ERRORS.personCannot);
+  const person = acting.person;
+
   // Loaded here: the server half of teammates and the engine both import this file.
   const [{ usableTeammatesNamed }, engine] = await Promise.all([import("./teammate-server"), import("./engine")]);
-  const found = await usableTeammatesNamed(a.person.viewer, name);
+  const found = await usableTeammatesNamed(person.viewer, name);
   if (found.length === 0) return refuse(DELEGATION_COPY.noTeammateNamed(name));
   if (found.length > 1) return refuse(DELEGATION_COPY.severalNamed(name));
   const delegate = found[0];
   if (delegate.id === a.agent.id) return refuse(DELEGATION_COPY.cantAskItself);
   if (delegate.status !== "ENABLED") return refuse(DELEGATION_COPY.delegatePaused(delegate.name));
 
-  const session = await engine.getOrCreateTeammateSession(delegate, a.person.userId);
+  const session = await engine.getOrCreateTeammateSession(delegate, person.userId);
   const claim = await claimTeammateTurn({
-    organizationId: a.person.organizationId,
+    organizationId: person.organizationId,
     agentId: delegate.id,
-    userId: a.person.userId,
+    userId: person.userId,
     what: "AI teammate delegation",
     trigger: "DELEGATED",
     sessionId: session.id,
@@ -246,7 +253,7 @@ async function runDelegation(
   try {
     turn = await engine.runTeammateTurn({
       agent: engine.teammateAgentFrom(delegate),
-      person: a.person,
+      person,
       sessionId: session.id,
       trigger: "DELEGATED",
       userText: null,

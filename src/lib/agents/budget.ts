@@ -50,7 +50,7 @@ export type TurnClaim =
       ok: false;
       /** not_found: the teammate's row is gone (its workspace was deleted under the turn). */
       /** workflow_cap: an automation asked its teammates its most for the UTC day (Phase 2 step 7). */
-      code: "rate_limited" | "agent_cap" | "ai_limit" | "not_found" | "workflow_cap";
+      code: "rate_limited" | "agent_cap" | "ai_limit" | "not_found" | "workflow_cap" | "workflow_paused";
       message: string;
       retryAfter?: number;
       /** For ai_limit: which bound refused (AiClaim.refusedBy). */
@@ -132,11 +132,14 @@ export async function claimTeammateTurn(a: {
     // two runs at once cannot both take the last one. Only runs that hold a
     // question count: a run whose question was given back did not ask.
     if (a.workflow) {
-      const wf = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "AutomationWorkflow"
+      const wf = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+        SELECT "id", "status"::text AS "status" FROM "AutomationWorkflow"
         WHERE "id" = ${a.workflow.id} AND "organizationId" = ${a.organizationId}
         FOR NO KEY UPDATE`;
       if (wf.length === 0) return { ok: false, code: "not_found", message: AUTOMATION_TEAMMATE_COPY.workflowGone };
+      // Paused (or archived) since its event matched: a pause takes effect at
+      // the next teammate it would ask, never after the day's cap (review round 9).
+      if (wf[0].status !== "ACTIVE") return { ok: false, code: "workflow_paused", message: AUTOMATION_TEAMMATE_COPY.automationPaused };
       const [{ used }] = await tx.$queryRaw<Array<{ used: number }>>`
         SELECT COUNT(*)::int AS "used" FROM "AgentRun"
         WHERE "automationWorkflowId" = ${a.workflow.id}

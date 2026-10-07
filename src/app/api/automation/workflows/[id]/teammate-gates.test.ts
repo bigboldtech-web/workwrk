@@ -64,7 +64,12 @@ vi.mock("@/lib/prisma", () => {
   };
   const tx = {
     $queryRaw: async () => [],
-    automationWorkflow: { ...workflow, findFirst: async () => (st.wfUnderLock ?? st.wf ? { ...(st.wfUnderLock ?? st.wf) } : null) },
+    automationWorkflow: {
+      ...workflow,
+      // The row as it is under the lock: a save that landed in between shows here.
+      findFirst: async () => (st.wfUnderLock ?? st.wf ? { ...(st.wfUnderLock ?? st.wf) } : null),
+      findUnique: async () => (st.wfUnderLock ?? st.wf ? { ...(st.wfUnderLock ?? st.wf) } : null),
+    },
     automationWorkflowVersion: {
       aggregate: async () => ({ _max: { versionNumber: 1 } }),
       create: async (a: { data: Row }) => {
@@ -130,6 +135,20 @@ describe("saving (PUT)", () => {
   });
 });
 
+describe("a teammate step the creator saved while someone else saved or restored (review round 9)", () => {
+  it("is checked again under the lock: someone else never takes it out", async () => {
+    as("u-mia");
+    // Mia's draft (and the row she read) had no step; Max saved one meanwhile.
+    st.wf = { ...st.wf, definition: { trigger: "task.created", conditions: null, actions: [COMMENT] } };
+    st.wfUnderLock = { ...st.wf, definition: { trigger: "task.created", conditions: null, actions: [COMMENT, STEP] } };
+    expect(await read(await put({ definition: { trigger: "task.created", actions: [COMMENT], everywhere: true } }))).toMatchObject({ status: 403, body: { code: "teammate_step_creator_only" } });
+    expect(st.updates).toEqual([]);
+    st.live = { definitionJson: { actions: [COMMENT] } };
+    const res = await restore(new Request("https://x.test", { method: "POST" }) as never, { params: Promise.resolve({ id: "wf1", n: "1" }) });
+    expect(await read(res)).toMatchObject({ status: 403, body: { code: "teammate_step_creator_only" } });
+  });
+});
+
 describe("publishing", () => {
   it("refuses anyone but the creator publishing a teammate step, or publishing one away (review round 3)", async () => {
     as("u-mia");
@@ -150,10 +169,13 @@ describe("publishing", () => {
     expect(st.versions).toEqual([]);
   });
 
-  it("publishes the creator's teammate step", async () => {
+  it("publishes the creator's teammate step, with the teammate as it is now (review round 9)", async () => {
     as("u-max");
     expect((await publish(new Request("https://x.test") as never, params)).status).toBe(200);
     expect(st.versions).toHaveLength(1);
+    const prints = (st.versions[0].definitionJson as { __teammates?: Record<string, string> }).__teammates;
+    expect(Object.keys(prints ?? {})).toEqual(["t-triage"]);
+    expect(prints?.["t-triage"]).toMatch(/^[0-9a-f]{32}$/);
   });
 });
 

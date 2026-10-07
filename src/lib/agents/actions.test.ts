@@ -23,7 +23,7 @@ vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeT
 vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixtures")).fakeLogActivity }));
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
 
-import { RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
+import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, sweepActions, waitingCount } from "./actions";
 import { AGENT_SLUG, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -429,6 +429,17 @@ describe("claimUnreportedOutcomes", () => {
     expect(first.map((r) => r.id)).toEqual([older.id, newer.id]);
     expect(await claimUnreportedOutcomes("s1")).toEqual([]);
     expect(fx.sql[0]).toMatch(/^\s*UPDATE "AgentAction"[\s\S]*"reportedAt" IS NULL[\s\S]*RETURNING/);
+  });
+});
+
+describe("claimUnreportedOutcomes, a turn's worth at a time (review round 9)", () => {
+  it("tells at most OUTCOMES_PER_TURN, oldest first, and leaves the rest for the next turn", async () => {
+    const base = Date.now() - 1_000_000;
+    const all = Array.from({ length: OUTCOMES_PER_TURN + 10 }, (_, i) => talkPost({ status: "EXPIRED", createdAt: new Date(base + i * 1000) }));
+    const first = await claimUnreportedOutcomes("s1");
+    expect(first.map((r) => r.id)).toEqual(all.slice(0, OUTCOMES_PER_TURN).map((r) => r.id));
+    expect((await claimUnreportedOutcomes("s1")).map((r) => r.id)).toEqual(all.slice(OUTCOMES_PER_TURN).map((r) => r.id));
+    expect(fx.sql.at(-1)).toContain("LIMIT");
   });
 });
 

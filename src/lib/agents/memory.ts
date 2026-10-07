@@ -117,33 +117,31 @@ export async function rememberFact(a: {
   const match = normaliseKey(key);
   const limit = a.scope === "person" ? MEMORY_LIMITS.perPerson : MEMORY_LIMITS.perAgent;
 
-  const rows = await prisma.agentMemory.findMany({
-    where: { agentId: a.agentId, scope: a.scope, scopeId },
-    select: { id: true, key: true },
-  });
-  const existing = rows.find((r) => normaliseKey(r.key) === match);
-  if (existing) {
-    const row = await prisma.agentMemory.update({
-      where: { id: existing.id },
-      data: { key, value, source: a.source, createdById: a.createdById },
+  // One read-modify-write at a time for these memories: two turns of one
+  // teammate for one person (a group chat and its own chat, at once) never
+  // both find no match and both add one, as two keys differing only in case
+  // or spacing, or pass the limit (review round 9).
+  const lockKey = `agent-memory:${a.agentId}:${a.scope}:${scopeId}`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const rows = await tx.agentMemory.findMany({
+      where: { agentId: a.agentId, scope: a.scope, scopeId },
+      select: { id: true, key: true },
     });
-    return { ok: true, created: false, memory: viewOf(row) };
-  }
-  if (rows.length >= limit) return { ok: false, error: memoryFull(limit, a.scope) };
-  try {
-    const row = await prisma.agentMemory.create({
+    const existing = rows.find((r) => normaliseKey(r.key) === match);
+    if (existing) {
+      const row = await tx.agentMemory.update({
+        where: { id: existing.id },
+        data: { key, value, source: a.source, createdById: a.createdById },
+      });
+      return { ok: true as const, created: false, memory: viewOf(row) };
+    }
+    if (rows.length >= limit) return { ok: false as const, error: memoryFull(limit, a.scope) };
+    const row = await tx.agentMemory.create({
       data: { agentId: a.agentId, scope: a.scope, scopeId, key, value, source: a.source, createdById: a.createdById },
     });
-    return { ok: true, created: true, memory: viewOf(row) };
-  } catch (err) {
-    // The same key saved a moment ago (two chats at once): replace that one.
-    if ((err as { code?: string } | null)?.code !== "P2002") throw err;
-    const same = { agentId: a.agentId, scope: a.scope, scopeId, key };
-    await prisma.agentMemory.updateMany({ where: same, data: { value, source: a.source, createdById: a.createdById } });
-    const row = await prisma.agentMemory.findFirst({ where: same });
-    if (!row) throw err;
-    return { ok: true, created: false, memory: viewOf(row) };
-  }
+    return { ok: true as const, created: true, memory: viewOf(row) };
+  });
 }
 
 /**

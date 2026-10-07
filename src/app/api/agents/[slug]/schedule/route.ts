@@ -137,12 +137,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
   // proxy never cuts a long run and the page never says it didn't start
   // while it ran (review round 5). A client that leaves changes nothing:
   // the turn finishes and saves itself in the person's chat.
-  await auditAgent({ organizationId: c.organizationId, actorId: c.userId, agent: { id: agent.id, name: agent.name, slug }, action: "run_now" });
   const started = await startLegacyAgentNow({ id: agent.id, slug, name: agent.name }, c.viewer);
   if (!started.ok) {
     const headers = started.retryAfter !== undefined ? { "Retry-After": String(started.retryAfter) } : undefined;
     return NextResponse.json({ error: started.error, code: started.code }, { status: started.status, headers });
   }
+  // On record only once it started, naming its run: a refused click ran nothing (review round 9).
+  await auditAgent({ organizationId: c.organizationId, actorId: c.userId, agent: { id: agent.id, name: agent.name, slug }, action: "run_now", metadata: { runId: started.runId } });
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {

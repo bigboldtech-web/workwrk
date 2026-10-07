@@ -64,8 +64,12 @@ import { pick } from "@/lib/surface-prefs";
 import type { HubHeader } from "./agents-hub";
 import { PAGE_SIZES, RUN_SORTS, RUN_SORT_LABEL, RunHistory, TRIGGER_LABEL, type RunRow } from "./run-history-view";
 
-/** The longest a Run now's turn runs: Run now is offered again after it even if its end was never heard. */
-const RUN_NOW_MAX_MS = 5 * 60 * 1000;
+/**
+ * A backstop only: Run now is offered again when its run's end is heard
+ * (runNowDone). If that never comes (this tab lost its connection), after
+ * this long, past any turn's length.
+ */
+const RUN_NOW_MAX_MS = 20 * 60 * 1000;
 
 export type Agent = {
   id: string;
@@ -172,8 +176,9 @@ export function WorkspaceAgentsView({ tab, header }: { tab: "agents" | "runs"; h
   const runningUntilChanged = useRef(new Map<string, string>());
   useEffect(() => {
     const onRealtime = (e: Event) => {
-      const ev = (e as CustomEvent<{ type?: string; agentId?: string } | null>).detail;
-      if (ev?.type !== "agent.changed" || !ev.agentId) return;
+      const ev = (e as CustomEvent<{ type?: string; agentId?: string; runNowDone?: boolean } | null>).detail;
+      // Only the run's own end: other changes to the agent publish too (review round 9).
+      if (ev?.type !== "agent.changed" || !ev.agentId || ev.runNowDone !== true) return;
       const slug = runningUntilChanged.current.get(ev.agentId);
       if (!slug) return;
       runningUntilChanged.current.delete(ev.agentId);

@@ -12,15 +12,18 @@
 //   1. the conversation, with the right to post (requireConversation); a
 //      message already sent with this key answers with that one, before any
 //      refusal, and starts no turn (and spends none of the limit below)
-//   2. a teammate may be asked here (talkAddressRefusal): a member, no
-//      Guests, at most 250 people, not archived, a direct message, a group
-//      or a private channel
+//   2. a teammate may be asked here (talkAddressRefusal), in two parts:
+//      first what needs no member read (not a Guest, a member, not
+//      archived, a direct message, a group or a private channel), then
+//      five tries a minute per person (every try past the first part
+//      counts, refused or not), then one bounded read of the members (at
+//      most 250 people, no Guests; conversationAudience) (review round 8)
 //   3. the person, as a teammate acts for them
 //   4. the teammate, one this person may use (another person's private one
 //      answers as one that does not exist), and on
 //   5. the body names it ("@<Name>"): it was picked from the @ list
 //   6. (the key, read with step 1)
-//   7. five asks a minute per person
+//   7. (the per-minute limit, taken in step 2)
 //   8. AI is set up
 //   9. mentions and the thread, checked as a plain message's
 //  10. one AI question for the turn (claimTeammateTurn): refused, nothing

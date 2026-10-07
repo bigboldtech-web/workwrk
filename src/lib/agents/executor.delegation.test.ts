@@ -214,6 +214,14 @@ describe("ask_teammate", () => {
     expect(dataOf(whole.modelContent)).not.toHaveProperty("endedEarly");
   });
 
+  it("starts no delegate's turn for a person who can no longer be acted for (review round 9)", async () => {
+    fx.person = { ok: false, reason: "inactive" };
+    const r = await call(ASK);
+    expect(r.record.state).toBe("failed");
+    expect(st.claims).toEqual([]);
+    expect(st.turns).toEqual([]);
+  });
+
   it("refuses a request too long to pass on, asking nobody (review round 1)", async () => {
     const r = await call({ ...ASK, request: "x".repeat(4001) });
     expect(r.record.state).toBe("failed");
