@@ -57,6 +57,29 @@ export function changedFields(kept: unknown, now: PrintedTeammate): PrintField[]
   return PRINT_FIELDS.filter((f) => typeof was[f] === "string" && was[f] !== current[f]);
 }
 
+/**
+ * The teammate as a person was shown it, as one token their page sends back
+ * when they allow it (the Connections card, review of step 2): its part prints
+ * in PRINT_FIELDS order, joined by dots. Built from teammateFieldPrints, so
+ * it says nothing beyond what that person may already read of the teammate.
+ */
+export function teammateShownPrint(a: PrintedTeammate): string {
+  const p = teammateFieldPrints(a);
+  return PRINT_FIELDS.map((f) => p[f]).join(".");
+}
+
+/**
+ * The parts that differ between what the person was shown (a
+ * teammateShownPrint token) and the teammate now. A token that is not one
+ * names every part: nothing can be said to be unchanged.
+ */
+export function changedSinceShown(shown: string, now: PrintedTeammate): PrintField[] {
+  const parts = typeof shown === "string" ? shown.split(".") : [];
+  if (parts.length !== PRINT_FIELDS.length || parts.some((p) => !/^[0-9a-f]{32}$/.test(p))) return [...PRINT_FIELDS];
+  const current = teammateFieldPrints(now);
+  return PRINT_FIELDS.filter((f, i) => parts[i] !== current[f]);
+}
+
 /** Whether someone other than this person may change the teammate: a workspace one, or anyone else's. */
 export function othersMayChange(agent: { visibility: string; ownerId: string | null }, personId: string): boolean {
   return agent.visibility !== "PRIVATE" || agent.ownerId !== personId;

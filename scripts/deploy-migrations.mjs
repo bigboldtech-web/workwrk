@@ -271,6 +271,13 @@ const SQL_MANIFEST = [
   // checks. Before the reload: Prisma selects every column on a read with no
   // select, and every teammate turn reads AgentPersonSetting.
   "2026-10-08-ai-teammates-phase3.sql",
+  // AI teammates, Phase 3 review of step 2: a nullable "accountKey" on
+  // "TeammateTokenRevocation" and on "TeammateConnection" (indexed), so a
+  // queued revoke is never sent for a Google account connected again since,
+  // and a backfill of the connections with no key, guarded on its own effect.
+  // Before the reload: Prisma selects every column on a read with no select,
+  // and the new build writes and reads both columns.
+  "2026-10-08-ai-teammates-phase3-revoke-key.sql",
 ];
 
 /**

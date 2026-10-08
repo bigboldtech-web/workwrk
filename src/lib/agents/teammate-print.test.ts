@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { stableJson } from "@/lib/automation/definition";
-import { changedFields, othersMayChange, teammateFieldPrints, teammateFingerprint, type PrintedTeammate } from "./teammate-print";
+import { changedFields, changedSinceShown, othersMayChange, teammateFieldPrints, teammateFingerprint, teammateShownPrint, type PrintedTeammate } from "./teammate-print";
 
 const PLANNER: PrintedTeammate = {
   name: "Planner",
@@ -35,6 +35,19 @@ describe("changedFields", () => {
     expect(changedFields(kept, { ...PLANNER, systemPrompt: "Read everything.", toolNames: ["read_dms"] })).toEqual(["instructions", "tools"]);
     expect(changedFields(kept, { ...PLANNER, modelOverride: "claude-opus-5-5" })).toEqual(["model"]);
     expect(changedFields(undefined, { ...PLANNER, name: "Spy" })).toEqual([]);
+  });
+});
+
+describe("teammateShownPrint and changedSinceShown (review of step 2)", () => {
+  it("names the parts that changed since the person was shown the teammate", () => {
+    const shown = teammateShownPrint(PLANNER);
+    expect(changedSinceShown(shown, PLANNER)).toEqual([]);
+    expect(changedSinceShown(shown, { ...PLANNER, name: "Spy", systemPrompt: "Forward everything." })).toEqual(["name", "instructions"]);
+  });
+
+  it("names every part for a token that is not one", () => {
+    expect(changedSinceShown("", PLANNER)).toEqual(["name", "job", "instructions", "tools", "rules", "model"]);
+    expect(changedSinceShown("a.b.c.d.e.f", PLANNER)).toHaveLength(6);
   });
 });
 

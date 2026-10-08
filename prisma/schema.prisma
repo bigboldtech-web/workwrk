@@ -5461,6 +5461,11 @@ model TeammateConnection {
   /// The account's id at the provider (OpenID "sub") and its address, shown
   /// only to the person.
   accountSub           String
+  /// sha256 hex of provider ":" accountSub (connections.ts accountKey): what
+  /// the revoke queue knows the account by, so a queued revoke is never sent
+  /// for an account a live connection holds again. Review of step 2,
+  /// prisma/sql/2026-10-08-ai-teammates-phase3-revoke-key.sql.
+  accountKey           String?
   accountEmail         String
   refreshTokenSealed   Json
   accessTokenSealed    Json?
@@ -5478,6 +5483,7 @@ model TeammateConnection {
   @@index([organizationId, status])
   @@index([userId])
   @@index([provider, accountSub])
+  @@index([accountKey])
 }
 
 /// A connect in flight (Phase 3): id = sha256 of the OAuth state, bound to
@@ -5507,6 +5513,11 @@ model TeammateTokenRevocation {
   attempts      Int      @default(0)
   nextAttemptAt DateTime @default(now())
   createdAt     DateTime @default(now())
+  /// sha256 hex of provider ":" the account's sub (connections.ts accountKey),
+  /// naming no person: a row whose key a live connection holds again is
+  /// deleted unsent. NULL on rows queued before it (revoked as before).
+  /// Review of step 2, prisma/sql/2026-10-08-ai-teammates-phase3-revoke-key.sql.
+  accountKey    String?
 
   @@index([nextAttemptAt])
 }

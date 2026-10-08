@@ -362,6 +362,76 @@ describe("DELEGATION_COPY (one teammate asking another, Phase 2; review round 6)
   });
 });
 
+describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_POLICY_COPY, CONNECTION_ROUTE_ERRORS)", () => {
+  const GROUPS: Record<string, [Record<string, unknown>, Record<string, [unknown[], string]>]> = {
+    CONNECTIONS_COPY: [
+      copy.CONNECTIONS_COPY as unknown as Record<string, unknown>,
+      {
+        workspaceOffMember: [["Acme"], "An Owner or Admin hasn't turned this on in Acme."],
+        addProduct: [["Gmail"], "Add Gmail"],
+        connectedAs: [["max@x.com", "8 Oct 2026"], "Connected as max@x.com on 8 Oct 2026."],
+        uses: [["Gmail and Google Calendar"], "Your teammates may use: Gmail and Google Calendar."],
+        lastUsed: [["5 minutes ago", "Ops"], "Last used 5 minutes ago by Ops."],
+        needsReconnect: [["8 Oct 2026"], "Google stopped working for your teammates on 8 Oct 2026. Reconnect to use it again."],
+        allowGmail: [["Ops"], "Let Ops use my Gmail"],
+        allowCalendar: [["Ops"], "Let Ops use my Google Calendar"],
+        changedSince: [["instructions and tools"], "Changed since you allowed it: instructions and tools."],
+        partial: [["Gmail"], "Google didn't give access to Gmail, so your teammates can't use it. Connect again and tick it."],
+        didntConnect: [["you didn't give WorkwrK access"], "Google didn't connect: you didn't give WorkwrK access."],
+        brokenNoticeMessage: [["Acme"], "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme."],
+        disconnectedByAdminMessage: [["Acme"], "An Owner or Admin disconnected Google from AI teammates in Acme."],
+        productTurnedOff: [["Gmail", "Acme"], "An Owner or Admin turned off Gmail for AI teammates in Acme."],
+        addFirst: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
+      },
+    ],
+    CONNECTOR_POLICY_COPY: [
+      copy.CONNECTOR_POLICY_COPY as unknown as Record<string, unknown>,
+      {
+        counts: [[3, 2, 1], "3 people connected: 2 with Gmail, 1 with Google Calendar."],
+        needReconnect: [[2], "2 need to reconnect."],
+        disconnectedAll: [[1], "Disconnected 1 person."],
+        turnOffTitle: [["Gmail"], "Turn off Gmail for AI teammates?"],
+        notOffered: [["Gmail"], "Gmail isn't available on this WorkwrK yet."],
+        auditChanged: [["Gmail", true], "Turned on Gmail for AI teammates"],
+        auditDisconnectedAll: [[12], "Disconnected 12 people from Google for AI teammates"],
+      },
+    ],
+    CONNECTION_ROUTE_ERRORS: [
+      copy.CONNECTION_ROUTE_ERRORS as unknown as Record<string, unknown>,
+      {
+        noTool: [["Ops", "Gmail"], "Ops has no Gmail tools, so there's nothing to allow."],
+        productOff: [["Google Calendar"], "Google Calendar is turned off for AI teammates in this workspace."],
+        notOffered: [["Gmail"], "Gmail isn't available on this WorkwrK yet."],
+        notGranted: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
+        teammateChanged: [["Ops", "instructions and tools"], "Ops changed while this page was open: instructions and tools. Look again before you allow it."],
+      },
+    ],
+  };
+  for (const [group, [g, said]] of Object.entries(GROUPS)) {
+    it(`${group} lists every builder`, () => {
+      expect(Object.keys(g).filter((k) => typeof g[k] === "function").sort()).toEqual(Object.keys(said).sort());
+    });
+    for (const [name, [args, sentence]] of Object.entries(said)) {
+      it(`${group}.${name} says what the spec says`, () => {
+        const made = (g[name] as (...a: unknown[]) => string)(...args);
+        expect(made).toBe(sentence);
+        expect(BANNED.test(made)).toBe(false);
+      });
+    }
+  }
+  it("says one person, and one who needs to reconnect, as one", () => {
+    expect(copy.CONNECTOR_POLICY_COPY.counts(1, 1, 0)).toBe("1 person connected: 1 with Gmail, 0 with Google Calendar.");
+    expect(copy.CONNECTOR_POLICY_COPY.needReconnect(1)).toBe("1 needs to reconnect.");
+    expect(copy.CONNECTOR_POLICY_COPY.auditChanged("Google Calendar", false)).toBe("Turned off Google Calendar for AI teammates");
+  });
+  it("words every code the connect routes put in ?ai_error=", () => {
+    const codes = ["access_denied", "state_invalid", "signed_out", "wrong_person", "workspace_changed", "workspace_off", "person_cannot", "exchange_failed", "no_access", "not_configured", "rate_limited", "bad_products", "workspace_closed"];
+    expect(Object.keys(copy.CONNECT_ERROR_WORDS).sort()).toEqual([...codes].sort());
+    expect(copy.CONNECT_ERROR_WORDS.state_invalid).toBe("the sign-in took too long or was opened twice");
+    for (const words of Object.values(copy.CONNECT_ERROR_WORDS)) expect(BANNED.test(words)).toBe(false);
+  });
+});
+
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],

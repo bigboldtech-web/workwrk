@@ -112,6 +112,11 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // that paused. A chat's own requests write none: the person is in it.
   agent_approval: k("agent_approval", "Waiting for your approval", "Bot", "primary", "requests"),
   agent_routine_paused: k("agent_routine_paused", "Routine paused", "Bot", "primary", "requests"),
+  // AI teammates, Phase 3 (docs/plans/ai-teammates-phase3.md step 2), written
+  // by src/lib/connectors/connections.ts: the person's Google connection
+  // stopped working (reconnect it), or an Owner or Admin disconnected
+  // everyone's. Both link to the person's own card in Calendar & connections.
+  agent_connection: k("agent_connection", "AI teammates", "Link2", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),

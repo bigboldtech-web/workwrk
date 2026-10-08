@@ -11,7 +11,9 @@
  * /account/connections?connected=google.
  *
  * Two cards, both of them things the backend already does and no UI ever
- * offered:
+ * offered (and, since AI teammates Phase 3, a third: Google for your AI
+ * teammates, components/account/teammate-google-card.tsx, its own OAuth
+ * client and its own ?ai= outcome):
  *
  *   Google Calendar   CalendarSubscription rows, the OAuth pair at
  *                     /api/integrations/google-calendar/{connect,callback}
@@ -40,6 +42,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { googleConnectSentence } from "@/lib/connect-errors";
+import { TeammateGoogleCard, type TeammateConnectOutcome } from "@/components/account/teammate-google-card";
 
 type GoogleStatus = {
   available: boolean;
@@ -85,12 +88,17 @@ export default function ConnectionsPage() {
   // so a reload, a bookmark or a Back does not re-announce a connection
   // that happened ten minutes ago.
   const [outcome] = useState(() => ({ connected: sp.get("connected"), error: sp.get("error") }));
+  // The AI teammates' Google connect lands here too, with its own three
+  // (docs/plans/ai-teammates-phase3.md step 2), read and stripped the same way.
+  const [aiOutcome] = useState<TeammateConnectOutcome>(() => ({ ai: sp.get("ai"), partial: sp.getAll("ai_partial"), error: sp.get("ai_error") }));
   const stripped = useRef(false);
   useEffect(() => {
-    if (stripped.current || (!outcome.connected && !outcome.error)) return;
+    const any = outcome.connected || outcome.error || aiOutcome.ai || aiOutcome.error || aiOutcome.partial.length > 0;
+    if (stripped.current || !any) return;
     stripped.current = true;
-    router.replace("/account/connections", { scroll: false });
-  }, [outcome, router]);
+    // The anchor stays (#ai-google), so the card the callback named is the one in view.
+    router.replace(`/account/connections${typeof window !== "undefined" ? window.location.hash : ""}`, { scroll: false });
+  }, [outcome, aiOutcome, router]);
 
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
@@ -232,8 +240,7 @@ export default function ConnectionsPage() {
         ) : !google ? (
           <div className="cxn__loading"><Dots variant="pending" /> <span>Reading your connections</span></div>
         ) : (
-          <>
-            {/* ── Google Calendar ─────────────────────────────── */}
+            /* ── Google Calendar ─────────────────────────────── */
             <section className="cxn__card">
               <header className="cxn__card-head">
                 <span className="cxn__card-icon"><Calendar aria-hidden /></span>
@@ -338,7 +345,17 @@ export default function ConnectionsPage() {
                 </div>
               )}
             </section>
+        )}
 
+        {/* ── Google for your AI teammates (Phase 3) ──────── */}
+        {/* Drawn whatever the Google Calendar read did (review of step 2): it
+            has its own OAuth client, its own routes, its own loading and
+            error, and its own Disconnect, which a failed calendar read must
+            never hide. */}
+        <TeammateGoogleCard outcome={aiOutcome} />
+
+        {loadError || !google ? null : (
+          <>
             {/* ── Personal calendar feed ──────────────────────── */}
             <section className="cxn__card">
               <header className="cxn__card-head">

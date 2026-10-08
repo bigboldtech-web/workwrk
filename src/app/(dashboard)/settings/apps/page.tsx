@@ -13,6 +13,10 @@
 //                  autosaved PER ROW (only that row waits on its write)
 //   3. Automations "Pause all automations" (settings.work.automationsPaused,
 //                  read by the automation engine) with this month's runs
+//   4. Google for AI teammates  the workspace switch per product, the counts
+//                  and Disconnect everyone (teammate-google-section.tsx;
+//                  docs/plans/ai-teammates-phase3.md step 2), drawn only once
+//                  this WorkwrK offers Google, for Owners and Admins
 //
 // Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
 // complete apps object, and checks the response really holds it. Hidden and
@@ -45,6 +49,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useSettingsSection } from "@/hooks/use-settings-section";
 import { ModulesSection } from "./modules-section";
+import { TeammateGoogleSection } from "./teammate-google-section";
 
 // The rail's own tier vocabulary (AccessTier), in plain words: a vocabulary
 // drift here is a compile error, not a silent bug.
@@ -371,6 +376,8 @@ export default function AppsSettingsPage() {
           <h2 className={SECTION_LABEL}>Automations<span className="h-px flex-1 bg-line" aria-hidden /></h2>
           <AutomationsCard />
         </section>
+
+        <TeammateGoogleSection />
 
         <RequestsSection />
 

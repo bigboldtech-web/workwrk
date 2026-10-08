@@ -79,3 +79,30 @@ export function googleConfig(env: NodeJS.ProcessEnv = process.env): GoogleConfig
 export function googleRedirectUri(): string {
   return absoluteUrl("/api/teammate-connections/google/callback");
 }
+
+/** Where a token is sent to be revoked, and nothing else. */
+export interface GoogleRevokeConfig {
+  revokeUrl: string;
+  /** GOOGLE_AGENT_BASE_URL's revoke address: a stand-in, never Google. */
+  standIn: boolean;
+}
+
+/**
+ * Where revokes go, read on its own (review of step 2). It never depends on
+ * GOOGLE_AGENT_PRODUCTS or the client credentials: Google's revoke endpoint
+ * takes the token alone, so emptying the product list to switch the feature
+ * off (a failed review, a policy strike, the rollback) still lets every
+ * disconnect, leaver and queued revoke reach Google, and the queue drains.
+ * Null only without SECRETS_ENCRYPTION_KEY: no stored token can be opened
+ * then, and a queue row that cannot be opened would be dropped, so it waits
+ * for the key instead. The stand-in base counts outside production only;
+ * production always tells Google itself.
+ */
+export function googleRevokeConfig(env: NodeJS.ProcessEnv = process.env): GoogleRevokeConfig | null {
+  if (!(env.SECRETS_ENCRYPTION_KEY ?? "").trim()) return null;
+  const rawBase = (env.GOOGLE_AGENT_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  if (!rawBase || env.NODE_ENV === "production") return { revokeUrl: GOOGLE.revokeUrl, standIn: false };
+  // A base that is not an address points nowhere a token should go.
+  if (!URL.canParse(rawBase)) return null;
+  return { revokeUrl: `${rawBase}/revoke`, standIn: true };
+}

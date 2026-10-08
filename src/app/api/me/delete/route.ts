@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-helpers";
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
 import { soleAdminWorkspaces } from "@/lib/access/self-facts";
+import { endAllConnectionsOf } from "@/lib/connectors/connections";
 
 /** Thrown inside the transaction when the re-check under the lock refuses. */
 class LastAdminError extends Error {
@@ -143,6 +144,13 @@ export async function POST(req: NextRequest) {
         },
       });
     }, { timeout: 20_000, maxWait: 10_000 });
+
+    // Their Google connections for AI teammates go in every workspace, and
+    // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After
+    // the commit, never failing the erasure: the cron sweep ends any missed.
+    await endAllConnectionsOf(userId, "left", userId).catch((e) => {
+      console.error(`[connectors] account deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+    });
 
     return jsonSuccess({
       ok: true,
