@@ -109,6 +109,9 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   process_run_started: "an ActivityLog action beside the run.assigned notification in api/process-runs",
   process_run_cancelled: "an ActivityLog action in api/process-runs/[id]",
   process_run_deleted: "an ActivityLog action in api/process-runs/[id]",
+  "teammate_connection.needs_reconnect": "an ActivityLog type (a Google connection that stopped working) beside the agent_connection notice in lib/connectors/connections",
+  "teammate_connection.disconnected": "an ActivityLog type (one per connection ended) beside the agent_connection notices in lib/connectors/connections",
+  "teammate_connection.connected": "an ActivityLog type (a Google connection made) in lib/connectors/connections",
 };
 
 /**
@@ -171,6 +174,12 @@ describe("inbox-kinds covers every notification the app writes", () => {
       expect(KINDS[type], `${type} has no kind`).toBeDefined();
       expect(written.get(type) ?? [], `${type} is not written where the scanner reads it`).toContain("src/lib/agents/routines-server.ts");
     }
+  });
+
+  it("routes the AI teammate connection notice, which connections.ts writes inline (Phase 3 step 2)", () => {
+    expect(KINDS.agent_connection, "agent_connection has no kind").toBeDefined();
+    expect(kindFor("agent_connection").tab).toBe("primary");
+    expect(written.get("agent_connection") ?? [], "agent_connection is not written where the scanner reads it").toContain("src/lib/connectors/connections.ts");
   });
 
   it("never leaves a routed row without words, whatever the writer sends", () => {

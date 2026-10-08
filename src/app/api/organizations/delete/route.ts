@@ -4,6 +4,7 @@ import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/works
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
+import { endWorkspaceConnections } from "@/lib/connectors/connections";
 import { expireOpenCheckouts, openSubscriptionsOf, stopSubscription, stripe } from "@/services/billing";
 
 /**
@@ -145,6 +146,13 @@ export async function POST(req: NextRequest) {
   if (!claimed) {
     return jsonError("This organization is already scheduled for deletion. Use the Restore action to cancel.", 409);
   }
+
+  // Every Google connection for AI teammates here ends now, not in 30 days,
+  // and Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After
+  // the commit, never failing the delete; the hard delete queues any left.
+  await endWorkspaceConnections(orgId, "workspace_deleted", userId).catch((e) => {
+    console.error(`[connectors] workspace deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
 
   logAuditEvent({
     type: "organization_scheduled_deletion",

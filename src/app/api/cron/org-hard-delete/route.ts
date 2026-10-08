@@ -9,6 +9,7 @@ import { moveHomesOutOf } from "@/lib/access/workspace-anchor";
 import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/company-notifications";
 import { HARD_DELETE_FIRST, isHardDeleteFirst } from "@/lib/admin/hard-delete-order";
 import { cronJob, cronResult } from "@/lib/cron-result";
+import { queueWorkspaceRevocations } from "@/lib/connectors/connections";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -173,6 +174,12 @@ async function handle(req: NextRequest) {
           await moveHomesOutOf(org.id, tx);
           // The accounts that go with it (their photos go after the commit).
           const leaving = await tx.user.findMany({ where: { organizationId: org.id }, select: { id: true } });
+          // 1c. Google is told about every AI teammate connection still
+          // here (docs/plans/ai-teammates-phase3.md Decision 20): a revoke is
+          // queued, in this transaction, for each Google account no other
+          // workspace's connection holds. The queue has no foreign key, so it
+          // outlives the cascade below that takes the connections.
+          await queueWorkspaceRevocations(tx, org.id);
           // 2. Its staff audit rows lose every name (an AppSumo refund keeps
           // its label, which is the code, not a name).
           await tx.$executeRaw`

@@ -57,6 +57,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { endConnectionsFor } from "@/lib/connectors/connections";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -549,6 +550,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const roleChange = outcome.roleChange;
   const user = outcome.user;
   if (!user) return err(404, "User not found");
+  // A deactivated person's Google stops serving their AI teammates here, and
+  // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After the
+  // commit, never failing the edit: the cron sweep ends any this misses.
+  if (deactivating) {
+    await endConnectionsFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
+      console.error(`[connectors] deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+    });
+  }
   if (roleChange?.changed) {
     void logActivity({
       type: "org_role.changed",
@@ -676,6 +685,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return null;
   });
   if (removed) return removed;
+  // A removed person's Google stops serving their AI teammates, and Google is
+  // told (Decision 20); the cron sweep ends any this misses.
+  await endConnectionsFor(ctx.organizationId, [id], "left", ctx.userId).catch((e) => {
+    console.error(`[connectors] removal hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
   void logActivity({
     type: "user_removed",
     actorId: ctx.userId,

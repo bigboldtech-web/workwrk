@@ -100,7 +100,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   }),
   page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", {
     aliases: ["/settings/calendar"],
-    keywords: ["google calendar", "ics", "feed", "sync", "integrations"],
+    keywords: ["google calendar", "ics", "feed", "sync", "integrations", "gmail", "google", "ai teammates"],
   }),
   page("me", "account/shortcuts", "Keyboard shortcuts", "/account/shortcuts", "Keyboard", {
     aliases: ["/settings?tab=shortcuts"],
@@ -127,7 +127,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   page("workspace", "apps", "Apps & modules", "/settings/apps", "Boxes", {
     group: "Workspace",
     aliases: ["/settings/modules"],
-    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium"],
+    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates"],
   }),
   page("workspace", "members", "Members", "/settings/members", "Users", {
     group: "People",

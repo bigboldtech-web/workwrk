@@ -15,6 +15,11 @@
 //      anyone else. The old autonomous loop, which ran them as the first
 //      admin it found and ran every tool with no card, is gone
 //      (docs/plans/ai-teammates-phase2.md step 2).
+//   4. Google connections for AI teammates are kept honest
+//      (src/lib/connectors/connections.ts sweepConnections): connects nobody
+//      finished are deleted, the connections of people deleted, deactivated
+//      or no longer in the workspace end, and revokes Google has not confirmed
+//      are tried again (docs/plans/ai-teammates-phase3.md step 2).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
@@ -30,6 +35,7 @@ import { sweepActions } from "@/lib/agents/actions";
 import { sweepStaleRuns } from "@/lib/agents/budget";
 import { convertLegacySchedules, type LegacyScheduleCounts } from "@/lib/agents/legacy-schedules";
 import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines-server";
+import { sweepConnections } from "@/lib/connectors/connections";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 
@@ -46,6 +52,15 @@ const ROUTINE_RUNNER = { limit: 200, budgetMs: 120_000, concurrency: 10 } as con
 
 /** Old schedules moved per tick: each is one read of its creator and one transaction. */
 const LEGACY_MOVER = { limit: 100 } as const;
+
+/**
+ * The connector sweep (docs/plans/ai-teammates-phase3.md step 2): up to 500
+ * leavers ended and 50 revokes tried a tick, within 20 seconds, so the tick
+ * stays inside the crontab's curl --max-time 290 after the routines' 120.
+ */
+const CONNECTOR_SWEEP = { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 } as const;
+
+type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
 
 function errorLine(err: unknown): string {
   return err instanceof Error ? (err.message.split("\n").pop() ?? err.message) : String(err);
@@ -94,11 +109,21 @@ async function handle(req: Request) {
     console.error(`[cron-failure] run-due-agents: the schedule move threw: ${errorLine(err)}`);
   }
 
+  // 4. Google connections for AI teammates: connects never finished, leavers
+  //    the hooks missed, and revokes Google has not confirmed yet.
+  let connectors: ConnectorSweepCounts | null = null;
+  try {
+    connectors = await sweepConnections(now, CONNECTOR_SWEEP);
+  } catch (err) {
+    stepsFailed += 1;
+    console.error(`[cron-failure] run-due-agents: the connector sweep threw: ${errorLine(err)}`);
+  }
+
   // A step that threw fails the tick, and so does a schedule that did not
   // move: it is left for the next tick, but nothing runs it until it moves,
   // so someone is told (review of step 2). One routine's failure stays on
   // the routine and in its chat.
-  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy }, stepsFailed + (legacy?.failed ?? 0));
+  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy, connectors }, stepsFailed + (legacy?.failed ?? 0));
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

@@ -31,6 +31,7 @@
 // (scimReactivated) and transfers nothing back: the row says so.
 
 import { prisma } from "@/lib/prisma";
+import { endConnectionsFor } from "@/lib/connectors/connections";
 import { runHandover } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
 
@@ -97,6 +98,13 @@ export async function scimDeprovision(organizationId: string, userId: string): P
     return { ok: false, status: 409, error: "This is the workspace's last Owner. Make someone else an Owner in WorkwrK first." };
   }
   if (gate.kind === "no_recipient") return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
+
+  // Deactivated: their Google stops serving their AI teammates here, and
+  // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). Never
+  // failing the call: the cron sweep ends any this misses.
+  await endConnectionsFor(organizationId, [userId], "deactivated", null).catch((e) => {
+    console.error(`[connectors] SCIM deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
 
   if (gate.kind === "owner") {
     await prisma.activityLog.create({

@@ -1,0 +1,43 @@
+// DELETE /api/teammate-connections/google: the signed-in person disconnects
+// their own Google from their AI teammates in this workspace
+// (docs/plans/ai-teammates-phase3.md step 2, Decision 19).
+//
+// NO AI GATE (Decision 27): a person with AI off can always remove their
+// tokens. Only their own row, read by their own session.
+//
+// The row goes and its revoke is queued in one transaction
+// (connections.ts removeConnections), then Google is told at once, with five
+// seconds to answer. The answer says where that stands:
+//   revoked "now"         Google confirmed
+//   revoked "queued"      Google did not answer in time; the cron keeps trying
+//   revoked "kept_shared" the same account is connected in another workspace,
+//                         so Google is not told (it would end that one too)
+
+import { NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma";
+import { viewerFromSession } from "@/lib/access/viewer";
+import { CONNECTION_ROUTE_ERRORS, CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
+import { teammateError } from "@/lib/agents/teammate-server";
+import { connectionFor, removeConnections, revokeQueued } from "@/lib/connectors/connections";
+import { googleConfig } from "@/lib/connectors/google/config";
+
+export async function DELETE() {
+  const viewer = await viewerFromSession();
+  if (!viewer) return teammateError(401, "signed_out", CONNECTIONS_COPY.signedOut);
+  const connection = await connectionFor(viewer);
+  if (!connection) return teammateError(404, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
+
+  const { removed, queued } = await removeConnections({
+    where: Prisma.sql`"id" = ${connection.id} AND "organizationId" = ${viewer.organizationId} AND "userId" = ${viewer.userId}`,
+    reason: "disconnected",
+    actor: { id: viewer.userId, type: "person" },
+  });
+  // A second click, or another tab, got there first.
+  if (removed.length === 0) return teammateError(404, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
+  if (queued.length === 0) return NextResponse.json({ disconnected: true, revoked: "kept_shared" });
+
+  const cfg = googleConfig();
+  if (!cfg) return NextResponse.json({ disconnected: true, revoked: "queued" });
+  const r = await revokeQueued(queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => ({ revoked: 0, kept: queued.length, dropped: 0 }));
+  return NextResponse.json({ disconnected: true, revoked: r.revoked === queued.length ? "now" : "queued" });
+}
