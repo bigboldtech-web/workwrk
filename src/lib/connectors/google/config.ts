@@ -42,12 +42,6 @@ const GOOGLE = {
   calendarBase: "https://www.googleapis.com/calendar/v3",
 } as const;
 
-/** This machine, by any of the names a stand-in runs on. */
-function isLocalHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || h === "0.0.0.0" || /^127\./.test(h);
-}
-
 /**
  * The client, or null when this deployment has none to offer: a missing
  * client id, secret or SECRETS_ENCRYPTION_KEY (tokens are only ever stored
@@ -62,14 +56,12 @@ export function googleConfig(env: NodeJS.ProcessEnv = process.env): GoogleConfig
 
   const rawBase = (env.GOOGLE_AGENT_BASE_URL ?? "").trim().replace(/\/+$/, "");
   if (!rawBase) return { clientId, clientSecret, ...GOOGLE, products, standIn: false };
-  let base: URL;
-  try {
-    base = new URL(rawBase);
-  } catch {
-    // A base that is not an address points nowhere a token should go.
-    return null;
-  }
-  if (env.NODE_ENV === "production" && (base.protocol !== "https:" || isLocalHost(base.hostname))) return null;
+  // Production never talks to a stand-in, local or not: a staging address
+  // copied into its settings would receive every person's codes and tokens,
+  // and the client secret (review of step 1).
+  if (env.NODE_ENV === "production") return null;
+  // A base that is not an address points nowhere a token should go.
+  if (!URL.canParse(rawBase)) return null;
   return {
     clientId,
     clientSecret,

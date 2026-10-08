@@ -40,7 +40,8 @@ export function headerSafe(s: string): string {
 }
 
 const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
-const DOMAIN = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+// A top-level label is letters, or an internationalised one in its xn-- form.
+const DOMAIN = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/;
 
 /**
  * One plain address, local@domain.tld, at most 254 characters: no name, no
@@ -52,6 +53,9 @@ export function isEmailAddress(s: string): boolean {
   const at = s.indexOf("@");
   if (at <= 0 || at !== s.lastIndexOf("@")) return false;
   const local = s.slice(0, at);
+  // No encoded word: a client that decodes "=?utf-8?q?...?=" would show the
+  // recipient another address than the one on the card (review of step 1).
+  if (local.includes("=?")) return false;
   return local.length <= 64 && LOCAL_PART.test(local) && DOMAIN.test(s.slice(at + 1));
 }
 

@@ -1,8 +1,9 @@
 // How a connector token is kept (docs/plans/ai-teammates-phase3.md Decision
 // 16): sealed with AES-256-GCM by src/lib/secrets-crypto.ts, as the same JSON
-// blob OrgSecret.encryptedKey holds. A dump of the database holds no token,
-// and a key rotation moves these columns with the rest: SEALED_COLUMNS is the
-// list scripts/rotate-secrets-key.ts walks.
+// blob OrgSecret.encryptedKey holds. A dump of the database holds no token.
+// SEALED_COLUMNS lists every column that holds one, for
+// scripts/rotate-secrets-key.ts to walk: step 2 extends that script, before
+// any token is stored, so a key rotation moves these with the rest.
 //
 // Server-only: reads the key from the environment.
 

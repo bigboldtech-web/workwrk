@@ -92,7 +92,9 @@ describe("dedupeKey", () => {
 
 describe("addresses", () => {
   it("takes one plain address only", () => {
-    for (const ok of ["max@proof.test", "o'brien+team@mail.example.co.uk"]) expect(isEmailAddress(ok), ok).toBe(true);
+    for (const ok of ["max@proof.test", "o'brien+team@mail.example.co.uk", "max@proof.xn--p1ai"]) expect(isEmailAddress(ok), ok).toBe(true);
+    // An encoded word a client would decode into another address (review of step 1).
+    expect(isEmailAddress("=?utf-8?q?x=40evil.test?=@corp.com")).toBe(false);
     for (const bad of ["", "max", "max@", "@proof.test", "max@proof", "a b@proof.test", "<max@proof.test>", "max@proof.test, lea@proof.test", "max@@proof.test", `${"a".repeat(250)}@x.test`]) {
       expect(isEmailAddress(bad), bad).toBe(false);
     }

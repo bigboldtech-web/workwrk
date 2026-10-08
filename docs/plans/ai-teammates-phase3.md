@@ -1726,3 +1726,12 @@ Ask AI is untouched on every path.
 - /Users/bigboldtechnologies/theywrk-agents/src/app/api/users/[id]/route.ts
 - /Users/bigboldtechnologies/theywrk-agents/src/app/(dashboard)/account/connections/page.tsx
 - /Users/bigboldtechnologies/theywrk-agents/scripts/ai-stand-in-model.mjs
+
+---
+
+## After Phase 3: what was built, and each review
+
+- **Step 1** (data and pure foundations): built as specified, with these choices the builder made toward the safer side: no Google row in the tools picker or the Tools tab until step 5 (a row that cannot work would come back unticked); connector writes refused in `prepareOne` until step 3 replaces it with `prepareConnector`; a header's line breaks become a space; address lists split before names are decoded; `googleConfig` refuses an unreadable base address.
+  - Review of step 1 (one read-only reviewer): 8 found (no high, 4 medium), 6 fixed and 2 handed to the step that needs them.
+    - Fixed: HTML is now read through htmlparser2 (sanitize-html, already a dependency) in time linear in its length, instead of patterns that took quadratic time on an outsider's "<a<a<a..." and could stall the server; hidden elements go with their content however they are written (a "/>" on a div, "</div>" inside an attribute, an unclosed comment, CSS comments and escapes, entities, height or width 0 with overflow hidden, tiny fonts, text moved off the page); of two versions of one message the HTML one is read, as the person sees it, so a sentence put only in the plain version never reaches the model, and every part of a mixed message is read; blocks open a line and table cells stay apart ("12 5", not "125"); production refuses any stand-in Google address; an encoded word in an address is refused and internationalised top-level domains are allowed.
+    - Handed on: step 2 extends `scripts/rotate-secrets-key.ts` to walk `SEALED_COLUMNS` before any token is stored (seal.ts says so); step 5 keeps stored Google tools when a manager saves the Tools tab (until then only a direct API call can store one).

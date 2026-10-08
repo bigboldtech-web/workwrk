@@ -35,6 +35,9 @@ describe("googleConfig", () => {
     expect(googleConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "https://localhost:8788" }))).toBeNull();
     expect(googleConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "https://[::1]:8788" }))).toBeNull();
     expect(googleConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "http://stand-in.example.com" }))).toBeNull();
+    // Any stand-in at all, https and far from this machine included (review of step 1).
+    expect(googleConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "https://standin.staging.example.com" }))).toBeNull();
+    expect(googleConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "https://localhost." }))).toBeNull();
     expect(googleConfig(env({ GOOGLE_AGENT_BASE_URL: "not an address" }))).toBeNull();
   });
 
