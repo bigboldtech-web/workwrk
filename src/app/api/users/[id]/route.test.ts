@@ -76,6 +76,7 @@ vi.mock("@/lib/work-schedule", () => ({
 }));
 vi.mock("@/lib/work-schedule-server", () => ({ readOrgWorkSchedule: async () => ({ workdays: [1, 2, 3, 4, 5], hoursPerDay: 8 }) }));
 
+import { applyRoleChange } from "@/lib/access/membership";
 import { DELETE, PATCH } from "./route";
 
 const params = { params: Promise.resolve({ id: "u-max" }) };
@@ -115,5 +116,35 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     const res = await DELETE(new NextRequest("https://app.test/api/users/u-max", { method: "DELETE" }), params);
     expect(res.status).toBe(200);
     expect(st.endConnectionsFor).toHaveBeenCalledWith("org1", ["u-max"], "left", "u-admin");
+  });
+
+  // Review of step 2: an agent account can hold no connection (Decision 27).
+  // Before, a role change ran no hook and the tokens stayed for good.
+  it("making someone an agent account ends their connection (no_access), after the role change", async () => {
+    vi.mocked(applyRoleChange).mockResolvedValueOnce({
+      ok: true,
+      changed: true,
+      targetName: "Max Chen",
+      before: { level: "EMPLOYEE", role: "MEMBER" },
+      after: { level: "AGENT", role: "MEMBER" },
+      bumped: true,
+    });
+    const res = await patch({ orgRole: "MEMBER", memberTier: "AGENT" });
+    expect(res.status).toBe(200);
+    expect(st.endConnectionsFor).toHaveBeenCalledWith("org1", ["u-max"], "no_access", "u-admin");
+  });
+
+  it("another role change ends nothing", async () => {
+    vi.mocked(applyRoleChange).mockResolvedValueOnce({
+      ok: true,
+      changed: true,
+      targetName: "Max Chen",
+      before: { level: "EMPLOYEE", role: "MEMBER" },
+      after: { level: "MANAGER", role: "MEMBER" },
+      bumped: false,
+    });
+    const res = await patch({ orgRole: "MEMBER", memberTier: "MANAGER" });
+    expect(res.status).toBe(200);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
 });

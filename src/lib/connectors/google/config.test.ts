@@ -4,7 +4,7 @@
 // stand-in base moves every address.
 
 import { describe, expect, it } from "vitest";
-import { googleConfig } from "./config";
+import { googleConfig, googleRevokeConfig } from "./config";
 
 const FULL = {
   NODE_ENV: "development",
@@ -68,5 +68,26 @@ describe("googleConfig", () => {
 
   it("offers only the products the deployment lists", () => {
     expect(googleConfig(env({ GOOGLE_AGENT_PRODUCTS: "calendar" }))?.products).toEqual(["calendar"]);
+  });
+});
+
+describe("googleRevokeConfig (review of step 2)", () => {
+  it("still tells Google when no product is offered and no client is set, so the queue drains", () => {
+    const off = env({ GOOGLE_AGENT_PRODUCTS: undefined, GOOGLE_AGENT_CLIENT_ID: undefined, GOOGLE_AGENT_CLIENT_SECRET: undefined });
+    expect(googleConfig(off)).toBeNull();
+    expect(googleRevokeConfig(off)).toEqual({ revokeUrl: "https://oauth2.googleapis.com/revoke", standIn: false });
+  });
+
+  it("waits without the sealing key: no queued token could be opened", () => {
+    expect(googleRevokeConfig(env({ SECRETS_ENCRYPTION_KEY: undefined }))).toBeNull();
+  });
+
+  it("uses the stand-in outside production only", () => {
+    expect(googleRevokeConfig(env({ GOOGLE_AGENT_BASE_URL: "http://127.0.0.1:8788/" }))).toEqual({ revokeUrl: "http://127.0.0.1:8788/revoke", standIn: true });
+    expect(googleRevokeConfig(env({ NODE_ENV: "production", GOOGLE_AGENT_BASE_URL: "http://127.0.0.1:8788" }))).toEqual({
+      revokeUrl: "https://oauth2.googleapis.com/revoke",
+      standIn: false,
+    });
+    expect(googleRevokeConfig(env({ GOOGLE_AGENT_BASE_URL: "not an address" }))).toBeNull();
   });
 });

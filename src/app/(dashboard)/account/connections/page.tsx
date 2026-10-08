@@ -240,8 +240,7 @@ export default function ConnectionsPage() {
         ) : !google ? (
           <div className="cxn__loading"><Dots variant="pending" /> <span>Reading your connections</span></div>
         ) : (
-          <>
-            {/* ── Google Calendar ─────────────────────────────── */}
+            /* ── Google Calendar ─────────────────────────────── */
             <section className="cxn__card">
               <header className="cxn__card-head">
                 <span className="cxn__card-icon"><Calendar aria-hidden /></span>
@@ -346,10 +345,17 @@ export default function ConnectionsPage() {
                 </div>
               )}
             </section>
+        )}
 
-            {/* ── Google for your AI teammates (Phase 3) ──────── */}
-            <TeammateGoogleCard outcome={aiOutcome} />
+        {/* ── Google for your AI teammates (Phase 3) ──────── */}
+        {/* Drawn whatever the Google Calendar read did (review of step 2): it
+            has its own OAuth client, its own routes, its own loading and
+            error, and its own Disconnect, which a failed calendar read must
+            never hide. */}
+        <TeammateGoogleCard outcome={aiOutcome} />
 
+        {loadError || !google ? null : (
+          <>
             {/* ── Personal calendar feed ──────────────────────── */}
             <section className="cxn__card">
               <header className="cxn__card-head">

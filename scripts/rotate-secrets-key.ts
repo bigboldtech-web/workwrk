@@ -56,7 +56,7 @@ import type { Prisma } from "../src/generated/prisma";
 import { databaseLabel, scriptPrisma } from "./lib/script-prisma";
 import { SEALED_COLUMNS } from "../src/lib/connectors/seal";
 import { encryptSecretWith } from "../src/lib/secrets-crypto";
-import { opensWith, planRotation, type SealedCell } from "./lib/rotation-plan";
+import { opensWith, planRotation, readColumnCells, type SealedCell } from "./lib/rotation-plan";
 
 const prisma = scriptPrisma();
 
@@ -79,24 +79,18 @@ function isMissingTable(err: unknown): boolean {
   return !!err && typeof err === "object" && (err as { code?: unknown }).code === "P2021";
 }
 
-/** Every sealed cell of every column, page by page. A table this database does not have yet holds none. */
+/**
+ * Every sealed cell of every column, page by page (rotation-plan.ts
+ * readColumnCells: ids after the last one read, never Prisma's cursor, so a
+ * row deleted at a page boundary cannot end the scan early; review of step
+ * 2). A table this database does not have yet holds none.
+ */
 async function readCells(): Promise<SealedCell[]> {
   const cells: SealedCell[] = [];
   for (const c of SEALED_COLUMNS) {
     const d = delegate(c.model);
-    let cursor: string | null = null;
     try {
-      for (;;) {
-        const page: Array<Record<string, unknown>> = await d.findMany({
-          select: { id: true, [c.column]: true },
-          orderBy: { id: "asc" },
-          take: PAGE,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        });
-        for (const r of page) cells.push({ model: c.model, column: c.column, id: String(r.id), blob: r[c.column] ?? null });
-        if (page.length < PAGE) break;
-        cursor = String(page[page.length - 1].id);
-      }
+      cells.push(...(await readColumnCells(c, (args) => d.findMany(args), PAGE)));
     } catch (err) {
       if (!isMissingTable(err)) throw err;
       console.log(`${c.model}.${c.column}: no such table in this database yet, so nothing to move.`);

@@ -43,6 +43,12 @@ export interface TeammateGoogleUse {
   allowed: ProductSet;
   /** Per allowed product, what changed since the person allowed it; such a product is not used until allowed again. */
   changed: Partial<Record<ConnectorProduct, PrintField[]>>;
+  /**
+   * The teammate as this read showed it (teammate-print.ts teammateShownPrint).
+   * An allow sends it back as `expect`, so it covers what the person saw: one
+   * changed since answers 409 teammate_changed (review of step 2).
+   */
+  print: string;
 }
 
 /** GET /api/teammate-connections. */

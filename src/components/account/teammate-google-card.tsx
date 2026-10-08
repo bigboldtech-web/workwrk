@@ -12,7 +12,14 @@
  * NOTHING IS DRAWN when this WorkwrK offers no Google and the person holds
  * no connection (`available` false), the precedent the Google Calendar card
  * set. A connection is always drawn, so it can always be removed (Decision
- * 27).
+ * 27): for a Guest or an agent account too, where the Guest line takes the
+ * place of Connect, Add, Reconnect and the teammates only (review of step 2).
+ *
+ * WHAT IT SAYS TEAMMATES MAY USE is what Google granted AND the workspace has
+ * on now; a granted product the workspace turned off is named as such, and
+ * with every product off the workspace's own line takes the teammates' place.
+ * An allow sends back the teammate as the card showed it (`print`), so a
+ * teammate changed since is refused and the card reads again.
  *
  * Connect, Reconnect and Add are real navigations to the start route, never
  * fetches: it answers a redirect to Google. Connect is a secondary button:
@@ -113,11 +120,20 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
 
   const setAllow = useCallback(async (t: TeammateGoogleUse, changes: Partial<Record<ConnectorProduct, boolean>>) => {
     setBusy(`allow:${t.slug}`);
-    const r = await apiFetch<{ teammate: TeammateGoogleUse }>(`/api/teammate-connections/teammates/${encodeURIComponent(t.slug)}`, { method: "PUT", json: changes });
+    // `expect`: the teammate as this card showed it, so the allow covers what the person saw.
+    const r = await apiFetch<{ teammate: TeammateGoogleUse }>(`/api/teammate-connections/teammates/${encodeURIComponent(t.slug)}`, {
+      method: "PUT",
+      json: { ...changes, expect: t.print },
+    });
     setBusy(null);
-    if (!r.ok) { toast(r.error || C.allowFailed, { tone: "danger" }); return; }
+    if (!r.ok) {
+      toast(r.error || C.allowFailed, { tone: "danger" });
+      // It changed while the card was open: read again, so the new parts are shown.
+      if (r.code === "teammate_changed") void load();
+      return;
+    }
     setView((v) => (v ? { ...v, teammates: v.teammates.map((x) => (x.slug === t.slug ? r.data.teammate : x)) } : v));
-  }, [toast]);
+  }, [toast, load]);
 
   async function disconnect() {
     setBusy("disconnect");
@@ -152,21 +168,23 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
   const on = CONNECTOR_PRODUCTS.filter((p) => view.products[p] === "on");
   const connection = view.connection;
   const choice = (picked ?? on).filter((p) => on.includes(p));
+  const ws = view.workspaceName || "your workspace";
+  const workspaceOff = (
+    <>
+      <p className="cxn__note">{C.workspaceOffMember(ws)}</p>
+      {view.canManagePolicy ? (
+        <p className="cxn__note">
+          {C.workspaceOffAdmin} <Link href="/settings/apps#ai-google">{C.appsLink}</Link>
+        </p>
+      ) : null}
+    </>
+  );
 
   let body: React.ReactNode;
-  if (view.guest) {
+  if (view.guest && !connection) {
     body = <p className="cxn__note">{C.guestNote}</p>;
   } else if (!connection && on.length === 0) {
-    body = (
-      <>
-        <p className="cxn__note">{C.workspaceOffMember(view.workspaceName || "your workspace")}</p>
-        {view.canManagePolicy ? (
-          <p className="cxn__note">
-            {C.workspaceOffAdmin} <Link href="/settings/apps#ai-google">{C.appsLink}</Link>
-          </p>
-        ) : null}
-      </>
-    );
+    body = workspaceOff;
   } else if (!connection) {
     body = (
       <>
@@ -206,33 +224,13 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
       </>
     );
   } else {
+    // What teammates may use now: granted by Google AND on in the workspace
+    // (review of step 2). A granted product the workspace turned off is named.
+    const usable = connection.products.filter((p) => on.includes(p));
+    const turnedOff = connection.products.filter((p) => !on.includes(p));
     const missing = on.filter((p) => !connection.products.includes(p));
-    body = (
+    const teammates = (
       <>
-        {connection.status === "needs_reconnect" ? (
-          <div className="cxn__error" role="status">
-            <TriangleAlert aria-hidden />
-            <span>{C.needsReconnect(fmt.date(connection.needsReconnectAt ?? connection.connectedAt, "date"))}</span>
-            { }
-            <a className="cxn__link-btn" href={startHref(connection.products)}>{C.reconnect}</a>
-          </div>
-        ) : null}
-        <p className="cxn__note">
-          {C.connectedAs(connection.accountEmail, fmt.date(connection.connectedAt, "date"))}{" "}
-          {C.uses(titleList(connection.products.map(productWord)))}{" "}
-          {connection.lastUsedAt ? C.lastUsed(fmt.relative(connection.lastUsedAt), connection.lastUsedBy ?? C.someTeammate) : C.neverUsed}
-        </p>
-        {missing.length > 0 && connection.status === "active" ? (
-          <div className="cxn__actions">
-            {missing.map((p) => (
-               
-              <a key={p} className="cxn__btn" href={startHref([...connection.products, p])}>
-                <RefreshCw aria-hidden /> {C.addProduct(productWord(p))}
-              </a>
-            ))}
-          </div>
-        ) : null}
-
         <h3 className="cxn__note"><strong>{C.teammatesHeading}</strong></h3>
         {view.teammates.length === 0 ? (
           <p className="cxn__note">{C.noTeammates}</p>
@@ -252,12 +250,19 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                     <>
                       {CONNECTOR_PRODUCTS.filter((p) => t.tools[p]).map((p) => {
                         const label = p === "gmail" ? C.allowGmail(t.name) : C.allowCalendar(t.name);
+                        // A product the connection lacks cannot be allowed until it is
+                        // added (the PUT answers not_granted, review of step 2); one
+                        // allowed already can always be turned off (Decision 27).
+                        const needsAdd = !connection.products.includes(p) && !t.allowed[p];
                         return (
                           <label key={p} className="cxn__cal-switch">
-                            <span>{label}</span>
+                            <span>
+                              {label}
+                              {needsAdd ? <em>{C.addFirst(productWord(p))}</em> : null}
+                            </span>
                             <Switch
                               checked={t.allowed[p]}
-                              disabled={busy === `allow:${t.slug}`}
+                              disabled={busy === `allow:${t.slug}` || needsAdd}
                               onChange={(next) => { void setAllow(t, { [p]: next }); }}
                               aria-label={label}
                             />
@@ -284,6 +289,43 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
             })}
           </ul>
         )}
+      </>
+    );
+    body = (
+      <>
+        {connection.status === "needs_reconnect" ? (
+          <div className="cxn__error" role="status">
+            <TriangleAlert aria-hidden />
+            <span>{C.needsReconnect(fmt.date(connection.needsReconnectAt ?? connection.connectedAt, "date"))}</span>
+            {view.guest ? null : (
+              // A real navigation to the start route, which answers a redirect to Google.
+              <a className="cxn__link-btn" href={startHref(connection.products)}>{C.reconnect}</a>
+            )}
+          </div>
+        ) : null}
+        <p className="cxn__note">
+          {C.connectedAs(connection.accountEmail, fmt.date(connection.connectedAt, "date"))}{" "}
+          {usable.length > 0 ? `${C.uses(titleList(usable.map(productWord)))} ` : null}
+          {connection.lastUsedAt ? C.lastUsed(fmt.relative(connection.lastUsedAt), connection.lastUsedBy ?? C.someTeammate) : C.neverUsed}
+        </p>
+        {on.length > 0
+          ? turnedOff.map((p) => (
+              <p key={p} className="cxn__note">{C.productTurnedOff(productWord(p), ws)}</p>
+            ))
+          : null}
+        {!view.guest && missing.length > 0 && connection.status === "active" ? (
+          <div className="cxn__actions">
+            {missing.map((p) => (
+              <a key={p} className="cxn__btn" href={startHref([...connection.products, p])}>
+                <RefreshCw aria-hidden /> {C.addProduct(productWord(p))}
+              </a>
+            ))}
+          </div>
+        ) : null}
+
+        {/* The Guest line takes the teammates' place, and with every
+            product off the workspace's own line does (review of step 2). */}
+        {view.guest ? <p className="cxn__note">{C.guestNote}</p> : on.length === 0 ? workspaceOff : teammates}
 
         <div className="cxn__actions">
           <button type="button" className="cxn__btn cxn__btn--danger" onClick={() => setConfirmOpen(true)} disabled={busy === "disconnect"}>

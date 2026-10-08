@@ -442,7 +442,8 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   // A company closed here is deleted in 30 days, as an Owner's own delete
   // is: its Google connections for AI teammates end now, as the system (no
   // person of the workspace acted), and Google is told
-  // (docs/plans/ai-teammates-phase3.md Decision 20). Never failing the patch.
+  // (docs/plans/ai-teammates-phase3.md Decision 20). Never failing the patch:
+  // the cron sweep ends any this misses on its next tick (review of step 2).
   if (result.changed?.includes("status") && result.company?.status === "CANCELLED") {
     await endWorkspaceConnections(id, "workspace_deleted", null).catch((e) => {
       console.error(`[connectors] staff closure hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);

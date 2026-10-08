@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ viewer: null as unknown }));
+const st = vi.hoisted(() => ({ viewer: null as unknown, offered: true }));
 const CFG = vi.hoisted(() => ({
   clientId: "agent-client",
   clientSecret: "agent-secret",
@@ -19,7 +19,11 @@ const CFG = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/connector-test-db")).connectorDb }));
-vi.mock("@/lib/connectors/google/config", () => ({ googleConfig: () => CFG, googleRedirectUri: () => "https://app.test/cb" }));
+vi.mock("@/lib/connectors/google/config", () => ({
+  googleConfig: () => (st.offered ? CFG : null),
+  googleRevokeConfig: () => ({ revokeUrl: CFG.revokeUrl, standIn: true }),
+  googleRedirectUri: () => "https://app.test/cb",
+}));
 vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: vi.fn(async () => st.viewer) }));
 // No AI gate: the route must never ask for one (Decision 27).
 vi.mock("@/lib/app-gate", () => ({ requireApp: vi.fn(async () => { throw new Error("the AI gate was asked"); }) }));
@@ -40,6 +44,7 @@ beforeEach(() => {
   process.env.SECRETS_ENCRYPTION_KEY = "e".repeat(64);
   resetConnectorDb();
   st.viewer = MAX;
+  st.offered = true;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -90,5 +95,17 @@ describe("DELETE /api/teammate-connections/google", () => {
     expect(cdb.revocations).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
     expect(cdb.connections.map((c) => c.organizationId)).toEqual(["org2"]);
+  });
+
+  // Review of step 2: with GOOGLE_AGENT_PRODUCTS emptied (the feature switched
+  // off) the route answered "queued" and never told Google, and nothing drained it.
+  it("revokes at Google at once even when this WorkwrK no longer offers Google", async () => {
+    st.offered = false;
+    const fetch = revokeAnswers(200);
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("rt-max") });
+    const res = await DELETE();
+    expect(await res.json()).toEqual({ disconnected: true, revoked: "now" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(cdb.revocations).toEqual([]);
   });
 });

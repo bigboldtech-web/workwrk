@@ -19,27 +19,76 @@
 // 19): a crash between the two can never leave WorkwrK listed in someone's
 // Google account with no row left to say so.
 //
+// ONE GOOGLE ACCOUNT, ONE DECISION AT A TIME (review of step 2). Whether an
+// account is still held by another live connection, and so whether its grant
+// is revoked, is decided under a per-account lock (lockAccounts), taken by
+// every path that decides it: a removal after its delete, a connect for the
+// new account and the one it replaces, the hard delete, and the queue just
+// before it tells Google. Without it two removals of one account at the same
+// moment each saw the other's row and neither queued a revoke, and a revoke
+// queued a minute before a reconnect of the same account ended the new grant
+// too. A queue row keeps its account only as accountKey (sha256 of provider
+// and sub), which names no person.
+//
 // NOTHING ABOUT THE ACCOUNT IN LOGS OR AUDIT ROWS (Decision 16): audit
 // metadata holds ids, products and counts; the address is shown only to the
 // person, on their own card.
 //
 // Server-only: imports prisma.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Prisma } from "@/generated/prisma";
+import { accessV2Tables } from "@/lib/access/flags";
 import { logActivity } from "@/lib/activity";
 import { CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
 import { changedFields, othersMayChange, PRINT_FIELDS, type PrintField, type PrintedTeammate } from "@/lib/agents/teammate-print";
 import type { ActingPerson } from "@/lib/agents/acting";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
-import { googleConfig, type GoogleConfig } from "./google/config";
+import { googleConfig, googleRevokeConfig, type GoogleConfig, type GoogleRevokeConfig } from "./google/config";
 import { revokeToken, type GoogleTokens } from "./google/oauth";
 import { CONNECTOR_PRODUCTS, NO_PRODUCTS, parseProducts, productSet, type ConnectorProduct, type ProductSet } from "./products";
 import { openToken, sealToken } from "./seal";
 
 /** Where every connection notice and reconnect link goes: the person's own card. */
 export const CONNECTIONS_HREF = "/account/connections#ai-google";
+
+/**
+ * An Inbox row's link for one workspace's connection (review of step 2). The
+ * workspace rides in ?ws=, which the Connections page ignores, so a reconnect
+ * marks read that workspace's rows by their link, never by their message: a
+ * workspace renamed since, or two workspaces with one name, read the wrong
+ * rows.
+ */
+export function connectionsHref(organizationId: string): string {
+  return `/account/connections?ws=${encodeURIComponent(organizationId)}#ai-google`;
+}
+
+/**
+ * The name a revoke queue row and the per-account lock know a Google account
+ * by (review of step 2): sha256 hex of the provider and the account's sub. It
+ * names no person. The SQL that writes one (queueWorkspaceRevocations, and
+ * the backfill in prisma/sql/2026-10-08-ai-teammates-phase3-revoke-key.sql)
+ * works it out the same way: encode(sha256(convert_to(provider || ':' || sub,
+ * 'UTF8')), 'hex').
+ */
+export function accountKey(provider: string, sub: string): string {
+  return createHash("sha256").update(`${provider}:${sub}`, "utf8").digest("hex");
+}
+
+/**
+ * Hold the per-account lock of these accounts until the transaction ends
+ * (see ONE GOOGLE ACCOUNT above). In one sorted order everywhere (ORDER BY
+ * in the statement, so the database sorts, and its volatile lock calls run
+ * in that order), so two transactions never wait on each other. $executeRaw,
+ * never $queryRaw: pg_advisory_xact_lock answers void, which a query cannot
+ * read back.
+ */
+async function lockAccounts(tx: Prisma.TransactionClient, keys: readonly string[]): Promise<void> {
+  const wanted = [...new Set(keys)];
+  if (wanted.length === 0) return;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || k)) FROM unnest(${wanted}::text[]) AS k ORDER BY k`;
+}
 
 /** Who ended a connection, as its audit row names them: a person (the admin who acted), or the system. */
 export type RemoveActor = { id: string | null; type: "person" | "system" };
@@ -249,7 +298,7 @@ export async function markNeedsReconnect(conn: Pick<LiveConnection, "id" | "orga
         type: "agent_connection",
         title: CONNECTIONS_COPY.brokenNoticeTitle,
         message: CONNECTIONS_COPY.brokenNoticeMessage(ws),
-        link: CONNECTIONS_HREF,
+        link: connectionsHref(conn.organizationId),
       },
     });
     publishToUser(conn.userId, { type: "notification" });
@@ -284,7 +333,7 @@ export async function touchUsed(connectionId: string, agentId: string): Promise<
 
 export type SaveConnectionResult =
   | { ok: true; id: string; replaced: boolean; reconnect: boolean; queued: string[] }
-  | { ok: false; code: "exchange_failed" };
+  | { ok: false; code: "exchange_failed" | "workspace_closed" };
 
 function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
@@ -299,6 +348,12 @@ async function saveOnce(a: {
   scopes: string[];
 }): Promise<SaveConnectionResult> {
   return prisma.$transaction(async (tx): Promise<SaveConnectionResult> => {
+    // A workspace its Owner deleted, or staff closed, takes no new connection
+    // (review of step 2): its connections ended when it was closed, and one
+    // made now would hold the person's tokens until the hard delete, 30 days
+    // on. A close that commits after this read is caught by the cron sweep.
+    const org = await tx.organization.findUnique({ where: { id: a.organizationId }, select: { status: true } });
+    if (!org || org.status === "CANCELLED") return { ok: false, code: "workspace_closed" };
     // The person's row, locked: a second callback at the same moment waits
     // here, then reads what this one wrote.
     const rows = await tx.$queryRaw<Array<{ id: string; accountSub: string; refreshTokenSealed: unknown }>>`
@@ -306,6 +361,13 @@ async function saveOnce(a: {
        WHERE "organizationId" = ${a.organizationId} AND "userId" = ${a.userId} AND "provider" = 'google'
        FOR UPDATE`;
     const existing = rows[0] ?? null;
+    // The new account and the one it replaces, locked before anything about
+    // them is decided: a removal of either account elsewhere waits for this
+    // to commit and then sees it, and the queue never revokes the new grant
+    // while this connect is still committing.
+    const newKey = accountKey("google", a.claims.sub);
+    const oldKey = existing ? accountKey("google", existing.accountSub) : null;
+    await lockAccounts(tx, oldKey ? [newKey, oldKey] : [newKey]);
     const now = new Date();
     const access = {
       accessTokenSealed: json(sealToken(a.tokens.accessToken)),
@@ -324,6 +386,7 @@ async function saveOnce(a: {
           products,
           scopes: a.scopes,
           accountSub: a.claims.sub,
+          accountKey: newKey,
           accountEmail: a.claims.email,
           refreshTokenSealed: json(sealToken(a.tokens.refreshToken)),
           ...access,
@@ -345,6 +408,7 @@ async function saveOnce(a: {
         products,
         scopes: a.scopes,
         accountSub: a.claims.sub,
+        accountKey: newKey,
         accountEmail: a.claims.email,
         refreshTokenSealed,
         ...access,
@@ -365,7 +429,9 @@ async function saveOnce(a: {
       const shared = await tx.teammateConnection.count({ where: { provider: "google", accountSub: existing.accountSub } });
       if (shared === 0) {
         const id = revocationId();
-        await tx.teammateTokenRevocation.create({ data: { id, provider: "google", tokenSealed: json(existing.refreshTokenSealed), reason: "replaced" } });
+        await tx.teammateTokenRevocation.create({
+          data: { id, provider: "google", tokenSealed: json(existing.refreshTokenSealed), reason: "replaced", accountKey: oldKey },
+        });
         queued.push(id);
       }
     }
@@ -380,7 +446,10 @@ async function saveOnce(a: {
  * takes over the row and queues the old account's revoke (`queued`, tried at
  * once by the caller and drained by the cron). After the commit: the
  * person's notices about this connection are read, and the audit line names
- * products and ids only.
+ * products and ids only. It throws only when nothing was stored: what runs
+ * after the commit is logged, never thrown, so a caller that discards the new
+ * grant on a throw never revokes one a stored connection now uses (review of
+ * step 2).
  */
 export async function saveConnection(a: {
   organizationId: string;
@@ -400,30 +469,29 @@ export async function saveConnection(a: {
   if (!result.ok) return result;
 
   // The "stopped working" and "disconnected by an Admin" rows for this
-  // workspace have nothing left to act on.
-  const ws = await workspaceName(a.organizationId);
+  // workspace have nothing left to act on. Matched by the link that names
+  // this workspace (connectionsHref), never by the message text.
   const read = await prisma.notification
     .updateMany({
-      where: {
-        userId: a.userId,
-        type: "agent_connection",
-        read: false,
-        message: { in: [CONNECTIONS_COPY.brokenNoticeMessage(ws), CONNECTIONS_COPY.disconnectedByAdminMessage(ws)] },
-      },
+      where: { userId: a.userId, type: "agent_connection", read: false, link: connectionsHref(a.organizationId) },
       data: { read: true },
     })
     .catch(() => null);
   if (read && read.count > 0) publishToUser(a.userId, { type: "notification" });
 
-  await logActivity({
-    type: "teammate_connection.connected",
-    actorId: a.userId,
-    organizationId: a.organizationId,
-    description: CONNECTIONS_COPY.auditConnected,
-    targetId: a.userId,
-    targetType: "user",
-    metadata: { provider: "google", products: a.products, connectionId: result.id, replaced: result.replaced, reconnect: result.reconnect },
-  });
+  try {
+    await logActivity({
+      type: "teammate_connection.connected",
+      actorId: a.userId,
+      organizationId: a.organizationId,
+      description: CONNECTIONS_COPY.auditConnected,
+      targetId: a.userId,
+      targetType: "user",
+      metadata: { provider: "google", products: a.products, connectionId: result.id, replaced: result.replaced, reconnect: result.reconnect },
+    });
+  } catch (err) {
+    console.error(`[connectors] connect audit row not written: ${errorLine(err)}`);
+  }
   return result;
 }
 
@@ -434,7 +502,8 @@ export async function accountHeld(sub: string): Promise<boolean> {
 
 // ── Ending connections ──────────────────────────────────────────────
 
-export type RemoveReason = "disconnected" | "left" | "deactivated" | "admin_all" | "workspace_deleted" | "sweep";
+/** no_access: the person now holds Guest, or is an agent account, in that workspace (review of step 2). */
+export type RemoveReason = "disconnected" | "left" | "deactivated" | "admin_all" | "workspace_deleted" | "no_access" | "sweep";
 
 /** Rows deleted (and their revokes queued) per transaction: a 10,000 person disconnect is twenty short ones. */
 const REMOVE_CHUNK = 500;
@@ -447,9 +516,12 @@ type Removed = { id: string; organizationId: string; userId: string };
 
 /**
  * End every connection `where` matches. Each chunk is one transaction: the
- * rows deleted (RETURNING their sealed refresh tokens), and a revoke queued
- * for every Google account no live row still holds (the transaction sees its
- * own deletes, so only rows that stay are read). After each commit, the audit
+ * rows deleted (RETURNING their sealed refresh tokens), their accounts locked
+ * (lockAccounts), and a revoke queued for every Google account no live row
+ * still holds (the transaction sees its own deletes, so only rows that stay
+ * are read; and the check runs after the lock, so a removal of the same
+ * account committing meanwhile is seen, never both of them deciding the other
+ * still holds it). After each commit, the audit
  * rows (one per connection, ids and the reason only) and, with `notify`, one
  * Inbox row per person, both in batches of 500. `limit` caps how many end
  * (the sweep's per-tick share).
@@ -473,6 +545,8 @@ export async function removeConnections(a: {
            WHERE "id" IN (SELECT "id" FROM "TeammateConnection" WHERE ${a.where} LIMIT ${take})
           RETURNING "id", "organizationId", "userId", "provider", "accountSub", "refreshTokenSealed"`;
         if (gone.length === 0) return { gone: [] as Removed[], queued: [] as string[] };
+        // After the delete, before the held check (review of step 2).
+        await lockAccounts(tx, gone.map((g) => accountKey(g.provider, g.accountSub)));
         const subs = [...new Set(gone.map((g) => g.accountSub))];
         const live = await tx.$queryRaw<Array<{ accountSub: string }>>`
           SELECT DISTINCT "accountSub" FROM "TeammateConnection"
@@ -480,7 +554,13 @@ export async function removeConnections(a: {
         const held = new Set(live.map((l) => l.accountSub));
         const rows = gone
           .filter((g) => !held.has(g.accountSub))
-          .map((g) => ({ id: revocationId(), provider: "google", tokenSealed: json(g.refreshTokenSealed), reason: a.reason }));
+          .map((g) => ({
+            id: revocationId(),
+            provider: "google",
+            tokenSealed: json(g.refreshTokenSealed),
+            reason: a.reason,
+            accountKey: accountKey(g.provider, g.accountSub),
+          }));
         if (rows.length > 0) await tx.teammateTokenRevocation.createMany({ data: rows });
         return { gone: gone.map((g) => ({ id: g.id, organizationId: g.organizationId, userId: g.userId })), queued: rows.map((r) => r.id) };
       },
@@ -532,7 +612,7 @@ async function afterRemoved(gone: readonly Removed[], a: { reason: RemoveReason;
           type: "agent_connection",
           title: CONNECTIONS_COPY.disconnectedByAdminTitle,
           message: CONNECTIONS_COPY.disconnectedByAdminMessage(names.get(r.organizationId)?.trim() || "your workspace"),
-          link: CONNECTIONS_HREF,
+          link: connectionsHref(r.organizationId),
         })),
       });
       for (const r of batch) publishToUser(r.userId, { type: "notification" });
@@ -547,9 +627,14 @@ const REVOKE_NOW_TIMEOUT_MS = 5_000;
 /** How long trying revokes at once may hold a request in all; the rest wait for the cron. */
 const REVOKE_NOW_BUDGET_MS = 8_000;
 
-/** Revokes queued a moment ago, tried at once, best effort: what is not revoked waits for the cron. */
+/**
+ * Revokes queued a moment ago, tried at once, best effort: what is not
+ * revoked waits for the cron. Through the revoke settings alone
+ * (googleRevokeConfig), so a deployment that stopped offering Google still
+ * tells Google (review of step 2).
+ */
 async function revokeNow(ids: readonly string[]): Promise<void> {
-  const cfg = googleConfig();
+  const cfg = googleRevokeConfig();
   if (!cfg || ids.length === 0) return;
   await revokeQueued(ids, cfg, { timeoutMs: REVOKE_NOW_TIMEOUT_MS, budgetMs: REVOKE_NOW_BUDGET_MS }).catch((err) => {
     console.error(`[connectors] revoke at once failed: ${errorLine(err)}`);
@@ -558,11 +643,17 @@ async function revokeNow(ids: readonly string[]): Promise<void> {
 
 /**
  * The hooks for people leaving or deactivated here (the users route, SCIM
- * deprovisioning, deleting one's own account): their connections in this
+ * deprovisioning, deleting one's own account), or made a Guest or an agent
+ * account here (no_access, review of step 2): their connections in this
  * workspace end, as the admin who acted or the system, and Google is told at
  * once where it can be. Returns how many ended.
  */
-export async function endConnectionsFor(organizationId: string, userIds: readonly string[], reason: "left" | "deactivated", actorId: string | null): Promise<number> {
+export async function endConnectionsFor(
+  organizationId: string,
+  userIds: readonly string[],
+  reason: "left" | "deactivated" | "no_access",
+  actorId: string | null,
+): Promise<number> {
   const ids = [...new Set(userIds.filter((id) => typeof id === "string" && id.length > 0))];
   if (ids.length === 0) return 0;
   const { removed, queued } = await removeConnections({
@@ -601,12 +692,30 @@ export async function endWorkspaceConnections(organizationId: string, reason: "w
  * workspace whose Google account no other workspace's connection holds. The
  * foreign keys then cascade the connections away; the queue has none, so it
  * outlives them until Google is told.
+ *
+ * THE ACCOUNTS SHARED WITH ANOTHER WORKSPACE ARE LOCKED FIRST (review of
+ * step 2): those are the ones the NOT EXISTS decides, and a removal of the
+ * other workspace's row at the same moment would otherwise see this one's,
+ * as this one sees that, and neither would queue a revoke. An account no
+ * other workspace holds is queued whatever runs meanwhile (a connect of it
+ * committing elsewhere is caught when the queue tells Google), so it needs
+ * no lock; locking every account of a large workspace would fill the lock
+ * table inside the hard delete's one transaction.
  */
 export async function queueWorkspaceRevocations(tx: Prisma.TransactionClient, organizationId: string): Promise<number> {
+  await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || s.k))
+      FROM (SELECT DISTINCT encode(sha256(convert_to(c."provider" || ':' || c."accountSub", 'UTF8')), 'hex') AS k
+              FROM "TeammateConnection" c
+             WHERE c."organizationId" = ${organizationId}
+               AND EXISTS (SELECT 1 FROM "TeammateConnection" o
+                            WHERE o."provider" = c."provider" AND o."accountSub" = c."accountSub" AND o."organizationId" <> ${organizationId})) s
+     ORDER BY s.k`;
   return tx.$executeRaw`
-    INSERT INTO "TeammateTokenRevocation" ("id", "provider", "tokenSealed", "reason", "attempts", "nextAttemptAt", "createdAt")
+    INSERT INTO "TeammateTokenRevocation" ("id", "provider", "tokenSealed", "reason", "attempts", "nextAttemptAt", "createdAt", "accountKey")
     SELECT 'rv_' || md5(c."id" || clock_timestamp()::text || random()::text), c."provider", c."refreshTokenSealed", 'workspace_deleted', 0,
-           (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
+           (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'),
+           encode(sha256(convert_to(c."provider" || ':' || c."accountSub", 'UTF8')), 'hex')
       FROM "TeammateConnection" c
      WHERE c."organizationId" = ${organizationId}
        AND NOT EXISTS (SELECT 1 FROM "TeammateConnection" o
@@ -621,27 +730,62 @@ const REVOKE_AT_ONCE = 5;
 const REVOKE_MAX_ATTEMPTS = 6;
 const REVOKE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-type QueueRow = { id: string; tokenSealed: unknown; attempts: number; createdAt: Date };
+type QueueRow = { id: string; tokenSealed: unknown; attempts: number; createdAt: Date; accountKey: string | null };
+
+/** What telling Google about some queue rows came to. stillHeld: deleted unsent, a live connection holds the account again. */
+export type RevokeCounts = { revoked: number; kept: number; dropped: number; stillHeld: number };
 
 /**
- * Try these queue rows, five at a time, until the deadline. Revoked, or
- * already unknown to Google: the row goes. Failed: the row stays for the
- * next try, unless it was tried REVOKE_MAX_ATTEMPTS times or is older than
- * seven days, when it is dropped and counted. A token no key opens can never
- * be sent, so it is dropped and counted.
+ * The rows of this batch whose Google account a live connection holds again
+ * (a reconnect made since the row was queued), deleted without telling
+ * Google: Google revokes per client and account, so revoking the old token
+ * would end the new connection too (review of step 2). Read under the
+ * per-account lock, so a connect still committing is waited for and seen. A
+ * row queued before accounts were kept (accountKey null) is revoked as
+ * before. The ids deleted.
  */
-async function revokeRows(rows: readonly QueueRow[], cfg: GoogleConfig, o: { deadline: number; timeoutMs?: number; now?: Date }): Promise<{ revoked: number; kept: number; dropped: number; tried: number }> {
+async function dropStillHeld(rows: readonly QueueRow[]): Promise<Set<string>> {
+  const keyed = rows.filter((r) => typeof r.accountKey === "string" && r.accountKey.length > 0);
+  if (keyed.length === 0) return new Set();
+  const keys = [...new Set(keyed.map((r) => r.accountKey as string))];
+  return prisma.$transaction(async (tx) => {
+    await lockAccounts(tx, keys);
+    const live = await tx.$queryRaw<Array<{ accountKey: string }>>`
+      SELECT DISTINCT "accountKey" FROM "TeammateConnection" WHERE "accountKey" = ANY(${keys}::text[])`;
+    const held = new Set(live.map((l) => l.accountKey));
+    const drop = keyed.filter((r) => held.has(r.accountKey as string)).map((r) => r.id);
+    if (drop.length > 0) await tx.teammateTokenRevocation.deleteMany({ where: { id: { in: drop } } });
+    return new Set(drop);
+  });
+}
+
+/**
+ * Try these queue rows, five at a time, until the deadline. First, a row
+ * whose account a live connection holds again goes unsent (dropStillHeld).
+ * Revoked, or already unknown to Google: the row goes. Failed: the row stays
+ * for the next try, unless it was tried REVOKE_MAX_ATTEMPTS times or is older
+ * than seven days, when it is dropped and counted. A token no key opens can
+ * never be sent, so it is dropped and counted.
+ */
+async function revokeRows(
+  rows: readonly QueueRow[],
+  cfg: GoogleRevokeConfig,
+  o: { deadline: number; timeoutMs?: number; now?: Date },
+): Promise<RevokeCounts & { tried: number }> {
   let revoked = 0;
   let kept = 0;
   let dropped = 0;
+  let stillHeld = 0;
   let tried = 0;
   const now = o.now ?? new Date();
   for (let i = 0; i < rows.length; i += REVOKE_AT_ONCE) {
     if (Date.now() >= o.deadline) break;
     const batch = rows.slice(i, i + REVOKE_AT_ONCE);
     tried += batch.length;
+    const held = await dropStillHeld(batch);
+    stillHeld += held.size;
     const outcomes = await Promise.all(
-      batch.map(async (row): Promise<"revoked" | "kept" | "dropped"> => {
+      batch.filter((row) => !held.has(row.id)).map(async (row): Promise<"revoked" | "kept" | "dropped"> => {
         let token: string;
         try {
           token = openToken(row.tokenSealed);
@@ -668,61 +812,112 @@ async function revokeRows(rows: readonly QueueRow[], cfg: GoogleConfig, o: { dea
       else kept += 1;
     }
   }
-  return { revoked, kept, dropped, tried };
+  return { revoked, kept, dropped, stillHeld, tried };
 }
 
-/** Try these queued revokes now (a disconnect, a hook): what fails stays queued for the cron. */
-export async function revokeQueued(
-  ids: readonly string[],
-  cfg: GoogleConfig,
-  o: { timeoutMs?: number; budgetMs?: number } = {},
-): Promise<{ revoked: number; kept: number; dropped: number }> {
+/**
+ * Try these queued revokes now (a disconnect, a hook, a connect that replaced
+ * an account): what fails stays queued for the cron. `cfg` is the revoke
+ * settings (googleRevokeConfig); a full GoogleConfig carries them too.
+ */
+export async function revokeQueued(ids: readonly string[], cfg: GoogleRevokeConfig, o: { timeoutMs?: number; budgetMs?: number } = {}): Promise<RevokeCounts> {
   const wanted = [...new Set(ids)].slice(0, 1000);
-  if (wanted.length === 0) return { revoked: 0, kept: 0, dropped: 0 };
+  if (wanted.length === 0) return { revoked: 0, kept: 0, dropped: 0, stillHeld: 0 };
   const rows = await prisma.teammateTokenRevocation.findMany({
     where: { id: { in: wanted } },
-    select: { id: true, tokenSealed: true, attempts: true, createdAt: true },
+    select: { id: true, tokenSealed: true, attempts: true, createdAt: true, accountKey: true },
   });
   const r = await revokeRows(rows, cfg, { deadline: Date.now() + (o.budgetMs ?? 30_000), timeoutMs: o.timeoutMs });
-  return { revoked: r.revoked, kept: r.kept + (rows.length - r.tried), dropped: r.dropped };
+  return { revoked: r.revoked, kept: r.kept + (rows.length - r.tried), dropped: r.dropped, stillHeld: r.stillHeld };
 }
+
+/** People deleted, INACTIVE, or no longer in the workspace (anchored elsewhere with no membership here). */
+const LEAVERS_WHERE = Prisma.sql`"id" IN (
+      SELECT c."id" FROM "TeammateConnection" c JOIN "User" u ON u."id" = c."userId"
+       WHERE u."deletedAt" IS NOT NULL OR u."status" = 'INACTIVE'
+          OR (u."organizationId" <> c."organizationId"
+              AND NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                               WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId")))`;
+
+/**
+ * People still here who can no longer connect (Decision 27; review of step
+ * 2): an agent account, or a Guest. The level is the one held in that
+ * workspace, read as src/lib/access reads it (acting-workspace.ts
+ * levelHeldIn): the person's own row where they are anchored, their
+ * membership's role elsewhere. A Guest is a Member-level person whose stored
+ * User.orgRole says GUEST where they are anchored, read only while
+ * ACCESS_V2_TABLES is on, as org-role.ts effectiveOrgRole reads it, so the
+ * sweep never ends a connection the rest of the product still lets them make.
+ */
+function noAccessWhere(guestColumnRead: boolean): Prisma.Sql {
+  return Prisma.sql`"id" IN (
+      SELECT c."id" FROM "TeammateConnection" c JOIN "User" u ON u."id" = c."userId"
+       WHERE u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+         AND ((u."organizationId" = c."organizationId"
+               AND (u."accessLevel" = 'AGENT'
+                    OR (${guestColumnRead}::boolean AND u."orgRole" = 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN'))))
+           OR (u."organizationId" <> c."organizationId"
+               AND EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                            WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId" AND m."role" = 'AGENT'))))`;
+}
+
+/**
+ * Workspaces their Owner deleted, or staff closed (review of step 2): the
+ * close's own hook ends their connections at once, and this ends any it
+ * missed (a failed hook, a connect finishing meanwhile) now rather than at
+ * the hard delete, 30 days on.
+ */
+const CLOSED_WHERE = Prisma.sql`"id" IN (
+      SELECT c."id" FROM "TeammateConnection" c JOIN "Organization" o ON o."id" = c."organizationId"
+       WHERE o."status" = 'CANCELLED')`;
+
+export type ConnectorSweepCounts = {
+  statesExpired: number;
+  /** Connections ended because their person left (reason sweep). */
+  leavers: number;
+  /** Because their person is now a Guest or an agent account there. */
+  noAccess: number;
+  /** Because their workspace was deleted or closed. */
+  closed: number;
+} & RevokeCounts;
 
 /**
  * The cron's step (run-due-agents step 4), each part on its own:
  *   1. connects nobody finished are deleted;
- *   2. connections whose person is deleted, INACTIVE, or no longer in the
- *      workspace (anchored elsewhere with no membership here) end, as the
- *      system, with no notice: the hooks may have missed a path (Decision 20);
+ *   2. connections end, as the system, with no notice, the hooks may have
+ *      missed a path (Decision 20), within one share of `leaversLimit`:
+ *      a person deleted, INACTIVE, or no longer in the workspace (reason
+ *      sweep); a person who is now a Guest or an agent account there
+ *      (no_access); a workspace deleted or closed (workspace_deleted);
  *   3. queued revokes are claimed five at a time (FOR UPDATE SKIP LOCKED, so
  *      two ticks never take one row twice), each claim counting a try and
  *      moving the next one further out, and tried until the budget runs out.
  * The answer is counts only.
  */
-export async function sweepConnections(
-  now: Date,
-  o: { leaversLimit: number; revokeLimit: number; budgetMs: number },
-): Promise<{ statesExpired: number; leavers: number; revoked: number; kept: number; dropped: number }> {
+export async function sweepConnections(now: Date, o: { leaversLimit: number; revokeLimit: number; budgetMs: number }): Promise<ConnectorSweepCounts> {
   const deadline = Date.now() + o.budgetMs;
   const statesExpired = await prisma.$executeRaw`DELETE FROM "TeammateOAuthState" WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')`;
 
-  const { removed } = await removeConnections({
-    where: Prisma.sql`"id" IN (
-      SELECT c."id" FROM "TeammateConnection" c JOIN "User" u ON u."id" = c."userId"
-       WHERE u."deletedAt" IS NOT NULL OR u."status" = 'INACTIVE'
-          OR (u."organizationId" <> c."organizationId"
-              AND NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                               WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId")))`,
-    reason: "sweep",
-    actor: SYSTEM_ACTOR,
-    limit: o.leaversLimit,
-  });
+  let room = Math.max(0, o.leaversLimit);
+  const end = async (where: Prisma.Sql, reason: RemoveReason): Promise<number> => {
+    if (room <= 0) return 0;
+    const { removed } = await removeConnections({ where, reason, actor: SYSTEM_ACTOR, limit: room });
+    room -= removed.length;
+    return removed.length;
+  };
+  const leavers = await end(LEAVERS_WHERE, "sweep");
+  const noAccess = await end(noAccessWhere(accessV2Tables()), "no_access");
+  const closed = await end(CLOSED_WHERE, "workspace_deleted");
 
   let revoked = 0;
   let kept = 0;
   let dropped = 0;
-  const cfg = googleConfig();
-  // With no Google client on this deployment there is nobody to tell: the
-  // queue waits, and a row older than seven days goes at its first try after.
+  let stillHeld = 0;
+  // Through the revoke settings alone (review of step 2): emptying
+  // GOOGLE_AGENT_PRODUCTS, or removing the client, still lets the queue drain.
+  // Without the sealing key no token can be opened, so the queue waits for
+  // it rather than dropping every row as unreadable.
+  const cfg = googleRevokeConfig();
   if (cfg) {
     let claimed = 0;
     while (claimed < o.revokeLimit && Date.now() < deadline) {
@@ -739,17 +934,18 @@ export async function sweepConnections(
                          ORDER BY "nextAttemptAt"
                          LIMIT ${take}
                          FOR UPDATE SKIP LOCKED)
-        RETURNING "id", "tokenSealed", "attempts", "createdAt"`;
+        RETURNING "id", "tokenSealed", "attempts", "createdAt", "accountKey"`;
       if (rows.length === 0) break;
       claimed += rows.length;
       const r = await revokeRows(rows, cfg, { deadline: Number.POSITIVE_INFINITY, now });
       revoked += r.revoked;
       kept += r.kept;
       dropped += r.dropped;
+      stillHeld += r.stillHeld;
       if (rows.length < take) break;
     }
   }
-  return { statesExpired, leavers: removed.length, revoked, kept, dropped };
+  return { statesExpired, leavers, noAccess, closed, revoked, kept, dropped, stillHeld };
 }
 
 // ── What Owners and Admins see and set ──────────────────────────────

@@ -99,6 +99,29 @@ describe("googleCall", () => {
     expect(openToken(cdb.connections[0].accessTokenSealed)).toBe("fresh-access-token");
   });
 
+  // Review of step 2: the swap's count was ignored, so a call that read the
+  // connection before a disconnect (Google kept the shared grant) or a
+  // reconnect as another account still used the fresh token afterwards.
+  it("never uses a refreshed token the swap could not store: not_connected once the row is gone", async () => {
+    const { calls } = fetchQueue([{ status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } }, { status: 200, json: { messages: [] } }]);
+    const conn = connection({ expiresInMs: 10_000 });
+    // Max disconnected while this call was on its way.
+    cdb.connections = [];
+    const r = await googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false });
+    expect(r).toEqual({ ok: false, failure: "not_connected" });
+    expect(calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
+  });
+
+  it("answers needs_reconnect, and sends nothing, when the connection was made again since it was read", async () => {
+    const { calls } = fetchQueue([{ status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } }, { status: 200, json: {} }]);
+    const conn = connection({ expiresInMs: 10_000 });
+    // Reconnected as another account: tokenVersion 2.
+    cdb.connections[0].tokenVersion = 2;
+    const r = await googleCall(conn, CFG, { method: "POST", url: "https://g.test/gmail/v1/users/me/messages/send", body: { raw: "x" }, write: true });
+    expect(r).toEqual({ ok: false, failure: "needs_reconnect" });
+    expect(calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
+  });
+
   it("answers unknown_outcome for a write that timed out, after one fetch and no retry", async () => {
     const { fn } = fetchQueue(["timeout", { status: 200, json: {} }]);
     const r = await googleCall(connection(), CFG, { method: "POST", url: "https://g.test/gmail/v1/users/me/messages/send", body: { raw: "x" }, write: true });

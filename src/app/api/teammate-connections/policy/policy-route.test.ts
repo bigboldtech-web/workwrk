@@ -11,10 +11,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const st = vi.hoisted(() => ({
   viewer: { userId: "u-admin", organizationId: "org1", orgRole: "ADMIN", isAgent: false } as { userId: string; organizationId: string; orgRole: string; isAgent: boolean },
   cfg: null as unknown,
+  /** The actor as the database has them now (freshWorkspaceActor). */
+  fresh: { ok: true, level: "COMPANY_ADMIN", admin: true, owner: false } as unknown,
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/connector-test-db")).connectorDb }));
-vi.mock("@/lib/connectors/google/config", () => ({ googleConfig: () => st.cfg, googleRedirectUri: () => "https://app.test/cb" }));
+vi.mock("@/lib/connectors/google/config", () => ({
+  googleConfig: () => st.cfg,
+  googleRevokeConfig: () => ({ revokeUrl: "https://g.test/revoke", standIn: true }),
+  googleRedirectUri: () => "https://app.test/cb",
+}));
+vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: st.viewer.userId, organizationId: st.viewer.organizationId } }) }));
+vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: vi.fn(async () => st.fresh) }));
 vi.mock("@/lib/app-gate", () => ({
   requireManageApps: vi.fn(async () =>
     st.viewer.orgRole === "OWNER" || st.viewer.orgRole === "ADMIN" ? { viewer: st.viewer } : { error: NextResponse.json({ error: "no_access", page: "apps" }, { status: 403 }) },
@@ -46,8 +55,11 @@ beforeEach(() => {
   resetConnectorDb();
   st.viewer = { userId: "u-admin", organizationId: "org1", orgRole: "ADMIN", isAgent: false };
   st.cfg = CFG;
+  st.fresh = { ok: true, level: "COMPANY_ADMIN", admin: true, owner: false };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
+
+const STALE = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and sign in again if asked.", code: "stale_session" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -86,6 +98,19 @@ describe("the policy", () => {
     ]);
   });
 
+  // Review of step 2: the session's role is checked only every five minutes,
+  // so an Admin demoted a moment ago could still turn Gmail on.
+  it("refuses an Admin the database no longer holds as one, and writes nothing", async () => {
+    st.fresh = STALE;
+    const res = await PUT(json("PUT", { calendar: true }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "stale_session" });
+    expect(cdb.policy.get("org1")).toBeUndefined();
+    expect(cdb.activity).toEqual([]);
+    // GET reads counts only and keeps the gate alone.
+    expect((await GET()).status).toBe(200);
+  });
+
   it("turns a product off even when this WorkwrK no longer offers Google", async () => {
     cdb.policy.set("org1", ["calendar"]);
     st.cfg = null;
@@ -105,6 +130,16 @@ describe("the policy", () => {
 });
 
 describe("disconnect everyone", () => {
+  it("refuses an Admin demoted or removed a moment ago, and ends nothing", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-1", accountSub: "s1" });
+    st.fresh = STALE;
+    const res = await DISCONNECT_ALL(json("POST", { confirm: "disconnect" }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "stale_session" });
+    expect(cdb.connections).toHaveLength(1);
+    expect(cdb.notifications).toEqual([]);
+  });
+
   it("needs the confirm word", async () => {
     seedConnection({ organizationId: "org1", userId: "u-1", accountSub: "s1" });
     const res = await DISCONNECT_ALL(json("POST", { confirm: "yes" }));
@@ -143,7 +178,7 @@ describe("disconnect everyone", () => {
     expect(people.every((p) => p.actorId === "u-admin" && (p.metadata as { reason: string }).reason === "admin_all")).toBe(true);
     const notices = cdb.notifications.filter((n) => n.type === "agent_connection");
     expect(notices).toHaveLength(1201);
-    expect(notices[0]).toMatchObject({ message: "An Owner or Admin disconnected Google from AI teammates in Acme.", link: "/account/connections#ai-google" });
+    expect(notices[0]).toMatchObject({ message: "An Owner or Admin disconnected Google from AI teammates in Acme.", link: "/account/connections?ws=org1#ai-google" });
     expect(Math.max(...auditSizes)).toBeLessThanOrEqual(500);
     expect(Math.max(...noticeSizes)).toBeLessThanOrEqual(500);
     expect(auditSizes.reduce((a, b) => a + b, 0)).toBe(1201);

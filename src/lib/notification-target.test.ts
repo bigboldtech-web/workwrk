@@ -12,6 +12,15 @@ describe("parseNotificationLink", () => {
     expect(parseNotificationLink("/item/abc123")).toMatchObject({ kind: "item", id: "abc123", href: "/item/abc123" });
   });
 
+  // AI teammates Phase 3, review of step 2: a Google connection notice names
+  // its workspace in ?ws=, and still opens the Connections card itself.
+  it("keeps a connection notice's workspace and anchor in its href", () => {
+    expect(parseNotificationLink("/account/connections?ws=org1#ai-google")).toMatchObject({
+      kind: "external",
+      href: "/account/connections?ws=org1#ai-google",
+    });
+  });
+
   it("reads every route prefix the app writes into a link", () => {
     const cases: Array<[string, string, string | null]> = [
       ["/boards/q4-leads", "board", "q4-leads"],

@@ -14,6 +14,11 @@ export function legacyLevelRow(level: string) {
   return { accessLevel: level };
 }
 
+/** The level a stored user row carries, for test doubles that answer as the database would. */
+export function legacyLevelOfRow(row: { accessLevel?: string | null }): string {
+  return row.accessLevel ?? "";
+}
+
 /** The level a legacy session carries. */
 export function legacyLevelOf(session: { user: { accessLevel?: string } }): string {
   return session.user.accessLevel ?? "";

@@ -25,6 +25,13 @@
 // Then saveConnection, and Google is told at once about an account this one
 // replaced (the cron drains what fails). Every answer once the state matched
 // clears the cookie.
+//
+// ONCE GOOGLE HAS ISSUED A GRANT, NOTHING IS LEFT BEHIND (review of step 2).
+// Everything after the code exchange runs in one try: any way out that
+// stores nothing (no access granted, a refusal, a throw such as a database
+// timeout) revokes the new grant, unless another live connection holds the
+// same account (Decision 19), clears the cookie and answers exchange_failed
+// (or its own code) rather than a raw error.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
@@ -32,8 +39,8 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { connectDone, connectFailed, stateCookieOptions, STATE_COOKIE } from "@/lib/connectors/connect-redirects";
 import { accountHeld, revokeQueued, saveConnection, workspaceConnectorProducts } from "@/lib/connectors/connections";
-import { googleConfig } from "@/lib/connectors/google/config";
-import { exchangeCode, idTokenClaims, revokeToken } from "@/lib/connectors/google/oauth";
+import { googleConfig, googleRevokeConfig } from "@/lib/connectors/google/config";
+import { exchangeCode, idTokenClaims, revokeToken, type GoogleTokens } from "@/lib/connectors/google/oauth";
 import { consumeState } from "@/lib/connectors/oauth-state";
 import { productsGranted } from "@/lib/connectors/products";
 
@@ -48,6 +55,23 @@ function sameSecret(a: string, b: string): boolean {
 function ended(res: NextResponse): NextResponse {
   res.cookies.set(STATE_COOKIE, "", stateCookieOptions(0));
   return res;
+}
+
+function errorLine(err: unknown): string {
+  return err instanceof Error ? (err.message.split("\n").pop() ?? err.message) : String(err);
+}
+
+/**
+ * The grant this connect made and keeps nothing of, revoked at Google,
+ * unless it is the very grant another live connection of the same account
+ * still uses (Decision 19). Through the revoke settings alone
+ * (googleRevokeConfig).
+ */
+async function discardGrant(tokens: GoogleTokens, sub: string): Promise<void> {
+  const revoker = googleRevokeConfig();
+  if (!revoker) return;
+  if (await accountHeld(sub)) return;
+  await revokeToken(revoker, tokens.refreshToken ?? tokens.accessToken);
 }
 
 export async function GET(req: NextRequest) {
@@ -82,34 +106,54 @@ export async function GET(req: NextRequest) {
   const exchanged = await exchangeCode(cfg, code, row.verifier);
   if (!exchanged.ok) return ended(connectFailed("exchange_failed"));
   const tokens = exchanged.tokens;
-  const claims = idTokenClaims(tokens.idToken ?? "");
-  if (!claims) return ended(connectFailed("exchange_failed"));
 
-  // A product counts only when Google granted every one of its scopes
-  // (Decision 4), and only one this connect asked for and the workspace allows.
-  const granted = productsGranted(tokens.scope).filter((p) => allowed.includes(p));
-  if (granted.length === 0) {
-    // Nothing to keep, so the grant just made is revoked, unless it is the
-    // very grant another live connection still uses (Decision 19).
-    if (!(await accountHeld(claims.sub))) await revokeToken(cfg, tokens.refreshToken ?? tokens.accessToken);
-    return ended(connectFailed("no_access"));
-  }
+  let claims: { sub: string; email: string } | null = null;
+  let stored = false;
+  try {
+    claims = idTokenClaims(tokens.idToken ?? "");
+    // Google named no account. Whether another live connection holds this
+    // grant cannot be known, so it is not revoked: revoking a grant another
+    // workspace's connection still uses would end that one in silence. Google
+    // lists WorkwrK in that account until the person removes it there.
+    if (!claims) return ended(connectFailed("exchange_failed"));
 
-  const saved = await saveConnection({
-    organizationId: row.organizationId,
-    userId: row.userId,
-    tokens,
-    claims,
-    products: granted,
-    scopes: tokens.scope.split(/\s+/).filter(Boolean).slice(0, 50),
-  });
-  if (!saved.ok) {
-    if (!(await accountHeld(claims.sub))) await revokeToken(cfg, tokens.refreshToken ?? tokens.accessToken);
-    return ended(connectFailed(saved.code));
+    // A product counts only when Google granted every one of its scopes
+    // (Decision 4), and only one this connect asked for and the workspace allows.
+    const granted = productsGranted(tokens.scope).filter((p) => allowed.includes(p));
+    if (granted.length === 0) {
+      await discardGrant(tokens, claims.sub);
+      return ended(connectFailed("no_access"));
+    }
+
+    const saved = await saveConnection({
+      organizationId: row.organizationId,
+      userId: row.userId,
+      tokens,
+      claims,
+      products: granted,
+      scopes: tokens.scope.split(/\s+/).filter(Boolean).slice(0, 50),
+    });
+    if (!saved.ok) {
+      await discardGrant(tokens, claims.sub);
+      return ended(connectFailed(saved.code));
+    }
+    // Stored: from here the new grant is a connection's, and is never revoked.
+    stored = true;
+    // The account this one replaced is told at once; what fails waits for the cron.
+    const revoker = googleRevokeConfig();
+    if (saved.queued.length > 0 && revoker) {
+      await revokeQueued(saved.queued, revoker, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => undefined);
+    }
+    return ended(connectDone(allowed.filter((p) => !granted.includes(p))));
+  } catch (err) {
+    console.error(`[connectors] google callback failed: ${errorLine(err)}`);
+    // Nothing stored and the account known: the grant goes, unless shared.
+    // A failure to tell (the database still down) leaves it, since whether
+    // it is shared cannot be known then.
+    if (!stored && claims) {
+      const sub = claims.sub;
+      await discardGrant(tokens, sub).catch(() => undefined);
+    }
+    return ended(connectFailed("exchange_failed"));
   }
-  // The account this one replaced is told at once; what fails waits for the cron.
-  if (saved.queued.length > 0) {
-    await revokeQueued(saved.queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => undefined);
-  }
-  return ended(connectDone(allowed.filter((p) => !granted.includes(p))));
 }

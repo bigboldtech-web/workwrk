@@ -4,7 +4,10 @@
 // opens only with the old one (and so moves), holds nothing (a nullable
 // column left empty), or opens with neither. Pure, so its counting is tested
 // (rotation-plan.test.ts) without a database: a column the script forgot to
-// count would leave its secrets on a key that is about to be deleted.
+// count would leave its secrets on a key that is about to be deleted. The
+// paging that reads each column (readColumnCells) is here too, given the
+// model's findMany, so a page boundary that moves under it is tested the same
+// way.
 
 import { SEALED_COLUMNS } from "../../src/lib/connectors/seal";
 import { decryptSecretWith } from "../../src/lib/secrets-crypto";
@@ -39,6 +42,35 @@ export interface RotationPlan {
   /** Cells holding a secret, and how many of them are on the new key already. */
   total: number;
   onNew: number;
+}
+
+/** The one read this file pages a column with: a Prisma model's findMany. */
+export type FindPage = (args: { select: Record<string, boolean>; where?: { id: { gt: string } }; orderBy: { id: "asc" }; take: number }) => Promise<Array<Record<string, unknown>>>;
+
+/**
+ * Every cell of one sealed column, page by page: ids after the last one read,
+ * in id order (review of step 2). Never Prisma's `cursor` with `skip`: that
+ * reads the cursor row itself first, so when the last row of a page is
+ * deleted before the next read (a disconnect, a used connect, a revoke
+ * drained) the next page comes back empty, the scan stops there, and the rest
+ * of the column is never counted, while the run says every secret is on the
+ * new key.
+ */
+export async function readColumnCells(c: { model: string; column: string }, findMany: FindPage, pageSize: number): Promise<SealedCell[]> {
+  const cells: SealedCell[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const page = await findMany({
+      select: { id: true, [c.column]: true },
+      ...(after ? { where: { id: { gt: after } } } : {}),
+      orderBy: { id: "asc" },
+      take: pageSize,
+    });
+    for (const r of page) cells.push({ model: c.model, column: c.column, id: String(r.id), blob: r[c.column] ?? null });
+    if (page.length < pageSize) break;
+    after = String(page[page.length - 1].id);
+  }
+  return cells;
 }
 
 /** What a blob opens to with this key, or null. */

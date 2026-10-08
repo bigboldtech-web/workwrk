@@ -149,7 +149,9 @@ export async function POST(req: NextRequest) {
 
   // Every Google connection for AI teammates here ends now, not in 30 days,
   // and Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After
-  // the commit, never failing the delete; the hard delete queues any left.
+  // the commit, never failing the delete; the cron sweep ends any left in a
+  // CANCELLED workspace on its next tick (review of step 2), and a connect
+  // finishing meanwhile is refused (connections.ts saveConnection).
   await endWorkspaceConnections(orgId, "workspace_deleted", userId).catch((e) => {
     console.error(`[connectors] workspace deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
   });

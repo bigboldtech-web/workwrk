@@ -380,6 +380,8 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
         didntConnect: [["you didn't give WorkwrK access"], "Google didn't connect: you didn't give WorkwrK access."],
         brokenNoticeMessage: [["Acme"], "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme."],
         disconnectedByAdminMessage: [["Acme"], "An Owner or Admin disconnected Google from AI teammates in Acme."],
+        productTurnedOff: [["Gmail", "Acme"], "An Owner or Admin turned off Gmail for AI teammates in Acme."],
+        addFirst: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
       },
     ],
     CONNECTOR_POLICY_COPY: [
@@ -400,6 +402,8 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
         noTool: [["Ops", "Gmail"], "Ops has no Gmail tools, so there's nothing to allow."],
         productOff: [["Google Calendar"], "Google Calendar is turned off for AI teammates in this workspace."],
         notOffered: [["Gmail"], "Gmail isn't available on this WorkwrK yet."],
+        notGranted: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
+        teammateChanged: [["Ops", "instructions and tools"], "Ops changed while this page was open: instructions and tools. Look again before you allow it."],
       },
     ],
   };
@@ -421,7 +425,7 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
     expect(copy.CONNECTOR_POLICY_COPY.auditChanged("Google Calendar", false)).toBe("Turned off Google Calendar for AI teammates");
   });
   it("words every code the connect routes put in ?ai_error=", () => {
-    const codes = ["access_denied", "state_invalid", "signed_out", "wrong_person", "workspace_changed", "workspace_off", "person_cannot", "exchange_failed", "no_access", "not_configured", "rate_limited", "bad_products"];
+    const codes = ["access_denied", "state_invalid", "signed_out", "wrong_person", "workspace_changed", "workspace_off", "person_cannot", "exchange_failed", "no_access", "not_configured", "rate_limited", "bad_products", "workspace_closed"];
     expect(Object.keys(copy.CONNECT_ERROR_WORDS).sort()).toEqual([...codes].sort());
     expect(copy.CONNECT_ERROR_WORDS.state_invalid).toBe("the sign-in took too long or was opened twice");
     for (const words of Object.values(copy.CONNECT_ERROR_WORDS)) expect(BANNED.test(words)).toBe(false);

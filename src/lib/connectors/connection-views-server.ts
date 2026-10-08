@@ -15,7 +15,7 @@ import type { Viewer } from "@/lib/access/types";
 import { isOwnerOrAdmin } from "@/lib/app-gate";
 import { hueForAgent } from "@/lib/agents/hues";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
-import { changedFields, othersMayChange, PRINT_FIELDS, type PrintField } from "@/lib/agents/teammate-print";
+import { changedFields, othersMayChange, PRINT_FIELDS, teammateShownPrint, type PrintField } from "@/lib/agents/teammate-print";
 import { TEAMMATE_SELECT, workspaceModules, type TeammateRecord } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { prisma } from "@/lib/prisma";
@@ -65,6 +65,7 @@ export function teammateGoogleUse(
     tools: productsOfTools(tools),
     allowed,
     changed: own ? {} : changedSinceAllowed(agent, allowed, setting?.connectorPrints ?? null),
+    print: teammateShownPrint(agent),
   };
 }
 

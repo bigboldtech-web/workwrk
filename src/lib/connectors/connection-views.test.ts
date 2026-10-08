@@ -8,6 +8,8 @@ describe("teammateConnectSentence", () => {
   it("words each code the routes send", () => {
     expect(teammateConnectSentence("access_denied")).toBe("you didn't give WorkwrK access");
     expect(teammateConnectSentence("workspace_changed")).toBe("you switched workspace meanwhile");
+    // A connect finishing in a workspace deleted meanwhile (review of step 2).
+    expect(teammateConnectSentence("workspace_closed")).toBe("this workspace was deleted or closed");
   });
   it("reads an unknown code as itself, so it can be searched for (connect-errors.ts rule)", () => {
     expect(teammateConnectSentence("invalid_scope")).toBe("invalid_scope");

@@ -19,6 +19,7 @@ const st = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/connector-test-db")).connectorDb }));
 vi.mock("@/lib/connectors/google/config", () => ({
   googleConfig: () => st.cfg,
+  googleRevokeConfig: () => ({ revokeUrl: "https://oauth2.google.test/revoke", standIn: false }),
   googleRedirectUri: () => "https://app.workwrk.test/api/teammate-connections/google/callback",
 }));
 vi.mock("@/lib/app-gate", () => ({ requireApp: vi.fn(async () => st.gate) }));

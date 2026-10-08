@@ -176,6 +176,9 @@ export function TeammateGoogleSection() {
         }
       >
         <p className="text-base text-ink">{P.turnOffBody}</p>
+        {/* Disconnect is the whole grant (Decision 4): turning off one product
+            this way ends the other too, so the dialog says so (review of step 2). */}
+        <p className="mt-2 text-base text-ink">{P.turnOffDisconnectNote}</p>
       </AccountDialog>
 
       <ConfirmDialog

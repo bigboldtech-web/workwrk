@@ -10,8 +10,11 @@
 // seconds to answer. The answer says where that stands:
 //   revoked "now"         Google confirmed
 //   revoked "queued"      Google did not answer in time; the cron keeps trying
-//   revoked "kept_shared" the same account is connected in another workspace,
-//                         so Google is not told (it would end that one too)
+//   revoked "kept_shared" the same account is connected elsewhere in WorkwrK
+//                         (another workspace, or another person), so Google is
+//                         not told (it would end that one too)
+// Google is told through the revoke settings alone (googleRevokeConfig), so
+// a WorkwrK that stopped offering Google still revokes (review of step 2).
 
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma";
@@ -19,7 +22,7 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { CONNECTION_ROUTE_ERRORS, CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
 import { teammateError } from "@/lib/agents/teammate-server";
 import { connectionFor, removeConnections, revokeQueued } from "@/lib/connectors/connections";
-import { googleConfig } from "@/lib/connectors/google/config";
+import { googleRevokeConfig } from "@/lib/connectors/google/config";
 
 export async function DELETE() {
   const viewer = await viewerFromSession();
@@ -36,8 +39,10 @@ export async function DELETE() {
   if (removed.length === 0) return teammateError(404, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
   if (queued.length === 0) return NextResponse.json({ disconnected: true, revoked: "kept_shared" });
 
-  const cfg = googleConfig();
+  const cfg = googleRevokeConfig();
   if (!cfg) return NextResponse.json({ disconnected: true, revoked: "queued" });
-  const r = await revokeQueued(queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => ({ revoked: 0, kept: queued.length, dropped: 0 }));
-  return NextResponse.json({ disconnected: true, revoked: r.revoked === queued.length ? "now" : "queued" });
+  const r = await revokeQueued(queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => ({ revoked: 0, kept: queued.length, dropped: 0, stillHeld: 0 }));
+  // The account connected again meanwhile (here or elsewhere): its grant is in use, so it was kept.
+  if (r.stillHeld === queued.length) return NextResponse.json({ disconnected: true, revoked: "kept_shared" });
+  return NextResponse.json({ disconnected: true, revoked: r.revoked + r.stillHeld === queued.length ? "now" : "queued" });
 }

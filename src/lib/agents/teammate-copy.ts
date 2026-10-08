@@ -1104,6 +1104,8 @@ export const CONNECTIONS_COPY = {
   addProduct: (p: string) => `Add ${p}`,
   connectedAs: (email: string, date: string) => `Connected as ${email} on ${date}.`,
   uses: (list: string) => `Your teammates may use: ${list}.`,
+  /** A product Google granted that the workspace has off: it is not used, and the card says why (review of step 2). */
+  productTurnedOff: (p: string, ws: string) => `An Owner or Admin turned off ${p} for AI teammates in ${ws}.`,
   lastUsed: (when: string, name: string) => `Last used ${when} by ${name}.`,
   neverUsed: "Not used yet.",
   /** lastUsed's name for a teammate the person can no longer open. */
@@ -1115,13 +1117,20 @@ export const CONNECTIONS_COPY = {
   allowCalendar: (n: string) => `Let ${n} use my Google Calendar`,
   changedSince: (parts: string) => `Changed since you allowed it: ${parts}.`,
   allowAgain: "Allow again",
-  noTeammates: "None of your teammates has Google tools yet. Tick them in a teammate's Tools and approvals.",
+  /** Beside a teammate's switch for a product the person's connection lacks: turning it on waits for Add. */
+  addFirst: (p: string) => `Your Google connection doesn't include ${p}. Add ${p} first.`,
+  // No "tick them" sentence until the picker offers Google tools (step 5): it
+  // would send people to a choice that is not there yet (review of step 2).
+  noTeammates: "None of your teammates has Google tools yet.",
   disconnect: "Disconnect",
   disconnectTitle: "Disconnect Google?",
   disconnectBody: "Your teammates stop using your Gmail and Google Calendar at once, and WorkwrK's access is removed from your Google account. Requests waiting for your approval stay until you reconnect or they expire.",
   disconnectedToast: "Google disconnected",
   disconnectFailed: "Couldn't disconnect. Try again.",
-  sharedNote: "Google still lists WorkwrK because you connected the same account in another workspace.",
+  // What is known is only that another live connection holds the account: it
+  // may be another workspace, or a colleague who connected the same shared
+  // mailbox here (review of step 2).
+  sharedNote: "Google still lists WorkwrK because this Google account is also connected elsewhere in WorkwrK.",
   connectedOk: "Google is connected for your AI teammates.",
   partial: (p: string) => `Google didn't give access to ${p}, so your teammates can't use it. Connect again and tick it.`,
   didntConnect: (why: string) => `Google didn't connect: ${why}.`,
@@ -1160,6 +1169,8 @@ export const CONNECT_ERROR_WORDS: Readonly<Record<string, string>> = {
   not_configured: "it isn't set up on this WorkwrK",
   rate_limited: "you tried too many times, so wait a few minutes",
   bad_products: "pick Gmail, Google Calendar or both",
+  // A connect finishing after the workspace was deleted or closed (review of step 2).
+  workspace_closed: "this workspace was deleted or closed",
 };
 
 /** The workspace switch in Settings, Apps & modules (Decisions 1, 21 and 25). */
@@ -1173,12 +1184,14 @@ export const CONNECTOR_POLICY_COPY = {
   noneConnected: "Nobody has connected yet.",
   disconnectAll: "Disconnect everyone",
   disconnectAllTitle: "Disconnect everyone's Google?",
-  disconnectAllBody: "Every person's Google connection in this workspace is removed, and WorkwrK's access is revoked at Google. They can connect again while it is on.",
+  disconnectAllBody: "Every person's Google connection in this workspace is removed, and WorkwrK's access is revoked at Google unless that Google account is also connected elsewhere in WorkwrK. They can connect again while it is on.",
   disconnectedAll: (n: number) => `Disconnected ${count(n, "person", "people")}.`,
   turnOffTitle: (p: string) => `Turn off ${p} for AI teammates?`,
   turnOffBody: "Teammates stop using it for everyone at once. People stay connected until they disconnect, or until you disconnect everyone.",
   turnOff: "Turn off",
   turnOffAndDisconnect: "Turn off and disconnect everyone",
+  /** Beside turnOffAndDisconnect: a disconnect is the whole grant (Decision 4), so turning off one product this way ends both (review of step 2). */
+  turnOffDisconnectNote: "Disconnecting everyone ends their whole Google connection, Gmail and Google Calendar both, and they must connect again.",
   notOffered: (p: string) => `${p} isn't available on this WorkwrK yet.`,
   saved: "Saved",
   saveFailed: "Couldn't save that. Try again.",
@@ -1201,6 +1214,13 @@ export const CONNECTION_ROUTE_ERRORS = {
   // Not in the spec's list: the two refusals the routes answer that it names only by code.
   notOffered: (p: string) => `${p} isn't available on this WorkwrK yet.`,
   personCannot: "Your AI teammates can't act for you in this workspace now.",
+  // Review of step 2: a connection that exists without the product is its own
+  // refusal, never "isn't connected" beside a card that says connected.
+  notGranted: (p: string) => `Your Google connection doesn't include ${p}. Add ${p} first.`,
+  /** The teammate changed while the card was open: the allow would cover parts the person was never shown. */
+  teammateChanged: (n: string, parts: string) => `${n} changed while this page was open: ${parts}. Look again before you allow it.`,
+  /** A session still says Owner or Admin, the database no longer does. */
+  adminsOnly: "Only Owners and Admins can change this.",
 } as const;
 
 /**

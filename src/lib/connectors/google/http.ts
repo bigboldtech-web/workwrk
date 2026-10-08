@@ -19,10 +19,12 @@
 // A REFRESH WRITES ONLY ON THE VERSION IT READ. The new access token is
 // stored by a compare-and-swap on tokenVersion (and status active), so two
 // refreshes at once both write a valid token, and one from before a
-// reconnect writes nothing. invalid_grant marks the connection
-// needs_reconnect by the same swap (connections.ts markNeedsReconnect);
-// invalid_client is WorkwrK's own credentials and marks nothing; anything
-// else is Google being unavailable (Decision 18).
+// reconnect writes nothing, and then uses nothing: a token the swap could not
+// store answers not_connected or needs_reconnect (review of step 2).
+// invalid_grant marks the connection needs_reconnect by the same swap
+// (connections.ts markNeedsReconnect); invalid_client is WorkwrK's own
+// credentials and marks nothing; anything else is Google being unavailable
+// (Decision 18).
 //
 // LOGS NAME THE KIND AND THE STATUS ONLY: "[connectors] google <failure>
 // <status>". Never a token, an address, a URL with a query, or a body.
@@ -91,12 +93,27 @@ export async function refreshFor(conn: LiveConnection, cfg: GoogleConfig): Promi
   }
   const r = await refreshAccess(cfg, refreshToken);
   if (r.ok) {
-    await prisma.teammateConnection
+    const wrote = await prisma.teammateConnection
       .updateMany({
         where: { id: conn.id, tokenVersion: conn.tokenVersion, status: "active" },
         data: { accessTokenSealed: sealToken(r.accessToken) as unknown as Prisma.InputJsonValue, accessTokenExpiresAt: new Date(Date.now() + r.expiresIn * 1000) },
       })
       .catch(() => null);
+    if (wrote?.count === 1) return { ok: true, accessToken: r.accessToken };
+    // The swap wrote nothing (review of step 2): the connection this call
+    // read was disconnected, reconnected (perhaps as another account) or
+    // marked broken meanwhile. A disconnect that kept a shared account's
+    // grant at Google leaves this refresh token working, so the new token
+    // would still read or write the old account after the person ended it.
+    // It is never used; the row as it is now says why.
+    const now = await prisma.teammateConnection
+      .findUnique({ where: { id: conn.id }, select: { tokenVersion: true, status: true } })
+      .catch(() => undefined);
+    if (now === undefined) return { ok: false, failure: "unavailable" };
+    if (now === null) return { ok: false, failure: "not_connected" };
+    if (now.tokenVersion !== conn.tokenVersion || now.status !== "active") return { ok: false, failure: "needs_reconnect" };
+    // Unchanged: only the write failed (the database, a moment), and the
+    // token is this very connection's.
     return { ok: true, accessToken: r.accessToken };
   }
   if (r.kind === "invalid_grant") {

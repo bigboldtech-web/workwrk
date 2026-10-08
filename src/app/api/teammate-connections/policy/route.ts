@@ -11,13 +11,22 @@
 // One statement per product (connections.ts setPolicyProduct). Turning off
 // stops every use at the next call; people stay connected, and the answer's
 // `turnedOff` lets the page offer to disconnect everyone.
+//
+// A CHANGE RE-READS THE ACTOR (review of step 2): the session's role is
+// checked against the database only every five minutes (src/lib/auth.ts), so
+// PUT asks freshWorkspaceActor, as the users route does, and an Admin demoted
+// or removed a moment ago cannot turn Gmail on for the workspace. GET returns
+// counts only and keeps the gate alone.
 
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
 import { z } from "zod";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
 import { CONNECTION_ROUTE_ERRORS, CONNECTOR_POLICY_COPY } from "@/lib/agents/teammate-copy";
 import { invalidRequest, teammateError } from "@/lib/agents/teammate-server";
 import { requireManageApps } from "@/lib/app-gate";
+import { authOptions } from "@/lib/auth";
 import { connectorPolicyView } from "@/lib/connectors/connection-views-server";
 import { setPolicyProduct } from "@/lib/connectors/connections";
 import { googleConfig } from "@/lib/connectors/google/config";
@@ -43,6 +52,9 @@ export async function PUT(req: Request) {
   const gate = await requireManageApps("apps");
   if ("error" in gate) return gate.error;
   const { viewer } = gate;
+  const fresh = await freshWorkspaceActor(await getServerSession(authOptions));
+  if (!fresh.ok) return teammateError(fresh.status, fresh.code, fresh.error);
+  if (!fresh.admin) return teammateError(403, "stale_session", CONNECTION_ROUTE_ERRORS.adminsOnly);
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
 

@@ -18,8 +18,10 @@
 //   4. Google connections for AI teammates are kept honest
 //      (src/lib/connectors/connections.ts sweepConnections): connects nobody
 //      finished are deleted, the connections of people deleted, deactivated
-//      or no longer in the workspace end, and revokes Google has not confirmed
-//      are tried again (docs/plans/ai-teammates-phase3.md step 2).
+//      or no longer in the workspace end, and so do those of Guests, agent
+//      accounts and deleted or closed workspaces (review of step 2), and
+//      revokes Google has not confirmed are tried again
+//      (docs/plans/ai-teammates-phase3.md step 2).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).

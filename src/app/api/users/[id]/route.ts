@@ -557,6 +557,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await endConnectionsFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
       console.error(`[connectors] deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
+  } else if (roleChange?.changed && roleChange.after.level === "AGENT") {
+    // Made an agent account here, which can hold no Google connection for AI
+    // teammates (Decision 27): it ends now, after the commit, never failing
+    // the edit (review of step 2). This route's roles are Owner, Admin and
+    // Member, so no Guest is made here; a Guest written elsewhere (the Guest
+    // invitation's orgRole) is ended by the cron sweep (connections.ts
+    // sweepConnections, no_access).
+    await endConnectionsFor(ctx.organizationId, [id], "no_access", ctx.userId).catch((e) => {
+      console.error(`[connectors] role change hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+    });
   }
   if (roleChange?.changed) {
     void logActivity({

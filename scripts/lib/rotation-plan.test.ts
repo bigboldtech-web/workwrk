@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { SEALED_COLUMNS } from "../../src/lib/connectors/seal";
 import { encryptSecretWith } from "../../src/lib/secrets-crypto";
-import { planRotation, type SealedCell } from "./rotation-plan";
+import { planRotation, readColumnCells, type FindPage, type SealedCell } from "./rotation-plan";
 
 const OLD = "0".repeat(64);
 const NEW = "1".repeat(64);
@@ -75,5 +75,46 @@ describe("planRotation", () => {
 
   it("refuses a column SEALED_COLUMNS does not list", () => {
     expect(() => planRotation([cell("user", "passwordHash", "u1", "x")], { newKey: NEW, oldKey: OLD })).toThrow(/not in SEALED_COLUMNS/);
+  });
+});
+
+describe("readColumnCells (review of step 2)", () => {
+  /**
+   * A table as Prisma's findMany reads it, the way Postgres answers each
+   * form: `where: { id: { gt } }`, or Prisma's `cursor`, whose page is empty
+   * when the cursor row itself is gone. `onRead` runs after each page.
+   */
+  function table(ids: string[], onRead: (page: number, rows: string[]) => void): FindPage {
+    let reads = 0;
+    return async (args) => {
+      const a = args as Parameters<FindPage>[0] & { cursor?: { id: string }; skip?: number };
+      let rows = [...ids].sort();
+      const cursor = a.cursor?.id;
+      if (cursor !== undefined) rows = rows.includes(cursor) ? rows.filter((id) => id >= cursor).slice(a.skip ?? 0) : [];
+      const after = a.where?.id.gt;
+      if (after !== undefined) rows = rows.filter((id) => id > after);
+      const page = rows.slice(0, a.take);
+      onRead(++reads, page);
+      return page.map((id) => ({ id, tokenSealed: { v: 1, id } }));
+    };
+  }
+
+  it("keeps reading when the last row of a page is deleted before the next read", async () => {
+    const ids = ["a1", "a2", "a3", "a4", "a5", "a6", "a7"];
+    const cells = await readColumnCells(
+      { model: "teammateTokenRevocation", column: "tokenSealed" },
+      table(ids, (page, rows) => {
+        // A revoke drained between two reads takes the page's last row.
+        if (page === 1) ids.splice(ids.indexOf(rows[rows.length - 1]), 1);
+      }),
+      3,
+    );
+    expect(cells.map((c) => c.id)).toEqual(["a1", "a2", "a3", "a4", "a5", "a6", "a7"]);
+    expect(cells.every((c) => c.model === "teammateTokenRevocation" && c.column === "tokenSealed")).toBe(true);
+  });
+
+  it("reads a column of exactly one page, and an empty one", async () => {
+    expect(await readColumnCells({ model: "orgSecret", column: "encryptedKey" }, table(["s1", "s2"], () => {}), 2)).toHaveLength(2);
+    expect(await readColumnCells({ model: "orgSecret", column: "encryptedKey" }, table([], () => {}), 2)).toEqual([]);
   });
 });

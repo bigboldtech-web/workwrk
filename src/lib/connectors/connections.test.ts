@@ -22,14 +22,25 @@ const cfg = vi.hoisted(() => ({
   } as unknown,
 }));
 
-vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./connector-test-db")).connectorDb }));
-vi.mock("@/lib/connectors/google/config", () => ({ googleConfig: () => cfg.value, googleRedirectUri: () => "https://app.test/api/teammate-connections/google/callback" }));
+// The revoke settings stand alone (review of step 2): they stay while the connect settings are gone.
+const revokeCfg = vi.hoisted(() => ({ value: { revokeUrl: "https://g.test/revoke", standIn: true } as unknown }));
 
-import { cdb, resetConnectorDb, seedConnection } from "./connector-test-db";
+vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./connector-test-db")).connectorDb }));
+vi.mock("@/lib/connectors/google/config", () => ({
+  googleConfig: () => cfg.value,
+  googleRevokeConfig: () => revokeCfg.value,
+  googleRedirectUri: () => "https://app.test/api/teammate-connections/google/callback",
+}));
+
+import { cdb, connectorDb, keyOf, resetConnectorDb, seedConnection } from "./connector-test-db";
 import {
+  accountKey,
   connectorAccess,
+  endConnectionsFor,
   markNeedsReconnect,
+  queueWorkspaceRevocations,
   removeConnections,
+  revokeQueued,
   saveConnection,
   setPolicyProduct,
   sweepConnections,
@@ -39,6 +50,7 @@ import { Prisma } from "@/generated/prisma";
 import { sealToken } from "./seal";
 
 const FULL_CFG = cfg.value;
+const REVOKE_CFG = revokeCfg.value;
 
 const PRINTED: PrintedTeammate = {
   name: "Ops",
@@ -71,14 +83,23 @@ beforeEach(() => {
   process.env.SECRETS_ENCRYPTION_KEY = "a".repeat(64);
   resetConnectorDb();
   cfg.value = FULL_CFG;
+  revokeCfg.value = REVOKE_CFG;
   cdb.policy.set("org1", ["gmail", "calendar"]);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
+
+/** The index of the first raw statement starting with this text. */
+function rawAt(prefix: string): number {
+  return cdb.raw.findIndex((s) => s.startsWith(prefix));
+}
+
+const LOCK = "SELECT pg_advisory_xact_lock";
 
 describe("connectorAccess", () => {
   it("walks every refusal in order, each naming itself", async () => {
@@ -135,7 +156,8 @@ describe("markNeedsReconnect", () => {
     expect(await markNeedsReconnect(conn, "revoked")).toBe(true);
     expect(await markNeedsReconnect(conn, "revoked")).toBe(false);
     expect(cdb.notifications).toHaveLength(1);
-    expect(cdb.notifications[0]).toMatchObject({ userId: "u-max", type: "agent_connection", link: "/account/connections#ai-google" });
+    // The workspace rides in the link (review of step 2), and the page still lands on the card.
+    expect(cdb.notifications[0]).toMatchObject({ userId: "u-max", type: "agent_connection", link: "/account/connections?ws=org1#ai-google" });
     const audits = cdb.activity.filter((a) => a.type === "teammate_connection.needs_reconnect");
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ actorId: null, actorType: "system", metadata: { provider: "google", connectionId: row.id, reason: "revoked" } });
@@ -187,6 +209,41 @@ describe("saveConnection", () => {
     expect(r).toEqual({ ok: false, code: "exchange_failed" });
     expect(cdb.connections).toEqual([]);
   });
+
+  // Review of step 2: a connect finishing after the Owner deleted the
+  // workspace made a row that lived until the hard delete, 30 days on.
+  it("refuses, inside its transaction, a connect into a workspace deleted or closed meanwhile", async () => {
+    cdb.closedOrgs.add("org1");
+    const r = await saveConnection({ organizationId: "org1", userId: "u-max", tokens: tokens("rt-new"), claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail"], scopes: [] });
+    expect(r).toEqual({ ok: false, code: "workspace_closed" });
+    expect(cdb.connections).toEqual([]);
+    expect(cdb.activity).toEqual([]);
+  });
+
+  it("stores the account key, and locks the new account and the replaced one before deciding the revoke", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-old" });
+    await saveConnection({ organizationId: "org1", userId: "u-max", tokens: tokens("rt-new"), claims: { sub: "sub-new", email: "other@mail.test" }, products: ["gmail"], scopes: [] });
+    expect(cdb.connections[0].accountKey).toBe(accountKey("google", "sub-new"));
+    expect(accountKey("google", "sub-new")).toBe(keyOf("google", "sub-new"));
+    expect(cdb.locks).toEqual([{ keys: [keyOf("google", "sub-new"), keyOf("google", "sub-old")].sort(), inTx: true }]);
+    // The old account's queue row keeps its key, so a reconnect of it later is never revoked.
+    expect(cdb.revocations[0]).toMatchObject({ reason: "replaced", accountKey: keyOf("google", "sub-old") });
+    // Locked after the person's row and before the replaced account's held check.
+    expect(rawAt('SELECT "id", "accountSub"')).toBeLessThan(rawAt(LOCK));
+  });
+
+  // Review of step 2: the notices were matched by their message, so a renamed
+  // workspace's stayed unread and a same-named one's were read by mistake.
+  it("marks read this workspace's connection notices by their link, never another workspace's of the same name", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", status: "needs_reconnect" });
+    const message = "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme.";
+    cdb.notifications.push(
+      { userId: "u-max", type: "agent_connection", read: false, message, link: "/account/connections?ws=org1#ai-google" },
+      { userId: "u-max", type: "agent_connection", read: false, message, link: "/account/connections?ws=org2#ai-google" },
+    );
+    await saveConnection({ organizationId: "org1", userId: "u-max", tokens: tokens("rt-new"), claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail"], scopes: [] });
+    expect(cdb.notifications.map((n) => n.read)).toEqual([true, false]);
+  });
 });
 
 describe("removeConnections", () => {
@@ -208,6 +265,24 @@ describe("removeConnections", () => {
     expect(cdb.activity.filter((a) => a.type === "teammate_connection.disconnected")).toHaveLength(2);
     expect(cdb.notifications.filter((n) => n.type === "agent_connection")).toHaveLength(2);
     expect(cdb.events.find((e) => e.op === "activity.createMany")?.inTx).toBe(false);
+  });
+
+  // Review of step 2: two removals of one account at once each saw the
+  // other's row and neither queued a revoke. The per-account lock is taken
+  // after the delete and before the held check, in one sorted order.
+  it("locks the removed accounts after the delete and before the held check, and keys each queued revoke", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-b" });
+    seedConnection({ organizationId: "org1", userId: "u-lea", accountSub: "sub-a" });
+    seedConnection({ organizationId: "org1", userId: "u-mia", accountSub: "sub-a" });
+    await removeConnections({ where: Prisma.sql`"organizationId" = ${"org1"}`, reason: "admin_all", actor: { id: "u-admin", type: "person" } });
+    const del = rawAt('DELETE FROM "TeammateConnection"');
+    const lock = rawAt(LOCK);
+    const held = rawAt('SELECT DISTINCT "accountSub"');
+    expect(del).toBeGreaterThanOrEqual(0);
+    expect(del).toBeLessThan(lock);
+    expect(lock).toBeLessThan(held);
+    expect(cdb.locks).toEqual([{ keys: [keyOf("google", "sub-a"), keyOf("google", "sub-b")].sort(), inTx: true }]);
+    expect(cdb.revocations.map((r) => r.accountKey).sort()).toEqual([keyOf("google", "sub-a"), keyOf("google", "sub-a"), keyOf("google", "sub-b")].sort());
   });
 
   it("writes audit rows with ids and the reason only, never the account", async () => {
@@ -245,7 +320,7 @@ describe("sweepConnections", () => {
 
     expect(cdb.connections.map((c) => c.userId).sort()).toEqual(["u-here", "u-member"]);
     // The two leavers' revokes are queued and confirmed; the stuck one is dropped on its sixth try.
-    expect(out).toEqual({ statesExpired: 1, leavers: 2, revoked: 2, kept: 1, dropped: 1 });
+    expect(out).toEqual({ statesExpired: 1, leavers: 2, noAccess: 0, closed: 0, revoked: 2, kept: 1, dropped: 1, stillHeld: 0 });
     expect(cdb.revocations.map((r) => r.id)).toEqual(["rv-retry"]);
     expect(cdb.states.map((s) => s.id)).toEqual(["st-live"]);
     // The fake reads the leaver rule from the real statement: it is the anti-join on this workspace's membership.
@@ -255,6 +330,131 @@ describe("sweepConnections", () => {
     expect(leaverSql).toContain('u."deletedAt" IS NOT NULL OR u."status" = \'INACTIVE\'');
     // Claimed with SKIP LOCKED, so two ticks never take one row twice.
     expect(cdb.raw.some((s) => s.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
+  });
+
+  // Review of step 2: a Guest's or an agent account's connection was never
+  // ended, and nobody but an Admin's Disconnect everyone could remove it.
+  it("ends the connection of an agent account and, with the stored org role read, a Guest's (no_access)", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.users = [
+      { id: "u-agent", organizationId: "org1", status: "ACTIVE", deletedAt: null, ...legacyLevelRow("AGENT"), orgRole: null },
+      { id: "u-guest", organizationId: "org1", status: "ACTIVE", deletedAt: null, ...legacyLevelRow("EMPLOYEE"), orgRole: "GUEST" },
+      { id: "u-member", organizationId: "org1", status: "ACTIVE", deletedAt: null, ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER" },
+      // Anchored elsewhere, an agent account through its membership here.
+      { id: "u-agent2", organizationId: "org2", status: "ACTIVE", deletedAt: null, ...legacyLevelRow("EMPLOYEE"), orgRole: null },
+    ];
+    cdb.memberships = [{ userId: "u-agent2", organizationId: "org1", role: "AGENT" }];
+    for (const u of ["u-agent", "u-guest", "u-member", "u-agent2"]) seedConnection({ organizationId: "org1", userId: u, accountSub: `s-${u}`, refreshTokenSealed: sealToken(`rt-${u}`) });
+
+    // The stored org role is read only while ACCESS_V2_TABLES is on, as the viewer reads it: the Guest stays.
+    let out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out.noAccess).toBe(2);
+    expect(cdb.connections.map((c) => c.userId).sort()).toEqual(["u-guest", "u-member"]);
+
+    vi.stubEnv("ACCESS_V2_TABLES", "true");
+    out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out.noAccess).toBe(1);
+    expect(cdb.connections.map((c) => c.userId)).toEqual(["u-member"]);
+    const reasons = cdb.activity.filter((a) => a.type === "teammate_connection.disconnected").map((a) => (a.metadata as { reason: string }).reason);
+    expect(reasons).toEqual(["no_access", "no_access", "no_access"]);
+  });
+
+  // Review of step 2: a failed delete hook, or a connect finishing after the
+  // delete, left a CANCELLED workspace's tokens for the 30 day grace.
+  it("ends the connections of a workspace deleted or closed (workspace_deleted)", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.orgs.set("org2", "Closed Co");
+    cdb.closedOrgs.add("org2");
+    cdb.users = [
+      { id: "u-1", organizationId: "org2", status: "ACTIVE", deletedAt: null },
+      { id: "u-2", organizationId: "org1", status: "ACTIVE", deletedAt: null },
+    ];
+    seedConnection({ organizationId: "org2", userId: "u-1", accountSub: "s-1", refreshTokenSealed: sealToken("rt-1") });
+    seedConnection({ organizationId: "org1", userId: "u-2", accountSub: "s-2", refreshTokenSealed: sealToken("rt-2") });
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out).toMatchObject({ closed: 1, revoked: 1 });
+    expect(cdb.connections.map((c) => c.organizationId)).toEqual(["org1"]);
+    expect(cdb.activity.find((a) => a.type === "teammate_connection.disconnected")?.metadata).toMatchObject({ reason: "workspace_deleted" });
+  });
+
+  // Review of step 2: every revoke was gated on the connect settings, so
+  // emptying GOOGLE_AGENT_PRODUCTS left the queue holding tokens for good.
+  it("drains the queue with no Google client or product offered, through the revoke settings alone", async () => {
+    cfg.value = null;
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    cdb.revocations.push({ id: "rv-1", provider: "google", tokenSealed: sealToken("rt-1"), reason: "disconnected", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: null });
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out.revoked).toBe(1);
+    expect(cdb.revocations).toEqual([]);
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://g.test/revoke");
+  });
+
+  it("waits, dropping nothing, while no token could be opened (no sealing key)", async () => {
+    revokeCfg.value = null;
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    cdb.revocations.push({ id: "rv-1", provider: "google", tokenSealed: sealToken("rt-1"), reason: "disconnected", attempts: 5, nextAttemptAt: old, createdAt: old, accountKey: null });
+    await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(cdb.revocations).toHaveLength(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // Review of step 2: a revoke queued before a reconnect of the same account
+  // ended the new grant too (Google revokes per client and account).
+  it("deletes unsent, under the account's lock, a queued revoke whose account a live connection holds again", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    // Max disconnected, the revoke at once timed out, and he connected the same account again.
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    cdb.revocations.push(
+      { id: "rv-held", provider: "google", tokenSealed: sealToken("rt-old"), reason: "disconnected", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: keyOf("google", "sub-max") },
+      // Queued before accounts were kept: revoked as before.
+      { id: "rv-old", provider: "google", tokenSealed: sealToken("rt-legacy"), reason: "left", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: null },
+    );
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out).toMatchObject({ revoked: 1, stillHeld: 1 });
+    expect(cdb.revocations).toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new URLSearchParams(String(fetch.mock.calls[0]?.[1]?.body)).get("token")).toBe("rt-legacy");
+    expect(cdb.locks).toContainEqual({ keys: [keyOf("google", "sub-max")], inTx: true });
+  });
+});
+
+describe("revokeQueued", () => {
+  it("never revokes an account connected again since it was queued, and says so", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-max" });
+    cdb.revocations.push({ id: "rv-1", provider: "google", tokenSealed: sealToken("rt-old"), reason: "disconnected", attempts: 0, nextAttemptAt: new Date(), createdAt: new Date(), accountKey: keyOf("google", "sub-max") });
+    expect(await revokeQueued(["rv-1"], { revokeUrl: "https://g.test/revoke", standIn: true })).toEqual({ revoked: 0, kept: 0, dropped: 0, stillHeld: 1 });
+    expect(cdb.revocations).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("endConnectionsFor", () => {
+  it("tells Google at once even when this WorkwrK no longer offers Google (review of step 2)", async () => {
+    cfg.value = null;
+    const fetch = fetchStub(() => ({ status: 200 }));
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("rt-max") });
+    expect(await endConnectionsFor("org1", ["u-max"], "no_access", "u-admin")).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(cdb.revocations).toEqual([]);
+    expect(cdb.activity[0]?.metadata).toMatchObject({ reason: "no_access" });
+  });
+});
+
+describe("queueWorkspaceRevocations", () => {
+  it("queues, keyed, the accounts no other workspace holds, after locking those another workspace shares", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-shared" });
+    seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-shared" });
+    seedConnection({ organizationId: "org1", userId: "u-lea", accountSub: "sub-solo" });
+    const n = await connectorDb.$transaction((tx) => queueWorkspaceRevocations(tx as unknown as Prisma.TransactionClient, "org1"));
+    expect(n).toBe(1);
+    expect(cdb.revocations).toEqual([expect.objectContaining({ reason: "workspace_deleted", accountKey: keyOf("google", "sub-solo") })]);
+    // Only the shared account is locked: a workspace of any size never fills the lock table.
+    expect(cdb.locks).toEqual([{ keys: [keyOf("google", "sub-shared")], inTx: true }]);
+    expect(rawAt(LOCK)).toBeLessThan(rawAt('INSERT INTO "TeammateTokenRevocation"'));
   });
 });
 

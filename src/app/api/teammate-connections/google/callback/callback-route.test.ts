@@ -27,12 +27,13 @@ const CFG = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/connector-test-db")).connectorDb }));
 vi.mock("@/lib/connectors/google/config", () => ({
   googleConfig: () => CFG,
+  googleRevokeConfig: () => ({ revokeUrl: CFG.revokeUrl, standIn: true }),
   googleRedirectUri: () => "https://app.workwrk.test/api/teammate-connections/google/callback",
 }));
 vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: vi.fn(async () => st.viewer) }));
 vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: vi.fn(async () => st.acting) }));
 
-import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
+import { cdb, connectorDb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { createState } from "@/lib/connectors/oauth-state";
 import { openToken, sealToken } from "@/lib/connectors/seal";
 import { GET } from "./route";
@@ -47,7 +48,7 @@ function idToken(sub: string, email: string): string {
 }
 
 /** Google's token endpoint and revoke endpoint, as the stand-in answers them. */
-function google(o: { scope: string[]; sub?: string; email?: string; revoke?: number }) {
+function google(o: { scope: string[]; sub?: string; email?: string; revoke?: number; noIdToken?: boolean }) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -59,7 +60,7 @@ function google(o: { scope: string[]; sub?: string; email?: string; revoke?: num
           refresh_token: "refresh-new",
           expires_in: 3600,
           scope: ["openid", "email", ...o.scope].join(" "),
-          id_token: idToken(o.sub ?? "sub-max", o.email ?? "max@mail.test"),
+          ...(o.noIdToken ? {} : { id_token: idToken(o.sub ?? "sub-max", o.email ?? "max@mail.test") }),
         });
       }
       if (String(url) === CFG.revokeUrl) return new Response(null, { status: o.revoke ?? 200 });
@@ -207,5 +208,49 @@ describe("what is stored", () => {
     expect(line).toBeTruthy();
     expect(JSON.stringify(line)).not.toContain("private@mail.test");
     expect(JSON.stringify(line)).not.toContain("sub-max");
+  });
+});
+
+// Review of step 2: after a successful exchange, two exits left the new grant
+// at Google and one answered a raw 500 with the cookie still set.
+describe("after the code exchange", () => {
+  it("answers exchange_failed, clearing the cookie, when the database fails, and revokes the new grant", async () => {
+    const calls = google({ scope: CAL });
+    const state = await begin(["calendar"]);
+    vi.spyOn(connectorDb, "$transaction").mockRejectedValueOnce(new Error("connection timed out"));
+    const res = await callback(`code=c1&state=${state}`, state);
+    expect(res.status).toBe(302);
+    expect(outcome(res).get("ai_error")).toBe("exchange_failed");
+    expect(res.headers.get("set-cookie")).toMatch(/wk_tc_state=;.*Max-Age=0/i);
+    expect(cdb.connections).toEqual([]);
+    expect(calls).toContain(CFG.revokeUrl);
+  });
+
+  it("never revokes a grant another live connection holds, when the save fails", async () => {
+    seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-max" });
+    const calls = google({ scope: CAL });
+    const state = await begin(["calendar"]);
+    vi.spyOn(connectorDb, "$transaction").mockRejectedValueOnce(new Error("connection timed out"));
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("exchange_failed");
+    expect(calls).not.toContain(CFG.revokeUrl);
+  });
+
+  it("revokes nothing when Google names no account, since whether it is shared cannot be known", async () => {
+    const calls = google({ scope: CAL, noIdToken: true });
+    const state = await begin(["calendar"]);
+    const res = await callback(`code=c1&state=${state}`, state);
+    expect(outcome(res).get("ai_error")).toBe("exchange_failed");
+    expect(res.headers.get("set-cookie")).toMatch(/wk_tc_state=;.*Max-Age=0/i);
+    expect(calls).not.toContain(CFG.revokeUrl);
+    expect(cdb.connections).toEqual([]);
+  });
+
+  it("refuses a workspace deleted meanwhile, and revokes the grant it just made", async () => {
+    const calls = google({ scope: CAL });
+    const state = await begin(["calendar"]);
+    cdb.closedOrgs.add("org1");
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("workspace_closed");
+    expect(cdb.connections).toEqual([]);
+    expect(calls).toContain(CFG.revokeUrl);
   });
 });

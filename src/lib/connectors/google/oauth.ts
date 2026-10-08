@@ -11,7 +11,7 @@
 // Server-only: holds the client secret.
 
 import { createHash, randomBytes } from "node:crypto";
-import { googleRedirectUri, type GoogleConfig } from "./config";
+import { googleRedirectUri, type GoogleConfig, type GoogleRevokeConfig } from "./config";
 
 /** Every call to Google's OAuth endpoints gives up after this long. */
 export const OAUTH_TIMEOUT_MS = 10_000;
@@ -175,9 +175,11 @@ export async function refreshAccess(
  * Tell Google to revoke a token, and so the whole grant. 200: revoked. 400:
  * Google no longer knows the token (revoked already, or expired), so there is
  * nothing left to revoke. Anything else, or no answer in time: failed, and
- * the queue tries again (connections.ts revokeQueued).
+ * the queue tries again (connections.ts revokeQueued). Only the revoke
+ * address is read (config.ts googleRevokeConfig), so a revoke never waits on
+ * the connect settings (review of step 2).
  */
-export async function revokeToken(cfg: GoogleConfig, token: string, timeoutMs = OAUTH_TIMEOUT_MS): Promise<"revoked" | "already" | "failed"> {
+export async function revokeToken(cfg: Pick<GoogleRevokeConfig, "revokeUrl">, token: string, timeoutMs = OAUTH_TIMEOUT_MS): Promise<"revoked" | "already" | "failed"> {
   const res = await postForm(cfg.revokeUrl, { token }, timeoutMs);
   if (!res) {
     logOauth("revoke", "network");
