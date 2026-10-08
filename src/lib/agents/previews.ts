@@ -34,6 +34,7 @@ import { talkGateForUser } from "@/lib/talk-gate";
 // The person's legacy level is read only in acting.ts, which hands it to the
 // permission matrix, the List helpers and the goal rules.
 import { canContributeAs, contractsChangeableBy, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
+import { prepareConnector } from "./connector-previews";
 import { splitScheduleZone } from "./cron";
 import { routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
 import { describeSchedule, wordsInZone, zoneName } from "./schedule-words";
@@ -104,6 +105,12 @@ export interface PrepareContext {
   teammate: Pick<TeammateToolContext, "agentId" | "agentName" | "trigger">;
   /** The teammate's managers' tightening: a tool they set to "ask" is never offered "don't ask again". */
   agentRules?: ApprovalRules;
+  /**
+   * The turn read the person's email or calendar before this call
+   * (docs/plans/ai-teammates-phase3.md Decision 9): the card asks, says why,
+   * and never offers "don't ask again".
+   */
+  tainted?: boolean;
 }
 
 export type Prepared =
@@ -111,8 +118,8 @@ export type Prepared =
   /** `detail`: what the model can retry with, as the tool would answer it (the ids of Lists that share a name). */
   | { ok: false; error: string; detail?: Record<string, unknown> };
 
-/** What one tool's preparation found, before the shared fields are added. */
-interface Found {
+/** What one tool's preparation found, before the shared fields are added (connector-previews.ts builds one too). */
+export interface Found {
   input: Record<string, unknown>;
   /** What the input makes the call: never below the tool's base. */
   risk?: ToolRisk;
@@ -172,8 +179,8 @@ function fail(error: string, detail?: Record<string, unknown>): { ok: false; err
   return detail && Object.keys(detail).length > 0 ? { ok: false, error, detail } : { ok: false, error };
 }
 
-/** "Mon 12 Oct, 14:00, Kolkata time": a moment in the person's zone, named. */
-function whenWords(at: Date, zone: string): string {
+/** "Mon 12 Oct, 14:00, Kolkata time": a moment in the person's zone, named (an event card's When line too). */
+export function whenWords(at: Date, zone: string): string {
   const p: Record<string, string> = {};
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: zone,
@@ -225,6 +232,14 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
     preview.alwaysLabel ??= APPROVAL_CARD.approveAlways;
   } else {
     delete preview.alwaysLabel;
+  }
+  // A turn that read the person's email or calendar asks before everything
+  // after it, and its cards never store "don't ask again" (Decision 9): a
+  // planted email must not be one click from a standing rule.
+  if (ctx.tainted) {
+    delete preview.alwaysKey;
+    delete preview.alwaysLabel;
+    preview.lines = [...(preview.lines ?? []), CONNECTOR_COPY.askedAfterReading];
   }
   return { ok: true, tool, input: found.input, risk, preview, targetKey };
 }
@@ -628,17 +643,22 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       };
     }
 
-    // The Google writes (docs/plans/ai-teammates-phase3.md): no card is made
-    // for one before its own preparation is built, so nothing the model wrote
-    // is ever proposed unchecked. Their reads never reach here.
+    // The Google writes (docs/plans/ai-teammates-phase3.md step 3): their
+    // own preparation, which reads the person's connection now. The
+    // calendar's answer notYet until step 4 builds them, so nothing the model
+    // wrote is ever proposed unchecked. Their reads never reach here.
+    case "search_email":
+    case "read_email":
     case "draft_email":
     case "send_email":
     case "reply_email":
+    case "list_events":
+    case "find_free_time":
     case "create_event":
     case "update_event":
     case "cancel_event":
     case "respond_to_invite":
-      return { error: CONNECTOR_COPY.notYet };
+      return prepareConnector(tool, raw, ctx);
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

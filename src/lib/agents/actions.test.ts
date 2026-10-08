@@ -22,8 +22,19 @@ vi.mock("./previews", async () => ({ prepareCall: (await import("./test-fixtures
 vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeTools() }));
 vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixtures")).fakeLogActivity }));
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
+// The person's Google (Phase 3 step 3): the workspace's switch and their
+// connection, answering fx.connectors and fx.connectorAccess; whether this
+// deployment offers Google at all.
+vi.mock("@/lib/connectors/connections", async () => (await import("./test-fixtures")).connectorFake);
+const deployment = vi.hoisted(() => ({ offersGoogle: true }));
+vi.mock("@/lib/connectors/google/config", () => ({
+  googleConfig: () => (deployment.offersGoogle ? { products: ["gmail", "calendar"] } : null),
+  googleRevokeConfig: () => null,
+  googleRedirectUri: () => "https://app.test/api/teammate-connections/google/callback",
+}));
 
 import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount } from "./actions";
+import { CONNECTOR_COPY } from "./teammate-copy";
 import { AGENT_SLUG, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -47,6 +58,7 @@ const sent = (type: string) => published.filter((p) => (p.event as { type: strin
 beforeEach(() => {
   resetFixtures();
   published.length = 0;
+  deployment.offersGoogle = true;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
 });
@@ -618,5 +630,69 @@ describe("Ask AI's own requests (no teammate, follow-up 1.5c)", () => {
     talkPost();
     expect(await waitingCount("org", "me")).toBe(2);
     expect(await waitingCount("org", "me", new Date(), { teammatesOnly: true })).toBe(1);
+  });
+});
+
+describe("a Google card meets the person's Google as it is now (Phase 3 step 3)", () => {
+  const STORED = { to: ["olivia@proof.test"], cc: [], subject: "Hi", body: "Hello there", account: { sub: "sub-me", email: "priya@mail.test" }, dedupeKey: "k1" };
+  const sendCard = (o: Partial<ActionRowFx> = {}) =>
+    seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", input: STORED, preview: { title: 'Send email "Hi"', target: { label: CONNECTOR_COPY.sentFolderTarget } }, ...o });
+
+  beforeEach(() => {
+    fx.agent.toolNames = ["search_tasks", "create_task", "search_email", "send_email"];
+    fx.connectors = { gmail: true, calendar: false };
+    fx.cards.send_email = { title: 'Send email "Hi"' };
+    fx.answers.send_email = { ok: true, email: { id: "g-msg-1", threadId: "g-thr-1" } };
+  });
+
+  it("cancels a send whose product is off now, with that reason, and sends nothing (Decision 21)", async () => {
+    fx.connectors = { gmail: false, calendar: false };
+    const off = sendCard();
+    // Before: "Cancelled: Chief of Staff can no longer use this tool."
+    expect((await decideActions(viewer, [{ id: off.id, decision: "approve" }])).results).toEqual([
+      { id: off.id, status: "CANCELLED", code: "tool_off", error: CONNECTOR_COPY.cancelledProductOff("Gmail") },
+    ]);
+    deployment.offersGoogle = false;
+    const gone = sendCard();
+    expect((await decideActions(viewer, [{ id: gone.id, decision: "approve" }])).results[0]).toMatchObject({ status: "CANCELLED", error: CONNECTOR_COPY.cancelledNotConfigured });
+    expect(fx.handlerCalls).toEqual([]);
+    expect(fx.prepareCalls).toEqual([]);
+  });
+
+  it("leaves it waiting, connection_needed, when the person must connect or reconnect first", async () => {
+    for (const [reason, sentence] of [
+      ["not_connected", CONNECTOR_COPY.notConnected],
+      ["needs_reconnect", CONNECTOR_COPY.needsReconnect],
+      ["not_granted", CONNECTOR_COPY.notGranted("Gmail")],
+    ] as const) {
+      fx.connectorAccess = { ok: false, reason };
+      const row = sendCard();
+      expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results).toEqual([{ id: row.id, status: "PENDING", code: "connection_needed", error: sentence }]);
+      expect(fx.actions.find((r) => r.id === row.id)?.status).toBe("PENDING");
+    }
+    // Asked as an approval, of the teammate as it is now, by the person's own decision.
+    expect(fx.connectorAccessCalls[0]).toEqual({ product: "gmail", forApproval: true, agent: { id: "a1", visibility: "PRIVATE", ownerId: "me" } });
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("cancels it when the person no longer lets the teammate use their Gmail", async () => {
+    fx.connectorAccess = { ok: false, reason: "not_allowed" };
+    const row = sendCard();
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results).toEqual([
+      { id: row.id, status: "CANCELLED", code: "tool_off", error: CONNECTOR_COPY.cancelledNotAllowed("Chief of Staff", "Gmail") },
+    ]);
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("runs an edited body with the recipients, subject and account the card stored (Decision 14)", async () => {
+    const row = sendCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve", edit: { text: "A better body" } }]);
+    expect(out.results[0]).toMatchObject({ status: "EXECUTED" });
+    expect(fx.handlerCalls).toHaveLength(1);
+    expect(fx.handlerCalls[0].input).toEqual({ ...STORED, body: "A better body" });
+    expect(fx.handlerCalls[0].ctx.teammate).toMatchObject({ trigger: "APPROVAL", actionId: row.id });
+    // Approving it again sends nothing more.
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ code: "already_decided" });
+    expect(fx.handlerCalls).toHaveLength(1);
   });
 });

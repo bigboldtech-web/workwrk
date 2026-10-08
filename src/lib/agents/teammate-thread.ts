@@ -335,6 +335,8 @@ export interface AgentActionRow {
   editedInput?: unknown;
   groupKey?: string | null;
   sessionId?: string | null;
+  /** The run that asked: a continue after it reads whether it read the person's Google (engine.ts startsTainted). */
+  runId?: string | null;
   decidedVia?: string | null;
   createdAt: Date | string;
   expiresAt: Date | string;

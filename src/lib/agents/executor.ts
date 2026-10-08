@@ -31,19 +31,65 @@
 // A handler that throws answers a plain sentence (the error itself goes to
 // the server log): a database message is no sentence for a card.
 //
+// THE PERSON'S OWN GOOGLE (docs/plans/ai-teammates-phase3.md step 3). A
+// connector call is first held to where and how often it may run: only in
+// the person's own chats, continues and routines (Decision 13), at most 12 an
+// answer and each tool's own count, 30 a minute per person (Decision 22).
+// The person is read again for it, never taken from the start of a long turn;
+// the connection and the person's allow are read in its preparation and its
+// handler (connector-access.ts). A connector tool the turn was not offered
+// answers why (a Talk answer, an allow missing, a connection to reconnect).
+//
+// A TURN THAT READ GOOGLE ASKS BEFORE EVERY WRITE (Decision 9). After a
+// search_email, read_email or list_events that worked, every later call
+// above READ in the turn waits on a card, whatever the person chose not to
+// be asked about, and its card offers no "don't ask again"; a teammate this
+// turn asks starts the same way. What such a read keeps in the call log is
+// its count (Decision 16), though the model read it all. A send or a reply
+// identical to one already waiting points at that card and makes no second
+// one (Decision 23).
+//
 // Server-only: imports prisma.
 
 import type { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
+import { TOOL_PRODUCT, TAINTING_TOOLS, CONNECTOR_LIMITS, type ConnectorProduct } from "@/lib/connectors/products";
+import type { ConnectorRefusal } from "@/lib/connectors/connections";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
+import { rateLimit } from "@/lib/rate-limit-memory";
 import { actorLabelFor, resolveActingPerson, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
 import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
+import {
+  CONNECTOR_TURN_LIMITS,
+  connectorAuditFacts,
+  connectorRefusalSentence,
+  connectorStored,
+  connectorTrigger,
+  emptyConnectorCounters,
+  notHereKindOf,
+  notHereSentence,
+  type ConnectorCounters,
+  type NotHereKind,
+} from "./connector-rules";
 import { prepareCall, type Prepared } from "./previews";
-import { ACTION_ERRORS, DELEGATION_COPY, TALK_TEAMMATE_COPY, TEAMMATE_TOOL_ERRORS, agentAuditLine, forgotLine, memoryUpdatedLine, routineCreatedLine, titleList, tooManyWaiting } from "./teammate-copy";
+import {
+  ACTION_ERRORS,
+  CONNECTOR_COPY,
+  DELEGATION_COPY,
+  TALK_TEAMMATE_COPY,
+  TEAMMATE_TOOL_ERRORS,
+  agentAuditLine,
+  forgotLine,
+  memoryUpdatedLine,
+  routineCreatedLine,
+  titleList,
+  tooManyWaiting,
+} from "./teammate-copy";
+import type { PrintField } from "./teammate-print";
 import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
-import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
+import { toolOutcome, toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_TTL_MS,
   BASE_RISK,
@@ -56,7 +102,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { isToolName, type ToolName } from "./tool-names";
+import { isConnectorToolName, isToolName, type ConnectorToolName, type ToolName } from "./tool-names";
 import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
@@ -110,8 +156,18 @@ export interface ExecuteArgs {
   /** The person's own choices (sanitizeRules, level "person"). */
   personRules: ApprovalRules;
   practice: boolean;
-  /** The turn's counters, shared by all its calls: each call, each request and each teammate it asked is counted here. */
-  counters: { calls: number; proposals: number; delegations: number };
+  /**
+   * The turn's counters, shared by all its calls: each call, each request and
+   * each teammate it asked is counted here. `tainted`: a Google read worked
+   * in this turn (or the turn started from one that did), so every later
+   * call above READ asks (Decision 9). `connector`: its Google calls
+   * (Decision 22). Both start empty when a caller leaves them out.
+   */
+  counters: { calls: number; proposals: number; delegations: number; tainted?: boolean; connector?: ConnectorCounters };
+  /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
+  connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: PrintField[] }>>;
+  /** Where this turn's answer goes, when that is why no Google tool is offered (step 5 sets it; else read from the trigger). */
+  connectorNotHere?: NotHereKind | null;
   emit?: (e: TeammateStreamEvent) => void;
 }
 
@@ -204,7 +260,7 @@ const DELEGATE_REQUEST_LIMIT = 4000;
 async function runDelegation(
   a: ExecuteArgs,
   input: Record<string, unknown>,
-  done: (state: CallState, result: unknown, extra?: { errorText?: string; actionId?: string }) => ExecuteResult,
+  done: (state: CallState, result: unknown, extra?: DoneExtra) => ExecuteResult,
   refuse: (error: string, detail?: Record<string, unknown>) => ExecuteResult,
 ): Promise<ExecuteResult> {
   if (a.turn.trigger !== "CHAT" && a.turn.trigger !== "RESUME") return refuse(ACTION_ERRORS.toolOff);
@@ -262,7 +318,10 @@ async function runDelegation(
       runId: claim.runId,
       questionId: claim.questionId,
       streaming: false,
-      origin: { kind: "delegated", by: { agentId: a.agent.id, name: a.agent.name, sessionId: a.turn.sessionId, runId: a.turn.runId }, request },
+      // A turn that read Google hands its taint on: the delegate asks before
+      // every write too, so a planted email cannot act through another
+      // teammate (Decision 9).
+      origin: { kind: "delegated", by: { agentId: a.agent.id, name: a.agent.name, sessionId: a.turn.sessionId, runId: a.turn.runId }, request, tainted: a.counters.tainted === true },
     });
   } catch (err) {
     // runTeammateTurn answers its own failures; what this one did is unknown, so its question is kept.
@@ -311,6 +370,69 @@ async function runDelegation(
   });
 }
 
+/** How a call's record differs from what the model read. */
+interface DoneExtra {
+  errorText?: string;
+  actionId?: string;
+  /** What the call log keeps of the result, when it is not the result itself: a connector read's count (Decision 16). */
+  stored?: unknown;
+}
+
+/**
+ * Where and how often a connector call may run (see the file header), or
+ * the sentence that says why not. Counted only once it may run, so a
+ * refusal spends nothing of the answer's share.
+ */
+function connectorPrecheck(a: ExecuteArgs, name: ConnectorToolName): string | null {
+  if (!connectorTrigger(a.turn.trigger)) {
+    const kind = notHereKindOf(a.turn.trigger);
+    return kind ? notHereSentence(kind) : ACTION_ERRORS.toolOff;
+  }
+  const c = (a.counters.connector ??= emptyConnectorCounters());
+  if (c.calls >= CONNECTOR_LIMITS.callsPerTurn) return CONNECTOR_COPY.tooManyThisTurn;
+  const own = CONNECTOR_TURN_LIMITS[name];
+  if (own && c[own.key] >= own.max) return own.sentence;
+  const minute = rateLimit(`google-tools:${a.person.userId}`, { max: CONNECTOR_LIMITS.perPersonPerMinute, windowMs: 60_000 });
+  if (!minute.ok) return CONNECTOR_COPY.ourRateLimit(minute.retryAfter);
+  c.calls += 1;
+  if (own) c[own.key] += 1;
+  return null;
+}
+
+/** Why this turn was not offered a Google tool the model called anyway: where its answer goes, else the person's connection or allow. */
+function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
+  const kind = a.connectorNotHere ?? notHereKindOf(a.turn.trigger);
+  if (kind) return notHereSentence(kind);
+  const product = TOOL_PRODUCT[name];
+  const refusal = a.connectorRefusals?.[product];
+  return refusal ? connectorRefusalSentence(refusal, a.agent.name, product) : ACTION_ERRORS.toolOff;
+}
+
+/**
+ * A send or a reply exactly like one already waiting for this person (the
+ * same recipients, subject, body and conversation: the preparation's
+ * dedupeKey), which a planted loop would otherwise ask for again and again,
+ * so one "Approve 5" sends five (Decision 23).
+ */
+async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string; title: string | null } | null> {
+  const key = input.dedupeKey;
+  if (typeof key !== "string" || key.length === 0) return null;
+  const row = await prisma.agentAction.findFirst({
+    where: {
+      organizationId: person.organizationId,
+      actingForId: person.userId,
+      toolName: tool,
+      status: "PENDING",
+      expiresAt: { gt: new Date() },
+      input: { path: ["dedupeKey"], equals: key },
+    },
+    select: { id: true, preview: true },
+  });
+  if (!row) return null;
+  const title = record(row.preview).title;
+  return { id: row.id, title: typeof title === "string" ? title : null };
+}
+
 /**
  * Run one call the model asked for, as the person (see the file header). A
  * refusal, a tool's failure or a tool that throws is a result the model
@@ -319,11 +441,22 @@ async function runDelegation(
 export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const started = Date.now();
   const input = record(a.input);
+  // A Google read's record keeps no input either: its ids and search words
+  // are the person's mail, not the teammate's words (Decision 16).
+  const googleRead = isConnectorToolName(a.name) && BASE_RISK[a.name] === "READ";
   // Set once a call is past the reads (below): a Talk turn's writes tell the
   // model only how they went.
   let talkWrite = false;
-  const done = (state: CallState, result: unknown, extra: { errorText?: string; actionId?: string } = {}): ExecuteResult => ({
-    record: { name: a.name, input, result, errorText: extra.errorText ?? null, durationMs: Date.now() - started, state, actionId: extra.actionId ?? null },
+  const done = (state: CallState, result: unknown, extra: DoneExtra = {}): ExecuteResult => ({
+    record: {
+      name: a.name,
+      input: googleRead ? null : input,
+      result: "stored" in extra ? extra.stored : result,
+      errorText: extra.errorText ?? null,
+      durationMs: Date.now() - started,
+      state,
+      actionId: extra.actionId ?? null,
+    },
     modelContent: wrapToolData(a.name, talkWrite ? toldInTalk(state, result) : result),
     isError: state === "failed",
   });
@@ -334,12 +467,28 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const enabled: ReadonlySet<string> = a.enabled instanceof Set ? a.enabled : new Set(a.enabled);
   const name = a.name;
   const tool = isToolName(name) && enabled.has(name) && !TEAMMATE_EXCLUDED.has(name) ? TOOLS[name] : undefined;
-  if (!isToolName(name) || !tool) return refuse(ACTION_ERRORS.toolOff);
+  if (!isToolName(name) || !tool) {
+    // A Google tool this turn was not offered says why (see the file header).
+    if (isConnectorToolName(name)) return refuse(connectorMissing(a, name));
+    return refuse(ACTION_ERRORS.toolOff);
+  }
   // The model API does not enforce input_schema: no read or write sees an
   // input the tool's own schema does not describe (input-check.ts), so an
   // object where a string belongs never reaches a query as a filter.
   const checked = checkToolInput(tool.input_schema, a.input);
   if (!checked.ok) return refuse(badInputSentence(checked.field));
+
+  // A Google call: where and how often first, then the person as they are
+  // now, never as they were when a long turn began (the connection and the
+  // allow are read in the preparation and the handler).
+  let person = a.person;
+  if (isConnectorToolName(name)) {
+    const stop = connectorPrecheck(a, name);
+    if (stop) return refuse(stop);
+    const now = await resolveActingPerson(a.person.organizationId, a.person.userId).catch(() => null);
+    if (!now?.ok) return refuse(ACTION_ERRORS.personCannot);
+    person = now.person;
+  }
   const teammate: Omit<TeammateToolContext, "timezone"> = {
     agentId: a.agent.id,
     agentName: a.agent.name,
@@ -354,9 +503,15 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
 
   // Reads run, in a practice run too: they change nothing.
   if (BASE_RISK[name] === "READ") {
-    const ran = await runHandler(tool, toolCtxFor(a.person, teammate), checked.input);
+    const ran = await runHandler(tool, toolCtxFor(person, teammate), checked.input);
     if (!ran.ok) return done("failed", { error: ran.error }, { errorText: ran.error });
-    return done(toolOutcome(name, ran.result).failed ? "failed" : "ran", ran.result);
+    const failed = toolOutcome(name, ran.result).failed;
+    if (!isConnectorToolName(name) || failed) return done(failed ? "failed" : "ran", ran.result);
+    // Other people's words came back: every later call above READ in this
+    // turn waits on a card (Decision 9).
+    if (TAINTING_TOOLS.has(name)) a.counters.tainted = true;
+    // The model reads all of it, once; the log keeps how many (Decision 16).
+    return done("ran", ran.result, { stored: connectorStored(ran.result) });
   }
 
   // A Talk answer posts with no card to people who may not open what a write
@@ -365,23 +520,37 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // waits or failed; the names stay on the card and in the person's own chat
   // (review round 5).
   talkWrite = a.turn.trigger === "TALK";
+  const tainted = a.counters.tainted === true;
   const prepared = await prepareCall(name, checked.input, {
-    person: a.person,
+    person,
     teammate: { agentId: a.agent.id, agentName: a.agent.name, trigger: a.turn.trigger },
     agentRules: a.agentRules,
+    tainted,
   });
   if (!prepared.ok) return refuse(prepared.error, prepared.detail);
   if (a.practice) return done("practice", { practice: true, wouldDo: prepared.preview.title });
 
-  const gate = gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
+  // After a Google read in this turn nothing above READ runs without a card,
+  // and the person's "Don't ask" is not read (Decision 9).
+  const gate = tainted ? "ask" : gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
   if (gate === "ask") {
-    if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(a.person.organizationId, a.person.userId)) >= MAX_PENDING_PER_PERSON) {
-      return refuse(tooManyWaiting(a.person.firstName));
+    if (name === "send_email" || name === "reply_email") {
+      const twin = await waitingTwin(person, name, prepared.input);
+      if (twin) {
+        return done(
+          "waiting",
+          { status: "waiting_for_approval", actionId: twin.id, title: twin.title ?? prepared.preview.title, note: CONNECTOR_COPY.alreadyWaiting },
+          { actionId: twin.id },
+        );
+      }
+    }
+    if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
+      return refuse(tooManyWaiting(person.firstName));
     }
     const view = await proposeAction({
-      organizationId: a.person.organizationId,
+      organizationId: person.organizationId,
       agentId: a.agent.id,
-      actingForId: a.person.userId,
+      actingForId: person.userId,
       sessionId: a.turn.sessionId,
       runId: a.turn.runId,
       routineId: a.turn.routineId,
@@ -405,7 +574,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     const out = await runApprovedAction({
       action: { id: actionId, toolName: name, risk: prepared.risk, sessionId: a.turn.sessionId, runId: a.turn.runId, routineId: a.turn.routineId, preview: prepared.preview },
       input: prepared.input,
-      person: a.person,
+      person,
       agent: a.agent,
       trigger: a.turn.trigger,
       decidedVia: "rule",
@@ -413,11 +582,11 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     return out.status === "EXECUTED" ? done("ran", out.data, { actionId }) : done("failed", out.data, { actionId });
   }
 
-  const ran = await runHandler(tool, toolCtxFor(a.person, teammate), prepared.input);
+  const ran = await runHandler(tool, toolCtxFor(person, teammate), prepared.input);
   if (!ran.ok) return done("failed", { error: ran.error }, { errorText: ran.error });
   if (toolOutcome(name, ran.result).failed) return done("failed", ran.result);
   await auditAgentAction({
-    person: a.person,
+    person,
     agent: a.agent,
     toolName: name,
     input: prepared.input,
@@ -600,8 +769,12 @@ export async function auditAgentAction(a: {
   /** person: approved; rule: the person's own "Don't ask"; null: ran without asking. */
   decidedVia?: "person" | "rule" | null;
 }): Promise<void> {
-  const what = toolOutcomeSentence(a.toolName, a.input, toolOutcome(a.toolName, a.result)).text;
-  const target = auditTarget(a.result);
+  // A Google write's sentence names no subject, and its facts are the id
+  // Google gave it and how many it reached (Decision 16): admins read the
+  // audit log, and the subject and the addresses are the person's mail.
+  const connector = isConnectorToolName(a.toolName) ? a.toolName : null;
+  const what = connector ? toolSentence(connector, null).text : toolOutcomeSentence(a.toolName, a.input, toolOutcome(a.toolName, a.result)).text;
+  const target = connector ? null : auditTarget(a.result);
   await logActivity({
     type: `agent.${a.toolName}`,
     actorId: a.person.userId,
@@ -620,6 +793,7 @@ export async function auditAgentAction(a: {
       sessionId: a.sessionId ?? null,
       routineId: a.routineId ?? null,
       decidedVia: a.decidedVia ?? null,
+      ...(connector ? { connector: connectorAuditFacts(connector, a.input, a.result) } : {}),
     },
     severity: a.risk === "IRREVERSIBLE" ? "warning" : "info",
   });

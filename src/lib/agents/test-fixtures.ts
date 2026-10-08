@@ -8,6 +8,7 @@
 // Test-only: nothing in the app imports it.
 
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
+import { CONNECTOR_COPY } from "./teammate-copy";
 import { BASE_RISK, alwaysKeyFor, type ApprovalRules, type ToolRisk } from "./tool-policy";
 import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName } from "./tool-names";
 
@@ -94,6 +95,11 @@ export const fx = {
   runTriggers: {} as Record<string, string>,
   /** The Ask AI chat an Ask AI request's decision reads (null: gone, or not the person's). */
   chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { id?: string; kind?: string | null; productContext: string | null; agent: Record<string, unknown> | null } | null,
+  /** The workspace's Google products (connections.ts workspaceConnectorProducts), for the tests that mock it with connectorFake. */
+  connectors: { gmail: false, calendar: false },
+  /** What connectorAccess answers (connectorFake), and what it was asked. */
+  connectorAccess: { ok: true } as { ok: true } | { ok: false; reason: string; changed?: string[] },
+  connectorAccessCalls: [] as Array<{ product: string; forApproval?: boolean; agent: { id: string; visibility: string; ownerId: string | null } }>,
 };
 
 export function resetFixtures(): void {
@@ -112,6 +118,9 @@ export function resetFixtures(): void {
   fx.sql = [];
   fx.runTriggers = {};
   fx.chat = { productContext: null, agent: null };
+  fx.connectors = { gmail: false, calendar: false };
+  fx.connectorAccess = { ok: true };
+  fx.connectorAccessCalls = [];
 }
 
 /** One request in the table, PENDING for the person unless told otherwise. */
@@ -150,13 +159,17 @@ export function seedAction(o: Partial<ActionRowFx> & { toolName: string }): Acti
 
 // ── prisma ──────────────────────────────────────────────────────────
 
-/** A where clause as the queue writes them: equality, in, not, lt, lte, gt and OR. */
+/** A where clause as the queue writes them: equality, in, not, lt, lte, gt, OR, and a JSON path's equals (a send's dedupeKey). */
 function matches(row: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === "OR") return (cond as Array<Record<string, unknown>>).some((c) => matches(row, c));
     const v = row[key];
     if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date };
+      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date; path?: string[]; equals?: unknown };
+      if (Array.isArray(c.path)) {
+        const at = c.path.reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), v);
+        return at === c.equals;
+      }
       if (c.in) return c.in.includes(v);
       // `{ not: null }`: a teammate's request, never Ask AI's own (agentId null).
       if ("not" in c) return (v ?? null) !== c.not;
@@ -254,6 +267,15 @@ export const prismaFake = {
 
 // ── The modules around the queue ────────────────────────────────────
 
+/** connections.ts's switch and access, answering fx.connectors and fx.connectorAccess (the tests that mock "@/lib/connectors/connections"). */
+export const connectorFake = {
+  workspaceConnectorProducts: async () => ({ ...fx.connectors }),
+  connectorAccess: async (a: { product: string; forApproval?: boolean; agent: { id: string; visibility: string; ownerId: string | null } }) => {
+    fx.connectorAccessCalls.push({ product: a.product, forApproval: a.forApproval, agent: { id: a.agent.id, visibility: a.agent.visibility, ownerId: a.agent.ownerId } });
+    return fx.connectorAccess;
+  },
+};
+
 export const actingFake = {
   resolveActingPerson: async () => fx.person,
   toolCtxFor: (person: typeof PERSON, teammate: Record<string, unknown>) => ({
@@ -267,10 +289,12 @@ export const actingFake = {
 /**
  * prepareCall's stand-in: the tool's own class unless a card says otherwise,
  * a Talk conversation's target key, the policy's own "don't ask again" key
- * (none where the teammate's managers set the tool to ask), and the input as
- * given unless the card names the input it resolves to.
+ * (none where the teammate's managers set the tool to ask, and none, with the
+ * line that says why, in a turn that read Google: previews.ts prepareCall's
+ * tainted rule), and the input as given unless the card names the input it
+ * resolves to.
  */
-export async function fakePrepareCall(tool: string, input: unknown, ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown> }) {
+export async function fakePrepareCall(tool: string, input: unknown, ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown>; tainted?: boolean }) {
   const raw = { ...((input ?? {}) as Record<string, unknown>) };
   fx.prepareCalls.push({ tool, input: raw, ctx });
   const set = fx.cards[tool];
@@ -283,20 +307,35 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
   const targetKey =
     o.targetKey !== undefined ? o.targetKey : tool === "post_in_talk" && typeof resolved.conversationId === "string" ? `conv:${resolved.conversationId}` : null;
   const tightened = ctx.agentRules?.[tool] === "ask";
-  const alwaysKey = tightened ? null : alwaysKeyFor(tool, risk, targetKey);
+  const alwaysKey = tightened || ctx.tainted ? null : alwaysKeyFor(tool, risk, targetKey);
   return {
     ok: true as const,
     tool,
     input: resolved,
     risk,
     targetKey,
-    preview: { title: o.title ?? `Run ${tool}`, ...(alwaysKey ? { alwaysKey, alwaysLabel: "Approve and don't ask again" } : {}) },
+    preview: {
+      title: o.title ?? `Run ${tool}`,
+      ...(alwaysKey ? { alwaysKey, alwaysLabel: "Approve and don't ask again" } : {}),
+      ...(ctx.tainted ? { lines: [CONNECTOR_COPY.askedAfterReading] } : {}),
+    },
   };
 }
 
-const FAKE_TOOL_PROPS: Record<string, unknown> = Object.fromEntries(
-  ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request"].map((k) => [k, { type: "string" }]),
-);
+const FAKE_TOOL_PROPS: Record<string, unknown> = {
+  ...Object.fromEntries(
+    ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request", "subject", "body", "threadId", "messageId"].map((k) => [
+      k,
+      { type: "string" },
+    ]),
+  ),
+  // The Google tools' lists, count and flags (connector-tools.ts).
+  to: { type: "array", items: { type: "string" } },
+  cc: { type: "array", items: { type: "string" } },
+  limit: { type: "integer" },
+  unreadOnly: { type: "boolean" },
+  replyAll: { type: "boolean" },
+};
 
 /** Every tool, each recording its call and answering fx.answers[tool]. */
 export function fakeTools() {

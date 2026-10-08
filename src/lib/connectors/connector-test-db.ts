@@ -257,6 +257,19 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     wrote("policy.upsert");
     return [{ products: next }];
   }
+  if (sql.startsWith('SELECT lower(u."email") AS "email" FROM "User" u')) {
+    // Who of an email's recipients is a live person of this workspace (connector-previews.ts outsideCount).
+    needs(sql, "the workspace member check", [
+      `WHERE lower(u."email") = ANY(?::text[])`,
+      `u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
+      `(u."organizationId" = ? OR EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ?))`,
+    ]);
+    const [emails, org] = v as [string[], string];
+    return cdb.users
+      .filter((u) => !u.deletedAt && u.status !== "INACTIVE" && emails.includes(String(u.email).toLowerCase()))
+      .filter((u) => u.organizationId === org || cdb.memberships.some((m) => m.userId === u.id && m.organizationId === org))
+      .map((u) => ({ email: String(u.email).toLowerCase() }));
+  }
   throw new Error(`connector-test-db: unknown query ${sql}`);
 }
 
