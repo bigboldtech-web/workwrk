@@ -49,6 +49,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
@@ -494,7 +495,8 @@ async function modulesOf(organizationId: string, cache: DecideCache): Promise<{ 
 async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
   const known = cache.tools.get(agent.id);
   if (known) return known;
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, await modulesOf(agent.organizationId, cache)));
+  // No Google tool is offered yet (docs/plans/ai-teammates-phase3.md step 1): a card for one is cancelled as tool_off.
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...(await modulesOf(agent.organizationId, cache)), connectors: NO_PRODUCTS }));
   cache.tools.set(agent.id, tools);
   return tools;
 }

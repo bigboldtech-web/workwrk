@@ -10,7 +10,8 @@
 //   OUTWARD       tells someone else, posts where others read, changes what
 //                 others own or share, or can start automations. Asks first;
 //                 the person may choose "Don't ask".
-//   IRREVERSIBLE  cannot be taken back (an invitation email). Always asks;
+//   IRREVERSIBLE  cannot be taken back (an invitation email, an email sent
+//                 in the person's name). Always asks;
 //                 "Don't ask" is never offered and never stored. Any future
 //                 delete, share or permission tool belongs here.
 //
@@ -31,7 +32,7 @@
 // Pure: the name list and the copy file, nothing that reads a database.
 
 import { EDIT_FIELD_LABELS } from "./teammate-copy";
-import { isToolName, type ToolName } from "./tool-names";
+import { CONNECTOR_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
 
 export type ToolRisk = "READ" | "INTERNAL" | "OUTWARD" | "IRREVERSIBLE";
 
@@ -60,6 +61,11 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   // It never asks itself: what the teammate it asks would do asks for itself
   // (docs/plans/ai-teammates-phase2.md step 5).
   ask_teammate: "READ",
+  // The person's own Gmail and Google Calendar, read (Phase 3).
+  search_email: "READ",
+  read_email: "READ",
+  list_events: "READ",
+  find_free_time: "READ",
   // The person's own work, or something new nobody is told about.
   create_task: "INTERNAL",
   create_sop: "INTERNAL",
@@ -74,6 +80,13 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   remember: "INTERNAL",
   forget: "INTERNAL",
   create_routine: "INTERNAL",
+  // A draft nobody is sent, and the person's own events (Phase 3 Decisions 7
+  // and 12). An event call that tells anyone else is IRREVERSIBLE
+  // (NOTIFY_ESCALATES).
+  draft_email: "INTERNAL",
+  create_event: "INTERNAL",
+  update_event: "INTERNAL",
+  cancel_event: "INTERNAL",
   // Other people see it, or it changes what they share. A new doc, form or
   // table made where the teammate can make it is open to every member, who
   // can edit it (node-rules: a root doc, form or table), so making one is
@@ -89,10 +102,26 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   post_in_talk: "OUTWARD",
   // Cannot be taken back.
   invite_person_with_role: "IRREVERSIBLE",
+  // Mail in the person's name, and an answer the organizer sees (Phase 3 Decision 8).
+  send_email: "IRREVERSIBLE",
+  reply_email: "IRREVERSIBLE",
+  respond_to_invite: "IRREVERSIBLE",
 };
 
 /** Always asks, whatever is stored. */
-export const ALWAYS_ASK: ReadonlySet<ToolName> = new Set<ToolName>(["invite_person_with_role"]);
+export const ALWAYS_ASK: ReadonlySet<ToolName> = new Set<ToolName>(["invite_person_with_role", "send_email", "reply_email", "respond_to_invite"]);
+
+/**
+ * The calendar writes whose call is IRREVERSIBLE, not OUTWARD, once it tells
+ * anyone else: an invitation, a change or a cancel of an event others are on
+ * (Phase 3 Decision 8). Google emails them at once, so "Don't ask" is never
+ * offered or stored for those calls, and only the person's own events run
+ * without a card.
+ */
+export const NOTIFY_ESCALATES: ReadonlySet<ToolName> = new Set<ToolName>(["create_event", "update_event", "cancel_event"]);
+
+/** The Google connector tools (Phase 3): only in turns whose answer only the person reads (toolsForTrigger). */
+export const CONNECTOR_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(CONNECTOR_TOOL_NAMES);
 
 /** "Don't ask" only for one target (a Talk conversation), never tool-wide. */
 export const TARGET_SCOPED_ALWAYS: ReadonlySet<ToolName> = new Set<ToolName>(["post_in_talk"]);
@@ -180,13 +209,22 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
  * start in their own chat (another teammate's ask, a Talk message, an
  * automation) has none of the watched-only tools and reads no one else's
  * words. A chat and its continue keep everything.
+ *
+ * Google tools only in turns whose answer only the person reads, never where
+ * it posts, flows on or goes back to another teammate
+ * (docs/plans/ai-teammates-phase3.md Decision 13).
  */
 export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
   if (t === "CHAT" || t === "RESUME") return [...enabled];
   if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
   const postsWithNoCard = t === "TALK" || t === "AUTOMATION";
   return enabled.filter(
-    (n) => !WATCHED_ONLY_TOOLS.has(n) && !OTHER_PEOPLES_WORDS.has(n) && !(postsWithNoCard && PERSONAL_RECORDS.has(n)) && !(t === "TALK" && UNCHECKED_FOR_TALK.has(n)),
+    (n) =>
+      !WATCHED_ONLY_TOOLS.has(n) &&
+      !OTHER_PEOPLES_WORDS.has(n) &&
+      !CONNECTOR_TOOLS.has(n) &&
+      !(postsWithNoCard && PERSONAL_RECORDS.has(n)) &&
+      !(t === "TALK" && UNCHECKED_FOR_TALK.has(n)),
   );
 }
 
@@ -218,6 +256,12 @@ export const EDITABLE_FIELD: Readonly<Partial<Record<ToolName, EditableField>>> 
   comment_on_task: { field: "text", label: EDIT_FIELD_LABELS.comment, maxLength: 4000 },
   post_in_talk: { field: "text", label: EDIT_FIELD_LABELS.message, maxLength: 3000 },
   update_doc: { field: "text", label: EDIT_FIELD_LABELS.text, maxLength: 8000 },
+  // Phase 3 Decision 14: recipients and subject are shown and fixed; to
+  // change them the person says no and asks again.
+  draft_email: { field: "body", label: EDIT_FIELD_LABELS.message, maxLength: 8000 },
+  send_email: { field: "body", label: EDIT_FIELD_LABELS.message, maxLength: 8000 },
+  reply_email: { field: "body", label: EDIT_FIELD_LABELS.message, maxLength: 8000 },
+  create_event: { field: "title", label: EDIT_FIELD_LABELS.title, maxLength: 200 },
 };
 
 const RANK: Record<ToolRisk, number> = { READ: 0, INTERNAL: 1, OUTWARD: 2, IRREVERSIBLE: 3 };
@@ -267,6 +311,8 @@ export function isEscalated(tool: ToolName, risk: ToolRisk): boolean {
  */
 export function canAlwaysAllow(tool: ToolName, risk: ToolRisk, targetKey: string | null): boolean {
   const r = effectiveRisk(tool, risk);
+  // A calendar write that tells anyone else is never "Don't ask" (Phase 3 Decision 8).
+  if (NOTIFY_ESCALATES.has(tool) && r !== "INTERNAL") return false;
   if (r === "IRREVERSIBLE" || ALWAYS_ASK.has(tool)) return false;
   if (TARGET_SCOPED_ALWAYS.has(tool)) return Boolean(targetKey);
   return true;
@@ -347,7 +393,10 @@ export function sanitizeRules(raw: unknown, o: { level: "agent" | "person"; allo
     if (target === ESCALATED) {
       // The person's choice for a tool's calls above its own class: theirs
       // alone, and only for a tool whose own class can escalate to OUTWARD.
+      // A calendar write escalates to IRREVERSIBLE, which has no choice, so
+      // "create_event:outward" is never kept and the settings never list one.
       if (o.level !== "person" || BASE_RISK[tool] !== "INTERNAL") continue;
+      if (NOTIFY_ESCALATES.has(tool)) continue;
       if (value === "always" && !canAlwaysAllow(tool, "OUTWARD", null)) continue;
       out[key] = value;
       kept += 1;

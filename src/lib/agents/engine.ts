@@ -45,6 +45,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { Prisma } from "@/generated/prisma";
 import { createMessageWithFallback, getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { aiCostCents } from "@/lib/ai-cost";
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
@@ -827,8 +828,10 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // What started the turn decides what it is offered (Phase 2): a delegated
   // turn has no ask_teammate (depth one) and nothing whose line lands where
   // nobody looks; a routine never asks another teammate.
+  // No Google tool yet (docs/plans/ai-teammates-phase3.md step 1): the
+  // workspace's products are read once the switch exists (step 2).
   const enabled = toolsForTrigger(
-    teammateToolNames(a.agent, { tablesOn, talkOn })
+    teammateToolNames(a.agent, { tablesOn, talkOn, connectors: NO_PRODUCTS })
       .filter((name) => !TEAMMATE_EXCLUDED.has(name) && Boolean(TOOLS[name]))
       .sort(),
     a.trigger,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CROSS_TOOL_NAMES, PPMS_TOOL_NAMES, PRODUCT_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isTeammateToolName, isToolName } from "./tool-names";
+import { CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PPMS_TOOL_NAMES, PRODUCT_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isConnectorToolName, isTeammateToolName, isToolName } from "./tool-names";
 import { TOOL_VERBS, toolOutcome, toolOutcomeSentence, toolSentence, toolSubject } from "./tool-verbs";
 
 const RETIRED = [
@@ -25,8 +25,15 @@ describe("the Ask AI tool set", () => {
 });
 
 describe("the AI teammate tools", () => {
-  it("are eleven (ask_teammate came with Phase 2), apart from the Ask AI names, and in no Ask AI set", () => {
-    expect(TEAMMATE_TOOL_NAMES).toHaveLength(11);
+  it("are twenty-two (ask_teammate came with Phase 2, the eleven Google tools with Phase 3), apart from the Ask AI names, and in no Ask AI set", () => {
+    expect(TEAMMATE_TOOL_NAMES).toHaveLength(22);
+    expect(CONNECTOR_TOOL_NAMES).toHaveLength(11);
+    expect(new Set([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]).size).toBe(50);
+    for (const t of CONNECTOR_TOOL_NAMES) {
+      expect(TEAMMATE_TOOL_NAMES as readonly string[]).toContain(t);
+      expect(isConnectorToolName(t)).toBe(true);
+    }
+    expect(isConnectorToolName("read_talk")).toBe(false);
     for (const t of TEAMMATE_TOOL_NAMES) {
       expect(isToolName(t)).toBe(true);
       expect(isTeammateToolName(t)).toBe(true);
@@ -170,5 +177,23 @@ describe("the subject a sentence names", () => {
 describe("ask_teammate's sentence (Phase 2)", () => {
   it("names the teammate it asked", () => {
     expect(toolSentence("ask_teammate", { teammate: "Project Manager", request: "Which tasks are stuck?" })).toEqual({ concept: "teammate", text: 'Asked "Project Manager"' });
+  });
+});
+
+describe("the Google tools' sentences (Phase 3)", () => {
+  it("count what they read, from the stored { count } alone", () => {
+    expect(toolOutcomeSentence("search_email", { query: "invoice" }, toolOutcome("search_email", { count: 5 })).text).toBe("Searched 5 emails");
+    expect(toolOutcomeSentence("read_email", { threadId: "t1" }, toolOutcome("read_email", { count: 1 })).text).toBe("Read 1 email");
+    expect(toolOutcomeSentence("list_events", { from: "2026-10-12" }, toolOutcome("list_events", { count: 4 })).text).toBe("Looked at 4 of your events");
+    expect(toolOutcomeSentence("find_free_time", { from: "2026-10-12" }, toolOutcome("find_free_time", { count: 2 })).text).toBe("Found 2 free slots");
+    expect(toolOutcomeSentence("find_free_time", {}, toolOutcome("find_free_time", { count: 1 })).text).toBe("Found 1 free slot");
+  });
+
+  it("read as email or calendar rows, and never name a subject they were not given as one", () => {
+    expect(toolSentence("send_email", { to: ["max@x.com"], subject: "Payroll", body: "x" })).toEqual({ concept: "email", text: "Sent email" });
+    expect(toolSentence("draft_email", {}).text).toBe("Saved a draft");
+    expect(toolSentence("reply_email", {}, true).text).toBe("Couldn't send the reply");
+    expect(toolSentence("create_event", { title: "Focus" })).toEqual({ concept: "calendar", text: 'Added event "Focus"' });
+    expect(toolSentence("respond_to_invite", { eventId: "e1", response: "accepted" }).text).toBe("Answered invite");
   });
 });

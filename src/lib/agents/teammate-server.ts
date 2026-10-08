@@ -19,6 +19,9 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
 import { UNLIMITED_AI } from "@/lib/ai-allowance";
+// Google tools are shown and given once the workspace switch is read
+// (docs/plans/ai-teammates-phase3.md steps 2 and 5); until then, none.
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { plainData } from "./plain-data";
 import { TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
@@ -445,7 +448,7 @@ export async function toolTable(
   ]);
   const targetLabels = await conversationLabels(agent.organizationId, userId, conversationTargets(personRules));
   return toolSettings({
-    enabled: teammateToolNames(agent, modules),
+    enabled: teammateToolNames(agent, { ...modules, connectors: NO_PRODUCTS }),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
@@ -466,7 +469,7 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    toolNames: teammateToolNames(agent, modules),
+    toolNames: teammateToolNames(agent, { ...modules, connectors: NO_PRODUCTS }),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,

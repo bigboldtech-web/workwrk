@@ -3,9 +3,10 @@
 // concept carries app-wide). Pure, so the page, the panel and the agent run
 // detail all print the same words.
 //
-// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 10
-// AI teammate tools): a tool with no sentence is a compile error, so no call
-// ever prints its raw name again.
+// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 22
+// AI teammate tools, 11 of them Google connector tools, 50 names in all): a
+// tool with no sentence is a compile error, so no call ever prints its raw
+// name again.
 //
 // A teammate's call can also end without running: it waits for the person's
 // approval, or a practice run only reports what it would do. Neither is done,
@@ -39,7 +40,9 @@ export type ToolConcept =
   | "memory"
   | "routine"
   | "inbox"
-  | "teammate";
+  | "teammate"
+  | "email"
+  | "calendar";
 
 export interface ToolVerb {
   concept: ToolConcept;
@@ -90,6 +93,18 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   list_my_inbox: { concept: "inbox", done: "Checked your Inbox", failed: "Couldn't check your Inbox" },
   read_talk: { concept: "talk", done: "Read Talk messages", failed: "Couldn't read Talk" },
   ask_teammate: { concept: "teammate", done: "Asked", failed: "Couldn't ask the teammate" },
+  // The person's own Gmail and Google Calendar (docs/plans/ai-teammates-phase3.md).
+  search_email: { concept: "email", done: "Searched email", failed: "Couldn't search email" },
+  read_email: { concept: "email", done: "Read email", failed: "Couldn't read the email" },
+  draft_email: { concept: "email", done: "Saved a draft", failed: "Couldn't save the draft" },
+  send_email: { concept: "email", done: "Sent email", failed: "Couldn't send the email" },
+  reply_email: { concept: "email", done: "Replied", failed: "Couldn't send the reply" },
+  list_events: { concept: "calendar", done: "Looked at your events", failed: "Couldn't read your calendar" },
+  find_free_time: { concept: "calendar", done: "Found free time", failed: "Couldn't find free time" },
+  create_event: { concept: "calendar", done: "Added event", failed: "Couldn't add the event" },
+  update_event: { concept: "calendar", done: "Changed event", failed: "Couldn't change the event" },
+  cancel_event: { concept: "calendar", done: "Cancelled event", failed: "Couldn't cancel the event" },
+  respond_to_invite: { concept: "calendar", done: "Answered invite", failed: "Couldn't answer the invite" },
 };
 
 const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key", "teammate"] as const;
@@ -163,6 +178,10 @@ const COUNT_NOUN: Partial<Record<ToolName, [string, string]>> = {
   list_my_weekly_reviews: ["weekly review", "weekly reviews"],
   list_my_inbox: ["notification", "notifications"],
   read_talk: ["message", "messages"],
+  search_email: ["email", "emails"],
+  read_email: ["email", "emails"],
+  list_events: ["event", "events"],
+  find_free_time: ["free slot", "free slots"],
 };
 
 // The tools whose result names an object with an address of its own. Tasks

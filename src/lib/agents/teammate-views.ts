@@ -11,6 +11,7 @@
 //
 // Pure: no prisma, no fetch.
 
+import { NO_PRODUCTS, TOOL_PRODUCT, type ProductSet } from "@/lib/connectors/products";
 import type { TeammateHue } from "./hues";
 import { routineReasonText } from "./routines";
 import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
@@ -28,7 +29,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isConnectorToolName, isToolName, type ToolName } from "./tool-names";
 
 // ── A teammate ──────────────────────────────────────────────────────
 
@@ -104,10 +105,22 @@ export interface TeammateLimits {
 
 // ── Tools and approvals ─────────────────────────────────────────────
 
-/** Every tool a teammate may be given, in the picker's order. */
+/** Every tool a teammate may be given, in the picker's order, whatever is on (the tests read every name). */
 export const GIVABLE_TOOLS: readonly ToolName[] = (Object.keys(TOOL_PICKER_COPY) as string[]).filter(
   (n): n is ToolName => isToolName(n) && !TEAMMATE_EXCLUDED.has(n),
 );
+
+/** The Google product each connector tool needs (products.ts TOOL_PRODUCT), as the picker reads it. */
+export const TOOL_CONNECTOR = TOOL_PRODUCT;
+
+/**
+ * The tools a teammate may be given here: GIVABLE_TOOLS without the Google
+ * tools of a product that is off (docs/plans/ai-teammates-phase3.md), so a
+ * row that could never work is never shown.
+ */
+export function givableTools(connectors: ProductSet): ToolName[] {
+  return GIVABLE_TOOLS.filter((n) => !isConnectorToolName(n) || connectors[TOOL_CONNECTOR[n]] === true);
+}
 
 /** Every tool name, for rules kept while a tool is switched off (actions.ts keeps them too). */
 export const ALL_TOOL_NAMES: readonly ToolName[] = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES];
@@ -197,7 +210,8 @@ export function toolSettings(a: {
     const label = Object.prototype.hasOwnProperty.call(labels, target) ? labels[target] : null;
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
-  return GIVABLE_TOOLS.map((name): ToolSetting => {
+  // No Google row until the workspace's products are read (docs/plans/ai-teammates-phase3.md step 5).
+  return givableTools(NO_PRODUCTS).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];

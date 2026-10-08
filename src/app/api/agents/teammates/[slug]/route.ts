@@ -38,6 +38,7 @@ import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { ALL_TOOL_NAMES, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
 import { isToolName, type ToolName } from "@/lib/agents/tool-names";
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -124,7 +125,7 @@ export async function PATCH(req: Request, { params }: Params) {
     // back the Talk tools its managers chose.
     const modules = await workspaceModules(agent.organizationId);
     const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);
-    const kept = teammateToolNames(agent, { tablesOn: true, talkOn: true }).filter(off);
+    const kept = teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS }).filter(off);
     const next = cleanToolNames([...b.toolNames.filter((n) => !(isToolName(n) && off(n))), ...kept]);
     if (!sameList(next, agent.toolNames)) {
       data.toolNames = next;

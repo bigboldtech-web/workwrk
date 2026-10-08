@@ -5405,17 +5405,110 @@ model AgentRoutine {
 /// make ({ [tool or "tool:target"]: "ask" | "always" }) and the read cursor
 /// behind the unread dot.
 model AgentPersonSetting {
-  id            String    @id @default(cuid())
-  agentId       String
-  agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  userId        String
-  approvalRules Json      @default("{}")
-  lastReadAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @default(now()) @updatedAt
+  id                String    @id @default(cuid())
+  agentId           String
+  agent             Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId            String
+  approvalRules     Json      @default("{}")
+  lastReadAt        DateTime?
+  /// Phase 3 (prisma/sql/2026-10-08-ai-teammates-phase3.sql): the Google
+  /// products ("gmail" | "calendar") this person lets this teammate use, read
+  /// only for a teammate someone else may change (teammate-print.ts
+  /// othersMayChange), and per product the teammate's part prints when they
+  /// allowed it: { gmail?: Record<PrintField,string>, calendar?: ... }.
+  connectorProducts String[]  @default([])
+  connectorPrints   Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
 
   @@unique([agentId, userId])
   @@index([userId])
+}
+
+/// What a workspace lets its people connect to their AI teammates (Phase 3).
+/// No row: nothing. Written only by PUT /api/teammate-connections/policy.
+/// prisma/sql/2026-10-08-ai-teammates-phase3.sql (FK to Organization there).
+model TeammateConnectorPolicy {
+  organizationId String
+  /// "google"
+  provider       String
+  /// "gmail" | "calendar"
+  products       String[] @default([])
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  @@id([organizationId, provider])
+}
+
+/// One person's own account at a provider, connected to their AI teammates in
+/// ONE workspace (Phase 3). Tokens sealed (src/lib/connectors/seal.ts). Used
+/// only for that person's own turns (src/lib/connectors/connections.ts
+/// connectorAccess). FKs to Organization and User (CASCADE) live in the SQL.
+model TeammateConnection {
+  id                   String    @id @default(cuid())
+  organizationId       String
+  userId               String
+  /// "google"
+  provider             String
+  /// "active" | "needs_reconnect"
+  status               String    @default("active")
+  /// "revoked" | "scopes_missing"
+  statusReason         String?
+  /// "gmail" | "calendar": what Google granted and the workspace allowed
+  products             String[]  @default([])
+  scopes               String[]  @default([])
+  /// The account's id at the provider (OpenID "sub") and its address, shown
+  /// only to the person.
+  accountSub           String
+  accountEmail         String
+  refreshTokenSealed   Json
+  accessTokenSealed    Json?
+  accessTokenExpiresAt DateTime?
+  /// Bumped on every connect: a refresh that read an older version writes nothing.
+  tokenVersion         Int       @default(1)
+  connectedAt          DateTime  @default(now())
+  lastUsedAt           DateTime?
+  lastUsedAgentId      String?
+  needsReconnectAt     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now()) @updatedAt
+
+  @@unique([organizationId, userId, provider])
+  @@index([organizationId, status])
+  @@index([userId])
+  @@index([provider, accountSub])
+}
+
+/// A connect in flight (Phase 3): id = sha256 of the OAuth state, bound to
+/// the person and the workspace, expiring in 10 minutes, deleted on use.
+model TeammateOAuthState {
+  id             String   @id
+  organizationId String
+  userId         String
+  provider       String
+  products       String[]
+  verifierSealed Json
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+/// A token the provider must still be told to revoke (Phase 3). No person,
+/// no workspace, no FK: it outlives both until revoked, then goes.
+model TeammateTokenRevocation {
+  id            String   @id
+  provider      String
+  tokenSealed   Json
+  /// disconnected | replaced | left | deactivated | admin_all | workspace_deleted | no_access | sweep
+  reason        String
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([nextAttemptAt])
 }
 
 model App {

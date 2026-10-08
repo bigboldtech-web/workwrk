@@ -264,6 +264,13 @@ const SQL_MANIFEST = [
   // it. Before the reload: Prisma selects every column on a read with no
   // select, and the routine runner reads it.
   "2026-10-08-ai-teammates-routine-print.sql",
+  // AI teammates, Phase 3 (docs/plans/ai-teammates-phase3.md): the new
+  // "TeammateConnection", "TeammateOAuthState", "TeammateConnectorPolicy" and
+  // "TeammateTokenRevocation" tables, two defaulted columns on
+  // "AgentPersonSetting" (CHECK NOT VALID), catalogue-guarded foreign keys and
+  // checks. Before the reload: Prisma selects every column on a read with no
+  // select, and every teammate turn reads AgentPersonSetting.
+  "2026-10-08-ai-teammates-phase3.sql",
 ];
 
 /**

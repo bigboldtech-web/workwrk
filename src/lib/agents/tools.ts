@@ -1782,8 +1782,9 @@ const getTeamAlignmentRollup: ToolDefinition = {
 
 // The registry, typed against the one name list (tool-names.ts): a missing or
 // extra entry is a compile error, which is what keeps the chat thread's verb
-// map and this table the same 39 names (the 28 Ask AI tools and the 11 AI
-// teammate tools, src/lib/agents/teammate-tools.ts).
+// map and this table the same 50 names (the 28 Ask AI tools and the 22 AI
+// teammate tools, src/lib/agents/teammate-tools.ts, 11 of them the Google
+// connector tools of src/lib/agents/connector-tools.ts).
 //
 // The Ask AI loops look a tool up here by the name the model sent. A
 // teammate tool is in no Ask AI set (CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES), so
@@ -1830,7 +1831,7 @@ const REGISTRY = {
   get_team_alignment_rollup: getTeamAlignmentRollup,
   // AI teammates: update_task, comment_on_task, move_task, post_in_talk,
   // update_doc, remember, forget, create_routine, list_my_inbox, read_talk,
-  // ask_teammate.
+  // ask_teammate, and the eleven Google connector tools.
   ...TEAMMATE_TOOLS,
 } satisfies Record<ToolName, ToolDefinition>;
 
