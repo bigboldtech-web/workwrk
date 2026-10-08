@@ -9,11 +9,24 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { LEGACY_COPY } from "./teammate-copy";
 import { teammateToolNames } from "./teammate-tools";
-import { ALL_TOOL_NAMES, GIVABLE_TOOLS, TOOL_MODULE, agentScheduleView, cleanToolNames, editedPersonRules, routineViewFromRow, toolSettings, type RoutineRowLike } from "./teammate-views";
+import {
+  ALL_TOOL_NAMES,
+  GIVABLE_TOOLS,
+  TOOL_CONNECTOR,
+  TOOL_MODULE,
+  agentScheduleView,
+  cleanToolNames,
+  editedPersonRules,
+  givableTools,
+  routineViewFromRow,
+  toolSettings,
+  type RoutineRowLike,
+} from "./teammate-views";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
-import type { ToolName } from "./tool-names";
+import { CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
 import { serverTimeZone, zoneName } from "./schedule-words";
 
 describe("the tools a teammate may be given", () => {
@@ -23,9 +36,9 @@ describe("the tools a teammate may be given", () => {
 
   it("need exactly the modules teammateToolNames takes them out for", () => {
     const every = { toolNames: [...ALL_TOOL_NAMES], productSlug: null };
-    const on = teammateToolNames(every, { tablesOn: true, talkOn: true });
+    const on = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS });
     const missingWithout = (opts: { tablesOn: boolean; talkOn: boolean }) => {
-      const left = new Set(teammateToolNames(every, opts));
+      const left = new Set(teammateToolNames(every, { ...opts, connectors: NO_PRODUCTS }));
       return on.filter((t) => !left.has(t)).sort();
     };
     const needing = (m: "talk" | "tables") => (Object.keys(TOOL_MODULE) as ToolName[]).filter((t) => TOOL_MODULE[t] === m).sort();
@@ -35,6 +48,18 @@ describe("the tools a teammate may be given", () => {
 
   it("are stored as real tools, never an excluded one, each once, sorted", () => {
     expect(cleanToolNames(["search_tasks", "create_sprint", 42, "nope", "search_tasks", "create_task"])).toEqual(["create_task", "search_tasks"]);
+  });
+
+  it("hold the Google tools only for a product that is on, by the product teammateToolNames reads (Phase 3)", () => {
+    expect(givableTools(NO_PRODUCTS).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
+    expect(givableTools(NO_PRODUCTS)).toEqual(GIVABLE_TOOLS.filter((t) => !(CONNECTOR_TOOL_NAMES as readonly string[]).includes(t)));
+    const gmailOnly = givableTools({ gmail: true, calendar: false });
+    expect(gmailOnly.filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t)).sort()).toEqual(["draft_email", "read_email", "reply_email", "search_email", "send_email"]);
+    expect([...givableTools({ gmail: true, calendar: true })]).toEqual([...GIVABLE_TOOLS]);
+    // The map the picker reads is the one teammateToolNames takes them out by.
+    const every = { toolNames: [...ALL_TOOL_NAMES], productSlug: null };
+    const offered = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: { gmail: false, calendar: true } });
+    for (const t of CONNECTOR_TOOL_NAMES) expect(offered.includes(t), t).toBe(TOOL_CONNECTOR[t] === "calendar");
   });
 });
 
@@ -82,6 +107,12 @@ describe("toolSettings", () => {
     expect(row("create_data_table")).toMatchObject({ enabled: false, unavailable: "tables_off" });
     expect(row("read_talk")).toMatchObject({ unavailable: null });
     expect(row("create_contract")).toBeUndefined();
+  });
+
+  it("lists no Google row while no product is on, whatever the teammate stores (Phase 3)", () => {
+    const withGoogle = toolSettings({ enabled: ["search_email", "send_email", "search_tasks"], agentRules: {}, personRules: { send_email: "always" }, talkOn: true, tablesOn: true });
+    for (const t of CONNECTOR_TOOL_NAMES) expect(withGoogle.find((r) => r.name === t), t).toBeUndefined();
+    expect(withGoogle.map((r) => r.name)).toEqual(givableTools(NO_PRODUCTS));
   });
 });
 

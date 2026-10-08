@@ -11,7 +11,9 @@ import {
   toolsForTrigger,
   ALWAYS_ASK,
   BASE_RISK,
+  CONNECTOR_TOOLS,
   EDITABLE_FIELD,
+  NOTIFY_ESCALATES,
   MAX_PENDING_PER_PERSON,
   MAX_PROPOSALS_PER_TURN,
   MAX_TOOL_CALLS_PER_TURN,
@@ -26,7 +28,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
+import { CONNECTOR_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
 
 const ALL: ToolName[] = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES];
 
@@ -41,16 +43,37 @@ describe("every tool has a class", () => {
 
   it("matches the 3.3 table", () => {
     const by = (risk: ToolRisk) => ALL.filter((t) => BASE_RISK[t] === risk).sort();
-    expect(by("IRREVERSIBLE")).toEqual(["invite_person_with_role"]);
+    // Sending mail and answering an invite cannot be taken back (Phase 3 Decision 8).
+    expect(by("IRREVERSIBLE")).toEqual(["invite_person_with_role", "reply_email", "respond_to_invite", "send_email"]);
     // A new doc, form or table is open to every member: making one is outward (review round 1).
     expect(by("OUTWARD")).toEqual(["create_data_table", "create_doc", "create_form", "create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
     expect(by("READ")).toEqual([
       // ask_teammate never asks itself: what the teammate it asks would do asks for itself (Phase 2).
-      "ask_teammate", "get_team_alignment_rollup", "list_data_tables", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
-      "list_my_sops", "list_my_weekly_reviews", "read_talk", "search_contracts", "search_employees", "search_meetings",
+      "ask_teammate", "find_free_time", "get_team_alignment_rollup", "list_data_tables", "list_events", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
+      "list_my_sops", "list_my_weekly_reviews", "read_email", "read_talk", "search_contracts", "search_email", "search_employees", "search_meetings",
       "search_okrs", "search_sops", "search_tasks",
     ]);
-    expect(by("INTERNAL")).toHaveLength(ALL.length - 16 - 9 - 1);
+    expect(by("INTERNAL")).toHaveLength(ALL.length - 20 - 9 - 4);
+  });
+
+  it("gives every Google connector tool its class (Phase 3)", () => {
+    const want: Record<(typeof CONNECTOR_TOOL_NAMES)[number], ToolRisk> = {
+      search_email: "READ",
+      read_email: "READ",
+      list_events: "READ",
+      find_free_time: "READ",
+      draft_email: "INTERNAL",
+      create_event: "INTERNAL",
+      update_event: "INTERNAL",
+      cancel_event: "INTERNAL",
+      send_email: "IRREVERSIBLE",
+      reply_email: "IRREVERSIBLE",
+      respond_to_invite: "IRREVERSIBLE",
+    };
+    for (const t of CONNECTOR_TOOL_NAMES) expect(BASE_RISK[t], t).toBe(want[t]);
+    for (const t of ["send_email", "reply_email", "respond_to_invite"] as const) expect(ALWAYS_ASK.has(t), t).toBe(true);
+    expect([...NOTIFY_ESCALATES].sort()).toEqual(["cancel_event", "create_event", "update_event"]);
+    expect([...CONNECTOR_TOOLS].sort()).toEqual([...CONNECTOR_TOOL_NAMES].sort());
   });
 
   it("an escalation never lowers a class, and an unknown tool is the strictest", () => {
@@ -215,7 +238,14 @@ describe("the limits and the lists", () => {
   });
 
   it("gives an edit field exactly to the tools the 3.3 table names, each with a label and a length", () => {
-    expect(Object.keys(EDITABLE_FIELD).sort()).toEqual(["comment_on_task", "create_meeting", "create_okr", "create_task", "post_in_talk", "send_kudos", "update_doc"]);
+    // Phase 3 Decision 14: an email's body, an event's title.
+    expect(Object.keys(EDITABLE_FIELD).sort()).toEqual([
+      "comment_on_task", "create_event", "create_meeting", "create_okr", "create_task", "draft_email", "post_in_talk", "reply_email", "send_email", "send_kudos", "update_doc",
+    ]);
+    expect(EDITABLE_FIELD.send_email).toMatchObject({ field: "body", maxLength: 8000 });
+    expect(EDITABLE_FIELD.reply_email?.field).toBe("body");
+    expect(EDITABLE_FIELD.draft_email?.field).toBe("body");
+    expect(EDITABLE_FIELD.create_event).toMatchObject({ field: "title", maxLength: 200 });
     for (const f of Object.values(EDITABLE_FIELD)) {
       expect(f?.label.trim()).not.toBe("");
       expect(f?.maxLength).toBeGreaterThan(0);
@@ -254,9 +284,56 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     expect(toolsForTrigger(["search_tasks", "search_sops"], "AUTOMATION")).toEqual(["search_tasks", "search_sops"]);
     expect(toolsForTrigger(["search_tasks", "search_sops"], "CHAT")).toEqual(["search_tasks", "search_sops"]);
   });
+  it("offers Google tools only where the answer is the person's alone (Phase 3 Decision 13)", () => {
+    const all: ToolName[] = [...ALL];
+    for (const t of ["DELEGATED", "TALK", "AUTOMATION"] as const) {
+      const offered = toolsForTrigger(all, t);
+      for (const c of CONNECTOR_TOOL_NAMES) expect(offered, `${t} ${c}`).not.toContain(c);
+    }
+    for (const t of ["CHAT", "RESUME", "ROUTINE"] as const) {
+      const offered = toolsForTrigger(all, t);
+      for (const c of CONNECTOR_TOOL_NAMES) expect(offered, `${t} ${c}`).toContain(c);
+    }
+    // A routine still never asks another teammate.
+    expect(toolsForTrigger(all, "ROUTINE")).not.toContain("ask_teammate");
+  });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
     expect(BASE_RISK.ask_teammate).toBe("READ");
     expect(MAX_DELEGATIONS_PER_TURN).toBe(3);
+  });
+});
+
+describe("sending mail never skips the card (Phase 3 Decision 8)", () => {
+  it("asks for a send, a reply and an invite's answer, whatever the person stored", () => {
+    expect(gate("send_email", "IRREVERSIBLE", { personRules: { send_email: "always" } })).toBe("ask");
+    expect(gate("send_email", "INTERNAL", { personRules: { send_email: "always" } })).toBe("ask");
+    expect(gate("reply_email", "IRREVERSIBLE", { personRules: { reply_email: "always" } })).toBe("ask");
+    expect(gate("respond_to_invite", "IRREVERSIBLE", { personRules: { respond_to_invite: "always" } })).toBe("ask");
+    for (const t of ["send_email", "reply_email", "respond_to_invite"] as const) expect(alwaysKeyFor(t, "IRREVERSIBLE", null), t).toBeNull();
+  });
+
+  it("runs the person's own drafts and events, and asks once an event tells anyone else", () => {
+    expect(gate("draft_email", "INTERNAL")).toBe("run");
+    expect(gate("create_event", "INTERNAL")).toBe("run");
+    expect(gate("create_event", "IRREVERSIBLE")).toBe("ask");
+    expect(gate("create_event", "IRREVERSIBLE", { personRules: { create_event: "always", "create_event:outward": "always" } })).toBe("ask");
+    expect(gate("update_event", "OUTWARD", { personRules: { "update_event:outward": "always" } })).toBe("ask");
+    expect(alwaysKeyFor("create_event", "IRREVERSIBLE", null)).toBeNull();
+    expect(alwaysKeyFor("cancel_event", "OUTWARD", null)).toBeNull();
+    expect(canAlwaysAllow("update_event", "OUTWARD", null)).toBe(false);
+    // The person's own events keep their tool-wide choice.
+    expect(alwaysKeyFor("create_event", "INTERNAL", null)).toBe("create_event");
+  });
+
+  it("never keeps a Don't ask for them, so the settings never list one", () => {
+    expect(
+      sanitizeRules(
+        { send_email: "always", reply_email: "always", respond_to_invite: "always", "create_event:outward": "always", "cancel_event:outward": "ask", create_event: "always", draft_email: "ask" },
+        { level: "person", allowedTools: ALL },
+      ),
+    ).toEqual({ create_event: "always", draft_email: "ask" });
+    // "Ask me first" for a send stays the person's own (it asks anyway).
+    expect(sanitizeRules({ send_email: "ask" }, { level: "person", allowedTools: ALL })).toEqual({ send_email: "ask" });
   });
 });

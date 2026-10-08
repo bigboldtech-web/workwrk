@@ -420,7 +420,18 @@ export const ACTION_VERB: Readonly<Partial<Record<ToolName, string>>> = {
   create_kpi: "Create KPI",
   send_kudos: "Send kudos to",
   invite_person_with_role: "Invite",
+  // The person's own Gmail and Google Calendar (Phase 3). An invite's answer
+  // is its own verb (RESPONSE_VERB).
+  draft_email: "Save draft",
+  send_email: "Send email",
+  reply_email: "Reply to",
+  create_event: "Create event",
+  update_event: "Change event",
+  cancel_event: "Cancel event",
 };
+
+/** The card title's verb for respond_to_invite, by the answer it sends: 'Accept "Team sync"'. */
+export const RESPONSE_VERB = { accepted: "Accept", declined: "Decline", tentative: "Say maybe to" } as const;
 
 /** 'Create task "Call Acme"' */
 export function quotedTitle(verb: string, subject: string): string {
@@ -1005,8 +1016,8 @@ export interface ToolPickerCopy {
 }
 
 /**
- * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 11
- * teammate tools, 39 in all (tool-names.ts). Typed by ToolName, so a tool with no label
+ * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 22
+ * teammate tools, 50 in all (tool-names.ts). Typed by ToolName, so a tool with no label
  * is a compile error; teammate-copy.test.ts holds it to every name too.
  */
 export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
@@ -1049,7 +1060,28 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   remember: { label: "Remember things" },
   forget: { label: "Forget things" },
   create_routine: { label: "Set up routines", description: "Runs on a schedule you choose. Each run uses one AI question." },
+  // The person's own Gmail and Google Calendar (docs/plans/ai-teammates-phase3.md).
+  search_email: { label: "Search your Gmail", description: "Subjects, senders and a short preview, at most 20 at a time." },
+  read_email: { label: "Read your Gmail", description: "One conversation at a time, long emails cut short. Attachments are not opened." },
+  draft_email: { label: "Draft emails in your Gmail", description: "Saves a draft in your Gmail. Nothing is sent." },
+  send_email: { label: "Send emails from your Gmail", description: "Always asks first, showing who it goes to and every word." },
+  reply_email: { label: "Reply from your Gmail", description: "Always asks first, showing who it goes to and every word." },
+  list_events: { label: "Read your Google Calendar" },
+  find_free_time: { label: "Find free time", description: "Your calendar, and when colleagues who share theirs are free or busy." },
+  create_event: { label: "Add events to your Google Calendar", description: "Asks first when anyone else is invited." },
+  update_event: { label: "Change your Google Calendar events", description: "Only events you organize. Asks first when anyone else is on them." },
+  cancel_event: { label: "Cancel your Google Calendar events", description: "Only events you organize. Asks first when anyone else is on them." },
+  respond_to_invite: { label: "Answer calendar invites", description: "Always asks first. The organizer sees your answer." },
 };
+
+/**
+ * The Google connector tools' sentences (docs/plans/ai-teammates-phase3.md):
+ * for now the one a tool answers before its handler is built. The rest join
+ * it as the tools are built.
+ */
+export const CONNECTOR_COPY = {
+  notYet: "This Google tool isn't ready yet.",
+} as const;
 
 /**
  * The Workspace agents drawer, opened for a slug that is not a workspace agent

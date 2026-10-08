@@ -25,10 +25,11 @@
 //
 // Pure: no React, no fetch, no prisma.
 
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import type { TeammateHue } from "./hues";
 import type { TeammateVisibility } from "./teammate-access";
 import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, TOOL_PICKER_COPY, asksFirstInLine, dontAskInLine } from "./teammate-copy";
-import { GIVABLE_TOOLS, TOOL_MODULE, type ToolSetting } from "./teammate-views";
+import { GIVABLE_TOOLS, TOOL_MODULE, givableTools, type ToolSetting } from "./teammate-views";
 import type { TemplateCard, TemplateKey } from "./templates";
 import { ALWAYS_ASK, BASE_RISK, TARGET_SCOPED_ALWAYS, type ApprovalChoice, type ToolRisk } from "./tool-policy";
 import type { ToolName } from "./tool-names";
@@ -149,7 +150,8 @@ export function draftToolGroups(
 ): ToolPickerGroup[] {
   const ticked = new Set<string>(d.tools);
   return grouped(
-    GIVABLE_TOOLS.map((name): ToolPickerRow => {
+    // No Google row until the workspace's products are read (docs/plans/ai-teammates-phase3.md step 5).
+    givableTools(NO_PRODUCTS).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);

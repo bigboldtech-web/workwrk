@@ -41,6 +41,7 @@ import {
   ACTION_VERB,
   APPROVAL_CARD,
   CHANGE_LABELS,
+  CONNECTOR_COPY,
   CONTRACT_CHANGE_LABELS,
   CONTRACT_NOT_FOUND,
   CONTRACT_VALUE_WORDS,
@@ -626,6 +627,18 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
         preview: { title: titled(tool, contract.title), ...(lines.length > 0 ? { lines } : {}), target: { label: short(contract.title) } },
       };
     }
+
+    // The Google writes (docs/plans/ai-teammates-phase3.md): no card is made
+    // for one before its own preparation is built, so nothing the model wrote
+    // is ever proposed unchecked. Their reads never reach here.
+    case "draft_email":
+    case "send_email":
+    case "reply_email":
+    case "create_event":
+    case "update_event":
+    case "cancel_event":
+    case "respond_to_invite":
+      return { error: CONNECTOR_COPY.notYet };
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

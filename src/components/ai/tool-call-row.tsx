@@ -8,7 +8,7 @@
 // task" in the danger text with the server's own message on a second line.
 //
 // The words come from src/lib/agents/tool-verbs.ts, which is typed against
-// every tool (the 28 Ask AI tools and the 10 AI teammate tools), so a call
+// every tool (the 28 Ask AI tools and the 22 AI teammate tools), so a call
 // never prints its code name or its raw input. An AI teammate's call that
 // waits for the person's approval shows a clock, and a practice call an
 // empty circle: neither ran, so neither reads as done or links anywhere.
@@ -17,7 +17,7 @@ import Link from "next/link";
 import {
   CheckSquare, FileText, ClipboardList, Table2, ScrollText, Trophy, Target, Gauge,
   CalendarClock, FileSignature, Timer, UserPlus, Heart, LayoutGrid, NotebookPen, Users, Search,
-  MessageSquare, MessageCircle, Brain, Inbox, Clock, Circle,
+  MessageSquare, MessageCircle, Brain, Inbox, Clock, Circle, Mail, CalendarDays,
   type LucideIcon,
 } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
@@ -49,6 +49,9 @@ const CONCEPT_ICON: Record<ToolConcept, LucideIcon> = {
   inbox: Inbox,
   // One teammate asking another (ask_teammate, Phase 2).
   teammate: Users,
+  // The person's own Gmail and Google Calendar (Phase 3).
+  email: Mail,
+  calendar: CalendarDays,
 };
 
 /** A teammate's call that did not run: waiting for approval, or a practice run. */
