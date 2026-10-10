@@ -3,24 +3,74 @@
 // Calendar. teammate-tools.ts spreads them into TEAMMATE_TOOLS, and so into
 // the registry (tools.ts REGISTRY), beside the other teammate tools.
 //
-// NOT OFFERED UNTIL THEY WORK. A teammate is given a connector tool only for a
-// product its `connectors` hold (teammate-tools.ts teammateToolNames), and
-// every caller passes NO_PRODUCTS until the workspace switch is read. Each
-// handler refuses without ctx.teammate, as every teammate tool does, and
-// otherwise answers CONNECTOR_COPY.notYet until its Google call is built.
+// OFFERED ONLY WHERE THEY MAY RUN. A teammate is given a connector tool only
+// for a product its `connectors` hold (teammate-tools.ts teammateToolNames:
+// the workspace's switch within what this deployment offers), only in a turn
+// whose answer only the person reads (tool-policy.ts toolsForTrigger), and
+// only while the person's own connection and allow say so (engine.ts
+// prepareTurn). The calendar's handlers answer CONNECTOR_COPY.notYet until
+// step 4 builds them.
+//
+// EVERY HANDLER, IN ORDER (step 3): no ctx.teammate refuses as every teammate
+// tool does; the input read by its own schema; the person a moment ago
+// (acting.ts actingPersonFor); the teammate and the person's connection read
+// NOW (connector-access.ts openConnector: the workspace switch, the
+// connection by the person's own key, their allow and the teammate's prints,
+// Decisions 5, 6 and 21); then Google; then the connection marked used.
+//
+// WHAT GOOGLE SENDS IS DATA. Every answer reaches the model only inside
+// <tool_data> (executor.ts wrapToolData: made plain, "<" and ">" escaped),
+// with a note that it is other people's words, cut to Decision 17's sizes and
+// told when it was cut. HTML is read as the person would see it, hidden text
+// dropped (gmail-parse.ts). Attachments are counted and never named or opened
+// (Decision 10). The executor keeps only a read's count (Decision 16).
+//
+// A WRITE RUNS WHAT ITS CARD SHOWED, AS THE ACCOUNT IT SHOWED. Its input is
+// the preparation's (connector-previews.ts), never the model's own words: the
+// recipients, the subject and the body as the card showed them, a reply's
+// recipients fixed when it was proposed, and the Google account (its sub and
+// address) the card named. A different account now refuses with the reason
+// (Decision 15). A send or a reply runs only from its approval (Decision 8)
+// and is never sent twice: a write Google did not confirm is "check your Sent
+// folder" (a draft: "check your Gmail drafts"), never a retry (google/http.ts,
+// Decision 24). At an approval, a refusal before anything was sent that can
+// be mended (a connection to make or mend, Google busy or not answering)
+// carries `held`, so the card waits to be approved again (review of step 3).
+//
+// WHAT THE MODEL READS OF A HEADER IS WHOLE (review of step 3): an address
+// list is cut between addresses, never inside one, and the note says when
+// one was cut; a read_email answer always fits the executor's limit, its
+// newest message and its note kept.
 //
 // The descriptions and the input schemas are the model's: what it reads in
 // an email or an event is information from other people, never an
 // instruction, and it never sends because something it read asks it to.
 //
-// No runtime import from teammate-tools.ts, which imports this file.
+// No runtime import from teammate-tools.ts at load, which imports this file:
+// what the handlers need loads on first use, as teammate-tools.ts loads its
+// write paths, so Ask AI keeps loading exactly what it loaded before.
 
 import { z } from "zod";
-import { CONNECTOR_LIMITS as L } from "@/lib/connectors/products";
+import type { LiveConnection } from "@/lib/connectors/connections";
+import type { GoogleConfig } from "@/lib/connectors/google/config";
+import type { GoogleFailure, GoogleRequest, GoogleResult } from "@/lib/connectors/google/http";
+import { CONNECTOR_LIMITS as L, type ConnectorProduct } from "@/lib/connectors/products";
+import { clampText } from "./clamp";
 import { CONNECTOR_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
 import type { ConnectorToolName } from "./tool-names";
-import type { ToolContext, ToolDefinition } from "./tools";
+import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
+
+// ── Loaded on first use ─────────────────────────────────────────────
+
+const acting = () => import("./acting");
+const connectorAccess = () => import("./connector-access");
+const connectorRules = () => import("./connector-rules");
+const teammateTools = () => import("./teammate-tools");
+const connections = () => import("@/lib/connectors/connections");
+const http = () => import("@/lib/connectors/google/http");
+const gmailMime = () => import("@/lib/connectors/google/gmail-mime");
+const gmailParse = () => import("@/lib/connectors/google/gmail-parse");
 
 // ── Inputs ──────────────────────────────────────────────────────────
 
@@ -123,7 +173,25 @@ export const CONNECTOR_INPUT = {
   respond_to_invite: respondToInviteInput,
 } as const satisfies Record<ConnectorToolName, z.ZodType>;
 
-// ── The handlers, until each Google call is built ───────────────────
+/**
+ * The Google account a write's card named (connector-previews.ts): its
+ * OpenID sub and its address. The model's schema has no such field, so only a
+ * preparation ever sets it (executor.ts checkToolInput drops what a schema
+ * does not declare).
+ */
+const accountInput = z.object({ sub: z.string().min(1).max(255), email: z.string().max(254) });
+
+/** What a reply runs with: the recipients, subject and headers fixed when it was proposed (Decision 15). */
+const replyStoredInput = z.object({
+  threadId: z.string().trim().min(1).max(200),
+  to: z.array(z.string()).min(1).max(L.recipientsMax),
+  cc: z.array(z.string()).max(L.recipientsMax),
+  subject: z.string().max(L.subjectMax),
+  inReplyTo: z.string().max(2000).nullable(),
+  references: z.string().max(20_000).nullable(),
+});
+
+// ── The calendar's handlers, until step 4 builds them ───────────────
 
 /**
  * Ask AI and the legacy agent loops never set ctx.teammate, so they are
@@ -134,7 +202,427 @@ async function notReady(ctx: ToolContext): Promise<Refusal> {
   return ctx.teammate ? { error: CONNECTOR_COPY.notYet } : { error: ERR.teammateOnly };
 }
 
+// ── What every Gmail handler shares ─────────────────────────────────
+
+function refused(error: string): Refusal {
+  return { error };
+}
+
+function isRefused(v: unknown): v is Refusal {
+  return !!v && typeof v === "object" && typeof (v as { error?: unknown }).error === "string";
+}
+
+function rec(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/** zod's complaint as the other teammate tools word it (teammate-tools.ts badInput). */
+async function badInputOf(error: z.ZodError): Promise<Refusal> {
+  return (await teammateTools()).badInput(error);
+}
+
+/** One call's way in: the person, the teammate and the person's own connection, read now (see the file header). */
+interface Opened {
+  agentId: string;
+  connection: LiveConnection;
+  cfg: GoogleConfig;
+}
+
+/**
+ * One call's way in. At an approval, a refusal that leaves the card able to
+ * wait (a connection to make or mend) says so in `held`, as the preparation's
+ * does (connector-previews.ts): nothing was sent, so the card goes back to
+ * waiting rather than failing (review of step 3).
+ */
+async function openFor(ctx: ToolContext, t: TeammateToolContext, product: ConnectorProduct): Promise<Opened | Refusal> {
+  const person = await (await acting()).actingPersonFor(ctx);
+  if (!person) return refused(ERR.personCant);
+  const approval = t.trigger === "APPROVAL";
+  const opened = await (await connectorAccess()).openConnector({ person, agentId: t.agentId, product, forApproval: approval });
+  if (!opened.ok) {
+    const held = approval ? (await connectorRules()).heldForRefusal(opened.reason) : null;
+    return held ? { error: opened.error, held } : refused(opened.error);
+  }
+  return { agentId: t.agentId, connection: opened.connection, cfg: opened.cfg };
+}
+
+async function call<T>(o: Opened, req: GoogleRequest): Promise<GoogleResult<T>> {
+  return (await http()).googleCall<T>(o.connection, o.cfg, req);
+}
+
+/** When the connection was last used, and by which teammate (one write a minute at most); a failure there never fails the call. */
+async function touch(o: Opened): Promise<void> {
+  await (await connections()).touchUsed(o.connection.id, o.agentId).catch(() => undefined);
+}
+
+/**
+ * A failed Google call in the person's words (connector-rules.ts
+ * googleFailureSentence), the tool's own sentence. At an approval, a failure
+ * before anything was sent carries `held`, so the card waits to be approved
+ * again (review of step 3).
+ */
+async function failed(r: { failure: GoogleFailure; retryAfter?: number }, notFound: string, tool: ConnectorToolName, t: TeammateToolContext): Promise<Refusal> {
+  const rules = await connectorRules();
+  const error = rules.googleFailureSentence(r, { product: "gmail", notFound, tool });
+  const held = t.trigger === "APPROVAL" ? rules.heldForFailure(r.failure) : null;
+  return held ? { error, held } : refused(error);
+}
+
+/** A Gmail address under the person's own mailbox, with its query. */
+function gmailUrl(cfg: GoogleConfig, path: string, params: Array<[string, string]> = []): string {
+  const q = new URLSearchParams(params).toString();
+  return `${cfg.gmailBase}/users/me/${path}${q ? `?${q}` : ""}`;
+}
+
+/**
+ * The account a write's card named, compared with the connection now: a
+ * write prepared for one Google account never runs as another (Decision 15).
+ */
+function accountRefusal(raw: Record<string, unknown>, connection: LiveConnection): Refusal | null {
+  const account = accountInput.safeParse(raw.account);
+  if (!account.success) return refused(CONNECTOR_COPY.accountUnknown);
+  if (account.data.sub !== connection.accountSub) return refused(CONNECTOR_COPY.accountChanged(account.data.email, connection.accountEmail));
+  return null;
+}
+
+/** The message as Gmail's `raw` takes it, or null when an address is not one plain address (never built, never guessed at). */
+async function rawMessage(m: { to: string[]; cc: string[]; subject: string; body: string; inReplyTo?: string | null; references?: string | null }): Promise<string | null> {
+  const { buildMime, rawOf } = await gmailMime();
+  try {
+    return rawOf(buildMime(m));
+  } catch {
+    return null;
+  }
+}
+
+/** A header as the model reads it: encoded words read back, one line, at most `max`. */
+async function headerLine(payload: unknown, name: string, max: number): Promise<string> {
+  const [{ headerOf }, { decodeHeaderWords, headerSafe }] = await Promise.all([gmailParse(), gmailMime()]);
+  return clampText(headerSafe(decodeHeaderWords(headerOf(payload, name) ?? "")), max).trim();
+}
+
+/** The most characters one address header takes (Decision 17), and the most addresses it lists (as many as an email may go to). */
+const ADDRESS_LINE_MAX = 300;
+const ADDRESSES_SHOWN = L.recipientsMax;
+/** The longest name shown beside an address. */
+const ADDRESS_NAME_MAX = 60;
+
+/**
+ * A From, To or Cc header as the model reads it (review of step 3): whole
+ * addresses only, each "Name <address>" with a long name cut short, never an
+ * address cut in two. A cut inside the last address could leave another real
+ * domain (a ".com" cut to ".co"), and nothing said the list was short, so
+ * "email everyone on that thread" could go to a lookalike. Past 20
+ * addresses or 300 characters the line ends with how many more there are,
+ * and `cut` says so, for the answer's note. The first address is always
+ * shown whole. A header with no plain address in it reads as its text, cut
+ * to the same size.
+ */
+async function addressLine(payload: unknown, name: string): Promise<{ text: string; cut: boolean }> {
+  const [{ headerOf }, { decodeHeaderWords, headerSafe, parseAddressList }] = await Promise.all([gmailParse(), gmailMime()]);
+  const raw = headerOf(payload, name) ?? "";
+  const list = parseAddressList(raw);
+  if (list.length === 0) {
+    const text = headerSafe(decodeHeaderWords(raw)).trim();
+    return { text: clampText(text, ADDRESS_LINE_MAX).trim(), cut: text.length > ADDRESS_LINE_MAX };
+  }
+  const shown: string[] = [];
+  let size = 0;
+  for (const a of list) {
+    const who = a.name ? clampText(headerSafe(a.name), ADDRESS_NAME_MAX).trim() : "";
+    const one = who ? `${who} <${a.email}>` : a.email;
+    const add = one.length + (shown.length > 0 ? 2 : 0);
+    if (shown.length > 0 && (shown.length >= ADDRESSES_SHOWN || size + add > ADDRESS_LINE_MAX)) break;
+    shown.push(one);
+    size += add;
+  }
+  const more = list.length - shown.length;
+  return more > 0 ? { text: CONNECTOR_COPY.moreAddresses(shown.join(", "), more), cut: true } : { text: shown.join(", "), cut: false };
+}
+
+/** Metadata reads sent side by side, at most this many at once. */
+const READS_AT_ONCE = 5;
+
+/** Gmail's answers to search_email's list. */
+interface MessageRef {
+  id: string;
+  threadId: string;
+}
+
+function messageRefs(v: unknown): MessageRef[] {
+  return (Array.isArray(v) ? v : [])
+    .map((m) => ({ id: str(rec(m).id), threadId: str(rec(m).threadId) }))
+    .filter((m) => m.id.length > 0 && m.id.length <= 200);
+}
+
 const addressList = (description: string) => ({ type: "array", items: { type: "string" }, description });
+
+// ── The Gmail handlers ──────────────────────────────────────────────
+
+/** The headers a search reads of each message: who, to whom, what and when. */
+const SEARCH_HEADERS: Array<[string, string]> = [
+  ["format", "metadata"],
+  ["metadataHeaders", "From"],
+  ["metadataHeaders", "To"],
+  ["metadataHeaders", "Subject"],
+  ["metadataHeaders", "Date"],
+];
+
+/** One message of a search as the model reads it, each part cut to its size (Decision 17); `cut` when an address list left any out. */
+async function searchRow(msg: unknown): Promise<{ row: Record<string, unknown>; cut: boolean }> {
+  const m = rec(msg);
+  const { htmlToText } = await gmailParse();
+  const labels = Array.isArray(m.labelIds) ? m.labelIds : [];
+  const from = await addressLine(m.payload, "From");
+  const to = await addressLine(m.payload, "To");
+  return {
+    row: {
+      messageId: str(m.id),
+      threadId: str(m.threadId),
+      from: from.text,
+      to: to.text,
+      subject: await headerLine(m.payload, "Subject", L.subjectMax),
+      date: await headerLine(m.payload, "Date", 100),
+      // Gmail's preview carries HTML entities: read as text, on one line.
+      snippet: clampText(htmlToText(str(m.snippet)).replace(/\s+/g, " ").trim(), L.snippetChars),
+      unread: labels.includes("UNREAD"),
+    },
+    cut: from.cut || to.cut,
+  };
+}
+
+/** An answer's note: whose words these are, and each way it was cut (Decision 17). */
+function noteOf(parts: { more?: boolean; threadCut?: boolean; addressesCut?: boolean }): string {
+  return [
+    CONNECTOR_COPY.emailNote,
+    ...(parts.more ? [CONNECTOR_COPY.moreEmails] : []),
+    ...(parts.threadCut ? [CONNECTOR_COPY.threadCut] : []),
+    ...(parts.addressesCut ? [CONNECTOR_COPY.addressesCut] : []),
+  ].join(" ");
+}
+
+/**
+ * search_email: Gmail's own search, newest first, at most 20, each message's
+ * sender, recipients, subject, date and a 200-character preview. A message
+ * gone since the search is left out. More than were asked for is said, so a
+ * short list is never read as all there is.
+ */
+async function searchEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.search_email.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const o = await openFor(ctx, t, "gmail");
+  if (isRefused(o)) return o;
+  const limit = parsed.data.limit ?? L.searchDefault;
+  const q = parsed.data.unreadOnly ? `${parsed.data.query} is:unread` : parsed.data.query;
+  const list = await call<unknown>(o, { method: "GET", url: gmailUrl(o.cfg, "messages", [["q", q], ["maxResults", String(limit)]]), write: false });
+  if (!list.ok) return failed(list, CONNECTOR_COPY.emailNotFound, "search_email", t);
+  const refs = messageRefs(rec(list.data).messages).slice(0, limit);
+  const emails: Array<Record<string, unknown>> = [];
+  let addressesCut = false;
+  for (let i = 0; i < refs.length; i += READS_AT_ONCE) {
+    const batch = await Promise.all(
+      refs.slice(i, i + READS_AT_ONCE).map((m) => call<unknown>(o, { method: "GET", url: gmailUrl(o.cfg, `messages/${encodeURIComponent(m.id)}`, SEARCH_HEADERS), write: false })),
+    );
+    for (const r of batch) {
+      if (!r.ok) {
+        if (r.failure === "not_found") continue;
+        return failed(r, CONNECTOR_COPY.emailNotFound, "search_email", t);
+      }
+      const one = await searchRow(r.data);
+      emails.push(one.row);
+      addressesCut ||= one.cut;
+    }
+  }
+  await touch(o);
+  const more = typeof rec(list.data).nextPageToken === "string";
+  return {
+    count: emails.length,
+    emails,
+    ...(more || addressesCut ? { partial: true } : {}),
+    note: noteOf({ more, addressesCut }),
+  };
+}
+
+/**
+ * The most characters a read_email answer takes as JSON, its note included:
+ * under the executor's TOOL_DATA_MAX (30,000), past which wrapToolData keeps
+ * only the answer's first part, so the newest messages and the note were what
+ * a long thread lost (review of step 3). executor.test.ts holds the two apart.
+ */
+export const READ_ANSWER_MAX = 29_000;
+
+/**
+ * read_email: one conversation, by its threadId or one message's id. The
+ * newest ten messages, oldest first, each body at most 4,000 characters as
+ * the person would read it, and 20,000 in all: once the room runs out, older
+ * bodies read as cut. Attachments are counted, never named (Decision 10).
+ *
+ * THE WHOLE ANSWER FITS (review of step 3). The 20,000 counts bodies only;
+ * each message also carries its senders, recipients and date, and a body's
+ * quotes and line breaks grow when written as JSON. Past READ_ANSWER_MAX the
+ * oldest bodies give way first, then the oldest messages, and the newest
+ * message's body last of all, so the newest and the note always reach the
+ * model, and the note says what was cut.
+ */
+async function readEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.read_email.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const o = await openFor(ctx, t, "gmail");
+  if (isRefused(o)) return o;
+  let threadId = parsed.data.threadId ?? "";
+  if (!threadId) {
+    const m = await call<unknown>(o, { method: "GET", url: gmailUrl(o.cfg, `messages/${encodeURIComponent(parsed.data.messageId ?? "")}`, [["format", "minimal"]]), write: false });
+    if (!m.ok) return failed(m, CONNECTOR_COPY.emailNotFound, "read_email", t);
+    threadId = str(rec(m.data).threadId);
+    if (!threadId) return refused(CONNECTOR_COPY.emailNotFound);
+  }
+  const thread = await call<unknown>(o, { method: "GET", url: gmailUrl(o.cfg, `threads/${encodeURIComponent(threadId)}`, [["format", "full"]]), write: false });
+  if (!thread.ok) return failed(thread, CONNECTOR_COPY.threadNotFound, "read_email", t);
+  const { bodyText } = await gmailParse();
+  const list = rec(thread.data).messages;
+  const all = (Array.isArray(list) ? list : []).map(rec);
+  // Gmail lists a conversation oldest first: the newest ten are its end.
+  const kept = all.slice(-L.messagesPerThread);
+  let earlier = all.length - kept.length;
+  const read = kept.map((m) => bodyText(m.payload, L.bodyChars));
+  const bodies: Array<{ body: string; cut: boolean }> = [];
+  let room = L.threadChars;
+  let fits = true;
+  for (let i = read.length - 1; i >= 0; i -= 1) {
+    if (fits && read[i].text.length <= room) {
+      room -= read[i].text.length;
+      bodies[i] = { body: read[i].text, cut: read[i].cut };
+    } else {
+      fits = false;
+      bodies[i] = { body: CONNECTOR_COPY.bodyCutMark, cut: true };
+    }
+  }
+  let messages: Array<Record<string, unknown>> = [];
+  let addressesCut = false;
+  for (let i = 0; i < kept.length; i += 1) {
+    const m = kept[i];
+    const [from, to, cc] = [await addressLine(m.payload, "From"), await addressLine(m.payload, "To"), await addressLine(m.payload, "Cc")];
+    addressesCut ||= from.cut || to.cut || cc.cut;
+    messages.push({
+      messageId: str(m.id),
+      from: from.text,
+      to: to.text,
+      cc: cc.text,
+      date: await headerLine(m.payload, "Date", 100),
+      body: bodies[i].body,
+      bodyCut: bodies[i].cut,
+      attachments: read[i].attachments,
+    });
+  }
+  const subject = await headerLine(all[0]?.payload, "Subject", L.subjectMax);
+  const answer = () => {
+    const threadCut = earlier > 0 || messages.some((m) => m.bodyCut === true);
+    const cut = threadCut || addressesCut;
+    return { threadId, subject, count: all.length, messages, earlier, ...(cut ? { partial: true } : {}), note: noteOf({ threadCut, addressesCut }) };
+  };
+  const cutBody = (i: number) => {
+    messages[i] = { ...messages[i], body: CONNECTOR_COPY.bodyCutMark, bodyCut: true };
+  };
+  while (JSON.stringify(answer()).length > READ_ANSWER_MAX) {
+    const oldest = messages.findIndex((m) => m.body !== CONNECTOR_COPY.bodyCutMark);
+    if (oldest >= 0 && oldest < messages.length - 1) cutBody(oldest);
+    else if (messages.length > 1) {
+      messages = messages.slice(1);
+      earlier += 1;
+    } else if (oldest >= 0) cutBody(oldest);
+    else {
+      // Not even one message's headers fit: none is shown, and the note says so.
+      earlier += messages.length;
+      messages = [];
+      break;
+    }
+  }
+  await touch(o);
+  return answer();
+}
+
+/**
+ * draft_email: a draft in the person's Gmail, nothing sent (Decision 7).
+ * Runs the preparation's input, as the account it named.
+ */
+async function draftEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.draft_email.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const o = await openFor(ctx, t, "gmail");
+  if (isRefused(o)) return o;
+  const wrong = accountRefusal(raw, o.connection);
+  if (wrong) return wrong;
+  const message = await rawMessage({ to: parsed.data.to, cc: parsed.data.cc ?? [], subject: parsed.data.subject, body: parsed.data.body });
+  if (!message) return refused(ERR.notAllowed);
+  const threadId = parsed.data.threadId ?? null;
+  const r = await call<unknown>(o, { method: "POST", url: gmailUrl(o.cfg, "drafts"), body: { message: { raw: message, ...(threadId ? { threadId } : {}) } }, write: true });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.threadNotFound, "draft_email", t);
+  await touch(o);
+  const d = rec(r.data);
+  return { ok: true, draft: { id: str(d.id) || null }, email: { threadId: str(rec(d.message).threadId) || threadId } };
+}
+
+/** A send or a reply runs only from the person's approval of its card (Decision 8): never from a rule, never unasked. */
+function fromApproval(t: TeammateToolContext): boolean {
+  return t.trigger === "APPROVAL" && typeof t.actionId === "string" && t.actionId.length > 0;
+}
+
+/** send_email: the approved card's email, sent once from the account it named. */
+async function sendEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.send_email.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  if (!fromApproval(t)) return refused(CONNECTOR_COPY.needsApproval);
+  const o = await openFor(ctx, t, "gmail");
+  if (isRefused(o)) return o;
+  const wrong = accountRefusal(raw, o.connection);
+  if (wrong) return wrong;
+  const message = await rawMessage({ to: parsed.data.to, cc: parsed.data.cc ?? [], subject: parsed.data.subject, body: parsed.data.body });
+  if (!message) return refused(ERR.notAllowed);
+  const r = await call<unknown>(o, { method: "POST", url: gmailUrl(o.cfg, "messages/send"), body: { raw: message }, write: true });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.emailNotFound, "send_email", t);
+  await touch(o);
+  const d = rec(r.data);
+  return { ok: true, email: { id: str(d.id) || null, threadId: str(d.threadId) || null } };
+}
+
+/**
+ * reply_email: the approved reply, in its conversation, to the recipients
+ * fixed when it was proposed (never worked out again here: someone who joined
+ * the thread since is not added, Decision 15), sent once.
+ */
+async function replyEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.reply_email.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  if (!fromApproval(t)) return refused(CONNECTOR_COPY.needsApproval);
+  const stored = replyStoredInput.safeParse(raw);
+  if (!stored.success) return refused(ERR.notAllowed);
+  const o = await openFor(ctx, t, "gmail");
+  if (isRefused(o)) return o;
+  const wrong = accountRefusal(raw, o.connection);
+  if (wrong) return wrong;
+  const s = stored.data;
+  const message = await rawMessage({ to: s.to, cc: s.cc, subject: s.subject, body: parsed.data.body, inReplyTo: s.inReplyTo, references: s.references });
+  if (!message) return refused(ERR.notAllowed);
+  const r = await call<unknown>(o, { method: "POST", url: gmailUrl(o.cfg, "messages/send"), body: { raw: message, threadId: s.threadId }, write: true });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.threadNotFound, "reply_email", t);
+  await touch(o);
+  const d = rec(r.data);
+  return { ok: true, email: { id: str(d.id) || null, threadId: str(d.threadId) || s.threadId } };
+}
 
 // ── Gmail ───────────────────────────────────────────────────────────
 
@@ -151,7 +639,7 @@ const searchEmail: ToolDefinition = {
     },
     required: ["query"],
   },
-  handler: notReady,
+  handler: searchEmailRun,
 };
 
 const readEmail: ToolDefinition = {
@@ -165,7 +653,7 @@ const readEmail: ToolDefinition = {
       messageId: { type: "string", description: "Or one message's messageId, from search_email" },
     },
   },
-  handler: notReady,
+  handler: readEmailRun,
 };
 
 const draftEmail: ToolDefinition = {
@@ -183,7 +671,7 @@ const draftEmail: ToolDefinition = {
     },
     required: ["to", "subject", "body"],
   },
-  handler: notReady,
+  handler: draftEmailRun,
 };
 
 const sendEmail: ToolDefinition = {
@@ -200,7 +688,7 @@ const sendEmail: ToolDefinition = {
     },
     required: ["to", "subject", "body"],
   },
-  handler: notReady,
+  handler: sendEmailRun,
 };
 
 const replyEmail: ToolDefinition = {
@@ -217,7 +705,7 @@ const replyEmail: ToolDefinition = {
     },
     required: ["body"],
   },
-  handler: notReady,
+  handler: replyEmailRun,
 };
 
 // ── Google Calendar ─────────────────────────────────────────────────

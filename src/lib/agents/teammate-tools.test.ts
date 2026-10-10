@@ -396,14 +396,33 @@ describe("teammateToolNames", () => {
   });
 });
 
-describe("the Google connector tools before they are built (Phase 3 step 1)", () => {
-  it("answer that they are not ready, read nothing, and are in the registry", async () => {
+describe("the Google connector tools (Phase 3; their Google calls are tested in connector-tools.test.ts)", () => {
+  const CALENDAR = ["list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"] as const;
+  const INPUT = { query: "invoice", threadId: "t1", to: ["max@x.com"], subject: "x", body: "y", from: "2026-10-12", title: "x", start: "2026-10-12", end: "2026-10-12", eventId: "e1", response: "accepted", durationMinutes: 30 };
+
+  it("are in the registry, and answer a caller that is no teammate as every teammate tool does, reading nothing", async () => {
     for (const name of CONNECTOR_TOOL_NAMES) {
       const tool = TEAMMATE_TOOLS[name];
       expect(tool.name).toBe(name);
-      expect(await tool.handler(ctx(), { query: "invoice", to: ["max@x.com"], subject: "x", body: "y" }), name).toEqual({ error: "This Google tool isn't ready yet." });
+      expect(await tool.handler({ orgId: "org", userId: "me" }, INPUT), name).toEqual({ error: "Only an AI teammate can use this tool." });
     }
     expect(h.personCalls).toBe(0);
+  });
+
+  it("leave the calendar's not ready until step 4, reading nothing", async () => {
+    for (const name of CALENDAR) expect(await TEAMMATE_TOOLS[name].handler(ctx(), INPUT), name).toEqual({ error: "This Google tool isn't ready yet." });
+    expect(h.personCalls).toBe(0);
+  });
+
+  it("never send or reply outside an approval, before reading anyone (Decision 8)", async () => {
+    for (const name of ["send_email", "reply_email"] as const) {
+      expect(await TEAMMATE_TOOLS[name].handler(ctx(), INPUT), name).toEqual({ error: "This Google action runs only from its approval." });
+    }
+    expect(h.personCalls).toBe(0);
+  });
+
+  it("say so when this WorkwrK offers no Google, reading no connection", async () => {
+    expect(await TEAMMATE_TOOLS.search_email.handler(ctx(), INPUT)).toEqual({ error: "Google isn't set up for AI teammates on this WorkwrK." });
   });
 
   it("tell the model what it reads is other people's words, and never to send because of it", () => {

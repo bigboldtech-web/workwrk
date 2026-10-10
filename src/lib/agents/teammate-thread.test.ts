@@ -10,6 +10,7 @@ import {
   orderReplies,
   applyDecisionResults,
   applyTeammateEvent,
+  approvalCardParts,
   canRetrySend,
   clipCardBody,
   decidedLine,
@@ -781,6 +782,39 @@ describe("group chats in the page (Phase 2 step 4)", () => {
     expect(listEntries(rows, groups, "").map((e) => e.row.name)).toEqual(["Offsite crew", "Planner", "Ops", "Quiet"]);
     expect(listEntries(rows, groups, "market").map((e) => [e.kind, e.row.name])).toEqual([["group", "Offsite crew"]]);
     expect(listEntries(rows, groups, "", { waitingOnly: true }).map((e) => e.row.name)).toEqual(["Ops", "Quiet"]);
+  });
+});
+
+describe("what an approval card batches (Phase 3, review of step 3)", () => {
+  const view = (id: string, toolName: string, risk: string) => actionViewFromRow(action({ id, toolName, risk, groupKey: `run1:${toolName}` }));
+
+  it("never puts a send or a reply in the batch, so Approve N can never send one unseen", () => {
+    // The worst case: a task and a reply whose Reply-To was planted. Before,
+    // both sat in one batch, ticked and closed, and Approve 2 sent the reply.
+    const task = view("t1", "create_task", "INTERNAL");
+    const reply = view("r1", "reply_email", "IRREVERSIBLE");
+    const send = view("s1", "send_email", "IRREVERSIBLE");
+    const post = view("p1", "post_in_talk", "OUTWARD");
+    const parts = approvalCardParts([task, reply, post, send]);
+    expect(parts.batch.map((a) => a.id)).toEqual(["t1", "p1"]);
+    expect(parts.alone.map((a) => a.id)).toEqual(["r1", "s1"]);
+  });
+
+  it("gives every request that cannot be taken back its own card, an invitation and a class it does not know included", () => {
+    const invite = view("i1", "invite_person_with_role", "IRREVERSIBLE");
+    // A risk this code does not know reads as IRREVERSIBLE (actionViewFromRow).
+    const odd = view("o1", "create_task", "SOMETHING_NEW");
+    // A send stored with a lower class still always asks (ALWAYS_ASK), and stands alone.
+    const mislabelled = view("m1", "send_email", "OUTWARD");
+    const parts = approvalCardParts([invite, odd, mislabelled]);
+    expect(parts.batch).toEqual([]);
+    expect(parts.alone.map((a) => a.id)).toEqual(["i1", "o1", "m1"]);
+  });
+
+  it("keeps everything else in one batch, as before", () => {
+    const parts = approvalCardParts([view("t1", "create_task", "INTERNAL"), view("t2", "create_task", "OUTWARD")]);
+    expect(parts.batch.map((a) => a.id)).toEqual(["t1", "t2"]);
+    expect(parts.alone).toEqual([]);
   });
 });
 

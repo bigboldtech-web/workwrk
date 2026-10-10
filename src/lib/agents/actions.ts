@@ -45,22 +45,42 @@
 // AI runs a tool (the person's own context, no teammate). They never offer
 // "don't ask again" and never make a chat carry on.
 //
+// A GOOGLE CARD (docs/plans/ai-teammates-phase3.md step 3) meets the person's
+// Google as it is now, before anything is prepared: its product turned off in
+// the workspace, or this deployment no longer offering Google, CANCELS it
+// with that reason (Decision 21); a connection that is gone, needs
+// reconnecting or lacks the product leaves it PENDING (connection_needed),
+// so the person can reconnect and approve it; an allow the person withdrew
+// CANCELS it. Its preparation then checks the Google account the card named
+// (Decision 15), and a send or a reply gets a fresh access token before the
+// swap. Anything found before Google was sent the email, by the preparation,
+// a refresh or the handler itself (a grant revoked, Google busy or not
+// answering), leaves it PENDING too (connection_needed or retry_later), with
+// a sentence that says it can be approved again; only a write whose outcome
+// is unknown, or that Google refused as written, ends it (review of step 3).
+// The person is read again just before each Google card's swap.
+//
 // Server-only: imports prisma.
 
 import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
-import { NO_PRODUCTS } from "@/lib/connectors/products";
+import { connectorAccess, workspaceConnectorProducts } from "@/lib/connectors/connections";
+import { googleConfig } from "@/lib/connectors/google/config";
+import { productOfTool, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson, type ActingResult } from "./acting";
 import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
+import { connectorAgentFrom } from "./connector-access";
+import { connectorRefusalSentence, productWord } from "./connector-rules";
 import { prepareCall, type Prepared } from "./previews";
 import { askAiAgent } from "./session-guard";
 import { canUseAgent } from "./teammate-access";
 import {
   ACTION_ERRORS,
   ASK_AI_CARDS,
+  CONNECTOR_COPY,
   cancelledRemovedLine,
   cancelledToolOffLine,
   didntWorkLine,
@@ -175,7 +195,22 @@ const DECIDE_SELECT = {
   routineId: true,
   input: true,
   agent: {
-    select: { id: true, slug: true, name: true, status: true, organizationId: true, visibility: true, ownerId: true, toolNames: true, productSlug: true, approvalRules: true },
+    // description, systemPrompt and modelOverride with the rest: what a Google card's teammate is (connector-access.ts connectorAgentFrom).
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      status: true,
+      organizationId: true,
+      visibility: true,
+      ownerId: true,
+      toolNames: true,
+      productSlug: true,
+      approvalRules: true,
+      description: true,
+      systemPrompt: true,
+      modelOverride: true,
+    },
   },
 } as const;
 
@@ -354,7 +389,13 @@ export interface DecisionInput {
   edit?: { text: string };
 }
 
-export type DecisionCode = "already_decided" | "expired" | "agent_paused" | "agent_removed" | "tool_off" | "person_cannot" | "failed";
+/**
+ * connection_needed: a Google card whose person must connect or reconnect
+ * Google first; retry_later: Google, or WorkwrK's own link to it, did not
+ * answer before anything was sent. Either way the card stays PENDING and can
+ * be approved again (Phase 3; review of step 3).
+ */
+export type DecisionCode = "already_decided" | "expired" | "agent_paused" | "agent_removed" | "tool_off" | "person_cannot" | "connection_needed" | "retry_later" | "failed";
 
 export interface DecisionResult {
   id: string;
@@ -368,6 +409,8 @@ export interface DecisionResult {
 interface DecideCache {
   person: ActingResult | null;
   modules: { tablesOn: boolean; talkOn: boolean } | null;
+  /** The workspace's Google switch within what this deployment offers, read once per decision request. */
+  connectors: ProductSet | null;
   tools: Map<string, ReadonlySet<ToolName>>;
   /** Ask AI's tools per chat (its product scope), for its own requests. */
   askAiTools: Map<string, ReadonlySet<ToolName>>;
@@ -384,7 +427,7 @@ export async function decideActions(
   decisions: readonly DecisionInput[],
   opts: { always?: boolean } = {},
 ): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null; chat: ResumeChat | null }> {
-  const cache: DecideCache = { person: null, modules: null, tools: new Map(), askAiTools: new Map() };
+  const cache: DecideCache = { person: null, modules: null, connectors: null, tools: new Map(), askAiTools: new Map() };
   const results: DecisionResult[] = [];
   const touched: Array<[string, string | null]> = [];
   let firstSlug: string | null = null;
@@ -491,12 +534,18 @@ async function modulesOf(organizationId: string, cache: DecideCache): Promise<{ 
   return cache.modules;
 }
 
-/** The tools this teammate may use now (teammateToolNames, with this workspace's modules). */
+/** This workspace's Google products (the switch within what this deployment offers), read once per decision request. */
+async function connectorsOf(organizationId: string, cache: DecideCache): Promise<ProductSet> {
+  cache.connectors ??= await workspaceConnectorProducts(organizationId);
+  return cache.connectors;
+}
+
+/** The tools this teammate may use now (teammateToolNames, with this workspace's modules and Google products). */
 async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
   const known = cache.tools.get(agent.id);
   if (known) return known;
-  // No Google tool is offered yet (docs/plans/ai-teammates-phase3.md step 1): a card for one is cancelled as tool_off.
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...(await modulesOf(agent.organizationId, cache)), connectors: NO_PRODUCTS }));
+  const [modules, connectors] = await Promise.all([modulesOf(agent.organizationId, cache), connectorsOf(agent.organizationId, cache)]);
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors }));
   cache.tools.set(agent.id, tools);
   return tools;
 }
@@ -540,6 +589,13 @@ async function approve(
   const agent = row.agent;
   if (agent && (agent.status === "ARCHIVED" || !canUseAgent(agent, viewer))) return cancel(row, viewer.userId, "agent_removed", cancelledRemovedLine(agent.name), now);
   if (agent && agent.status === "DISABLED") return { id: row.id, status: "PENDING", code: "agent_paused", error: pausedComposer(agent.name) };
+  // A Google card whose product is off now never runs, and says so, before
+  // the tool set (which drops it too) could only say the tool is gone
+  // (Decision 21).
+  const product = agent ? productOfTool(row.toolName) : null;
+  if (agent && product && !(await connectorsOf(agent.organizationId, cache))[product]) {
+    return cancel(row, viewer.userId, "tool_off", googleConfig() ? CONNECTOR_COPY.cancelledProductOff(productWord(product)) : CONNECTOR_COPY.cancelledNotConfigured, now);
+  }
   const tools = agent ? await toolsOf(agent, cache) : await askAiToolsOf(row, viewer, cache);
   const tool = row.toolName;
   if (!isToolName(tool) || !tools.has(tool)) return cancel(row, viewer.userId, "tool_off", agent ? cancelledToolOffLine(agent.name) : ASK_AI_CARDS.toolOff, now);
@@ -547,6 +603,22 @@ async function approve(
   const acting = (cache.person ??= await resolveActingPerson(viewer.organizationId, viewer.userId));
   if (!acting.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: agent ? ACTION_ERRORS.personCannot : ASK_AI_CARDS.personCannot };
   const person = acting.person;
+
+  if (agent && product) {
+    // The person's own Google now, by their own key (Decision 5). The card
+    // itself is what they approve, so the teammate's prints are not compared;
+    // whether they still let this teammate use it is.
+    const access = await connectorAccess({ person, agent: connectorAgentFrom(agent), product, forApproval: true });
+    if (!access.ok) {
+      if (access.reason === "not_allowed") return cancel(row, viewer.userId, "tool_off", CONNECTOR_COPY.cancelledNotAllowed(agent.name, productWord(product)), now);
+      if (access.reason === "workspace_off" || access.reason === "not_configured") {
+        return cancel(row, viewer.userId, "tool_off", access.reason === "workspace_off" ? CONNECTOR_COPY.cancelledProductOff(productWord(product)) : CONNECTOR_COPY.cancelledNotConfigured, now);
+      }
+      // Not connected, to reconnect, or without the product: it waits, so
+      // the person can connect and approve it then, and the sentence says so.
+      return { id: row.id, status: "PENDING", code: "connection_needed", error: CONNECTOR_COPY.stillWaits(connectorRefusalSentence(access, agent.name, product)) };
+    }
+  }
 
   // Only the tool's one editable field changes, clamped to its length.
   const stored = record(row.input);
@@ -559,6 +631,12 @@ async function approve(
     agentRules,
   });
   if (!prepared.ok) {
+    // A Google card that met a connection to mend, or Google not answering,
+    // before anything was sent: it waits, to be approved again (review of
+    // step 3: it used to fail for good, and the person had to ask again).
+    if (agent && product && prepared.held) {
+      return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(prepared.error) };
+    }
     // The person can no longer do it (or the edit left nothing to run): it
     // fails with the reason, and the teammate is told at its next turn.
     const failed = { status: "FAILED", decidedVia: "person", decidedById: viewer.userId, decidedAt: now, error: prepared.error, ...(edited ? { editedInput: json(edited) } : {}) };
@@ -579,6 +657,17 @@ async function approve(
     prepared.preview = preview;
   }
   const risk = prepared.risk === "READ" ? row.risk : prepared.risk;
+  // A Google card runs as the person is at this moment, never as the copy
+  // this request read before its first card (review of step 3): an "Approve
+  // 50" of sends takes minutes, and someone made a Guest, deactivated or with
+  // AI turned off meanwhile sends nothing more. Read again just before the
+  // swap, as the executor reads them again for each Google call of a turn.
+  let runAs = person;
+  if (agent && product) {
+    const again = await resolveActingPerson(viewer.organizationId, viewer.userId);
+    if (!again.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: ACTION_ERRORS.personCannot };
+    runAs = again.person;
+  }
   const claimed = await swap(row.id, "PENDING", {
     status: "RUNNING",
     decidedVia: "person",
@@ -595,12 +684,29 @@ async function approve(
   const out = await runApprovedAction({
     action: { id: row.id, toolName: tool, risk, sessionId: row.sessionId, runId: row.runId, routineId: row.routineId, preview: prepared.preview },
     input: prepared.input,
-    person,
+    person: runAs,
     // Null: Ask AI's own, run in the person's own context as Ask AI runs it.
     agent: agent ? { id: agent.id, slug: agent.slug, name: agent.name } : null,
     trigger: "APPROVAL",
     decidedVia: "person",
+    holdNotSent: Boolean(agent && product),
   });
+  if (out.status === "HELD") {
+    // Nothing was sent, and what stopped it can be mended: the card goes back
+    // to waiting exactly as it was before this approval (its card, its class,
+    // no edit kept), by one swap from RUNNING (review of step 3).
+    const back = await swap(row.id, "RUNNING", {
+      status: "PENDING",
+      decidedVia: null,
+      decidedById: null,
+      decidedAt: null,
+      risk: row.risk,
+      preview: json(row.preview),
+      ...(edited ? { editedInput: row.editedInput === null ? Prisma.DbNull : json(row.editedInput) } : {}),
+    });
+    if (!back) return lost(row.id);
+    return { id: row.id, status: "PENDING", code: out.code, error: CONNECTOR_COPY.stillWaits(out.error) };
+  }
   // Ask AI's cards never offer "don't ask again", so nothing is ever stored for them.
   const always = agent !== null && opts.always === true && (await storeAlways(agent.id, viewer.userId, tool, prepared));
   if (out.status === "EXECUTED") {
@@ -751,7 +857,7 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
         LIMIT ${limit}
       )
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
-      "sessionId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;
+      "sessionId", "runId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;
   const at = (v: Date | string) => new Date(v).getTime();
   return [...rows].sort((x, y) => at(x.createdAt) - at(y.createdAt));
 }

@@ -17,6 +17,11 @@
 //   "{n} things are waiting for your approval", a checkbox per request (all
 //   ticked: unticking holds one back), Select all, each title opening its
 //   text and facts, Edit per request, then "Approve {k}" and "Deny {k}".
+// What cannot be taken back (an email, a reply, an invitation; see
+//   teammate-thread.ts standsAlone) is never in the batch (review of step 3):
+//   each is its own card beside it, its recipients, account, outside-workspace
+//   line and every word of its body always in view, so "Approve {k}" can
+//   never send one the person did not look at.
 // Edit: a textarea held to the field's length; Approve with changes, Cancel.
 // It starts from the field's own value as it will run (ActionView
 // editableValue, through editStartText), never the card's words: a title
@@ -34,6 +39,7 @@ import { Dots } from "@/components/ui/dots";
 import { clampText } from "@/lib/agents/clamp";
 import { APPROVAL_CARD, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
 import {
+  approvalCardParts,
   clipCardBody,
   decidedLine,
   editStartText,
@@ -81,9 +87,17 @@ export interface ApprovalCardProps {
 }
 
 export function ApprovalCard(props: ApprovalCardProps) {
-  if (props.actions.length === 0) return null;
-  if (props.actions.length === 1) return <SingleCard {...props} action={props.actions[0]} />;
-  return <BatchCard {...props} />;
+  // What cannot be taken back is never batched (approvalCardParts): each such
+  // request is its own card, everything else is the batch it always was.
+  const { batch, alone } = approvalCardParts(props.actions);
+  const cards = [
+    ...(batch.length === 1 ? [<SingleCard key={batch[0].id} {...props} action={batch[0]} />] : []),
+    ...(batch.length > 1 ? [<BatchCard key="batch" {...props} actions={batch} />] : []),
+    ...alone.map((a) => <SingleCard key={a.id} {...props} action={a} whole />),
+  ];
+  if (cards.length === 0) return null;
+  if (cards.length === 1) return cards[0];
+  return <div className="flex flex-col gap-2">{cards}</div>;
 }
 
 /** Send decisions and say what went wrong: the request failing, or a request that could not be decided yet. */
@@ -109,7 +123,8 @@ function approval(id: string, edit?: string): TeammateDecision {
 
 /* ─────────────────────────── one request ─────────────────────────── */
 
-function SingleCard({ action: a, agentName, deciding, onDecide }: ApprovalCardProps & { action: ActionView }) {
+/** `whole`: a request that cannot be taken back shows every word of its body, never the first lines and Show all. */
+function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }: ApprovalCardProps & { action: ActionView; whole?: boolean }) {
   const datePrefs = useDatePrefs();
   const decide = useDecide(onDecide);
   const [edit, setEdit] = useState<string | null>(null);
@@ -127,7 +142,7 @@ function SingleCard({ action: a, agentName, deciding, onDecide }: ApprovalCardPr
     <section data-action-id={a.id} aria-label={a.preview.title} className="rounded-lg border border-line bg-raised p-3">
       <StatusChip color={RUN_TONE_COLOR[chip.tone]} label={chip.label} />
       <h3 className="mt-2 break-words text-base font-medium text-ink">{a.preview.title}</h3>
-      {waiting || approving ? <Details a={a} /> : <Outcome a={a} agentName={agentName} />}
+      {waiting || approving ? <Details a={a} whole={whole} /> : <Outcome a={a} agentName={agentName} />}
       {waiting ? (
         <p className="mt-2 text-sm text-ink-2" title={formatDateTitle(a.expiresAt, datePrefs)}>
           {waitsUntil(formatDate(a.expiresAt, datePrefs, "datetime"))}
@@ -344,9 +359,10 @@ function BatchCard({ actions, agentName, deciding, onDecide }: ApprovalCardProps
 
 /* ─────────────────────────── the parts ─────────────────────────── */
 
-/** A waiting request's text and facts: the exact words in a quote block, then who sees it and the undo. */
-function Details({ a }: { a: ActionView }) {
-  const [all, setAll] = useState(false);
+/** A waiting request's text and facts: the exact words in a quote block, then who sees it and the undo. `whole`: every word, never clipped. */
+function Details({ a, whole = false }: { a: ActionView; whole?: boolean }) {
+  const [shown, setAll] = useState(false);
+  const all = shown || whole;
   const body = a.preview.body ? clipCardBody(a.preview.body) : null;
   return (
     <>

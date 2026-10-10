@@ -7,7 +7,9 @@
 //
 // Test-only: nothing in the app imports it.
 
+import { Prisma } from "@/generated/prisma";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
+import { CONNECTOR_COPY } from "./teammate-copy";
 import { BASE_RISK, alwaysKeyFor, type ApprovalRules, type ToolRisk } from "./tool-policy";
 import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName } from "./tool-names";
 
@@ -72,7 +74,10 @@ function freshAgent() {
   };
 }
 
-type Card = { ok: false; error: string } | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown> };
+/** A refusal may carry `held` (an approval that can wait, connector-rules.ts HeldCode) and `readGoogle` (the preparation read Gmail). */
+type Card =
+  | { ok: false; error: string; held?: "connection_needed" | "retry_later"; readGoogle?: true }
+  | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown>; readGoogle?: true };
 
 export const fx = {
   actions: [] as ActionRowFx[],
@@ -84,6 +89,9 @@ export const fx = {
   /** What a tool's handler answers (an Error is thrown); else { ok: true }. */
   answers: {} as Record<string, unknown>,
   person: { ok: true, person: PERSON } as { ok: true; person: typeof PERSON } | { ok: false; reason: string },
+  /** What resolveActingPerson answers next, one read at a time, before falling back to `person`; and how many reads there were. */
+  personQueue: [] as Array<{ ok: true; person: typeof PERSON } | { ok: false; reason: string }>,
+  personReads: 0,
   /** What prepareCall answers for a tool: a refusal, or the class, title, target and input of its card. */
   cards: {} as Record<string, Card | ((input: Record<string, unknown>) => Card)>,
   prepareCalls: [] as Array<{ tool: string; input: Record<string, unknown>; ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown> } }>,
@@ -94,6 +102,11 @@ export const fx = {
   runTriggers: {} as Record<string, string>,
   /** The Ask AI chat an Ask AI request's decision reads (null: gone, or not the person's). */
   chat: { productContext: null as string | null, agent: null as Record<string, unknown> | null } as { id?: string; kind?: string | null; productContext: string | null; agent: Record<string, unknown> | null } | null,
+  /** The workspace's Google products (connections.ts workspaceConnectorProducts), for the tests that mock it with connectorFake. */
+  connectors: { gmail: false, calendar: false },
+  /** What connectorAccess answers (connectorFake), and what it was asked. */
+  connectorAccess: { ok: true } as { ok: true } | { ok: false; reason: string; changed?: string[] },
+  connectorAccessCalls: [] as Array<{ product: string; forApproval?: boolean; agent: { id: string; visibility: string; ownerId: string | null } }>,
 };
 
 export function resetFixtures(): void {
@@ -105,6 +118,8 @@ export function resetFixtures(): void {
   fx.handlerCalls = [];
   fx.answers = {};
   fx.person = { ok: true, person: PERSON };
+  fx.personQueue = [];
+  fx.personReads = 0;
   fx.cards = {};
   fx.prepareCalls = [];
   fx.modules = { tablesOn: true, talkOn: true };
@@ -112,6 +127,9 @@ export function resetFixtures(): void {
   fx.sql = [];
   fx.runTriggers = {};
   fx.chat = { productContext: null, agent: null };
+  fx.connectors = { gmail: false, calendar: false };
+  fx.connectorAccess = { ok: true };
+  fx.connectorAccessCalls = [];
 }
 
 /** One request in the table, PENDING for the person unless told otherwise. */
@@ -150,13 +168,17 @@ export function seedAction(o: Partial<ActionRowFx> & { toolName: string }): Acti
 
 // ── prisma ──────────────────────────────────────────────────────────
 
-/** A where clause as the queue writes them: equality, in, not, lt, lte, gt and OR. */
+/** A where clause as the queue writes them: equality, in, not, lt, lte, gt, OR, and a JSON path's equals (a send's dedupeKey). */
 function matches(row: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === "OR") return (cond as Array<Record<string, unknown>>).some((c) => matches(row, c));
     const v = row[key];
     if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date };
+      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date; path?: string[]; equals?: unknown };
+      if (Array.isArray(c.path)) {
+        const at = c.path.reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), v);
+        return at === c.equals;
+      }
       if (c.in) return c.in.includes(v);
       // `{ not: null }`: a teammate's request, never Ask AI's own (agentId null).
       if ("not" in c) return (v ?? null) !== c.not;
@@ -191,7 +213,9 @@ export const prismaFake = {
     },
     updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       const hit = rows(a.where);
-      for (const r of hit) Object.assign(r, a.data, { updatedAt: new Date() });
+      // A JSON column set back to empty (Prisma.DbNull) reads as null, as the database answers.
+      const data = Object.fromEntries(Object.entries(a.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v]));
+      for (const r of hit) Object.assign(r, data, { updatedAt: new Date() });
       return { count: hit.length };
     },
     create: async (a: { data: Partial<ActionRowFx> & { toolName: string } }) => ({ ...seedAction({ ...a.data, id: `act${fx.actions.length + 1}`, createdAt: new Date() }) }),
@@ -254,8 +278,20 @@ export const prismaFake = {
 
 // ── The modules around the queue ────────────────────────────────────
 
+/** connections.ts's switch and access, answering fx.connectors and fx.connectorAccess (the tests that mock "@/lib/connectors/connections"). */
+export const connectorFake = {
+  workspaceConnectorProducts: async () => ({ ...fx.connectors }),
+  connectorAccess: async (a: { product: string; forApproval?: boolean; agent: { id: string; visibility: string; ownerId: string | null } }) => {
+    fx.connectorAccessCalls.push({ product: a.product, forApproval: a.forApproval, agent: { id: a.agent.id, visibility: a.agent.visibility, ownerId: a.agent.ownerId } });
+    return fx.connectorAccess;
+  },
+};
+
 export const actingFake = {
-  resolveActingPerson: async () => fx.person,
+  resolveActingPerson: async () => {
+    fx.personReads += 1;
+    return fx.personQueue.shift() ?? fx.person;
+  },
   toolCtxFor: (person: typeof PERSON, teammate: Record<string, unknown>) => ({
     orgId: person.organizationId,
     userId: person.userId,
@@ -267,10 +303,12 @@ export const actingFake = {
 /**
  * prepareCall's stand-in: the tool's own class unless a card says otherwise,
  * a Talk conversation's target key, the policy's own "don't ask again" key
- * (none where the teammate's managers set the tool to ask), and the input as
- * given unless the card names the input it resolves to.
+ * (none where the teammate's managers set the tool to ask, and none, with the
+ * line that says why, in a turn that read Google: previews.ts prepareCall's
+ * tainted rule), and the input as given unless the card names the input it
+ * resolves to.
  */
-export async function fakePrepareCall(tool: string, input: unknown, ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown> }) {
+export async function fakePrepareCall(tool: string, input: unknown, ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown>; tainted?: boolean }) {
   const raw = { ...((input ?? {}) as Record<string, unknown>) };
   fx.prepareCalls.push({ tool, input: raw, ctx });
   const set = fx.cards[tool];
@@ -283,20 +321,36 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
   const targetKey =
     o.targetKey !== undefined ? o.targetKey : tool === "post_in_talk" && typeof resolved.conversationId === "string" ? `conv:${resolved.conversationId}` : null;
   const tightened = ctx.agentRules?.[tool] === "ask";
-  const alwaysKey = tightened ? null : alwaysKeyFor(tool, risk, targetKey);
+  const alwaysKey = tightened || ctx.tainted ? null : alwaysKeyFor(tool, risk, targetKey);
   return {
     ok: true as const,
     tool,
     input: resolved,
     risk,
     targetKey,
-    preview: { title: o.title ?? `Run ${tool}`, ...(alwaysKey ? { alwaysKey, alwaysLabel: "Approve and don't ask again" } : {}) },
+    ...(o.readGoogle ? { readGoogle: true as const } : {}),
+    preview: {
+      title: o.title ?? `Run ${tool}`,
+      ...(alwaysKey ? { alwaysKey, alwaysLabel: "Approve and don't ask again" } : {}),
+      ...(ctx.tainted ? { lines: [CONNECTOR_COPY.askedAfterReading] } : {}),
+    },
   };
 }
 
-const FAKE_TOOL_PROPS: Record<string, unknown> = Object.fromEntries(
-  ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request"].map((k) => [k, { type: "string" }]),
-);
+const FAKE_TOOL_PROPS: Record<string, unknown> = {
+  ...Object.fromEntries(
+    ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request", "subject", "body", "threadId", "messageId"].map((k) => [
+      k,
+      { type: "string" },
+    ]),
+  ),
+  // The Google tools' lists, count and flags (connector-tools.ts).
+  to: { type: "array", items: { type: "string" } },
+  cc: { type: "array", items: { type: "string" } },
+  limit: { type: "integer" },
+  unreadOnly: { type: "boolean" },
+  replyAll: { type: "boolean" },
+};
 
 /** Every tool, each recording its call and answering fx.answers[tool]. */
 export function fakeTools() {
