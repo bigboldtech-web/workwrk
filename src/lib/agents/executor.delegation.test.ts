@@ -37,6 +37,17 @@ vi.mock("./budget", () => ({
     return st.claimAnswer ?? { ok: true, runId: `drun${st.claims.length}`, questionId: `dq${st.claims.length}` };
   },
   giveBackTurn: async (runId: string) => void st.givenBack.push(runId),
+  // Review round 4 of Phase 3: the run check, as the fixtures' fake answers it.
+  runStillOpen: async (_db: unknown, runId: string, personId: string) => {
+    const { fx } = await import("./test-fixtures");
+    return !fx.closedRuns.has(runId) && !fx.gonePeople.has(personId);
+  },
+  runState: async (_db: unknown, runId: string, personId: string) => {
+    const { fx } = await import("./test-fixtures");
+    return fx.closedRuns.has(runId) ? "closed" : fx.gonePeople.has(personId) ? "person_gone" : "open";
+  },
+  RUN_LOCK_TX_TIMEOUT_MS: 20_000,
+  OPEN_RUN_STATUSES: ["PENDING", "RUNNING"],
 }));
 vi.mock("./engine", () => ({
   getOrCreateTeammateSession: async (agent: { id: string }, userId: string) => ({ id: `chat:${agent.id}:${userId}`, created: false }),
@@ -172,6 +183,24 @@ describe("ask_teammate", () => {
     expect(events.map((e) => e.type)).toEqual(["event"]);
     expect(dataOf(r.modelContent)).toMatchObject({ waiting: [{ title: 'Move "Call Acme" to Backlog' }], note: DELEGATION_COPY.waitingNote(PERSON.firstName, "Project Manager") });
     expect(st.published).toEqual([{ userId: PERSON.userId, type: "agent.changed", agentId: "a-pm" }]);
+  });
+
+  // Review round 4 of Phase 3: the lines a turn writes while it runs were
+  // written whatever had happened to its run, so after the person's account
+  // erasure they outlived the blanking of the chat.
+  it("writes each line only while its own turn's run is open: the delegate's in its chat, the caller's in the caller's", async () => {
+    const card = seedAction({ id: "x1", toolName: "move_task", sessionId: `chat:a-pm:${PERSON.userId}`, preview: { title: 'Move "Call Acme" to Backlog' } });
+    st.turnAnswer = { text: "I asked to move it.", error: null, giveBack: false, proposedActionIds: [card.id], messages: [] };
+    fx.closedRuns.add("drun1");
+    fx.closedRuns.add("run1");
+    await call(ASK);
+    // Before: both lines written.
+    expect(fx.messages).toEqual([]);
+    // With only the delegate's run closed, the caller's line is still written in the caller's chat.
+    fx.closedRuns.delete("run1");
+    fx.closedRuns.add("drun2");
+    await call(ASK);
+    expect(fx.messages.map((m) => m.sessionId)).toEqual(["s1"]);
   });
 
   it("says the delegate didn't answer when nothing came back", async () => {

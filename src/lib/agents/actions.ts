@@ -74,6 +74,7 @@ import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson, type ActingResult } from "./acting";
+import { RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "./budget";
 import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
 import { connectorAgentFrom } from "./connector-access";
 import { connectorRefusalSentence, productWord } from "./connector-rules";
@@ -262,8 +263,18 @@ export interface EventLine {
  * One centred line in a teammate chat: an EVENT ChatMessage whose content is
  * the sentence. Null when there is no chat to write it in, or the write
  * failed: a line is a notice, and nothing it reports is undone for want of it.
+ *
+ * `whileOpen`: a line a turn writes while it runs is written only while that
+ * turn's run is open and its person still has an account, checked under the
+ * run's lock in the same transaction (budget.ts runStillOpen; review round 4
+ * of Phase 3: a line written after the person's account erasure had blanked
+ * their chats was kept for good).
  */
-export async function writeEventLine(sessionId: string | null, line: EventLine): Promise<TeammateMessageView | null> {
+export async function writeEventLine(
+  sessionId: string | null,
+  line: EventLine,
+  opts: { whileOpen?: { runId: string; personId: string } } = {},
+): Promise<TeammateMessageView | null> {
   if (!sessionId) return null;
   const meta: Record<string, unknown> = { event: line.event };
   if (line.actionId) meta.actionId = line.actionId;
@@ -271,12 +282,17 @@ export async function writeEventLine(sessionId: string | null, line: EventLine):
   if (line.agentId) meta.agentId = line.agentId;
   if (line.replyTo) meta.replyTo = line.replyTo;
   if (line.link) meta.link = line.link;
+  const data = { sessionId, role: "SYSTEM" as const, kind: "EVENT", content: line.text, meta: json(meta) };
+  const select = { id: true, role: true, content: true, kind: true, meta: true, createdAt: true } as const;
+  const open = opts.whileOpen;
   try {
-    const row = await prisma.chatMessage.create({
-      data: { sessionId, role: "SYSTEM", kind: "EVENT", content: line.text, meta: json(meta) },
-      select: { id: true, role: true, content: true, kind: true, meta: true, createdAt: true },
-    });
-    return messageViewFromRow(row);
+    const row = open
+      ? await prisma.$transaction(
+          async (tx) => ((await runStillOpen(tx, open.runId, open.personId)) ? tx.chatMessage.create({ data, select }) : null),
+          { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+        )
+      : await prisma.chatMessage.create({ data, select });
+    return row ? messageViewFromRow(row) : null;
   } catch (err) {
     console.error(`[agents] chat line not written: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
     return null;

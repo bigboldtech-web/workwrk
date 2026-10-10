@@ -22,7 +22,10 @@
  * of step 5): a product off reads as off on its row, never as "none of your
  * teammates has Google tools".
  * An allow sends back the teammate as the card showed it (`print`), so a
- * teammate changed since is refused and the card reads again.
+ * teammate changed since is refused and the card reads again; and the
+ * Google account it showed (`account`), so an allow after the person
+ * reconnected as another account elsewhere is refused and the card reads
+ * again (review round 4 of Phase 3).
  *
  * Connect, Reconnect and Add are real navigations to the start route, never
  * fetches: it answers a redirect to Google. Connect is a secondary button:
@@ -139,24 +142,27 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
   // another tab changes nothing there and answers workspace_changed, so the
   // whole page reloads into the workspace the person is in now.
   const shownIn = view?.organizationId ?? "";
+  // The Google account this card was read for (review round 4 of Phase 3).
+  const shownAccount = view?.connection?.account;
 
   const setAllow = useCallback(async (t: TeammateGoogleUse, changes: Partial<Record<ConnectorProduct, boolean>>) => {
     setBusy(`allow:${t.slug}`);
-    // `expect`: the teammate as this card showed it, so the allow covers what the person saw.
+    // `expect`: the teammate as this card showed it, so the allow covers what
+    // the person saw; `account`: the Google account it showed (review round 4).
     const r = await apiFetch<{ teammate: TeammateGoogleUse }>(`/api/teammate-connections/teammates/${encodeURIComponent(t.slug)}`, {
       method: "PUT",
-      json: { ...changes, expect: t.print, organizationId: shownIn },
+      json: { ...changes, expect: t.print, account: shownAccount, organizationId: shownIn },
     });
     setBusy(null);
     if (!r.ok) {
       toast(r.error || C.allowFailed, { tone: "danger" });
       if (r.code === "workspace_changed") { window.location.reload(); return; }
-      // It changed while the card was open: read again, so the new parts are shown.
-      if (r.code === "teammate_changed") void load();
+      // It, or the Google account, changed while the card was open: read again, so the change is shown.
+      if (r.code === "teammate_changed" || r.code === "account_changed") void load();
       return;
     }
     setView((v) => (v ? { ...v, teammates: v.teammates.map((x) => (x.slug === t.slug ? r.data.teammate : x)) } : v));
-  }, [toast, load, shownIn]);
+  }, [toast, load, shownIn, shownAccount]);
 
   async function disconnect() {
     setBusy("disconnect");

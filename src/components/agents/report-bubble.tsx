@@ -10,7 +10,7 @@ import { useState } from "react";
 import { OsMarkdown } from "@/components/layout/os/markdown";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { TEAMMATE_CHAT, andMore, reportHeader } from "@/lib/agents/teammate-copy";
-import { reportLines, type TeammateMessageView } from "@/lib/agents/teammate-thread";
+import { answerLinks, reportLines, type TeammateMessageView } from "@/lib/agents/teammate-thread";
 import type { TeammateHue } from "@/lib/agents/hues";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
@@ -44,8 +44,8 @@ export function ReportBubble({
         ) : null}
         {text ? (
           <div className="mt-1 text-prose text-ink">
-            {/* As a teammate's answer shows its links (review round 3 of Phase 3): a routine can read the person's Google too. */}
-            <OsMarkdown text={text} links={m.readGoogle ? "inert" : "shown"} />
+            {/* As a teammate's answer shows its links (review round 3 of Phase 3): a routine can read the person's Google too, and one that called a Google tool links nothing (review round 4). */}
+            <OsMarkdown text={text} links={answerLinks(m)} />
           </div>
         ) : null}
         {more > 0 && !all ? (

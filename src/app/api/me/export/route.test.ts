@@ -32,6 +32,8 @@ vi.mock("@/lib/prisma", () => {
         const mine = rows.filter((r) => r.sessionId === args.where?.sessionId).reverse();
         return mine.slice(0, args.take ?? mine.length);
       }
+      // The requests: newest first, at most `take` (review round 4 of Phase 3).
+      if (name === "agentAction" && args.take !== undefined) return [...rows].reverse().slice(0, args.take);
       return rows;
     },
     findUnique: async (args: Args) => {
@@ -40,7 +42,10 @@ vi.mock("@/lib/prisma", () => {
     },
     count: async (args: Args) => {
       st.calls.push({ model: name, op: "count", args });
-      return ((st.rows[name] ?? []) as Array<Record<string, unknown>>).filter((r) => r.sessionId === args.where?.sessionId).length;
+      const rows = (st.rows[name] ?? []) as Array<Record<string, unknown>>;
+      // A request has no sessionId here: every request in the double is the person's.
+      if (name === "agentAction") return rows.length;
+      return rows.filter((r) => r.sessionId === args.where?.sessionId).length;
     },
   });
   return {
@@ -60,6 +65,9 @@ import { GET } from "./route";
 
 /** The route's own cap on one chat (route.ts TEAMMATE_CHAT_EXPORT_MAX). */
 const TEAMMATE_CHAT_EXPORT_MAX = 5_000;
+/** The route's cap on every chat together, and on the requests (review round 4 of Phase 3). */
+const TEAMMATE_CHATS_EXPORT_BUDGET = 20_000;
+const TEAMMATE_REQUESTS_EXPORT_MAX = 5_000;
 
 beforeEach(() => {
   st.rows = {};
@@ -161,5 +169,56 @@ describe("GET /api/me/export: AI teammates' records (review round 3 of Phase 3)"
     // Only the person's own chats with teammates, and only their messages.
     expect(callOf("chatSession")?.args.where).toEqual({ userId: "u-max", kind: { in: ["TEAMMATE", "TEAMMATE_GROUP"] } });
     expect(st.calls.filter((c) => c.model === "chatMessage" && c.op === "findMany").map((c) => c.args.where)).toEqual([{ sessionId: "s1" }, { sessionId: "s2" }]);
+  });
+});
+
+// Review round 4 of Phase 3: each chat was capped, the export as a whole was
+// not, and every chat was read at once through Promise.all, so a heavy
+// user's export could fail or run the server out of memory; and every
+// request a teammate ever asked them to approve was read with no cap.
+describe("GET /api/me/export: bounded as a whole (review round 4 of Phase 3)", () => {
+  const msg = (sessionId: string, i: number) => ({ id: `${sessionId}-m${i}`, sessionId, role: "USER", kind: null, content: "w", toolCalls: null, createdAt: "2026-10-08T09:00:00.000Z" });
+  const chat = (id: string) => ({ id, organizationId: "org1", kind: "TEAMMATE", title: id, agentId: `a-${id}`, createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-09T09:00:00.000Z" });
+
+  it("reads the chats one at a time, most recently active first, within one budget across them all, saying what each left out", async () => {
+    const sizes: Array<[string, number]> = [["c1", TEAMMATE_CHAT_EXPORT_MAX + 3], ["c2", 4_500], ["c3", 4_500], ["c4", 4_500], ["c5", 4_500], ["c6", 2]];
+    st.rows.chatSession = sizes.map(([id]) => chat(id));
+    st.rows.chatMessage = sizes.flatMap(([id, n]) => Array.from({ length: n }, (_, i) => msg(id, i)));
+    const out = await exported();
+    const chats = out.records.teammateChats as Array<{ id: string; messages: unknown[]; messagesLeftOut: number; lastActiveAt: string }>;
+    // Before: every chat whole up to its own cap, 23,002 messages in all, read side by side.
+    expect(chats.map((c) => [c.id, c.messages.length, c.messagesLeftOut])).toEqual([
+      ["c1", TEAMMATE_CHAT_EXPORT_MAX, 3],
+      ["c2", 4_500, 0],
+      ["c3", 4_500, 0],
+      ["c4", 4_500, 0],
+      ["c5", 1_500, 3_000],
+      ["c6", 0, 2],
+    ]);
+    expect(chats.reduce((n, c) => n + c.messages.length, 0)).toBe(TEAMMATE_CHATS_EXPORT_BUDGET);
+    expect(chats[0].lastActiveAt).toBe("2026-10-09T09:00:00.000Z");
+    // The most recently active first.
+    expect(callOf("chatSession")?.args.orderBy).toEqual([{ updatedAt: "desc" }, { id: "desc" }]);
+    // One chat at a time: each chat's count and read before the next chat's, and none for a chat past the budget.
+    const reads = st.calls.filter((c) => c.model === "chatMessage").map((c) => `${c.op}:${String(c.args.where?.sessionId)}`);
+    expect(reads).toEqual(["count:c1", "findMany:c1", "count:c2", "findMany:c2", "count:c3", "findMany:c3", "count:c4", "findMany:c4", "count:c5", "findMany:c5", "count:c6"]);
+    expect(st.calls.filter((c) => c.model === "chatMessage" && c.op === "findMany").map((c) => c.args.take)).toEqual([TEAMMATE_CHAT_EXPORT_MAX, 4_500, 4_500, 4_500, 1_500]);
+  });
+
+  it("carries at most TEAMMATE_REQUESTS_EXPORT_MAX requests, the newest, oldest first, and says how many it left out", async () => {
+    st.rows.agentAction = Array.from({ length: TEAMMATE_REQUESTS_EXPORT_MAX + 2 }, (_, i) => ({
+      id: `act${i}`, organizationId: "org1", agentId: "a-ops", toolName: "create_task", status: "EXECUTED", preview: {}, input: {}, editedInput: null,
+      createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, i)).toISOString(), decidedAt: null, executedAt: null, expiresAt: "2026-10-09T09:00:00.000Z",
+    }));
+    const out = await exported();
+    const requests = out.records.teammateRequests as Array<{ id: string }>;
+    // Before: all 5,002, and no count of what was left out.
+    expect(requests).toHaveLength(TEAMMATE_REQUESTS_EXPORT_MAX);
+    expect(requests[0].id).toBe("act2");
+    expect(requests[requests.length - 1].id).toBe(`act${TEAMMATE_REQUESTS_EXPORT_MAX + 1}`);
+    expect(out.records.teammateRequestsLeftOut).toBe(2);
+    expect(callOf("agentAction")?.args).toMatchObject({ where: { actingForId: "u-max" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: TEAMMATE_REQUESTS_EXPORT_MAX });
+    st.rows.agentAction = st.rows.agentAction.slice(0, 3);
+    expect((await exported()).records.teammateRequestsLeftOut).toBe(0);
   });
 });

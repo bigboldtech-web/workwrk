@@ -683,6 +683,8 @@ export const TURN_ERRORS = {
   notSaved: "The answer couldn't be saved. Check what it did before asking again.",
   /** A run its process never finished (budget.ts sweepStaleRuns). */
   didntFinish: "This run stopped part way and didn't finish. Check what it did before asking again.",
+  /** A run still going when the person it worked for deleted their account (POST /api/me/delete, review round 4 of Phase 3). */
+  accountDeleted: "This run stopped because the account it worked for was deleted.",
 } as const;
 
 // ── New teammate dialog ──────────────────────────────────────────────
@@ -1451,6 +1453,12 @@ export const CONNECTION_ROUTE_ERRORS = {
    * (review round 1 of Phase 3).
    */
   workspaceChanged: "You switched workspace in another tab, so nothing was changed. The page now reloads to show the workspace you're in.",
+  /**
+   * The person reconnected as another Google account (on another device,
+   * say) since the card was read: nothing is allowed, and the card reads the
+   * connection again (review round 4 of Phase 3).
+   */
+  accountChanged: "Your Google connection is now a different account, so nothing was allowed. Look again before you allow a teammate.",
 } as const;
 
 /**

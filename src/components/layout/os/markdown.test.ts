@@ -93,3 +93,38 @@ describe("an AI answer's links (review round 3 of Phase 3)", () => {
     expect(html(`[Open the invoice](${PLANTED})`)).toContain(">Open the invoice</a>");
   });
 });
+
+// Review round 4 of Phase 3: any address starting with "/" but not "//" was
+// a page of this app, so "/\evil.test/x" stayed a link on its words in
+// "shown" mode; a browser reads "\" as "/" and drops tabs and line breaks,
+// and the click went to evil.test.
+describe("a page of this app is one the browser opens here (review round 4 of Phase 3)", () => {
+  it("refuses a path a browser reads as another site, in every mode", () => {
+    for (const url of ["/\\evil.test", "/\\evil.test/x", "/\t/evil.test", "/\n/evil.test", "/\r\n/evil.test", "\t//evil.test", "/ /evil.test"]) {
+      for (const mode of ["plain", "shown", "inert"] as const) {
+        // Before: every one but "\t//evil.test" was { href: url, text: "Open the invoice", internal: true }.
+        expect(linkShown("Open the invoice", url, mode)).toEqual({ href: null, text: "Open the invoice" });
+      }
+    }
+    const out = html("See [Open the invoice](/\\evil.test/x) now.", "shown");
+    expect(out).not.toContain("<a ");
+    expect(out).toContain("Open the invoice");
+  });
+
+  it("keeps an encoded backslash and a normal page on this origin, linked on their words", () => {
+    expect(linkShown("Odd page", "/%5Cevil.test", "shown")).toEqual({ href: "/%5Cevil.test", text: "Odd page", words: null, internal: true });
+    expect(linkShown("Task", "/tasks/1", "shown")).toEqual({ href: "/tasks/1", text: "Task", words: null, internal: true });
+    const out = html("Open [Task](/tasks/1).", "shown");
+    expect(out).toContain('<a href="/tasks/1"');
+    expect(out).toContain(">Task</a>");
+  });
+
+  it("prints an outside address with a backslash or a space as plain text, and drops control characters before reading one", () => {
+    expect(linkShown("Pay", "https://good.test\\@evil.test/", "shown")).toEqual({ href: null, text: "Pay" });
+    expect(linkShown("Pay", "https://good.test/a b", "shown")).toEqual({ href: null, text: "Pay" });
+    expect(linkShown("Mail", "mailto:a@x.test\\b", "shown")).toEqual({ href: null, text: "Mail" });
+    // A tab inside the scheme is dropped as the browser drops it, and the address shown is the one it opens.
+    expect(linkShown("Docs", "ht\ttps://docs.test/a", "shown")).toMatchObject({ href: "https://docs.test/a", text: "https://docs.test/a" });
+    expect(linkShown("x", "java\tscript:alert(1)", "shown")).toEqual({ href: null, text: "x" });
+  });
+});

@@ -113,6 +113,18 @@ describe("one tick", () => {
     expect(out.body.legacySchedules).toMatchObject({ failed: 1 });
   });
 
+  // Review round 4 of Phase 3: a queued revoke no key opens was dropped in
+  // silence; now it is kept, and the tick fails so the ops alert goes out
+  // before the seven days after which it is dropped.
+  it("fails the tick when queued revokes could not be opened with the sealing key", async () => {
+    st.sweepConnections.mockResolvedValueOnce({ ...SWEPT, kept: 4, unopenable: 3 });
+    const out = await run();
+    // Before: 200, nobody told.
+    expect(out.status).toBe(500);
+    expect(out.body.connectors).toMatchObject({ unopenable: 3 });
+    expect((await run()).status).toBe(200);
+  });
+
   it("fails the tick when the move throws, after the routines ran", async () => {
     st.convertLegacySchedules.mockRejectedValueOnce(new Error("move down"));
     const out = await run();

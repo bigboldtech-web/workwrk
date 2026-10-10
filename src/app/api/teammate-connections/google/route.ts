@@ -56,7 +56,7 @@ export async function DELETE(req: Request) {
 
   const cfg = googleRevokeConfig();
   if (!cfg) return NextResponse.json({ disconnected: true, revoked: "queued" });
-  const r = await revokeQueued(queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => ({ revoked: 0, kept: queued.length, dropped: 0, stillHeld: 0 }));
+  const r = await revokeQueued(queued, cfg, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => ({ revoked: 0, kept: queued.length, dropped: 0, stillHeld: 0, unopenable: 0 }));
   // The account connected again meanwhile (here or elsewhere): its grant is in use, so it was kept.
   if (r.stillHeld === queued.length) return NextResponse.json({ disconnected: true, revoked: "kept_shared" });
   return NextResponse.json({ disconnected: true, revoked: r.revoked + r.stillHeld === queued.length ? "now" : "queued" });

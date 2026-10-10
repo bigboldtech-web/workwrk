@@ -31,7 +31,8 @@ import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type E
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
-import { AGENT_SLUG, PERSON, fx, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
+import { AGENT_SLUG, PERSON, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
+import { ACTION_ERRORS } from "./teammate-copy";
 
 let events: TeammateStreamEvent[] = [];
 
@@ -211,6 +212,80 @@ describe("what other people will see", () => {
     const ran = await call("create_task", { title: "Call Acme", assigneeEmail: "max@x.com" }, { personRules: { "create_task:outward": "always" } });
     expect(ran.record.state).toBe("ran");
     expect(fx.actions[1]).toMatchObject({ status: "EXECUTED", decidedVia: "rule" });
+  });
+});
+
+// Review round 4 of Phase 3: a turn still going while its person erased
+// their account made cards, recorded actions and wrote chat lines after the
+// erasure had blanked their chats and cards, and those were kept for good.
+describe("a turn whose run closed under it (review round 4 of Phase 3)", () => {
+  /** The run closes (the erasure commits) once this many locked reads were made. */
+  function closeAfter(reads: number) {
+    const read = prismaFake.$queryRaw;
+    return vi.spyOn(prismaFake, "$queryRaw").mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const out = await read(strings, ...values);
+      if (fx.runChecks.length === reads) fx.closedRuns.add("run1");
+      return out;
+    });
+  }
+
+  it("makes no card, records no Don't ask action and runs no write once the run is closed", async () => {
+    fx.closedRuns.add("run1");
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello team" } };
+    fx.cards.create_task = { title: 'Create task "Call Acme"', input: { title: "Call Acme" } };
+    const asked = await call("post_in_talk", { channel: "#general", text: "Hello team" });
+    const ruled = await call("post_in_talk", { channel: "#general", text: "Hello team" }, { personRules: { "post_in_talk:conv:c1": "always" } });
+    const own = await call("create_task", { title: "Call Acme" });
+    // Before: a PENDING card, an EXECUTED action and a task, all after the erasure.
+    for (const r of [asked, ruled, own]) expect(r.record).toMatchObject({ state: "failed", errorText: null });
+    expect(dataOf(asked.modelContent)).toEqual({ error: ACTION_ERRORS.personCannot });
+    expect(fx.actions).toEqual([]);
+    expect(fx.handlerCalls).toEqual([]);
+    expect(fx.messages).toEqual([]);
+    // Reads still run: they change nothing.
+    fx.answers.search_tasks = { count: 0, tasks: [] };
+    expect((await call("search_tasks", { query: "x" })).record.state).toBe("ran");
+  });
+
+  it("asks again under the run's lock in the transaction that makes the card, so a close just before it is caught", async () => {
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello team" } };
+    // The erasure commits after the early check (a run read and a person read).
+    closeAfter(2);
+    const r = await call("post_in_talk", { channel: "#general", text: "Hello team" });
+    expect(dataOf(r.modelContent)).toEqual({ error: ACTION_ERRORS.personCannot });
+    expect(fx.actions).toEqual([]);
+    expect(fx.runChecks).toEqual([
+      { read: "run:run1", inTx: false },
+      { read: "person:me", inTx: false },
+      { read: "run:run1", inTx: true },
+    ]);
+  });
+
+  it("records a Don't ask action only under the run's lock, and runs nothing when it closed just before", async () => {
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello team" } };
+    closeAfter(2);
+    const r = await call("post_in_talk", { channel: "#general", text: "Hello team" }, { personRules: { "post_in_talk:conv:c1": "always" } });
+    expect(dataOf(r.modelContent)).toEqual({ error: ACTION_ERRORS.personCannot });
+    expect(fx.actions).toEqual([]);
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("writes a turn's chat line only while its run is open, and an open run's card and line as before", async () => {
+    fx.answers.remember = { ok: true, memory: { key: "report day", value: "Mondays" }, created: true };
+    closeAfter(2);
+    await call("remember", { key: "report day", value: "Mondays" });
+    // The line asked under the lock, after the close: not written.
+    expect(fx.messages).toEqual([]);
+    vi.restoreAllMocks();
+    resetFixtures();
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello team" } };
+    fx.answers.remember = { ok: true, memory: { key: "report day", value: "Mondays" }, created: true };
+    expect((await call("post_in_talk", { channel: "#general", text: "Hello team" })).record.state).toBe("waiting");
+    await call("remember", { key: "report day", value: "Mondays" });
+    expect(fx.actions).toHaveLength(1);
+    expect(fx.messages).toHaveLength(1);
+    // The card's and the line's checks ran inside their transactions.
+    expect(fx.runChecks.filter((c) => c.inTx).map((c) => c.read)).toEqual(["run:run1", "person:me", "run:run1", "person:me"]);
   });
 });
 

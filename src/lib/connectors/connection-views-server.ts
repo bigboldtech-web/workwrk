@@ -16,11 +16,11 @@ import { isOwnerOrAdmin } from "@/lib/app-gate";
 import { hueForAgent } from "@/lib/agents/hues";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
 import { sharedMemoriesPrints } from "@/lib/agents/memory";
-import { changedSinceAllowed as changedParts, othersMayChange, teammateShownPrint, type AllowPart } from "@/lib/agents/teammate-print";
+import { allowedForAccount, changedSinceAllowed as changedParts, othersMayChange, teammateShownPrint, type AllowPart } from "@/lib/agents/teammate-print";
 import { TEAMMATE_SELECT, workspaceModules, type TeammateRecord } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { prisma } from "@/lib/prisma";
-import { connectorCounts, workspaceConnectorProducts } from "./connections";
+import { accountKey, connectorCounts, workspaceConnectorProducts } from "./connections";
 import type { ConnectionView, ConnectorPolicyView, TeammateConnectionsView, TeammateGoogleUse } from "./connection-views";
 import { productsOfTools } from "./connection-views";
 import { googleConfig } from "./google/config";
@@ -52,8 +52,25 @@ function changedSinceAllowed(agent: TeammateRecord, allowed: ProductSet, prints:
 }
 
 /**
+ * The products the person allowed, as connectorAccess reads them: one
+ * allowed while connected as another Google account is not allowed now
+ * (review round 4 of Phase 3), so its row asks for an allow again in the
+ * words of a product never allowed. `account` null: no connection to read
+ * against, so the allows read as stored.
+ */
+function allowedNow(setting: { connectorProducts: string[]; connectorPrints: unknown } | null, account: string | null): ProductSet {
+  const stored = productSet(setting?.connectorProducts);
+  if (account === null) return stored;
+  const prints = setting?.connectorPrints;
+  const kept = prints && typeof prints === "object" && !Array.isArray(prints) ? (prints as Record<string, unknown>) : {};
+  return { gmail: stored.gmail && allowedForAccount(kept.gmail, account), calendar: stored.calendar && allowedForAccount(kept.calendar, account) };
+}
+
+/**
  * One teammate's row on the card, for this person. `memories`: its shared
  * memories' print (memory.ts sharedMemoriesPrintOf), read by the caller.
+ * `account`: the person's connection's account key (connections.ts
+ * accountKey), null when they hold none.
  */
 export function teammateGoogleUse(
   agent: TeammateRecord,
@@ -61,9 +78,10 @@ export function teammateGoogleUse(
   tools: readonly string[],
   setting: { connectorProducts: string[]; connectorPrints: unknown } | null,
   memories: string,
+  account: string | null,
 ): TeammateGoogleUse {
   const own = !othersMayChange(agent, viewerId);
-  const allowed = own ? productSet([]) : productSet(setting?.connectorProducts);
+  const allowed = own ? productSet([]) : allowedNow(setting, account);
   return {
     slug: agent.slug,
     name: agent.name,
@@ -81,7 +99,8 @@ export function teammateGoogleUse(
 async function connectionView(viewer: Viewer): Promise<ConnectionView | null> {
   const row = await prisma.teammateConnection.findUnique({
     where: { organizationId_userId_provider: { organizationId: viewer.organizationId, userId: viewer.userId, provider: "google" } },
-    select: { accountEmail: true, products: true, status: true, connectedAt: true, lastUsedAt: true, lastUsedAgentId: true, needsReconnectAt: true },
+    // The account's id is read only to make its opaque key, never sent (review round 4 of Phase 3).
+    select: { accountEmail: true, accountSub: true, products: true, status: true, connectedAt: true, lastUsedAt: true, lastUsedAgentId: true, needsReconnectAt: true },
   });
   if (!row) return null;
   // The teammate that used it last, named only while the person may still use it.
@@ -95,6 +114,7 @@ async function connectionView(viewer: Viewer): Promise<ConnectionView | null> {
   }
   return {
     accountEmail: row.accountEmail,
+    account: accountKey("google", row.accountSub),
     products: parseProducts(row.products),
     status: row.status === "active" ? "active" : "needs_reconnect",
     connectedAt: row.connectedAt.toISOString(),
@@ -116,7 +136,7 @@ const EVERY_PRODUCT: ProductSet = { gmail: true, calendar: true };
  * (connection-views.ts teammateProductRows). With every product off the
  * card shows the workspace's own line in their place, so nothing is read.
  */
-async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet): Promise<TeammateGoogleUse[]> {
+async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet, account: string): Promise<TeammateGoogleUse[]> {
   if (!connectors.gmail && !connectors.calendar) return [];
   if (viewer.orgRole === "GUEST" || viewer.isAgent) return [];
   const [modules, agents] = await Promise.all([
@@ -145,7 +165,7 @@ async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet): Prom
     sharedMemoriesPrints(ids),
   ]);
   const settingOf = new Map(settings.map((s) => [s.agentId, s]));
-  return withTools.map(({ agent, tools }) => teammateGoogleUse(agent, viewer.userId, tools, settingOf.get(agent.id) ?? null, memories.get(agent.id) ?? ""));
+  return withTools.map(({ agent, tools }) => teammateGoogleUse(agent, viewer.userId, tools, settingOf.get(agent.id) ?? null, memories.get(agent.id) ?? "", account));
 }
 
 /** GET /api/teammate-connections, for the signed-in person. */
@@ -165,7 +185,7 @@ export async function teammateConnectionsView(viewer: Viewer): Promise<TeammateC
     workspaceName: org?.name ?? "",
     products: cfg ? stateOf(connectors) : OFF,
     connection,
-    teammates: connection && !guest ? await teammatesWithGoogle(viewer, connectors) : [],
+    teammates: connection && !guest ? await teammatesWithGoogle(viewer, connectors, connection.account) : [],
     canManagePolicy: isOwnerOrAdmin(viewer),
     guest,
   };

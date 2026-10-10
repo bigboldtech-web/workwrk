@@ -22,14 +22,46 @@
  * "inert" (an answer that read the person's Google, meta.readGoogle) links
  * nothing at all, printing the words and the whole address as plain text.
  * Left out, links render as before.
+ *
+ * THIS APP'S PAGE IS ONE THE BROWSER OPENS ON THIS APP (review round 4 of
+ * Phase 3). "/\evil.test/x" passed as a page of this app, so it stayed a link
+ * on its words in "shown" mode, and a browser reads "\" as "/" and drops tabs
+ * and line breaks, so the click went to evil.test. Control characters, tabs
+ * and line breaks are dropped first, as the browser drops them; a page of
+ * this app then starts with "/", holds no backslash and no space, and
+ * resolves to this origin; an http(s) or mailto address with a backslash or
+ * a space is no address anyone can read as written, so it is plain text.
  */
 
 type Inline = string | React.ReactElement;
 
+/** The address without ASCII control characters (tabs and line breaks among them), which a browser drops before reading it. */
+function withoutControls(s: string): string {
+  return Array.from(s)
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c > 0x1f && c !== 0x7f;
+    })
+    .join("");
+}
+
+/** A backslash or any space: a browser reads either otherwise than it is shown. */
+const MISREAD = /[\\\s]/;
+
+/** A path a browser opens on this app's own origin. */
+function ownPage(u: string): boolean {
+  if (!u.startsWith("/") || MISREAD.test(u)) return false;
+  try {
+    return new URL(u, "https://x.invalid").origin === "https://x.invalid";
+  } catch {
+    return false;
+  }
+}
+
 function safeHref(url: string): string | null {
-  const u = url.trim();
-  if (/^(https?:|mailto:)/i.test(u)) return u;
-  if (u.startsWith("/") && !u.startsWith("//")) return u;
+  const u = withoutControls(url).trim();
+  if (/^(https?:|mailto:)/i.test(u)) return MISREAD.test(u) ? null : u;
+  if (ownPage(u)) return u;
   return null;
 }
 

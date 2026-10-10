@@ -177,6 +177,62 @@ export async function claimTeammateTurn(a: {
 export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 
 /**
+ * The statuses of a run whose turn is still going: PENDING, as
+ * claimTeammateTurn writes it until the turn's last write, and RUNNING, an
+ * old Workspace agents run's. Every other status is closed: the turn's own
+ * last write (SUCCEEDED or FAILED), the stale-run sweep, or the person's
+ * account erasure (POST /api/me/delete, review round 4 of Phase 3).
+ */
+export const OPEN_RUN_STATUSES = ["PENDING", "RUNNING"] as const;
+
+/**
+ * How long a transaction that waits on a run's lock may last: as long as the
+ * account erasure's (20 seconds), which takes the person's open runs in its
+ * first statement and holds them to its commit, so a turn's save waits for it
+ * rather than failing (review round 4 of Phase 3).
+ */
+export const RUN_LOCK_TX_TIMEOUT_MS = 20_000;
+
+/** Where a turn's run stands for what it writes (runState). */
+export type RunState = "open" | "closed" | "person_gone";
+
+/**
+ * Where a turn's run stands (review round 4 of Phase 3): "open", and its
+ * person still has an account, so the turn may write what it made to their
+ * chat and cards; "closed" (ended, swept stale, or failed by the person's
+ * account erasure, POST /api/me/delete); or "person_gone", still open but
+ * the person's account deleted since it began (claimed after the erasure's
+ * first statement, which fails only the runs open then). Inside the
+ * caller's transaction it locks the run's row (FOR UPDATE), then the
+ * person's (FOR SHARE), until that commits.
+ *
+ * WHY EITHER ORDER IS SAFE. The erasure fails the person's open runs in its
+ * first statement and blanks every run's output in its next, before it
+ * anonymises their User row; it touches no run after that, then blanks
+ * their chats and cards. If the erasure goes first, this waits on the run's
+ * lock (or the person's), reads the run FAILED (or the account deleted), and
+ * the caller writes nothing. If this goes first, the erasure's first
+ * statement (or its anonymising) waits on the lock until the caller's rows
+ * are committed, and the blanking later in its transaction reads and blanks
+ * them. The locks are taken in the erasure's own order, run then person, and
+ * it takes no run after the person, so the two never wait on each other in
+ * turn.
+ */
+export async function runState(db: Db, runId: string, personId: string): Promise<RunState> {
+  const run = await db.$queryRaw<Array<{ status: string }>>`
+    SELECT "status" FROM "AgentRun" WHERE "id" = ${runId} FOR UPDATE`;
+  if (run.length === 0 || !(OPEN_RUN_STATUSES as readonly string[]).includes(run[0].status)) return "closed";
+  const person = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "User" WHERE "id" = ${personId} AND "deletedAt" IS NULL FOR SHARE`;
+  return person.length > 0 ? "open" : "person_gone";
+}
+
+/** Whether a turn may still write what it made to the person's chat or cards (runState "open"). */
+export async function runStillOpen(db: Db, runId: string, personId: string): Promise<boolean> {
+  return (await runState(db, runId, personId)) === "open";
+}
+
+/**
  * A turn whose process stopped (a restart, out of memory, a cut connection
  * that took the server with it) leaves its run PENDING, read as "Running
  * now" in Run history for good. Each tick, one open past RUN_STALE_MS
@@ -187,7 +243,7 @@ export const RUN_STALE_MS = 2 * 60 * 60 * 1000;
  */
 export async function sweepStaleRuns(now: Date = new Date()): Promise<number> {
   const stale = await prisma.agentRun.updateMany({
-    where: { status: { in: ["PENDING", "RUNNING"] }, startedAt: { lt: new Date(now.getTime() - RUN_STALE_MS) } },
+    where: { status: { in: [...OPEN_RUN_STATUSES] }, startedAt: { lt: new Date(now.getTime() - RUN_STALE_MS) } },
     data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.didntFinish },
   });
   return stale.count;

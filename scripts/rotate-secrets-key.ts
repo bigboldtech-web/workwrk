@@ -36,6 +36,16 @@
 //      (pm2 reload workwrk --update-env && pm2 save), and run the dry run once
 //      more WITHOUT the previous key: it must say every secret opens with the
 //      new key.
+//   5. CHECK THE REVOKE QUEUE'S COUNT before step 1 and again after step 4
+//      (review round 4 of Phase 3): the TeammateTokenRevocation.tokenSealed
+//      line the dry run prints, or SELECT count(*) FROM
+//      "TeammateTokenRevocation". It should only fall. A queued revoke no key
+//      opens is kept, not sent: the cron logs "[cron-failure] run-due-agents:
+//      N queued Google revoke(s) no key opens" and fails each tick, and after
+//      seven days such a row is dropped for good, leaving WorkwrK listed in
+//      that person's Google account. If the count stays up, some place still
+//      lacks a key: put SECRETS_ENCRYPTION_KEY_PREVIOUS back there until the
+//      dry run says every secret opens with the new key.
 //
 // Never write either key into this repository. It prints the database it is
 // pointed at, counts and row ids: never a key, and never a secret.

@@ -36,8 +36,8 @@ vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
 import { requireApp } from "@/lib/app-gate";
 import { resolveActingPerson } from "@/lib/agents/acting";
-import { allowPrints, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
-import { cdb, connectorDb, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
+import { allowRecord, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
+import { cdb, connectorDb, keyOf, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
 import { LOCK_WAIT_TX_TIMEOUT_MS } from "@/lib/connectors/connections";
 import { PUT } from "./route";
 
@@ -69,13 +69,20 @@ function seedAgent(o: Row & { slug: string }): Row {
   return row;
 }
 
-/** The card's PUT: it names the workspace the card was read in (review round 1 of Phase 3), this one unless a test says otherwise. */
+/** The account the card was read for, as it sends it back (review round 4 of Phase 3): sub-max's, the one these tests connect. */
+const SHOWN_ACCOUNT = keyOf("google", "sub-max");
+
+/**
+ * The card's PUT: it names the workspace the card was read in (review round 1
+ * of Phase 3) and the Google account it showed (review round 4), these
+ * unless a test says otherwise.
+ */
 function put(slug: string, body: Record<string, unknown>) {
   return PUT(
     new Request(`https://app.test/api/teammate-connections/teammates/${slug}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ organizationId: "org1", ...body }),
+      body: JSON.stringify({ organizationId: "org1", account: SHOWN_ACCOUNT, ...body }),
     }),
     { params: Promise.resolve({ slug }) },
   );
@@ -91,9 +98,9 @@ function shown(agent: Row): string {
   return teammateShownPrint(agent as never, memoriesOf(agent));
 }
 
-/** What an allow stores for a product: the part prints and the shared memories' print. */
-function printsOf(agent: Row) {
-  return allowPrints(agent as never, memoriesOf(agent));
+/** What an allow stores for a product: the part prints, the shared memories' print and the account (review round 4 of Phase 3). */
+function printsOf(agent: Row, account = SHOWN_ACCOUNT) {
+  return allowRecord(agent as never, memoriesOf(agent), account);
 }
 
 function sharedMemory(agent: Row, key: string, value: string): void {
@@ -252,7 +259,7 @@ describe("PUT /api/teammate-connections/teammates/[slug]", () => {
     expect((await put("ops", { gmail: true, expect: shown(agent) })).status).toBe(200);
     const allow = cdb.events.find((e) => e.op === "setting.allow");
     expect(allow?.inTx).toBe(true);
-    expect(cdb.raw.findIndex((q) => q.startsWith('SELECT "products" FROM "TeammateConnection"'))).toBeLessThan(cdb.raw.findIndex((q) => q.startsWith('INSERT INTO "AgentPersonSetting"')));
+    expect(cdb.raw.findIndex((q) => q.startsWith('SELECT "products", "accountSub" FROM "TeammateConnection"'))).toBeLessThan(cdb.raw.findIndex((q) => q.startsWith('INSERT INTO "AgentPersonSetting"')));
     // A product the connection lost meanwhile is refused as not granted, under the same lock.
     cdb.connections[0].products = ["calendar"];
     const lost = await put("ops", { gmail: true, expect: shown(agent) });
@@ -311,5 +318,52 @@ describe("PUT /api/teammate-connections/teammates/[slug]", () => {
     );
     expect(res.status).toBe(409);
     expect(cdb.settings[0]).toMatchObject({ connectorProducts: ["calendar"] });
+  });
+  // Review round 4 of Phase 3: the allow carried no Google account, so a
+  // card left open on Max's work account allowed Ops into the personal
+  // account he had since reconnected as on his phone (round 3 clears allows
+  // only at the reconnect itself, and this allow came after it).
+  it("refuses an allow when the connection is another Google account than the card showed, or the card names none, and stores nothing", async () => {
+    const agent = seedAgent({ slug: "ops" });
+    const row = seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-work" });
+    const shownWork = keyOf("google", "sub-work");
+    // He reconnects as his personal account elsewhere, under the card's feet.
+    row.accountSub = "sub-personal";
+    row.accountKey = keyOf("google", "sub-personal");
+    let res = await put("ops", { gmail: true, expect: shown(agent), account: shownWork });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "account_changed", error: "Your Google connection is now a different account, so nothing was allowed. Look again before you allow a teammate." });
+    // Before: 200, and Ops read the personal mailbox on a choice made for the work one.
+    expect(cdb.settings).toEqual([]);
+    // A page from before this release names no account: it reads the card again too.
+    res = await PUT(
+      new Request("https://app.test/api/teammate-connections/teammates/ops", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organizationId: "org1", gmail: true, expect: shown(agent) }),
+      }),
+      { params: Promise.resolve({ slug: "ops" }) },
+    );
+    expect(await res.json()).toMatchObject({ code: "account_changed" });
+    expect(cdb.settings).toEqual([]);
+    // The card read again shows the personal account, and that allow stores its key beside the prints.
+    const personal = keyOf("google", "sub-personal");
+    res = await put("ops", { gmail: true, expect: shown(agent), account: personal });
+    expect(res.status).toBe(200);
+    expect((cdb.settings[0].connectorPrints as Row).gmail).toEqual(printsOf(agent, personal));
+    expect(((cdb.settings[0].connectorPrints as Row).gmail as Row).account).toBe(personal);
+    expect((await res.json()).teammate).toMatchObject({ allowed: { gmail: true, calendar: false } });
+    // Stopping a teammate needs no account: it always works.
+    expect((await put("ops", { gmail: false, account: undefined })).status).toBe(200);
+  });
+
+  it("answers the row read against the account connected now: an allow given for another account reads as not allowed", async () => {
+    const agent = seedAgent({ slug: "ops" });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    // Calendar was allowed while connected as an account he no longer is.
+    cdb.settings.push({ id: "ps1", agentId: agent.id, userId: "u-max", approvalRules: {}, connectorProducts: ["calendar"], connectorPrints: { calendar: printsOf(agent, keyOf("google", "sub-old")) } });
+    const res = await put("ops", { gmail: true, expect: shown(agent) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).teammate).toMatchObject({ allowed: { gmail: true, calendar: false } });
   });
 });

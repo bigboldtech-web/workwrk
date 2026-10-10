@@ -100,12 +100,17 @@ export async function runAutomationTeammateStep(ctx: ActionContext, params: Reco
   if (!claim.ok) throw new Error(claim.code === "agent_cap" ? AUTOMATION_TEAMMATE_COPY.agentCap : claim.message);
 
   // 7. The line, then the turn. The line never stops a turn already paid for.
-  await writeEventLine(session.id, {
-    text: AUTOMATION_TEAMMATE_COPY.askedLine(workflowName, clampText(instruction, 300)),
-    event: "automation_asked",
-    agentId: agent.id,
-    link: { kind: "automation", workflowId: ctx.workflowId, runId: ctx.runId },
-  }).catch((err: unknown) => console.error(`[agents] automation asked line ${claim.runId} not saved: ${errorLine(err)}`));
+  // Only while its run is open and its person here (review round 4 of Phase 3), as a turn's own lines.
+  await writeEventLine(
+    session.id,
+    {
+      text: AUTOMATION_TEAMMATE_COPY.askedLine(workflowName, clampText(instruction, 300)),
+      event: "automation_asked",
+      agentId: agent.id,
+      link: { kind: "automation", workflowId: ctx.workflowId, runId: ctx.runId },
+    },
+    { whileOpen: { runId: claim.runId, personId: person.userId } },
+  ).catch((err: unknown) => console.error(`[agents] automation asked line ${claim.runId} not saved: ${errorLine(err)}`));
 
   let turn: TurnResult | null = null;
   try {
