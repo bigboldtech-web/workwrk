@@ -3288,7 +3288,11 @@ model ConsentRecord {
   region        String? // e.g. "EU", "UK", "US-CA", "BR", "IN", "ROW"
   country       String? // ISO 3166-1 alpha-2
   policyVersion String // ties to versioned policy text
-  method        String // "banner", "settings", "api", "withdrawn"
+  /// "banner", "settings", "api" (POST /api/consent, nothing else from a
+  /// request), "withdrawn" (DELETE /api/consent), "erasure" (POST
+  /// /api/me/delete); "erasure_finished" was written by the erasure sweep
+  /// until review round 6 of Phase 3 (AccountErasure.finishedAt since).
+  method        String
 
   // Evidence
   ipAddress String?
@@ -3301,6 +3305,28 @@ model ConsentRecord {
   @@index([sessionId])
   @@index([organizationId])
   @@index([createdAt])
+}
+
+/// One account erasure's progress (POST /api/me/delete; review round 6 of
+/// Phase 3), so the sweep that blanks the person's teammate words goes on
+/// where it stopped (src/lib/agents/erasure-sweep.ts). Written only by the
+/// erasure's own transaction, and by the cron's bridge for erasures made
+/// before this table. Read and written with raw SQL. The FK to User
+/// (CASCADE), the CHECK on part and the partial index on lastTriedAt WHERE
+/// finishedAt IS NULL live in prisma/sql/2026-10-11-ai-teammates-phase3-round6.sql.
+model AccountErasure {
+  userId        String    @id
+  erasedAt      DateTime
+  /// "chats" | "requests" | "runs" | "questions" | "activity" | "memories" | "routines"
+  part          String
+  /// Where the part stopped; null at its first row.
+  cursor        Json?
+  /// When the pass in progress started; null while waiting for the last pass.
+  passStartedAt DateTime?
+  lastTriedAt   DateTime?
+  tries         Int       @default(0)
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
 }
 
 // ==========================================

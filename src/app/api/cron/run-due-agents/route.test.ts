@@ -38,7 +38,7 @@ const run = async () => {
 const COUNTS = { due: 3, succeeded: 2, failed: 0, skipped: 0, missed: 1, paused: 0, taken: 0, deferred: 0 };
 const MOVED = { found: 3, moved: 1, stopped: 2, taken: 0, failed: 0 };
 const SWEPT = { statesExpired: 2, leavers: 1, revoked: 3, kept: 1, dropped: 0 };
-const ERASED = { found: 2, blanked: 1500, finished: 1, waiting: 1, failed: 0 };
+const ERASED = { found: 2, blanked: 1500, finished: 1, waiting: 1, failed: 0, overdue: 0, bridged: 0 };
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date("2026-10-06T09:00:00Z"), toFake: ["Date"] });
@@ -149,6 +149,18 @@ describe("one tick", () => {
     const failed = await run();
     expect(failed.status).toBe(500);
     expect(failed.body.erasures).toMatchObject({ failed: 1 });
+  });
+
+  // Review round 6 of Phase 3: an erasure that could never finish stayed
+  // unfinished with no alert (and was dropped after 30 days). One still not
+  // finished three days after it was asked now fails the tick, so ops is told.
+  it("fails the tick when an account erasure is overdue, with nothing else failed", async () => {
+    st.finishErasures.mockResolvedValueOnce({ ...ERASED, failed: 0, overdue: 1 });
+    const overdue = await run();
+    // Before: 200, nobody told.
+    expect(overdue.status).toBe(500);
+    expect(overdue.body.erasures).toMatchObject({ failed: 0, overdue: 1 });
+    expect((await run()).status).toBe(200);
   });
 
   it("fails the tick when the move throws, after the routines ran", async () => {

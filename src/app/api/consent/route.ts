@@ -7,6 +7,15 @@ import { consentIdOf } from "@/lib/compliance/consent-id";
 const CONSENT_COOKIE = "wwrk_consent";
 const CONSENT_MAX_AGE = 60 * 60 * 24 * 180; // 6 months — GDPR/EDPB guidance
 
+/**
+ * The methods the banner's own client sends (src/lib/compliance/consent-client.ts
+ * saveConsent); anything else is stored as "banner". "withdrawn" is DELETE's
+ * own, and "erasure" is written only by POST /api/me/delete (review round 6
+ * of Phase 3: this stored whatever method a request named, and the erasure
+ * sweep found erasures by that record, so a request could name "erasure").
+ */
+const POSTED_METHODS: ReadonlySet<string> = new Set(["banner", "settings", "api"]);
+
 interface ConsentInput {
   necessary?: boolean;
   preferences?: boolean;
@@ -36,7 +45,7 @@ export async function POST(req: NextRequest) {
   // Derive the session if the user is logged in (optional)
   let userId: string | null = null;
   try {
-    const session = (await getServerSession()) as any;
+    const session = (await getServerSession()) as { user?: { id?: string } } | null;
     userId = session?.user?.id ?? null;
   } catch {
     userId = null;
@@ -67,7 +76,7 @@ export async function POST(req: NextRequest) {
         region: geo.label,
         country: geo.country,
         policyVersion: POLICY_VERSION,
-        method: body.method ?? "banner",
+        method: typeof body.method === "string" && POSTED_METHODS.has(body.method) ? body.method : "banner",
         ipAddress,
         userAgent,
       },
@@ -103,7 +112,7 @@ export async function DELETE(req: NextRequest) {
 
   let userId: string | null = null;
   try {
-    const session = (await getServerSession()) as any;
+    const session = (await getServerSession()) as { user?: { id?: string } } | null;
     userId = session?.user?.id ?? null;
   } catch {
     userId = null;

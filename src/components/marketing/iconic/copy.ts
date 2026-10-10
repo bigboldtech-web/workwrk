@@ -179,7 +179,8 @@ export const LEGAL_COPY = {
     // Review round 3 of Phase 3, the same day: section 6 says deleting one's
     // account erases the words of a teammate's answers and requests. Review
     // round 5 of Phase 3, the same day: at once, or within a day for a very
-    // long history.
+    // long history. Review round 6 of Phase 3, the same day: at once for most
+    // histories, or within a few days for a very long one.
     updated: "10 October 2026",
   },
   terms: {

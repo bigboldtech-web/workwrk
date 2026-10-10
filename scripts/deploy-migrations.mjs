@@ -298,6 +298,13 @@ const SQL_MANIFEST = [
   // catalogue-guarded so a later deploy takes no lock: safe before or after
   // the reload.
   "2026-10-10-ai-teammates-phase3-round5.sql",
+  // AI teammates, Phase 3 review round 6: the new "AccountErasure" table
+  // (one row a person: an account erasure's progress, so the sweep goes on
+  // where it stopped instead of starting again), its catalogue-guarded
+  // foreign key to "User", CHECK and partial index. New and empty, so it
+  // locks nothing anyone waits on but "User" for a moment, once. Before the
+  // reload: the new build's delete route writes it in its transaction.
+  "2026-10-11-ai-teammates-phase3-round6.sql",
 ];
 
 /**

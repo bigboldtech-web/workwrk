@@ -428,7 +428,9 @@ describe("the truth gates", () => {
     expect(text).toContain("Our encrypted backups hold the encrypted tokens too, for at most 90 days, as above.");
     // Review round 3 of Phase 3: deleting the account erases them (src/app/api/me/delete).
     // Review round 5 of Phase 3: a very long history is finished by the erasure sweep, within a day.
-    expect(text).toContain("and its requests stay as every teammate request does, until you delete your account, which erases their words at once, or within a day for a very long history.");
+    // Review round 6 of Phase 3: a day was not true for the worst case (a history of about a million rows, or many erasures at once).
+    expect(text).toContain("and its requests stay as every teammate request does, until you delete your account, which erases their words at once for most histories, or within a few days for a very long one.");
+    expect(text).not.toContain("within a day");
   });
 
   it("lists on /cookies the cookie connecting Google to AI teammates sets, as long as it lasts", () => {
