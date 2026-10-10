@@ -23,7 +23,7 @@
 import type { ConnectorRefusal } from "@/lib/connectors/connections";
 import type { GoogleFailure } from "@/lib/connectors/google/http";
 import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
-import { CONNECTIONS_COPY, CONNECTOR_COPY, PRINT_FIELD_WORDS, titleList } from "./teammate-copy";
+import { CONNECTIONS_COPY, CONNECTOR_COPY, CONNECTOR_TITLES, PRINT_FIELD_WORDS, titleList } from "./teammate-copy";
 import { PRINT_FIELDS, type PrintField } from "./teammate-print";
 import type { ConnectorToolName } from "./tool-names";
 
@@ -79,9 +79,17 @@ export function connectorTrigger(trigger: string): boolean {
 /**
  * A failed Google call, in the person's words. `notFound` is the tool's own
  * (an email, a conversation); an unknown outcome is only ever a write's, and
- * says to check before asking again (Decision 24).
+ * says to check before asking again (Decision 24). `tool` names the call, so
+ * a write's sentence is its own (review of step 3): a draft Google did not
+ * confirm is checked in Drafts, never in Sent, and an email Gmail refused
+ * never reads as a search to reword.
  */
-export function googleFailureSentence(f: { failure: GoogleFailure; retryAfter?: number }, o: { product: ConnectorProduct; notFound: string }): string {
+export function googleFailureSentence(
+  f: { failure: GoogleFailure; retryAfter?: number },
+  o: { product: ConnectorProduct; notFound: string; tool?: ConnectorToolName },
+): string {
+  const draft = o.tool === "draft_email";
+  const email = o.tool === "send_email" || o.tool === "reply_email";
   switch (f.failure) {
     case "not_connected":
       return CONNECTOR_COPY.notConnected;
@@ -98,13 +106,50 @@ export function googleFailureSentence(f: { failure: GoogleFailure; retryAfter?: 
     case "client":
       return CONNECTOR_COPY.clientBroken;
     case "bad_request":
-      return CONNECTOR_COPY.googleBadRequest;
+      return draft ? CONNECTOR_COPY.googleRejectedDraft : email ? CONNECTOR_COPY.googleRejectedEmail : CONNECTOR_COPY.googleBadRequest;
     case "unknown_outcome":
-      return CONNECTOR_COPY.unknownOutcomeEmail;
+      return draft ? CONNECTOR_COPY.unknownOutcomeDraft : CONNECTOR_COPY.unknownOutcomeEmail;
     case "changed":
     case "forbidden":
       return CONNECTOR_COPY.googleRefused;
   }
+}
+
+/**
+ * Why an approval could not run a Google card yet, with nothing sent: it
+ * stays PENDING and can be approved again (review of step 3).
+ *   connection_needed  the person connects, reconnects or adds the product first
+ *   retry_later        Google, or WorkwrK's own link to it, is not answering now
+ */
+export type HeldCode = "connection_needed" | "retry_later";
+
+export function isHeldCode(v: unknown): v is HeldCode {
+  return v === "connection_needed" || v === "retry_later";
+}
+
+/**
+ * A failed Google call that happened before anything was sent, as the code
+ * its card waits with; null for one that ends the card (a write whose outcome
+ * is unknown, a request Google refused as written, something gone).
+ */
+export function heldForFailure(failure: GoogleFailure): HeldCode | null {
+  if (failure === "not_connected" || failure === "needs_reconnect" || failure === "scope_missing") return "connection_needed";
+  if (failure === "unavailable" || failure === "rate_limited" || failure === "client") return "retry_later";
+  return null;
+}
+
+/** The person's connection refusing a card at its approval: only a connection to make or mend waits; any other reason ends it. */
+export function heldForRefusal(reason: ConnectorRefusal | "teammate_off"): HeldCode | null {
+  return reason === "not_connected" || reason === "needs_reconnect" || reason === "not_granted" ? "connection_needed" : null;
+}
+
+/**
+ * A Google write as the model and the history name it (CONNECTOR_TITLES):
+ * never the card's own title, which can quote a subject from someone else's
+ * email (review of step 3).
+ */
+export function connectorTitle(tool: ConnectorToolName): string {
+  return CONNECTOR_TITLES[tool] ?? CONNECTOR_COPY.googleAction;
 }
 
 function rec(v: unknown): Record<string, unknown> {

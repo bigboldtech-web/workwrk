@@ -41,13 +41,16 @@
 // answers why (a Talk answer, an allow missing, a connection to reconnect).
 //
 // A TURN THAT READ GOOGLE ASKS BEFORE EVERY WRITE (Decision 9). After a
-// search_email, read_email or list_events that worked, every later call
-// above READ in the turn waits on a card, whatever the person chose not to
-// be asked about, and its card offers no "don't ask again"; a teammate this
-// turn asks starts the same way. What such a read keeps in the call log is
-// its count (Decision 16), though the model read it all. A send or a reply
+// search_email, read_email or list_events that worked, or a reply's
+// preparation, which reads its conversation (review of step 3), every later
+// call above READ in the turn waits on a card, whatever the person chose not
+// to be asked about, and its card offers no "don't ask again"; a teammate
+// this turn asks starts the same way. What such a read keeps in the call log
+// is its count (Decision 16), though the model read it all. A Google write's
+// card title is the person's alone: the model and the call log name the
+// write by its kind (connectorTitle), never by a subject. A send or a reply
 // identical to one already waiting points at that card and makes no second
-// one (Decision 23).
+// one, and adds nothing to this turn's approval row (Decision 23).
 //
 // Server-only: imports prisma.
 
@@ -66,11 +69,14 @@ import {
   connectorAuditFacts,
   connectorRefusalSentence,
   connectorStored,
+  connectorTitle,
   connectorTrigger,
   emptyConnectorCounters,
+  isHeldCode,
   notHereKindOf,
   notHereSentence,
   type ConnectorCounters,
+  type HeldCode,
   type NotHereKind,
 } from "./connector-rules";
 import { prepareCall, type Prepared } from "./previews";
@@ -159,13 +165,25 @@ export interface ExecuteArgs {
   /**
    * The turn's counters, shared by all its calls: each call, each request and
    * each teammate it asked is counted here. `tainted`: a Google read worked
-   * in this turn (or the turn started from one that did), so every later
-   * call above READ asks (Decision 9). `connector`: its Google calls
-   * (Decision 22). Both start empty when a caller leaves them out.
+   * in this turn (or the turn started from one that did, or could not be
+   * told apart from one), so every later call above READ asks (Decision 9).
+   * `readGoogle`: other people's words from the person's Google really
+   * reached this turn (a read here, or a start known to follow one), which is
+   * what the turn's rows record; a start the database could not answer asks
+   * but records nothing (review of step 3). `connector`: its Google calls
+   * (Decision 22). All start empty when a caller leaves them out.
    */
-  counters: { calls: number; proposals: number; delegations: number; tainted?: boolean; connector?: ConnectorCounters };
+  counters: { calls: number; proposals: number; delegations: number; tainted?: boolean; readGoogle?: boolean; connector?: ConnectorCounters };
   /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
   connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: PrintField[] }>>;
+  /**
+   * The Google tools this teammate's own set holds, whatever this turn offers
+   * (engine.ts prepareTurn). A call to one it does not hold is refused as any
+   * tool it does not have, before any product, allow or connection reason
+   * (review of step 3: else a planted call to send_email answered "allow it
+   * in Settings", and the person's allow led nowhere). Left out: none.
+   */
+  connectorHeld?: readonly string[];
   /** Where this turn's answer goes, when that is why no Google tool is offered (step 5 sets it; else read from the trigger). */
   connectorNotHere?: NotHereKind | null;
   emit?: (e: TeammateStreamEvent) => void;
@@ -399,8 +417,13 @@ function connectorPrecheck(a: ExecuteArgs, name: ConnectorToolName): string | nu
   return null;
 }
 
-/** Why this turn was not offered a Google tool the model called anyway: where its answer goes, else the person's connection or allow. */
+/**
+ * Why this turn was not offered a Google tool the model called anyway: a tool
+ * the teammate does not hold at all, then where its answer goes, else the
+ * person's connection or allow.
+ */
 function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
+  if (!(a.connectorHeld ?? []).includes(name)) return ACTION_ERRORS.toolOff;
   const kind = a.connectorNotHere ?? notHereKindOf(a.turn.trigger);
   if (kind) return notHereSentence(kind);
   const product = TOOL_PRODUCT[name];
@@ -414,7 +437,7 @@ function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
  * dedupeKey), which a planted loop would otherwise ask for again and again,
  * so one "Approve 5" sends five (Decision 23).
  */
-async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string; title: string | null } | null> {
+async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string } | null> {
   const key = input.dedupeKey;
   if (typeof key !== "string" || key.length === 0) return null;
   const row = await prisma.agentAction.findFirst({
@@ -426,11 +449,9 @@ async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<s
       expiresAt: { gt: new Date() },
       input: { path: ["dedupeKey"], equals: key },
     },
-    select: { id: true, preview: true },
+    select: { id: true },
   });
-  if (!row) return null;
-  const title = record(row.preview).title;
-  return { id: row.id, title: typeof title === "string" ? title : null };
+  return row ? { id: row.id } : null;
 }
 
 /**
@@ -509,7 +530,10 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     if (!isConnectorToolName(name) || failed) return done(failed ? "failed" : "ran", ran.result);
     // Other people's words came back: every later call above READ in this
     // turn waits on a card (Decision 9).
-    if (TAINTING_TOOLS.has(name)) a.counters.tainted = true;
+    if (TAINTING_TOOLS.has(name)) {
+      a.counters.tainted = true;
+      a.counters.readGoogle = true;
+    }
     // The model reads all of it, once; the log keeps how many (Decision 16).
     return done("ran", ran.result, { stored: connectorStored(ran.result) });
   }
@@ -527,8 +551,18 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     agentRules: a.agentRules,
     tainted,
   });
+  // A reply's preparation read its conversation in Gmail: from here the turn
+  // has read other people's words, as after search_email (review of step 3).
+  if (prepared.readGoogle) {
+    a.counters.tainted = true;
+    a.counters.readGoogle = true;
+  }
   if (!prepared.ok) return refuse(prepared.error, prepared.detail);
-  if (a.practice) return done("practice", { practice: true, wouldDo: prepared.preview.title });
+  // What the model and the history call a Google write: never its card's
+  // title, which can quote a subject from someone else's email (review of
+  // step 3). The card the person reads keeps it.
+  const modelTitle = isConnectorToolName(name) ? connectorTitle(name) : prepared.preview.title;
+  if (a.practice) return done("practice", { practice: true, wouldDo: modelTitle });
 
   // After a Google read in this turn nothing above READ runs without a card,
   // and the person's "Don't ask" is not read (Decision 9).
@@ -537,11 +571,10 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     if (name === "send_email" || name === "reply_email") {
       const twin = await waitingTwin(person, name, prepared.input);
       if (twin) {
-        return done(
-          "waiting",
-          { status: "waiting_for_approval", actionId: twin.id, title: twin.title ?? prepared.preview.title, note: CONNECTOR_COPY.alreadyWaiting },
-          { actionId: twin.id },
-        );
+        // The answer points at the card that already waits; the record names
+        // no action of its own, so this turn's approval row never shows the
+        // same email a second time, nor in another chat (review of step 3).
+        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: CONNECTOR_COPY.alreadyWaiting });
       }
     }
     if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
@@ -563,7 +596,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     });
     a.counters.proposals += 1;
     a.emit?.({ type: "approval", action: view });
-    return done("waiting", { status: "waiting_for_approval", actionId: view.id, title: view.preview.title }, { actionId: view.id });
+    return done("waiting", { status: "waiting_for_approval", actionId: view.id, title: isConnectorToolName(name) ? modelTitle : view.preview.title }, { actionId: view.id });
   }
 
   if (prepared.risk !== "INTERNAL") {
@@ -653,11 +686,20 @@ export interface ApprovedRun {
   /** "APPROVAL" for a person's approval; the turn's own trigger for a call their rule let run. */
   trigger: TeammateToolContext["trigger"];
   decidedVia: "person" | "rule";
+  /**
+   * The person's approval (actions.ts approve): a Google handler that refused
+   * before anything was sent, with a reason that can be mended (its `held`),
+   * answers HELD and leaves the row RUNNING for the caller to put back to
+   * PENDING, never FAILED (review of step 3). Only a write whose outcome is
+   * unknown, or one Google refused as written, ends the card.
+   */
+  holdNotSent?: boolean;
 }
 
 export type ApprovedOutcome =
   | { status: "EXECUTED"; result: ActionResult; data: unknown }
-  | { status: "FAILED"; error: string; data: unknown };
+  | { status: "FAILED"; error: string; data: unknown }
+  | { status: "HELD"; code: HeldCode; error: string; data: unknown };
 
 /**
  * Run one RUNNING action's tool as the person, with the action's id in the
@@ -683,6 +725,11 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   const data = ran.ok ? ran.result : { error: ran.error };
   const outcome = toolOutcome(name, data);
   if (outcome.failed) {
+    const held = record(data).held;
+    if (a.holdNotSent && isConnectorToolName(name) && isHeldCode(held)) {
+      const said = record(data).error;
+      return { status: "HELD", code: held, error: typeof said === "string" && said ? said : (outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed), data };
+    }
     const error = outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed;
     await prisma.agentAction.updateMany({ where: { id: a.action.id, status: "RUNNING" }, data: { status: "FAILED", error } });
     return { status: "FAILED", error, data };

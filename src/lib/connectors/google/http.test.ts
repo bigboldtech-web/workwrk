@@ -11,7 +11,7 @@ import { cdb, resetConnectorDb, seedConnection } from "../connector-test-db";
 import type { LiveConnection } from "../connections";
 import { openToken, sealToken } from "../seal";
 import type { GoogleConfig } from "./config";
-import { googleCall } from "./http";
+import { freshAccess, googleCall } from "./http";
 
 const CFG: GoogleConfig = {
   clientId: "cid",
@@ -186,6 +186,47 @@ describe("googleCall", () => {
     fetchQueue([{ status: 403, json: { error: { code: 403, errors: [{ reason: "insufficientPermissions" }] } } }]);
     expect(await googleCall(connection(), CFG, { method: "GET", url: GMAIL, write: false })).toEqual({ ok: false, failure: "scope_missing" });
     expect(cdb.connections[0]).toMatchObject({ status: "needs_reconnect", statusReason: "scopes_missing" });
+  });
+
+  it("refreshes an expired token once for every request of one call, side by side or after (review of step 3)", async () => {
+    const tokenCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url) === CFG.tokenUrl) {
+          tokenCalls.push(String(url));
+          return new Response(JSON.stringify({ access_token: "fresh-access-token", expires_in: 3600 }), { status: 200 });
+        }
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fresh-access-token");
+        return new Response(JSON.stringify({ ok: 1 }), { status: 200 });
+      }),
+    );
+    const conn = connection({ expiresInMs: 10_000 });
+    // A search's message reads, five at a time, then one more.
+    const batch = await Promise.all(Array.from({ length: 5 }, () => googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false })));
+    const later = await googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false });
+    expect([...batch, later].every((r) => r.ok)).toBe(true);
+    // Before: six refreshes, and six writes of the row.
+    expect(tokenCalls).toHaveLength(1);
+    // A connection opened again (another call) gets its own refresh, from the token now stored.
+    const again = await googleCall({ ...conn, accessTokenSealed: cdb.connections[0].accessTokenSealed, accessTokenExpiresAt: cdb.connections[0].accessTokenExpiresAt as Date }, CFG, { method: "GET", url: GMAIL, write: false });
+    expect(again.ok).toBe(true);
+    expect(tokenCalls).toHaveLength(1);
+  });
+
+  it("refreshes before an approval sends, so a revoked grant is found first, and the call's requests use that token (review of step 3)", async () => {
+    const { calls } = fetchQueue([{ status: 400, json: { error: "invalid_grant" } }]);
+    const conn = connection();
+    expect(await freshAccess(conn, CFG)).toEqual({ ok: false, failure: "needs_reconnect" });
+    expect(calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
+    expect(cdb.connections[0]).toMatchObject({ status: "needs_reconnect" });
+    resetConnectorDb();
+    const ok = fetchQueue([{ status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } }, { status: 200, json: { id: "g1" } }]);
+    const live = connection();
+    expect(await freshAccess(live, CFG)).toEqual({ ok: true });
+    await googleCall(live, CFG, { method: "POST", url: "https://g.test/gmail/v1/users/me/messages/send", body: { raw: "x" }, write: true });
+    expect(ok.calls.map((c) => c.url)).toEqual([CFG.tokenUrl, "https://g.test/gmail/v1/users/me/messages/send"]);
+    expect(ok.calls[1].auth).toBe("Bearer fresh-access-token");
   });
 
   it("logs the failure kind and the status only: no token, no body, no address", async () => {

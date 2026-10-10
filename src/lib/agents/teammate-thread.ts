@@ -31,7 +31,7 @@ import type { RunTone } from "@/lib/automation/run-status";
 import { clampText } from "./clamp";
 import type { TeammateHue } from "./hues";
 import { plainLine } from "./run-view";
-import { EDITABLE_FIELD } from "./tool-policy";
+import { ALWAYS_ASK, EDITABLE_FIELD } from "./tool-policy";
 import { isToolName } from "./tool-names";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
@@ -624,6 +624,31 @@ export function groupApprovals(
     if (action.status === "PENDING") pendingIds.push(action.id);
   }
   return { groups, pendingIds };
+}
+
+/**
+ * Whether a request is approved only on a card of its own (review of step
+ * 3): what cannot be taken back (an email sent or a reply in the person's
+ * name, an invitation, an invite answered, a calendar change that tells other
+ * people, and a class this code does not know, read as IRREVERSIBLE).
+ */
+export function standsAlone(a: Pick<ActionView, "risk" | "toolName">): boolean {
+  return a.risk === "IRREVERSIBLE" || (isToolName(a.toolName) && ALWAYS_ASK.has(a.toolName));
+}
+
+/**
+ * One turn's requests as the approval card lays them out (approval-card.tsx,
+ * the chat and the Inbox pane alike): what stands alone each on its own card,
+ * with who it goes to, the account, who is outside the workspace and every
+ * word in sight; everything else in one batch, as before. A batch starts with
+ * every row ticked and closed, so "Approve {n}" could otherwise send an email
+ * whose recipients the person never saw (a planted Reply-To, say).
+ */
+export function approvalCardParts(actions: readonly ActionView[]): { batch: ActionView[]; alone: ActionView[] } {
+  const batch: ActionView[] = [];
+  const alone: ActionView[] = [];
+  for (const a of actions) (standsAlone(a) ? alone : batch).push(a);
+  return { batch, alone };
 }
 
 /** How many lines of a routine report show before "And {n} more". */

@@ -5,7 +5,8 @@
 // THE TOKEN. Used while it has more than a minute left; otherwise refreshed
 // first (refreshFor). A 401 means Google refused the request before doing
 // anything, so it refreshes once, by force, and the request goes once more:
-// safe for writes too.
+// safe for writes too. One opened connection is refreshed at most once,
+// however many requests its call makes (review of step 3: REFRESHED).
 //
 // A WRITE IS NEVER SENT TWICE (Decision 24). A GET that timed out, lost its
 // connection or met a 5xx is tried once more after half a second. A write
@@ -124,17 +125,58 @@ export async function refreshFor(conn: LiveConnection, cfg: GoogleConfig): Promi
   return { ok: false, failure: "unavailable" };
 }
 
-/** The stored access token while it has more than a minute left, else a refresh. */
-async function accessFor(conn: LiveConnection, cfg: GoogleConfig, force: boolean): Promise<AccessResult> {
-  if (conn.status !== "active") return { ok: false, failure: "needs_reconnect" };
+/**
+ * The one refresh each opened connection gets (review of step 3). A tool call
+ * opens the person's connection once (connector-access.ts openConnector) and
+ * every request it makes shares that object: a search's list and each of its
+ * message reads, five at a time. Without this each of them refreshed an
+ * expired token on its own, up to 21 refreshes and 21 writes for one search,
+ * which is the per-user quota flooding Decision 22 is meant to prevent. The
+ * first request that needs a refresh starts it, the rest (at the same moment
+ * or later in the call) wait on the same answer, a failed one included, and
+ * the entry goes with the object when the call is done.
+ */
+const REFRESHED = new WeakMap<LiveConnection, Promise<AccessResult>>();
+
+function refreshOnce(conn: LiveConnection, cfg: GoogleConfig): Promise<AccessResult> {
+  const known = REFRESHED.get(conn);
+  if (known) return known;
+  const started = refreshFor(conn, cfg);
+  REFRESHED.set(conn, started);
+  return started;
+}
+
+/**
+ * The token this call already refreshed, else the stored one while it has
+ * more than a minute left, else this call's one refresh. Everything before
+ * the refresh starts runs at once, with no wait, so requests sent side by side
+ * find the refresh the first of them started.
+ */
+function accessFor(conn: LiveConnection, cfg: GoogleConfig, force: boolean): Promise<AccessResult> {
+  if (conn.status !== "active") return Promise.resolve<AccessResult>({ ok: false, failure: "needs_reconnect" });
+  const refreshed = REFRESHED.get(conn);
+  if (refreshed) return refreshed;
   if (!force && conn.accessTokenSealed && conn.accessTokenExpiresAt && conn.accessTokenExpiresAt.getTime() - Date.now() > FRESH_FOR_MS) {
     try {
-      return { ok: true, accessToken: openToken(conn.accessTokenSealed) };
+      return Promise.resolve<AccessResult>({ ok: true, accessToken: openToken(conn.accessTokenSealed) });
     } catch {
       // Sealed under a key no longer held: a refresh writes a new one.
     }
   }
-  return refreshFor(conn, cfg);
+  return refreshOnce(conn, cfg);
+}
+
+/**
+ * A refresh now, before an approval sends anything (review of step 3): a
+ * grant revoked at Google, or a refresh token Testing mode expired after
+ * seven days (Decision 32), is found while the card can still wait for the
+ * person to reconnect, instead of when the send is already under way. It is
+ * this connection's one refresh, so the call's own requests use its token.
+ */
+export async function freshAccess(conn: LiveConnection, cfg: GoogleConfig): Promise<{ ok: true } | { ok: false; failure: GoogleFailure }> {
+  if (conn.status !== "active") return { ok: false, failure: "needs_reconnect" };
+  const r = await refreshOnce(conn, cfg);
+  return r.ok ? { ok: true } : { ok: false, failure: r.failure };
 }
 
 type Sent = { kind: "response"; res: Response } | { kind: "network" };
@@ -213,7 +255,9 @@ export async function googleCall<T>(conn: LiveConnection, cfg: GoogleConfig, req
     await sent.res.body?.cancel().catch(() => undefined);
     const fresh = await accessFor(conn, cfg, true);
     if (!fresh.ok) return { ok: false, failure: fresh.failure };
-    sent = await send(fresh.accessToken, req);
+    // A token this call already refreshed is not refreshed again (review of
+    // step 3): the 401 stands, and is answered below.
+    if (fresh.accessToken !== token.accessToken) sent = await send(fresh.accessToken, req);
   }
   if (sent.kind === "network") {
     const failure: GoogleFailure = req.write ? "unknown_outcome" : "unavailable";

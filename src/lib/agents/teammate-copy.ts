@@ -1113,7 +1113,21 @@ export const CONNECTOR_COPY = {
   // it could not read (a 403 of its own, a 400): not in the spec's list.
   googleRefused: "Google refused that for your account.",
   googleBadRequest: "Google couldn't read that request. Check the search words or the id and try again.",
+  // A write's own sentences (review of step 3): a draft is never in Sent, and
+  // an email Gmail refused was approved by the person, not searched for.
+  googleRejectedEmail: "Gmail refused this email as it was written, so nothing was sent.",
+  googleRejectedDraft: "Gmail refused this draft as it was written, so nothing was saved.",
+  unknownOutcomeDraft: "Google didn't confirm the draft was saved. Check your Gmail drafts before asking again.",
   unknownOutcomeEmail: "Google didn't confirm it was sent. Check your Sent folder in Gmail before asking again.",
+  /** An email whose body has no words once its links are made plain (review of step 3: email keeps its @ signs, so the Talk sentence was untrue). */
+  emptyBody: "The email has no words left once its links are turned into plain text. Say what it should say.",
+  /**
+   * A card an approval could not run yet, with nothing sent: it stays waiting
+   * (review of step 3). `why` is the reason's own sentence.
+   */
+  stillWaits: (why: string) => `${why} It still waits for you, so you can approve it again after that.`,
+  /** What a Google write is called wherever its card's own title is not shown (CONNECTOR_TITLES), for a tool with none. */
+  googleAction: "A Google action",
   emailNotFound: "I can't find that email.",
   threadNotFound: "I can't find that conversation.",
   badRecipient: (a: string) => `${a} isn't an email address.`,
@@ -1124,6 +1138,9 @@ export const CONNECTOR_COPY = {
   // The model is told when anything was cut (Decision 17): not in the spec's list.
   moreEmails: "More emails match than are shown here. Search with more words to narrow it.",
   threadCut: "Not all of this conversation is here: older messages, or long ones, were cut.",
+  // An address list cut at a whole address, never inside one (review of step 3).
+  moreAddresses: (list: string, n: number) => `${list} and ${count(n, "more address", "more addresses")}`,
+  addressesCut: "Some lists of people were too long to show whole: each one ends with how many more addresses it left out.",
   /** What a body past the conversation's room reads as (read_email). */
   bodyCutMark: "(cut: too long to read here)",
   toLine: (l: string) => `To: ${l}`,
@@ -1142,6 +1159,23 @@ export const CONNECTOR_COPY = {
   /** The deployment stopped offering Google (GOOGLE_AGENT_PRODUCTS emptied): not in the spec's list. */
   cancelledNotConfigured: "Cancelled: Google for AI teammates isn't set up on this WorkwrK any more.",
 } as const;
+
+/**
+ * What a Google write is called wherever the model reads it, now or in a
+ * later turn: the waiting answer, a practice run's line, the tool row and the
+ * actions line (review of step 3). Never the card's own title, which quotes a
+ * subject that can come from someone else's email; only the card the person
+ * reads shows it.
+ */
+export const CONNECTOR_TITLES: Readonly<Partial<Record<ToolName, string>>> = {
+  draft_email: "Save a draft in Gmail",
+  send_email: "Send an email from Gmail",
+  reply_email: "Reply in the email conversation",
+  create_event: "Add an event to Google Calendar",
+  update_event: "Change an event in Google Calendar",
+  cancel_event: "Cancel an event in Google Calendar",
+  respond_to_invite: "Answer a calendar invite",
+};
 
 /**
  * The person's own Google connection for their AI teammates

@@ -35,6 +35,7 @@ import { talkGateForUser } from "@/lib/talk-gate";
 // permission matrix, the List helpers and the goal rules.
 import { canContributeAs, contractsChangeableBy, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
 import { prepareConnector } from "./connector-previews";
+import { isHeldCode, type HeldCode } from "./connector-rules";
 import { splitScheduleZone } from "./cron";
 import { routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
 import { describeSchedule, wordsInZone, zoneName } from "./schedule-words";
@@ -113,10 +114,17 @@ export interface PrepareContext {
   tainted?: boolean;
 }
 
+/**
+ * `readGoogle`: the preparation itself read the person's Gmail (a reply's
+ * conversation, connector-previews.ts), so the turn asks before every later
+ * write, as after search_email (Decision 9; review of step 3). `held`, at an
+ * approval: nothing was sent and the card can wait (connector-rules.ts
+ * HeldCode), so it stays PENDING rather than FAILED.
+ */
 export type Prepared =
-  | { ok: true; tool: ToolName; input: Record<string, unknown>; risk: ToolRisk; preview: ActionPreview; targetKey: string | null }
+  | { ok: true; tool: ToolName; input: Record<string, unknown>; risk: ToolRisk; preview: ActionPreview; targetKey: string | null; readGoogle?: true }
   /** `detail`: what the model can retry with, as the tool would answer it (the ids of Lists that share a name). */
-  | { ok: false; error: string; detail?: Record<string, unknown> };
+  | { ok: false; error: string; detail?: Record<string, unknown>; held?: HeldCode; readGoogle?: true };
 
 /** What one tool's preparation found, before the shared fields are added (connector-previews.ts builds one too). */
 export interface Found {
@@ -125,6 +133,8 @@ export interface Found {
   risk?: ToolRisk;
   preview: ActionPreview;
   targetKey?: string | null;
+  /** The preparation read the person's Google (see Prepared). */
+  readGoogle?: true;
 }
 
 /** The longest a subject runs on a card's title line. */
@@ -212,8 +222,8 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
 
   const found = await prepareOne(tool, raw, ctx);
   if ("error" in found) {
-    const { error, ...detail } = found as { error: string } & Record<string, unknown>;
-    return fail(error, detail);
+    const { error, held, readGoogle, ...detail } = found as { error: string; held?: unknown; readGoogle?: unknown } & Record<string, unknown>;
+    return { ...fail(error, detail), ...(isHeldCode(held) ? { held } : {}), ...(readGoogle === true ? { readGoogle: true as const } : {}) };
   }
   const risk = maxRisk(base, found.risk ?? base);
   const targetKey = found.targetKey ?? null;
@@ -241,7 +251,7 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
     delete preview.alwaysLabel;
     preview.lines = [...(preview.lines ?? []), CONNECTOR_COPY.askedAfterReading];
   }
-  return { ok: true, tool, input: found.input, risk, preview, targetKey };
+  return { ok: true, tool, input: found.input, risk, preview, targetKey, ...(found.readGoogle === true ? { readGoogle: true as const } : {}) };
 }
 
 async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: PrepareContext): Promise<Found | { error: string }> {

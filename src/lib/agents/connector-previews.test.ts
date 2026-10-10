@@ -36,6 +36,11 @@ const ok = (p: Prepared): Ok => {
 
 let threadMessages: unknown[] = [];
 let calls: URL[] = [];
+/** What Google's token endpoint answers a refresh (an approval's fresh token), and the thread read's status. */
+let tokenReply: { status: number; json: unknown } = { status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } };
+let threadStatus = 200;
+/** Gmail's own requests only: an approval's refresh goes to the token endpoint. */
+const gmailCalls = () => calls.filter((u) => u.pathname.startsWith("/gmail/"));
 
 const header = (name: string, value: string) => ({ name, value });
 function threadMessage(id: string, h: Record<string, string>, labels: string[] = ["INBOX"]) {
@@ -97,12 +102,16 @@ beforeEach(() => {
     threadMessage("m-draft", { From: "max@mail.test", To: "someone@else.test", Subject: "Re: Invoice due" }, ["DRAFT"]),
   ];
   calls = [];
+  tokenReply = { status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } };
+  threadStatus = 200;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (raw: string) => {
       const url = new URL(String(raw));
       calls.push(url);
+      if (url.pathname === "/token") return new Response(JSON.stringify(tokenReply.json), { status: tokenReply.status });
       if (url.pathname === "/gmail/v1/users/me/threads/t1") {
+        if (threadStatus !== 200) return new Response(JSON.stringify({ error: { code: threadStatus } }), { status: threadStatus });
         return new Response(JSON.stringify({ id: "t1", messages: url.searchParams.get("format") === "minimal" ? [{ id: "m2" }] : threadMessages }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
@@ -205,8 +214,65 @@ describe("reply_email's card", () => {
     const approved = ok(await prepareCall("reply_email", { ...first.input, body: "Paid today, thanks." }, ctx({ trigger: "APPROVAL" })));
     expect(approved.input).toMatchObject({ to: ["billing@ext.test"], cc: [], inReplyTo: "<m2@ext.test>", body: "Paid today, thanks." });
     expect(JSON.stringify(approved)).not.toContain("intruder");
-    // One read, only that the conversation is still there.
-    expect(calls.map((u) => u.searchParams.get("format"))).toEqual(["minimal"]);
+    // One Gmail read, only that the conversation is still there, after the approval's one refresh (review of step 3).
+    expect(gmailCalls().map((u) => u.searchParams.get("format"))).toEqual(["minimal"]);
+    expect(calls.map((u) => u.pathname)).toEqual(["/token", "/gmail/v1/users/me/threads/t1"]);
+    // At the approval nothing new of the conversation is read, so nothing taints.
+    expect(approved).not.toHaveProperty("readGoogle");
+  });
+
+  it("says its first preparation read Gmail, so the turn asks before every later write (review of step 3)", async () => {
+    const r = ok(await prepareCall("reply_email", { threadId: "t1", body: "Paid today." }, ctx()));
+    // Before: no mark, and the turn's later writes ran without a card.
+    expect(r.readGoogle).toBe(true);
+    // Refused after the read (too many people on the conversation), it still says so.
+    threadMessages = [threadMessage("m2", { From: "Boss <boss@ext.test>", To: "max@mail.test", Cc: Array.from({ length: 25 }, (_, i) => `p${i}@ext.test`).join(", "), Subject: "Invoice due" })];
+    const many = await prepareCall("reply_email", { threadId: "t1", body: "Paid.", replyAll: true }, ctx());
+    expect(many).toEqual({ ok: false, error: CONNECTOR_COPY.tooManyRecipients, readGoogle: true });
+    // A send reads nothing of Gmail.
+    expect(ok(await prepareCall("send_email", { to: ["olivia@proof.test"], subject: "Hi", body: "x" }, ctx()))).not.toHaveProperty("readGoogle");
+  });
+
+  it("keeps a conversation's ids whole and bounded, the newest kept, so the card can always be sent (review of step 3)", async () => {
+    const many = Array.from({ length: 2000 }, (_, i) => `<id${i}@ext.test>`).join(" ");
+    threadMessages = [threadMessage("m2", { From: "Boss <boss@ext.test>", To: "max@mail.test", Subject: "Invoice due", "Message-ID": "<m2@ext.test>", References: `${many} <${"x".repeat(400)}@ext.test>` })];
+    const r = ok(await prepareCall("reply_email", { threadId: "t1", body: "Paid." }, ctx()));
+    const refs = String(r.input.references);
+    // Before: 30 KB stored, which the approval refused with a sentence that said nothing of why.
+    expect(refs.length).toBeLessThanOrEqual(2000);
+    expect(refs.endsWith("<id1999@ext.test> <m2@ext.test>")).toBe(true);
+    expect(refs).not.toContain("x".repeat(400));
+    expect(r.input.inReplyTo).toBe("<m2@ext.test>");
+    // An id longer than a header line's room is never In-Reply-To.
+    threadMessages = [threadMessage("m2", { From: "Boss <boss@ext.test>", To: "max@mail.test", Subject: "Invoice due", "Message-ID": `<${"y".repeat(400)}@ext.test>` })];
+    const long = ok(await prepareCall("reply_email", { threadId: "t1", body: "Paid." }, ctx()));
+    expect(long.input).toMatchObject({ inReplyTo: null, references: null });
+    // A card stored before the bound is held to it at its approval.
+    const approved = ok(await prepareCall("reply_email", { ...r.input, references: `${many} <m2@ext.test>` }, ctx({ trigger: "APPROVAL" })));
+    expect(String(approved.input.references).length).toBeLessThanOrEqual(2000);
+  });
+
+  it("at its approval waits, never fails, when the grant was revoked or Google did not answer before anything was sent (review of step 3)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = ok(await prepareCall("reply_email", { threadId: "t1", body: "Paid today." }, ctx()));
+    // Found by the approval's own refresh: before, the send began and the card failed for good.
+    tokenReply = { status: 400, json: { error: "invalid_grant" } };
+    expect(await prepareCall("reply_email", first.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: CONNECTOR_COPY.needsReconnect, held: "connection_needed" });
+    expect(gmailCalls().filter((u) => u.searchParams.get("format") === "minimal")).toEqual([]);
+    // Marked so: the next approval meets it before Google, and still waits.
+    expect(await prepareCall("send_email", { to: ["olivia@proof.test"], subject: "Hi", body: "x", account: ACCOUNT }, ctx({ trigger: "APPROVAL" }))).toEqual({
+      ok: false,
+      error: CONNECTOR_COPY.needsReconnect,
+      held: "connection_needed",
+    });
+    // Google down for the conversation's check.
+    cdb.connections[0].status = "active";
+    tokenReply = { status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } };
+    threadStatus = 503;
+    expect(await prepareCall("reply_email", first.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: CONNECTOR_COPY.googleUnavailable, held: "retry_later" });
+    // A conversation that is gone ends it: approving again cannot help.
+    threadStatus = 404;
+    expect(await prepareCall("reply_email", first.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: CONNECTOR_COPY.threadNotFound });
   });
 
   it("says when the conversation is gone", async () => {

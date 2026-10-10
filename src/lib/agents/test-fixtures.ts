@@ -7,6 +7,7 @@
 //
 // Test-only: nothing in the app imports it.
 
+import { Prisma } from "@/generated/prisma";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { BASE_RISK, alwaysKeyFor, type ApprovalRules, type ToolRisk } from "./tool-policy";
@@ -73,7 +74,10 @@ function freshAgent() {
   };
 }
 
-type Card = { ok: false; error: string } | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown> };
+/** A refusal may carry `held` (an approval that can wait, connector-rules.ts HeldCode) and `readGoogle` (the preparation read Gmail). */
+type Card =
+  | { ok: false; error: string; held?: "connection_needed" | "retry_later"; readGoogle?: true }
+  | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown>; readGoogle?: true };
 
 export const fx = {
   actions: [] as ActionRowFx[],
@@ -85,6 +89,9 @@ export const fx = {
   /** What a tool's handler answers (an Error is thrown); else { ok: true }. */
   answers: {} as Record<string, unknown>,
   person: { ok: true, person: PERSON } as { ok: true; person: typeof PERSON } | { ok: false; reason: string },
+  /** What resolveActingPerson answers next, one read at a time, before falling back to `person`; and how many reads there were. */
+  personQueue: [] as Array<{ ok: true; person: typeof PERSON } | { ok: false; reason: string }>,
+  personReads: 0,
   /** What prepareCall answers for a tool: a refusal, or the class, title, target and input of its card. */
   cards: {} as Record<string, Card | ((input: Record<string, unknown>) => Card)>,
   prepareCalls: [] as Array<{ tool: string; input: Record<string, unknown>; ctx: { agentRules?: ApprovalRules; teammate: Record<string, unknown> } }>,
@@ -111,6 +118,8 @@ export function resetFixtures(): void {
   fx.handlerCalls = [];
   fx.answers = {};
   fx.person = { ok: true, person: PERSON };
+  fx.personQueue = [];
+  fx.personReads = 0;
   fx.cards = {};
   fx.prepareCalls = [];
   fx.modules = { tablesOn: true, talkOn: true };
@@ -204,7 +213,9 @@ export const prismaFake = {
     },
     updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       const hit = rows(a.where);
-      for (const r of hit) Object.assign(r, a.data, { updatedAt: new Date() });
+      // A JSON column set back to empty (Prisma.DbNull) reads as null, as the database answers.
+      const data = Object.fromEntries(Object.entries(a.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v]));
+      for (const r of hit) Object.assign(r, data, { updatedAt: new Date() });
       return { count: hit.length };
     },
     create: async (a: { data: Partial<ActionRowFx> & { toolName: string } }) => ({ ...seedAction({ ...a.data, id: `act${fx.actions.length + 1}`, createdAt: new Date() }) }),
@@ -277,7 +288,10 @@ export const connectorFake = {
 };
 
 export const actingFake = {
-  resolveActingPerson: async () => fx.person,
+  resolveActingPerson: async () => {
+    fx.personReads += 1;
+    return fx.personQueue.shift() ?? fx.person;
+  },
   toolCtxFor: (person: typeof PERSON, teammate: Record<string, unknown>) => ({
     orgId: person.organizationId,
     userId: person.userId,
@@ -314,6 +328,7 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
     input: resolved,
     risk,
     targetKey,
+    ...(o.readGoogle ? { readGoogle: true as const } : {}),
     preview: {
       title: o.title ?? `Run ${tool}`,
       ...(alwaysKey ? { alwaysKey, alwaysLabel: "Approve and don't ask again" } : {}),

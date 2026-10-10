@@ -16,7 +16,7 @@ vi.mock("./acting", () => ({ actingPersonFor: async () => acting.person }));
 
 import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { sealToken } from "@/lib/connectors/seal";
-import { CONNECTOR_TOOLS_DEFS } from "./connector-tools";
+import { CONNECTOR_TOOLS_DEFS, READ_ANSWER_MAX } from "./connector-tools";
 import { CONNECTOR_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext } from "./tools";
 
@@ -49,7 +49,16 @@ function stubGoogle(): void {
     vi.fn(async (raw: string, init?: RequestInit) => {
       const url = new URL(String(raw));
       const method = init?.method ?? "GET";
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      // Gmail's requests are JSON; the token endpoint's is a form, kept as text.
+      const text = typeof init?.body === "string" ? init.body : undefined;
+      let body: unknown = undefined;
+      if (text !== undefined) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = text;
+        }
+      }
       calls.push({ method, url, body, auth: new Headers(init?.headers).get("authorization") });
       const key = `${method} ${url.pathname}`;
       const route = routes[key] ?? Object.entries(routes).find(([k]) => k.endsWith("*") && key.startsWith(k.slice(0, -1)))?.[1];
@@ -172,7 +181,8 @@ describe("search_email", () => {
     expect(r).toMatchObject({ count: 2, partial: true, note: `${CONNECTOR_COPY.emailNote} ${CONNECTOR_COPY.moreEmails}` });
     const [first, second] = r.emails as Array<Record<string, unknown>>;
     expect((first.subject as string).length).toBe(200);
-    expect((first.from as string).length).toBe(300);
+    // A long name is cut short; the address beside it never is (review of step 3).
+    expect(first.from).toBe(`${"N".repeat(60)} <boss@ext.test>`);
     expect((first.snippet as string).length).toBe(200);
     expect((first.snippet as string).startsWith("Tom & Jerry")).toBe(true);
     expect(first).toMatchObject({ messageId: "m1", threadId: "t-invoice", unread: true });
@@ -184,6 +194,33 @@ describe("search_email", () => {
   it("says what Google answered, in the person's words", async () => {
     routes[`GET /gmail/v1/users/me/messages`] = () => ({ status: 429 });
     expect(await run("search_email", { query: "invoice" })).toEqual({ error: CONNECTOR_COPY.googleBusy(30) });
+  });
+
+  it("cuts a long To list only between whole addresses, says how many it left out, and tells the model (review of step 3)", async () => {
+    // Ten colleagues: about 380 characters. Before, the cut at 300 landed inside an address.
+    const people = Array.from({ length: 10 }, (_, i) => `colleague.number${i}@finance.acme.test`);
+    routes[`GET /gmail/v1/users/me/messages`] = () => ({ status: 200, json: { messages: [{ id: "m1", threadId: "t1" }] } });
+    routes[`GET /gmail/v1/users/me/messages/m1`] = () => ({ status: 200, json: message("m1", { to: people.join(", ") }) });
+    const r = await run("search_email", { query: "invoice" });
+    const to = (r.emails as Array<{ to: string }>)[0].to;
+    const shown = to.replace(/ and \d+ more address(es)?$/, "").split(", ");
+    // Every address shown is one of the real ones, whole.
+    for (const a of shown) expect(people).toContain(a);
+    expect(to).toBe(CONNECTOR_COPY.moreAddresses(shown.join(", "), people.length - shown.length));
+    expect(to.length).toBeLessThanOrEqual(300 + 40);
+    expect(r).toMatchObject({ partial: true, note: `${CONNECTOR_COPY.emailNote} ${CONNECTOR_COPY.addressesCut}` });
+  });
+
+  it("refreshes an expired token once for the whole search, its list and every message read (review of step 3)", async () => {
+    cdb.connections[0].accessTokenExpiresAt = new Date(Date.now() - 1000);
+    routes[`POST /token`] = () => ({ status: 200, json: { access_token: "fresh-access-token", expires_in: 3600 } });
+    routes[`GET /gmail/v1/users/me/messages`] = () => ({ status: 200, json: { messages: ["m1", "m2", "m3", "m4", "m5", "m6"].map((id) => ({ id, threadId: "t1" })) } });
+    routes[`GET /gmail/v1/users/me/messages/*`] = (url) => ({ status: 200, json: message(url.pathname.split("/").pop() ?? "m") });
+    const r = await run("search_email", { query: "invoice" });
+    expect(r).toMatchObject({ count: 6 });
+    // Before: one refresh, and one database write, for each of the seven requests.
+    expect(calls.filter((c) => c.url.pathname === "/token")).toHaveLength(1);
+    expect(calls.filter((c) => c.url.pathname.startsWith("/gmail/")).every((c) => c.auth === "Bearer fresh-access-token")).toBe(true);
   });
 });
 
@@ -200,6 +237,23 @@ describe("read_email", () => {
     expect(kept.filter((m) => m.body !== CONNECTOR_COPY.bodyCutMark).reduce((n, m) => n + m.body.length, 0)).toBeLessThanOrEqual(20_000);
     expect(kept.find((m) => m.messageId === "m8")?.attachments).toBe(1);
     expect(JSON.stringify(r)).not.toMatch(/salary-review|att-secret-1/);
+  });
+
+  it("always fits the model's limit with its note: the oldest bodies give way, the newest message never (review of step 3)", async () => {
+    // Ten messages of 2,000 characters each fit the 20,000 for bodies, but
+    // quotes double when written as JSON, and each carries a long To list.
+    const many = Array.from({ length: 40 }, (_, i) => `person.number${i}@finance.acme.test`).join(", ");
+    const msgs = Array.from({ length: 10 }, (_, i) => message(`m${i}`, { text: `${i}${'""'.repeat(999)}x`, to: many }));
+    routes[`GET /gmail/v1/users/me/threads/t-invoice`] = () => ({ status: 200, json: { id: "t-invoice", messages: msgs } });
+    const r = await run("read_email", { threadId: "t-invoice" });
+    // Before: past 30,000 the executor kept only the first part, which lost the newest messages and the note.
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(READ_ANSWER_MAX);
+    const kept = r.messages as Array<{ messageId: string; body: string; bodyCut: boolean }>;
+    expect(kept.at(-1)?.messageId).toBe("m9");
+    expect(kept.at(-1)?.body.startsWith("9")).toBe(true);
+    expect(kept.at(-1)?.bodyCut).toBe(false);
+    expect(kept[0].body).toBe(CONNECTOR_COPY.bodyCutMark);
+    expect(r).toMatchObject({ partial: true, note: `${CONNECTOR_COPY.emailNote} ${CONNECTOR_COPY.threadCut} ${CONNECTOR_COPY.addressesCut}` });
   });
 
   it("finds the conversation of one message, and says when it is gone", async () => {
@@ -271,6 +325,39 @@ describe("the writes", () => {
     expect(mime).toContain("To: boss@ext.test\r\n");
     expect(mime).toContain("In-Reply-To: <abc@ext.test>\r\n");
     expect(mime).toContain("Subject: Re: Invoice due\r\n");
+  });
+
+  it("names each write's own failure: a draft Google didn't confirm is checked in Drafts, a refused email is not a search (review of step 3)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    routes[`POST /gmail/v1/users/me/drafts`] = () => "timeout";
+    const draft = await run("draft_email", { to: ["boss@ext.test"], cc: [], subject: "Re: Invoice due", body: "Draft text", account: ACCOUNT });
+    // Before: "Google didn't confirm it was sent. Check your Sent folder", for a draft that is never sent.
+    expect(draft).toEqual({ error: CONNECTOR_COPY.unknownOutcomeDraft });
+    routes[`POST /gmail/v1/users/me/messages/send`] = () => ({ status: 400, json: { error: { code: 400 } } });
+    // Before: "Check the search words or the id".
+    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: CONNECTOR_COPY.googleRejectedEmail });
+  });
+
+  it("at its approval, says a refusal before anything was sent can wait, and an unknown outcome cannot (review of step 3)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    routes[`POST /gmail/v1/users/me/messages/send`] = () => ({ status: 429 });
+    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: CONNECTOR_COPY.googleBusy(30), held: "retry_later" });
+    // A grant revoked at Google: the 401's refresh answers invalid_grant, and nothing was sent.
+    routes[`POST /gmail/v1/users/me/messages/send`] = () => ({ status: 401 });
+    routes[`POST /token`] = () => ({ status: 400, json: { error: "invalid_grant" } });
+    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: CONNECTOR_COPY.needsReconnect, held: "connection_needed" });
+    // The connection is now marked: the next approval meets it before Google.
+    expect(await run("reply_email", REPLY, ctx({ trigger: "APPROVAL", actionId: "act2" }))).toEqual({ error: CONNECTOR_COPY.needsReconnect, held: "connection_needed" });
+    // A send that may have happened is never offered again.
+    resetConnectorDb();
+    cdb.policy.set("org1", ["gmail"]);
+    cdb.agents.push({ id: "a1", slug: "inbox-helper", name: "Inbox helper", organizationId: "org1", status: "ENABLED", visibility: "PRIVATE", ownerId: "u-max", description: "", systemPrompt: "", toolNames: [], approvalRules: {}, modelOverride: null, productSlug: null });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: ACCOUNT.sub, accountEmail: ACCOUNT.email, products: ["gmail"], refreshTokenSealed: sealToken("r"), accessTokenSealed: sealToken("a"), accessTokenExpiresAt: new Date(Date.now() + 3_600_000) });
+    routes[`POST /gmail/v1/users/me/messages/send`] = () => "timeout";
+    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act3" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeEmail });
+    // In a turn, nothing is held: only an approval can wait.
+    routes[`POST /gmail/v1/users/me/drafts`] = () => ({ status: 429 });
+    expect(await run("draft_email", { to: ["boss@ext.test"], cc: [], subject: "x", body: "y", account: ACCOUNT })).toEqual({ error: CONNECTOR_COPY.googleBusy(30) });
   });
 
   it("saves a draft as the account its preparation named, and sends nothing (Decision 7)", async () => {

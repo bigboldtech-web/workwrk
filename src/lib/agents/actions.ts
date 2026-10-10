@@ -52,7 +52,13 @@
 // reconnecting or lacks the product leaves it PENDING (connection_needed),
 // so the person can reconnect and approve it; an allow the person withdrew
 // CANCELS it. Its preparation then checks the Google account the card named
-// (Decision 15).
+// (Decision 15), and a send or a reply gets a fresh access token before the
+// swap. Anything found before Google was sent the email, by the preparation,
+// a refresh or the handler itself (a grant revoked, Google busy or not
+// answering), leaves it PENDING too (connection_needed or retry_later), with
+// a sentence that says it can be approved again; only a write whose outcome
+// is unknown, or that Google refused as written, ends it (review of step 3).
+// The person is read again just before each Google card's swap.
 //
 // Server-only: imports prisma.
 
@@ -383,8 +389,13 @@ export interface DecisionInput {
   edit?: { text: string };
 }
 
-/** connection_needed: a Google card whose person must connect or reconnect Google first; it stays PENDING (Phase 3). */
-export type DecisionCode = "already_decided" | "expired" | "agent_paused" | "agent_removed" | "tool_off" | "person_cannot" | "connection_needed" | "failed";
+/**
+ * connection_needed: a Google card whose person must connect or reconnect
+ * Google first; retry_later: Google, or WorkwrK's own link to it, did not
+ * answer before anything was sent. Either way the card stays PENDING and can
+ * be approved again (Phase 3; review of step 3).
+ */
+export type DecisionCode = "already_decided" | "expired" | "agent_paused" | "agent_removed" | "tool_off" | "person_cannot" | "connection_needed" | "retry_later" | "failed";
 
 export interface DecisionResult {
   id: string;
@@ -604,8 +615,8 @@ async function approve(
         return cancel(row, viewer.userId, "tool_off", access.reason === "workspace_off" ? CONNECTOR_COPY.cancelledProductOff(productWord(product)) : CONNECTOR_COPY.cancelledNotConfigured, now);
       }
       // Not connected, to reconnect, or without the product: it waits, so
-      // the person can connect and approve it then.
-      return { id: row.id, status: "PENDING", code: "connection_needed", error: connectorRefusalSentence(access, agent.name, product) };
+      // the person can connect and approve it then, and the sentence says so.
+      return { id: row.id, status: "PENDING", code: "connection_needed", error: CONNECTOR_COPY.stillWaits(connectorRefusalSentence(access, agent.name, product)) };
     }
   }
 
@@ -620,6 +631,12 @@ async function approve(
     agentRules,
   });
   if (!prepared.ok) {
+    // A Google card that met a connection to mend, or Google not answering,
+    // before anything was sent: it waits, to be approved again (review of
+    // step 3: it used to fail for good, and the person had to ask again).
+    if (agent && product && prepared.held) {
+      return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(prepared.error) };
+    }
     // The person can no longer do it (or the edit left nothing to run): it
     // fails with the reason, and the teammate is told at its next turn.
     const failed = { status: "FAILED", decidedVia: "person", decidedById: viewer.userId, decidedAt: now, error: prepared.error, ...(edited ? { editedInput: json(edited) } : {}) };
@@ -640,6 +657,17 @@ async function approve(
     prepared.preview = preview;
   }
   const risk = prepared.risk === "READ" ? row.risk : prepared.risk;
+  // A Google card runs as the person is at this moment, never as the copy
+  // this request read before its first card (review of step 3): an "Approve
+  // 50" of sends takes minutes, and someone made a Guest, deactivated or with
+  // AI turned off meanwhile sends nothing more. Read again just before the
+  // swap, as the executor reads them again for each Google call of a turn.
+  let runAs = person;
+  if (agent && product) {
+    const again = await resolveActingPerson(viewer.organizationId, viewer.userId);
+    if (!again.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: ACTION_ERRORS.personCannot };
+    runAs = again.person;
+  }
   const claimed = await swap(row.id, "PENDING", {
     status: "RUNNING",
     decidedVia: "person",
@@ -656,12 +684,29 @@ async function approve(
   const out = await runApprovedAction({
     action: { id: row.id, toolName: tool, risk, sessionId: row.sessionId, runId: row.runId, routineId: row.routineId, preview: prepared.preview },
     input: prepared.input,
-    person,
+    person: runAs,
     // Null: Ask AI's own, run in the person's own context as Ask AI runs it.
     agent: agent ? { id: agent.id, slug: agent.slug, name: agent.name } : null,
     trigger: "APPROVAL",
     decidedVia: "person",
+    holdNotSent: Boolean(agent && product),
   });
+  if (out.status === "HELD") {
+    // Nothing was sent, and what stopped it can be mended: the card goes back
+    // to waiting exactly as it was before this approval (its card, its class,
+    // no edit kept), by one swap from RUNNING (review of step 3).
+    const back = await swap(row.id, "RUNNING", {
+      status: "PENDING",
+      decidedVia: null,
+      decidedById: null,
+      decidedAt: null,
+      risk: row.risk,
+      preview: json(row.preview),
+      ...(edited ? { editedInput: row.editedInput === null ? Prisma.DbNull : json(row.editedInput) } : {}),
+    });
+    if (!back) return lost(row.id);
+    return { id: row.id, status: "PENDING", code: out.code, error: CONNECTOR_COPY.stillWaits(out.error) };
+  }
   // Ask AI's cards never offer "don't ask again", so nothing is ever stored for them.
   const always = agent !== null && opts.always === true && (await storeAlways(agent.id, viewer.userId, tool, prepared));
   if (out.status === "EXECUTED") {

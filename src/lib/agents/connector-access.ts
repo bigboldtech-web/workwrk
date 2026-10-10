@@ -81,7 +81,10 @@ export async function connectorAgentById(organizationId: string, agentId: string
   return connectorAgentFrom(row);
 }
 
-export type OpenConnector = { ok: true; agent: ConnectorAgent; connection: LiveConnection; cfg: GoogleConfig } | { ok: false; error: string };
+/** `reason` says which refusal it was, so an approval can tell a connection to mend (the card waits) from one that ends it (review of step 3). */
+export type OpenConnector =
+  | { ok: true; agent: ConnectorAgent; connection: LiveConnection; cfg: GoogleConfig }
+  | { ok: false; error: string; reason: ConnectorRefusal | "teammate_off" };
 
 /**
  * One call's way to the person's Google: the teammate read now, then
@@ -92,11 +95,11 @@ export type OpenConnector = { ok: true; agent: ConnectorAgent; connection: LiveC
  */
 export async function openConnector(a: { person: ActingPerson; agentId: string; product: ConnectorProduct; forApproval: boolean }): Promise<OpenConnector> {
   // A deployment that offers no Google reads nothing to say so.
-  if (!googleConfig()) return { ok: false, error: CONNECTOR_COPY.notConfigured };
+  if (!googleConfig()) return { ok: false, error: CONNECTOR_COPY.notConfigured, reason: "not_configured" };
   const agent = await connectorAgentById(a.person.organizationId, a.agentId);
-  if (!agent) return { ok: false, error: CONNECTOR_COPY.teammateOff };
+  if (!agent) return { ok: false, error: CONNECTOR_COPY.teammateOff, reason: "teammate_off" };
   const access = await connectorAccess({ person: a.person, agent, product: a.product, forApproval: a.forApproval });
-  if (!access.ok) return { ok: false, error: connectorRefusalSentence(access, agent.name, a.product) };
+  if (!access.ok) return { ok: false, error: connectorRefusalSentence(access, agent.name, a.product), reason: access.reason };
   return { ok: true, agent, connection: access.connection, cfg: access.cfg };
 }
 
