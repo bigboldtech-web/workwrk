@@ -33,8 +33,9 @@ import { googleRevokeConfig } from "@/lib/connectors/google/config";
 export async function DELETE(req: Request) {
   const viewer = await viewerFromSession();
   if (!viewer) return teammateError(401, "signed_out", CONNECTIONS_COPY.signedOut);
-  // A caller that names no workspace (an API client, a page from before
-  // this) is answered as before; one that names another is refused.
+  // The workspace the page showed, required: a caller that names another, or
+  // none (an API client, a page from before review round 1 of Phase 3), is
+  // refused below (comment corrected in review round 2 of Phase 3).
   const body = (await req.json().catch(() => null)) as { organizationId?: unknown } | null;
   const shownIn = body && typeof body === "object" ? body.organizationId : undefined;
   // Required (lead, after review round 1): a page that names no workspace,

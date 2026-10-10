@@ -285,6 +285,13 @@ const SQL_MANIFEST = [
   // selects every column on a read with no select, and every card read and
   // every proposal writes the column.
   "2026-10-10-ai-teammates-phase3-round1.sql",
+  // AI teammates, Phase 3 review round 2: output.readGoogle = false recorded
+  // on runs that ended before round 1 with a final write on record, no
+  // readGoogle at all, no Google tool named in their output, and a card not
+  // yet told, so a turn told of their cards no longer reads them as unknown
+  // and ignores the person's "Don't ask". Data only, guarded on its own
+  // effect: safe before or after the reload.
+  "2026-10-10-ai-teammates-phase3-round2.sql",
 ];
 
 /**

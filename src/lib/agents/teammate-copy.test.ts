@@ -380,8 +380,14 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
         didntConnect: [["you didn't give WorkwrK access"], "Google didn't connect: you didn't give WorkwrK access."],
         brokenNoticeMessage: [["Acme"], "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme."],
         disconnectedByAdminMessage: [["Acme"], "An Owner or Admin disconnected Google from AI teammates in Acme."],
-        // Review round 1 of Phase 3: a suspended workspace's people read why their connection ended.
-        workspaceSuspendedMessage: [["Acme"], "Acme was suspended, so WorkwrK disconnected Google from its AI teammates and removed its access from your Google account."],
+        // Review round 1 of Phase 3: a suspended workspace's people read why
+        // their connection ended. Review round 2: access at Google is said to
+        // be going only where it is, never where another connection keeps it.
+        workspaceSuspendedMessage: [["Acme"], "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there, and its access to your Google account is being removed."],
+        workspaceSuspendedSharedMessage: [
+          ["Acme"],
+          "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there. Google still lists WorkwrK because this Google account is also connected elsewhere in WorkwrK.",
+        ],
         productTurnedOff: [["Gmail", "Acme"], "An Owner or Admin turned off Gmail for AI teammates in Acme."],
         addFirst: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
       },
@@ -428,6 +434,18 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
     expect(copy.CONNECTOR_COPY.alreadySent).toBe("The same email was just sent from an earlier request, or is being sent now. It isn't asked for again.");
     expect(copy.CONNECTOR_COPY.alreadySentEvent).toBe("The same invitation was just sent from an earlier request, or is being sent now. It isn't asked for again.");
     for (const s of [copy.CONNECTOR_POLICY_COPY.auditDisconnectingAll, copy.CONNECTION_ROUTE_ERRORS.workspaceChanged, copy.CONNECTOR_COPY.workspaceClosed, copy.CONNECTOR_COPY.alreadySent, copy.CONNECTOR_COPY.alreadySentEvent]) {
+      expect(BANNED.test(s)).toBe(false);
+    }
+  });
+  it("words review round 2 of Phase 3's own sentences plainly", () => {
+    expect(copy.CONNECTOR_COPY.maybeSent).toBe(
+      "The same email may already have gone out from an earlier request: Google didn't confirm whether it was sent. It isn't asked for again. Tell the person to check their Sent folder in Gmail first.",
+    );
+    expect(copy.CONNECTOR_COPY.maybeSentEvent).toBe(
+      "The same invitation may already have gone out from an earlier request: Google didn't confirm whether it was sent. It isn't asked for again. Tell the person to check their Google Calendar first.",
+    );
+    expect(copy.PRINT_FIELD_WORDS.memories).toBe("shared memories");
+    for (const s of [copy.CONNECTOR_COPY.maybeSent, copy.CONNECTOR_COPY.maybeSentEvent, copy.PRINT_FIELD_WORDS.memories]) {
       expect(BANNED.test(s)).toBe(false);
     }
   });

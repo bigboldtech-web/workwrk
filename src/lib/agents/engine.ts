@@ -82,7 +82,7 @@ import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind
 import { executeToolCall, markRunReadGoogle, wrapToolData, type CallRecord } from "./executor";
 import { memoriesForPrompt } from "./memory";
 import { APPROVAL_CARD, ROUTINE_FALLBACK_NAME, TURN_ERRORS, waitingForApprovalLine } from "./teammate-copy";
-import type { PrintField } from "./teammate-print";
+import type { AllowPart } from "./teammate-print";
 import { actionViewFromRow, messageViewFromRow, type AgentActionRow, type TeammateMessageView, type TeammateStreamEvent } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
 import { MAX_TOOL_CALLS_PER_TURN, OUTCOMES_PER_TURN, TEAMMATE_EXCLUDED, honoursDontAsk, sanitizeRules, toolsForTrigger, type ApprovalRules } from "./tool-policy";
@@ -875,7 +875,7 @@ interface Prepared {
   personRules: ApprovalRules;
   history: Anthropic.MessageParam[];
   /** Why each Google product the teammate holds tools for is not offered this turn, so a call to one answers its reason. */
-  connectorRefusals: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: PrintField[] }>>;
+  connectorRefusals: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: AllowPart[] }>>;
   /** The Google tools the teammate's own set holds, whatever this turn offers (executor.ts connectorHeld). */
   connectorHeld: string[];
   /**
@@ -997,11 +997,11 @@ export function connectorNotHereLine(kind: NotHereKind, products: readonly Conne
  * How a turn starts (Decision 9): "tainted" when it carries on from a turn
  * that read the person's Google, "clean" when it does not, "unknown" when the
  * database could not say. A teammate asked by a turn that did; a group's
- * later answer to a message another teammate already answered from the
- * person's Google; and a continue (review of step 3), when any answer of
- * this teammate here since the person last wrote read Google
- * (meta.readGoogle), as does the answer of a run whose card it reports, or
- * that run itself (output.readGoogle). The rows are read as well as the
+ * later answer, or continue, after any teammate of the group read the
+ * person's Google since they last wrote (groupTaint, review round 2 of
+ * Phase 3); and a continue (review of step 3), when any answer here since
+ * the person last wrote read Google (meta.readGoogle), as does the answer of
+ * a run whose card it reports, or that run itself (output.readGoogle). The rows are read as well as the
  * run: the run is written last, and a failed write of it must not drop the
  * taint. A run still going (its card approved while it made its last call)
  * cannot say yet, so it is unknown.
@@ -1044,6 +1044,51 @@ async function runsTaint(runIds: readonly string[]): Promise<TaintStart> {
   return clean >= ids.length ? "clean" : "unknown";
 }
 
+/** When the person last wrote in this chat, or null when they never did. */
+async function lastAsked(sessionId: string): Promise<{ createdAt: Date } | null> {
+  return prisma.chatMessage.findFirst({
+    where: { sessionId, role: "USER" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { createdAt: true },
+  });
+}
+
+/**
+ * A GROUP'S TURN READS EVERY TEAMMATE'S GOOGLE SINCE THE PERSON LAST WROTE
+ * (review round 2 of Phase 3). A later answerer, and a continue, read the
+ * other teammates' answers in their history; a continue counted only its
+ * own teammate's, so B's continue after A answered the same message from a
+ * planted thread started clean, honoured Don't ask, and posted what the
+ * email said in Talk with no card. Tainted when any teammate's answer here
+ * read Google (meta.readGoogle) since the person's last message, or answers
+ * the message this turn answers, or carries an outcome's run; or when any
+ * run of this group that ended since then, or is still going, read Google
+ * (the runs behind those answers, marked at once, so an answer whose own
+ * mark was lost is still counted). Never this turn's own run.
+ */
+async function groupTaint(a: TurnArgs, ofRuns: readonly Prisma.ChatMessageWhereInput[]): Promise<"tainted" | "clean"> {
+  const asked = await lastAsked(a.sessionId);
+  const answering = a.trigger === "CHAT" ? (a.group?.messageId ?? a.userMessageId ?? null) : null;
+  const since: Prisma.ChatMessageWhereInput[] = asked ? [{ createdAt: { gt: asked.createdAt } }] : [{}];
+  const answers = await prisma.chatMessage.count({
+    where: {
+      sessionId: a.sessionId,
+      role: "ASSISTANT",
+      AND: [{ meta: { path: ["readGoogle"], equals: true } }, { OR: [...since, ...(answering ? [{ meta: { path: ["replyTo"], equals: answering } }] : []), ...ofRuns] }],
+    },
+  });
+  if (answers > 0) return "tainted";
+  const runs = await prisma.agentRun.count({
+    where: {
+      sessionId: a.sessionId,
+      id: { not: a.runId },
+      output: { path: ["readGoogle"], equals: true },
+      ...(asked ? { OR: [{ endedAt: null }, { endedAt: { gt: asked.createdAt } }] } : {}),
+    },
+  });
+  return runs > 0 ? "tainted" : "clean";
+}
+
 async function startsTainted(a: TurnArgs, outcomes: readonly AgentActionRow[], canMatter: boolean): Promise<TaintStart> {
   if (a.trigger === "DELEGATED") return a.origin?.kind === "delegated" && a.origin.tainted === true ? "tainted" : "clean";
   const carriesOn = a.trigger === "RESUME" || (a.trigger === "CHAT" && Boolean(a.group));
@@ -1065,26 +1110,22 @@ async function startsTainted(a: TurnArgs, outcomes: readonly AgentActionRow[], c
       if (runs !== "clean") return runs;
       if (!(a.trigger === "CHAT" && a.group)) return "clean";
     }
+    if (a.group) {
+      // Any teammate of the group, since the person last wrote (review round
+      // 2 of Phase 3), for a later answerer and a continue alike.
+      if ((await groupTaint(a, ofRuns)) === "tainted") return "tainted";
+      return a.trigger === "RESUME" ? runsTaint(runIds) : "clean";
+    }
     if (a.trigger === "RESUME") {
-      const asked = await prisma.chatMessage.findFirst({
-        where: { sessionId: a.sessionId, role: "USER" },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { createdAt: true },
-      });
+      const asked = await lastAsked(a.sessionId);
       const since: Prisma.ChatMessageWhereInput[] = [asked ? { createdAt: { gt: asked.createdAt } } : {}];
-      const ofThis: Prisma.ChatMessageWhereInput[] = a.group ? [{ meta: { path: ["agentId"], equals: a.agent.id } }] : [];
       const answers = await prisma.chatMessage.count({
-        where: { sessionId: a.sessionId, role: "ASSISTANT", AND: [{ meta: { path: ["readGoogle"], equals: true } }, ...ofThis, { OR: [...since, ...ofRuns] }] },
+        where: { sessionId: a.sessionId, role: "ASSISTANT", AND: [{ meta: { path: ["readGoogle"], equals: true } }, { OR: [...since, ...ofRuns] }] },
       });
       if (answers > 0) return "tainted";
       return runsTaint(runIds);
     }
-    const answering = a.group?.messageId ?? a.userMessageId ?? null;
-    if (!answering) return "clean";
-    const read = await prisma.chatMessage.count({
-      where: { sessionId: a.sessionId, role: "ASSISTANT", AND: [{ meta: { path: ["replyTo"], equals: answering } }, { meta: { path: ["readGoogle"], equals: true } }] },
-    });
-    return read > 0 ? "tainted" : "clean";
+    return "clean";
   } catch (err) {
     console.error(`[agents] turn ${a.runId}: whether it starts after a Google read is unknown, so it asks first: ${errorLine(err)}`);
     return "unknown";

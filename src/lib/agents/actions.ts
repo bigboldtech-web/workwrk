@@ -823,9 +823,13 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
   publishChanged(expired.map((row) => [row.actingForId, row.agentId] as const));
 
   const cutoff = new Date(now.getTime() - RUNNING_STUCK_MS);
+  // Its outcome is unknown, and the card says so as a flag (review round 2 of
+  // Phase 3): for ten minutes from now the same email or invitation is not
+  // asked for again (executor.ts findTwin), as for a send Google never
+  // confirmed. updatedAt is when it failed, which that window counts from.
   const stuck = await prisma.agentAction.updateMany({
     where: { status: "RUNNING", OR: [{ decidedAt: { lt: cutoff } }, { decidedAt: null, createdAt: { lt: cutoff } }] },
-    data: { status: "FAILED", error: ACTION_ERRORS.unconfirmed },
+    data: { status: "FAILED", error: ACTION_ERRORS.unconfirmed, result: { unknownOutcome: true }, updatedAt: now },
   });
   return { expired: expired.length, stuck: stuck.count };
 }

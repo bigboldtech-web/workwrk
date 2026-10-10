@@ -12,7 +12,7 @@
 
 import type { TeammateHue } from "@/lib/agents/hues";
 import { CONNECT_ERROR_WORDS } from "@/lib/agents/teammate-copy";
-import type { PrintField } from "@/lib/agents/teammate-print";
+import type { AllowPart } from "@/lib/agents/teammate-print";
 import { CONNECTOR_PRODUCTS, TOOL_PRODUCT, type ConnectorProduct, type ProductSet } from "./products";
 
 export type ProductState = "on" | "off";
@@ -42,7 +42,7 @@ export interface TeammateGoogleUse {
   /** The products the person let it use. */
   allowed: ProductSet;
   /** Per allowed product, what changed since the person allowed it; such a product is not used until allowed again. */
-  changed: Partial<Record<ConnectorProduct, PrintField[]>>;
+  changed: Partial<Record<ConnectorProduct, AllowPart[]>>;
   /**
    * The teammate as this read showed it (teammate-print.ts teammateShownPrint).
    * An allow sends it back as `expect`, so it covers what the person saw: one

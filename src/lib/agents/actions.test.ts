@@ -364,7 +364,12 @@ describe("sweepActions", () => {
     const out = await sweepActions(now);
     expect(out).toEqual({ expired: 0, stuck: 1 });
     expect(fx.actions.find((r) => r.id === stuck.id)).toMatchObject({ status: "FAILED", error: "Couldn't confirm it finished." });
+    // Review round 2 of Phase 3: flagged as an outcome nobody knows, from now,
+    // so the same email or invitation is not asked for again (executor.ts findTwin).
+    expect(fx.actions.find((r) => r.id === stuck.id)).toMatchObject({ result: { unknownOutcome: true } });
+    expect(fx.actions.find((r) => r.id === stuck.id)?.updatedAt.getTime()).toBeGreaterThanOrEqual(now.getTime());
     expect(fx.actions.find((r) => r.id === busy.id)?.status).toBe("RUNNING");
+    expect(fx.actions.find((r) => r.id === busy.id)?.result).toBeNull();
     const again = await decideActions(viewer, [{ id: stuck.id, decision: "approve" }]);
     expect(again.results).toEqual([{ id: stuck.id, status: "FAILED", code: "already_decided" }]);
     expect(fx.handlerCalls).toEqual([]);

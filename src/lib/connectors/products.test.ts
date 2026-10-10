@@ -115,4 +115,16 @@ describe("isEventId", () => {
     expect(isEventId(null)).toBe(false);
     expect(isEventId(12)).toBe(false);
   });
+
+  // Review round 2 of Phase 3: a series split by "this and following events"
+  // carries "_R" and its start, which the round 1 shape refused, so the
+  // teammate could not change an event list_events had just named.
+  it("takes a split series' id and its single times, and still never a dot or a loose R segment", () => {
+    for (const id of ["7cbh8rpc10lrc0ckih9tafss99_R20261013T150000", "7cbh8rpc10lrc0ckih9tafss99_R20261013T150000_20261020T150000Z", "abc123_R20261013T150000_20261020"]) {
+      expect(isEventId(id)).toBe(true);
+    }
+    for (const id of ["abc_R20261013T150000.", "abc_R2026101T150000", "abc_R20261013", "abc_R20261013T150000Z", "abc_r20261013T150000x", "abc_R../x"]) {
+      expect(isEventId(id)).toBe(false);
+    }
+  });
 });

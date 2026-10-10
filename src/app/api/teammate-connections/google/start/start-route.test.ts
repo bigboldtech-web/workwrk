@@ -45,7 +45,7 @@ const CFG = {
 
 const MAX = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false };
 
-function start(query = "?products=calendar", host = "app.workwrk.test") {
+function start(query = "?products=calendar&ws=org1", host = "app.workwrk.test") {
   return GET(new NextRequest(`https://${host}/api/teammate-connections/google/start${query}`, { headers: { host } }));
 }
 
@@ -92,8 +92,8 @@ describe("the refusals", () => {
     cdb.policy.set("org1", []);
     expect(errorOf(await start())).toBe("workspace_off");
     cdb.policy.set("org1", ["calendar"]);
-    expect(errorOf(await start("?products=gmail"))).toBe("bad_products");
-    expect(errorOf(await start("?products=nonsense"))).toBe("bad_products");
+    expect(errorOf(await start("?products=gmail&ws=org1"))).toBe("bad_products");
+    expect(errorOf(await start("?products=nonsense&ws=org1"))).toBe("bad_products");
 
     expect(cdb.states).toEqual([]);
   });
@@ -105,6 +105,20 @@ describe("the refusals", () => {
     expect(res.headers.get("location")).toBe("https://app.workwrk.test/login?callbackUrl=/account/connections");
   });
 
+  // Review round 2 of Phase 3: Reconnect on a card showing one workspace,
+  // with the session switched to another in another tab, connected the
+  // other one with the first one's products.
+  it("connects nothing for a workspace other than the one the card showed, or a link that names none", async () => {
+    for (const query of ["?products=calendar&ws=org2", "?products=calendar", "?products=calendar&ws="]) {
+      const res = await start(query);
+      expect(res.headers.get("location")).toBe("https://app.workwrk.test/account/connections?ai_error=workspace_changed#ai-google");
+    }
+    expect(cdb.states).toEqual([]);
+    expect(cdb.lookups).toEqual([]);
+    // The card's own workspace still connects.
+    expect(new URL((await start("?products=calendar&ws=org1")).headers.get("location") ?? "").origin).toBe("https://accounts.google.test");
+  });
+
   it("lands every refusal on the app host's card, at the Google card", async () => {
     st.cfg = null;
     expect((await start()).headers.get("location")).toBe("https://app.workwrk.test/account/connections?ai_error=not_configured#ai-google");
@@ -113,7 +127,7 @@ describe("the refusals", () => {
 
 describe("the redirect to Google", () => {
   it("asks with S256, the products granted before, consent, and only the products asked", async () => {
-    const res = await start("?products=calendar");
+    const res = await start("?products=calendar&ws=org1");
     expect(res.status).toBe(302);
     const url = new URL(res.headers.get("location") ?? "");
     expect(`${url.origin}${url.pathname}`).toBe(CFG.authUrl);
@@ -133,7 +147,7 @@ describe("the redirect to Google", () => {
 
   it("keeps what a reconnect already had, and hints the account it had", async () => {
     seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", products: ["gmail"], accountEmail: "max@mail.test" });
-    const q = new URL((await start("?products=calendar")).headers.get("location") ?? "").searchParams;
+    const q = new URL((await start("?products=calendar&ws=org1")).headers.get("location") ?? "").searchParams;
     expect((q.get("scope") ?? "").split(" ")).toEqual(expect.arrayContaining(["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.events"]));
     expect(q.get("login_hint")).toBe("max@mail.test");
     expect(cdb.states[0].products).toEqual(["gmail", "calendar"]);
@@ -171,15 +185,15 @@ describe("the redirect to Google", () => {
 
 describe("the host", () => {
   it("moves a request on another host to the app host first, before anything is read", async () => {
-    const res = await start("?products=calendar", "workwrk.test");
+    const res = await start("?products=calendar&ws=org1", "workwrk.test");
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("https://app.workwrk.test/api/teammate-connections/google/start?products=calendar&hop=1");
+    expect(res.headers.get("location")).toBe("https://app.workwrk.test/api/teammate-connections/google/start?products=calendar&ws=org1&hop=1");
     expect(requireApp).not.toHaveBeenCalled();
     expect(cdb.states).toEqual([]);
   });
 
   it("moves it once at most, so a proxy that rewrites the host can never loop it", async () => {
-    const res = await start("?products=calendar&hop=1", "127.0.0.1:3000");
+    const res = await start("?products=calendar&ws=org1&hop=1", "127.0.0.1:3000");
     expect(res.status).toBe(302);
     expect(new URL(res.headers.get("location") ?? "").origin).toBe("https://accounts.google.test");
   });

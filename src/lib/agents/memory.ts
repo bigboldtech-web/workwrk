@@ -24,8 +24,10 @@
 //
 // Server-only: imports prisma.
 
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { TEAMMATE_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS, memoryFull } from "./teammate-copy";
+import { sharedMemoriesPrint } from "./teammate-print";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
 
@@ -235,6 +237,45 @@ export async function listMemories(agentId: string, userId: string, opts: { incl
       : Promise.resolve([]),
   ]);
   return [...mine, ...shared].map(viewOf);
+}
+
+/**
+ * The shared memories' print of one teammate (teammate-print.ts
+ * sharedMemoriesPrint), the part of a Google allow they are (review round 2
+ * of Phase 3): the very rows listMemories reads into every person's turn.
+ * `db`: a transaction's client when the caller reads inside one.
+ */
+export async function sharedMemoriesPrintOf(agentId: string, db: Prisma.TransactionClient = prisma): Promise<string> {
+  const rows = await db.agentMemory.findMany({
+    where: { agentId, scope: "agent", scopeId: agentId },
+    orderBy: { updatedAt: "desc" },
+    take: MEMORY_LIMITS.perAgent,
+    select: { key: true, value: true },
+  });
+  return sharedMemoriesPrint(rows);
+}
+
+/** The same for several teammates in one read (the Connections card), by teammate id; one with none has the print of none. */
+export async function sharedMemoriesPrints(agentIds: readonly string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(agentIds)];
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  const rows = await prisma.agentMemory.findMany({
+    where: { agentId: { in: ids }, scope: "agent" },
+    orderBy: { updatedAt: "desc" },
+    take: ids.length * MEMORY_LIMITS.perAgent,
+    select: { agentId: true, scopeId: true, key: true, value: true },
+  });
+  const byAgent = new Map<string, Array<{ key: string; value: unknown }>>();
+  for (const r of rows) {
+    // Only a teammate's own shared rows are read into its turns (scopeId is its id).
+    if (r.scopeId !== r.agentId) continue;
+    const list = byAgent.get(r.agentId) ?? [];
+    if (list.length < MEMORY_LIMITS.perAgent) list.push({ key: r.key, value: r.value });
+    byAgent.set(r.agentId, list);
+  }
+  for (const id of ids) out.set(id, sharedMemoriesPrint(byAgent.get(id) ?? []));
+  return out;
 }
 
 /** One memory as one prompt line: one line, and nothing that can open or close a block. */

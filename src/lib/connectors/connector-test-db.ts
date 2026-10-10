@@ -45,6 +45,10 @@ export const cdb = {
   notifications: [] as Row[],
   activity: [] as Row[],
   agents: [] as Row[],
+  /** Teammates' memories (AgentMemory): a Google allow's print covers the shared ones (review round 2 of Phase 3). */
+  memories: [] as Row[],
+  /** Every read of the person's connection FOR SHARE (the allow's, review round 2 of Phase 3). */
+  connectionShareReads: [] as Array<{ organizationId: string; userId: string; inTx: boolean }>,
   /** Every write, in order, with whether it ran inside $transaction. */
   events: [] as Array<{ op: string; inTx: boolean }>,
   /** The text of every raw statement, in order. */
@@ -78,6 +82,8 @@ export function resetConnectorDb(): void {
   cdb.notifications = [];
   cdb.activity = [];
   cdb.agents = [];
+  cdb.memories = [];
+  cdb.connectionShareReads = [];
   cdb.events = [];
   cdb.raw = [];
   cdb.lookups = [];
@@ -119,6 +125,11 @@ export function seedConnection(o: Row & { organizationId: string; userId: string
 }
 
 let inTx = false;
+
+/** Whether the code is inside $transaction right now: a revoke sent while its account's lock is held is (review round 2 of Phase 3). */
+export function inTransaction(): boolean {
+  return inTx;
+}
 
 function wrote(op: string): void {
   cdb.events.push({ op, inTx });
@@ -227,6 +238,15 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     const [row] = cdb.states.splice(i, 1);
     wrote("state.delete");
     return [row];
+  }
+  if (sql.startsWith('SELECT "products" FROM "TeammateConnection"')) {
+    // The allow's read of the person's own connection, held until it commits
+    // (review round 2 of Phase 3), so a removal's delete and allow clear wait for it.
+    needs(sql, "the allow's connection read", [`WHERE "organizationId" = ? AND "userId" = ? AND "provider" = 'google'`]);
+    if (!sql.endsWith("FOR SHARE")) throw new Error(`connector-test-db: the allow reads the connection FOR SHARE\n${sql}`);
+    if (!inTx) throw new Error("connector-test-db: a FOR SHARE read outside a transaction holds nothing");
+    cdb.connectionShareReads.push({ organizationId: String(v[0]), userId: String(v[1]), inTx });
+    return cdb.connections.filter((c) => c.organizationId === v[0] && c.userId === v[1] && c.provider === "google").map((c) => ({ products: [...(c.products as string[])] }));
   }
   if (sql.startsWith('SELECT "id", "accountSub", "refreshTokenSealed" FROM "TeammateConnection"')) {
     needs(sql, "saveOnce's read", ["FOR UPDATE"]);
@@ -560,6 +580,23 @@ export const connectorDb = {
     findMany: async (a: Args) => {
       const ids = ((a.where?.agentId as { in: string[] }) ?? { in: [] }).in;
       return cdb.settings.filter((s) => s.userId === a.where?.userId && ids.includes(String(s.agentId))).map(copy);
+    },
+  },
+  agentMemory: {
+    // A teammate's shared memories (memory.ts sharedMemoriesPrintOf and
+    // sharedMemoriesPrints): by one teammate and its own scope id, or by
+    // several teammates' agent scope, newest first.
+    findMany: async (a: Args) => {
+      const w = (a.where ?? {}) as { agentId?: unknown; scope?: unknown; scopeId?: unknown };
+      if (w.scope !== "agent") throw new Error("connector-test-db: only shared (agent scope) memories are read here");
+      const ids = typeof w.agentId === "string" ? [w.agentId] : ((w.agentId as { in?: string[] } | undefined)?.in ?? null);
+      if (!ids) throw new Error("connector-test-db: memories are read by teammate");
+      if (typeof w.agentId === "string" && w.scopeId !== w.agentId) throw new Error("connector-test-db: one teammate's shared memories are read by its own scope id");
+      return cdb.memories
+        .filter((m) => ids.includes(String(m.agentId)) && m.scope === "agent" && (w.scopeId === undefined || m.scopeId === w.scopeId))
+        .sort((x, y) => (y.updatedAt as Date).getTime() - (x.updatedAt as Date).getTime())
+        .slice(0, a.take ?? 1000)
+        .map(copy);
     },
   },
   agent: {

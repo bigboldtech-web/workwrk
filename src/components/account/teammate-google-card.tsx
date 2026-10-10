@@ -56,8 +56,14 @@ function productWord(p: ConnectorProduct): string {
   return p === "gmail" ? C.gmail : C.calendar;
 }
 
-function startHref(products: readonly ConnectorProduct[]): string {
-  return `${START}?products=${encodeURIComponent(products.join(","))}`;
+/**
+ * Connect, Reconnect and Add, for the workspace this card was read in (review
+ * round 2 of Phase 3): the start route connects nothing when the session
+ * moved to another workspace in another tab, and lands back here with
+ * ai_error=workspace_changed.
+ */
+function startHref(products: readonly ConnectorProduct[], organizationId: string): string {
+  return `${START}?products=${encodeURIComponent(products.join(","))}&ws=${encodeURIComponent(organizationId)}`;
 }
 
 /** The connect flow's own outcome. */
@@ -229,7 +235,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
             // A real navigation to a route handler that answers a redirect
             // to Google (the Google Calendar card's own reason for the disable).
              
-            <a className="cxn__btn" href={startHref(choice)}>
+            <a className="cxn__btn" href={startHref(choice, view.organizationId)}>
               <Link2 aria-hidden /> {C.connect}
             </a>
           ) : (
@@ -258,6 +264,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
               const rows = teammateProductRows(t, on, connection.products);
               // "Allow again" only for a product on here: one off cannot be allowed (product_off).
               const changedProducts = CONNECTOR_PRODUCTS.filter((p) => on.includes(p) && (t.changed[p] ?? []).length > 0);
+              // Every part named, the shared memories included (review round 2 of Phase 3).
               const changedParts = [...new Set(changedProducts.flatMap((p) => t.changed[p] ?? []))].map((f) => PRINT_FIELD_WORDS[f] ?? f);
               return (
                 <li key={t.slug}>
@@ -299,7 +306,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                       })}
                       {changedParts.length > 0 ? (
                         <p className="cxn__note">
-                          {C.changedSince(titleList(changedParts, 6))}{" "}
+                          {C.changedSince(titleList(changedParts, changedParts.length))}{" "}
                           <button
                             type="button"
                             className="cxn__link-btn"
@@ -327,7 +334,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
             <span>{C.needsReconnect(fmt.date(connection.needsReconnectAt ?? connection.connectedAt, "date"))}</span>
             {view.guest ? null : (
               // A real navigation to the start route, which answers a redirect to Google.
-              <a className="cxn__link-btn" href={startHref(connection.products)}>{C.reconnect}</a>
+              <a className="cxn__link-btn" href={startHref(connection.products, view.organizationId)}>{C.reconnect}</a>
             )}
           </div>
         ) : null}
@@ -344,7 +351,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
         {!view.guest && missing.length > 0 && connection.status === "active" ? (
           <div className="cxn__actions">
             {missing.map((p) => (
-              <a key={p} className="cxn__btn" href={startHref([...connection.products, p])}>
+              <a key={p} className="cxn__btn" href={startHref([...connection.products, p], view.organizationId)}>
                 <RefreshCw aria-hidden /> {C.addProduct(productWord(p))}
               </a>
             ))}
