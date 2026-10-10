@@ -565,7 +565,9 @@ describe("finishErasures", () => {
     // The next tick reads the light one no more, and the heavy one goes on.
     st.log = [];
     expect(await finishErasures(NOW, { limit: 50, budgetMs: 1_000 })).toMatchObject({ found: 1 });
-  });
+    // 25,000 messages through the in-memory double: about 2 s here, past the
+    // 5 s default on CI's slower runner (round 8's CI run timed out on it).
+  }, 30_000);
 
   // Review round 6 of Phase 3: a clean pass after the settle time finished an
   // erasure even when it had started before it, so a write that landed behind
