@@ -278,7 +278,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </div>
 
         <SettingsCard title="Your data" id="profile.data">
-          <p className="text-base text-ink-2">A copy of your personal records: your profile, your notifications, your activity and your consents. It downloads as a JSON file.</p>
+          <p className="text-base text-ink-2">A copy of your personal records: your profile, notifications, activity and consents; your KPIs, reviews, feedback, check-ins, meetings, kudos and ideas; and your AI teammate chats, requests, memories and routines. It downloads as a JSON file.</p>
           <div className="flex items-center gap-3">
             <button type="button" className={btn.secondary} onClick={() => { void download(); }} disabled={exportBusy}>
               {exportBusy ? <Pending label="Preparing" /> : null}
@@ -292,7 +292,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-0 flex-1">
               <div className="text-base font-medium text-ink">Delete my account</div>
-              <div className="mt-0.5 text-sm text-ink-2">Removes you from {me.organization.name} and erases your personal details. Work you created stays with the workspace.</div>
+              <div className="mt-0.5 text-sm text-ink-2">Deletes your account in every workspace you belong to and erases your personal details. Work you created stays with its workspace.</div>
             </div>
             <button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>
           </div>
