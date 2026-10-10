@@ -858,13 +858,22 @@ async function main() {
   );
 
   step = "2 a Guest";
-  const gilStart = await startConnect(gil);
-  check("Gil, a Guest, gets ai_error=person_cannot from start", errorOf(gilStart.location) === "person_cannot" && gilStart.authUrl === null, { location: gilStart.location?.toString() });
-  check("and no connect was begun for him", (await prisma.teammateOAuthState.count({ where: { userId: gil.id } })) === 0);
-  const gilView = await gil.json("GET", "/api/teammate-connections");
-  check("his card reads as a Guest's", gilView.status === 200 && gilView.body.guest === true, gilView);
-  s = await shot(gil, "/account/connections#ai-google", "p3-connections-guest.png");
-  check("Gil's card says Guests can't connect (p3-connections-guest.png)", shows(s.text, [CONNECTIONS_COPY.guestNote], [CONNECTIONS_COPY.pickProducts]) && s.exceptions.length === 0, s.exceptions);
+  // A stored Guest role counts only while ACCESS_V2_TABLES is on (the app's
+  // effectiveOrgRole; production runs with it off, where a stored Guest is a
+  // Member everywhere). So the Guest path is proved only when the server runs
+  // with it on and the proof is told so; otherwise it says it skipped, never
+  // silently (the refusal itself is unit-tested in the start route's tests).
+  if (process.env.PROOF_GUESTS === "v2") {
+    const gilStart = await startConnect(gil);
+    check("Gil, a Guest, gets ai_error=person_cannot from start", errorOf(gilStart.location) === "person_cannot" && gilStart.authUrl === null, { location: gilStart.location?.toString() });
+    check("and no connect was begun for him", (await prisma.teammateOAuthState.count({ where: { userId: gil.id } })) === 0);
+    const gilView = await gil.json("GET", "/api/teammate-connections");
+    check("his card reads as a Guest's", gilView.status === 200 && gilView.body.guest === true, gilView);
+    s = await shot(gil, "/account/connections#ai-google", "p3-connections-guest.png");
+    check("Gil's card says Guests can't connect (p3-connections-guest.png)", shows(s.text, [CONNECTIONS_COPY.guestNote], [CONNECTIONS_COPY.pickProducts]) && s.exceptions.length === 0, s.exceptions);
+  } else {
+    console.log("  skip 2 a Guest: the server runs without ACCESS_V2_TABLES, where a stored Guest is a Member everywhere (as in production). Run the server with ACCESS_V2_TABLES=true and the proof with PROOF_GUESTS=v2 to prove it.");
+  }
 
   step = "2 connect";
   let gm = await googleMark();
