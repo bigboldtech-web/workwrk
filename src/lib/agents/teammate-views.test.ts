@@ -10,15 +10,18 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
 import { NO_PRODUCTS } from "@/lib/connectors/products";
-import { LEGACY_COPY } from "./teammate-copy";
+import { LEGACY_COPY, TOOL_PICKER_NOTES } from "./teammate-copy";
 import { teammateToolNames } from "./teammate-tools";
 import {
   ALL_TOOL_NAMES,
+  CONNECTOR_ROW_STATES,
   GIVABLE_TOOLS,
+  NO_GOOGLE_ROWS,
   TOOL_CONNECTOR,
   TOOL_MODULE,
   agentScheduleView,
   cleanToolNames,
+  connectorRowState,
   editedPersonRules,
   givableTools,
   routineViewFromRow,
@@ -77,6 +80,8 @@ describe("toolSettings", () => {
     talkOn: true,
     tablesOn: false,
     targetLabels: { "conv:c1": "#general" },
+    connectors: NO_PRODUCTS,
+    google: NO_GOOGLE_ROWS,
   });
   const row = (name: string) => rows.find((r) => r.name === name);
 
@@ -110,9 +115,52 @@ describe("toolSettings", () => {
   });
 
   it("lists no Google row while no product is on, whatever the teammate stores (Phase 3)", () => {
-    const withGoogle = toolSettings({ enabled: ["search_email", "send_email", "search_tasks"], agentRules: {}, personRules: { send_email: "always" }, talkOn: true, tablesOn: true });
+    const withGoogle = toolSettings({ enabled: ["search_email", "send_email", "search_tasks"], agentRules: {}, personRules: { send_email: "always" }, talkOn: true, tablesOn: true, connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS });
     for (const t of CONNECTOR_TOOL_NAMES) expect(withGoogle.find((r) => r.name === t), t).toBeUndefined();
     expect(withGoogle.map((r) => r.name)).toEqual(givableTools(NO_PRODUCTS));
+  });
+
+  it("gives a Google tool a row only for a product that is on, with the reader's own state, and no other tool one (Phase 3 step 5)", () => {
+    const table = toolSettings({
+      enabled: ["search_email", "send_email", "list_events", "search_tasks"],
+      agentRules: {},
+      personRules: {},
+      talkOn: true,
+      tablesOn: true,
+      connectors: { gmail: true, calendar: false },
+      google: { gmail: "changed", calendar: "ready" },
+    });
+    const at = (name: string) => table.find((r) => r.name === name);
+    expect(at("search_email")).toMatchObject({ enabled: true, connector: { product: "gmail", state: "changed" } });
+    expect(at("send_email")).toMatchObject({ enabled: true, alwaysAsks: true, connector: { product: "gmail", state: "changed" } });
+    expect(at("draft_email")).toMatchObject({ enabled: false, connector: { product: "gmail", state: "changed" } });
+    // Calendar is off here: stored or not, it has no row.
+    expect(at("list_events")).toBeUndefined();
+    expect(table.filter((r) => r.connector?.product === "calendar")).toEqual([]);
+    for (const r of table) expect(r.connector === null, r.name).toBe(!(CONNECTOR_TOOL_NAMES as readonly string[]).includes(r.name));
+  });
+});
+
+describe("a Google row's state (Phase 3 step 5)", () => {
+  it("is what connectorAccess would answer a turn, each refusal its own", () => {
+    expect(connectorRowState({ ok: true })).toBe("ready");
+    expect(connectorRowState({ ok: false, reason: "not_connected" })).toBe("connect_first");
+    expect(connectorRowState({ ok: false, reason: "needs_reconnect" })).toBe("reconnect");
+    expect(connectorRowState({ ok: false, reason: "not_granted" })).toBe("not_granted");
+    expect(connectorRowState({ ok: false, reason: "not_allowed" })).toBe("allow_first");
+    expect(connectorRowState({ ok: false, reason: "teammate_changed" })).toBe("changed");
+    // A product off, or no Google here, has no row at all (givableTools).
+    expect(connectorRowState({ ok: false, reason: "workspace_off" })).toBe("connect_first");
+    expect(connectorRowState({ ok: false, reason: "not_configured" })).toBe("connect_first");
+  });
+
+  it("has a line for every state, and starts at nothing connected", () => {
+    expect(Object.keys(TOOL_PICKER_NOTES).filter((k) => k !== "link").sort()).toEqual([...CONNECTOR_ROW_STATES].sort());
+    expect(NO_GOOGLE_ROWS).toEqual({ gmail: "connect_first", calendar: "connect_first" });
+  });
+
+  it("is never a Google row for a caller that left the products out", () => {
+    expect(givableTools(undefined as never).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
   });
 });
 

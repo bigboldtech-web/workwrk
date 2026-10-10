@@ -23,16 +23,36 @@
 // those. The tab lists each with a Remove, and the only edit it can send for
 // one is null (ruleRemoval).
 //
+// THE PERSON'S OWN GOOGLE (docs/plans/ai-teammates-phase3.md step 5). A
+// Google tool has a row only while its product is on here (teammate-views.ts
+// givableTools): a row that could never work is never shown. Its row says
+// what stands between the teammate and the reader's own Google now, and links
+// to their Connections card when there is something to do there
+// (connectorNote). It ticks like any other tool. A save of the tab names the
+// Google products whose rows it showed (toolsPatch), so the route keeps
+// what is stored for the rest.
+//
 // Pure: no React, no fetch, no prisma.
 
-import { NO_PRODUCTS } from "@/lib/connectors/products";
+import { CONNECTOR_PRODUCTS, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import type { TeammateHue } from "./hues";
 import type { TeammateVisibility } from "./teammate-access";
-import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, TOOL_PICKER_COPY, asksFirstInLine, dontAskInLine } from "./teammate-copy";
-import { GIVABLE_TOOLS, TOOL_MODULE, givableTools, type ToolSetting } from "./teammate-views";
+import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, TOOL_PICKER_COPY, TOOL_PICKER_NOTES, asksFirstInLine, dontAskInLine } from "./teammate-copy";
+import {
+  GIVABLE_TOOLS,
+  NO_GOOGLE_ROWS,
+  TOOL_CONNECTOR,
+  TOOL_MODULE,
+  givableTools,
+  type ConnectorRowState,
+  type ConnectorRowStates,
+  type ToolSetting,
+} from "./teammate-views";
 import type { TemplateCard, TemplateKey } from "./templates";
 import { ALWAYS_ASK, BASE_RISK, TARGET_SCOPED_ALWAYS, type ApprovalChoice, type ToolRisk } from "./tool-policy";
-import type { ToolName } from "./tool-names";
+import { isConnectorToolName, type ToolName } from "./tool-names";
+
+export type { ConnectorRowState, ConnectorRowStates };
 
 // ── Groups ──────────────────────────────────────────────────────────
 
@@ -112,6 +132,20 @@ export interface ToolPickerRow {
   /** Its managers' "Ask everyone first": offered to the managers of a workspace teammate. */
   askEveryone: { offered: boolean; on: boolean };
   rules: ChoiceRule[];
+  /** A Google tool: its product, and what stands between it and the reader's own Google now. Null for any other tool. */
+  connector: { product: ConnectorProduct; state: ConnectorRowState } | null;
+}
+
+/** Where a Google row's link goes: the reader's own card, in My settings, Calendar & connections (Decision 25). */
+export const GOOGLE_CONNECTIONS_HREF = "/account/connections#ai-google";
+
+/**
+ * A Google row's line under its label, and its link to the reader's
+ * Connections card, which only a row with something to do there has.
+ */
+export function connectorNote(c: { state: ConnectorRowState }): { text: string; link: { label: string; href: string } | null } {
+  if (c.state === "ready") return { text: TOOL_PICKER_NOTES.ready, link: null };
+  return { text: TOOL_PICKER_NOTES[c.state], link: { label: TOOL_PICKER_NOTES.link[c.state], href: GOOGLE_CONNECTIONS_HREF } };
 }
 
 export interface ToolPickerGroup {
@@ -140,21 +174,38 @@ export function choiceRulesOf(t: Pick<ToolSetting, "scoped">): ChoiceRule[] {
 }
 
 /**
- * The new teammate form's tools: every tool a teammate may be given, the
- * ticked ones on (never one whose module is off), each with the person's own
- * choice or, where they made none, its class's default.
+ * A Google row of the new teammate form, for the teammate being made. The
+ * list route reads the person's own state as if for a teammate of their own
+ * (teammate-server.ts connectorRowStates with no teammate). One made for
+ * everyone is one someone else may change (teammate-print.ts
+ * othersMayChange), so it uses the person's Google only once they allow it
+ * (Decision 6): where nothing else stands in the way, its row says so rather
+ * than "ready". A connection to make or mend comes first, as connectorAccess
+ * checks it first.
+ */
+function draftConnectorState(state: ConnectorRowState, visibility: TeammateVisibility): ConnectorRowState {
+  return visibility === "WORKSPACE" && state === "ready" ? "allow_first" : state;
+}
+
+/**
+ * The new teammate form's tools: every tool a teammate may be given here (a
+ * Google tool only while its product is on), the ticked ones on (never one
+ * whose module is off), each with the person's own choice or, where they made
+ * none, its class's default.
  */
 export function draftToolGroups(
-  d: { tools: readonly ToolName[]; choices: Readonly<Record<string, ApprovalChoice>> },
-  modules: { talkOn: boolean; tablesOn: boolean },
+  d: { tools: readonly ToolName[]; choices: Readonly<Record<string, ApprovalChoice>>; visibility?: TeammateVisibility },
+  modules: { talkOn: boolean; tablesOn: boolean; connectors: ProductSet; google: ConnectorRowStates },
 ): ToolPickerGroup[] {
   const ticked = new Set<string>(d.tools);
+  // Just me until an Owner or Admin chooses otherwise (draftFromTemplate).
+  const visibility = d.visibility ?? "PRIVATE";
   return grouped(
-    // No Google row until the workspace's products are read (docs/plans/ai-teammates-phase3.md step 5).
-    givableTools(NO_PRODUCTS).map((name): ToolPickerRow => {
+    givableTools(modules.connectors).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);
+      const product = isConnectorToolName(name) ? TOOL_CONNECTOR[name] : null;
       return {
         name,
         label: copy.label,
@@ -165,6 +216,7 @@ export function draftToolGroups(
         approval: controlFor(name, chosen === "ask" || chosen === "always" ? chosen : defaultChoice(BASE_RISK[name]), false),
         askEveryone: { offered: false, on: false },
         rules: [],
+        connector: product ? { product, state: draftConnectorState(modules.google?.[product] ?? NO_GOOGLE_ROWS[product], visibility) } : null,
       };
     }),
   );
@@ -191,6 +243,8 @@ export function settingsToolGroups(tools: readonly ToolSetting[], o: { canManage
       approval: controlFor(t.name, t.gate === "run" ? "always" : "ask", held),
       askEveryone: { offered: o.canManage && o.workspace && (t.risk === "INTERNAL" || held), on: held },
       rules: choiceRulesOf(t),
+      // The route's table has a Google row only while its product is on here, with the reader's own state.
+      connector: t.connector ?? null,
     };
   });
   return grouped(o.canManage ? rows : rows.filter((r) => r.on || r.rules.length > 0));
@@ -218,6 +272,22 @@ export function toolNamesWith(tools: readonly ToolSetting[], name: ToolName, on:
   if (on) next.add(name);
   else next.delete(name);
   return [...next].sort();
+}
+
+/**
+ * The tab's PATCH for one tick: the whole set (toolNamesWith) and the Google
+ * products whose rows the tab showed (`connectorRows`). The route takes the
+ * set as the managers' word only for those products, and keeps what is
+ * stored for every other one (docs/plans/ai-teammates-phase3.md step 5). So
+ * a save while Gmail is off, from a tab read before Gmail was turned on, or
+ * from a page older than the Google rows, never drops a Gmail tool nobody was
+ * shown; and a Gmail tool unticked on its row is removed even if Gmail was
+ * turned off meanwhile, so it never comes back when Gmail does.
+ */
+export function toolsPatch(tools: readonly ToolSetting[], name: ToolName, on: boolean): { toolNames: ToolName[]; connectorRows: ConnectorProduct[] } {
+  const shown = new Set<ConnectorProduct>();
+  for (const t of tools) if (isConnectorToolName(t.name)) shown.add(TOOL_CONNECTOR[t.name]);
+  return { toolNames: toolNamesWith(tools, name, on), connectorRows: CONNECTOR_PRODUCTS.filter((p) => shown.has(p)) };
 }
 
 /** Its managers' rules after one "Ask everyone first" changes (PATCH agentRules): each "ask" they hold, this one put on or taken off. */

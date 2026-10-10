@@ -168,8 +168,12 @@ export const LEGAL_COPY = {
     // after 30 days (from a named date, not this one), and the older-files
     // date; section 1 names the random id a consent record is filed under;
     // section 3 says what AI teammates may do and remember, and that their
-    // routines run on a schedule.
-    updated: "6 October 2026",
+    // routines run on a schedule. 10 October 2026: section 3 says what
+    // connecting Google to AI teammates reads, sends to the model provider and
+    // keeps, how to disconnect, and Google's Limited Use disclosure; section 6
+    // says when its tokens are deleted (docs/plans/ai-teammates-phase3.md
+    // step 5).
+    updated: "10 October 2026",
   },
   terms: {
     eyebrow: "Terms",

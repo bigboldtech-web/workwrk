@@ -186,7 +186,12 @@ export interface ExecuteArgs {
    * in Settings", and the person's allow led nowhere). Left out: none.
    */
   connectorHeld?: readonly string[];
-  /** Where this turn's answer goes, when that is why no Google tool is offered (step 5 sets it; else read from the trigger). */
+  /**
+   * Where this turn's answer goes, when that is why no Google tool is offered
+   * (engine.ts prepareTurn sets it for a Talk, automation or delegated turn
+   * whose teammate holds Google tools here, step 5; left out, it is read from
+   * the trigger).
+   */
   connectorNotHere?: NotHereKind | null;
   emit?: (e: TeammateStreamEvent) => void;
 }

@@ -317,6 +317,33 @@ describe("removing, pausing and adding back", () => {
     expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
   });
 
+  it("keeps a stored Google tool its tab did not show, and removes one unticked on its row (Phase 3 step 5)", async () => {
+    // This WorkwrK offers no Google here, so the tab draws no Google row.
+    seedShared({ toolNames: ["list_events", "search_email", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    // A save from a tab that showed no Google row: what is stored for them stays.
+    const saved = await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["create_task", "search_tasks"] }), slugged(SHARED_SLUG)));
+    expect(saved.status).toBe(200);
+    // Before: ["create_task", "search_tasks"], both Google tools dropped by a tick of another tool.
+    expect(db.agents[0].toolNames).toEqual(["create_task", "list_events", "search_email", "search_tasks"]);
+    expect(saved.body.teammate.toolNames).toEqual(["create_task", "search_tasks"]);
+    // Nor can such a save add one nobody was shown.
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["create_task", "search_tasks", "send_email"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["create_task", "list_events", "search_email", "search_tasks"]);
+
+    // A tab that showed the Gmail rows: its list is the managers' word for Gmail, a removal
+    // included, even with Gmail off by the time it lands; Calendar's stays as stored.
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["create_task", "search_tasks"], connectorRows: ["gmail"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["create_task", "list_events", "search_tasks"]);
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["create_task", "search_tasks", "send_email"], connectorRows: ["gmail", "nope"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["create_task", "list_events", "search_tasks", "send_email"]);
+    expect(mocks.audits.filter((a) => a.action === "edited").map((a) => a.metadata)).toEqual([
+      { fields: ["tools"] },
+      { fields: ["tools"] },
+      { fields: ["tools"] },
+    ]);
+  });
+
   it("changes a removed teammate only by adding it back, within the plan's limit", async () => {
     seedPrivate().status = "ARCHIVED";
     db.viewer = PEOPLE.max;

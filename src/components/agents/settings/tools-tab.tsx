@@ -5,9 +5,11 @@
 // the route's table of its tools for this person (teammate-views.ts
 // toolSettings, rows by teammate-setup.ts settingsToolGroups).
 //
-//   its managers   tick its tools (PATCH toolNames) and, on a workspace
-//                  teammate, "Ask everyone first" (PATCH agentRules: they
-//                  only tighten)
+//   its managers   tick its tools (PATCH toolNames, with the Google products
+//                  whose rows it showed: teammate-setup.ts toolsPatch, so a
+//                  Google tool nobody was shown is kept as stored) and, on a
+//                  workspace teammate, "Ask everyone first" (PATCH
+//                  agentRules: they only tighten)
 //   everyone       their own "Ask me first" / "Don't ask" per tool
 //                  (PUT .../approvals), and a Remove for each "Don't ask" an
 //                  approval card stored: one Talk conversation, or a tool's
@@ -21,7 +23,7 @@ import { useState } from "react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { TEAMMATE_SETTINGS } from "@/lib/agents/teammate-copy";
-import { agentRulesWith, choiceEdit, ruleRemoval, settingsToolGroups, toolNamesWith } from "@/lib/agents/teammate-setup";
+import { agentRulesWith, choiceEdit, ruleRemoval, settingsToolGroups, toolsPatch } from "@/lib/agents/teammate-setup";
 import type { TeammateDetail, ToolSetting } from "@/lib/agents/teammate-views";
 import type { ApprovalChoice } from "@/lib/agents/tool-policy";
 import type { ToolName } from "@/lib/agents/tool-names";
@@ -78,7 +80,7 @@ export function ToolsTab({
           groups={groups}
           canTick={manages}
           busy={busy}
-          onTick={(name: ToolName, on: boolean) => void patch({ toolNames: toolNamesWith(t.tools, name, on) })}
+          onTick={(name: ToolName, on: boolean) => void patch(toolsPatch(t.tools, name, on))}
           onChoice={(name, value) => void putRules(choiceEdit(name, value))}
           onAskEveryone={(name, ask) => void patch({ agentRules: agentRulesWith(t.tools, name, ask) })}
           onRemoveRule={(key) => void putRules(ruleRemoval(key))}

@@ -130,6 +130,20 @@ describe("the person's own work", () => {
     expect(r.record.state).toBe("waiting");
     expect(fx.handlerCalls).toEqual([]);
   });
+
+  it("asks first in a teammate asked by a turn that read the person's Google, and only then (Phase 3 step 5, Decision 9)", async () => {
+    // runDelegation hands the asking turn's taint on (origin.tainted); the
+    // engine starts the delegate's counters with it.
+    const asked = { sessionId: "s2", routineId: null, trigger: "DELEGATED" as const, runId: "run2" };
+    const tainted = await call("create_task", { title: "Pay the invoice" }, { turn: asked, counters: { calls: 0, proposals: 0, delegations: 0, tainted: true } });
+    // Fails without the taint: it ran, from words a planted email may have put in the request.
+    expect(tainted.record.state).toBe("waiting");
+    expect(fx.handlerCalls).toEqual([]);
+    expect(fx.actions).toHaveLength(1);
+    const clean = await call("create_task", { title: "Pay the invoice" }, { turn: asked });
+    expect(clean.record.state).toBe("ran");
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
 });
 
 describe("what other people will see", () => {

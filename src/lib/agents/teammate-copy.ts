@@ -1075,6 +1075,23 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
 };
 
 /**
+ * The line under a Google tool's row in the picker and on the Tools and
+ * approvals tab (docs/plans/ai-teammates-phase3.md step 5), by what stands
+ * between the teammate and the reader's own Google now (teammate-views.ts
+ * ConnectorRowState), and the words of the link to their Connections card.
+ * `ready` has no link: there is nothing to do there.
+ */
+export const TOOL_PICKER_NOTES = {
+  ready: "Uses your own Google account.",
+  connect_first: "Uses your own Google account. Connect Google first.",
+  reconnect: "Your Google connection needs reconnecting.",
+  not_granted: "Your Google connection doesn't include this. Connect again and tick it.",
+  allow_first: "Uses your own Google account once you allow it.",
+  changed: "Changed since you allowed it. Check it and allow it again.",
+  link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+} as const;
+
+/**
  * The Google connector tools' sentences and card lines
  * (docs/plans/ai-teammates-phase3.md steps 3 and 4): what a tool answers when
  * it cannot (each its own reason, connector-rules.ts), what an email card and
@@ -1289,9 +1306,11 @@ export const CONNECTIONS_COPY = {
   allowAgain: "Allow again",
   /** Beside a teammate's switch for a product the person's connection lacks: turning it on waits for Add. */
   addFirst: (p: string) => `Your Google connection doesn't include ${p}. Add ${p} first.`,
-  // No "tick them" sentence until the picker offers Google tools (step 5): it
-  // would send people to a choice that is not there yet (review of step 2).
-  noTeammates: "None of your teammates has Google tools yet.",
+  // The "tick them" sentence came with the picker's Google rows (step 5;
+  // review of step 2 held it back until the choice was there). Only a
+  // teammate's managers tick its tools, and everyone manages their own, so it
+  // names a teammate they manage.
+  noTeammates: "None of your teammates has Google tools yet. Tick them in the Tools and approvals of a teammate you manage.",
   disconnect: "Disconnect",
   disconnectTitle: "Disconnect Google?",
   disconnectBody: "Your teammates stop using your Gmail and Google Calendar at once, and WorkwrK's access is removed from your Google account. Requests waiting for your approval stay until you reconnect or they expire.",

@@ -11,7 +11,8 @@
 //
 // Pure: no prisma, no fetch.
 
-import { NO_PRODUCTS, TOOL_PRODUCT, type ProductSet } from "@/lib/connectors/products";
+import type { ConnectorRefusal } from "@/lib/connectors/connections";
+import { TOOL_PRODUCT, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import type { TeammateHue } from "./hues";
 import { routineReasonText } from "./routines";
 import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
@@ -119,7 +120,55 @@ export const TOOL_CONNECTOR = TOOL_PRODUCT;
  * row that could never work is never shown.
  */
 export function givableTools(connectors: ProductSet): ToolName[] {
-  return GIVABLE_TOOLS.filter((n) => !isConnectorToolName(n) || connectors[TOOL_CONNECTOR[n]] === true);
+  // Read as teammateToolNames reads it: a caller that left it out gets no Google row.
+  return GIVABLE_TOOLS.filter((n) => !isConnectorToolName(n) || connectors?.[TOOL_CONNECTOR[n]] === true);
+}
+
+/**
+ * What stands between a teammate and the reader's own Google now, for one
+ * product, as a Google tool's row in the picker says it
+ * (docs/plans/ai-teammates-phase3.md step 5; teammate-copy.ts
+ * TOOL_PICKER_NOTES): nothing (ready); no connection here (connect_first);
+ * one that stopped working (reconnect); one that lacks the product
+ * (not_granted); for a teammate someone else may change, no allow from this
+ * person (allow_first), or an allow from before it changed (changed).
+ * connections.ts connectorAccess decides each, in its own order, so the row
+ * says what a turn would meet.
+ */
+export type ConnectorRowState = "ready" | "connect_first" | "reconnect" | "not_granted" | "allow_first" | "changed";
+
+export const CONNECTOR_ROW_STATES: readonly ConnectorRowState[] = ["ready", "connect_first", "reconnect", "not_granted", "allow_first", "changed"];
+
+/** Per product, how its rows read for this person (teammate-server.ts connectorRowStates). */
+export type ConnectorRowStates = Readonly<Record<ConnectorProduct, ConnectorRowState>>;
+
+/**
+ * What the rows read before anything is known, and on a WorkwrK that offers
+ * no Google, where no Google row is drawn at all.
+ */
+export const NO_GOOGLE_ROWS: ConnectorRowStates = Object.freeze({ gmail: "connect_first", calendar: "connect_first" });
+
+/**
+ * A row's state from connectorAccess's answer. A product off in the
+ * workspace, or a WorkwrK with no Google, has no row (givableTools), so the
+ * two read as having nothing connected.
+ */
+export function connectorRowState(access: { ok: true } | { ok: false; reason: ConnectorRefusal }): ConnectorRowState {
+  if (access.ok) return "ready";
+  switch (access.reason) {
+    case "needs_reconnect":
+      return "reconnect";
+    case "not_granted":
+      return "not_granted";
+    case "not_allowed":
+      return "allow_first";
+    case "teammate_changed":
+      return "changed";
+    case "not_connected":
+    case "workspace_off":
+    case "not_configured":
+      return "connect_first";
+  }
 }
 
 /** Every tool name, for rules kept while a tool is switched off (actions.ts keeps them too). */
@@ -171,6 +220,8 @@ export interface ToolSetting {
   alwaysAsks: boolean;
   /** The person's choices for one target: a Talk conversation, or its calls for other people. */
   scoped: ScopedChoice[];
+  /** A Google tool: its product, and what stands between it and the reader's own Google now. Null for any other tool. */
+  connector: { product: ConnectorProduct; state: ConnectorRowState } | null;
 }
 
 function ownChoice(rules: ApprovalRules, key: string): ApprovalChoice | null {
@@ -183,7 +234,8 @@ function ownChoice(rules: ApprovalRules, key: string): ApprovalChoice | null {
  * The table of a teammate's tools for one person: each tool's class, whether
  * it is on, its managers' tightening, the person's own choices, and what a
  * call does now (tool-policy.ts gateFor, for a call of the tool's own class
- * with no target).
+ * with no target). A Google tool has a row only while its product is on here
+ * (givableTools), with what stands between it and the person's own Google.
  */
 export function toolSettings(a: {
   /** The tools the teammate may use now. */
@@ -196,6 +248,10 @@ export function toolSettings(a: {
   tablesOn: boolean;
   /** The conversations the person's Talk choices name: "conv:<id>" to "#general". */
   targetLabels?: Readonly<Record<string, string>>;
+  /** The Google products on here (connections.ts workspaceConnectorProducts): a product off has no rows. */
+  connectors: ProductSet;
+  /** How each product's rows read for this person (teammate-server.ts connectorRowStates). */
+  google: ConnectorRowStates;
 }): ToolSetting[] {
   const on = new Set<string>(a.enabled);
   const agentRules = sanitizeRules(a.agentRules, { level: "agent", allowedTools: ALL_TOOL_NAMES });
@@ -210,11 +266,11 @@ export function toolSettings(a: {
     const label = Object.prototype.hasOwnProperty.call(labels, target) ? labels[target] : null;
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
-  // No Google row until the workspace's products are read (docs/plans/ai-teammates-phase3.md step 5).
-  return givableTools(NO_PRODUCTS).map((name): ToolSetting => {
+  return givableTools(a.connectors).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];
+    const product = isConnectorToolName(name) ? TOOL_CONNECTOR[name] : null;
     return {
       name,
       label: copy.label,
@@ -229,6 +285,7 @@ export function toolSettings(a: {
       canDontAsk: risk !== "READ" && !TARGET_SCOPED_ALWAYS.has(name) && canAlwaysAllow(name, risk, null),
       alwaysAsks: risk === "IRREVERSIBLE" || ALWAYS_ASK.has(name),
       scoped: scoped.get(name) ?? [],
+      connector: product ? { product, state: a.google?.[product] ?? NO_GOOGLE_ROWS[product] } : null,
     };
   });
 }

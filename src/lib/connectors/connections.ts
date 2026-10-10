@@ -233,9 +233,12 @@ function printsOf(raw: unknown, product: ConnectorProduct): unknown {
  *      (not at an approval: the person approves the card itself)
  * The connection is read by the acting person alone (Decision 5).
  * `setting` when the caller already read the person's AgentPersonSetting.
+ * Only the person's workspace and id are read, so the picker's rows ask the
+ * very same question for the signed-in person (teammate-server.ts
+ * connectorRowStates, step 5).
  */
 export async function connectorAccess(a: {
-  person: ActingPerson;
+  person: Pick<ActingPerson, "organizationId" | "userId">;
   agent: ConnectorAgent;
   product: ConnectorProduct;
   setting?: { connectorProducts: string[]; connectorPrints: unknown } | null;

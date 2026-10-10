@@ -533,6 +533,33 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
   });
 });
 
+describe("TOOL_PICKER_NOTES (a Google tool's row, Phase 3 step 5)", () => {
+  const STATES = ["ready", "connect_first", "reconnect", "not_granted", "allow_first", "changed"];
+
+  it("words each state as the spec does, and links every one but ready", () => {
+    expect(copy.TOOL_PICKER_NOTES).toEqual({
+      ready: "Uses your own Google account.",
+      connect_first: "Uses your own Google account. Connect Google first.",
+      reconnect: "Your Google connection needs reconnecting.",
+      not_granted: "Your Google connection doesn't include this. Connect again and tick it.",
+      allow_first: "Uses your own Google account once you allow it.",
+      changed: "Changed since you allowed it. Check it and allow it again.",
+      link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+    });
+    expect(Object.keys(copy.TOOL_PICKER_NOTES).filter((k) => k !== "link").sort()).toEqual([...STATES].sort());
+    expect(Object.keys(copy.TOOL_PICKER_NOTES.link).sort()).toEqual(STATES.filter((s) => s !== "ready").sort());
+    const all: Array<[string, string]> = [];
+    strings(copy.TOOL_PICKER_NOTES, "TOOL_PICKER_NOTES", all);
+    expect(all.filter(([, s]) => BANNED.test(s))).toEqual([]);
+  });
+
+  it("sends a connected person with no Google tools to the picker that now has them (review of step 2)", () => {
+    expect(copy.CONNECTIONS_COPY.noTeammates).toBe("None of your teammates has Google tools yet. Tick them in the Tools and approvals of a teammate you manage.");
+    // The tab it names is the drawer's own.
+    expect(copy.CONNECTIONS_COPY.noTeammates).toContain(copy.TEAMMATE_SETTINGS.tabTools);
+  });
+});
+
 describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {
     dailyCap: [[20], "This automation has asked its teammates 20 times today, the most one automation may, so this run's request was not asked. Runs from tomorrow (UTC) ask again."],

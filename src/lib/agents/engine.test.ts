@@ -47,7 +47,7 @@ const db = vi.hoisted(() => ({
   replies: [] as unknown[],
   requests: [] as Req[],
   streamed: 0,
-  executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown; tainted?: boolean; readGoogle?: boolean; connectorRefusals?: unknown; connectorHeld?: unknown }>,
+  executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown; tainted?: boolean; readGoogle?: boolean; connectorRefusals?: unknown; connectorHeld?: unknown; connectorNotHere?: unknown }>,
   /** The chat's rows can't be written. */
   saveThrows: false,
   /** What each claim asked for. */
@@ -201,6 +201,7 @@ vi.mock("./executor", () => ({
     counters: { calls: number; proposals: number; tainted?: boolean; readGoogle?: boolean };
     connectorRefusals?: unknown;
     connectorHeld?: unknown;
+    connectorNotHere?: unknown;
   }) => {
     db.executed.push({
       name: a.name,
@@ -212,6 +213,8 @@ vi.mock("./executor", () => ({
       readGoogle: a.counters.readGoogle === true,
       connectorRefusals: a.connectorRefusals,
       connectorHeld: a.connectorHeld,
+      // Left out of the record when there is none, as the rows above were written before it.
+      connectorNotHere: a.connectorNotHere ?? undefined,
     });
     a.counters.calls += 1;
     if (a.name === "search_email") {
@@ -1470,5 +1473,69 @@ describe("the person's own Google (Phase 3 step 3)", () => {
       { id: { in: ["run-clean"] }, output: { path: ["readGoogle"], equals: true } },
       { id: { in: ["run-clean"] }, endedAt: null },
     ]);
+  });
+
+  // Phase 3 step 5 (Decision 13): where the person's Google is never used, and the model is told why.
+  const TALK_ORIGIN = { kind: "talk" as const, conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel" as const, audience: 3, context: [] };
+  const AUTO_ORIGIN = { kind: "automation" as const, workflowId: "wf1", workflowName: "Invoice triage", automationRunId: "arun1", instruction: "Summarise the invoice", values: [] };
+  const ASKED_ORIGIN = { kind: "delegated" as const, by: { agentId: "a9", name: "Chief of Staff", sessionId: "s9", runId: "r9" }, request: "Search my email for the invoice" };
+  const ELSEWHERE = [
+    ["TALK", { trigger: "TALK" as const, userText: "@Ops search my email", userMessageId: null, origin: TALK_ORIGIN }, "talk", "your answer is posted for everyone in the conversation"],
+    ["AUTOMATION", { trigger: "AUTOMATION" as const, userText: null, userMessageId: null, origin: AUTO_ORIGIN }, "automation", "your answer goes to fields other people read"],
+    ["DELEGATED", { trigger: "DELEGATED" as const, userText: null, userMessageId: null, origin: ASKED_ORIGIN }, "delegated", "your answer goes back to the teammate that asked; the person can ask you directly"],
+  ] as const;
+
+  for (const [trigger, args, kind, why] of ELSEWHERE) {
+    it(`offers a ${trigger} turn none of the person's Google, says why in block 2, and names it when the model calls one (step 5)`, async () => {
+      // Allowed, connected and on: a chat would be offered them.
+      db.setting = { approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: printOf() } } as never;
+      db.replies = [reply([use("tu1", "search_email", { query: "invoice" })], "tool_use"), reply([say("I can't use your email here.")], "end_turn")];
+      await runTeammateTurn(turn({ agent: GMAIL_AGENT, ...args }));
+      expect(toolsAsked(0)).toEqual(["create_task"]);
+      const block2 = db.requests[0].system[1].text;
+      // Before: nothing said why, and the model could only guess.
+      expect(block2).toContain(`Your Gmail tools aren't available here: ${why}. If asked, say so in one sentence.`);
+      expect(block2).not.toContain("You can use Priya's Gmail");
+      expect(block2).not.toContain("Google Calendar");
+      // The executor answers the real reason (executor.ts connectorMissing).
+      expect(db.executed[0]).toMatchObject({ name: "search_email", connectorNotHere: kind });
+      // Nothing about the person's connection is read for a turn that cannot use it.
+      expect(db.connectionLookups).toEqual([]);
+    });
+  }
+
+  it("names both products when the teammate holds tools for both, and only those on here", async () => {
+    db.policy = ["gmail", "calendar"];
+    const BOTH_AGENT = { ...GMAIL_AGENT, toolNames: ["search_email", "list_events", "create_task"] as unknown };
+    db.replies = [reply([say("Not here.")], "end_turn"), reply([say("Not here.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: BOTH_AGENT, trigger: "DELEGATED", userText: null, userMessageId: null, origin: ASKED_ORIGIN }));
+    expect(db.requests[0].system[1].text).toContain(
+      "Your Gmail and Google Calendar tools aren't available here: your answer goes back to the teammate that asked; the person can ask you directly. If asked, say so in one sentence.",
+    );
+    // Calendar off in the workspace: only Gmail is named.
+    db.policy = ["gmail"];
+    await runTeammateTurn(turn({ agent: BOTH_AGENT, trigger: "DELEGATED", userText: null, userMessageId: null, origin: ASKED_ORIGIN }));
+    expect(db.requests[1].system[1].text).toContain("Your Gmail tools aren't available here:");
+    expect(db.requests[1].system[1].text).not.toContain("Google Calendar");
+  });
+
+  it("says nothing of Google where no tool of a product on here is in the set, nor in the person's own chat", async () => {
+    db.agentRow = { ...OPS, visibility: "PRIVATE", ownerId: "me" };
+    db.replies = [reply([use("tu1", "search_email", { query: "x" })], "tool_use"), reply([say("Ok.")], "end_turn"), reply([say("Ok.")], "end_turn"), reply([say("Ok.")], "end_turn")];
+    // Gmail off in the workspace: nothing to say, and nothing named as the reason.
+    db.policy = [];
+    await runTeammateTurn(turn({ agent: GMAIL_AGENT, trigger: "TALK", userText: "@Ops hi", userMessageId: null, origin: TALK_ORIGIN }));
+    expect(db.requests[0].system[1].text).not.toContain("aren't available here");
+    expect(db.executed[0].connectorNotHere).toBeUndefined();
+    // A WorkwrK that offers no Google never mentions it.
+    vi.stubEnv("GOOGLE_AGENT_PRODUCTS", "");
+    await runTeammateTurn(turn({ agent: GMAIL_AGENT, trigger: "AUTOMATION", userText: null, userMessageId: null, origin: AUTO_ORIGIN }));
+    expect(db.requests[2].system[1].text).not.toContain("Gmail");
+    // The person's own chat: offered as before, with no "not here" line.
+    vi.stubEnv("GOOGLE_AGENT_PRODUCTS", "gmail,calendar");
+    db.policy = ["gmail"];
+    await runTeammateTurn(turn({ agent: GMAIL_AGENT }));
+    expect(toolsAsked(3)).toEqual(["create_task", "read_email", "search_email"]);
+    expect(db.requests[3].system[1].text).not.toContain("aren't available here");
   });
 });

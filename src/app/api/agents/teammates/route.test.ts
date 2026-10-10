@@ -174,6 +174,16 @@ describe("GET /api/agents/teammates", () => {
     expect(admin.body.teammates.every((t: { canManage: boolean }) => t.canManage)).toBe(true);
   });
 
+  it("answers the Google products on here and how their rows read, none on a WorkwrK that offers no Google (Phase 3 step 5)", async () => {
+    db.viewer = PEOPLE.max;
+    const { body } = await list();
+    expect(body.connectors).toEqual({ gmail: false, calendar: false });
+    expect(body.google).toEqual({ gmail: "connect_first", calendar: "connect_first" });
+    // No template starts with a Google tool (Decision 28).
+    const google = ["search_email", "read_email", "draft_email", "send_email", "reply_email", "list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"];
+    for (const card of body.templates as Array<{ key: string; tools: string[] }>) expect(card.tools.filter((t) => google.includes(t)), card.key).toEqual([]);
+  });
+
   it("adds the removed ones only when asked, and searches names and jobs", async () => {
     db.viewer = PEOPLE.max;
     expect((await list("?removed=1")).body.teammates.map((t: { slug: string }) => t.slug)).toContain("old-helper");

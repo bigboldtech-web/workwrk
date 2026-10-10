@@ -35,10 +35,13 @@ import {
   workspaceModules,
 } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
-import { ALL_TOOL_NAMES, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
+import { ALL_TOOL_NAMES, TOOL_CONNECTOR, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
-import { isToolName, type ToolName } from "@/lib/agents/tool-names";
-import { NO_PRODUCTS } from "@/lib/connectors/products";
+import { isConnectorToolName, isToolName, type ToolName } from "@/lib/agents/tool-names";
+import { parseProducts, type ProductSet } from "@/lib/connectors/products";
+
+/** Every Google product: what the stored set holds, whatever is on here (the keep below reads it). */
+const EVERY_PRODUCT: ProductSet = { gmail: true, calendar: true };
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -59,6 +62,9 @@ const patchSchema = z
     job: z.string().trim().min(1).max(200).optional(),
     instructions: z.string().max(8000).optional(),
     toolNames: z.array(z.string().max(64)).max(100).optional(),
+    // The Google products whose rows the tools tab showed (teammate-setup.ts
+    // toolsPatch): only for those does `toolNames` say what is ticked.
+    connectorRows: z.array(z.string().max(20)).max(10).optional(),
     agentRules: z.record(z.string().max(120), z.enum(["ask", "always"])).optional(),
     status: z.enum(["ENABLED", "DISABLED"]).optional(),
     monthlyQuestionCap: z.number().int().min(1).max(100_000).nullable().optional(),
@@ -123,10 +129,26 @@ export async function PATCH(req: Request, { params }: Params) {
     // the detail's tool set leaves it out while the module is off), so a save
     // made then must neither drop it nor add it: Talk turned back on brings
     // back the Talk tools its managers chose.
+    //
+    // A Google tool the same way, by whether the tab SHOWED its product's
+    // rows (`connectorRows`), never by whether the product is on now
+    // (docs/plans/ai-teammates-phase3.md step 5, and the item the review of
+    // step 1 handed to it). Worst case of deciding by "on now": a tab read
+    // while Gmail was off, or a page older than the Google rows, saved after
+    // Gmail came on, drops every stored Gmail tool nobody was shown; and a
+    // Gmail tool its manager unticked on its row, saved just after Gmail was
+    // turned off, would be kept and come back when Gmail does. So for a
+    // product whose rows the tab showed, the list is its managers' word, a
+    // removal included, whatever the switch says now; for any other, what is
+    // stored stays, neither dropped nor added. A request that names no
+    // product (every page before this one) keeps every stored Google tool.
     const modules = await workspaceModules(agent.organizationId);
+    const shown = new Set(parseProducts(b.connectorRows ?? []));
     const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);
-    const kept = teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS }).filter(off);
-    const next = cleanToolNames([...b.toolNames.filter((n) => !(isToolName(n) && off(n))), ...kept]);
+    const unshown = (n: ToolName) => isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n]);
+    const keep = (n: ToolName) => off(n) || unshown(n);
+    const kept = teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: EVERY_PRODUCT }).filter(keep);
+    const next = cleanToolNames([...b.toolNames.filter((n) => !(isToolName(n) && keep(n))), ...kept]);
     if (!sameList(next, agent.toolNames)) {
       data.toolNames = next;
       edited.push("tools");
