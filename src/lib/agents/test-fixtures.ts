@@ -121,6 +121,13 @@ export const fx = {
   closedRuns: new Set<string>(),
   gonePeople: new Set<string>(),
   runChecks: [] as Array<{ read: string; inTx: boolean }>,
+  /**
+   * Review round 5 of Phase 3: each transaction's options, and which client
+   * each count of waiting requests ran on ("tx": the transaction's own, handed
+   * to its callback; "base": the module's prisma, even inside a transaction).
+   */
+  txOptions: [] as unknown[],
+  countClients: [] as Array<"tx" | "base">,
 };
 
 export function resetFixtures(): void {
@@ -149,6 +156,8 @@ export function resetFixtures(): void {
   fx.closedRuns = new Set();
   fx.gonePeople = new Set();
   fx.runChecks = [];
+  fx.txOptions = [];
+  fx.countClients = [];
   inTx = false;
 }
 
@@ -220,12 +229,26 @@ const withAgent = (r: ActionRowFx) => ({ ...r, agent: r.agentId ? { ...fx.agent 
 let inTx = false;
 
 export const prismaFake = {
-  // One transaction: the same fake, with its writes known to be inside it.
-  $transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+  // One transaction: the same fake, with its writes known to be inside it,
+  // its options kept, and a client of its own whose count of waiting
+  // requests says so (review round 5 of Phase 3), made at each call so a
+  // test's spies on the fake reach it.
+  $transaction: async <T>(fn: (tx: unknown) => Promise<T>, opts?: unknown): Promise<T> => {
+    fx.txOptions.push(opts ?? null);
+    const tx = {
+      ...prismaFake,
+      agentAction: {
+        ...prismaFake.agentAction,
+        count: async (a: { where: Record<string, unknown> }) => {
+          fx.countClients.push("tx");
+          return rows(a.where).length;
+        },
+      },
+    };
     const was = inTx;
     inTx = true;
     try {
-      return await fn(prismaFake);
+      return await fn(tx);
     } finally {
       inTx = was;
     }
@@ -269,7 +292,10 @@ export const prismaFake = {
       return { count: hit.length };
     },
     create: async (a: { data: Partial<ActionRowFx> & { toolName: string } }) => ({ ...seedAction({ ...a.data, id: `act${fx.actions.length + 1}`, createdAt: new Date() }) }),
-    count: async (a: { where: Record<string, unknown> }) => rows(a.where).length,
+    count: async (a: { where: Record<string, unknown> }) => {
+      fx.countClients.push("base");
+      return rows(a.where).length;
+    },
   },
   chatSession: {
     findFirst: async () => (fx.chat ? { ...fx.chat } : null),

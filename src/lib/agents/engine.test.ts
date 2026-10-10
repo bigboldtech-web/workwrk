@@ -82,6 +82,8 @@ const db = vi.hoisted(() => ({
   personGone: false,
   lockReads: [] as string[],
   txOptions: [] as unknown[],
+  /** Review round 5 of Phase 3: what each transaction throws before it starts, one call at a time. */
+  txThrows: [] as unknown[],
 }));
 
 /** A where as the taint's reads write them: equality, AND, OR, in, a JSON path's equals, gt, not, null; {} matches every row. */
@@ -111,6 +113,8 @@ vi.mock("@/lib/prisma", () => ({
     // The save's transaction (review round 4 of Phase 3): the same double, its options kept.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>, opts?: unknown) => {
       db.txOptions.push(opts);
+      const fails = db.txThrows.shift();
+      if (fails) throw fails;
       const { prisma } = await import("@/lib/prisma");
       return fn(prisma);
     },
@@ -431,6 +435,7 @@ beforeEach(() => {
   db.personGone = false;
   db.lockReads = [];
   db.txOptions = [];
+  db.txThrows = [];
   db.history = [];
   db.historyQueries = [];
   db.nextId = 0;
@@ -550,7 +555,8 @@ describe("the loop", () => {
       const r = await runTeammateTurn(turn());
       expect(r.assistantMessageId).not.toBeNull();
       expect(db.lockReads).toEqual(["run:run1", "person:me", "create", "run:run1", "person:me"]);
-      expect(db.txOptions).toEqual([{ timeout: 20_000 }, { timeout: 20_000 }]);
+      // Review round 5 of Phase 3: each waits up to 10 seconds to start (before: Prisma's 2).
+      expect(db.txOptions).toEqual([{ timeout: 20_000, maxWait: 10_000 }, { timeout: 20_000, maxWait: 10_000 }]);
       expect(db.runUpdates).toHaveLength(1);
       expect(db.runUpdates[0]).toMatchObject({ where: { id: "run1", status: { in: ["PENDING", "RUNNING"] } }, data: { status: "SUCCEEDED", output: { text: "Two are due." } } });
     });
@@ -587,6 +593,45 @@ describe("the loop", () => {
       expect(await runTeammateTurn(turn())).toMatchObject({ assistantMessageId: null, error: TURN_ERRORS.notSaved });
       expect(db.created).toEqual([]);
       expect(db.runUpdates.every((u) => !("status" in u.data) && !("output" in u.data))).toBe(true);
+    });
+  });
+
+  // Review round 5 of Phase 3: under pool pressure the save's transaction
+  // could not start in time (P2028), and the answer was lost at once.
+  describe("a save that could not start (review round 5 of Phase 3)", () => {
+    const timedOut = () => Object.assign(new Error("Transaction API error: Unable to start a transaction in the given time."), { code: "P2028" });
+
+    it("tries the save once more when its transaction could not start, and the answer is saved", async () => {
+      db.txThrows = [timedOut()];
+      db.replies = [reply([say("Two are due.")], "end_turn")];
+      const r = await runTeammateTurn(turn());
+      // Before: notSaved, nothing written.
+      expect(r.assistantMessageId).not.toBeNull();
+      expect(r.error).toBeNull();
+      expect(db.created.map((c) => c.content)).toEqual(["Two are due."]);
+      // The failed try, the second, and the run's last write.
+      expect(db.txOptions).toHaveLength(3);
+      expect(db.runUpdates[0]).toMatchObject({ data: { status: "SUCCEEDED" } });
+      // The pool's own timeout is tried again the same way.
+      db.txThrows = [Object.assign(new Error("Timed out fetching a new connection from the connection pool."), { code: "P2024" })];
+      db.created = [];
+      db.replies = [reply([say("Done.")], "end_turn")];
+      expect((await runTeammateTurn(turn())).assistantMessageId).not.toBeNull();
+      expect(db.created).toHaveLength(1);
+    });
+
+    it("says the answer couldn't be saved when the second try fails too, and tries no other failure again", async () => {
+      db.txThrows = [timedOut(), timedOut()];
+      db.replies = [reply([say("Two are due.")], "end_turn")];
+      expect(await runTeammateTurn(turn())).toMatchObject({ assistantMessageId: null, error: TURN_ERRORS.notSaved });
+      expect(db.created).toEqual([]);
+      // Two tries of the save, then the run's last write: never a third try.
+      expect(db.txOptions).toHaveLength(3);
+      db.txOptions = [];
+      db.txThrows = [Object.assign(new Error("connection reset"), { code: "P1017" })];
+      db.replies = [reply([say("Two are due.")], "end_turn")];
+      expect(await runTeammateTurn(turn())).toMatchObject({ assistantMessageId: null, error: TURN_ERRORS.notSaved });
+      expect(db.txOptions).toHaveLength(2);
     });
   });
 

@@ -187,11 +187,19 @@ export const OPEN_RUN_STATUSES = ["PENDING", "RUNNING"] as const;
 
 /**
  * How long a transaction that waits on a run's lock may last: as long as the
- * account erasure's (20 seconds), which takes the person's open runs in its
- * first statement and holds them to its commit, so a turn's save waits for it
- * rather than failing (review round 4 of Phase 3).
+ * account erasure's (20 seconds), which takes the person's open runs and
+ * holds them to its commit, so a turn's save waits for it rather than
+ * failing (review round 4 of Phase 3).
  */
 export const RUN_LOCK_TX_TIMEOUT_MS = 20_000;
+
+/**
+ * How long such a transaction may wait to start, for a connection from the
+ * pool (review round 5 of Phase 3). Prisma's default is 2 seconds, so under
+ * pool pressure (the routine runner's 10 turns at a time) a save threw
+ * where a plain write would have waited. The erasure's own is 10 seconds.
+ */
+export const RUN_LOCK_TX_MAX_WAIT_MS = 10_000;
 
 /** Where a turn's run stands for what it writes (runState). */
 export type RunState = "open" | "closed" | "person_gone";
@@ -202,18 +210,20 @@ export type RunState = "open" | "closed" | "person_gone";
  * chat and cards; "closed" (ended, swept stale, or failed by the person's
  * account erasure, POST /api/me/delete); or "person_gone", still open but
  * the person's account deleted since it began (claimed after the erasure's
- * first statement, which fails only the runs open then). Inside the
- * caller's transaction it locks the run's row (FOR UPDATE), then the
- * person's (FOR SHARE), until that commits.
+ * run statement, which fails only the runs open then). Inside the caller's
+ * transaction it locks the run's row (FOR UPDATE), then the person's (FOR
+ * SHARE), until that commits.
  *
- * WHY EITHER ORDER IS SAFE. The erasure fails the person's open runs in its
- * first statement and blanks every run's output in its next, before it
- * anonymises their User row; it touches no run after that, then blanks
- * their chats and cards. If the erasure goes first, this waits on the run's
- * lock (or the person's), reads the run FAILED (or the account deleted), and
- * the caller writes nothing. If this goes first, the erasure's first
+ * WHY EITHER ORDER IS SAFE (review rounds 4 and 5 of Phase 3). The erasure's
+ * short transaction fails the person's open runs, ends their running
+ * requests and anonymises their User row, back to back, and takes no run
+ * after that; their words are blanked only after it commits, in batches
+ * (src/lib/agents/erasure-sweep.ts). If the erasure goes first, this waits on
+ * the run's lock (or the person's), reads the run FAILED (or the account
+ * deleted), and the caller writes nothing, so from the erasure's commit on no
+ * turn of theirs writes again. If this goes first, the erasure's run
  * statement (or its anonymising) waits on the lock until the caller's rows
- * are committed, and the blanking later in its transaction reads and blanks
+ * are committed, and the batches after the erasure's commit read and blank
  * them. The locks are taken in the erasure's own order, run then person, and
  * it takes no run after the person, so the two never wait on each other in
  * turn.

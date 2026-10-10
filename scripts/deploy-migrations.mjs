@@ -292,6 +292,12 @@ const SQL_MANIFEST = [
   // and ignores the person's "Don't ask". Data only, guarded on its own
   // effect: safe before or after the reload.
   "2026-10-10-ai-teammates-phase3-round2.sql",
+  // AI teammates, Phase 3 review round 5: an index on "AgentRun"
+  // ("triggeredBy", "id"), so an account erasure's batches read one
+  // person's runs in id order instead of the whole table. Index only,
+  // catalogue-guarded so a later deploy takes no lock: safe before or after
+  // the reload.
+  "2026-10-10-ai-teammates-phase3-round5.sql",
 ];
 
 /**

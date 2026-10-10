@@ -14,6 +14,7 @@ const st = vi.hoisted(() => ({
   convertLegacySchedules: vi.fn(),
   sweepStaleRuns: vi.fn(),
   sweepConnections: vi.fn(),
+  finishErasures: vi.fn(),
 }));
 
 vi.mock("@/lib/email", () => ({ queueEmail: async () => {} }));
@@ -24,6 +25,7 @@ vi.mock("@/lib/agents/budget", () => ({ sweepStaleRuns: st.sweepStaleRuns }));
 vi.mock("@/lib/agents/routines-server", () => ({ processDueRoutines: st.processDueRoutines }));
 vi.mock("@/lib/agents/legacy-schedules", () => ({ convertLegacySchedules: st.convertLegacySchedules }));
 vi.mock("@/lib/connectors/connections", () => ({ sweepConnections: st.sweepConnections }));
+vi.mock("@/lib/agents/erasure-sweep", () => ({ finishErasures: st.finishErasures }));
 
 import * as autonomous from "@/lib/agents/autonomous";
 import { POST } from "./route";
@@ -36,6 +38,7 @@ const run = async () => {
 const COUNTS = { due: 3, succeeded: 2, failed: 0, skipped: 0, missed: 1, paused: 0, taken: 0, deferred: 0 };
 const MOVED = { found: 3, moved: 1, stopped: 2, taken: 0, failed: 0 };
 const SWEPT = { statesExpired: 2, leavers: 1, revoked: 3, kept: 1, dropped: 0 };
+const ERASED = { found: 2, blanked: 1500, finished: 1, waiting: 1, failed: 0 };
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date("2026-10-06T09:00:00Z"), toFake: ["Date"] });
@@ -60,6 +63,10 @@ beforeEach(() => {
     st.order.push("connectors");
     return SWEPT;
   });
+  st.finishErasures.mockReset().mockImplementation(async () => {
+    st.order.push("erasures");
+    return ERASED;
+  });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -71,7 +78,7 @@ describe("one tick", () => {
   it("sweeps first, then runs the routines with their own budget, then moves the old schedules", async () => {
     const out = await run();
     expect(out.status).toBe(200);
-    expect(st.order).toEqual(["sweep", "stale", "routines", "legacy", "connectors"]);
+    expect(st.order).toEqual(["sweep", "stale", "routines", "legacy", "connectors", "erasures"]);
     const now = st.sweepActions.mock.calls[0][0] as Date;
     expect(now.toISOString()).toBe("2026-10-06T09:00:00.000Z");
     expect(st.processDueRoutines).toHaveBeenCalledWith(now, { limit: 200, budgetMs: 120_000, concurrency: 10 });
@@ -79,12 +86,14 @@ describe("one tick", () => {
     // Step 4 (docs/plans/ai-teammates-phase3.md step 2): within its own budget,
     // 500 revokes a tick (review round 1 of Phase 3: 50 left a large queue for hours).
     expect(st.sweepConnections).toHaveBeenCalledWith(now, { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 });
+    // Step 5 (review round 5 of Phase 3): the erasures' words, within their own budget.
+    expect(st.finishErasures).toHaveBeenCalledWith(now, { limit: 50, budgetMs: 20_000 });
   });
 
   it("answers in counts only, naming nobody", async () => {
     const { body } = await run();
-    expect(body).toMatchObject({ actions: { expired: 2, stuck: 1 }, staleRuns: 1, routines: COUNTS, legacySchedules: MOVED, connectors: SWEPT });
-    for (const v of [...Object.values(body.actions), ...Object.values(body.routines), ...Object.values(body.legacySchedules), ...Object.values(body.connectors)]) expect(typeof v).toBe("number");
+    expect(body).toMatchObject({ actions: { expired: 2, stuck: 1 }, staleRuns: 1, routines: COUNTS, legacySchedules: MOVED, connectors: SWEPT, erasures: ERASED });
+    for (const v of [...Object.values(body.actions), ...Object.values(body.routines), ...Object.values(body.legacySchedules), ...Object.values(body.connectors), ...Object.values(body.erasures)]) expect(typeof v).toBe("number");
     expect(body).not.toHaveProperty("runs");
   });
 
@@ -93,7 +102,7 @@ describe("one tick", () => {
     st.sweepStaleRuns.mockRejectedValueOnce(new Error("stale down"));
     st.processDueRoutines.mockRejectedValueOnce(new Error("routines down"));
     const out = await run();
-    expect(st.order).toEqual(["legacy", "connectors"]);
+    expect(st.order).toEqual(["legacy", "connectors", "erasures"]);
     expect(out.status).toBe(500);
     expect(out.body).toMatchObject({ actions: null, staleRuns: null, routines: null, legacySchedules: MOVED, connectors: SWEPT });
   });
@@ -101,9 +110,9 @@ describe("one tick", () => {
   it("fails the tick when the connector sweep throws, after every other step ran", async () => {
     st.sweepConnections.mockRejectedValueOnce(new Error("sweep down"));
     const out = await run();
-    expect(st.order).toEqual(["sweep", "stale", "routines", "legacy"]);
+    expect(st.order).toEqual(["sweep", "stale", "routines", "legacy", "erasures"]);
     expect(out.status).toBe(500);
-    expect(out.body).toMatchObject({ routines: COUNTS, legacySchedules: MOVED, connectors: null });
+    expect(out.body).toMatchObject({ routines: COUNTS, legacySchedules: MOVED, connectors: null, erasures: ERASED });
   });
 
   it("fails the tick when a schedule did not move, so someone is told (review of step 2)", async () => {
@@ -125,10 +134,27 @@ describe("one tick", () => {
     expect((await run()).status).toBe(200);
   });
 
+  // Review round 5 of Phase 3: the erasure's words are blanked after its
+  // transaction commits, and this step finishes what it left.
+  it("finishes the account erasures last, with its count in the body, and fails the tick when it throws or a pass failed", async () => {
+    const ok = await run();
+    expect(ok.status).toBe(200);
+    // Before: no erasure step, so words the erasure's own pass left stayed for good.
+    expect(ok.body.erasures).toEqual(ERASED);
+    st.finishErasures.mockRejectedValueOnce(new Error("sweep down"));
+    const threw = await run();
+    expect(threw.status).toBe(500);
+    expect(threw.body).toMatchObject({ connectors: SWEPT, erasures: null });
+    st.finishErasures.mockResolvedValueOnce({ ...ERASED, failed: 1 });
+    const failed = await run();
+    expect(failed.status).toBe(500);
+    expect(failed.body.erasures).toMatchObject({ failed: 1 });
+  });
+
   it("fails the tick when the move throws, after the routines ran", async () => {
     st.convertLegacySchedules.mockRejectedValueOnce(new Error("move down"));
     const out = await run();
-    expect(st.order).toEqual(["sweep", "stale", "routines", "connectors"]);
+    expect(st.order).toEqual(["sweep", "stale", "routines", "connectors", "erasures"]);
     expect(out.status).toBe(500);
     expect(out.body).toMatchObject({ routines: COUNTS, legacySchedules: null });
   });

@@ -601,6 +601,29 @@ describe("the person's own Google (Phase 3 step 3)", () => {
     expect(fx.twinLocks).toHaveLength(1);
   });
 
+  // Review round 5 of Phase 3: the card's transaction counted the person's
+  // waiting requests on the base client, asking the pool for a second
+  // connection while it held one, so 10 turns at once (the routine runner's
+  // pace) could run the pool (10) dry and every card wait to its timeout; and
+  // every run-lock transaction kept Prisma's 2 seconds to start.
+  it("counts the waiting requests on the card transaction's own client, and gives every run-lock transaction 10 seconds to start", async () => {
+    fx.cards.send_email = sendCard("k1");
+    await g("send_email", SEND);
+    fx.cards.post_in_talk = { title: "Post in #general", input: { conversationId: "c1", text: "Hello" } };
+    await g("post_in_talk", { conversationId: "c1", text: "Hello" });
+    expect(fx.actions).toHaveLength(2);
+    // Both branches, with a key and without. Before: ["base", "base"].
+    expect(fx.countClients).toEqual(["tx", "tx"]);
+    // A Don't ask action and a tool's chat line wait as long.
+    fx.answers.remember = { ok: true, memory: { key: "report day", value: "Mondays" }, created: true };
+    await g("post_in_talk", { conversationId: "c1", text: "Hello" }, { personRules: { "post_in_talk:conv:c1": "always" } });
+    await g("remember", { key: "report day", value: "Mondays" });
+    expect(fx.messages.length).toBeGreaterThan(0);
+    // Before: { timeout: 20_000 } alone, every one.
+    expect(fx.txOptions.length).toBeGreaterThanOrEqual(4);
+    for (const o of fx.txOptions) expect(o).toEqual({ timeout: 20_000, maxWait: 10_000 });
+  });
+
   // Review round 1 of Phase 3: the taint was saved only when the turn
   // finished, so a turn that stopped part way left its cards unmarked.
   it("marks the run the moment the turn first reads Google, and every card asked after it, and none before", async () => {
