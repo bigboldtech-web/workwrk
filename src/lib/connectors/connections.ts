@@ -379,7 +379,7 @@ export async function touchUsed(connectionId: string, agentId: string): Promise<
 // ── Connecting ──────────────────────────────────────────────────────
 
 export type SaveConnectionResult =
-  | { ok: true; id: string; replaced: boolean; reconnect: boolean; queued: string[] }
+  | { ok: true; id: string; replaced: boolean; reconnect: boolean; queued: string[]; allowsCleared: number }
   | { ok: false; code: "exchange_failed" | "workspace_closed" | "workspace_off" };
 
 function isUniqueViolation(err: unknown): boolean {
@@ -391,8 +391,13 @@ function isUniqueViolation(err: unknown): boolean {
  * holding it (revokeBatch, up to REVOKE_UNDER_LOCK_MS) before they go on
  * (review round 2 of Phase 3): Prisma's default of five seconds would end a
  * connect that waited, and the callback would then let its new grant go.
+ * Review round 3 of Phase 3: so do those that may wait behind one of them,
+ * the allow route's read of the person's connection FOR SHARE (behind
+ * saveOnce's FOR UPDATE, or a removal's delete) and setPolicyProduct's
+ * FOR UPDATE of the switch (behind saveOnce's FOR SHARE): a wait of a few
+ * seconds failed the click with a transaction-expired 500.
  */
-const LOCK_WAIT_TX_TIMEOUT_MS = 20_000;
+export const LOCK_WAIT_TX_TIMEOUT_MS = 20_000;
 
 async function saveOnce(a: {
   organizationId: string;
@@ -484,7 +489,7 @@ async function saveOnce(a: {
         },
         select: { id: true },
       });
-      return { ok: true, id: row.id, replaced: false, reconnect: false, queued: [] };
+      return { ok: true, id: row.id, replaced: false, reconnect: false, queued: [], allowsCleared: 0 };
     }
     const sameAccount = existing.accountSub === a.claims.sub;
     // No refresh token on a re-consent: the stored one is the same grant's,
@@ -510,6 +515,14 @@ async function saveOnce(a: {
       },
     });
     const queued: string[] = [];
+    // ANOTHER ACCOUNT ENDS EVERY ALLOW (review round 3 of Phase 3). An allow
+    // stores products and prints with no account attached, so an allow Max
+    // gave a workspace teammate while connected as max@company.com let it
+    // read max@gmail.com once he reconnected as that, on a choice he never
+    // made for it. His allows for this workspace's teammates are cleared in
+    // this transaction, as a removal clears them (clearAllows), and the card
+    // asks for each allow again. The same account keeps them.
+    const allowsCleared = sameAccount ? 0 : await clearAllows(tx, [{ organizationId: a.organizationId, userId: a.userId }]);
     // The same account: the same grant, so its old refresh token is never
     // revoked (that would revoke the new one too). Another account: the old
     // one's grant is revoked, unless another live connection (any person,
@@ -524,7 +537,7 @@ async function saveOnce(a: {
         queued.push(id);
       }
     }
-    return { ok: true, id: existing.id, replaced: !sameAccount, reconnect: sameAccount, queued };
+    return { ok: true, id: existing.id, replaced: !sameAccount, reconnect: sameAccount, queued, allowsCleared };
   }, { timeout: LOCK_WAIT_TX_TIMEOUT_MS });
 }
 
@@ -576,7 +589,7 @@ export async function saveConnection(a: {
       description: CONNECTIONS_COPY.auditConnected,
       targetId: a.userId,
       targetType: "user",
-      metadata: { provider: "google", products: a.products, connectionId: result.id, replaced: result.replaced, reconnect: result.reconnect },
+      metadata: { provider: "google", products: a.products, connectionId: result.id, replaced: result.replaced, reconnect: result.reconnect, allowsCleared: result.allowsCleared },
     });
   } catch (err) {
     console.error(`[connectors] connect audit row not written: ${errorLine(err)}`);
@@ -688,6 +701,25 @@ export async function removeConnections(a: {
           SELECT DISTINCT "accountSub" FROM "TeammateConnection"
            WHERE "provider" = 'google' AND "accountSub" = ANY(${subs}::text[])`;
         const held = new Set(live.map((l) => l.accountSub));
+        // A SUSPENSION'S NOTICE COUNTS ONLY WHAT OUTLIVES IT (review round 3
+        // of Phase 3). Two people of one workspace who connected the same
+        // Google account (a shared mailbox) can fall in different chunks, or
+        // different sweep ticks: the first was told Google still lists
+        // WorkwrK, then the second's chunk found nothing live and revoked the
+        // grant. A connection this removal will also end (it matches `where`)
+        // does not keep the account, so the notice says "being removed" unless
+        // a connection outside it holds the account. The revoke itself is still
+        // decided by `held`, as above.
+        const keeps =
+          a.notice === "suspended"
+            ? new Set(
+                (
+                  await tx.$queryRaw<Array<{ accountSub: string }>>`
+                    SELECT DISTINCT "accountSub" FROM "TeammateConnection"
+                     WHERE "provider" = 'google' AND "accountSub" = ANY(${subs}::text[]) AND NOT (${a.where})`
+                ).map((l) => l.accountSub),
+              )
+            : held;
         const rows = gone
           .filter((g) => !held.has(g.accountSub))
           .map((g) => ({
@@ -702,8 +734,9 @@ export async function removeConnections(a: {
           gone: gone.map((g) => ({ id: g.id, organizationId: g.organizationId, userId: g.userId })),
           queued: rows.map((r) => r.id),
           // The connections whose Google access is being removed: the rest keep
-          // a grant another live connection holds (review round 2 of Phase 3).
-          revoking: gone.filter((g) => !held.has(g.accountSub)).map((g) => g.id),
+          // a grant another live connection holds (review round 2 of Phase 3),
+          // for a suspension one outside it (see above).
+          revoking: gone.filter((g) => !keeps.has(g.accountSub)).map((g) => g.id),
         };
       },
       { timeout: 60_000 },
@@ -720,13 +753,15 @@ export async function removeConnections(a: {
 
 /**
  * The allows of the people whose connections these were, for the teammates
- * of that workspace, cleared (see ALLOWS END WITH THE CONNECTION above).
- * Inside the chunk's transaction. Only rows that hold an allow are written.
+ * of that workspace, cleared (see ALLOWS END WITH THE CONNECTION above), or
+ * of a person who reconnected as another Google account (saveOnce). Inside
+ * the caller's transaction. Only rows that hold an allow are written; the
+ * answer is how many.
  */
-async function clearAllows(tx: Prisma.TransactionClient, gone: ReadonlyArray<Pick<Removed, "organizationId" | "userId">>): Promise<void> {
+async function clearAllows(tx: Prisma.TransactionClient, gone: ReadonlyArray<Pick<Removed, "organizationId" | "userId">>): Promise<number> {
   const pairs = [...new Map(gone.map((g) => [`${g.organizationId}\u0000${g.userId}`, g])).values()];
-  if (pairs.length === 0) return;
-  await tx.$executeRaw`
+  if (pairs.length === 0) return 0;
+  return tx.$executeRaw`
     UPDATE "AgentPersonSetting" s
        SET "connectorProducts" = ARRAY[]::text[], "connectorPrints" = NULL, "updatedAt" = (now() AT TIME ZONE 'UTC')
       FROM "Agent" a, unnest(${pairs.map((p) => p.organizationId)}::text[], ${pairs.map((p) => p.userId)}::text[]) AS g("organizationId", "userId")
@@ -737,10 +772,11 @@ async function clearAllows(tx: Prisma.TransactionClient, gone: ReadonlyArray<Pic
 /**
  * The audit rows, and the Inbox rows with `notify`, for connections just
  * ended. `revoking`: the ids whose Google access is being removed (a revoke
- * was queued for their account); a suspension's notice says so only for
- * those (review round 2 of Phase 3: it said every person's access was
- * removed, also where the account is connected elsewhere in WorkwrK and
- * nothing is revoked).
+ * was queued for their account, or for a suspension will be once it ends the
+ * rest of the workspace's, review round 3 of Phase 3); a suspension's notice
+ * says so only for those (review round 2 of Phase 3: it said every person's
+ * access was removed, also where the account is connected elsewhere in
+ * WorkwrK and nothing is revoked).
  */
 async function afterRemoved(
   gone: readonly Removed[],
@@ -1289,5 +1325,5 @@ export async function setPolicyProduct(
         "updatedAt" = (now() AT TIME ZONE 'UTC')
       RETURNING "products"`;
     return { before: parseProducts(was[0]?.products ?? []), after: parseProducts(rows[0]?.products ?? []) };
-  });
+  }, { timeout: LOCK_WAIT_TX_TIMEOUT_MS });
 }

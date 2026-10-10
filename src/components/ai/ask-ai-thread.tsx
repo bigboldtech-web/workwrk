@@ -388,7 +388,8 @@ function Turn({ m, page }: { m: AiMessage; page: boolean }) {
           <div className="flex min-h-9 items-center text-sm text-danger-text">This answer didn&apos;t finish.</div>
         ) : m.content ? (
           <div className="text-prose text-ink">
-            <OsMarkdown text={m.content} />
+            {/* Every link shows where it goes, as a teammate's answer does (review round 3 of Phase 3). */}
+            <OsMarkdown text={m.content} links="shown" />
           </div>
         ) : null}
         {waiting || (m.streaming && m.content) ? (

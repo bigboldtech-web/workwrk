@@ -449,6 +449,11 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
       expect(BANNED.test(s)).toBe(false);
     }
   });
+  it("words review round 3 of Phase 3's own sentence plainly", () => {
+    // A reconnect as another Google account ends every allow given here.
+    expect(copy.CONNECTIONS_COPY.allowsCleared).toBe("You connected a different Google account, so teammates you had let use your Google need you to allow them again.");
+    expect(BANNED.test(copy.CONNECTIONS_COPY.allowsCleared)).toBe(false);
+  });
   it("says one person, and one who needs to reconnect, as one", () => {
     expect(copy.CONNECTOR_POLICY_COPY.counts(1, 1, 0)).toBe("1 person connected: 1 with Gmail, 0 with Google Calendar.");
     expect(copy.CONNECTOR_POLICY_COPY.needReconnect(1)).toBe("1 needs to reconnect.");

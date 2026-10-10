@@ -112,6 +112,14 @@ describe("messageViewFromRow", () => {
       routine: { id: null, name: "Routine", runId: null, dueAt: null },
     });
   });
+  // Review round 3 of Phase 3: an answer or a report that read the person's
+  // Google says so, so the thread shows its links as plain text.
+  it("says when an answer or a report read the person's Google, and only a true says so", () => {
+    expect(messageViewFromRow(row({ role: "ASSISTANT", content: "Done.", meta: { readGoogle: true, runId: "run1" } }))).toMatchObject({ kind: "agent", readGoogle: true });
+    expect(messageViewFromRow(row({ role: "ASSISTANT", kind: "REPORT", content: "Three things", meta: { routineId: "r1", readGoogle: true } }))).toMatchObject({ kind: "report", readGoogle: true });
+    expect(messageViewFromRow(row({ role: "ASSISTANT", content: "Done.", meta: { readGoogle: "true" } }))).not.toHaveProperty("readGoogle");
+    expect(messageViewFromRow(row({ role: "ASSISTANT", kind: "REPORT", meta: null }))).not.toHaveProperty("readGoogle");
+  });
   it("reads an event line, and keeps its words when the event is one it does not know", () => {
     expect(messageViewFromRow(row({ role: "SYSTEM", kind: "EVENT", content: "Forgot: report day", meta: { event: "memory_forgotten" } }))).toEqual({
       id: "m1", createdAt: "2026-10-06T09:00:00.000Z", text: "Forgot: report day", kind: "event", event: "memory_forgotten", routineId: null, actionId: null,

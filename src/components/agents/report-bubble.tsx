@@ -44,7 +44,8 @@ export function ReportBubble({
         ) : null}
         {text ? (
           <div className="mt-1 text-prose text-ink">
-            <OsMarkdown text={text} />
+            {/* As a teammate's answer shows its links (review round 3 of Phase 3): a routine can read the person's Google too. */}
+            <OsMarkdown text={text} links={m.readGoogle ? "inert" : "shown"} />
           </div>
         ) : null}
         {more > 0 && !all ? (

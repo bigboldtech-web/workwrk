@@ -137,7 +137,10 @@ export function AgentTurn({ m, teammate, showName = false }: { m: Extract<Teamma
         ) : null}
         {m.text ? (
           <div className="text-prose text-ink">
-            <OsMarkdown text={m.text} />
+            {/* Every link shows where it goes, and an answer that read the
+                person's Google links nothing (review round 3 of Phase 3);
+                one still arriving cannot say yet, so it links nothing either. */}
+            <OsMarkdown text={m.text} links={m.readGoogle || arriving ? "inert" : "shown"} />
           </div>
         ) : null}
         {waiting || (arriving && m.text) ? (

@@ -2,8 +2,9 @@
 //
 // Where Google sends the person back (docs/plans/ai-teammates-phase3.md step
 // 2). It answers only redirects to the Connections card: ?ai=connected (with
-// ?ai_partial=<product> for each product Google did not grant), or
-// ?ai_error=<code>. The one registered redirect address
+// ?ai_partial=<product> for each product Google did not grant, and
+// ?ai_allows=cleared when another Google account ended the person's allows),
+// or ?ai_error=<code>. The one registered redirect address
 // (google/config.ts googleRedirectUri).
 //
 // THE STATE IS THE PERSON'S, USED ONCE (Decision 5). In order:
@@ -147,7 +148,8 @@ export async function GET(req: NextRequest) {
     if (saved.queued.length > 0 && revoker) {
       await revokeQueued(saved.queued, revoker, { timeoutMs: 5_000, budgetMs: 5_000 }).catch(() => undefined);
     }
-    return ended(connectDone(allowed.filter((p) => !granted.includes(p))));
+    // Another account ended the person's allows (review round 3 of Phase 3): the card says why its teammates ask again.
+    return ended(connectDone(allowed.filter((p) => !granted.includes(p)), { allowsCleared: saved.allowsCleared > 0 }));
   } catch (err) {
     console.error(`[connectors] google callback failed: ${errorLine(err)}`);
     // Nothing stored and the account known: the grant goes, unless shared.

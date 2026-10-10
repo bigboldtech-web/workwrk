@@ -255,27 +255,22 @@ export async function sharedMemoriesPrintOf(agentId: string, db: Prisma.Transact
   return sharedMemoriesPrint(rows);
 }
 
-/** The same for several teammates in one read (the Connections card), by teammate id; one with none has the print of none. */
+/**
+ * The same for several teammates (the Connections card), by teammate id; one
+ * with none has the print of none.
+ *
+ * BUILT EXACTLY AS sharedMemoriesPrintOf BUILDS IT (review round 3 of Phase
+ * 3), one read per teammate through it. One read for all of them, with one
+ * take of 100 per teammate shared among them and the foreign scope ids
+ * dropped after it, let rows that are never read into a turn (an agent-scope
+ * row with a null or another scope id) use up the take: the card's print
+ * then differed from the one connectorAccess and the allow route compare,
+ * and every Allow answered teammate_changed for a teammate nobody changed.
+ */
 export async function sharedMemoriesPrints(agentIds: readonly string[]): Promise<Map<string, string>> {
   const ids = [...new Set(agentIds)];
-  const out = new Map<string, string>();
-  if (ids.length === 0) return out;
-  const rows = await prisma.agentMemory.findMany({
-    where: { agentId: { in: ids }, scope: "agent" },
-    orderBy: { updatedAt: "desc" },
-    take: ids.length * MEMORY_LIMITS.perAgent,
-    select: { agentId: true, scopeId: true, key: true, value: true },
-  });
-  const byAgent = new Map<string, Array<{ key: string; value: unknown }>>();
-  for (const r of rows) {
-    // Only a teammate's own shared rows are read into its turns (scopeId is its id).
-    if (r.scopeId !== r.agentId) continue;
-    const list = byAgent.get(r.agentId) ?? [];
-    if (list.length < MEMORY_LIMITS.perAgent) list.push({ key: r.key, value: r.value });
-    byAgent.set(r.agentId, list);
-  }
-  for (const id of ids) out.set(id, sharedMemoriesPrint(byAgent.get(id) ?? []));
-  return out;
+  const prints = await Promise.all(ids.map((id) => sharedMemoriesPrintOf(id)));
+  return new Map(ids.map((id, i) => [id, prints[i]]));
 }
 
 /** One memory as one prompt line: one line, and nothing that can open or close a block. */

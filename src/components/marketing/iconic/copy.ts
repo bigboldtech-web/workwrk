@@ -176,6 +176,8 @@ export const LEGAL_COPY = {
     // reads Google again at an approval, reads colleagues' busy times to find
     // a meeting time, and keeps its answer in the run history too; section 6
     // says the backups hold the encrypted tokens for as long as backups last.
+    // Review round 3 of Phase 3, the same day: section 6 says deleting one's
+    // account erases the words of a teammate's answers and requests.
     updated: "10 October 2026",
   },
   terms: {

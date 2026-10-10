@@ -1342,6 +1342,8 @@ export const CONNECTIONS_COPY = {
   sharedNote: "Google still lists WorkwrK because this Google account is also connected elsewhere in WorkwrK.",
   connectedOk: "Google is connected for your AI teammates.",
   partial: (p: string) => `Google didn't give access to ${p}, so your teammates can't use it. Connect again and tick it.`,
+  /** A reconnect as another Google account ended every allow given here (review round 3 of Phase 3): they were choices made for the other account. */
+  allowsCleared: "You connected a different Google account, so teammates you had let use your Google need you to allow them again.",
   didntConnect: (why: string) => `Google didn't connect: ${why}.`,
   guestNote: "Guests can't connect Google to AI teammates.",
   signedOut: "Sign in first.",

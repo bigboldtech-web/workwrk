@@ -48,6 +48,8 @@ export interface TeammateConnectOutcome {
   ai: string | null;
   partial: string[];
   error: string | null;
+  /** Another Google account ended the person's allows (review round 3 of Phase 3). */
+  allowsCleared?: boolean;
 }
 
 const START = "/api/teammate-connections/google/start";
@@ -87,6 +89,11 @@ function ResultLine({ outcome }: { outcome: TeammateConnectOutcome }) {
           <TriangleAlert aria-hidden /> {C.partial(productWord(p))}
         </p>
       ))}
+      {outcome.allowsCleared ? (
+        <p className="cxn__result cxn__result--bad">
+          <TriangleAlert aria-hidden /> {C.allowsCleared}
+        </p>
+      ) : null}
     </>
   );
 }

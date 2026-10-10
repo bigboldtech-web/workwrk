@@ -150,8 +150,15 @@ export const TAINTING_TOOLS: ReadonlySet<ConnectorToolName> = new Set<ConnectorT
  * times that id with their own suffix; list_events hands those back, and
  * refusing them made the teammate unable to change an event it had just
  * listed. The segment is held to its exact shape, still with no dot.
+ *
+ * AN ALL-DAY SPLIT TOO (review round 3 of Phase 3). The instance suffix
+ * already comes as a day alone for an all-day event; a split of an all-day
+ * series names its start as a day alone the same way ("<base>_R20261013"),
+ * and a moment may end in a Z. Both are taken, so the teammate can change,
+ * cancel or answer an all-day event it just listed. Still no dot, and an R
+ * segment is still only digits in Google's two shapes.
  */
-export const EVENT_ID_PATTERN = /^[a-z0-9_-]+(?:_R\d{8}T\d{6})?(?:_\d{8}(?:T\d{6}Z)?)?$/;
+export const EVENT_ID_PATTERN = /^[a-z0-9_-]+(?:_R\d{8}(?:T\d{6}Z?)?)?(?:_\d{8}(?:T\d{6}Z)?)?$/;
 
 /** Whether a text is an event id Google could have given (EVENT_ID_PATTERN), checked before any URL is built. */
 export function isEventId(id: unknown): id is string {

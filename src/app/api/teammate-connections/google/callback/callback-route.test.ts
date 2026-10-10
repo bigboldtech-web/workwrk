@@ -200,6 +200,26 @@ describe("what is stored", () => {
     expect(calls.filter((u) => u === CFG.revokeUrl)).toHaveLength(1);
   });
 
+  // Review round 3 of Phase 3: another account ends the person's allows,
+  // and the card they land on says why their teammates ask again.
+  it("says on the card when another account ended the person's allows, and only then", async () => {
+    cdb.agents.push({ id: "a-ops", organizationId: "org1" });
+    cdb.settings.push({ id: "ps1", agentId: "a-ops", userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "x" } } });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("refresh-old") });
+    google({ scope: GMAIL });
+    let state = await begin(["gmail"]);
+    let q = outcome(await callback(`code=c1&state=${state}`, state));
+    expect(q.get("ai")).toBe("connected");
+    expect(q.get("ai_allows")).toBeNull();
+    expect(cdb.settings[0].connectorProducts).toEqual(["gmail"]);
+    google({ scope: GMAIL, sub: "sub-personal", email: "max@personal.test" });
+    state = await begin(["gmail"]);
+    q = outcome(await callback(`code=c2&state=${state}`, state));
+    expect(q.get("ai")).toBe("connected");
+    expect(q.get("ai_allows")).toBe("cleared");
+    expect(cdb.settings[0].connectorProducts).toEqual([]);
+  });
+
   it("writes an audit line with products and ids, never the account", async () => {
     google({ scope: CAL, email: "private@mail.test" });
     const state = await begin(["calendar"]);
