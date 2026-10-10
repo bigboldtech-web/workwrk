@@ -55,6 +55,13 @@ export interface TeammateGoogleUse {
 export interface TeammateConnectionsView {
   /** False only when this WorkwrK offers no Google and the person holds no connection: the card is not drawn. */
   available: boolean;
+  /**
+   * The workspace this was read in. Disconnect and Allow send it back, and a
+   * route whose session is in another workspace now (switched in another
+   * tab) changes nothing and answers 409 workspace_changed (review round 1
+   * of Phase 3).
+   */
+  organizationId: string;
   workspaceName: string;
   products: Record<ConnectorProduct, ProductState>;
   connection: ConnectionView | null;
@@ -68,6 +75,8 @@ export interface TeammateConnectionsView {
 export interface ConnectorPolicyView {
   /** False only when this WorkwrK offers no Google and nobody here is connected. */
   available: boolean;
+  /** The workspace this was read in: the switch and Disconnect everyone send it back (TeammateConnectionsView.organizationId). */
+  organizationId: string;
   /** What this WorkwrK offers (GOOGLE_AGENT_PRODUCTS). */
   offered: ProductSet;
   /** What the workspace turned on, of what is offered. */

@@ -37,6 +37,7 @@ import {
   accountKey,
   connectorAccess,
   endConnectionsFor,
+  endSuspendedWorkspaceConnections,
   markNeedsReconnect,
   queueWorkspaceRevocations,
   removeConnections,
@@ -320,7 +321,7 @@ describe("sweepConnections", () => {
 
     expect(cdb.connections.map((c) => c.userId).sort()).toEqual(["u-here", "u-member"]);
     // The two leavers' revokes are queued and confirmed; the stuck one is dropped on its sixth try.
-    expect(out).toEqual({ statesExpired: 1, leavers: 2, noAccess: 0, closed: 0, revoked: 2, kept: 1, dropped: 1, stillHeld: 0 });
+    expect(out).toEqual({ statesExpired: 1, leavers: 2, noAccess: 0, closed: 0, suspended: 0, revoked: 2, kept: 1, dropped: 1, stillHeld: 0 });
     expect(cdb.revocations.map((r) => r.id)).toEqual(["rv-retry"]);
     expect(cdb.states.map((s) => s.id)).toEqual(["st-live"]);
     // The fake reads the leaver rule from the real statement: it is the anti-join on this workspace's membership.
@@ -459,17 +460,207 @@ describe("queueWorkspaceRevocations", () => {
 });
 
 describe("setPolicyProduct", () => {
-  it("is one statement with array_append or array_remove, never a read of the array", async () => {
+  // The write is still the one upsert that changes the array where it is;
+  // review round 1 of Phase 3 reads what it was, under the workspace's lock
+  // and the row's own, in the same transaction, for the audit row.
+  it("writes with one array_append or array_remove upsert, never an array worked out here, and answers before and after", async () => {
     const findUnique = vi.spyOn((await import("./connector-test-db")).connectorDb.teammateConnectorPolicy, "findUnique");
     cdb.policy.set("org1", ["calendar"]);
     // Answered in the products' own order (parseProducts), whatever order they were turned on.
-    expect(await setPolicyProduct("org1", "gmail", true, "u-admin")).toEqual(["gmail", "calendar"]);
-    expect(cdb.raw).toHaveLength(1);
-    expect(cdb.raw[0]).toContain("array_append");
-    expect(cdb.raw[0]).toContain('ON CONFLICT ("organizationId", "provider") DO UPDATE');
-    expect(await setPolicyProduct("org1", "calendar", false, "u-admin")).toEqual(["gmail"]);
-    expect(cdb.raw).toHaveLength(2);
-    expect(cdb.raw[1]).toContain("array_remove");
+    expect(await setPolicyProduct("org1", "gmail", true, "u-admin")).toEqual({ before: ["calendar"], after: ["gmail", "calendar"] });
+    const writes = () => cdb.raw.filter((s) => s.startsWith('INSERT INTO "TeammateConnectorPolicy"'));
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0]).toContain("array_append");
+    expect(writes()[0]).toContain('ON CONFLICT ("organizationId", "provider") DO UPDATE');
+    expect(await setPolicyProduct("org1", "calendar", false, "u-admin")).toEqual({ before: ["gmail", "calendar"], after: ["gmail"] });
+    expect(writes()).toHaveLength(2);
+    expect(writes()[1]).toContain("array_remove");
     expect(findUnique).not.toHaveBeenCalled();
+    // Each change: the workspace's lock, the row read FOR UPDATE, then the write, all in one transaction.
+    expect(cdb.raw.map((s) => s.slice(0, 40))).toEqual([
+      "SELECT pg_advisory_xact_lock(?::int, has",
+      'SELECT "products" FROM "TeammateConnecto',
+      'INSERT INTO "TeammateConnectorPolicy" ("',
+      "SELECT pg_advisory_xact_lock(?::int, has",
+      'SELECT "products" FROM "TeammateConnecto',
+      'INSERT INTO "TeammateConnectorPolicy" ("',
+    ]);
+    expect(cdb.policyLocks).toEqual([
+      { organizationId: "org1", inTx: true },
+      { organizationId: "org1", inTx: true },
+    ]);
+    expect(cdb.policyReads).toEqual([
+      { lock: "update", inTx: true },
+      { lock: "update", inTx: true },
+    ]);
+    expect(cdb.events.filter((e) => e.op === "policy.upsert").every((e) => e.inTx)).toBe(true);
+  });
+
+  it("answers no products before the workspace's first change", async () => {
+    cdb.policy.delete("org1");
+    expect(await setPolicyProduct("org1", "calendar", true, "u-admin")).toEqual({ before: [], after: ["calendar"] });
+  });
+});
+
+// ── Review round 1 of Phase 3 ───────────────────────────────────────
+
+describe("a suspended workspace (review round 1 of Phase 3)", () => {
+  // Before: nothing on the use path read the workspace's status, so a
+  // suspended workspace's routines kept reading everyone's mail.
+  it("lets no teammate use anyone's Google there, with its own reason before the switch's, and keeps a trial live", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    const own = agent({ visibility: "PRIVATE", ownerId: "u-max" });
+    cdb.suspendedOrgs.add("org1");
+    cdb.policy.set("org1", []);
+    expect(await connectorAccess({ person: person(), agent: own, product: "gmail" })).toEqual({ ok: false, reason: "workspace_closed" });
+    cdb.suspendedOrgs.clear();
+    cdb.closedOrgs.add("org1");
+    expect(await connectorAccess({ person: person(), agent: own, product: "gmail", forApproval: true })).toEqual({ ok: false, reason: "workspace_closed" });
+    cdb.closedOrgs.clear();
+    cdb.trialOrgs.add("org1");
+    cdb.policy.set("org1", ["gmail"]);
+    expect((await connectorAccess({ person: person(), agent: own, product: "gmail" })).ok).toBe(true);
+  });
+
+  it("takes no new connection there", async () => {
+    cdb.suspendedOrgs.add("org1");
+    const r = await saveConnection({ organizationId: "org1", userId: "u-max", tokens: { accessToken: "at", refreshToken: "rt", expiresIn: 3600, scope: "", idToken: null }, claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail"], scopes: [] });
+    expect(r).toEqual({ ok: false, code: "workspace_closed" });
+    expect(cdb.connections).toEqual([]);
+  });
+
+  it("ends its connections in the sweep, as the system, telling each person why, and leaves live and trial workspaces alone", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.orgs.set("org2", "Paused Co");
+    cdb.orgs.set("org3", "Trial Co");
+    cdb.suspendedOrgs.add("org2");
+    cdb.trialOrgs.add("org3");
+    cdb.users = [
+      { id: "u-1", organizationId: "org2", status: "ACTIVE", deletedAt: null },
+      { id: "u-2", organizationId: "org1", status: "ACTIVE", deletedAt: null },
+      { id: "u-3", organizationId: "org3", status: "ACTIVE", deletedAt: null },
+    ];
+    seedConnection({ organizationId: "org2", userId: "u-1", accountSub: "s-1", refreshTokenSealed: sealToken("rt-1") });
+    seedConnection({ organizationId: "org1", userId: "u-2", accountSub: "s-2", refreshTokenSealed: sealToken("rt-2") });
+    seedConnection({ organizationId: "org3", userId: "u-3", accountSub: "s-3", refreshTokenSealed: sealToken("rt-3") });
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 });
+    expect(out).toMatchObject({ suspended: 1, closed: 0, revoked: 1 });
+    expect(cdb.connections.map((c) => c.organizationId).sort()).toEqual(["org1", "org3"]);
+    expect(cdb.activity.find((a) => a.type === "teammate_connection.disconnected")).toMatchObject({ actorType: "system", metadata: { reason: "no_access" } });
+    expect(cdb.notifications).toEqual([
+      expect.objectContaining({
+        userId: "u-1",
+        title: "Google was disconnected from your AI teammates",
+        message: "Paused Co was suspended, so WorkwrK disconnected Google from its AI teammates and removed its access from your Google account.",
+        link: "/account/connections?ws=org2#ai-google",
+      }),
+    ]);
+  });
+
+  it("ends them at once from staff's suspension hook, with the same notice", async () => {
+    fetchStub(() => ({ status: 200 }));
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("rt-max") });
+    seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-other", refreshTokenSealed: sealToken("rt-other") });
+    expect(await endSuspendedWorkspaceConnections("org1")).toBe(1);
+    expect(cdb.connections.map((c) => c.organizationId)).toEqual(["org2"]);
+    expect(cdb.revocations).toEqual([]);
+    expect(cdb.notifications[0]).toMatchObject({ userId: "u-max", message: expect.stringContaining("Acme was suspended") });
+  });
+});
+
+describe("saveConnection (review round 1 of Phase 3)", () => {
+  const tokens = { accessToken: "at-new", refreshToken: "rt-new", expiresIn: 3600, scope: "", idToken: null };
+
+  // Before: a revoke queued before a reconnect of the same account could be
+  // sent after it, and Google ended the new grant with it.
+  it("deletes, under the account's lock, every revoke queued for the account it saves, and no other", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", status: "needs_reconnect" });
+    const old = new Date(Date.now() - 60_000);
+    cdb.revocations.push(
+      { id: "rv-mine", provider: "google", tokenSealed: sealToken("rt-old"), reason: "disconnected", attempts: 1, nextAttemptAt: old, createdAt: old, accountKey: keyOf("google", "sub-max") },
+      { id: "rv-other", provider: "google", tokenSealed: sealToken("rt-x"), reason: "left", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: keyOf("google", "sub-x") },
+    );
+    const r = await saveConnection({ organizationId: "org1", userId: "u-max", tokens, claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail"], scopes: [] });
+    expect(r).toMatchObject({ ok: true, reconnect: true });
+    expect(cdb.revocations.map((x) => x.id)).toEqual(["rv-other"]);
+    const ops = cdb.events.map((e) => e.op);
+    expect(ops.indexOf("lock")).toBeLessThan(ops.indexOf("revocation.supersede"));
+    expect(cdb.events.find((e) => e.op === "revocation.supersede")?.inTx).toBe(true);
+  });
+
+  // Before: the switch was read only by the callback, before the code
+  // exchange, so a connect finishing after "Turn off and disconnect
+  // everyone" stored a connection after everyone's had ended.
+  it("stores nothing when a product it would store is off now, reading the switch under a share lock in its transaction", async () => {
+    cdb.policy.set("org1", ["calendar"]);
+    const r = await saveConnection({ organizationId: "org1", userId: "u-max", tokens, claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail", "calendar"], scopes: [] });
+    expect(r).toEqual({ ok: false, code: "workspace_off" });
+    expect(cdb.connections).toEqual([]);
+    expect(cdb.policyReads).toEqual([{ lock: "share", inTx: true }]);
+    // A product this WorkwrK stopped offering is off too.
+    cdb.policy.set("org1", ["gmail", "calendar"]);
+    cfg.value = { ...(FULL_CFG as Record<string, unknown>), products: ["calendar"] };
+    expect(await saveConnection({ organizationId: "org1", userId: "u-max", tokens, claims: { sub: "sub-max", email: "max@mail.test" }, products: ["gmail"], scopes: [] })).toEqual({ ok: false, code: "workspace_off" });
+    expect(cdb.connections).toEqual([]);
+  });
+});
+
+describe("removeConnections (review round 1 of Phase 3)", () => {
+  // Before: `chunk.gone.length < take` ended the loop at the first chunk
+  // another removal made short, with the rest still connected.
+  it("goes on past a short chunk until a chunk ends nothing", async () => {
+    for (let i = 0; i < 1100; i++) seedConnection({ organizationId: "org1", userId: `u-${i}`, accountSub: `sub-${i}` });
+    const real = connectorDb.$queryRaw;
+    let deletes = 0;
+    vi.spyOn(connectorDb, "$queryRaw").mockImplementation((async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const out = (await real(strings, ...values)) as unknown[];
+      // One row of the first chunk was taken by someone's own disconnect while it waited.
+      if (strings.join("?").includes('DELETE FROM "TeammateConnection"') && ++deletes === 1) return out.slice(1);
+      return out;
+    }) as never);
+    const seen: number[] = [];
+    const r = await removeConnections({ where: Prisma.sql`"organizationId" = ${"org1"}`, reason: "admin_all", actor: { id: "u-admin", type: "person" }, onChunk: (n) => seen.push(n) });
+    expect(r.removed).toHaveLength(1099);
+    expect(cdb.connections).toEqual([]);
+    expect(seen).toEqual([499, 500, 100]);
+    expect(deletes).toBe(4);
+  });
+
+  // Before: an allow outlived the connection, so a reconnect months later let a
+  // workspace teammate back into the mail on a choice made before.
+  it("clears the people's allows for that workspace's teammates in the chunk that ends their connections", async () => {
+    cdb.agents.push({ id: "a-ops", organizationId: "org1" }, { id: "a-far", organizationId: "org2" });
+    cdb.settings.push(
+      { id: "ps1", agentId: "a-ops", userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "x" } } },
+      { id: "ps2", agentId: "a-far", userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "y" } } },
+    );
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    cdb.users = [{ id: "u-max", organizationId: "org1", status: "INACTIVE", deletedAt: null }];
+    await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 0, budgetMs: 20_000 });
+    expect(cdb.settings.map((s) => [s.id, s.connectorProducts])).toEqual([
+      ["ps1", []],
+      ["ps2", ["gmail"]],
+    ]);
+    const ops = cdb.events.filter((e) => e.op === "connection.delete" || e.op === "setting.clear");
+    expect(ops).toEqual([
+      { op: "connection.delete", inTx: true },
+      { op: "setting.clear", inTx: true },
+    ]);
+  });
+});
+
+describe("the revoke queue's drain (review round 1 of Phase 3)", () => {
+  // Before: five a claim and 50 a tick, so a large Disconnect everyone took hours to reach Google.
+  it("claims ten at a time and keeps claiming within the tick's limit", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    for (let i = 0; i < 25; i++) {
+      cdb.revocations.push({ id: `rv-${i}`, provider: "google", tokenSealed: sealToken(`rt-${i}`), reason: "admin_all", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: null });
+    }
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 });
+    expect(out).toMatchObject({ revoked: 25, kept: 0 });
+    expect(cdb.claims).toEqual([10, 10, 10]);
+    expect(fetch).toHaveBeenCalledTimes(25);
+    expect(cdb.revocations).toEqual([]);
   });
 });

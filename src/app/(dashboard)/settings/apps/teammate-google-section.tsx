@@ -62,24 +62,44 @@ export function TeammateGoogleSection() {
     return () => clearTimeout(t);
   }, [load]);
 
+  // The workspace these counts were read in (review round 1 of Phase 3):
+  // every change sends it, and a session switched to another workspace in
+  // another tab changes nothing there (workspace_changed), so the page
+  // reloads into the workspace the person is in now.
+  const shownIn = view?.organizationId ?? "";
+
   const save = useCallback(async (product: ConnectorProduct, on: boolean): Promise<boolean> => {
     setSavingKey(product);
-    const r = await apiFetch<ConnectorPolicyView & { turnedOff: ConnectorProduct[] }>("/api/teammate-connections/policy", { method: "PUT", json: { [product]: on } });
+    const r = await apiFetch<ConnectorPolicyView & { turnedOff: ConnectorProduct[] }>("/api/teammate-connections/policy", {
+      method: "PUT",
+      json: { [product]: on, organizationId: shownIn },
+    });
     setSavingKey(null);
-    if (!r.ok) { toast(r.error || P.saveFailed, { tone: "danger" }); return false; }
+    if (!r.ok) {
+      toast(r.error || P.saveFailed, { tone: "danger" });
+      if (r.code === "workspace_changed") window.location.reload();
+      return false;
+    }
     setView(r.data);
     setSavedAt((s) => ({ ...s, [product]: Date.now() }));
     toast(P.saved);
     return true;
-  }, [toast]);
+  }, [toast, shownIn]);
 
   const disconnectAll = useCallback(async (): Promise<boolean> => {
-    const r = await apiFetch<{ disconnected: number }>("/api/teammate-connections/policy/disconnect-all", { method: "POST", json: { confirm: "disconnect" } });
-    if (!r.ok) { toast(r.error || P.saveFailed, { tone: "danger" }); return false; }
+    const r = await apiFetch<{ disconnected: number }>("/api/teammate-connections/policy/disconnect-all", {
+      method: "POST",
+      json: { confirm: "disconnect", organizationId: shownIn },
+    });
+    if (!r.ok) {
+      toast(r.error || P.saveFailed, { tone: "danger" });
+      if (r.code === "workspace_changed") window.location.reload();
+      return false;
+    }
     toast(P.disconnectedAll(r.data.disconnected));
     void load();
     return true;
-  }, [load, toast]);
+  }, [load, toast, shownIn]);
 
   if (state === "hidden") return null;
   if (state === "ready" && view && !view.available) return null;

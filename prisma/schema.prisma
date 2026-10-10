@@ -5353,6 +5353,12 @@ model AgentAction {
   error          String?
   /// When the teammate was told the outcome.
   reportedAt     DateTime?
+  /// Proposed in a turn that read the person's Google, or could not tell
+  /// (Phase 3 Decision 9, review round 1 of Phase 3): it stands alone on its
+  /// card, and a turn told of it starts tainted, even when the turn that made
+  /// it never saved its answer or its run.
+  /// prisma/sql/2026-10-10-ai-teammates-phase3-round1.sql
+  readGoogle     Boolean   @default(false)
   expiresAt      DateTime
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
@@ -5520,6 +5526,9 @@ model TeammateTokenRevocation {
   accountKey    String?
 
   @@index([nextAttemptAt])
+  // A reconnect deletes the account's queued revokes by it (review round 1
+  // of Phase 3, prisma/sql/2026-10-10-ai-teammates-phase3-round1.sql).
+  @@index([accountKey])
 }
 
 model App {

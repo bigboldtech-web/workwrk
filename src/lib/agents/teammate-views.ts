@@ -167,6 +167,9 @@ export function connectorRowState(access: { ok: true } | { ok: false; reason: Co
     case "not_connected":
     case "workspace_off":
     case "not_configured":
+    // A suspended or closed workspace (review round 1 of Phase 3): nobody is
+    // signed in there to read the row, and its connections end.
+    case "workspace_closed":
       return "connect_first";
   }
 }

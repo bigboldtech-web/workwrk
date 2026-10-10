@@ -68,10 +68,16 @@ function seedAgent(o: Row & { slug: string }): Row {
   return row;
 }
 
-function put(slug: string, body: unknown) {
-  return PUT(new Request(`https://app.test/api/teammate-connections/teammates/${slug}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), {
-    params: Promise.resolve({ slug }),
-  });
+/** The card's PUT: it names the workspace the card was read in (review round 1 of Phase 3), this one unless a test says otherwise. */
+function put(slug: string, body: Record<string, unknown>) {
+  return PUT(
+    new Request(`https://app.test/api/teammate-connections/teammates/${slug}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId: "org1", ...body }),
+    }),
+    { params: Promise.resolve({ slug }) },
+  );
 }
 
 /** The teammate as the card was shown it: what an allow sends back as `expect` (review of step 2). */
@@ -202,5 +208,26 @@ describe("PUT /api/teammate-connections/teammates/[slug]", () => {
     expect((await put("ops", {})).status).toBe(400);
     seedAgent({ slug: "leas", visibility: "PRIVATE", ownerId: "u-lea" });
     expect((await put("leas", { gmail: false })).status).toBe(404);
+  });
+
+  // Review round 1 of Phase 3: a card open for one workspace allowed or
+  // stopped a teammate in whichever workspace the session had moved to.
+  it("allows and stops nothing when the session is in another workspace than the card showed", async () => {
+    const agent = seedAgent({ slug: "ops" });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    cdb.settings.push({ id: "ps1", agentId: agent.id, userId: "u-max", approvalRules: {}, connectorProducts: ["calendar"], connectorPrints: { calendar: { name: "y" } } });
+    let res = await put("ops", { gmail: true, expect: shown(agent), organizationId: "org2" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "workspace_changed", error: "You switched workspace in another tab, so nothing was changed. The page now reloads to show the workspace you're in." });
+    res = await put("ops", { calendar: false, organizationId: "org2" });
+    expect(res.status).toBe(409);
+    expect(cdb.settings[0]).toMatchObject({ connectorProducts: ["calendar"] });
+    // A caller that names no workspace (a page from before this release) reloads too, and nothing changes.
+    res = await PUT(
+      new Request("https://app.test/api/teammate-connections/teammates/ops", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ calendar: false }) }),
+      { params: Promise.resolve({ slug: "ops" }) },
+    );
+    expect(res.status).toBe(409);
+    expect(cdb.settings[0]).toMatchObject({ connectorProducts: ["calendar"] });
   });
 });

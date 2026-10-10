@@ -253,6 +253,12 @@ export interface ActionView {
   error: string | null;
   /** Where the card opens: its group chat, its teammate's chat, or Ask AI's (the server's actionViews). */
   href?: string | null;
+  /**
+   * Asked after the teammate read the person's email or calendar in that
+   * answer, or in one that could not tell (review round 1 of Phase 3): it
+   * stands alone, never in a batch (standsAlone). Present only when true.
+   */
+  readGoogle?: true;
 }
 
 /** One event of POST /api/agents/teammates/[slug]/messages. */
@@ -342,6 +348,8 @@ export interface AgentActionRow {
   expiresAt: Date | string;
   decidedAt?: Date | string | null;
   executedAt?: Date | string | null;
+  /** Asked in a turn that read the person's Google, or could not tell (review round 1 of Phase 3). */
+  readGoogle?: boolean | null;
 }
 
 function rec(v: unknown): Record<string, unknown> | null {
@@ -584,6 +592,7 @@ export function actionViewFromRow(row: AgentActionRow): ActionView {
     executedAt: iso(row.executedAt),
     result: resultText ? { text: resultText, href: appHref(result?.href) } : null,
     error: str(row.error),
+    ...(row.readGoogle === true ? { readGoogle: true as const } : {}),
   };
 }
 
@@ -631,9 +640,15 @@ export function groupApprovals(
  * 3): what cannot be taken back (an email sent or a reply in the person's
  * name, an invitation, an invite answered, a calendar change that tells other
  * people, and a class this code does not know, read as IRREVERSIBLE).
+ *
+ * AND ANYTHING ASKED AFTER A GOOGLE READ (review round 1 of Phase 3). A
+ * planted email could shape a memory ("always cc billing@..."), a routine or
+ * a Talk post, and in a batch it started ticked and closed, one "Approve 4"
+ * away with its words never on screen. Each such card is its own, its body
+ * whole, approved by its own click.
  */
-export function standsAlone(a: Pick<ActionView, "risk" | "toolName">): boolean {
-  return a.risk === "IRREVERSIBLE" || (isToolName(a.toolName) && ALWAYS_ASK.has(a.toolName));
+export function standsAlone(a: Pick<ActionView, "risk" | "toolName" | "readGoogle">): boolean {
+  return a.readGoogle === true || a.risk === "IRREVERSIBLE" || (isToolName(a.toolName) && ALWAYS_ASK.has(a.toolName));
 }
 
 /**

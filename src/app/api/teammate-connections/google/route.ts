@@ -1,4 +1,4 @@
-// DELETE /api/teammate-connections/google: the signed-in person disconnects
+// DELETE /api/teammate-connections/google { organizationId }: the signed-in person disconnects
 // their own Google from their AI teammates in this workspace
 // (docs/plans/ai-teammates-phase3.md step 2, Decision 19).
 //
@@ -15,6 +15,12 @@
 //                         not told (it would end that one too)
 // Google is told through the revoke settings alone (googleRevokeConfig), so
 // a WorkwrK that stopped offering Google still revokes (review of step 2).
+//
+// THE WORKSPACE THE PAGE SHOWED (review round 1 of Phase 3). The card's body
+// says which workspace's card was on screen ({ organizationId }); when the
+// session is in another one now (switched in another tab), nothing is removed
+// and the answer is 409 workspace_changed, so the page reloads instead of
+// ending the other workspace's connection.
 
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma";
@@ -24,9 +30,17 @@ import { teammateError } from "@/lib/agents/teammate-server";
 import { connectionFor, removeConnections, revokeQueued } from "@/lib/connectors/connections";
 import { googleRevokeConfig } from "@/lib/connectors/google/config";
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const viewer = await viewerFromSession();
   if (!viewer) return teammateError(401, "signed_out", CONNECTIONS_COPY.signedOut);
+  // A caller that names no workspace (an API client, a page from before
+  // this) is answered as before; one that names another is refused.
+  const body = (await req.json().catch(() => null)) as { organizationId?: unknown } | null;
+  const shownIn = body && typeof body === "object" ? body.organizationId : undefined;
+  // Required (lead, after review round 1): a page that names no workspace,
+  // such as one loaded before this release, reloads rather than act on
+  // whichever workspace the session holds now.
+  if (shownIn !== viewer.organizationId) return teammateError(409, "workspace_changed", CONNECTION_ROUTE_ERRORS.workspaceChanged);
   const connection = await connectionFor(viewer);
   if (!connection) return teammateError(404, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
 

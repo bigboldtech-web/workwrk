@@ -33,25 +33,37 @@ import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { scriptPrisma } from "./lib/script-prisma";
 
+// .env.local only: a repo's .env can point at another database (the main
+// tree's points at the production tunnel), and dotenv never lets a later file
+// override an earlier one, so loading it after would fill any gap from there.
 config({ path: ".env.local" });
-config();
 
 // ── Local only ──────────────────────────────────────────────────────
 
 function refuseUnlessLocal(): void {
-  const raw = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
-  let host = "";
-  let port = "";
-  try {
-    const u = new URL(raw);
-    host = u.hostname;
-    port = u.port || "5432";
-  } catch {
-    // Unreadable: refused below.
-  }
-  if (!(["localhost", "127.0.0.1", "[::1]"].includes(host) && port === "5432")) {
-    console.error(`Refused: this proof runs only against a database on this machine (localhost:5432), and DIRECT_URL or DATABASE_URL points at ${host ? `${host}:${port}` : "nothing readable"}.`);
+  // Every database address that is set must be this machine's: the client
+  // reads DATABASE_URL (scripts/lib/script-prisma.ts), so a local DIRECT_URL
+  // beside a remote DATABASE_URL is refused too.
+  if (!process.env.DATABASE_URL) {
+    console.error("Refused: DATABASE_URL is not set (this proof reads .env.local only).");
     process.exit(1);
+  }
+  for (const name of ["DATABASE_URL", "DIRECT_URL"] as const) {
+    const raw = process.env[name];
+    if (!raw) continue;
+    let host = "";
+    let port = "";
+    try {
+      const u = new URL(raw);
+      host = u.hostname;
+      port = u.port || "5432";
+    } catch {
+      // Unreadable: refused below.
+    }
+    if (!(["localhost", "127.0.0.1", "[::1]"].includes(host) && port === "5432")) {
+      console.error(`Refused: this proof runs only against a database on this machine (localhost:5432), and ${name} points at ${host ? `${host}:${port}` : "nothing readable"}.`);
+      process.exit(1);
+    }
   }
 }
 refuseUnlessLocal();

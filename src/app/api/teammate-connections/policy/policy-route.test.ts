@@ -47,8 +47,13 @@ const CFG = {
   standIn: true,
 };
 
-const json = (method: string, body: unknown) =>
-  new Request("https://app.test/api/teammate-connections/policy", { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+/** The section's request: it names the workspace the page was read in (review round 1 of Phase 3), this one unless a test says otherwise. */
+const json = (method: string, body: Record<string, unknown>) =>
+  new Request("https://app.test/api/teammate-connections/policy", {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ organizationId: "org1", ...body }),
+  });
 
 beforeEach(() => {
   process.env.SECRETS_ENCRYPTION_KEY = "9".repeat(64);
@@ -182,5 +187,93 @@ describe("disconnect everyone", () => {
     expect(Math.max(...auditSizes)).toBeLessThanOrEqual(500);
     expect(Math.max(...noticeSizes)).toBeLessThanOrEqual(500);
     expect(auditSizes.reduce((a, b) => a + b, 0)).toBe(1201);
+  });
+
+  // Review round 1 of Phase 3: a session switched to another workspace in
+  // another tab ended every connection there.
+  it("ends nothing when the session is in another workspace than the page showed", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-1", accountSub: "s1" });
+    const res = await DISCONNECT_ALL(json("POST", { confirm: "disconnect", organizationId: "org2" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "workspace_changed" });
+    expect(cdb.connections).toHaveLength(1);
+    expect(cdb.activity).toEqual([]);
+    // A caller that names no workspace (a page from before this release) reloads too, and nothing ends.
+    const unnamed = await DISCONNECT_ALL(new Request("https://app.test/x", { method: "POST", body: JSON.stringify({ confirm: "disconnect" }) }));
+    expect(unnamed.status).toBe(409);
+    expect(await unnamed.json()).toMatchObject({ code: "workspace_changed" });
+    expect(cdb.connections).toHaveLength(1);
+  });
+
+  // Review round 1 of Phase 3: the admin's row was written only after the
+  // whole loop, so a chunk that threw left thousands ended with no admin row.
+  it("writes the admin's row before anything ends, and the count so far when a chunk throws", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+    for (let i = 0; i < 700; i++) seedConnection({ organizationId: "org1", userId: `u-${i}`, accountSub: `sub-${i}` });
+    const real = connectorDb.$transaction;
+    let chunks = 0;
+    vi.spyOn(connectorDb, "$transaction").mockImplementation((async (fn: (tx: unknown) => Promise<unknown>) => {
+      const started = cdb.activity.some((a) => a.type === "teammate_connectors.disconnect_all_started");
+      if (!started) throw new Error("a connection ended before the admin's row");
+      chunks += 1;
+      if (chunks === 2) throw new Error("deadlock detected");
+      return real(fn as never);
+    }) as never);
+    await expect(DISCONNECT_ALL(json("POST", { confirm: "disconnect" }))).rejects.toThrow(/deadlock/);
+    const started = cdb.activity.filter((a) => a.type === "teammate_connectors.disconnect_all_started");
+    expect(started).toEqual([expect.objectContaining({ actorId: "u-admin", severity: "warning", description: "Started disconnecting everyone from Google for AI teammates" })]);
+    const done = cdb.activity.filter((a) => a.type === "teammate_connectors.disconnected_all");
+    expect(done).toEqual([expect.objectContaining({ metadata: { provider: "google", count: 500, finished: false } })]);
+    expect(cdb.connections).toHaveLength(200);
+  });
+
+  // Review round 1 of Phase 3: a short chunk (a row another removal took)
+  // ended the loop with thousands still connected.
+  it("keeps going past a chunk another removal made short, until nothing is left", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+    for (let i = 0; i < 1100; i++) seedConnection({ organizationId: "org1", userId: `u-${i}`, accountSub: `sub-${i}` });
+    const realQuery = connectorDb.$queryRaw;
+    let deletes = 0;
+    vi.spyOn(connectorDb, "$queryRaw").mockImplementation((async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const out = (await realQuery(strings, ...values)) as unknown[];
+      // Max disconnected himself while the first chunk waited on his row's lock: it comes back 499.
+      if (strings.join("?").includes('DELETE FROM "TeammateConnection"') && ++deletes === 1) return out.slice(1);
+      return out;
+    }) as never);
+    const res = await DISCONNECT_ALL(json("POST", { confirm: "disconnect" }));
+    expect(await res.json()).toEqual({ disconnected: 1099 });
+    expect(cdb.connections).toEqual([]);
+  });
+});
+
+describe("the policy's audit (review round 1 of Phase 3)", () => {
+  // Before: the route read the switch once, before the write, so another
+  // Admin's change landing between them went unaudited.
+  it("audits what this write changed, read with it under the lock, never a read from before another Admin's change", async () => {
+    // Admin A's page read Calendar on; Admin B turned it off meanwhile.
+    cdb.policy.set("org1", []);
+    vi.spyOn(connectorDb.teammateConnectorPolicy, "findUnique").mockResolvedValue({ products: ["calendar"], updatedAt: new Date() } as never);
+    const res = await PUT(json("PUT", { calendar: true }));
+    expect(res.status).toBe(200);
+    expect(cdb.activity.filter((a) => a.type === "teammate_connectors.changed")).toEqual([
+      expect.objectContaining({ description: "Turned on Google Calendar for AI teammates", oldValue: { provider: "google", product: "calendar", on: false }, newValue: { provider: "google", product: "calendar", on: true } }),
+    ]);
+    expect(cdb.policyLocks).toEqual([{ organizationId: "org1", inTx: true }]);
+    expect(cdb.policyReads).toEqual([{ lock: "update", inTx: true }]);
+  });
+
+  it("writes no audit row when the write changed nothing", async () => {
+    cdb.policy.set("org1", ["calendar"]);
+    await PUT(json("PUT", { calendar: true }));
+    expect(cdb.activity.filter((a) => a.type === "teammate_connectors.changed")).toEqual([]);
+  });
+
+  it("changes nothing when the session is in another workspace than the page showed", async () => {
+    const res = await PUT(json("PUT", { calendar: true, organizationId: "org2" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "workspace_changed" });
+    expect(cdb.policy.get("org1")).toBeUndefined();
+    expect(cdb.policy.get("org2")).toBeUndefined();
+    expect(cdb.activity).toEqual([]);
   });
 });

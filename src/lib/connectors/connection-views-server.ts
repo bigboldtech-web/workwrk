@@ -149,6 +149,7 @@ export async function teammateConnectionsView(viewer: Viewer): Promise<TeammateC
     // A connection is always shown, so it can be removed, even once this
     // WorkwrK stopped offering Google (Decision 27).
     available: cfg !== null || connection !== null,
+    organizationId: viewer.organizationId,
     workspaceName: org?.name ?? "",
     products: cfg ? stateOf(connectors) : OFF,
     connection,
@@ -174,6 +175,7 @@ export async function connectorPolicyView(organizationId: string): Promise<Conne
     // Shown while anyone is connected, so they can be disconnected, even once
     // this WorkwrK stopped offering Google.
     available: cfg !== null || counts.connected > 0,
+    organizationId,
     offered,
     on: { gmail: stored.gmail && offered.gmail, calendar: stored.calendar && offered.calendar },
     counts,

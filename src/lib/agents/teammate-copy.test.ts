@@ -380,6 +380,8 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
         didntConnect: [["you didn't give WorkwrK access"], "Google didn't connect: you didn't give WorkwrK access."],
         brokenNoticeMessage: [["Acme"], "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme."],
         disconnectedByAdminMessage: [["Acme"], "An Owner or Admin disconnected Google from AI teammates in Acme."],
+        // Review round 1 of Phase 3: a suspended workspace's people read why their connection ended.
+        workspaceSuspendedMessage: [["Acme"], "Acme was suspended, so WorkwrK disconnected Google from its AI teammates and removed its access from your Google account."],
         productTurnedOff: [["Gmail", "Acme"], "An Owner or Admin turned off Gmail for AI teammates in Acme."],
         addFirst: [["Gmail"], "Your Google connection doesn't include Gmail. Add Gmail first."],
       },
@@ -419,6 +421,16 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
       });
     }
   }
+  it("words review round 1 of Phase 3's own sentences plainly", () => {
+    expect(copy.CONNECTOR_POLICY_COPY.auditDisconnectingAll).toBe("Started disconnecting everyone from Google for AI teammates");
+    expect(copy.CONNECTION_ROUTE_ERRORS.workspaceChanged).toBe("You switched workspace in another tab, so nothing was changed. The page now reloads to show the workspace you're in.");
+    expect(copy.CONNECTOR_COPY.workspaceClosed).toBe("This workspace is suspended or closed, so AI teammates can't use anyone's Google here.");
+    expect(copy.CONNECTOR_COPY.alreadySent).toBe("The same email was just sent from an earlier request, or is being sent now. It isn't asked for again.");
+    expect(copy.CONNECTOR_COPY.alreadySentEvent).toBe("The same invitation was just sent from an earlier request, or is being sent now. It isn't asked for again.");
+    for (const s of [copy.CONNECTOR_POLICY_COPY.auditDisconnectingAll, copy.CONNECTION_ROUTE_ERRORS.workspaceChanged, copy.CONNECTOR_COPY.workspaceClosed, copy.CONNECTOR_COPY.alreadySent, copy.CONNECTOR_COPY.alreadySentEvent]) {
+      expect(BANNED.test(s)).toBe(false);
+    }
+  });
   it("says one person, and one who needs to reconnect, as one", () => {
     expect(copy.CONNECTOR_POLICY_COPY.counts(1, 1, 0)).toBe("1 person connected: 1 with Gmail, 0 with Google Calendar.");
     expect(copy.CONNECTOR_POLICY_COPY.needReconnect(1)).toBe("1 needs to reconnect.");

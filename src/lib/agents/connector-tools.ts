@@ -71,7 +71,7 @@ import type { LiveConnection } from "@/lib/connectors/connections";
 import type { EventFacts, EventTimes } from "@/lib/connectors/google/calendar";
 import type { GoogleConfig } from "@/lib/connectors/google/config";
 import type { GoogleFailure, GoogleRequest, GoogleResult } from "@/lib/connectors/google/http";
-import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
+import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, isEventId, type ConnectorProduct } from "@/lib/connectors/products";
 import type { ActingPerson } from "./acting";
 import { clampText } from "./clamp";
 import { CONNECTOR_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
@@ -101,7 +101,10 @@ const workScheduleServer = () => import("@/lib/work-schedule-server");
 const address = z.string().trim().min(3).max(254);
 /** A day, or a day and a time, in the person's zone; its shape is checked where it is read, in words. */
 const when = z.string().trim().min(1).max(40);
-const eventId = z.string().trim().min(1).max(1024);
+// Only an id Google could have given, before any URL is built (review round 1
+// of Phase 3): an id of ".." read from a planted email reached another Google
+// address, and its 403 marked the person's whole connection broken.
+const eventId = z.string().trim().min(1).max(1024).refine(isEventId, { message: "Not a Google Calendar event id" });
 
 const searchEmailInput = z.object({
   query: z.string().trim().min(1).max(L.queryMax),

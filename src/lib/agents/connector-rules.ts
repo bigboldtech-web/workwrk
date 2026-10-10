@@ -38,6 +38,8 @@ export function connectorRefusalSentence(r: { reason: ConnectorRefusal; changed?
   switch (r.reason) {
     case "not_configured":
       return CONNECTOR_COPY.notConfigured;
+    case "workspace_closed":
+      return CONNECTOR_COPY.workspaceClosed;
     case "workspace_off":
       return CONNECTOR_COPY.workspaceOff(p);
     case "not_connected":

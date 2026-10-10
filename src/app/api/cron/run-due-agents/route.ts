@@ -19,9 +19,9 @@
 //      (src/lib/connectors/connections.ts sweepConnections): connects nobody
 //      finished are deleted, the connections of people deleted, deactivated
 //      or no longer in the workspace end, and so do those of Guests, agent
-//      accounts and deleted or closed workspaces (review of step 2), and
-//      revokes Google has not confirmed are tried again
-//      (docs/plans/ai-teammates-phase3.md step 2).
+//      accounts and deleted or closed workspaces (review of step 2) and of
+//      suspended ones (review round 1 of Phase 3), and revokes Google has
+//      not confirmed are tried again (docs/plans/ai-teammates-phase3.md step 2).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
@@ -57,10 +57,14 @@ const LEGACY_MOVER = { limit: 100 } as const;
 
 /**
  * The connector sweep (docs/plans/ai-teammates-phase3.md step 2): up to 500
- * leavers ended and 50 revokes tried a tick, within 20 seconds, so the tick
- * stays inside the crontab's curl --max-time 290 after the routines' 120.
+ * leavers ended and 500 revokes tried a tick, ten at a time, within 20
+ * seconds, so the tick stays inside the crontab's curl --max-time 290 after
+ * the routines' 120. Review round 1 of Phase 3: 50 a tick (done in about two
+ * seconds, the rest of the budget unused) took over three hours to tell
+ * Google about a 10,000 person Disconnect everyone; the budget, not the
+ * count, now bounds a tick.
  */
-const CONNECTOR_SWEEP = { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 } as const;
+const CONNECTOR_SWEEP = { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 } as const;
 
 type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
 

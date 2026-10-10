@@ -126,6 +126,13 @@ export async function openConnector(a: { person: ActingPerson; agentId: string; 
  * second membership, that membership's role. Before, a client added as a
  * Guest passed find_free_time's check, and a card that invited one said
  * "Everyone on it is in this workspace."
+ *
+ * BOUNDED BY THIS WORKSPACE (review round 1 of Phase 3). Two branches, each
+ * driven by its own organizationId index, then the lowered addresses: the
+ * people anchored here (User by organizationId), and those here through a
+ * second membership (OrganizationMembership by organizationId, then their
+ * User by id). One WHERE with lower(email) first and an OR between the two
+ * could use no index, and scanned every User of the platform for each card.
  */
 export async function workspaceMembersAmong(organizationId: string, emails: readonly string[]): Promise<Set<string>> {
   const wanted = [...new Set(emails.map((e) => e.toLowerCase()))];
@@ -133,12 +140,15 @@ export async function workspaceMembersAmong(organizationId: string, emails: read
   const guestColumnRead = accessV2Tables();
   const rows = await prisma.$queryRaw<Array<{ email: string }>>`
     SELECT lower(u."email") AS "email" FROM "User" u
-     WHERE lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
-       AND ((u."organizationId" = ${organizationId}
-             AND u."accessLevel" <> 'AGENT'
-             AND NOT (${guestColumnRead}::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN')))
-         OR (u."organizationId" <> ${organizationId}
-             AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND m."role" <> 'AGENT')))`;
+     WHERE u."organizationId" = ${organizationId}
+       AND lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+       AND u."accessLevel" <> 'AGENT'
+       AND NOT (${guestColumnRead}::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN'))
+    UNION
+    SELECT lower(u."email") AS "email" FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"
+     WHERE m."organizationId" = ${organizationId} AND m."role" <> 'AGENT'
+       AND u."organizationId" <> ${organizationId}
+       AND lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`;
   return new Set(rows.map((r) => String(r.email).toLowerCase()));
 }
 

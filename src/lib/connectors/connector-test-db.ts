@@ -38,6 +38,10 @@ export const cdb = {
   orgs: new Map<string, string>(),
   /** Workspaces deleted or closed (Organization.status CANCELLED). */
   closedOrgs: new Set<string>(),
+  /** Workspaces staff suspended (Organization.status SUSPENDED, review round 1 of Phase 3). */
+  suspendedOrgs: new Set<string>(),
+  /** Workspaces still on their self-serve trial (Organization.status TRIAL): live, as ACTIVE is. */
+  trialOrgs: new Set<string>(),
   notifications: [] as Row[],
   activity: [] as Row[],
   agents: [] as Row[],
@@ -49,6 +53,12 @@ export const cdb = {
   lookups: [] as Array<{ organizationId: string; userId: string }>,
   /** Every per-account lock statement: the keys it locked, in the order it locked them. */
   locks: [] as Array<{ keys: string[]; inTx: boolean }>,
+  /** Every read of the switch under a row lock (review round 1 of Phase 3). */
+  policyReads: [] as Array<{ lock: "share" | "update"; inTx: boolean }>,
+  /** Every workspace switch lock (setPolicyProduct, review round 1 of Phase 3). */
+  policyLocks: [] as Array<{ organizationId: string; inTx: boolean }>,
+  /** How many rows each revoke claim asked for (the sweep's batch, review round 1 of Phase 3). */
+  claims: [] as number[],
 };
 
 let seq = 0;
@@ -63,6 +73,8 @@ export function resetConnectorDb(): void {
   cdb.memberships = [];
   cdb.orgs = new Map([["org1", "Acme"]]);
   cdb.closedOrgs = new Set();
+  cdb.suspendedOrgs = new Set();
+  cdb.trialOrgs = new Set();
   cdb.notifications = [];
   cdb.activity = [];
   cdb.agents = [];
@@ -70,6 +82,9 @@ export function resetConnectorDb(): void {
   cdb.raw = [];
   cdb.lookups = [];
   cdb.locks = [];
+  cdb.policyReads = [];
+  cdb.policyLocks = [];
+  cdb.claims = [];
   seq = 0;
 }
 
@@ -129,8 +144,18 @@ function heldElsewhere(c: Row, org: unknown): boolean {
   return cdb.connections.some((o) => o.provider === c.provider && o.accountSub === c.accountSub && o.organizationId !== org);
 }
 
+/** A workspace's Organization.status as the double holds it. */
+function orgStatus(id: string): string {
+  return cdb.closedOrgs.has(id) ? "CANCELLED" : cdb.suspendedOrgs.has(id) ? "SUSPENDED" : cdb.trialOrgs.has(id) ? "TRIAL" : "ACTIVE";
+}
+
 /** One condition list of a removeConnections where, as the code writes them. */
 function wherePredicate(where: string, vals: unknown[]): (r: Row) => boolean {
+  if (where.includes('JOIN "Organization" o') && where.includes("NOT IN")) {
+    // Review round 1 of Phase 3: a suspended workspace, and any status that is neither live nor closed.
+    needs(where, "the suspended-workspace sweep", ['JOIN "Organization" o ON o."id" = c."organizationId"', `o."status" NOT IN ('ACTIVE', 'TRIAL', 'CANCELLED')`]);
+    return (r) => !["ACTIVE", "TRIAL", "CANCELLED"].includes(orgStatus(String(r.organizationId)));
+  }
   if (where.includes('JOIN "Organization" o')) {
     needs(where, "the closed-workspace sweep", ['JOIN "Organization" o ON o."id" = c."organizationId"', `o."status" = 'CANCELLED'`]);
     return (r) => cdb.closedOrgs.has(String(r.organizationId));
@@ -228,6 +253,7 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
   if (sql.startsWith('UPDATE "TeammateTokenRevocation" SET "attempts" = "attempts" + 1')) {
     needs(sql, "the revoke claim", [`WHERE "nextAttemptAt" <= (now() AT TIME ZONE 'UTC')`, "FOR UPDATE SKIP LOCKED", '"accountKey"']);
     const take = Number(v[0]);
+    cdb.claims.push(take);
     const due = cdb.revocations.filter((r) => (r.nextAttemptAt as Date).getTime() <= now).slice(0, take);
     for (const r of due) {
       r.attempts = Number(r.attempts) + 1;
@@ -257,17 +283,30 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     wrote("policy.upsert");
     return [{ products: next }];
   }
+  if (sql.startsWith('SELECT "products" FROM "TeammateConnectorPolicy"')) {
+    // The switch read under a row lock: saveOnce's FOR SHARE, setPolicyProduct's
+    // FOR UPDATE (review round 1 of Phase 3).
+    needs(sql, "the switch's locked read", [`WHERE "organizationId" = ? AND "provider" = 'google'`]);
+    const lock = sql.endsWith("FOR SHARE") ? "share" : sql.endsWith("FOR UPDATE") ? "update" : null;
+    if (!lock) throw new Error(`connector-test-db: the switch is read under a lock\n${sql}`);
+    cdb.policyReads.push({ lock, inTx });
+    const products = cdb.policy.get(String(v[0]));
+    return products ? [{ products: [...products] }] : [];
+  }
   if (sql.startsWith('SELECT lower(u."email") AS "email" FROM "User" u')) {
     // Who of these addresses is a live member of this workspace, neither a
     // Guest nor an agent account (connector-access.ts workspaceMembersAmong,
-    // review of step 4: the no-access sweep's rule, read the other way).
+    // review of step 4: the no-access sweep's rule, read the other way). Two
+    // branches, each led by this workspace's own id (review round 1 of
+    // Phase 3: no scan of every User on the platform).
     needs(sql, "the workspace member check", [
-      `WHERE lower(u."email") = ANY(?::text[])`,
-      `u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
-      `(u."organizationId" = ? AND u."accessLevel" <> 'AGENT' AND NOT (?::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN')))`,
-      `OR (u."organizationId" <> ? AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ? AND m."role" <> 'AGENT'))`,
+      `FROM "User" u WHERE u."organizationId" = ? AND lower(u."email") = ANY(?::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
+      `AND u."accessLevel" <> 'AGENT' AND NOT (?::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN'))`,
+      `UNION SELECT lower(u."email") AS "email" FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"`,
+      `WHERE m."organizationId" = ? AND m."role" <> 'AGENT' AND u."organizationId" <> ? AND lower(u."email") = ANY(?::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
     ]);
-    const [emails, org, guestColumnRead] = v as [string[], string, boolean];
+    if (sql.includes(" OR ")) throw new Error(`connector-test-db: the member check has no OR, so each branch keeps its index\n${sql}`);
+    const [org, emails, guestColumnRead] = v as [string, string[], boolean];
     return cdb.users
       .filter((u) => !u.deletedAt && u.status !== "INACTIVE" && emails.includes(String(u.email).toLowerCase()))
       .filter((u) => {
@@ -300,17 +339,51 @@ async function executeRaw(strings: TemplateStringsArray, ...values: unknown[]): 
     if (before !== cdb.states.length) wrote("state.sweep");
     return before - cdb.states.length;
   }
-  if (sql === `SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || k)) FROM unnest(?::text[]) AS k ORDER BY k`) {
+  // The per-account locks, taken in the order of the lock ids themselves:
+  // the hashed id is what is sorted, never the key it came from (review round
+  // 1 of Phase 3: two keys sharing a hash were taken in opposite orders).
+  if (sql === `SELECT pg_advisory_xact_lock(s.h) FROM (SELECT DISTINCT hashtext('tc-sub:' || k) AS h FROM unnest(?::text[]) AS k) s ORDER BY s.h`) {
     const keys = v[0] as string[];
     locked(keys);
     return keys.length;
   }
-  if (sql.startsWith(`SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || s.k)) FROM (SELECT DISTINCT ${KEY_SQL} AS k`)) {
-    needs(sql, "the hard delete's lock", [`WHERE c."organizationId" = ?`, `AND EXISTS ${OTHER_WORKSPACE}`, "ORDER BY s.k"]);
+  if (sql.startsWith(`SELECT pg_advisory_xact_lock(s.h) FROM (SELECT DISTINCT hashtext('tc-sub:' || ${KEY_SQL}) AS h`)) {
+    needs(sql, "the hard delete's lock", [`WHERE c."organizationId" = ?`, `AND EXISTS ${OTHER_WORKSPACE}`, "ORDER BY s.h"]);
     const org = v[0];
     const keys = [...new Set(cdb.connections.filter((c) => c.organizationId === org && heldElsewhere(c, org)).map((c) => keyOf(String(c.provider), String(c.accountSub))))];
     locked(keys);
     return keys.length;
+  }
+  if (sql === "SELECT pg_advisory_xact_lock(?::int, hashtext(?))") {
+    // The workspace switch's own lock (setPolicyProduct), in the two key form.
+    if (!inTx) throw new Error("connector-test-db: the switch's lock outside a transaction is released at once");
+    cdb.policyLocks.push({ organizationId: String(v[1]), inTx });
+    return 1;
+  }
+  if (sql.startsWith('UPDATE "AgentPersonSetting" s SET "connectorProducts" = ARRAY[]::text[]')) {
+    // A connection's end clears its person's allows for that workspace's
+    // teammates (review round 1 of Phase 3), joined through the teammate's
+    // own workspace, and only rows that hold one.
+    needs(sql, "the allows cleared at a removal", [
+      `"connectorPrints" = NULL`,
+      `FROM "Agent" a, unnest(?::text[], ?::text[]) AS g("organizationId", "userId")`,
+      `WHERE s."userId" = g."userId" AND a."id" = s."agentId" AND a."organizationId" = g."organizationId"`,
+      `AND (cardinality(s."connectorProducts") > 0 OR s."connectorPrints" IS NOT NULL)`,
+    ]);
+    const [orgs, users] = v as [string[], string[]];
+    let n = 0;
+    for (const s of cdb.settings) {
+      const agent = cdb.agents.find((g) => g.id === s.agentId);
+      if (!agent) continue;
+      const hit = users.some((u, i) => u === s.userId && orgs[i] === agent.organizationId);
+      const holds = (s.connectorProducts as string[] | undefined)?.length || (s.connectorPrints !== null && s.connectorPrints !== undefined);
+      if (!hit || !holds) continue;
+      s.connectorProducts = [];
+      s.connectorPrints = null;
+      n += 1;
+    }
+    if (n > 0) wrote("setting.clear");
+    return n;
   }
   if (sql.startsWith('UPDATE "TeammateConnection" SET "lastUsedAt"')) {
     const row = cdb.connections.find((c) => c.id === v[1]);
@@ -470,9 +543,12 @@ export const connectorDb = {
     },
     deleteMany: async (a: Args) => {
       const before = cdb.revocations.length;
-      const match = idMatch(a.where);
+      // By id, or by account (a reconnect superseding its account's queued revokes, review round 1 of Phase 3).
+      const key = a.where?.accountKey;
+      if (key !== undefined && (typeof key !== "string" || !key)) throw new Error("connector-test-db: revocations are deleted by one account key");
+      const match = typeof key === "string" ? (r: Row) => r.accountKey === key : idMatch(a.where);
       cdb.revocations = cdb.revocations.filter((r) => !match(r));
-      if (before !== cdb.revocations.length) wrote("revocation.delete");
+      if (before !== cdb.revocations.length) wrote(typeof key === "string" ? "revocation.supersede" : "revocation.delete");
       return { count: before - cdb.revocations.length };
     },
   },
@@ -500,7 +576,7 @@ export const connectorDb = {
     findUnique: async (a: Args) => {
       const id = String(a.where?.id);
       const name = cdb.orgs.get(id);
-      return name === undefined ? null : { name, status: cdb.closedOrgs.has(id) ? "CANCELLED" : "ACTIVE" };
+      return name === undefined ? null : { name, status: orgStatus(id) };
     },
     findMany: async (a: Args) => {
       const ids = ((a.where?.id as { in: string[] }) ?? { in: [] }).in;

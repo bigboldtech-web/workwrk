@@ -52,7 +52,11 @@
 // write by its kind (connectorTitle), never by a subject. A send, a reply or
 // an invitation identical to one already waiting points at that card and
 // makes no second one, and adds nothing to this turn's approval row
-// (Decision 23; the invitation, review of step 4).
+// (Decision 23; the invitation, review of step 4); one identical to a card
+// being sent, or sent in the last ten minutes, says so and asks nothing; the
+// check and the card are made under one lock on the key (review round 1 of
+// Phase 3). The run is marked the moment the turn reads Google, and every
+// card a tainted turn asks for is marked on its own row (review round 1).
 //
 // Server-only: imports prisma.
 
@@ -455,6 +459,18 @@ function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
   return refusal ? connectorRefusalSentence(refusal, a.agent.name, product) : ACTION_ERRORS.toolOff;
 }
 
+/** The tools whose cards a twin replaces: what tells other people, sent once (Decision 23; the invitation, review of step 4). */
+const DEDUPED: ReadonlySet<string> = new Set(["send_email", "reply_email", "create_event"]);
+
+/** How long an identical email or invitation that went out still counts as a twin (review round 1 of Phase 3). */
+const SENT_TWIN_MS = 10 * 60 * 1000;
+
+/** The class of the twin check's advisory lock: its own key space (the two int form), apart from every other lock. */
+const DEDUPE_LOCK_CLASS = 73_021;
+
+/** A twin of a card about to be made: one waiting for the person, or one sent (or being sent) a moment ago. */
+type Twin = { id: string; state: "waiting" | "sent" };
+
 /**
  * A send or a reply exactly like one already waiting for this person (the
  * same recipients, subject, body and conversation: the preparation's
@@ -463,22 +479,84 @@ function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
  * the same people, title, times and account (calendar.ts eventDedupeKey,
  * review of step 4). A card with no key (a new event with nobody invited)
  * has no twin.
+ *
+ * REVIEW ROUND 1 OF PHASE 3. A card being sent right now (RUNNING), or sent
+ * in the last ten minutes (EXECUTED), is a twin too: a planted "send it
+ * again" in the continue made a fresh identical card, and the person
+ * approved it thinking it was another. Read inside the caller's transaction,
+ * under the key's lock (withTwinLock).
  */
-async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string } | null> {
-  const key = input.dedupeKey;
-  if (typeof key !== "string" || key.length === 0) return null;
-  const row = await prisma.agentAction.findFirst({
+async function findTwin(db: Prisma.TransactionClient, person: ActingPerson, tool: ToolName, key: string, now: Date): Promise<Twin | null> {
+  const row = await db.agentAction.findFirst({
     where: {
       organizationId: person.organizationId,
       actingForId: person.userId,
       toolName: tool,
-      status: "PENDING",
-      expiresAt: { gt: new Date() },
       input: { path: ["dedupeKey"], equals: key },
+      OR: [
+        { status: "PENDING", expiresAt: { gt: now } },
+        { status: "RUNNING" },
+        { status: "EXECUTED", executedAt: { gt: new Date(now.getTime() - SENT_TWIN_MS) } },
+      ],
     },
-    select: { id: true },
+    select: { id: true, status: true },
   });
-  return row ? { id: row.id } : null;
+  if (!row) return null;
+  return { id: row.id, state: row.status === "PENDING" ? "waiting" : "sent" };
+}
+
+/**
+ * The twin check and the card it may make, under one transaction-scoped lock
+ * on the person, the tool and the key (review round 1 of Phase 3): two turns
+ * at once (two teammates in a group, two chats one planted email drives)
+ * each found no twin and each made a card, and the person could approve both.
+ * Now the second waits for the first to commit, then finds its card. A card
+ * with no key is made as before, with no lock.
+ */
+async function withTwinLock<T>(
+  person: ActingPerson,
+  tool: ToolName,
+  input: Record<string, unknown>,
+  fn: (twin: Twin | null, db: Prisma.TransactionClient | null) => Promise<T>,
+): Promise<T> {
+  const key = input.dedupeKey;
+  if (!DEDUPED.has(tool) || typeof key !== "string" || key.length === 0) return fn(null, null);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DEDUPE_LOCK_CLASS}::int, hashtext(${`${person.organizationId}:${person.userId}:${tool}:${key}`}))`;
+    return fn(await findTwin(tx, person, tool, key, new Date()), tx);
+  });
+}
+
+/**
+ * Record on the turn's run, at once, that the turn read the person's Google
+ * (review round 1 of Phase 3): output.readGoogle merged into whatever the run
+ * holds, never replacing it. The run was marked only when the turn finished,
+ * so a turn that stopped part way (a reload during a deploy, out of memory)
+ * left its cards to be told to a later turn as if nothing had been read. A
+ * write that fails is logged: the turn's cards carry their own mark
+ * (AgentAction.readGoogle), and a run with no verdict on record reads as
+ * unknown (engine.ts startsTainted).
+ */
+export async function markRunReadGoogle(runId: string): Promise<void> {
+  if (!runId) return;
+  await prisma.$executeRaw`
+    UPDATE "AgentRun"
+       SET "output" = jsonb_set(CASE WHEN jsonb_typeof("output") = 'object' THEN "output" ELSE '{}'::jsonb END, '{readGoogle}', 'true'::jsonb, true)
+     WHERE "id" = ${runId}`.catch((err) => {
+    console.error(`[agents] run ${runId}: its Google read not recorded yet: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+  });
+}
+
+/**
+ * The turn has read other people's words from the person's Google: every
+ * later call above READ waits on a card (Decision 9), and the run says so
+ * the first time (markRunReadGoogle).
+ */
+async function turnReadGoogle(a: ExecuteArgs): Promise<void> {
+  a.counters.tainted = true;
+  if (a.counters.readGoogle === true) return;
+  a.counters.readGoogle = true;
+  await markRunReadGoogle(a.turn.runId);
 }
 
 /**
@@ -556,11 +634,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     const failed = toolOutcome(name, ran.result).failed;
     if (!isConnectorToolName(name) || failed) return done(failed ? "failed" : "ran", ran.result);
     // Other people's words came back: every later call above READ in this
-    // turn waits on a card (Decision 9).
-    if (TAINTING_TOOLS.has(name)) {
-      a.counters.tainted = true;
-      a.counters.readGoogle = true;
-    }
+    // turn waits on a card (Decision 9), and the run says so now.
+    if (TAINTING_TOOLS.has(name)) await turnReadGoogle(a);
     // The model reads all of it, once; the log keeps how many (Decision 16).
     return done("ran", ran.result, { stored: connectorStored(ran.result) });
   }
@@ -581,10 +656,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // A reply's preparation read its conversation in Gmail, or a calendar
   // write's the event it names (step 4): from here the turn has read other
   // people's words, as after search_email (review of step 3).
-  if (prepared.readGoogle) {
-    a.counters.tainted = true;
-    a.counters.readGoogle = true;
-  }
+  if (prepared.readGoogle) await turnReadGoogle(a);
   if (!prepared.ok) return refuse(prepared.error, prepared.detail);
   // What the model and the history call a Google write: never its card's
   // title, which can quote a subject from someone else's email (review of
@@ -597,37 +669,50 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const gate = tainted ? "ask" : gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
   if (gate === "ask") {
     // An invitation too (review of step 4): two identical create_event cards
-    // would each email every invitee and make a second event.
-    if (name === "send_email" || name === "reply_email" || name === "create_event") {
-      const twin = await waitingTwin(person, name, prepared.input);
+    // would each email every invitee and make a second event. The check and
+    // the card are one step under the key's lock (withTwinLock).
+    const asked = await withTwinLock(person, name, prepared.input, async (twin, db) => {
       if (twin) {
-        // The answer points at the card that already waits; the record names
-        // no action of its own, so this turn's approval row never shows the
-        // same email a second time, nor in another chat (review of step 3).
-        const note = name === "create_event" ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting;
-        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note });
+        // The answer points at the card that already waits, or says the same
+        // one just went out; the record names no action of its own, so this
+        // turn's approval row never shows the same email a second time, nor
+        // in another chat (review of step 3).
+        const event = name === "create_event";
+        // Sent, or being sent: nothing more is asked, and the call says so as its outcome.
+        if (twin.state === "sent") return refuse(event ? CONNECTOR_COPY.alreadySentEvent : CONNECTOR_COPY.alreadySent, { actionId: twin.id });
+        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: event ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting });
       }
-    }
-    if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
-      return refuse(tooManyWaiting(person.firstName));
-    }
-    const view = await proposeAction({
-      organizationId: person.organizationId,
-      agentId: a.agent.id,
-      actingForId: person.userId,
-      sessionId: a.turn.sessionId,
-      runId: a.turn.runId,
-      routineId: a.turn.routineId,
-      toolName: name,
-      risk: prepared.risk === "READ" ? "INTERNAL" : prepared.risk,
-      input: prepared.input,
-      preview: prepared.preview,
-      targetKey: prepared.targetKey,
-      groupKey: `${a.turn.runId}:${name}`,
+      if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
+        return refuse(tooManyWaiting(person.firstName));
+      }
+      const made = await proposeAction(
+        {
+          organizationId: person.organizationId,
+          agentId: a.agent.id,
+          actingForId: person.userId,
+          sessionId: a.turn.sessionId,
+          runId: a.turn.runId,
+          routineId: a.turn.routineId,
+          toolName: name,
+          risk: prepared.risk === "READ" ? "INTERNAL" : prepared.risk,
+          input: prepared.input,
+          preview: prepared.preview,
+          targetKey: prepared.targetKey,
+          groupKey: `${a.turn.runId}:${name}`,
+          // Proposed after a Google read in this turn, or in one that could
+          // not tell: marked so on its own row now (review round 1 of Phase
+          // 3), so it stands alone on its card and a turn told of it starts
+          // tainted, whether or not this turn ever saves its answer or run.
+          readGoogle: a.counters.tainted === true,
+        },
+        db,
+      );
+      return made;
     });
+    if (!("id" in asked)) return asked;
     a.counters.proposals += 1;
-    a.emit?.({ type: "approval", action: view });
-    return done("waiting", { status: "waiting_for_approval", actionId: view.id, title: isConnectorToolName(name) ? modelTitle : view.preview.title }, { actionId: view.id });
+    a.emit?.({ type: "approval", action: asked });
+    return done("waiting", { status: "waiting_for_approval", actionId: asked.id, title: isConnectorToolName(name) ? modelTitle : asked.preview.title }, { actionId: asked.id });
   }
 
   if (prepared.risk !== "INTERNAL") {

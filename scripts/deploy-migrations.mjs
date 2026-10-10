@@ -278,6 +278,13 @@ const SQL_MANIFEST = [
   // Before the reload: Prisma selects every column on a read with no select,
   // and the new build writes and reads both columns.
   "2026-10-08-ai-teammates-phase3-revoke-key.sql",
+  // AI teammates, Phase 3 review round 1: "AgentAction"."readGoogle" BOOLEAN
+  // NOT NULL DEFAULT false (a constant default, catalogue only, no row
+  // rewritten), the mark of a card proposed after a Google read, and an index
+  // on "TeammateTokenRevocation"."accountKey". Before the reload: Prisma
+  // selects every column on a read with no select, and every card read and
+  // every proposal writes the column.
+  "2026-10-10-ai-teammates-phase3-round1.sql",
 ];
 
 /**
