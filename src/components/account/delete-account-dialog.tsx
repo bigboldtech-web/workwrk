@@ -86,7 +86,7 @@ export function DeleteAccountDialog({
       ) : (
         <>
           <div className="rounded-md border border-[var(--os-danger-border)] p-3 text-base text-ink">
-            You will be removed from {orgName}. Your name, email, photo, phone and date of birth are erased, and your notifications and activity history are deleted. Tasks, docs and messages you created stay with the workspace, shown as from a deleted user.
+            This deletes your account in every workspace you belong to, not only {orgName}. Your name, email, photo, phone and date of birth are erased, and your notifications are deleted. Your AI chats, the requests AI teammates asked you to approve and what they remember about you are erased, and your routines stop. Tasks, docs and messages you created stay with their workspace, shown as from a deleted user, and so does the record of what you did there, without your network details.
           </div>
           <DialogBanner>{err}</DialogBanner>
           <form onSubmit={(e) => { e.preventDefault(); void go(); }}>
