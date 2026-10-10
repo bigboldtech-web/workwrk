@@ -15,8 +15,10 @@ const st = vi.hoisted(() => ({
   updates: [] as Array<Record<string, unknown>>,
   /** The target's row, as findFirst answers it. */
   target: {} as Record<string, unknown>,
-  /** Whether the target has an erasure's provenance record (review round 8 of Phase 3). */
-  erased: false,
+  /** The withdrawnAt of the target's newest erasure provenance record, or null (review rounds 8 and 9 of Phase 3). */
+  erasedAt: null as Date | null,
+  /** The target's deletedAt as the database holds it when the removal writes, when the route's read was stale (review round 9 of Phase 3). */
+  dbDeletedAt: undefined as Date | null | undefined,
 }));
 
 const TARGET = { id: "u-max", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -29,11 +31,18 @@ vi.mock("@/lib/prisma", () => {
       st.updates.push(a.data);
       return { ...st.target, status: typeof a.data.status === "string" ? a.data.status : st.target.status };
     },
+    // As Postgres answers it: a where on deletedAt is checked against the row as it is now.
+    updateMany: async (a: { where: { id: string; deletedAt?: null }; data: Record<string, unknown> }) => {
+      const now = st.dbDeletedAt === undefined ? st.target.deletedAt : st.dbDeletedAt;
+      if ("deletedAt" in a.where && a.where.deletedAt === null && now != null) return { count: 0 };
+      st.updates.push(a.data);
+      return { count: 1 };
+    },
     count: async () => 2,
   };
   const consentRecord = {
     findFirst: async (a: { where: { userId: string; method: string; withdrawnAt: unknown } }) =>
-      st.erased && a.where.method === "erasure" && JSON.stringify(a.where.withdrawnAt) === JSON.stringify({ not: null }) ? { id: "c1" } : null,
+      st.erasedAt && a.where.method === "erasure" && JSON.stringify(a.where.withdrawnAt) === JSON.stringify({ not: null }) ? { id: "c1", withdrawnAt: st.erasedAt } : null,
   };
   return { prisma: { user, consentRecord, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user }) } };
 });
@@ -97,7 +106,8 @@ beforeEach(() => {
   st.endConnectionsFor.mockReset().mockResolvedValue(1);
   st.updates = [];
   st.target = { ...TARGET };
-  st.erased = false;
+  st.erasedAt = null;
+  st.dbDeletedAt = undefined;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -169,7 +179,7 @@ describe("an account its own person erased is never restored or edited", () => {
 
   it("refuses the restore with account_erased, and writes nothing", async () => {
     st.target = { ...ERASED };
-    st.erased = true;
+    st.erasedAt = ERASED.deletedAt;
     const res = await restore();
     // Before: 200, deletedAt null and status ACTIVE.
     expect(res.status).toBe(409);
@@ -182,7 +192,7 @@ describe("an account its own person erased is never restored or edited", () => {
 
   it("refuses an edit of their name, or any field, with account_erased", async () => {
     st.target = { ...ERASED };
-    st.erased = true;
+    st.erasedAt = ERASED.deletedAt;
     for (const body of [{ firstName: "Max", lastName: "Chen" }, { phone: "+44 7700 900000" }, { status: "ACTIVE" }, { status: "INACTIVE", firstName: "Max" }]) {
       const res = await patch(body);
       // Before: 200, the name written onto the anonymised row.
@@ -194,7 +204,7 @@ describe("an account its own person erased is never restored or edited", () => {
 
   it("still lets an Admin deactivate an erased account restored before this fix", async () => {
     st.target = { ...ERASED, deletedAt: null, status: "ACTIVE" };
-    st.erased = true;
+    st.erasedAt = ERASED.deletedAt;
     const res = await patch({ status: "INACTIVE" });
     expect(res.status).toBe(200);
     expect(st.updates[0]).toMatchObject({ status: "INACTIVE" });
@@ -211,5 +221,81 @@ describe("an account its own person erased is never restored or edited", () => {
     const res = await patch({ firstName: "Maxine" });
     expect(res.status).toBe(200);
     expect(st.updates[0]).toMatchObject({ firstName: "Maxine" });
+  });
+});
+
+// Review round 9 of Phase 3: round 8 called an account erased whenever its
+// erasure record existed, so an erased account an Admin restored before
+// round 8, in use again, could not be edited at all (a role change included),
+// nor restored after an Admin removed it. Now an account is erased only while
+// its deletedAt is within a minute of its newest erasure record.
+describe("an erased account no longer in the state its erasure left it is an ordinary account", () => {
+  const ERASED_AT = new Date("2026-10-01T09:00:00Z");
+  const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+  const remove = () => DELETE(new NextRequest("https://app.test/api/users/u-max", { method: "DELETE" }), params);
+
+  it("edits an erased account an Admin restored before round 8, every field and its role", async () => {
+    st.target = { ...TARGET, firstName: "Deleted", lastName: "User", deletedAt: null, status: "ACTIVE" };
+    st.erasedAt = ERASED_AT;
+    vi.mocked(applyRoleChange).mockClear();
+    vi.mocked(applyRoleChange).mockResolvedValueOnce({
+      ok: true,
+      changed: true,
+      targetName: "Max Chen",
+      before: { level: "EMPLOYEE", role: "MEMBER" },
+      after: { level: "MANAGER", role: "MEMBER" },
+      bumped: false,
+    });
+    for (const body of [{ firstName: "Max", lastName: "Chen" }, { phone: "+44 7700 900000" }, { status: "ON_LEAVE" }, { orgRole: "MEMBER", memberTier: "MANAGER" }]) {
+      const res = await patch(body);
+      // Before: 409 account_erased on every one.
+      expect(res.status).toBe(200);
+    }
+    expect(st.updates.slice(0, 3)).toEqual([{ firstName: "Max", lastName: "Chen" }, { phone: "+44 7700 900000" }, { status: "ON_LEAVE" }]);
+    expect(vi.mocked(applyRoleChange).mock.calls[0]?.[1]).toMatchObject({ targetId: "u-max", next: { role: "MEMBER", tier: "MANAGER" } });
+  });
+
+  it("restores one an Admin removed after such a restore, and removes it again", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-10-20T09:00:00Z"), status: "INACTIVE" };
+    st.erasedAt = ERASED_AT;
+    const res = await restore();
+    // Before: 409 account_erased.
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toEqual({ deletedAt: null, status: "ACTIVE" });
+    st.target = { ...TARGET, deletedAt: null };
+    const again = await remove();
+    expect(again.status).toBe(200);
+    expect(st.updates[1]).toMatchObject({ status: "INACTIVE", deletedAt: expect.any(Date) });
+  });
+
+  it("goes by the minute's edge: a restore 60 seconds from the erasure is refused, 60.001 seconds from it goes through", async () => {
+    st.erasedAt = ERASED_AT;
+    st.target = { ...TARGET, deletedAt: new Date(ERASED_AT.getTime() + 60_000), status: "INACTIVE" };
+    expect((await restore()).status).toBe(409);
+    st.target = { ...TARGET, deletedAt: new Date(ERASED_AT.getTime() - 60_000), status: "INACTIVE" };
+    expect((await restore()).status).toBe(409);
+    expect(st.updates).toEqual([]);
+    st.target = { ...TARGET, deletedAt: new Date(ERASED_AT.getTime() + 60_001), status: "INACTIVE" };
+    // Before: 409, any erasure record refused it.
+    expect((await restore()).status).toBe(200);
+    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
+  });
+
+  it("a second removal of an account in the erased state leaves its deletedAt where the erasure put it", async () => {
+    // Already removed: People offers no Remove, and the route refuses it, writing nothing.
+    st.target = { ...TARGET, firstName: "Deleted", lastName: "User", deletedAt: ERASED_AT, status: "INACTIVE" };
+    st.erasedAt = ERASED_AT;
+    expect((await remove()).status).toBe(403);
+    expect(st.updates).toEqual([]);
+    // A removal whose read came just before the person's own erasure
+    // committed: the database holds the erasure's deletedAt by the write.
+    st.target = { ...TARGET };
+    st.dbDeletedAt = ERASED_AT;
+    const res = await remove();
+    // Before: deletedAt moved to the removal's moment, so the account left
+    // the erased state and the sweep never blanked its words.
+    expect(res.status).toBe(200);
+    expect(st.updates).toEqual([]);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
 });

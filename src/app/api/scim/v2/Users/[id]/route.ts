@@ -16,6 +16,11 @@
 // recognised the account, so their AI teammates' words stayed for good. A
 // deprovision (active:false, or DELETE) still answers a harmless success,
 // its other fields dropped: identity providers retry on errors.
+// Review round 9 of Phase 3: "erased" means in the state its erasure left it
+// (src/lib/compliance/erased-account.ts). An erased account an Admin restored
+// before round 8, or removed after such a restore, is an ordinary account
+// here, read and written as anyone is. No SCIM path sets deletedAt, so none
+// can move an erased account out of that state.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";

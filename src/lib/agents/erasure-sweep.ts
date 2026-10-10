@@ -60,6 +60,18 @@
 // what was written after the restore is not the erased person's to lose. It
 // is counted `restored`, apart from `overdue`, and never fails the tick.
 //
+// ONLY WHILE IT IS IN THE STATE ITS ERASURE LEFT IT (review round 9 of Phase
+// 3). The sweep acted on any deleted account with an erasure row, so an
+// account restored before round 8, in use again for months, and then removed
+// by an Admin (People sets deletedAt) was re-anonymised and blanked, the new
+// work with it, and nobody could undo that. Now the sweep's read, the
+// erasure's own pass, the re-anonymisation and every slice act only on an
+// account in the erased state (src/lib/compliance/erased-account.ts
+// erasedStateSql: the provenance record, deletedAt set, and deletedAt within
+// a minute of the newest record's withdrawnAt). Any other account with an
+// unfinished row is an ordinary one: counted `restored`, never failing the
+// tick, never overdue.
+//
 // WHAT "STILL HOLDING WORDS" IS, exactly what the erasure blanks:
 //   - a chat message of a chat they own whose content is not "Erased", or
 //     with a call record or meta (ChatMessage, by (sessionId, createdAt));
@@ -91,7 +103,7 @@
 // Server-only: imports prisma.
 
 import { Prisma } from "@/generated/prisma";
-import { ERASURE_METHOD } from "@/lib/compliance/erased-account";
+import { ERASURE_METHOD, erasedStateSql } from "@/lib/compliance/erased-account";
 import { prisma } from "@/lib/prisma";
 import { RUN_STALE_MS } from "./budget";
 
@@ -129,12 +141,6 @@ export const ERASURE_SLICE_MAX_MS = 5_000;
  * tick drained a backlog of light erasures far slower than the budget could).
  */
 export const ERASURE_PAGES_PER_TICK = 4;
-
-/**
- * Round 5's record of a finished erasure. No longer written: AccountErasure's
- * finishedAt replaces it (review round 6 of Phase 3). Only the bridge reads it.
- */
-export const ERASURE_FINISHED_METHOD = "erasure_finished";
 
 /**
  * Erasures the bridge gives a row each tick at most. It reads every erasure
@@ -382,9 +388,11 @@ interface ErasureRow {
 /**
  * How one slice ended: "finished"; "settling", a pass reached the end before
  * the settle time and the last pass waits for it; "more", the slice's time
- * ran out with its place saved; "taken", another pass moved the row first.
+ * ran out with its place saved; "taken", another pass moved the row first;
+ * "restored", the account is not in the erased state, so nothing was
+ * blanked or written (review round 9 of Phase 3).
  */
-type SliceEnd = "finished" | "settling" | "more" | "taken";
+type SliceEnd = "finished" | "settling" | "more" | "taken" | "restored";
 
 interface Slice {
   end: SliceEnd;
@@ -435,38 +443,55 @@ async function save(
  * Put the anonymisation back on an erased account that lost it (review round
  * 8 of Phase 3): an identity provider's SCIM push wrote the person's real
  * address and names back onto the row before SCIM refused erased accounts.
- * The same values POST /api/me/delete writes, only while the account is
- * deleted (an account restored before round 8 keeps what it holds), and only
- * when one of them differs, so it writes nothing on almost every call.
+ * The same values POST /api/me/delete writes, and only when one of them
+ * differs, so it writes nothing on almost every call.
+ *
+ * Only on an account in the erased state (review round 9 of Phase 3:
+ * erasedStateSql). Before, any deleted account was rewritten, so one
+ * restored before round 8, used again and then removed by an Admin was
+ * named "Deleted User" again. It also answers whether the account is in that
+ * state, read in the same statement, so a slice blanks nothing of an
+ * ordinary account, at no extra statement.
  *
  * Why it cannot deadlock: it is one statement by primary key, outside any
  * transaction, that locks at most this one User row and holds no other lock
- * while it waits for it. budget.ts runState takes a run row FOR UPDATE and
+ * while it waits for it (its reads of the User row and of the erasure
+ * records take no lock). budget.ts runState takes a run row FOR UPDATE and
  * then this User row FOR SHARE; this statement may wait for runState's
  * transaction to commit, but that transaction never waits on anything this
  * statement holds, so no cycle can pass through it. It changes no key column,
  * so no foreign key check locks another row.
  */
-async function reanonymise(userId: string): Promise<number> {
-  return prisma.$executeRaw`
-    UPDATE "User"
-       SET "email" = ('deleted-' || "id" || '@workwrk.anon'),
-           "firstName" = 'Deleted',
-           "lastName" = 'User',
-           "avatar" = NULL,
-           "phone" = NULL,
-           "dateOfBirth" = NULL,
-           "status" = 'INACTIVE',
-           "updatedAt" = (now() AT TIME ZONE 'UTC')
-     WHERE "id" = ${userId}
-       AND "deletedAt" IS NOT NULL
-       AND ("email" <> ('deleted-' || "id" || '@workwrk.anon')
-            OR "firstName" <> 'Deleted'
-            OR "lastName" <> 'User'
-            OR "avatar" IS NOT NULL
-            OR "phone" IS NOT NULL
-            OR "dateOfBirth" IS NOT NULL
-            OR "status" <> 'INACTIVE')`;
+async function reanonymise(userId: string): Promise<{ erased: boolean; mended: number }> {
+  const [row] = await prisma.$queryRaw<Array<{ erased: boolean; mended: number }>>`
+    WITH s AS (
+      SELECT u."id", ${erasedStateSql("u")} AS "erased"
+        FROM "User" u
+       WHERE u."id" = ${userId}
+    ), w AS (
+      UPDATE "User" x
+         SET "email" = ('deleted-' || x."id" || '@workwrk.anon'),
+             "firstName" = 'Deleted',
+             "lastName" = 'User',
+             "avatar" = NULL,
+             "phone" = NULL,
+             "dateOfBirth" = NULL,
+             "status" = 'INACTIVE',
+             "updatedAt" = (now() AT TIME ZONE 'UTC')
+        FROM s
+       WHERE x."id" = s."id"
+         AND s."erased"
+         AND (x."email" <> ('deleted-' || x."id" || '@workwrk.anon')
+              OR x."firstName" <> 'Deleted'
+              OR x."lastName" <> 'User'
+              OR x."avatar" IS NOT NULL
+              OR x."phone" IS NOT NULL
+              OR x."dateOfBirth" IS NOT NULL
+              OR x."status" <> 'INACTIVE')
+      RETURNING x."id"
+    )
+    SELECT COALESCE((SELECT s."erased" FROM s), false) AS "erased", (SELECT count(*) FROM w)::int AS "mended"`;
+  return { erased: row?.erased === true, mended: Number(row?.mended ?? 0) };
 }
 
 /**
@@ -475,8 +500,10 @@ async function reanonymise(userId: string): Promise<number> {
  * ERASURE_SETTLED_MS after the erasure finishes it at its end; one that
  * started before goes back to the first part, and when the settle time has
  * already passed the last pass starts at once, in this slice. Every slice
- * first puts the account's anonymisation back if it was lost (reanonymise).
- * Throws when a statement does, after saving the place it reached.
+ * first puts the account's anonymisation back if it was lost (reanonymise),
+ * and ends at once, blanking and writing nothing, when the account is not in
+ * the erased state (review round 9 of Phase 3). Throws when a statement
+ * does, after saving the place it reached.
  */
 async function runSlice(e: ErasureRow, now: Date, deadline: number): Promise<Slice> {
   const settledAt = new Date(e.erasedAt).getTime() + ERASURE_SETTLED_MS;
@@ -490,7 +517,10 @@ async function runSlice(e: ErasureRow, now: Date, deadline: number): Promise<Sli
     p.cursor = null;
   }
   try {
-    const mended = await reanonymise(e.userId);
+    const { erased, mended } = await reanonymise(e.userId);
+    // An ordinary account (review round 9 of Phase 3): its row was read in
+    // the erased state, and since then it is not. Nothing of it is touched.
+    if (!erased) return { end: "restored", rows: 0, row: e };
     const saved = async (s: ErasurePosition & { passStartedAt: Date | null; finishedAt: Date | null }, end: SliceEnd): Promise<Slice> => {
       const out = await save(e, s, end, p.rows);
       return { ...out, mended };
@@ -539,8 +569,10 @@ export async function recordErasure(db: Pick<Prisma.TransactionClient, "$execute
  * The erasure's own pass, after its transaction commits (POST
  * /api/me/delete): one slice of the person's erasure, from the place its row
  * holds (the start, as that transaction left it), until `deadline`, its
- * place saved. Acts only on a deleted account with an unfinished erasure row
- * (`found` false otherwise, nothing read). Throws when a statement does.
+ * place saved. Acts only on an account in the erased state with an
+ * unfinished erasure row (review round 9 of Phase 3: before, any deleted
+ * account with a row); `found` false otherwise, nothing read. Throws when a
+ * statement does.
  */
 export async function continueErasure(userId: string, deadline: number, now: Date = new Date()): Promise<{ found: boolean; end: SliceEnd | null; rows: number }> {
   const [row] = await prisma.$queryRaw<ErasureRow[]>`
@@ -549,7 +581,7 @@ export async function continueErasure(userId: string, deadline: number, now: Dat
       JOIN "User" u ON u."id" = e."userId"
      WHERE e."userId" = ${userId}
        AND e."finishedAt" IS NULL
-       AND u."deletedAt" IS NOT NULL`;
+       AND ${erasedStateSql("u")}`;
   if (!row) return { found: false, end: null, rows: 0 };
   const s = await runSlice(row, now, deadline);
   return { found: true, end: s.end, rows: s.rows };
@@ -565,16 +597,21 @@ export async function continueErasure(userId: string, deadline: number, now: Dat
  * from 2026-10-10 on were bridged, so the older ones kept those words for
  * good. Only for an erasure's provenance record (method "erasure", withdrawnAt
  * and userId set, which only POST /api/me/delete has ever written; see
- * src/lib/compliance/erased-account.ts), with no row yet and no round 5
- * "finished" record. Review round 8 of Phase 3: it also asked for the
- * anonymised address and deletedAt, so an account an identity provider
- * renamed, or an Admin restored, was never bridged and kept its words for
- * good. A restored account is given its row too, and the sweep leaves it
- * alone while it lives (it is counted `restored`). One statement, at most
- * ERASURE_BRIDGE_PER_TICK a tick, over the erasure records' own index; each
- * row marked tried now, so the rows already waiting are read before it; once
- * every erasure has a row it reads that short list and writes nothing.
- * Answers how many rows it wrote.
+ * src/lib/compliance/erased-account.ts), with no row yet. Review round 8 of
+ * Phase 3: it also asked for the anonymised address and deletedAt, so an
+ * account an identity provider renamed, or an Admin restored, was never
+ * bridged and kept its words for good. A restored account is given its row
+ * too, and the sweep leaves it alone while it is not in the erased state (it
+ * is counted `restored`). Review round 9 of Phase 3: it also left out every
+ * person with round 5's "erasure_finished" record, so an erasure round 5
+ * finished and an identity provider then renamed was never re-anonymised.
+ * Those now get a row too, and one cheap pass: their words are blank
+ * already, the pass puts the anonymisation back if they are still in the
+ * erased state, and their old moment means it finishes them. One statement,
+ * at most ERASURE_BRIDGE_PER_TICK a tick, over the erasure records' own
+ * index; each row marked tried now, so the rows already waiting are read
+ * before it; once every erasure has a row it reads that short list and
+ * writes nothing. Answers how many rows it wrote.
  */
 async function bridgeUnsweptErasures(now: Date): Promise<number> {
   return prisma.$executeRaw`
@@ -587,7 +624,6 @@ async function bridgeUnsweptErasures(now: Date): Promise<number> {
        AND c."withdrawnAt" IS NOT NULL
        AND c."userId" IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM "AccountErasure" a WHERE a."userId" = c."userId")
-       AND NOT EXISTS (SELECT 1 FROM "ConsentRecord" f WHERE f."userId" = c."userId" AND f."method" = ${ERASURE_FINISHED_METHOD})
      ORDER BY c."userId", c."createdAt" DESC
      LIMIT ${ERASURE_BRIDGE_PER_TICK}
     ON CONFLICT ("userId") DO NOTHING`;
@@ -604,12 +640,14 @@ export interface ErasureSweepCounts {
   waiting: number;
   /** A slice that threw, or the bridge, a later page's read or the overdue count (logged); the next tick tries again. */
   failed: number;
-  /** Erasures of deleted accounts not finished ERASURE_OVERDUE_MS after they were asked or bridged (logged); they fail the tick. */
+  /** Erasures of accounts in the erased state not finished ERASURE_OVERDUE_MS after they were asked or bridged (logged); they fail the tick. */
   overdue: number;
   /**
-   * Unfinished erasures whose account an Admin restored before review round
-   * 8 of Phase 3 (deletedAt null): never blanked while it lives, and not a
-   * failure, since nothing here can finish it (the founder lists them).
+   * Unfinished erasures whose account is not in the erased state: an Admin
+   * restored it before review round 8 of Phase 3 (deletedAt null), or
+   * removed it after such a restore (deletedAt later than the erasure;
+   * review round 9). Never blanked or re-anonymised, and not a failure,
+   * since nothing here can finish it (the founder lists them).
    */
   restored: number;
   /** Erased accounts whose anonymisation a slice put back (reanonymise). */
@@ -625,7 +663,8 @@ function errorLine(err: unknown): string {
 /**
  * Each tick (src/app/api/cron/run-due-agents step 5, see the header): the
  * bridge for the erasures made before round 6; then pages of at most
- * `limit` unfinished erasures of deleted accounts, least recently tried
+ * `limit` unfinished erasures of accounts in the erased state (review round
+ * 9 of Phase 3: before, of any deleted account), least recently tried
  * first, each given in turn a fair slice of what is left of the budget (what
  * is left over the erasures still to go this round, at most
  * ERASURE_SLICE_MAX_MS), round after round until the budget is spent or none
@@ -659,7 +698,7 @@ export async function finishErasures(now: Date, o: { limit: number; budgetMs: nu
         FROM "AccountErasure" e
         JOIN "User" u ON u."id" = e."userId"
        WHERE e."finishedAt" IS NULL
-         AND u."deletedAt" IS NOT NULL
+         AND ${erasedStateSql("u")}
          AND (e."passStartedAt" IS NOT NULL OR e."erasedAt" <= (${settledBefore}::timestamptz AT TIME ZONE 'UTC'))
          AND NOT (e."userId" = ANY(${[...seen]}::text[]))
        ORDER BY e."lastTriedAt" ASC NULLS FIRST, e."erasedAt", e."userId"
@@ -672,6 +711,8 @@ export async function finishErasures(now: Date, o: { limit: number; budgetMs: nu
   };
 
   let slicesFailed = 0;
+  // Read in the erased state and no longer in it when its slice came (review round 9 of Phase 3).
+  let slicesRestored = 0;
   let active = await readPage();
   while (Date.now() < deadline) {
     const more: ErasureRow[] = [];
@@ -688,6 +729,7 @@ export async function finishErasures(now: Date, o: { limit: number; budgetMs: nu
         counts.reanonymised += s.mended ?? 0;
         if (s.end === "finished") counts.finished += 1;
         else if (s.end === "more") more.push(s.row);
+        else if (s.end === "restored") slicesRestored += 1;
       } catch (err) {
         slicesFailed += 1;
         console.error(`[cron-failure] run-due-agents: an account erasure's words were not all blanked yet: ${errorLine(err)}`);
@@ -707,20 +749,22 @@ export async function finishErasures(now: Date, o: { limit: number; budgetMs: nu
     if (active.length === 0) break;
   }
   counts.failed += slicesFailed;
-  counts.waiting = counts.found - counts.finished - slicesFailed;
+  counts.waiting = counts.found - counts.finished - slicesFailed - slicesRestored;
 
   // Overdue from the later of the erasure's moment and its row's (a bridged
   // row's createdAt is its bridging); an account restored while unfinished
-  // is counted apart and fails nothing (review round 8 of Phase 3).
+  // is counted apart and fails nothing (review round 8 of Phase 3), and so is
+  // one removed after such a restore: any account not in the erased state
+  // (review round 9 of Phase 3; before, a deleted one was counted overdue).
   try {
     const overdueBefore = new Date(now.getTime() - ERASURE_OVERDUE_MS).toISOString();
     const [late] = await prisma.$queryRaw<Array<{ overdue: number; restored: number }>>`
-      SELECT count(*) FILTER (WHERE u."deletedAt" IS NOT NULL
-                                AND GREATEST(e."erasedAt", e."createdAt") < (${overdueBefore}::timestamptz AT TIME ZONE 'UTC'))::int AS "overdue",
-             count(*) FILTER (WHERE u."deletedAt" IS NULL)::int AS "restored"
-        FROM "AccountErasure" e
-        JOIN "User" u ON u."id" = e."userId"
-       WHERE e."finishedAt" IS NULL`;
+      SELECT count(*) FILTER (WHERE t."erased" AND t."since" < (${overdueBefore}::timestamptz AT TIME ZONE 'UTC'))::int AS "overdue",
+             count(*) FILTER (WHERE NOT t."erased")::int AS "restored"
+        FROM (SELECT GREATEST(e."erasedAt", e."createdAt") AS "since", ${erasedStateSql("u")} AS "erased"
+                FROM "AccountErasure" e
+                JOIN "User" u ON u."id" = e."userId"
+               WHERE e."finishedAt" IS NULL) t`;
     counts.overdue = Number(late?.overdue ?? 0);
     counts.restored = Number(late?.restored ?? 0);
     if (counts.overdue > 0) {
