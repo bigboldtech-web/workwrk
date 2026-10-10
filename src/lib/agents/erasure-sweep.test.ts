@@ -99,23 +99,25 @@ vi.mock("@/lib/prisma", () => {
     const rows = table("accountErasure");
     const log = (op: string, count?: number) => st.log.push({ model: "accountErasure", op, ...(count !== undefined ? { count } : {}) });
     if (kind === "execute" && sql.includes('INSERT INTO "AccountErasure"') && sql.includes('FROM "ConsentRecord" c')) {
-      // The bridge for round 5's erasures.
-      const [part, at, method, since, finished] = values as [string, string, string, string, string];
+      // The bridge for every erasure with no row (review round 7 of Phase 3: no date bound).
+      const [part, at, method, finished, limit] = values as [string, string, string, string, number];
       const records = table("consentRecord");
       const byUser = new Map<string, Row>();
       for (const c of records) {
         const u = table("user").find((x) => x.id === c.userId);
-        if (c.method !== method || !u || (c.createdAt as Date).getTime() < new Date(since).getTime()) continue;
+        if (c.method !== method || !u) continue;
         if (u.deletedAt == null || u.email !== `deleted-${u.id}@workwrk.anon`) continue;
         if (rows.some((r) => r.userId === c.userId) || records.some((f) => f.userId === c.userId && f.method === finished)) continue;
         const had = byUser.get(c.userId as string);
         if (!had || (had.createdAt as Date).getTime() < (c.createdAt as Date).getTime()) byUser.set(c.userId as string, c);
       }
-      for (const c of byUser.values()) {
+      // ORDER BY "userId", then LIMIT.
+      const taken = [...byUser.values()].sort((x, y) => String(x.userId).localeCompare(String(y.userId))).slice(0, limit);
+      for (const c of taken) {
         rows.push({ userId: c.userId, erasedAt: c.createdAt, part, cursor: null, passStartedAt: ts(at), lastTriedAt: null, tries: 0, finishedAt: null, createdAt: dbNow() });
       }
-      log("bridge", byUser.size);
-      return byUser.size;
+      log("bridge", taken.length);
+      return taken.length;
     }
     if (kind === "execute" && sql.includes('INSERT INTO "AccountErasure"') && sql.includes('ON CONFLICT ("userId") DO UPDATE')) {
       // recordErasure, in the erasure's own transaction.
@@ -215,7 +217,7 @@ import {
   ERASURE_BATCH,
   ERASURE_OVERDUE_MS,
   ERASURE_SETTLED_MS,
-  ROUND5_ERASURES_SINCE,
+  ERASURE_BRIDGE_PER_TICK,
   blankTeammateHistory,
   continueErasure,
   finishErasures,
@@ -617,8 +619,11 @@ describe("finishErasures", () => {
     expect(rowOf("forged")).toBeUndefined();
   });
 
-  // Review round 6 of Phase 3: erasures made on round 5's code have a consent record and no row.
-  it("gives round 5's erasures their rows, only for anonymised accounts with no row and no finished record, and sweeps them the same tick", async () => {
+  // Review round 6 of Phase 3: erasures made on round 5's code have a consent
+  // record and no row. Review round 7: so do every erasure made before it,
+  // which before round 3 kept the person's chats, requests and runs' output;
+  // the bridge read only records from 2026-10-10 on, so those kept them for good.
+  it("gives every erasure with no row its row, however old, only for anonymised accounts with no row and no finished record, and sweeps them the same tick", async () => {
     for (const u of ["r5", "twice", "finished5", "early", "removed", "has"]) seedPerson(u);
     const at = (iso: string) => new Date(iso);
     (st.tables.consentRecord ??= []).push(
@@ -630,8 +635,8 @@ describe("finishErasures", () => {
       // Round 5 finished it.
       { id: "c4", userId: "finished5", method: "erasure", createdAt: at("2026-10-10T06:00:00Z"), policyVersion: "2026-10-06" },
       { id: "c5", userId: "finished5", method: "erasure_finished", createdAt: at("2026-10-10T09:00:00Z"), policyVersion: "2026-10-06" },
-      // Before round 5's code.
-      { id: "c6", userId: "early", method: "erasure", createdAt: new Date(ROUND5_ERASURES_SINCE.getTime() - 60_000), policyVersion: "2026-10-06" },
+      // Erased months before round 5's code, on code that kept their chats.
+      { id: "c6", userId: "early", method: "erasure", createdAt: at("2026-06-01T06:00:00Z"), policyVersion: "2026-04-18" },
       // Removed by an admin (deleted, never anonymised), with a forged record.
       { id: "c7", userId: "removed", method: "erasure", createdAt: at("2026-10-10T06:00:00Z"), policyVersion: "2026-10-06" },
       // Already has its row.
@@ -642,16 +647,31 @@ describe("finishErasures", () => {
     st.tables.user.find((u) => u.id === "removed")!.email = "lea@x.test";
     erasureRow("has", { finishedAt: t(-60) });
     const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
-    // Before: no rows; round 5's sweep read the consent records.
-    expect(counts).toMatchObject({ bridged: 2, found: 2, finished: 2 });
-    expect(ofTable("accountErasure").map((r) => r.userId).sort()).toEqual(["has", "r5", "twice"]);
+    // Before round 6: no rows; round 5's sweep read the consent records. Before round 7: "early" was never bridged (bridged: 2).
+    expect(counts).toMatchObject({ bridged: 3, found: 3, finished: 3 });
+    expect(ofTable("accountErasure").map((r) => r.userId).sort()).toEqual(["early", "has", "r5", "twice"]);
+    expect(rowOf("early")).toMatchObject({ erasedAt: at("2026-06-01T06:00:00Z"), finishedAt: NOW });
+    expectBlank("early");
     expect(rowOf("r5")).toMatchObject({ erasedAt: at("2026-10-10T06:00:00Z"), passStartedAt: NOW, finishedAt: NOW });
     expect(rowOf("twice").erasedAt).toEqual(at("2026-10-10T07:00:00Z"));
     expectBlank("r5");
     expectBlank("twice");
-    for (const u of ["finished5", "early", "removed", "has"]) expect(firstWords(u)).toBe(WORDS);
+    for (const u of ["finished5", "removed", "has"]) expect(firstWords(u)).toBe(WORDS);
     // Once only.
     expect(await finishErasures(NOW, { limit: 50, budgetMs: 60_000 })).toMatchObject({ bridged: 0, found: 0 });
+  });
+
+  it("bridges at most ERASURE_BRIDGE_PER_TICK erasures a tick, and the rest on the next (review round 7 of Phase 3)", async () => {
+    const n = ERASURE_BRIDGE_PER_TICK + 3;
+    for (let i = 0; i < n; i++) {
+      const u = `old${String(i).padStart(4, "0")}`;
+      seedPerson(u);
+      (st.tables.consentRecord ??= []).push({ id: `c-${u}`, userId: u, method: "erasure", createdAt: t(-90 * 24 * HOUR), policyVersion: "2026-04-18" });
+    }
+    expect((await finishErasures(NOW, { limit: 0, budgetMs: 0 })).bridged).toBe(ERASURE_BRIDGE_PER_TICK);
+    expect((await finishErasures(NOW, { limit: 0, budgetMs: 0 })).bridged).toBe(3);
+    expect((await finishErasures(NOW, { limit: 0, budgetMs: 0 })).bridged).toBe(0);
+    expect(ofTable("accountErasure")).toHaveLength(n);
   });
 
   it("stops at its budget, leaving the rest for the next tick, and at its limit, least recently tried first", async () => {
