@@ -123,7 +123,20 @@ describe("isEventId", () => {
     for (const id of ["7cbh8rpc10lrc0ckih9tafss99_R20261013T150000", "7cbh8rpc10lrc0ckih9tafss99_R20261013T150000_20261020T150000Z", "abc123_R20261013T150000_20261020"]) {
       expect(isEventId(id)).toBe(true);
     }
-    for (const id of ["abc_R20261013T150000.", "abc_R2026101T150000", "abc_R20261013", "abc_R20261013T150000Z", "abc_r20261013T150000x", "abc_R../x"]) {
+    for (const id of ["abc_R20261013T150000.", "abc_R2026101T150000", "abc_r20261013T150000x", "abc_R../x"]) {
+      expect(isEventId(id)).toBe(false);
+    }
+  });
+
+  // Review round 3 of Phase 3: a split all-day series names its start as a
+  // day alone, and a moment may carry its Z; both were refused at the zod
+  // check, so the teammate could not change, cancel or answer an all-day
+  // event list_events had just named.
+  it("takes an all-day split series and its single days, and a split moment with its Z, still never a dot", () => {
+    for (const id of ["7cbh8rpc10lrc0ckih9tafss99_R20261013", "abc_R20261013_20261020", "abc_R20261013T150000Z", "abc_R20261013T150000Z_20261020T150000Z", "abc_R20261013_20261020T150000Z"]) {
+      expect(isEventId(id)).toBe(true);
+    }
+    for (const id of ["abc_R20261013.", "abc_R20261013Z", "abc_R20261013T1500Z", "abc_R20261013T150000ZZ", "abc_R20261013_2026102", "abc_R20261013/..", "abc_R_20261013"]) {
       expect(isEventId(id)).toBe(false);
     }
   });

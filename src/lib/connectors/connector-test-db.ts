@@ -63,6 +63,8 @@ export const cdb = {
   policyLocks: [] as Array<{ organizationId: string; inTx: boolean }>,
   /** How many rows each revoke claim asked for (the sweep's batch, review round 1 of Phase 3). */
   claims: [] as number[],
+  /** Each $transaction's options, in order (review round 3 of Phase 3: the timeouts of those that may wait on a lock). */
+  txOptions: [] as Array<Record<string, unknown> | undefined>,
 };
 
 let seq = 0;
@@ -91,6 +93,7 @@ export function resetConnectorDb(): void {
   cdb.policyReads = [];
   cdb.policyLocks = [];
   cdb.claims = [];
+  cdb.txOptions = [];
   seq = 0;
 }
 
@@ -261,6 +264,15 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     cdb.connections = cdb.connections.filter((c) => !gone.includes(c));
     if (gone.length) wrote("connection.delete");
     return gone.map(copy);
+  }
+  if (sql.startsWith(`SELECT DISTINCT "accountSub" FROM "TeammateConnection" WHERE "provider" = 'google' AND "accountSub" = ANY(?::text[]) AND NOT (`)) {
+    // A suspension's notice (review round 3 of Phase 3): the accounts a live
+    // connection outside the removal still holds, its own where negated.
+    const m = /AND NOT \((.*)\)$/.exec(sql);
+    if (!m) throw new Error(`connector-test-db: unreadable notice check ${sql}`);
+    const subs = v[0] as string[];
+    const inRemoval = wherePredicate(m[1], v.slice(1));
+    return [...new Set(cdb.connections.filter((c) => c.provider === "google" && subs.includes(String(c.accountSub)) && !inRemoval(c)).map((c) => c.accountSub))].map((s) => ({ accountSub: s }));
   }
   if (sql.startsWith('SELECT DISTINCT "accountSub" FROM "TeammateConnection"')) {
     const subs = v[0] as string[];
@@ -485,7 +497,8 @@ function idMatch(where: Row | undefined): (r: Row) => boolean {
 }
 
 export const connectorDb = {
-  $transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+  $transaction: async <T>(fn: (tx: unknown) => Promise<T>, options?: Record<string, unknown>): Promise<T> => {
+    cdb.txOptions.push(options);
     const was = inTx;
     inTx = true;
     try {
@@ -583,17 +596,19 @@ export const connectorDb = {
     },
   },
   agentMemory: {
-    // A teammate's shared memories (memory.ts sharedMemoriesPrintOf and
-    // sharedMemoriesPrints): by one teammate and its own scope id, or by
-    // several teammates' agent scope, newest first.
+    // A teammate's shared memories (memory.ts sharedMemoriesPrintOf, which
+    // sharedMemoriesPrints calls per teammate): by one teammate and its own
+    // scope id, newest first. Review round 3 of Phase 3: one read of several
+    // teammates' agent scope let rows no turn reads use up the take, so it
+    // is refused here.
     findMany: async (a: Args) => {
       const w = (a.where ?? {}) as { agentId?: unknown; scope?: unknown; scopeId?: unknown };
       if (w.scope !== "agent") throw new Error("connector-test-db: only shared (agent scope) memories are read here");
-      const ids = typeof w.agentId === "string" ? [w.agentId] : ((w.agentId as { in?: string[] } | undefined)?.in ?? null);
-      if (!ids) throw new Error("connector-test-db: memories are read by teammate");
-      if (typeof w.agentId === "string" && w.scopeId !== w.agentId) throw new Error("connector-test-db: one teammate's shared memories are read by its own scope id");
+      if (typeof w.agentId !== "string") throw new Error("connector-test-db: shared memories are read one teammate at a time");
+      if (w.scopeId !== w.agentId) throw new Error("connector-test-db: one teammate's shared memories are read by its own scope id");
+      const id = w.agentId;
       return cdb.memories
-        .filter((m) => ids.includes(String(m.agentId)) && m.scope === "agent" && (w.scopeId === undefined || m.scopeId === w.scopeId))
+        .filter((m) => String(m.agentId) === id && m.scope === "agent" && m.scopeId === w.scopeId)
         .sort((x, y) => (y.updatedAt as Date).getTime() - (x.updatedAt as Date).getTime())
         .slice(0, a.take ?? 1000)
         .map(copy);

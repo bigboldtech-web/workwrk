@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
@@ -31,6 +32,17 @@ class LastAdminError extends Error {
  *    used (src/lib/ai-allowance.ts); deleting it handed questions back, so
  *    invite, ask, delete could run the AI on any plan without end
  *  - the IP address and user agent on the activity rows they authored
+ *  - their AI chats' and AI teammates' records, in every workspace (review
+ *    round 3 of Phase 3): the text of every chat they own, with Ask AI or a
+ *    teammate (each message's words, its call record and its meta, worded
+ *    "Erased"; the chat's title), what each
+ *    request a teammate asked them to approve would send or change (input,
+ *    edited input, preview and result: an email's recipients and body, an
+ *    event's guests), and their runs' output (an answer's text and calls);
+ *    the input of Ask AI's tool runs too. The rows stay, as the AIQuery rows
+ *    do: their ids, status, times and token counts are the plan's and the
+ *    audit's. Their Google connections end first (endAllConnectionsOf), so
+ *    no teammate reads their Gmail or Google Calendar after the words go.
  *
  * Things we RETAIN:
  *  - Aggregated org records (reviews, KPI records, kudos, action items) with
@@ -86,6 +98,17 @@ export async function POST(req: NextRequest) {
   const anonymizedEmail = `deleted-${userId}@workwrk.anon`;
   const randomPassword = crypto.randomUUID() + crypto.randomUUID();
 
+  // Their Google connections for AI teammates go in every workspace, and
+  // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). Before
+  // the erasure (review round 3 of Phase 3: it ran after the commit, so a
+  // teammate could still read their mail into a chat the erasure had just
+  // blanked), never failing it: the cron sweep ends any missed. A refusal
+  // under the lock below, a race no up-front check can rule out, leaves them
+  // disconnected, which connecting again undoes.
+  await endAllConnectionsOf(userId, "left", userId).catch((e) => {
+    console.error(`[connectors] account deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
+
   try {
     await prisma.$transaction(async (tx) => {
       // 0) Lock every workspace this person belongs to, in one sorted order
@@ -123,6 +146,19 @@ export async function POST(req: NextRequest) {
         tx.ideaComment.deleteMany({ where: { userId } }),
         // Kept, with the network details cleared (see the header).
         tx.activityLog.updateMany({ where: { actorId: userId }, data: { ipAddress: null, userAgent: null } }),
+        // Their AI chats' and AI teammates' records, in every workspace (see the header).
+        tx.chatMessage.updateMany({ where: { session: { userId } }, data: { content: "Erased", toolCalls: Prisma.DbNull, meta: Prisma.DbNull } }),
+        tx.chatSession.updateMany({ where: { userId }, data: { title: null } }),
+        tx.agentAction.updateMany({ where: { actingForId: userId }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull } }),
+        tx.agentRun.updateMany({ where: { OR: [{ actingForId: userId }, { triggeredBy: userId }] }, data: { output: Prisma.DbNull } }),
+        // Ask AI's tool runs keep the tool's input there (no actingForId).
+        tx.agentRun.updateMany({ where: { triggeredBy: userId, actingForId: null }, data: { input: {} } }),
+        // What their teammates remember about them goes, and the routines that
+        // work as them keep no words and never run again (the rows stay, as
+        // chats and cards do, so nothing that points at one is left dangling;
+        // lead, after review round 3 of Phase 3).
+        tx.agentMemory.deleteMany({ where: { scope: "person", scopeId: userId } }),
+        tx.agentRoutine.updateMany({ where: { actingForId: userId }, data: { name: "Erased", prompt: "Erased", status: "paused", pausedReason: "person_gone", nextRunAt: null } }),
       ]);
 
       // 3) Log the erasure request itself (required evidence)
@@ -144,13 +180,6 @@ export async function POST(req: NextRequest) {
         },
       });
     }, { timeout: 20_000, maxWait: 10_000 });
-
-    // Their Google connections for AI teammates go in every workspace, and
-    // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After
-    // the commit, never failing the erasure: the cron sweep ends any missed.
-    await endAllConnectionsOf(userId, "left", userId).catch((e) => {
-      console.error(`[connectors] account deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
-    });
 
     return jsonSuccess({
       ok: true,

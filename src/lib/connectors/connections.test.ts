@@ -34,6 +34,7 @@ vi.mock("@/lib/connectors/google/config", () => ({
 
 import { cdb, connectorDb, inTransaction, keyOf, resetConnectorDb, seedConnection } from "./connector-test-db";
 import {
+  LOCK_WAIT_TX_TIMEOUT_MS,
   accountKey,
   connectorAccess,
   endConnectionsFor,
@@ -209,7 +210,39 @@ describe("saveConnection", () => {
     expect(cdb.connections).toHaveLength(1);
     expect(cdb.connections[0]).toMatchObject({ id: row.id, tokenVersion: 2, status: "active", statusReason: null, products: ["gmail"] });
     expect(cdb.revocations).toEqual([]);
-    expect(cdb.activity.find((a) => a.type === "teammate_connection.connected")?.metadata).toEqual({ provider: "google", products: ["gmail"], connectionId: row.id, replaced: false, reconnect: true });
+    expect(cdb.activity.find((a) => a.type === "teammate_connection.connected")?.metadata).toEqual({ provider: "google", products: ["gmail"], connectionId: row.id, replaced: false, reconnect: true, allowsCleared: 0 });
+  });
+
+  // Review round 3 of Phase 3: Max allowed the workspace teammate Ops into
+  // his Gmail while connected as max@company.com, then reconnected as his
+  // personal account. The allow carries no account, so Ops read the
+  // personal mailbox from the next turn, on a choice made for another one.
+  it("ends every allow given in this workspace when another account takes the row, in its transaction, and keeps them for the same account", async () => {
+    cdb.agents.push({ id: "a-ops", organizationId: "org1" }, { id: "a-notes", organizationId: "org1" }, { id: "a-far", organizationId: "org2" });
+    const allow = (id: string, agentId: string, userId = "u-max") => ({ id, agentId, userId, approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "x" } } });
+    cdb.settings.push(allow("ps1", "a-ops"), allow("ps2", "a-notes"), allow("ps3", "a-far"), allow("ps4", "a-ops", "u-mia"));
+    const row = seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-work" });
+    // The same account again: the allows stay.
+    const same = await saveConnection({ organizationId: "org1", userId: "u-max", tokens: tokens("rt-new"), claims: { sub: "sub-work", email: "max@company.test" }, products: ["gmail"], scopes: [] });
+    expect(same).toMatchObject({ ok: true, reconnect: true, allowsCleared: 0 });
+    expect(cdb.settings.map((x) => x.connectorProducts)).toEqual([["gmail"], ["gmail"], ["gmail"], ["gmail"]]);
+    expect(cdb.events.some((e) => e.op === "setting.clear")).toBe(false);
+    // Another account: every allow Max gave here ends, in the transaction that took the row over.
+    const other = await saveConnection({ organizationId: "org1", userId: "u-max", tokens: tokens("rt-new"), claims: { sub: "sub-personal", email: "max@personal.test" }, products: ["gmail"], scopes: [] });
+    expect(other).toMatchObject({ ok: true, id: row.id, replaced: true, allowsCleared: 2 });
+    // Before: all four still ["gmail"], and Ops read the personal mailbox.
+    expect(cdb.settings.map((x) => [x.id, x.connectorProducts, x.connectorPrints])).toEqual([
+      ["ps1", [], null],
+      ["ps2", [], null],
+      ["ps3", ["gmail"], { gmail: { name: "x" } }],
+      ["ps4", ["gmail"], { gmail: { name: "x" } }],
+    ]);
+    expect(cdb.events.filter((e) => e.op === "setting.clear" || e.op === "connection.update")).toEqual([
+      { op: "connection.update", inTx: true },
+      { op: "connection.update", inTx: true },
+      { op: "setting.clear", inTx: true },
+    ]);
+    expect(cdb.activity.filter((a) => a.type === "teammate_connection.connected").map((a) => (a.metadata as { allowsCleared: number }).allowsCleared)).toEqual([0, 2]);
   });
 
   it("queues the old account's revoke when another account takes the row", async () => {
@@ -556,6 +589,15 @@ describe("setPolicyProduct", () => {
     cdb.policy.delete("org1");
     expect(await setPolicyProduct("org1", "calendar", true, "u-admin")).toEqual({ before: [], after: ["calendar"] });
   });
+
+  // Review round 3 of Phase 3: its FOR UPDATE of the switch can wait behind
+  // a connect's FOR SHARE, which can itself wait on a revoke holding the
+  // account's lock; Prisma's default five seconds failed the switch with a 500.
+  it("allows as long as the transactions it can wait behind", async () => {
+    expect(LOCK_WAIT_TX_TIMEOUT_MS).toBe(20_000);
+    await setPolicyProduct("org1", "gmail", false, "u-admin");
+    expect(cdb.txOptions).toEqual([{ timeout: LOCK_WAIT_TX_TIMEOUT_MS }]);
+  });
 });
 
 // ── Review round 1 of Phase 3 ───────────────────────────────────────
@@ -641,6 +683,56 @@ describe("a suspended workspace (review round 1 of Phase 3)", () => {
       "u-max": "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there. Google still lists WorkwrK because this Google account is also connected elsewhere in WorkwrK.",
       "u-mia": "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there, and its access to your Google account is being removed.",
     });
+  });
+});
+
+// Review round 3 of Phase 3: the notice was decided one 500-row chunk at a
+// time. Two people of one workspace who connected the same Google account
+// (a shared mailbox) fell in different chunks: the first was told Google
+// still lists WorkwrK, then the second's chunk revoked the whole grant.
+describe("a suspension's notice across chunks and sweep ticks (review round 3 of Phase 3)", () => {
+  const BEING_REMOVED = "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there, and its access to your Google account is being removed.";
+  const STILL_LISTED = "Acme was suspended, so WorkwrK disconnected Google from its AI teammates there. Google still lists WorkwrK because this Google account is also connected elsewhere in WorkwrK.";
+
+  it("tells both people of a shared account it is being removed when they fall in different chunks, and revokes it once", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    seedConnection({ organizationId: "org1", userId: "u-p1", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-shared-1") });
+    for (let i = 0; i < 499; i += 1) seedConnection({ organizationId: "org1", userId: `u-f${i}`, accountSub: `sub-f${i}` });
+    seedConnection({ organizationId: "org1", userId: "u-p2", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-shared-2") });
+    expect(await endSuspendedWorkspaceConnections("org1")).toBe(501);
+    const said = Object.fromEntries(cdb.notifications.map((n) => [n.userId, n.message]));
+    // Before: u-p1 read STILL_LISTED, though the next chunk revoked the grant.
+    expect(said["u-p1"]).toBe(BEING_REMOVED);
+    expect(said["u-p2"]).toBe(BEING_REMOVED);
+    expect(cdb.raw.filter((q) => q.includes("AND NOT (")).length).toBe(2);
+    // The revoke is still decided by every live row: queued once, by the second chunk.
+    const sent = fetch.mock.calls.map((c) => new URLSearchParams(String(c[1]?.body)).get("token"));
+    expect(sent.filter((t) => t?.startsWith("rt-shared"))).toEqual(["rt-shared-2"]);
+  });
+
+  it("tells the first person of a shared account the same when the sweep ends them a tick apart", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.suspendedOrgs.add("org1");
+    seedConnection({ organizationId: "org1", userId: "u-p1", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-shared-1") });
+    seedConnection({ organizationId: "org1", userId: "u-p2", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-shared-2") });
+    await sweepConnections(new Date(), { leaversLimit: 1, revokeLimit: 0, budgetMs: 20_000 });
+    expect(cdb.notifications.map((n) => [n.userId, n.message])).toEqual([["u-p1", BEING_REMOVED]]);
+    // The grant is still held by u-p2's row, so nothing is queued yet.
+    expect(cdb.revocations).toEqual([]);
+    await sweepConnections(new Date(), { leaversLimit: 1, revokeLimit: 0, budgetMs: 20_000 });
+    expect(cdb.notifications.map((n) => [n.userId, n.message])).toEqual([["u-p1", BEING_REMOVED], ["u-p2", BEING_REMOVED]]);
+    expect(cdb.revocations).toHaveLength(1);
+  });
+
+  it("still says Google keeps listing WorkwrK when a connection outside the suspended workspace holds the account", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.orgs.set("org2", "Live Co");
+    seedConnection({ organizationId: "org1", userId: "u-p1", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-1") });
+    seedConnection({ organizationId: "org1", userId: "u-p2", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-2") });
+    seedConnection({ organizationId: "org2", userId: "u-p3", accountSub: "sub-shared", refreshTokenSealed: sealToken("rt-3") });
+    expect(await endSuspendedWorkspaceConnections("org1")).toBe(2);
+    expect(Object.fromEntries(cdb.notifications.map((n) => [n.userId, n.message]))).toEqual({ "u-p1": STILL_LISTED, "u-p2": STILL_LISTED });
+    expect(cdb.revocations).toEqual([]);
   });
 });
 

@@ -45,10 +45,15 @@ export function connectFailed(code: string): NextResponse {
   return redirect(absoluteUrl(`/account/connections?ai_error=${encodeURIComponent(code)}#ai-google`));
 }
 
-/** Back to the card, connected, naming each product Google did not grant. */
-export function connectDone(partial: readonly string[]): NextResponse {
+/**
+ * Back to the card, connected, naming each product Google did not grant, and
+ * saying when another Google account ended the person's allows (review round
+ * 3 of Phase 3: ai_allows=cleared).
+ */
+export function connectDone(partial: readonly string[], o: { allowsCleared?: boolean } = {}): NextResponse {
   const q = new URLSearchParams({ ai: "connected" });
   for (const p of partial) q.append("ai_partial", p);
+  if (o.allowsCleared) q.set("ai_allows", "cleared");
   return redirect(absoluteUrl(`/account/connections?${q.toString()}#ai-google`));
 }
 

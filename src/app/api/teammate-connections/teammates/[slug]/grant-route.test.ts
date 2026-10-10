@@ -38,6 +38,7 @@ import { requireApp } from "@/lib/app-gate";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { allowPrints, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
 import { cdb, connectorDb, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
+import { LOCK_WAIT_TX_TIMEOUT_MS } from "@/lib/connectors/connections";
 import { PUT } from "./route";
 
 const MAX = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false };
@@ -256,6 +257,17 @@ describe("PUT /api/teammate-connections/teammates/[slug]", () => {
     cdb.connections[0].products = ["calendar"];
     const lost = await put("ops", { gmail: true, expect: shown(agent) });
     expect(await lost.json()).toMatchObject({ code: "not_granted" });
+  });
+
+  // Review round 3 of Phase 3: the read FOR SHARE waits behind a reconnect's
+  // FOR UPDATE, which can wait on a revoke holding the account's lock; with
+  // Prisma's default five seconds the Allow failed with a 500.
+  it("allows as long as the transactions it can wait behind", async () => {
+    const agent = seedAgent({ slug: "ops" });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    expect((await put("ops", { gmail: true, expect: shown(agent) })).status).toBe(200);
+    expect(cdb.txOptions).toEqual([{ timeout: LOCK_WAIT_TX_TIMEOUT_MS }]);
+    expect(LOCK_WAIT_TX_TIMEOUT_MS).toBe(20_000);
   });
 
   // Review round 2 of Phase 3: a shared memory an Admin saved on the Memory

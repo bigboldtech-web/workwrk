@@ -162,8 +162,10 @@ export type TeammateMessageView =
       origin?: MessageOrigin;
       /** A continue after the person decided a card. */
       resume?: boolean;
+      /** The turn read the person's Gmail or Google Calendar (meta.readGoogle): its links are shown, never clickable (review round 3 of Phase 3). */
+      readGoogle?: true;
     })
-  | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef })
+  | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef; readGoogle?: true })
   | (MessageBase & {
       kind: "event";
       event: TeammateEventKind | null;
@@ -479,6 +481,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
           ...(agentId && agentName ? { agentName } : {}),
           ...(origin ? { origin } : {}),
           ...(meta?.resume === true ? { resume: true } : {}),
+          ...(meta?.readGoogle === true ? { readGoogle: true as const } : {}),
         };
       }
       return null;
@@ -494,6 +497,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
           runId: str(meta?.runId),
           dueAt: iso(str(meta?.dueAt)),
         },
+        ...(meta?.readGoogle === true ? { readGoogle: true as const } : {}),
       };
     case "EVENT": {
       const event = meta?.event;

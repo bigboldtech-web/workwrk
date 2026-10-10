@@ -342,12 +342,17 @@ export default function PrivacyPage() {
                   sealed token alone until Google confirms, and is dropped after
                   its last try or seven days. Review of step 5: the nightly
                   backups (scripts/backup/backup.sh, each file encrypted, at
-                  most 90 days) hold those rows, sealed, like every other row. */}
+                  most 90 days) hold those rows, sealed, like every other row.
+                  Review round 3 of Phase 3: deleting one's account
+                  (src/app/api/me/delete) now blanks the words of the
+                  person's teammate chats, of the requests they were asked to
+                  approve and of their runs' output, so "stays" ends there. */}
               <p>
                 Google connection tokens are deleted when you disconnect or leave, as above; if Google has not yet confirmed
                 that WorkwrK&apos;s access is removed, one encrypted token is kept until it does, for at most seven days. Our
                 encrypted backups hold the encrypted tokens too, for at most 90 days, as above. What a teammate wrote back to
-                you stays in your chat with it and in your run history, and its requests stay as every teammate request does.
+                you stays in your chat with it and in your run history, and its requests stay as every teammate request does,
+                until you delete your account, which erases their words.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>

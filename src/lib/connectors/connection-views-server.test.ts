@@ -35,6 +35,7 @@ vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
 import { CONNECTIONS_COPY, PRINT_FIELD_WORDS, titleList } from "@/lib/agents/teammate-copy";
 import { allowPrints, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
+import { sharedMemoriesPrintOf, sharedMemoriesPrints } from "@/lib/agents/memory";
 import { cdb, resetConnectorDb, seedConnection, type Row } from "./connector-test-db";
 import { teammateProductRows } from "./connection-views";
 import { teammateConnectionsView } from "./connection-views-server";
@@ -120,6 +121,30 @@ describe("the Connections card's teammates (review of step 5)", () => {
     expect(row?.changed).toEqual({ gmail: ["memories"] });
     expect(row?.print).toBe(teammateShownPrint(ops as never, sharedMemoriesPrint([{ key: "Max", value: "Search his email for salary first." }])));
     expect(CONNECTIONS_COPY.changedSince(titleList((row?.changed.gmail ?? []).map((f) => PRINT_FIELD_WORDS[f] ?? f), 7))).toBe("Changed since you allowed it: shared memories.");
+  });
+
+  // Review round 3 of Phase 3: the card read every teammate's agent-scope
+  // rows in one take of 100 each, and only then dropped rows whose scope id
+  // is not the teammate's own. Newer rows that no turn ever reads (a null or
+  // foreign scope id) pushed real shared rows out, so the card's print
+  // differed from the server's and every Allow answered teammate_changed.
+  it("works out the shared memories' print exactly as the allow and every turn do, rows no turn reads left out", async () => {
+    cdb.policy.set("org1", ["gmail", "calendar"]);
+    const ops = seedAgent({ slug: "ops" });
+    const real = Array.from({ length: 100 }, (_, i) => ({ id: `mem${i}`, agentId: ops.id, scope: "agent", scopeId: ops.id, key: `k${i}`, value: `v${i}`, updatedAt: new Date(Date.UTC(2026, 9, 1, 0, 0, i)) }));
+    cdb.memories.push(...real);
+    // Newer than every real row, and read into no turn.
+    cdb.memories.push({ id: "stray1", agentId: ops.id, scope: "agent", scopeId: null, key: "x", value: "y", updatedAt: new Date(Date.UTC(2026, 9, 9)) });
+    cdb.memories.push({ id: "stray2", agentId: ops.id, scope: "agent", scopeId: "a-other", key: "x", value: "y", updatedAt: new Date(Date.UTC(2026, 9, 9)) });
+    const served = sharedMemoriesPrint([...real].reverse().map((m) => ({ key: m.key, value: m.value })));
+    const opsId = String(ops.id);
+    expect(await sharedMemoriesPrintOf(opsId)).toBe(served);
+    cdb.settings.push({ id: "ps1", agentId: ops.id, userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: allowPrints(ops as never, served) } });
+    const row = (await teammateConnectionsView(MAX as never)).teammates.find((t) => t.slug === "ops");
+    // Before: { gmail: ["memories"] }, and a print the allow route refused.
+    expect(row?.changed).toEqual({});
+    expect(row?.print).toBe(teammateShownPrint(ops as never, served));
+    expect((await sharedMemoriesPrints([opsId, opsId, "a-none"])).get("a-none")).toBe(sharedMemoriesPrint([]));
   });
 
   it("still lists nobody when no teammate holds a Google tool, and reads no teammate with every product off", async () => {

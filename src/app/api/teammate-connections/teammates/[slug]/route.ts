@@ -59,7 +59,7 @@ import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { requireApp } from "@/lib/app-gate";
 import { teammateGoogleUse } from "@/lib/connectors/connection-views-server";
 import { productsOfTools } from "@/lib/connectors/connection-views";
-import { connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
+import { LOCK_WAIT_TX_TIMEOUT_MS, connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
 import { CONNECTOR_PRODUCTS, parseProducts, type ConnectorProduct } from "@/lib/connectors/products";
 import { prisma } from "@/lib/prisma";
 
@@ -166,7 +166,8 @@ export async function PUT(req: Request, { params }: Params) {
       }
     }
     return { ok: true, memories };
-  });
+    // As long as the transactions it can wait behind (review round 3 of Phase 3).
+  }, { timeout: LOCK_WAIT_TX_TIMEOUT_MS });
   if (!written.ok) {
     if (written.code === "not_connected") return teammateError(409, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
     if (written.code === "not_granted") return teammateError(409, "not_granted", CONNECTION_ROUTE_ERRORS.notGranted(productWord(written.product)));

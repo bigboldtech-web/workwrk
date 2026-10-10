@@ -1295,7 +1295,16 @@ async function main() {
   t = await say(max, inbox.slug, "email olivia@proof.test about 'Account' saying 'Which one'");
   const acct = t.approvals.find((a) => a.toolName === "send_email");
   gm = await googleMark();
-  check("Max reconnects Google as max.other@proof.test", aiOf(await connectAs(max, "max.other@proof.test")) === "connected" && (await connectionOf(org.id, max.id))?.accountSub === "sub-max-other");
+  const switched = await connectAs(max, "max.other@proof.test");
+  check("Max reconnects Google as max.other@proof.test", aiOf(switched) === "connected" && (await connectionOf(org.id, max.id))?.accountSub === "sub-max-other");
+  // Review round 3 of Phase 3: an allow carries no account, so another
+  // account ends every allow he gave here, and the card says why.
+  const afterSwitch = await prisma.agentPersonSetting.findUnique({ where: { agentId_userId: { agentId: ops.id, userId: max.id } }, select: { connectorProducts: true, connectorPrints: true } });
+  check(
+    "reconnecting as another account ended his allow of Ops, and the card he lands on says so",
+    (afterSwitch?.connectorProducts ?? []).length === 0 && (afterSwitch?.connectorPrints ?? null) === null && switched?.searchParams.get("ai_allows") === "cleared",
+    { afterSwitch, ai_allows: switched?.searchParams.get("ai_allows") ?? null },
+  );
   check("the account it replaced is revoked at once", routesOf(await googleSince(gm), "oauth.revoke").some((e) => e.sub === "sub-max" && e.outcome === "revoked"));
   if (acct) {
     gm = await googleMark();

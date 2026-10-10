@@ -88,9 +88,10 @@ export default function ConnectionsPage() {
   // so a reload, a bookmark or a Back does not re-announce a connection
   // that happened ten minutes ago.
   const [outcome] = useState(() => ({ connected: sp.get("connected"), error: sp.get("error") }));
-  // The AI teammates' Google connect lands here too, with its own three
-  // (docs/plans/ai-teammates-phase3.md step 2), read and stripped the same way.
-  const [aiOutcome] = useState<TeammateConnectOutcome>(() => ({ ai: sp.get("ai"), partial: sp.getAll("ai_partial"), error: sp.get("ai_error") }));
+  // The AI teammates' Google connect lands here too, with its own (ai,
+  // ai_partial, ai_error, and ai_allows since review round 3 of Phase 3;
+  // docs/plans/ai-teammates-phase3.md step 2), read and stripped the same way.
+  const [aiOutcome] = useState<TeammateConnectOutcome>(() => ({ ai: sp.get("ai"), partial: sp.getAll("ai_partial"), error: sp.get("ai_error"), allowsCleared: sp.get("ai_allows") === "cleared" }));
   const stripped = useRef(false);
   useEffect(() => {
     const any = outcome.connected || outcome.error || aiOutcome.ai || aiOutcome.error || aiOutcome.partial.length > 0;
