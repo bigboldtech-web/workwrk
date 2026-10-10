@@ -113,11 +113,12 @@ export const ERASURE_METHOD = "erasure";
  */
 export const ERASURE_FINISHED_METHOD = "erasure_finished";
 
-/** Round 5's code went live on this day: its erasures have a consent record and no AccountErasure row. */
-export const ROUND5_ERASURES_SINCE = new Date("2026-10-10T00:00:00.000Z");
-
-/** How far back the bridge reads consent records each tick: round 5's own window, so the read stays bounded. */
-export const ROUND5_BRIDGE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * Erasures the bridge gives a row each tick at most. It reads every erasure
+ * consent record with no date bound (review round 7 of Phase 3), through the
+ * partial index of prisma/sql/2026-10-11-ai-teammates-phase3-round7.sql.
+ */
+export const ERASURE_BRIDGE_PER_TICK = 200;
 
 /** The parts of one pass, in order (the CHECK on "AccountErasure"."part"). The most sensitive first: chats and requests hold whole email bodies. */
 export const ERASURE_PARTS = ["chats", "requests", "runs", "questions", "activity", "memories", "routines"] as const;
@@ -482,17 +483,21 @@ export async function continueErasure(userId: string, deadline: number, now: Dat
 }
 
 /**
- * Erasures made on round 5's code (live from ROUND5_ERASURES_SINCE) have a
- * consent record and no AccountErasure row: each gets one, its moment the
- * consent record's, a pass starting now (round 5's own pass may have left
- * words). Only for an account the erasure really anonymised (deleted, and
- * the address only POST /api/me/delete writes), with no row yet and no
- * round 5 "finished" record. One statement over the last
- * ROUND5_BRIDGE_WINDOW_MS of consent records. Harmless to keep; it can go
- * once no such record is left. Answers how many rows it wrote.
+ * Erasures that have a consent record and no AccountErasure row get one, its
+ * moment the consent record's, a pass starting now. Those are every erasure
+ * made before round 6 of Phase 3 (review round 7): before round 3, the
+ * erasure blanked an Ask AI question's text but kept the person's chats, the
+ * requests they approved, their runs' output, their memories and their
+ * routines' words; round 5's pass may have left some. Before, only erasures
+ * from 2026-10-10 on were bridged, so the older ones kept those words for
+ * good. Only for an account the erasure really anonymised (deleted, and the
+ * address only POST /api/me/delete writes, as it has since the route was
+ * added), with no row yet and no round 5 "finished" record. One statement, at
+ * most ERASURE_BRIDGE_PER_TICK a tick, over the erasure records' own index;
+ * once every erasure has a row it reads that short list and writes nothing.
+ * Answers how many rows it wrote.
  */
-async function bridgeRound5Erasures(now: Date): Promise<number> {
-  const since = new Date(Math.max(ROUND5_ERASURES_SINCE.getTime(), now.getTime() - ROUND5_BRIDGE_WINDOW_MS)).toISOString();
+async function bridgeUnsweptErasures(now: Date): Promise<number> {
   return prisma.$executeRaw`
     INSERT INTO "AccountErasure" ("userId", "erasedAt", "part", "cursor", "passStartedAt", "lastTriedAt", "tries", "finishedAt", "createdAt")
     SELECT DISTINCT ON (c."userId") c."userId", c."createdAt", ${ERASURE_START.part}::text, NULL::jsonb,
@@ -500,12 +505,12 @@ async function bridgeRound5Erasures(now: Date): Promise<number> {
       FROM "ConsentRecord" c
       JOIN "User" u ON u."id" = c."userId"
      WHERE c."method" = ${ERASURE_METHOD}
-       AND c."createdAt" >= (${since}::timestamptz AT TIME ZONE 'UTC')
        AND u."deletedAt" IS NOT NULL
        AND u."email" = 'deleted-' || u."id" || '@workwrk.anon'
        AND NOT EXISTS (SELECT 1 FROM "AccountErasure" a WHERE a."userId" = c."userId")
        AND NOT EXISTS (SELECT 1 FROM "ConsentRecord" f WHERE f."userId" = c."userId" AND f."method" = ${ERASURE_FINISHED_METHOD})
      ORDER BY c."userId", c."createdAt" DESC
+     LIMIT ${ERASURE_BRIDGE_PER_TICK}
     ON CONFLICT ("userId") DO NOTHING`;
 }
 
@@ -544,7 +549,7 @@ export async function finishErasures(now: Date, o: { limit: number; budgetMs: nu
   const deadline = Date.now() + o.budgetMs;
   const counts: ErasureSweepCounts = { found: 0, blanked: 0, finished: 0, waiting: 0, failed: 0, overdue: 0, bridged: 0 };
   try {
-    counts.bridged = await bridgeRound5Erasures(now);
+    counts.bridged = await bridgeUnsweptErasures(now);
   } catch (err) {
     counts.failed += 1;
     console.error(`[cron-failure] run-due-agents: round 5's account erasures were not given their rows: ${errorLine(err)}`);

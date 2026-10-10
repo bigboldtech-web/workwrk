@@ -305,6 +305,11 @@ const SQL_MANIFEST = [
   // locks nothing anyone waits on but "User" for a moment, once. Before the
   // reload: the new build's delete route writes it in its transaction.
   "2026-10-11-ai-teammates-phase3-round6.sql",
+  // AI teammates, Phase 3 review round 7: a partial index on the erasure
+  // consent records only, so the bridge that reads every past erasure each
+  // tick reads that short list. Catalogue-guarded; its first build locks
+  // "ConsentRecord" (small) for a moment, once.
+  "2026-10-11-ai-teammates-phase3-round7.sql",
 ];
 
 /**
