@@ -339,10 +339,11 @@ export async function fakePrepareCall(tool: string, input: unknown, ctx: { agent
 
 const FAKE_TOOL_PROPS: Record<string, unknown> = {
   ...Object.fromEntries(
-    ["query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request", "subject", "body", "threadId", "messageId"].map((k) => [
-      k,
-      { type: "string" },
-    ]),
+    [
+      "query", "text", "conversationId", "title", "email", "channel", "assigneeEmail", "taskId", "role", "heading", "docId", "key", "value", "name", "instructions", "message", "teammate", "request", "subject", "body", "threadId", "messageId",
+      // The calendar's (Phase 3 step 4).
+      "from", "start", "end", "eventId", "response", "location", "description",
+    ].map((k) => [k, { type: "string" }]),
   ),
   // The Google tools' lists, count and flags (connector-tools.ts).
   to: { type: "array", items: { type: "string" } },
@@ -350,6 +351,11 @@ const FAKE_TOOL_PROPS: Record<string, unknown> = {
   limit: { type: "integer" },
   unreadOnly: { type: "boolean" },
   replyAll: { type: "boolean" },
+  attendees: { type: "array", items: { type: "string" } },
+  addAttendees: { type: "array", items: { type: "string" } },
+  removeAttendees: { type: "array", items: { type: "string" } },
+  with: { type: "array", items: { type: "string" } },
+  durationMinutes: { type: "integer" },
 };
 
 /** Every tool, each recording its call and answering fx.answers[tool]. */

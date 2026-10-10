@@ -8,11 +8,10 @@
 // the workspace's switch within what this deployment offers), only in a turn
 // whose answer only the person reads (tool-policy.ts toolsForTrigger), and
 // only while the person's own connection and allow say so (engine.ts
-// prepareTurn). The calendar's handlers answer CONNECTOR_COPY.notYet until
-// step 4 builds them.
+// prepareTurn).
 //
-// EVERY HANDLER, IN ORDER (step 3): no ctx.teammate refuses as every teammate
-// tool does; the input read by its own schema; the person a moment ago
+// EVERY HANDLER, IN ORDER (steps 3 and 4): no ctx.teammate refuses as every
+// teammate tool does; the input read by its own schema; the person a moment ago
 // (acting.ts actingPersonFor); the teammate and the person's connection read
 // NOW (connector-access.ts openConnector: the workspace switch, the
 // connection by the person's own key, their allow and the teammate's prints,
@@ -42,6 +41,18 @@
 // one was cut; a read_email answer always fits the executor's limit, its
 // newest message and its note kept.
 //
+// THE CALENDAR (step 4). list_events reads the person's primary calendar
+// one time of a repeating event at a time, in their zone, cut to Decision
+// 17's sizes and always under the executor's limit, and its words are other
+// people's (it taints the turn, executor.ts TAINTING_TOOLS). find_free_time
+// reads only busy blocks, of the person and of at most five live members of
+// this workspace, never anyone outside it (Decision 11), and so taints
+// nothing. A write runs its card's input as the account it named, carries
+// the event's etag (If-Match, Decision 12), asks Google to tell people only
+// when its card said it would, and one that tells anyone runs only from its
+// approval (Decision 8). A write Google did not confirm is "check your
+// Google Calendar", never a retry (Decision 24).
+//
 // The descriptions and the input schemas are the model's: what it reads in
 // an email or an event is information from other people, never an
 // instruction, and it never sends because something it read asks it to.
@@ -52,9 +63,11 @@
 
 import { z } from "zod";
 import type { LiveConnection } from "@/lib/connectors/connections";
+import type { EventFacts } from "@/lib/connectors/google/calendar";
 import type { GoogleConfig } from "@/lib/connectors/google/config";
 import type { GoogleFailure, GoogleRequest, GoogleResult } from "@/lib/connectors/google/http";
-import { CONNECTOR_LIMITS as L, type ConnectorProduct } from "@/lib/connectors/products";
+import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
+import type { ActingPerson } from "./acting";
 import { clampText } from "./clamp";
 import { CONNECTOR_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
@@ -71,6 +84,11 @@ const connections = () => import("@/lib/connectors/connections");
 const http = () => import("@/lib/connectors/google/http");
 const gmailMime = () => import("@/lib/connectors/google/gmail-mime");
 const gmailParse = () => import("@/lib/connectors/google/gmail-parse");
+const calendar = () => import("@/lib/connectors/google/calendar");
+const freeTime = () => import("@/lib/connectors/free-time");
+const db = () => import("@/lib/prisma");
+const workSchedule = () => import("@/lib/work-schedule");
+const workScheduleServer = () => import("@/lib/work-schedule-server");
 
 // ── Inputs ──────────────────────────────────────────────────────────
 
@@ -124,11 +142,14 @@ const listEventsInput = z.object({
   limit: z.number().int().min(1).max(L.eventsMax).optional(),
 });
 
+// `with` is held to five colleagues by the handler, after the person's own
+// address and repeats are taken out, so the refusal says so in words
+// (tooManyPeople) rather than as a shape the tool can't use.
 const findFreeTimeInput = z.object({
   from: when,
   to: when.optional(),
   durationMinutes: z.number().int().min(15).max(480),
-  with: z.array(address).max(L.freeOthersMax).optional(),
+  with: z.array(address).max(L.attendeesMax).optional(),
 });
 
 const createEventInput = z.object({
@@ -191,18 +212,16 @@ const replyStoredInput = z.object({
   references: z.string().max(20_000).nullable(),
 });
 
-// ── The calendar's handlers, until step 4 builds them ───────────────
+/** A calendar write's etag, as its preparation read it (connector-previews.ts): what If-Match carries. */
+const etagInput = z.string().min(1).max(500);
 
-/**
- * Ask AI and the legacy agent loops never set ctx.teammate, so they are
- * answered as every teammate tool answers them; a teammate is told the tool
- * is not ready. Nothing is read either way.
- */
-async function notReady(ctx: ToolContext): Promise<Refusal> {
-  return ctx.teammate ? { error: CONNECTOR_COPY.notYet } : { error: ERR.teammateOnly };
-}
+/** How many people a calendar change or cancel tells, as its card said (connector-previews.ts `notify`). */
+const notifyInput = z.number().int().min(0).max(100_000);
 
-// ── What every Gmail handler shares ─────────────────────────────────
+/** What a change or a cancel of an event runs with, besides the model's own fields: fixed when it was prepared. */
+const eventStoredInput = z.object({ etag: etagInput, notify: notifyInput });
+
+// ── What every handler shares ───────────────────────────────────────
 
 function refused(error: string): Refusal {
   return { error };
@@ -228,6 +247,8 @@ async function badInputOf(error: z.ZodError): Promise<Refusal> {
 /** One call's way in: the person, the teammate and the person's own connection, read now (see the file header). */
 interface Opened {
   agentId: string;
+  /** The person as they are now: the calendar's days and times are read on their clock. */
+  person: ActingPerson;
   connection: LiveConnection;
   cfg: GoogleConfig;
 }
@@ -247,7 +268,7 @@ async function openFor(ctx: ToolContext, t: TeammateToolContext, product: Connec
     const held = approval ? (await connectorRules()).heldForRefusal(opened.reason) : null;
     return held ? { error: opened.error, held } : refused(opened.error);
   }
-  return { agentId: t.agentId, connection: opened.connection, cfg: opened.cfg };
+  return { agentId: t.agentId, person, connection: opened.connection, cfg: opened.cfg };
 }
 
 async function call<T>(o: Opened, req: GoogleRequest): Promise<GoogleResult<T>> {
@@ -261,13 +282,13 @@ async function touch(o: Opened): Promise<void> {
 
 /**
  * A failed Google call in the person's words (connector-rules.ts
- * googleFailureSentence), the tool's own sentence. At an approval, a failure
- * before anything was sent carries `held`, so the card waits to be approved
- * again (review of step 3).
+ * googleFailureSentence), the tool's own sentence for its own product. At an
+ * approval, a failure before anything was sent carries `held`, so the card
+ * waits to be approved again (review of step 3).
  */
 async function failed(r: { failure: GoogleFailure; retryAfter?: number }, notFound: string, tool: ConnectorToolName, t: TeammateToolContext): Promise<Refusal> {
   const rules = await connectorRules();
-  const error = rules.googleFailureSentence(r, { product: "gmail", notFound, tool });
+  const error = rules.googleFailureSentence(r, { product: TOOL_PRODUCT[tool], notFound, tool });
   const held = t.trigger === "APPROVAL" ? rules.heldForFailure(r.failure) : null;
   return held ? { error, held } : refused(error);
 }
@@ -450,10 +471,11 @@ async function searchEmailRun(ctx: ToolContext, raw: Record<string, unknown>): P
 }
 
 /**
- * The most characters a read_email answer takes as JSON, its note included:
- * under the executor's TOOL_DATA_MAX (30,000), past which wrapToolData keeps
- * only the answer's first part, so the newest messages and the note were what
- * a long thread lost (review of step 3). executor.test.ts holds the two apart.
+ * The most characters a read_email or list_events answer takes as JSON, its
+ * note included: under the executor's TOOL_DATA_MAX (30,000), past which
+ * wrapToolData keeps only the answer's first part, so the newest messages and
+ * the note were what a long thread lost (review of step 3). executor.test.ts
+ * holds the two apart.
  */
 export const READ_ANSWER_MAX = 29_000;
 
@@ -624,6 +646,430 @@ async function replyEmailRun(ctx: ToolContext, raw: Record<string, unknown>): Pr
   return { ok: true, email: { id: str(d.id) || null, threadId: str(d.threadId) || s.threadId } };
 }
 
+// ── The calendar's handlers (step 4) ────────────────────────────────
+
+/**
+ * The days a read covers, from the model's words: a first day, a last one
+ * (the same day by default), in order, at most `max` days in all. Read on
+ * the person's clock: a day the model writes is already theirs.
+ */
+async function windowDays(fromRaw: string, toRaw: string | undefined, max: number): Promise<{ from: string; to: string } | Refusal> {
+  const { dayPart, daysBetween } = await calendar();
+  const from = dayPart(fromRaw);
+  const to = toRaw === undefined ? from : dayPart(toRaw);
+  if (!from || !to) return refused(CONNECTOR_COPY.badDay);
+  const span = daysBetween(from, to);
+  if (span < 0) return refused(CONNECTOR_COPY.daysOutOfOrder);
+  if (span + 1 > max) return refused(CONNECTOR_COPY.windowTooLong(max));
+  return { from, to };
+}
+
+const isoOf = (ms: number) => new Date(ms).toISOString();
+
+/** The most people of one event the model reads; the rest are counted (attendeeCount). */
+const ATTENDEES_SHOWN = 10;
+/** The longest place shown. */
+const PLACE_SHOWN = 200;
+
+/** An event's text as the model reads it: one line, at most `max`. */
+function eventText(s: string, max: number): string {
+  return clampText(s.replace(/\s+/g, " ").trim(), max).trim();
+}
+
+/**
+ * One event as list_events tells the model, each part cut to its size
+ * (Decision 17): its description read as the person would see it (hidden
+ * HTML dropped, gmail-parse.ts) and at most 500 characters, at most ten of
+ * its people with how many there are, and whether it is one time of a
+ * repeating event.
+ */
+async function eventRow(f: EventFacts, zone: string, accountEmail: string): Promise<{ row: Record<string, unknown>; descriptionCut: boolean; attendeesCut: boolean }> {
+  const [{ htmlToText }, { isSelf, timesForModel }] = await Promise.all([gmailParse(), calendar()]);
+  const times = f.times ? timesForModel(f.times, zone) : null;
+  const text = f.description ? htmlToText(f.description).trim() : "";
+  const description = clampText(text, L.descriptionChars).trim();
+  const descriptionCut = description.length < text.length;
+  const self = f.attendees.find((p) => isSelf(p, accountEmail)) ?? null;
+  const shown = f.attendees.slice(0, ATTENDEES_SHOWN);
+  return {
+    row: {
+      eventId: f.id,
+      title: eventText(f.title, L.titleMax),
+      start: times?.start ?? null,
+      end: times?.end ?? null,
+      allDay: times?.allDay ?? false,
+      location: eventText(f.location, PLACE_SHOWN),
+      organizer: f.organizer ? { name: f.organizer.name ? eventText(f.organizer.name, ADDRESS_NAME_MAX) : null, email: f.organizer.email, self: f.organizer.self } : null,
+      attendees: shown.map((p) => ({ name: p.name ? eventText(p.name, ADDRESS_NAME_MAX) : null, email: p.email, response: p.response })),
+      attendeeCount: f.attendees.length,
+      myResponse: f.organizer?.self === true ? "organizer" : (self?.response ?? null),
+      description,
+      ...(descriptionCut ? { descriptionCut: true } : {}),
+      repeating: f.instance,
+    },
+    descriptionCut,
+    attendeesCut: f.attendees.length > shown.length || f.attendeesOmitted,
+  };
+}
+
+/** list_events' note: whose words these are, and each way the answer was cut (Decision 17). */
+function calendarNoteOf(p: { more: boolean; descriptionsCut: boolean; attendeesCut: boolean }): string {
+  return [
+    CONNECTOR_COPY.calendarNote,
+    ...(p.more ? [CONNECTOR_COPY.moreEvents] : []),
+    ...(p.descriptionsCut ? [CONNECTOR_COPY.descriptionsCut] : []),
+    ...(p.attendeesCut ? [CONNECTOR_COPY.attendeesCut] : []),
+  ].join(" ");
+}
+
+/** The last index whose row passes `test`, or -1. */
+function lastIndexOf(rows: ReadonlyArray<Record<string, unknown>>, test: (r: Record<string, unknown>) => boolean): number {
+  for (let i = rows.length - 1; i >= 0; i -= 1) if (test(rows[i])) return i;
+  return -1;
+}
+
+/**
+ * list_events: the person's primary calendar between two days (at most 31),
+ * each time of a repeating event on its own, earliest first, at most 50.
+ * More than were shown is said, so a short list is never read as all there
+ * is.
+ *
+ * THE WHOLE ANSWER FITS (as read_email's, review of step 3). Past
+ * READ_ANSWER_MAX the latest events' descriptions give way first, then their
+ * lists of people (still counted), then the latest events themselves, and
+ * the note says what was cut: the earliest events and the note always reach
+ * the model.
+ */
+async function listEventsRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.list_events.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const days = await windowDays(parsed.data.from, parsed.data.to, L.listWindowDays);
+  if (isRefused(days)) return days;
+  const o = await openFor(ctx, t, "calendar");
+  if (isRefused(o)) return o;
+  const { addDays, calendarUrl, dayStart, eventFacts, PRIMARY_EVENTS } = await calendar();
+  const zone = o.person.timezone;
+  const limit = parsed.data.limit ?? L.eventsMax;
+  const params: Array<[string, string]> = [
+    ["timeMin", isoOf(dayStart(days.from, zone))],
+    ["timeMax", isoOf(dayStart(addDays(days.to, 1), zone))],
+    // One row per time of a repeating event, so an id read here names one time (connector-previews.ts).
+    ["singleEvents", "true"],
+    ["orderBy", "startTime"],
+    ["maxResults", String(limit)],
+    ["timeZone", zone],
+    ...(parsed.data.query ? ([["q", parsed.data.query]] as Array<[string, string]>) : []),
+  ];
+  const r = await call<unknown>(o, { method: "GET", url: calendarUrl(o.cfg.calendarBase, PRIMARY_EVENTS, params), write: false });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.googleRefused, "list_events", t);
+  const items = rec(r.data).items;
+  const facts = (Array.isArray(items) ? items : [])
+    .map((e) => eventFacts(e, zone))
+    .filter((f): f is EventFacts => f !== null && f.status !== "cancelled");
+  let more = typeof rec(r.data).nextPageToken === "string" || facts.length > limit;
+  const rows: Array<Record<string, unknown>> = [];
+  let descriptionsCut = false;
+  let attendeesCut = false;
+  for (const f of facts.slice(0, limit)) {
+    const one = await eventRow(f, zone, o.connection.accountEmail);
+    rows.push(one.row);
+    descriptionsCut ||= one.descriptionCut;
+    attendeesCut ||= one.attendeesCut;
+  }
+  const answer = () => {
+    const cut = more || descriptionsCut || attendeesCut;
+    return {
+      count: rows.length,
+      events: rows,
+      window: { from: days.from, to: days.to, zone },
+      ...(more ? { more: true } : {}),
+      ...(cut ? { partial: true } : {}),
+      note: calendarNoteOf({ more, descriptionsCut, attendeesCut }),
+    };
+  };
+  while (JSON.stringify(answer()).length > READ_ANSWER_MAX) {
+    const d = lastIndexOf(rows, (row) => typeof row.description === "string" && row.description.length > 0);
+    if (d >= 0) {
+      rows[d] = { ...rows[d], description: "", descriptionCut: true };
+      descriptionsCut = true;
+      continue;
+    }
+    const a = lastIndexOf(rows, (row) => Array.isArray(row.attendees) && row.attendees.length > 0);
+    if (a >= 0) {
+      rows[a] = { ...rows[a], attendees: [] };
+      attendeesCut = true;
+      continue;
+    }
+    if (rows.length === 0) break;
+    rows.pop();
+    more = true;
+  }
+  await touch(o);
+  return answer();
+}
+
+/** The hours a working day is searched in, on the person's clock: the work calendar keeps days and hours a day, never when a day starts. */
+const WORK_DAY_START = "09:00";
+const WORK_DAY_END = "18:00";
+
+/** "Mon": a weekday (0 for Sunday) as the model reads it. 11 October 2026 was a Sunday. */
+function weekdayName(n: number): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short" }).format(new Date(Date.UTC(2026, 9, 11 + n)));
+}
+
+/**
+ * The person's working days (their own schedule, else the workspace's:
+ * work-schedule.ts effectivePersonSchedule; a schedule of no fixed days is
+ * every day, never none), and the workspace's holidays in these days as
+ * blocks of busy time on the person's clock.
+ */
+async function workingDaysOf(person: ActingPerson, days: { from: string; to: string }): Promise<{ days: number[]; closed: Array<{ start: number; end: number }> }> {
+  const [{ readOrgWorkSchedule }, { effectivePersonSchedule }, { prisma }, { addDays, dayStart, daysBetween }] = await Promise.all([workScheduleServer(), workSchedule(), db(), calendar()]);
+  const org = await readOrgWorkSchedule(person.organizationId);
+  let own: unknown = null;
+  try {
+    own = (await prisma.user.findUnique({ where: { id: person.userId }, select: { workSchedule: true } }))?.workSchedule ?? null;
+  } catch {
+    // Unread: the workspace's days, as for someone with no schedule of their own.
+    own = null;
+  }
+  const schedule = effectivePersonSchedule(org, own);
+  const workDays = schedule.workdays.length > 0 ? [...schedule.workdays] : [0, 1, 2, 3, 4, 5, 6];
+  const closed = schedule.holidays
+    .filter((h) => daysBetween(days.from, h.date) >= 0 && daysBetween(h.date, days.to) >= 0)
+    .map((h) => ({ start: dayStart(h.date, person.timezone), end: dayStart(addDays(h.date, 1), person.timezone) }));
+  return { days: workDays, closed };
+}
+
+/** Google's free/busy id for the person's own calendar. */
+const PRIMARY = "primary";
+
+/**
+ * find_free_time: when the person, and up to five colleagues of this
+ * workspace, are all free for a meeting of this length, within the person's
+ * working days and hours, over at most 14 days. Only busy blocks are read,
+ * never what anyone is doing (Decision 11); a colleague who does not share
+ * theirs is named, and the times leave them out. Nothing here is anyone's
+ * words, so it taints nothing (executor.ts TAINTING_TOOLS).
+ */
+async function findFreeTimeRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.find_free_time.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const days = await windowDays(parsed.data.from, parsed.data.to, L.freeWindowDays);
+  if (isRefused(days)) return days;
+  const o = await openFor(ctx, t, "calendar");
+  if (isRefused(o)) return o;
+  // The colleagues: one plain address each, once, never the person; at most
+  // five; each a live person of this workspace, or nobody's calendar is read.
+  const { headerSafe, isEmailAddress } = await gmailMime();
+  const self = new Set([o.connection.accountEmail.toLowerCase(), o.person.email.toLowerCase()]);
+  const people: string[] = [];
+  for (const a of parsed.data.with ?? []) {
+    const e = a.trim();
+    if (!isEmailAddress(e)) return refused(CONNECTOR_COPY.badRecipient(clampText(headerSafe(e), 254)));
+    const lower = e.toLowerCase();
+    if (self.has(lower) || people.includes(lower)) continue;
+    people.push(lower);
+  }
+  if (people.length > L.freeOthersMax) return refused(CONNECTOR_COPY.tooManyPeople);
+  if (people.length > 0) {
+    const members = await (await connectorAccess()).workspaceMembersAmong(o.person.organizationId, people);
+    const outsider = people.find((p) => !members.has(p));
+    if (outsider) return refused(CONNECTOR_COPY.notMember(outsider));
+  }
+  const { addDays, busyBlocks, calendarUrl, dayStart, localStamp } = await calendar();
+  const zone = o.person.timezone;
+  const from = dayStart(days.from, zone);
+  const to = dayStart(addDays(days.to, 1), zone);
+  // A read sent as a POST: tried again on a timeout like any read (google/http.ts).
+  const r = await call<unknown>(o, {
+    method: "POST",
+    url: calendarUrl(o.cfg.calendarBase, "freeBusy"),
+    body: { timeMin: isoOf(from), timeMax: isoOf(to), timeZone: zone, items: [{ id: PRIMARY }, ...people.map((id) => ({ id }))] },
+    write: false,
+  });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.googleRefused, "find_free_time", t);
+  const read = busyBlocks(r.data, [PRIMARY, ...people]);
+  // Never offered as free when the person's own calendar went unread.
+  if (read.unread.includes(PRIMARY)) return refused(CONNECTOR_COPY.ownFreeBusyFailed);
+  const hours = await workingDaysOf(o.person, days);
+  const { freeSlots } = await freeTime();
+  const slots = freeSlots({
+    busy: [...read.busy, ...hours.closed],
+    from: new Date(from),
+    to: new Date(to),
+    durationMinutes: parsed.data.durationMinutes,
+    zone,
+    workDays: hours.days,
+    dayStart: WORK_DAY_START,
+    dayEnd: WORK_DAY_END,
+    now: new Date(),
+    max: L.freeSlotsMax,
+  });
+  await touch(o);
+  const more = slots.length >= L.freeSlotsMax;
+  const couldNotRead = people.filter((p) => read.unread.includes(p));
+  const notes = [...(more ? [CONNECTOR_COPY.moreFreeTime] : []), ...(couldNotRead.length > 0 ? [CONNECTOR_COPY.freeBusyUnread] : [])];
+  return {
+    count: slots.length,
+    slots: slots.map((s) => ({ start: localStamp(s.start, zone), end: localStamp(s.end, zone) })),
+    zone,
+    checked: people.filter((p) => read.read.includes(p)),
+    couldNotRead,
+    durationMinutes: parsed.data.durationMinutes,
+    workingHours: { days: hours.days.map(weekdayName), from: WORK_DAY_START, to: WORK_DAY_END, zone },
+    ...(more ? { partial: true } : {}),
+    ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+  };
+}
+
+/**
+ * A calendar write's way in: one that tells anyone else runs only from the
+ * person's approval of its card (Decision 8), never from a rule or unasked;
+ * then the person's connection now, as the account the card named
+ * (Decision 15).
+ */
+async function openWrite(ctx: ToolContext, t: TeammateToolContext, raw: Record<string, unknown>, tellsOthers: boolean): Promise<Opened | Refusal> {
+  if (tellsOthers && !fromApproval(t)) return refused(CONNECTOR_COPY.needsApproval);
+  const o = await openFor(ctx, t, "calendar");
+  if (isRefused(o)) return o;
+  return accountRefusal(raw, o.connection) ?? o;
+}
+
+/** Google's sendUpdates for a write: the people on it told exactly when its card said they would be. */
+const sendUpdates = (tells: boolean): Array<[string, string]> => [["sendUpdates", tells ? "all" : "none"]];
+
+/**
+ * create_event: the card's event on the person's primary calendar, at the
+ * moments its preparation fixed, as the account it named. With anyone
+ * invited Google emails them (sendUpdates=all), so it runs only from its
+ * approval; with nobody, nobody is told.
+ */
+async function createEventRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.create_event.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const { calendarUrl, googleTimes, storedTimes, timesForModel, PRIMARY_EVENTS } = await calendar();
+  const times = storedTimes(raw.times);
+  if (!times) return refused(ERR.notAllowed);
+  const { isEmailAddress } = await gmailMime();
+  const attendees = parsed.data.attendees ?? [];
+  if (!attendees.every((a) => isEmailAddress(a))) return refused(ERR.notAllowed);
+  const o = await openWrite(ctx, t, raw, attendees.length > 0);
+  if (isRefused(o)) return o;
+  const d = parsed.data;
+  const body = {
+    summary: d.title,
+    ...(d.description ? { description: d.description } : {}),
+    ...(d.location ? { location: d.location } : {}),
+    ...googleTimes(times),
+    ...(attendees.length > 0 ? { attendees: attendees.map((email) => ({ email })) } : {}),
+  };
+  const r = await call<unknown>(o, { method: "POST", url: calendarUrl(o.cfg.calendarBase, PRIMARY_EVENTS, sendUpdates(attendees.length > 0)), body, write: true });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "create_event", t);
+  await touch(o);
+  return { ok: true, event: { id: str(rec(r.data).id) || null, start: timesForModel(times, o.person.timezone).start } };
+}
+
+/**
+ * update_event: the card's changes to an event the person organizes, only
+ * while it is the version the card read (If-Match its etag: a change since
+ * fails as eventChanged, Decision 12). The people it sends back are the
+ * event's own list as read, with who is added and less who is taken off.
+ */
+async function updateEventRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.update_event.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const stored = eventStoredInput.safeParse(raw);
+  if (!stored.success) return refused(ERR.notAllowed);
+  const { calendarUrl, eventPath, googlePatchTimes, storedAttendees, storedTimes, timesForModel } = await calendar();
+  const times = raw.times === undefined ? null : storedTimes(raw.times);
+  if (raw.times !== undefined && !times) return refused(ERR.notAllowed);
+  const people = raw.eventAttendees === undefined ? null : storedAttendees(raw.eventAttendees);
+  if (raw.eventAttendees !== undefined && !people) return refused(ERR.notAllowed);
+  const d = parsed.data;
+  const body: Record<string, unknown> = {
+    ...(d.title !== undefined ? { summary: d.title } : {}),
+    ...(d.description !== undefined ? { description: d.description } : {}),
+    ...(d.location !== undefined ? { location: d.location } : {}),
+    ...(times ? googlePatchTimes(times) : {}),
+    ...(people ? { attendees: people } : {}),
+  };
+  if (Object.keys(body).length === 0) return refused(CONNECTOR_COPY.nothingToChangeEvent);
+  const tells = stored.data.notify > 0;
+  const o = await openWrite(ctx, t, raw, tells);
+  if (isRefused(o)) return o;
+  const r = await call<unknown>(o, {
+    method: "PATCH",
+    url: calendarUrl(o.cfg.calendarBase, eventPath(d.eventId), sendUpdates(tells)),
+    body,
+    ifMatch: stored.data.etag,
+    write: true,
+  });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "update_event", t);
+  await touch(o);
+  return { ok: true, event: { id: str(rec(r.data).id) || d.eventId, ...(times ? { start: timesForModel(times, o.person.timezone).start } : {}) } };
+}
+
+/** cancel_event: an event the person organizes, deleted only while it is the version the card read; the people on it told when the card said so. */
+async function cancelEventRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.cancel_event.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const stored = eventStoredInput.safeParse(raw);
+  if (!stored.success) return refused(ERR.notAllowed);
+  const tells = stored.data.notify > 0;
+  const o = await openWrite(ctx, t, raw, tells);
+  if (isRefused(o)) return o;
+  const { calendarUrl, eventPath } = await calendar();
+  const r = await call<unknown>(o, {
+    method: "DELETE",
+    url: calendarUrl(o.cfg.calendarBase, eventPath(parsed.data.eventId), sendUpdates(tells)),
+    ifMatch: stored.data.etag,
+    write: true,
+  });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "cancel_event", t);
+  await touch(o);
+  return { ok: true, event: { id: parsed.data.eventId } };
+}
+
+/**
+ * respond_to_invite: the person's answer, sent as the event's own list with
+ * only their answer changed (Google takes a list whole), only while it is
+ * the version the card read. The organizer is told, so it runs only from its
+ * approval (Decision 8).
+ */
+async function respondToInviteRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = CONNECTOR_INPUT.respond_to_invite.safeParse(raw);
+  if (!parsed.success) return badInputOf(parsed.error);
+  const etag = etagInput.safeParse(raw.etag);
+  const { calendarUrl, eventPath, storedAttendees } = await calendar();
+  const people = storedAttendees(raw.eventAttendees);
+  if (!etag.success || !people || people.length === 0) return refused(ERR.notAllowed);
+  const o = await openWrite(ctx, t, raw, true);
+  if (isRefused(o)) return o;
+  const r = await call<unknown>(o, {
+    method: "PATCH",
+    url: calendarUrl(o.cfg.calendarBase, eventPath(parsed.data.eventId), sendUpdates(true)),
+    body: { attendees: people },
+    ifMatch: etag.data,
+    write: true,
+  });
+  if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "respond_to_invite", t);
+  await touch(o);
+  return { ok: true, event: { id: parsed.data.eventId }, response: parsed.data.response };
+}
+
 // ── Gmail ───────────────────────────────────────────────────────────
 
 const searchEmail: ToolDefinition = {
@@ -720,11 +1166,11 @@ const listEvents: ToolDefinition = {
       from: { type: "string", description: "The first day, YYYY-MM-DD in the person's time zone" },
       to: { type: "string", description: "The last day, YYYY-MM-DD (default: the same day)" },
       query: { type: "string", description: "Only events whose words match this, up to 100 characters" },
-      limit: { type: "integer", description: "How many events, 1 to 50" },
+      limit: { type: "integer", description: "How many events, 1 to 50 (default 50)" },
     },
     required: ["from"],
   },
-  handler: notReady,
+  handler: listEventsRun,
 };
 
 const findFreeTime: ToolDefinition = {
@@ -741,7 +1187,7 @@ const findFreeTime: ToolDefinition = {
     },
     required: ["from", "durationMinutes"],
   },
-  handler: notReady,
+  handler: findFreeTimeRun,
 };
 
 const createEvent: ToolDefinition = {
@@ -753,14 +1199,14 @@ const createEvent: ToolDefinition = {
     properties: {
       title: { type: "string", description: "The event's title, up to 200 characters" },
       start: { type: "string", description: "When it starts: YYYY-MM-DDTHH:MM in the person's time zone, or YYYY-MM-DD for all day" },
-      end: { type: "string", description: "When it ends, the same way" },
+      end: { type: "string", description: "When it ends, the same way; for all day, its last day" },
       description: { type: "string", description: "Notes for the event, up to 4000 characters" },
       location: { type: "string", description: "Where it is, up to 200 characters" },
       attendees: addressList("Who to invite, by email, at most 20"),
     },
     required: ["title", "start", "end"],
   },
-  handler: notReady,
+  handler: createEventRun,
 };
 
 const updateEvent: ToolDefinition = {
@@ -772,8 +1218,8 @@ const updateEvent: ToolDefinition = {
     properties: {
       eventId: { type: "string", description: "The event's eventId, from list_events" },
       title: { type: "string", description: "A new title" },
-      start: { type: "string", description: "A new start: YYYY-MM-DDTHH:MM in the person's time zone, or YYYY-MM-DD for all day" },
-      end: { type: "string", description: "A new end, the same way" },
+      start: { type: "string", description: "A new start: YYYY-MM-DDTHH:MM in the person's time zone, or YYYY-MM-DD for all day. Alone, it moves the event and keeps its length" },
+      end: { type: "string", description: "A new end, the same way; for all day, its last day" },
       description: { type: "string", description: "New notes, up to 4000 characters" },
       location: { type: "string", description: "A new place, up to 200 characters" },
       addAttendees: addressList("People to invite, by email, at most 20"),
@@ -781,7 +1227,7 @@ const updateEvent: ToolDefinition = {
     },
     required: ["eventId"],
   },
-  handler: notReady,
+  handler: updateEventRun,
 };
 
 const cancelEvent: ToolDefinition = {
@@ -795,7 +1241,7 @@ const cancelEvent: ToolDefinition = {
     },
     required: ["eventId"],
   },
-  handler: notReady,
+  handler: cancelEventRun,
 };
 
 const respondToInvite: ToolDefinition = {
@@ -810,7 +1256,7 @@ const respondToInvite: ToolDefinition = {
     },
     required: ["eventId", "response"],
   },
-  handler: notReady,
+  handler: respondToInviteRun,
 };
 
 /** The eleven connector tools, by name (teammate-tools.ts spreads them into TEAMMATE_TOOLS). */

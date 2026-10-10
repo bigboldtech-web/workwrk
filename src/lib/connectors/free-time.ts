@@ -41,8 +41,8 @@ function formatFor(zone: string): Intl.DateTimeFormat {
   return f;
 }
 
-/** The wall clock in `zone` at `at`. */
-function wallClock(at: number, zone: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } {
+/** The wall clock in `zone` at `at` (also the calendar tools' clock, google/calendar.ts). */
+export function wallClock(at: number, zone: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } {
   const p: Record<string, string> = {};
   for (const part of formatFor(zone).formatToParts(new Date(at))) p[part.type] = part.value;
   // A runtime that still says "24" means the midnight that starts the day.
@@ -56,7 +56,7 @@ function offsetAt(at: number, zone: string): number {
 }
 
 /** The moment a wall-clock time happens in `zone`: guessed, then corrected once for a change of offset in between. */
-function momentOf(y: number, mo: number, d: number, h: number, mi: number, zone: string): number {
+export function momentOf(y: number, mo: number, d: number, h: number, mi: number, zone: string): number {
   const asUtc = Date.UTC(y, mo - 1, d, h, mi);
   const first = asUtc - offsetAt(asUtc, zone);
   return asUtc - offsetAt(first, zone);
@@ -72,7 +72,8 @@ function hoursMinutes(s: string): { h: number; m: number } | null {
   return { h, m: mi };
 }
 
-function isZone(zone: string): boolean {
+/** Whether Intl knows `zone`. */
+export function isZone(zone: string): boolean {
   try {
     formatFor(zone);
     return true;

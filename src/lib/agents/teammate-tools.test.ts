@@ -397,7 +397,7 @@ describe("teammateToolNames", () => {
 });
 
 describe("the Google connector tools (Phase 3; their Google calls are tested in connector-tools.test.ts)", () => {
-  const CALENDAR = ["list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"] as const;
+  type CalendarTool = "list_events" | "find_free_time" | "create_event" | "update_event" | "cancel_event" | "respond_to_invite";
   const INPUT = { query: "invoice", threadId: "t1", to: ["max@x.com"], subject: "x", body: "y", from: "2026-10-12", title: "x", start: "2026-10-12", end: "2026-10-12", eventId: "e1", response: "accepted", durationMinutes: 30 };
 
   it("are in the registry, and answer a caller that is no teammate as every teammate tool does, reading nothing", async () => {
@@ -409,9 +409,21 @@ describe("the Google connector tools (Phase 3; their Google calls are tested in 
     expect(h.personCalls).toBe(0);
   });
 
-  it("leave the calendar's not ready until step 4, reading nothing", async () => {
-    for (const name of CALENDAR) expect(await TEAMMATE_TOOLS[name].handler(ctx(), INPUT), name).toEqual({ error: "This Google tool isn't ready yet." });
+  it("never invite, answer an invite, or change or cancel an event others are on outside an approval, before reading anyone (Decision 8; step 4)", async () => {
+    // Before step 4 the calendar's tools answered "isn't ready yet"; each now runs, and these only from a card.
+    const times = { kind: "day", start: "2026-10-12", end: "2026-10-12" };
+    const asked: Array<[CalendarTool, Record<string, unknown>]> = [
+      ["create_event", { ...INPUT, attendees: ["mia@x.com"], times }],
+      ["update_event", { ...INPUT, etag: '"1"', notify: 2 }],
+      ["cancel_event", { ...INPUT, etag: '"1"', notify: 2 }],
+      ["respond_to_invite", { ...INPUT, etag: '"1"', eventAttendees: [{ email: "boss@x.com" }, { email: "priya@x.com" }] }],
+    ];
+    for (const [name, input] of asked) expect(await TEAMMATE_TOOLS[name].handler(ctx(), input), name).toEqual({ error: "This Google action runs only from its approval." });
     expect(h.personCalls).toBe(0);
+    // Its reads say so when this WorkwrK offers no Google, as the Gmail tools do.
+    for (const name of ["list_events", "find_free_time"] as const) {
+      expect(await TEAMMATE_TOOLS[name].handler(ctx(), { from: "2026-10-12", durationMinutes: 30 }), name).toEqual({ error: "Google isn't set up for AI teammates on this WorkwrK." });
+    }
   });
 
   it("never send or reply outside an approval, before reading anyone (Decision 8)", async () => {

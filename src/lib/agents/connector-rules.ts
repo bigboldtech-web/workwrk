@@ -17,8 +17,8 @@
 // reached, never a subject or an address.
 //
 // THE LIMITS (Decision 22). Per answer: 12 connector calls, and per tool its
-// own count; per person, 30 a minute across answers (the executor's
-// rateLimit). The calendar's counts join in step 4.
+// own count, every calendar write sharing one; per person, 30 a minute across
+// answers (the executor's rateLimit).
 
 import type { ConnectorRefusal } from "@/lib/connectors/connections";
 import type { GoogleFailure } from "@/lib/connectors/google/http";
@@ -76,13 +76,18 @@ export function connectorTrigger(trigger: string): boolean {
   return trigger === "CHAT" || trigger === "RESUME" || trigger === "ROUTINE";
 }
 
+/** The calendar's writes: an etag rides on each, and Google's answer to one is its own (step 4). */
+const CALENDAR_WRITES: ReadonlySet<ConnectorToolName> = new Set<ConnectorToolName>(["create_event", "update_event", "cancel_event", "respond_to_invite"]);
+
 /**
  * A failed Google call, in the person's words. `notFound` is the tool's own
- * (an email, a conversation); an unknown outcome is only ever a write's, and
- * says to check before asking again (Decision 24). `tool` names the call, so
- * a write's sentence is its own (review of step 3): a draft Google did not
- * confirm is checked in Drafts, never in Sent, and an email Gmail refused
- * never reads as a search to reword.
+ * (an email, a conversation, an event); an unknown outcome is only ever a
+ * write's, and says to check before asking again (Decision 24). `tool` names
+ * the call, so a write's sentence is its own (review of step 3): a draft
+ * Google did not confirm is checked in Drafts, never in Sent, a calendar
+ * change in the calendar, and an email Gmail refused never reads as a search
+ * to reword. A calendar write's 412 is the event changed since its card
+ * (Decisions 12 and 15).
  */
 export function googleFailureSentence(
   f: { failure: GoogleFailure; retryAfter?: number },
@@ -90,6 +95,7 @@ export function googleFailureSentence(
 ): string {
   const draft = o.tool === "draft_email";
   const email = o.tool === "send_email" || o.tool === "reply_email";
+  const event = o.tool !== undefined && CALENDAR_WRITES.has(o.tool);
   switch (f.failure) {
     case "not_connected":
       return CONNECTOR_COPY.notConnected;
@@ -106,10 +112,11 @@ export function googleFailureSentence(
     case "client":
       return CONNECTOR_COPY.clientBroken;
     case "bad_request":
-      return draft ? CONNECTOR_COPY.googleRejectedDraft : email ? CONNECTOR_COPY.googleRejectedEmail : CONNECTOR_COPY.googleBadRequest;
+      return draft ? CONNECTOR_COPY.googleRejectedDraft : email ? CONNECTOR_COPY.googleRejectedEmail : event ? CONNECTOR_COPY.googleRejectedEvent : CONNECTOR_COPY.googleBadRequest;
     case "unknown_outcome":
-      return draft ? CONNECTOR_COPY.unknownOutcomeDraft : CONNECTOR_COPY.unknownOutcomeEmail;
+      return draft ? CONNECTOR_COPY.unknownOutcomeDraft : event ? CONNECTOR_COPY.unknownOutcomeCalendar : CONNECTOR_COPY.unknownOutcomeEmail;
     case "changed":
+      return event ? CONNECTOR_COPY.eventChanged : CONNECTOR_COPY.googleRefused;
     case "forbidden":
       return CONNECTOR_COPY.googleRefused;
   }
@@ -168,7 +175,9 @@ export function connectorStored(result: unknown): { count: number; partial?: tru
 
 /**
  * A connector write's audit facts (Decision 16): the product, the id Google
- * gave what was made, and how many people it reached. No subject, no address.
+ * gave what was made, and how many people it reached. No subject, no address,
+ * no title. A calendar change or cancel reached the people Google told
+ * (its preparation's `notify`); a new event, the people it invited.
  */
 export function connectorAuditFacts(tool: ConnectorToolName, input: Record<string, unknown> | null, result: unknown): Record<string, unknown> {
   const r = rec(result);
@@ -176,12 +185,13 @@ export function connectorAuditFacts(tool: ConnectorToolName, input: Record<strin
   const many = (v: unknown) => (Array.isArray(v) ? v.length : 0);
   const i = input ?? {};
   const email = tool === "draft_email" || tool === "send_email" || tool === "reply_email";
+  const told = typeof i.notify === "number" && Number.isFinite(i.notify) ? Math.max(0, Math.floor(i.notify)) : null;
   return {
     provider: "google",
     product: TOOL_PRODUCT[tool],
     googleId: id,
     ...(email ? { recipients: many(i.to) + many(i.cc) } : {}),
-    ...(Array.isArray(i.attendees) ? { attendees: many(i.attendees) } : {}),
+    ...(told !== null ? { attendees: told } : Array.isArray(i.attendees) ? { attendees: many(i.attendees) } : {}),
   };
 }
 
@@ -201,11 +211,22 @@ export function emptyConnectorCounters(): ConnectorCounters {
   return { calls: 0, searches: 0, threads: 0, eventReads: 0, freeTime: 0, drafts: 0, sends: 0, calendarWrites: 0 };
 }
 
-/** Each Gmail tool's own count per answer, and what passing it says. The calendar's join in step 4. */
-export const CONNECTOR_TURN_LIMITS: Readonly<Partial<Record<ConnectorToolName, { key: keyof ConnectorCounters; max: number; sentence: string }>>> = {
+/**
+ * Each connector tool's own count per answer, and what passing it says.
+ * Typed by the name list, so a tool with no count of its own is a compile
+ * error. The four calendar writes share one count: five changes to the
+ * person's calendar an answer, whichever kind (step 4).
+ */
+export const CONNECTOR_TURN_LIMITS: Readonly<Record<ConnectorToolName, { key: keyof ConnectorCounters; max: number; sentence: string }>> = {
   search_email: { key: "searches", max: L.searchesPerTurn, sentence: CONNECTOR_COPY.tooManySearches },
   read_email: { key: "threads", max: L.threadsPerTurn, sentence: CONNECTOR_COPY.tooManyThreads },
   draft_email: { key: "drafts", max: L.draftsPerTurn, sentence: CONNECTOR_COPY.tooManyDrafts },
   send_email: { key: "sends", max: L.sendsPerTurn, sentence: CONNECTOR_COPY.tooManySends },
   reply_email: { key: "sends", max: L.sendsPerTurn, sentence: CONNECTOR_COPY.tooManySends },
+  list_events: { key: "eventReads", max: L.eventReadsPerTurn, sentence: CONNECTOR_COPY.tooManyEventReads },
+  find_free_time: { key: "freeTime", max: L.freeTimePerTurn, sentence: CONNECTOR_COPY.tooManyFreeTime },
+  create_event: { key: "calendarWrites", max: L.calendarWritesPerTurn, sentence: CONNECTOR_COPY.tooManyCalendarWrites },
+  update_event: { key: "calendarWrites", max: L.calendarWritesPerTurn, sentence: CONNECTOR_COPY.tooManyCalendarWrites },
+  cancel_event: { key: "calendarWrites", max: L.calendarWritesPerTurn, sentence: CONNECTOR_COPY.tooManyCalendarWrites },
+  respond_to_invite: { key: "calendarWrites", max: L.calendarWritesPerTurn, sentence: CONNECTOR_COPY.tooManyCalendarWrites },
 };

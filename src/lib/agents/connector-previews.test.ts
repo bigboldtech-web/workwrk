@@ -1,12 +1,16 @@
-// A Gmail write's card, decided before anything is proposed and again at its
-// approval (src/lib/agents/connector-previews.ts, through previews.ts
-// prepareCall; docs/plans/ai-teammates-phase3.md step 3): every recipient
-// one plain address, lower case and once, at most 20; who is outside the
-// workspace counted; a subject that can hide no header; a reply's recipients
-// read from its conversation when proposed and never again; the Google
-// account fixed on the card; the body the one field the person may edit;
-// and a turn that read Google offering no "don't ask again". The connector
-// tables are in memory (connector-test-db.ts) and Google is a fetch double.
+// A Gmail or Google Calendar write's card, decided before anything is
+// proposed and again at its approval (src/lib/agents/connector-previews.ts,
+// through previews.ts prepareCall; docs/plans/ai-teammates-phase3.md steps 3
+// and 4): every recipient one plain address, lower case and once, at most
+// 20; who is outside the workspace counted; a subject that can hide no
+// header; a reply's recipients read from its conversation when proposed and
+// never again; the Google account fixed on the card; the body the one field
+// the person may edit; and a turn that read Google offering no "don't ask
+// again". A calendar card is IRREVERSIBLE whenever it tells anyone else, only
+// for events the person organizes (or, for an answer, is invited to), held
+// to the event's etag, and fixed to moments, never words read again. The
+// connector tables are in memory (connector-test-db.ts) and Google is a
+// fetch double.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,14 +19,14 @@ vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/c
 import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { sealToken } from "@/lib/connectors/seal";
 import { prepareCall, type PrepareContext, type Prepared } from "./previews";
-import { CONNECTOR_COPY, EDIT_FIELD_LABELS } from "./teammate-copy";
+import { CONNECTOR_COPY, EDIT_FIELD_LABELS, EVENT_CHANGE_LABELS, changeLine } from "./teammate-copy";
 
 const BASE = "https://g.test";
 const ACCOUNT = { sub: "sub-max", email: "max@mail.test" };
 
-function ctx(o: { trigger?: string; tainted?: boolean } = {}): PrepareContext {
+function ctx(o: { trigger?: string; tainted?: boolean; zone?: string } = {}): PrepareContext {
   return {
-    person: { userId: "u-max", organizationId: "org1", name: "Max Chen", firstName: "Max", email: "max@proof.test", timezone: "UTC" } as never,
+    person: { userId: "u-max", organizationId: "org1", name: "Max Chen", firstName: "Max", email: "max@proof.test", timezone: o.zone ?? "UTC" } as never,
     teammate: { agentId: "a1", agentName: "Inbox helper", trigger: (o.trigger ?? "CHAT") as never },
     ...(o.tainted ? { tainted: true } : {}),
   };
@@ -297,5 +301,195 @@ describe("draft_email's card", () => {
     expect(tainted.preview).not.toHaveProperty("alwaysKey");
     expect(tainted.preview).not.toHaveProperty("alwaysLabel");
     expect(tainted.preview.lines?.at(-1)).toBe(CONNECTOR_COPY.askedAfterReading);
+  });
+});
+
+// ── Google Calendar (step 4) ─────────────────────────────────────────
+
+describe("the calendar's cards (step 4)", () => {
+  const SELF = { email: ACCOUNT.email, self: true, responseStatus: "accepted" };
+  let events: Record<string, Record<string, unknown>> = {};
+  const calEvent = (id: string, o: Record<string, unknown> = {}) => ({
+    id,
+    etag: `"${id}-1"`,
+    status: "confirmed",
+    summary: "Team sync",
+    start: { dateTime: "2026-10-13T10:00:00Z" },
+    end: { dateTime: "2026-10-13T11:00:00Z" },
+    organizer: { email: ACCOUNT.email, self: true },
+    ...o,
+  });
+  const calendarCalls = () => calls.filter((u) => u.pathname.startsWith("/calendar/"));
+  const C = CONNECTOR_COPY;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_AGENT_PRODUCTS", "gmail,calendar");
+    cdb.policy.set("org1", ["gmail", "calendar"]);
+    cdb.connections[0].products = ["gmail", "calendar"];
+    events = {
+      // Max organizes it; Mia (here through a second membership) and an outsider are on it.
+      "e-team": calEvent("e-team", {
+        attendees: [{ ...SELF, organizer: true }, { email: "mia@proof.test", responseStatus: "accepted" }, { email: "outsider@ext.test", responseStatus: "needsAction" }],
+      }),
+      "e-solo": calEvent("e-solo", { summary: "Focus block" }),
+      "e-boss": calEvent("e-boss", { organizer: { email: "boss@ext.test", displayName: "Boss" }, attendees: [{ email: "boss@ext.test", organizer: true, responseStatus: "accepted" }, SELF] }),
+      "e-invite": calEvent("e-invite", {
+        summary: "Board review",
+        start: { dateTime: "2026-10-14T09:00:00Z" },
+        end: { dateTime: "2026-10-14T10:00:00Z" },
+        organizer: { email: "boss@ext.test", displayName: "Boss" },
+        attendees: [{ email: "boss@ext.test", organizer: true, responseStatus: "accepted" }, { ...SELF, responseStatus: "needsAction" }],
+      }),
+      "e-weekly": calEvent("e-weekly", { recurrence: ["RRULE:FREQ=WEEKLY"] }),
+      "e-weekly_20261013": calEvent("e-weekly_20261013", { recurringEventId: "e-weekly", attendees: [{ ...SELF, organizer: true }, { email: "mia@proof.test", responseStatus: "accepted" }] }),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (raw: string) => {
+        const url = new URL(String(raw));
+        calls.push(url);
+        if (url.pathname === "/token") return new Response(JSON.stringify(tokenReply.json), { status: tokenReply.status });
+        const m = /^\/calendar\/v3\/calendars\/primary\/events\/(.+)$/.exec(url.pathname);
+        const ev = m ? events[decodeURIComponent(m[1])] : undefined;
+        if (ev) return new Response(JSON.stringify(ev), { status: 200, headers: { etag: String(ev.etag) } });
+        return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
+      }),
+    );
+  });
+
+  it("create_event with one outsider invited is IRREVERSIBLE, says Google emails them, and counts the outsider (Decision 8)", async () => {
+    const r = ok(
+      await prepareCall(
+        "create_event",
+        { title: "Plan the offsite", start: "2026-10-13T15:00", end: "2026-10-13T16:00", attendees: ["outsider@ext.test", "Olivia@Proof.test", "olivia@proof.test", ACCOUNT.email] },
+        ctx({ zone: "Asia/Kolkata" }),
+      ),
+    );
+    expect(r.risk).toBe("IRREVERSIBLE");
+    // The person themselves is never invited; 15:00 in Kolkata is fixed as 09:30 UTC.
+    expect(r.input).toMatchObject({
+      title: "Plan the offsite",
+      attendees: ["outsider@ext.test", "olivia@proof.test"],
+      account: ACCOUNT,
+      times: { kind: "time", start: "2026-10-13T09:30:00.000Z", end: "2026-10-13T10:30:00.000Z", zone: "Asia/Kolkata" },
+    });
+    expect(r.preview).toMatchObject({
+      title: 'Create event "Plan the offsite"',
+      lines: [
+        C.whenLine("Tue 13 Oct, 15:00 to 16:00, Kolkata time"),
+        C.invitesLine("outsider@ext.test, olivia@proof.test"),
+        C.googleEmailsInvites,
+        C.outsideLine(1),
+        C.calendarOf(ACCOUNT.email),
+      ],
+      target: { label: C.calendarTarget },
+      // The title is the one field the person may change (Decision 14).
+      editable: { field: "title", label: EDIT_FIELD_LABELS.title, maxLength: 200 },
+    });
+    // Never "don't ask again" for a call that tells anyone (Decision 8).
+    expect(r.preview).not.toHaveProperty("alwaysKey");
+    // A new event reads nothing of anyone's: no Google call, nothing tainted.
+    expect(calendarCalls()).toEqual([]);
+    expect(r).not.toHaveProperty("readGoogle");
+    // Nobody else on it: the person's own work.
+    const solo = ok(await prepareCall("create_event", { title: "Focus", start: "2026-10-13", end: "2026-10-13" }, ctx()));
+    expect(solo.risk).toBe("INTERNAL");
+    expect(solo.input.times).toEqual({ kind: "day", start: "2026-10-13", end: "2026-10-13" });
+    expect(solo.preview.lines).toEqual([C.whenLine("Tue 13 Oct, all day"), C.onlyYourCalendar, C.calendarOf(ACCOUNT.email)]);
+    expect(solo.preview.alwaysKey).toBe("create_event");
+    // An end before the start, or a day beside a time, is refused in words.
+    expect(await prepareCall("create_event", { title: "x", start: "2026-10-13T16:00", end: "2026-10-13T15:00" }, ctx())).toEqual({ ok: false, error: C.endBeforeStart });
+    expect(await prepareCall("create_event", { title: "x", start: "2026-10-13", end: "2026-10-13T15:00" }, ctx())).toEqual({ ok: false, error: C.badTime });
+  });
+
+  it("refuses to change or cancel an event someone else organizes, after reading it (Decision 12)", async () => {
+    expect(await prepareCall("update_event", { eventId: "e-boss", title: "Mine now" }, ctx())).toEqual({ ok: false, error: C.notOrganizer, readGoogle: true });
+    expect(await prepareCall("cancel_event", { eventId: "e-boss" }, ctx())).toEqual({ ok: false, error: C.notOrganizer, readGoogle: true });
+    // An event that is not there reads nothing of anyone's.
+    expect(await prepareCall("cancel_event", { eventId: "e-gone" }, ctx())).toEqual({ ok: false, error: C.eventNotFound });
+  });
+
+  it("holds a card to the event's etag: unchanged it prepares again, changed at the approval it ends with eventChanged (Decisions 12 and 15)", async () => {
+    const first = ok(await prepareCall("cancel_event", { eventId: "e-team" }, ctx()));
+    expect(first.input).toMatchObject({ eventId: "e-team", etag: '"e-team-1"', notify: 2, account: ACCOUNT });
+    expect(ok(await prepareCall("cancel_event", first.input, ctx({ trigger: "APPROVAL" }))).input).toMatchObject({ etag: '"e-team-1"', notify: 2 });
+    events["e-team"] = { ...events["e-team"], etag: '"e-team-2"' };
+    const changed = await prepareCall("cancel_event", first.input, ctx({ trigger: "APPROVAL" }));
+    // Fails without the etag check: the approval would run against an event someone changed since.
+    expect(changed).toMatchObject({ ok: false, error: C.eventChanged });
+    expect(changed).not.toHaveProperty("held");
+  });
+
+  it("respond_to_invite is IRREVERSIBLE whatever is on the event, and sends back its own list with only the answer changed (Decision 8)", async () => {
+    const r = ok(await prepareCall("respond_to_invite", { eventId: "e-invite", response: "accepted" }, ctx()));
+    expect(r.risk).toBe("IRREVERSIBLE");
+    expect(r.readGoogle).toBe(true);
+    expect(r.input).toMatchObject({ eventId: "e-invite", response: "accepted", etag: '"e-invite-1"', account: ACCOUNT });
+    expect(r.input.eventAttendees).toEqual([{ email: "boss@ext.test", responseStatus: "accepted" }, { email: ACCOUNT.email, responseStatus: "accepted" }]);
+    expect(r.preview).toMatchObject({ title: 'Accept "Board review"', lines: [C.whenLine("Wed 14 Oct, 09:00 to 10:00, UTC"), C.organizerSees("Boss"), C.calendarOf(ACCOUNT.email)] });
+    expect(r.preview).not.toHaveProperty("alwaysKey");
+    // The person's own event has no invite to answer; one they are not on, nothing either.
+    expect(await prepareCall("respond_to_invite", { eventId: "e-solo", response: "declined" }, ctx())).toEqual({ ok: false, error: C.ownEvent, readGoogle: true });
+    events["e-boss"] = { ...events["e-boss"], attendees: [{ email: "boss@ext.test", organizer: true }] };
+    expect(await prepareCall("respond_to_invite", { eventId: "e-boss", response: "declined" }, ctx())).toEqual({ ok: false, error: C.notInvited, readGoogle: true });
+  });
+
+  it("cancels an event others are on only on a card that says who is told; the person's own goes at once, from the bin", async () => {
+    const team = ok(await prepareCall("cancel_event", { eventId: "e-team" }, ctx()));
+    expect(team.risk).toBe("IRREVERSIBLE");
+    expect(team.preview.title).toBe('Cancel event "Team sync"');
+    expect(team.preview.lines).toEqual([C.whenLine("Tue 13 Oct, 10:00 to 11:00, UTC"), C.tellsCancelled(2), C.outsideLine(1), C.calendarOf(ACCOUNT.email)]);
+    const solo = ok(await prepareCall("cancel_event", { eventId: "e-solo" }, ctx()));
+    expect(solo.risk).toBe("INTERNAL");
+    expect(solo.input.notify).toBe(0);
+    expect(solo.preview.lines).toEqual([C.whenLine("Tue 13 Oct, 10:00 to 11:00, UTC"), C.restoreFromBin, C.calendarOf(ACCOUNT.email)]);
+  });
+
+  it("changes one time of a repeating event, says so, and refuses the whole series", async () => {
+    // A planted "cancel my weekly sync" would otherwise end every time of it, for everyone.
+    expect(await prepareCall("cancel_event", { eventId: "e-weekly" }, ctx())).toEqual({ ok: false, error: C.wholeSeries, readGoogle: true });
+    const one = ok(await prepareCall("cancel_event", { eventId: "e-weekly_20261013" }, ctx()));
+    expect(one.preview.lines).toContain(C.oneTimeOnly);
+    expect(one.risk).toBe("IRREVERSIBLE");
+  });
+
+  it("update_event moves an event keeping its length, fixes the moment, and at the approval keeps it whatever the zone is now", async () => {
+    const r = ok(
+      await prepareCall(
+        "update_event",
+        { eventId: "e-team", start: "2026-10-15T10:00", addAttendees: ["olivia@proof.test", "MIA@proof.test"], removeAttendees: ["outsider@ext.test", ACCOUNT.email] },
+        ctx({ zone: "Asia/Kolkata" }),
+      ),
+    );
+    expect(r.readGoogle).toBe(true);
+    expect(r.risk).toBe("IRREVERSIBLE");
+    // 10:00 in Kolkata is 04:30 UTC; the hour the event lasted is kept.
+    expect(r.input.times).toEqual({ kind: "time", start: "2026-10-15T04:30:00.000Z", end: "2026-10-15T05:30:00.000Z", zone: "Asia/Kolkata" });
+    // Mia is on it already, and the person is never taken off their own event.
+    expect(r.input).toMatchObject({ addAttendees: ["olivia@proof.test"], removeAttendees: ["outsider@ext.test"], notify: 3 });
+    expect(r.input.eventAttendees).toEqual([{ email: ACCOUNT.email, responseStatus: "accepted" }, { email: "mia@proof.test", responseStatus: "accepted" }, { email: "olivia@proof.test" }]);
+    expect(r.preview.lines).toEqual([
+      C.whenLine("Tue 13 Oct, 15:30 to 16:30, Kolkata time"),
+      changeLine(EVENT_CHANGE_LABELS.time, "Thu 15 Oct, 10:00 to 11:00, Kolkata time"),
+      changeLine(EVENT_CHANGE_LABELS.adds, "olivia@proof.test"),
+      changeLine(EVENT_CHANGE_LABELS.removes, "outsider@ext.test"),
+      // Mia, the outsider taken off, and Olivia are told.
+      C.tellsPeople(3),
+      C.outsideLine(1),
+      C.calendarOf(ACCOUNT.email),
+    ]);
+    // The person moved to New York since: the approval runs the moment the card showed, not 10:00 there.
+    const approved = ok(await prepareCall("update_event", r.input, ctx({ trigger: "APPROVAL", zone: "America/New_York" })));
+    expect(approved.input.times).toEqual(r.input.times);
+    expect(approved.input).toMatchObject({ etag: '"e-team-1"', notify: 3, eventAttendees: r.input.eventAttendees });
+  });
+
+  it("update_event of the person's own event with nobody on it is INTERNAL, and a change that changes nothing is refused", async () => {
+    const r = ok(await prepareCall("update_event", { eventId: "e-solo", title: "Deep work", location: "Room 4" }, ctx()));
+    expect(r.risk).toBe("INTERNAL");
+    expect(r.input).toMatchObject({ title: "Deep work", location: "Room 4", notify: 0 });
+    expect(r.input).not.toHaveProperty("eventAttendees");
+    expect(r.preview.lines).toContain(C.onlyYourCalendar);
+    expect(await prepareCall("update_event", { eventId: "e-solo", title: "Focus block" }, ctx())).toEqual({ ok: false, error: C.nothingToChangeEvent, readGoogle: true });
   });
 });

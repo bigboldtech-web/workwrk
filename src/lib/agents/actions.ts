@@ -45,16 +45,18 @@
 // AI runs a tool (the person's own context, no teammate). They never offer
 // "don't ask again" and never make a chat carry on.
 //
-// A GOOGLE CARD (docs/plans/ai-teammates-phase3.md step 3) meets the person's
+// A GOOGLE CARD (docs/plans/ai-teammates-phase3.md steps 3 and 4) meets the person's
 // Google as it is now, before anything is prepared: its product turned off in
 // the workspace, or this deployment no longer offering Google, CANCELS it
 // with that reason (Decision 21); a connection that is gone, needs
 // reconnecting or lacks the product leaves it PENDING (connection_needed),
 // so the person can reconnect and approve it; an allow the person withdrew
 // CANCELS it. Its preparation then checks the Google account the card named
-// (Decision 15), and a send or a reply gets a fresh access token before the
-// swap. Anything found before Google was sent the email, by the preparation,
-// a refresh or the handler itself (a grant revoked, Google busy or not
+// (Decision 15), and a send, a reply or a calendar write gets a fresh access
+// token before the swap; a calendar card's event is read again and a change
+// since (its etag, Decision 12) ends it. Anything found before Google was
+// sent the write, by the preparation, a refresh or the handler itself (a
+// grant revoked, Google busy or not
 // answering), leaves it PENDING too (connection_needed or retry_later), with
 // a sentence that says it can be approved again; only a write whose outcome
 // is unknown, or that Google refused as written, ends it (review of step 3).

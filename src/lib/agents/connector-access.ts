@@ -103,6 +103,24 @@ export async function openConnector(a: { person: ActingPerson; agentId: string; 
   return { ok: true, agent, connection: access.connection, cfg: access.cfg };
 }
 
+/**
+ * Which of these addresses, lower case, are live people of this workspace
+ * (an anchored member, or a member through a second membership): one query.
+ * A card counts who is outside the workspace by it (connector-previews.ts
+ * outsideCount), and find_free_time reads the free/busy of no one else
+ * (Decision 11: never outsiders).
+ */
+export async function workspaceMembersAmong(organizationId: string, emails: readonly string[]): Promise<Set<string>> {
+  const wanted = [...new Set(emails.map((e) => e.toLowerCase()))];
+  if (wanted.length === 0) return new Set();
+  const rows = await prisma.$queryRaw<Array<{ email: string }>>`
+    SELECT lower(u."email") AS "email" FROM "User" u
+     WHERE lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+       AND (u."organizationId" = ${organizationId}
+            OR EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))`;
+  return new Set(rows.map((r) => String(r.email).toLowerCase()));
+}
+
 /** Per product a turn's teammate holds tools for: whether it may use it this turn, and if not why. */
 export type TurnConnectorAccess = Partial<Record<ConnectorProduct, { ok: true } | { ok: false; reason: ConnectorRefusal; changed?: PrintField[] }>>;
 

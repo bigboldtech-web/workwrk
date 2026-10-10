@@ -1,7 +1,8 @@
 // What a Google connector write would do, decided by the server before
 // anything is proposed and again at its approval
-// (docs/plans/ai-teammates-phase3.md step 3; previews.ts prepareCall calls
-// prepareConnector).
+// (docs/plans/ai-teammates-phase3.md steps 3 and 4; previews.ts prepareCall
+// calls prepareConnector). The email cards first, then the calendar's (the
+// section "Google Calendar" below says what holds for those).
 //
 // THE CARD IS WHAT RUNS. Every recipient is one plain address (never a name,
 // a list or an encoded word), lower case and once; at most 20 in all; the
@@ -19,7 +20,8 @@
 // joined the thread since is never added.
 //
 // ACCESS IS READ NOW, AS THE HANDLER READS IT (connector-access.ts
-// openConnector), at the first preparation and again at the approval.
+// openConnector), at the first preparation and again at the approval, for
+// the product the tool uses (Gmail or Google Calendar).
 //
 // A REPLY'S FIRST PREPARATION READS GMAIL (review of step 3): the
 // conversation's last sender, subject and headers. Its answer says so
@@ -36,27 +38,41 @@
 // Server-only: reads prisma and Google.
 
 import type { LiveConnection } from "@/lib/connectors/connections";
+import {
+  calendarUrl,
+  changedTimes,
+  eventFacts,
+  eventPath,
+  eventTimes,
+  isSelf,
+  readWhen,
+  sameTimes,
+  storedTimes,
+  wallOf,
+  type EventTimes,
+} from "@/lib/connectors/google/calendar";
 import type { GoogleConfig } from "@/lib/connectors/google/config";
 import { freshAccess, googleCall } from "@/lib/connectors/google/http";
 import { decodeHeaderWords, dedupeKey, headerSafe, isEmailAddress, parseAddressList } from "@/lib/connectors/google/gmail-mime";
 import { headerOf } from "@/lib/connectors/google/gmail-parse";
-import { CONNECTOR_LIMITS as L } from "@/lib/connectors/products";
-import { prisma } from "@/lib/prisma";
+import { CONNECTOR_LIMITS as L, TOOL_PRODUCT } from "@/lib/connectors/products";
 import { clampText } from "./clamp";
-import { openConnector } from "./connector-access";
+import { openConnector, workspaceMembersAmong } from "./connector-access";
 import { googleFailureSentence, heldForFailure, heldForRefusal, type HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
-import { ACTION_VERB, CONNECTOR_COPY, quotedTitle } from "./teammate-copy";
+import { zoneName } from "./schedule-words";
+import { ACTION_VERB, CONNECTOR_COPY, EVENT_CHANGE_LABELS, RESPONSE_VERB, TEAMMATE_TOOL_ERRORS as ERR, changeLine, quotedTitle } from "./teammate-copy";
 import { CONNECTOR_INPUT } from "./connector-tools";
 import { badInput, cleanOutwardText } from "./teammate-tools";
+import type { ToolRisk } from "./tool-policy";
 import type { ConnectorToolName } from "./tool-names";
 
 /** A refusal; at an approval, `held` when nothing was sent and the card can wait. */
 type Refused = { error: string; held?: HeldCode };
 
-/** A Google failure as a refusal: its sentence, and at an approval whether the card waits. */
+/** A Google failure as a refusal: its sentence (the tool's own product and words), and at an approval whether the card waits. */
 function refusedBy(f: Parameters<typeof googleFailureSentence>[0], o: { notFound: string; tool: ConnectorToolName; approval: boolean }): Refused {
-  const error = googleFailureSentence(f, { product: "gmail", notFound: o.notFound, tool: o.tool });
+  const error = googleFailureSentence(f, { product: TOOL_PRODUCT[o.tool], notFound: o.notFound, tool: o.tool });
   const held = o.approval ? heldForFailure(f.failure) : null;
   return held ? { error, held } : { error };
 }
@@ -106,16 +122,11 @@ export function checkedRecipients(toRaw: readonly string[], ccRaw: readonly stri
   return { to, cc };
 }
 
-/** How many of these addresses are not live people of this workspace (an anchored member, or a member through a second membership): one query. */
+/** How many of these addresses are not live people of this workspace (connector-access.ts workspaceMembersAmong: one query). */
 export async function outsideCount(organizationId: string, emails: readonly string[]): Promise<number> {
   const wanted = [...new Set(emails.map((e) => e.toLowerCase()))];
   if (wanted.length === 0) return 0;
-  const rows = await prisma.$queryRaw<Array<{ email: string }>>`
-    SELECT lower(u."email") AS "email" FROM "User" u
-     WHERE lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
-       AND (u."organizationId" = ${organizationId}
-            OR EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))`;
-  const inside = new Set(rows.map((r) => String(r.email).toLowerCase()));
+  const inside = await workspaceMembersAmong(organizationId, wanted);
   return wanted.filter((e) => !inside.has(e)).length;
 }
 
@@ -253,10 +264,12 @@ function replyFactsStored(raw: Record<string, unknown>): ReplyFacts | Refused {
 
 /**
  * Prepare one connector write for the person (previews.ts prepareCall's
- * connector cases; see the file header). The calendar's writes answer
- * CONNECTOR_COPY.notYet until step 4; a read never reaches here.
+ * connector cases; see the file header). A read never reaches here
+ * (prepareCall passes every READ tool through), so a tool with no
+ * preparation of its own answers notYet rather than being proposed unchecked.
  */
 export async function prepareConnector(tool: ConnectorToolName, raw: Record<string, unknown>, ctx: PrepareContext): Promise<(Found & { readGoogle?: true }) | (Refused & { readGoogle?: true })> {
+  if (tool === "create_event" || tool === "update_event" || tool === "cancel_event" || tool === "respond_to_invite") return prepareCalendar(tool, raw, ctx);
   if (tool !== "draft_email" && tool !== "send_email" && tool !== "reply_email") return { error: CONNECTOR_COPY.notYet };
   const approval = ctx.teammate.trigger === "APPROVAL";
   const parsed = CONNECTOR_INPUT[tool].safeParse(raw);
@@ -350,4 +363,355 @@ export async function prepareConnector(tool: ConnectorToolName, raw: Record<stri
       target: { label: CONNECTOR_COPY.sentFolderTarget },
     },
   });
+}
+
+// ── Google Calendar (step 4) ────────────────────────────────────────
+//
+// THE PERSON'S OWN EVENTS RUN, ANYTHING THAT TELLS SOMEONE ELSE WAITS
+// (Decisions 8 and 12). A new event with nobody invited, and a change or a
+// cancel of an event the person organizes with nobody else on it, is
+// INTERNAL. Inviting anyone, changing or cancelling an event others are on
+// (removing someone tells them too), and answering an invite are
+// IRREVERSIBLE: Google emails them at once, so they always wait on a card of
+// their own (teammate-thread.ts standsAlone), never "don't ask again"
+// (tool-policy.ts NOTIFY_ESCALATES), and Google is asked to tell people
+// (sendUpdates) exactly when the card said it would (`notify`, and a new
+// event's attendees).
+//
+// ONLY THE PERSON'S OWN, ONLY ONE TIME. A change or a cancel is only of an
+// event Google says the person organizes (organizer.self), an answer only to
+// an event Google lists them on (attendees[].self). A repeating event as a
+// whole is refused: one change would change every time of it for everyone,
+// and the worst case of a planted "cancel my weekly sync" is the series gone.
+// A teammate changes one time (list_events reads the times one by one), and
+// the card says so (oneTimeOnly).
+//
+// THE CARD'S EVENT IS THE ONE THAT CHANGES (Decisions 12 and 15). A change, a
+// cancel and an answer read the event first and store its etag; at the
+// approval the event is read again and a different etag refuses with
+// eventChanged, and the write itself carries the etag (If-Match), so an
+// event changed between the two still fails (412) rather than being
+// overwritten. Times are fixed as moments when first prepared
+// (google/calendar.ts), and the people a change sends back are the event's
+// own list as read, so nothing is worked out again from words at the approval.
+//
+// READING THE EVENT TAINTS THE TURN (Decision 9, as a reply's conversation
+// does, review of step 3). Its title, description and people are other
+// people's words; once Google answered with them, every later write of the
+// turn asks (readGoogle). The model reads none of them here: refusals are the
+// server's sentences, the card is the person's, and what the model and the
+// history call the write is its kind (connector-rules.ts connectorTitle).
+
+type CalendarWrite = "create_event" | "update_event" | "cancel_event" | "respond_to_invite";
+
+interface CreateEventIn {
+  title: string;
+  start: string;
+  end: string;
+  description?: string;
+  location?: string;
+  attendees?: string[];
+}
+
+interface UpdateEventIn {
+  eventId: string;
+  title?: string;
+  start?: string;
+  end?: string;
+  description?: string;
+  location?: string;
+  addAttendees?: string[];
+  removeAttendees?: string[];
+}
+
+/** The longest place an event keeps (connector-tools.ts createEventInput). */
+const PLACE_MAX = 200;
+/** The longest notes an event keeps. */
+const NOTES_MAX = 4000;
+
+/** One line of an event's text: links made plain (cleanOutwardText), no line break, at most `max`. */
+function eventLine(s: string, max: number): string {
+  return headerSafe(cleanOutwardText(s, { talk: false, max })).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The people a card invites or takes off: each one plain address, lower
+ * case, once, never the person themselves (their connected account, or the
+ * address Google flags as theirs).
+ */
+function checkedAttendees(raw: readonly string[], drop: readonly string[]): string[] | Refused {
+  const seen = new Set<string>(drop.filter(Boolean).map((d) => d.toLowerCase()));
+  const out: string[] = [];
+  for (const r of raw) {
+    const a = String(r ?? "").trim();
+    if (!isEmailAddress(a)) return { error: CONNECTOR_COPY.badRecipient(clampText(headerSafe(a), 254)) };
+    const lower = a.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    out.push(lower);
+  }
+  return out;
+}
+
+/** "Tue 13 Oct": a day as a card names it, assembled from Intl's parts so the words do not move with the runtime's locale data. */
+function dayLabel(day: string): string {
+  const [y, mo, d] = day.split("-").map(Number);
+  const p: Record<string, string> = {};
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }).formatToParts(new Date(Date.UTC(y, mo - 1, d)));
+  for (const part of parts) p[part.type] = part.value;
+  return `${p.weekday} ${p.day} ${p.month}`;
+}
+
+/**
+ * When an event is, as its card says it, on the person's clock: its start
+ * and its end, so what runs is what the card shows ("Tue 13 Oct, 15:00 to
+ * 16:00, Kolkata time"), or its days ("Tue 13 Oct, all day").
+ */
+function eventWhen(t: EventTimes, zone: string): string {
+  if (t.kind === "day") return CONNECTOR_COPY.allDaySpan(dayLabel(t.start), t.end !== t.start ? dayLabel(t.end) : null);
+  const s = wallOf(Date.parse(t.start), zone);
+  const e = wallOf(Date.parse(t.end), zone);
+  return CONNECTOR_COPY.timedSpan(`${dayLabel(s.day)}, ${s.time}`, e.day === s.day ? e.time : `${dayLabel(e.day)}, ${e.time}`, zoneName(zone));
+}
+
+/** What every calendar card ends with: the person's own calendar, by the account it is in (Decision 15). */
+function calendarCard(title: string, lines: string[], account: { email: string }, body?: string): Found["preview"] {
+  return {
+    title,
+    ...(body ? { body } : {}),
+    lines: [...lines, CONNECTOR_COPY.calendarOf(account.email)],
+    // No address: the sweep's line for a change it can't confirm reads
+    // "Check your Google Calendar before asking again." (unconfirmedLine).
+    target: { label: CONNECTOR_COPY.calendarTarget },
+  };
+}
+
+/**
+ * Prepare one calendar write for the person (see the section above). The
+ * person's connection is read now, as the handler reads it; at an approval
+ * the stored account is kept and compared, and a fresh token is fetched
+ * before anything else, so a grant revoked at Google is found while the card
+ * can still wait (review of step 3).
+ */
+async function prepareCalendar(tool: CalendarWrite, raw: Record<string, unknown>, ctx: PrepareContext): Promise<(Found & { readGoogle?: true }) | (Refused & { readGoogle?: true })> {
+  const approval = ctx.teammate.trigger === "APPROVAL";
+  const parsed = CONNECTOR_INPUT[tool].safeParse(raw);
+  if (!parsed.success) return badInput(parsed.error);
+
+  const opened = await openConnector({ person: ctx.person, agentId: ctx.teammate.agentId, product: "calendar", forApproval: approval });
+  if (!opened.ok) {
+    const held = approval ? heldForRefusal(opened.reason) : null;
+    return held ? { error: opened.error, held } : { error: opened.error };
+  }
+  const { connection, cfg } = opened;
+  const account = accountFor(raw, connection, approval);
+  if ("error" in account) return account;
+  if (approval) {
+    const fresh = await freshAccess(connection, cfg);
+    if (!fresh.ok) return refusedBy(fresh, { notFound: CONNECTOR_COPY.eventNotFound, tool, approval });
+  }
+  const zone = ctx.person.timezone;
+  const org = ctx.person.organizationId;
+  if (tool === "create_event") return createEventCard(parsed.data as CreateEventIn, raw, { approval, zone, org, account, accountEmail: connection.accountEmail });
+
+  // A change, a cancel or an answer: the event as it is now.
+  const eventId = (parsed.data as { eventId: string }).eventId;
+  const got = await googleCall<unknown>(connection, cfg, { method: "GET", url: calendarUrl(cfg.calendarBase, eventPath(eventId)), write: false });
+  if (!got.ok) return refusedBy(got, { notFound: CONNECTOR_COPY.eventNotFound, tool, approval });
+  // Google answered with the event: other people's words reached this
+  // preparation, whatever follows (see the section above).
+  const read = <T extends object>(v: T): T & { readGoogle: true } => ({ ...v, readGoogle: true as const });
+  const ev = eventFacts(got.data, zone);
+  if (!ev || ev.status === "cancelled") return read({ error: CONNECTOR_COPY.eventNotFound });
+  const etag = ev.etag ?? got.etag ?? null;
+  // No etag, no write: nothing could hold it to the event the card showed.
+  if (!etag) return read({ error: ERR.notAllowed });
+  if (approval && str(raw.etag) !== etag) return read({ error: CONNECTOR_COPY.eventChanged });
+  if (ev.series) return read({ error: CONNECTOR_COPY.wholeSeries });
+
+  const mine = (p: { self: boolean; email: string }) => isSelf(p, connection.accountEmail);
+  const self = ev.attendees.find(mine) ?? null;
+  const others = [...new Set(ev.attendees.filter((p) => !mine(p)).map((p) => p.email.toLowerCase()))];
+  const title = ev.title.trim() ? short(ev.title) : CONNECTOR_COPY.untitledEvent;
+  const when = ev.times ? [CONNECTOR_COPY.whenLine(eventWhen(ev.times, zone))] : [];
+  const once = ev.instance ? [CONNECTOR_COPY.oneTimeOnly] : [];
+
+  if (tool === "respond_to_invite") {
+    if (ev.organizer?.self === true) return read({ error: CONNECTOR_COPY.ownEvent });
+    if (!self) return read({ error: CONNECTOR_COPY.notInvited });
+    // Google takes a change of the list as the whole list: one it did not
+    // send whole would drop the people it left out.
+    if (ev.attendeesOmitted) return read({ error: CONNECTOR_COPY.attendeesHidden });
+    // Parsed by respond_to_invite's own schema above, which requires it.
+    const response = (parsed.data as unknown as { response: "accepted" | "declined" | "tentative" }).response;
+    const selfEmail = self.email.toLowerCase();
+    // The event's own list, as read, with only the person's answer changed.
+    const eventAttendees = ev.writableAttendees.map((a) => (str(a.email).toLowerCase() === selfEmail ? { ...a, responseStatus: response } : a));
+    const organizer = short(ev.organizer?.name?.trim() || ev.organizer?.email || "") || CONNECTOR_COPY.someoneElse;
+    return read({
+      input: { eventId: ev.id, response, etag, eventAttendees, account },
+      // The organizer is told, whoever else is on it (Decision 8).
+      risk: "IRREVERSIBLE" as ToolRisk,
+      preview: calendarCard(quotedTitle(RESPONSE_VERB[response], title), [...when, CONNECTOR_COPY.organizerSees(organizer), ...once], account),
+    });
+  }
+
+  // A change or a cancel: only of an event the person organizes (Decision 12).
+  if (ev.organizer?.self !== true) return read({ error: CONNECTOR_COPY.notOrganizer });
+
+  if (tool === "cancel_event") {
+    // A list Google cut short still has someone on it to tell.
+    const notify = ev.attendeesOmitted ? Math.max(others.length, 1) : others.length;
+    const told = notify > 0 ? [CONNECTOR_COPY.tellsCancelled(notify), CONNECTOR_COPY.outsideLine(await outsideCount(org, others))] : [CONNECTOR_COPY.restoreFromBin];
+    return read({
+      input: { eventId: ev.id, etag, notify, account },
+      risk: (notify > 0 ? "IRREVERSIBLE" : "INTERNAL") as ToolRisk,
+      preview: calendarCard(quotedTitle(ACTION_VERB.cancel_event ?? "", title), [...when, ...told, ...once], account),
+    });
+  }
+
+  // update_event: one line per part it changes, each as it will be.
+  const d = parsed.data as UpdateEventIn;
+  const input: Record<string, unknown> = { eventId: ev.id, etag, account };
+  const changes: string[] = [];
+  let body: string | undefined;
+  if (d.title !== undefined) {
+    const t = eventLine(d.title, L.titleMax);
+    if (!t) return read({ error: CONNECTOR_COPY.emptyTitle });
+    if (t !== ev.title.trim()) {
+      input.title = t;
+      changes.push(changeLine(EVENT_CHANGE_LABELS.title, short(t)));
+    }
+  }
+  // The new times: at the approval the moments the card stored, never the
+  // words read again in a zone that may have changed since.
+  let times: EventTimes | null = null;
+  if (approval) {
+    if (raw.times !== undefined) {
+      times = storedTimes(raw.times);
+      if (!times) return read({ error: ERR.notAllowed });
+    }
+  } else if (d.start !== undefined || d.end !== undefined) {
+    const start = d.start === undefined ? null : readWhen(d.start, zone);
+    const end = d.end === undefined ? null : readWhen(d.end, zone);
+    if ((d.start !== undefined && !start) || (d.end !== undefined && !end)) return read({ error: CONNECTOR_COPY.badTime });
+    const next = changedTimes(ev.times, start, end, zone);
+    if (next === "order") return read({ error: CONNECTOR_COPY.endBeforeStart });
+    if (typeof next === "string") return read({ error: CONNECTOR_COPY.badTime });
+    if (!sameTimes(next, ev.times)) times = next;
+  }
+  if (times) {
+    input.times = times;
+    changes.push(changeLine(EVENT_CHANGE_LABELS.time, eventWhen(times, zone)));
+  }
+  if (d.location !== undefined) {
+    const v = eventLine(d.location, PLACE_MAX);
+    if (v !== ev.location.trim()) {
+      input.location = v;
+      changes.push(changeLine(EVENT_CHANGE_LABELS.place, v ? short(v) : CONNECTOR_COPY.noValue));
+    }
+  }
+  if (d.description !== undefined) {
+    const v = cleanOutwardText(d.description, { talk: false, max: NOTES_MAX });
+    if (v !== ev.description.trim()) {
+      input.description = v;
+      changes.push(changeLine(EVENT_CHANGE_LABELS.notes, v ? short(v) : CONNECTOR_COPY.noValue));
+      // Every word of the new notes is on the card: the people on it read them.
+      if (v) body = v;
+    }
+  }
+  const drop = [connection.accountEmail, self?.email ?? ""];
+  const onIt = new Set(ev.attendees.map((p) => p.email.toLowerCase()));
+  let adds: string[] = [];
+  let removes: string[] = [];
+  if (d.addAttendees && d.addAttendees.length > 0) {
+    const c = checkedAttendees(d.addAttendees, drop);
+    if (!Array.isArray(c)) return read(c);
+    adds = c.filter((a) => !onIt.has(a));
+  }
+  if (d.removeAttendees && d.removeAttendees.length > 0) {
+    const c = checkedAttendees(d.removeAttendees, drop);
+    if (!Array.isArray(c)) return read(c);
+    removes = c.filter((a) => onIt.has(a));
+  }
+  if (adds.length > 0 || removes.length > 0) {
+    if (ev.attendeesOmitted) return read({ error: CONNECTOR_COPY.attendeesHidden });
+    const gone = new Set(removes);
+    input.addAttendees = adds;
+    input.removeAttendees = removes;
+    // The event's own list as read, less who is taken off, with who is added.
+    input.eventAttendees = [...ev.writableAttendees.filter((a) => !gone.has(str(a.email).toLowerCase())), ...adds.map((email) => ({ email }))];
+    if (adds.length > 0) changes.push(changeLine(EVENT_CHANGE_LABELS.adds, adds.join(", ")));
+    if (removes.length > 0) changes.push(changeLine(EVENT_CHANGE_LABELS.removes, removes.join(", ")));
+  }
+  if (changes.length === 0) return read({ error: CONNECTOR_COPY.nothingToChangeEvent });
+  // Who Google tells: everyone else on it now (who is taken off is told too), and who is added.
+  const toldOf = [...new Set([...others, ...adds])];
+  const notify = ev.attendeesOmitted ? Math.max(toldOf.length, 1) : toldOf.length;
+  input.notify = notify;
+  const told = notify > 0 ? [CONNECTOR_COPY.tellsPeople(notify), CONNECTOR_COPY.outsideLine(await outsideCount(org, toldOf))] : [CONNECTOR_COPY.onlyYourCalendar];
+  return read({
+    input,
+    risk: (notify > 0 ? "IRREVERSIBLE" : "INTERNAL") as ToolRisk,
+    preview: calendarCard(quotedTitle(ACTION_VERB.update_event ?? "", title), [...when, ...changes, ...told, ...once], account, body),
+  });
+}
+
+/**
+ * A new event on the person's own primary calendar. Nobody else on it: the
+ * person's own work (INTERNAL). Anyone invited: Google emails each of them,
+ * so it waits on its own card (IRREVERSIBLE). No Google call is made here: a
+ * new event reads nothing of anyone's.
+ */
+async function createEventCard(
+  d: CreateEventIn,
+  raw: Record<string, unknown>,
+  o: { approval: boolean; zone: string; org: string; account: { sub: string; email: string }; accountEmail: string },
+): Promise<Found | Refused> {
+  const title = eventLine(d.title, L.titleMax);
+  if (!title) return { error: CONNECTOR_COPY.emptyTitle };
+  // At the approval the moments the card stored; first, the model's words
+  // read on the person's clock, once.
+  let times: EventTimes;
+  if (o.approval) {
+    const stored = storedTimes(raw.times);
+    if (!stored) return { error: ERR.notAllowed };
+    times = stored;
+  } else {
+    const start = readWhen(d.start, o.zone);
+    const end = readWhen(d.end, o.zone);
+    if (!start || !end) return { error: CONNECTOR_COPY.badTime };
+    const t = eventTimes(start, end, o.zone);
+    if (t === "order") return { error: CONNECTOR_COPY.endBeforeStart };
+    if (t === "mixed") return { error: CONNECTOR_COPY.badTime };
+    times = t;
+  }
+  const description = d.description ? cleanOutwardText(d.description, { talk: false, max: NOTES_MAX }) : "";
+  const location = d.location ? eventLine(d.location, PLACE_MAX) : "";
+  const people = checkedAttendees(d.attendees ?? [], [o.accountEmail]);
+  if (!Array.isArray(people)) return people;
+  const input: Record<string, unknown> = {
+    title,
+    start: d.start,
+    end: d.end,
+    ...(description ? { description } : {}),
+    ...(location ? { location } : {}),
+    attendees: people,
+    times,
+    account: o.account,
+  };
+  const lines = [CONNECTOR_COPY.whenLine(eventWhen(times, o.zone))];
+  if (location) lines.push(changeLine(EVENT_CHANGE_LABELS.place, short(location)));
+  if (people.length > 0) {
+    lines.push(CONNECTOR_COPY.invitesLine(people.join(", ")), CONNECTOR_COPY.googleEmailsInvites, CONNECTOR_COPY.outsideLine(await outsideCount(o.org, people)));
+  } else {
+    lines.push(CONNECTOR_COPY.onlyYourCalendar);
+  }
+  return {
+    input,
+    risk: people.length > 0 ? "IRREVERSIBLE" : "INTERNAL",
+    // The title is the one field the person may change (Decision 14); the
+    // notes are every word the people invited read.
+    preview: calendarCard(quotedTitle(ACTION_VERB.create_event ?? "", short(title)), lines, o.account, description || undefined),
+  };
 }

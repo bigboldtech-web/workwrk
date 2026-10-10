@@ -41,8 +41,9 @@
 // answers why (a Talk answer, an allow missing, a connection to reconnect).
 //
 // A TURN THAT READ GOOGLE ASKS BEFORE EVERY WRITE (Decision 9). After a
-// search_email, read_email or list_events that worked, or a reply's
-// preparation, which reads its conversation (review of step 3), every later
+// search_email, read_email or list_events that worked, or a preparation that
+// read other people's words (a reply's conversation, review of step 3; the
+// event a calendar change, cancel or answer names, step 4), every later
 // call above READ in the turn waits on a card, whatever the person chose not
 // to be asked about, and its card offers no "don't ask again"; a teammate
 // this turn asks starts the same way. What such a read keeps in the call log
@@ -551,8 +552,9 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     agentRules: a.agentRules,
     tainted,
   });
-  // A reply's preparation read its conversation in Gmail: from here the turn
-  // has read other people's words, as after search_email (review of step 3).
+  // A reply's preparation read its conversation in Gmail, or a calendar
+  // write's the event it names (step 4): from here the turn has read other
+  // people's words, as after search_email (review of step 3).
   if (prepared.readGoogle) {
     a.counters.tainted = true;
     a.counters.readGoogle = true;
