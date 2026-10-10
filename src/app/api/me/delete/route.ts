@@ -10,7 +10,7 @@ import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/ser
 import { soleAdminWorkspaces } from "@/lib/access/self-facts";
 import { endAllConnectionsOf } from "@/lib/connectors/connections";
 import { OPEN_RUN_STATUSES } from "@/lib/agents/budget";
-import { ERASURE_INLINE_BUDGET_MS, ERASURE_METHOD, blankTeammateHistory } from "@/lib/agents/erasure-sweep";
+import { ERASURE_INLINE_BUDGET_MS, ERASURE_METHOD, continueErasure, recordErasure } from "@/lib/agents/erasure-sweep";
 import { TURN_ERRORS } from "@/lib/agents/teammate-copy";
 
 /** Thrown inside the transaction when the re-check under the lock refuses. */
@@ -58,15 +58,18 @@ class LastAdminError extends Error {
  *      last-admin re-check under them; the person's open runs and running
  *      requests failed and their User row anonymised, back to back; the small
  *      deletes and writes (notifications, idea votes and comments, person
- *      memories, their routines, at most 30); the consent record. Nothing in
+ *      memories, their routines, at most 30); the consent record, and beside
+ *      it the person's AccountErasure row (review round 6 of Phase 3: the
+ *      erasure's progress, started over if one is already there). Nothing in
  *      it reads their whole history.
- *  (b) After it commits, src/lib/agents/erasure-sweep.ts blankTeammateHistory
+ *  (b) After it commits, src/lib/agents/erasure-sweep.ts continueErasure
  *      blanks the words listed above, their AI questions' text and the
  *      network details of their activity rows, in batches of 500 rows, each
- *      its own short statement, for up to 20 seconds. The account is deleted
- *      once (a) commits, so the answer is a success whether or not (b)
- *      finished; the teammates cron (finishErasures) blanks whatever is left,
- *      within minutes, and reads them again until nothing can still arrive.
+ *      its own short statement, for up to 20 seconds, from the start, and
+ *      saves on the row where it stopped. The account is deleted once (a)
+ *      commits, so the answer is a success whether or not (b) finished; the
+ *      teammates cron (finishErasures) goes on from that place, within
+ *      minutes, and runs one more whole pass once nothing can still arrive.
  * Their AI questions and activity rows grow by one a teammate turn or write,
  * so they left (a) as well.
  *
@@ -203,8 +206,10 @@ export async function POST(req: NextRequest) {
         tx.agentRoutine.updateMany({ where: { actingForId: userId }, data: { name: "Erased", prompt: "Erased", status: "paused", pausedReason: "person_gone", nextRunAt: null } }),
       ]);
 
-      // 4) Log the erasure request itself (required evidence). The sweep
-      //    finds the erasures it has not finished by this record.
+      // 4) Log the erasure request itself (required evidence), and beside it
+      //    the erasure's progress row, which the sweep reads (review round 6
+      //    of Phase 3: it found erasures by this record alone, which POST
+      //    /api/consent could write for a living account).
       await tx.consentRecord.create({
         data: {
           userId,
@@ -222,6 +227,7 @@ export async function POST(req: NextRequest) {
           withdrawnAt: now,
         },
       });
+      await recordErasure(tx, userId, now);
     }, { timeout: 20_000, maxWait: 10_000 });
   } catch (err) {
     if (err instanceof LastAdminError) return lastAdmin();
@@ -230,12 +236,15 @@ export async function POST(req: NextRequest) {
   }
 
   // (b) The account is deleted. Their words go now, in batches within a
-  // budget; whatever this leaves, or a failure, the sweep finishes
-  // (src/lib/agents/erasure-sweep.ts finishErasures), so the answer is a
-  // success either way.
+  // budget, the place saved on the row; whatever this leaves, or a failure,
+  // the sweep finishes from there (src/lib/agents/erasure-sweep.ts
+  // finishErasures), so the answer is a success either way. A pass that
+  // reaches the end here still waits for the sweep's last pass, once nothing
+  // in flight can still write.
   try {
-    const pass = await blankTeammateHistory(userId, Date.now() + ERASURE_INLINE_BUDGET_MS);
-    if (!pass.done) console.error(`[delete] account ${userId}: words left for the erasure sweep after ${pass.rows} rows`);
+    const pass = await continueErasure(userId, Date.now() + ERASURE_INLINE_BUDGET_MS);
+    if (!pass.found) console.error(`[delete] account ${userId}: no erasure row found after the commit`);
+    else if (pass.end !== "settling") console.error(`[delete] account ${userId}: words left for the erasure sweep after ${pass.rows} rows`);
   } catch (err) {
     console.error(`[delete] account ${userId}: words left for the erasure sweep: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
   }

@@ -18,9 +18,19 @@
 -- LOCKS. The statement runs only when the index is missing, checked in the
 -- catalogue first (as 2026-10-03-message-client-id.sql), so a deploy after
 -- the first takes NO lock on this table (CREATE INDEX ... IF NOT EXISTS takes
--- its table lock before it looks). The first run's build reads the table
--- once under a SHARE lock: a teammate turn's run writes wait for that scan
--- (seconds on a large table, during the deploy) and nothing else.
+-- its table lock before it looks). The first build is a plain CREATE INDEX,
+-- not CONCURRENTLY: it holds a SHARE lock on "AgentRun" for the whole build,
+-- so every insert, update and delete of "AgentRun" waits until the build
+-- ends (every teammate turn, routine run, Ask AI tool run and run sweep), and
+-- so does every transaction queued behind one of those writes, holding its
+-- own locks while it waits. (Corrected in review round 6 of Phase 3: this
+-- said only a teammate turn's run writes wait.) It ran in production on
+-- 2026-10-10, while "AgentRun" was small, and the guard means it never
+-- builds there again. On a large "AgentRun" (another database, a restore),
+-- build it by hand first, in a quiet window, with
+--   CREATE INDEX CONCURRENTLY "AgentRun_triggeredBy_id_idx" ON "AgentRun" ("triggeredBy", "id");
+-- after which the guard skips it. CONCURRENTLY cannot run inside a DO block
+-- or a transaction, which is why this file does not use it.
 --
 -- Additive and idempotent: an index only, no row read for its content or
 -- written. Either order with the code works: without it the batches still

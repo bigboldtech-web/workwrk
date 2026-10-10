@@ -49,4 +49,16 @@ describe("POST /api/consent", () => {
     await DELETE(req("DELETE", old));
     expect(created[0]).toMatchObject({ sessionId: ID, method: "withdrawn" });
   });
+
+  // Review round 6 of Phase 3: the method was stored as the request named it,
+  // and the account erasure sweep found erasures by a record with method
+  // "erasure", so a request could make one for a living account.
+  it("stores only the banner client's own methods, and anything else as banner", async () => {
+    const post = (method: unknown) =>
+      POST(new NextRequest("https://workwrk.com/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method }) }));
+    for (const m of ["banner", "settings", "api"]) await post(m);
+    // Before: stored as named.
+    for (const m of ["erasure", "erasure_finished", "withdrawn", "Erasure", "", 7, null, { method: "erasure" }]) await post(m);
+    expect(created.map((c) => c.method)).toEqual(["banner", "settings", "api", "banner", "banner", "banner", "banner", "banner", "banner", "banner", "banner"]);
+  });
 });

@@ -22,12 +22,14 @@
 //      accounts and deleted or closed workspaces (review of step 2) and of
 //      suspended ones (review round 1 of Phase 3), and revokes Google has
 //      not confirmed are tried again (docs/plans/ai-teammates-phase3.md step 2).
-//   5. Account erasures of the last 30 days are finished
-//      (src/lib/agents/erasure-sweep.ts finishErasures): the words of a
-//      deleted person's teammate chats, requests and runs that the erasure's
-//      own pass left, or that arrived late, are blanked in batches, and each
-//      erasure is recorded finished once nothing can still arrive (review
-//      round 5 of Phase 3).
+//   5. Account erasures are finished (src/lib/agents/erasure-sweep.ts
+//      finishErasures): the words of a deleted person's teammate chats,
+//      requests and runs that the erasure's own pass left, or that arrived
+//      late, are blanked in batches, and each erasure is recorded finished
+//      once nothing can still arrive (review round 5 of Phase 3). Each one
+//      goes on from where it stopped, every one gets a fair slice of the
+//      budget, none is dropped for its age, and one not finished three days
+//      after it was asked fails the tick (review round 6 of Phase 3).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
@@ -77,10 +79,12 @@ type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
 
 /**
  * The erasure sweep (review round 5 of Phase 3): up to 50 unfinished
- * erasures a tick, oldest first, within 20 seconds, so the tick stays inside
- * the crontab's curl --max-time 290 after the routines' 120 and the
- * connectors' 20. A finished erasure is never read again, so the budget goes
- * to those with words left.
+ * erasures a tick within 20 seconds, so the tick stays inside the crontab's
+ * curl --max-time 290 after the routines' 120 and the connectors' 20. A
+ * finished erasure is never read again, so the budget goes to those with
+ * words left. Review round 6 of Phase 3: least recently tried first, each
+ * given a fair share of the 20 seconds, so one heavy history never holds up
+ * the rest.
  */
 const ERASURE_SWEEP = { limit: 50, budgetMs: 20_000 } as const;
 
@@ -157,12 +161,14 @@ async function handle(req: Request) {
   // (review round 4 of Phase 3): it is kept, and dropped after seven days, so
   // the wrong key must be found before then. So does an erasure whose pass
   // threw (review round 5 of Phase 3): it is tried again each tick, but a
-  // deleted person's words must not wait on it unseen.
+  // deleted person's words must not wait on it unseen. So does an erasure
+  // not finished three days after it was asked (review round 6 of Phase 3):
+  // it is still swept, but something is holding it up.
   const unopenable = connectors && connectors.unopenable > 0 ? 1 : 0;
   return cronResult(
     "run-due-agents",
     { actions, staleRuns, routines, legacySchedules: legacy, connectors, erasures },
-    stepsFailed + (legacy?.failed ?? 0) + unopenable + (erasures?.failed ?? 0),
+    stepsFailed + (legacy?.failed ?? 0) + unopenable + (erasures?.failed ?? 0) + (erasures?.overdue ?? 0),
   );
 }
 

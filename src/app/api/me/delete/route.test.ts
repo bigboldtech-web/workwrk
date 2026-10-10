@@ -7,12 +7,14 @@
 // for a heavy person, so the transaction is short and the words are blanked
 // in batches after it commits (src/lib/agents/erasure-sweep.ts, tested in
 // erasure-sweep.test.ts); and their Google connections end before it, so no
-// teammate reads their mail into a chat just blanked.
+// teammate reads their mail into a chat just blanked. Review round 6 of
+// Phase 3: the transaction writes the person's AccountErasure row, the
+// erasure's progress, and the pass after the commit goes on from it.
 
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-type Args = { where?: Record<string, unknown>; data?: Record<string, unknown>; select?: unknown };
+type Args = { where?: Record<string, unknown>; data?: Record<string, unknown>; select?: unknown; sql?: string; values?: unknown[] };
 
 const st = vi.hoisted(() => ({
   /** Every call, in order: the model, the operation, whether it ran in the transaction. */
@@ -22,9 +24,9 @@ const st = vi.hoisted(() => ({
   soleInTx: [] as string[],
   ended: [] as Array<{ userId: string; reason: string; at: number }>,
   endThrows: false,
-  /** Review round 5 of Phase 3: the batched blanking after the commit, and what it answers. */
+  /** Review round 5 of Phase 3: the batched blanking after the commit (round 6: continueErasure), and what it answers. */
   blanks: [] as Array<{ userId: string; deadline: number; at: number; inTx: boolean }>,
-  blankAnswer: { done: true, rows: 3 } as { done: boolean; rows: number } | Error,
+  blankAnswer: { found: true, end: "settling", rows: 3 } as { found: boolean; end: string | null; rows: number } | Error,
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -52,10 +54,10 @@ vi.mock("@/lib/connectors/connections", () => ({
     return 1;
   },
 }));
-vi.mock("@/lib/agents/erasure-sweep", () => ({
-  ERASURE_INLINE_BUDGET_MS: 20_000,
-  ERASURE_METHOD: "erasure",
-  blankTeammateHistory: async (userId: string, deadline: number) => {
+// recordErasure is the module's own, so its statement shows in the transaction.
+vi.mock("@/lib/agents/erasure-sweep", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agents/erasure-sweep")>()),
+  continueErasure: async (userId: string, deadline: number) => {
     st.blanks.push({ userId, deadline, at: st.calls.length, inTx: st.inTx });
     if (st.blankAnswer instanceof Error) throw st.blankAnswer;
     return st.blankAnswer;
@@ -88,8 +90,11 @@ vi.mock("@/lib/prisma", () => {
           };
         }
         if (key === "$executeRaw") {
-          return async () => {
-            st.calls.push({ model: "$executeRaw", op: "lock", args: {}, inTx: st.inTx });
+          return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+            const sql = strings.join("?").replace(/\s+/g, " ");
+            // The workspace locks, and (review round 6 of Phase 3) the erasure's row.
+            if (sql.includes('"AccountErasure"')) st.calls.push({ model: "accountErasure", op: "upsert", args: { sql, values }, inTx: st.inTx });
+            else st.calls.push({ model: "$executeRaw", op: "lock", args: {}, inTx: st.inTx });
             return 1;
           };
         }
@@ -118,7 +123,7 @@ beforeEach(() => {
   st.ended = [];
   st.endThrows = false;
   st.blanks = [];
-  st.blankAnswer = { done: true, rows: 3 };
+  st.blankAnswer = { found: true, end: "settling", rows: 3 };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -223,15 +228,34 @@ describe("POST /api/me/delete: a turn still going (review rounds 4 and 5 of Phas
     expect(st.blanks[0].deadline).toBeLessThanOrEqual(Date.now() + 20_000);
   });
 
-  it("answers success once the transaction committed, when the batches throw or run out of time", async () => {
+  // Review round 6 of Phase 3: this passed on code that wrote no row and
+  // never tried the pass at all; it now proves both.
+  it("answers success once the transaction committed, when the batches throw or run out of time, with the row written and the pass tried", async () => {
+    const proves = () => {
+      const commit = st.calls.findIndex((c) => c.model === "$commit");
+      const row = st.calls.findIndex((c) => c.model === "accountErasure");
+      // The row, in the transaction, before its commit.
+      expect(row).toBeGreaterThan(-1);
+      expect(st.calls[row].inTx).toBe(true);
+      expect(row).toBeLessThan(commit);
+      // The pass was tried, for this person, after the commit.
+      expect(st.blanks).toHaveLength(1);
+      expect(st.blanks[0]).toMatchObject({ userId: "u-max", inTx: false });
+      expect(st.blanks[0].at).toBeGreaterThan(commit);
+    };
     st.blankAnswer = new Error("canceling statement due to statement timeout");
     const thrown = await del();
     expect(thrown.status).toBe(200);
     expect(await thrown.json()).toMatchObject({ ok: true });
-    st.blankAnswer = { done: false, rows: 500 };
+    proves();
+
+    st.calls = [];
+    st.blanks = [];
+    st.blankAnswer = { found: true, end: "more", rows: 500 };
     const unfinished = await del();
     expect(unfinished.status).toBe(200);
     expect(await unfinished.json()).toMatchObject({ ok: true });
+    proves();
   });
 
   it("blanks nothing after a refusal under the lock", async () => {
@@ -240,5 +264,40 @@ describe("POST /api/me/delete: a turn still going (review rounds 4 and 5 of Phas
     expect(st.blanks).toEqual([]);
     // Refused before any run statement.
     expect(st.calls.filter((c) => c.model === "agentRun")).toEqual([]);
+  });
+});
+
+// Review round 6 of Phase 3: the sweep found erasures by the consent record
+// alone, restarted each from its first row every tick and dropped it after 30
+// days. The transaction now writes the erasure's own progress row, which only
+// it writes, so the sweep acts on real erasures and goes on where it stopped.
+describe("POST /api/me/delete: the erasure's progress row (review round 6 of Phase 3)", () => {
+  it("writes the person's AccountErasure row in its transaction, beside the consent record, at the erasure's moment, starting over when one is there", async () => {
+    await del();
+    const tx = txCalls();
+    const consent = tx.findIndex((c) => c.model === "consentRecord" && c.op === "create");
+    const rows = tx.filter((c) => c.model === "accountErasure");
+    // Before: no row at all.
+    expect(rows).toHaveLength(1);
+    expect(tx.indexOf(rows[0])).toBe(consent + 1);
+    const { sql, values } = rows[0].args as { sql: string; values: unknown[] };
+    expect(sql).toContain('INSERT INTO "AccountErasure"');
+    // The erasure's moment is the User row's deletedAt, and its pass starts there, at the first part.
+    const deletedAt = (tx.find((c) => c.model === "user" && c.op === "update")?.args.data as { deletedAt: Date }).deletedAt;
+    expect(values).toEqual(["u-max", deletedAt.toISOString(), "chats", deletedAt.toISOString()]);
+    // An erasure asked again starts over: the first part, no cursor, not finished, its tries moved on.
+    expect(sql).toContain('ON CONFLICT ("userId") DO UPDATE');
+    for (const reset of ['"erasedAt" = EXCLUDED."erasedAt"', '"part" = EXCLUDED."part"', '"cursor" = NULL', '"passStartedAt" = EXCLUDED."passStartedAt"', '"lastTriedAt" = NULL', '"finishedAt" = NULL', '"tries" = "AccountErasure"."tries" + 1']) {
+      expect(sql).toContain(reset);
+    }
+  });
+
+  it("writes no row when the request is refused, up front or under the lock", async () => {
+    st.sole = ["org1"];
+    expect((await del()).status).toBe(409);
+    st.sole = [];
+    st.soleInTx = ["org1"];
+    expect((await del()).status).toBe(409);
+    expect(st.calls.filter((c) => c.model === "accountErasure")).toEqual([]);
   });
 });

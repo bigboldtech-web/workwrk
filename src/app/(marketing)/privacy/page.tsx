@@ -352,13 +352,19 @@ export default function PrivacyPage() {
                   teammates cron every ten minutes
                   (src/lib/agents/erasure-sweep.ts), so a very long history
                   can take a while; "within a day" leaves the cron room to
-                  catch up. */}
+                  catch up. Review round 6 of Phase 3: the worst case is
+                  longer than a day. Each erasure goes on from where it
+                  stopped and shares each tick's 20 seconds with the others,
+                  and one more whole pass runs two hours after the request,
+                  so a history of about a million rows, or many erasures at
+                  once, takes up to a few days (one unfinished after three
+                  days alerts ops). */}
               <p>
                 Google connection tokens are deleted when you disconnect or leave, as above; if Google has not yet confirmed
                 that WorkwrK&apos;s access is removed, one encrypted token is kept until it does, for at most seven days. Our
                 encrypted backups hold the encrypted tokens too, for at most 90 days, as above. What a teammate wrote back to
                 you stays in your chat with it and in your run history, and its requests stay as every teammate request does,
-                until you delete your account, which erases their words at once, or within a day for a very long history.
+                until you delete your account, which erases their words at once for most histories, or within a few days for a very long one.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>
