@@ -21,6 +21,13 @@
 // User" again, and the erasure sweep then never recognised the account, so
 // their AI teammates' words stayed for good. Only a deactivation, and a
 // removal, still go through: switching someone off is never refused.
+// Review round 9 of Phase 3: "erased" means in the state its erasure left it
+// (src/lib/compliance/erased-account.ts). An erased account an Admin restored
+// before round 8 (deletedAt null), or removed after such a restore, is an
+// ordinary account here: edited, removed and restored as anyone is. Before,
+// every edit of it, a role change included, was refused while it was in use
+// again. A removal sets deletedAt only where it is null, so it never moves
+// an erased account's deletedAt off the erasure's moment.
 //
 // The legacy Task table (dead since Phase 2) and the check-ins no writer
 // ever fed are no longer read here.
@@ -706,9 +713,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return err(409, "This is the workspace's last Owner. Make someone else an Owner first.", { code: "last_owner" });
     }
     // tokenVersion: a removed person's open sessions end on their next check.
-    await tx.user.update({ where: { id }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
-    return null;
+    // Only where deletedAt is still null (review round 9 of Phase 3): the
+    // read above can be stale, and an account removed or erased since then
+    // keeps its deletedAt. Before, a removal racing the person's own erasure
+    // moved deletedAt off the erasure's moment, so the account left the
+    // erased state and its words were never blanked.
+    const n = await tx.user.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
+    return n.count === 0 ? ("already" as const) : null;
   });
+  // Removed already: a harmless success, nothing written or logged again.
+  if (removed === "already") return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
   if (removed) return removed;
   // A removed person's Google stops serving their AI teammates, and Google is
   // told (Decision 20); the cron sweep ends any this misses.

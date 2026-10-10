@@ -14,6 +14,13 @@
 // 50. The bridge now goes by the erasure's provenance record, 25 a tick
 // marked tried, the sweep reads several pages while its budget lasts, puts a
 // lost anonymisation back, and counts a restored account apart.
+// Review round 9 of Phase 3: the sweep acted on any deleted account with a
+// row, so an erased account an Admin restored, used again and then removed
+// was renamed "Deleted User" and blanked, its new work with it; and the
+// bridge left out every erasure round 5 finished, so one an identity
+// provider then renamed was never re-anonymised. The sweep now acts only on
+// an account in the erased state (src/lib/compliance/erased-account.ts), and
+// the bridge goes by the provenance record alone.
 // The database is an in-memory double that reads the where clauses the module
 // writes, and answers its raw statements on "AccountErasure" as Postgres
 // would, so what is blanked is what the rows hold.
@@ -34,6 +41,8 @@ const st = vi.hoisted(() => ({
   dbNow: 0,
   /** A model whose writes throw, for one person. */
   throwFor: null as { model: string; userId: string } | null,
+  /** Runs after each read of the sweep's page, as another request would between it and the slices. */
+  afterRead: null as (() => void) | null,
 }));
 
 /** Deep equality for the JSON values a where compares. */
@@ -96,6 +105,47 @@ vi.mock("@/lib/prisma", () => {
   const time = (v: unknown) => (v instanceof Date ? v.getTime() : Number.NEGATIVE_INFINITY);
   const deleted = (userId: unknown) => table("user").some((u) => u.id === userId && u.deletedAt != null);
   const anonymised = (u: Row) => same(Object.fromEntries(Object.keys(ANON("")).map((k) => [k, u[k] ?? null])), ANON(u.id as string));
+  /**
+   * Which accounts a statement treats as erased, read off its SQL (review
+   * round 9 of Phase 3): erasedStateSql's rule (the newest "erasure" record
+   * with withdrawnAt, and deletedAt within the tolerance its text names), or
+   * round 8's test, deletedAt alone.
+   */
+  const accountTest = (sql: string): ((userId: unknown) => boolean) => {
+    const near = /BETWEEN u\."deletedAt" - interval '(\d+) milliseconds' AND u\."deletedAt" \+ interval '(\d+) milliseconds'/.exec(sql);
+    if (near && sql.includes('SELECT max(ers."withdrawnAt") FROM "ConsentRecord" ers') && sql.includes(`ers."userId" = u."id" AND ers."method" = 'erasure' AND ers."withdrawnAt" IS NOT NULL`)) {
+      const tolerance = Number(near[1]);
+      if (Number(near[2]) !== tolerance) throw new Error("erasure-sweep.test: the tolerance differs on its two sides");
+      return (userId) => {
+        const u = table("user").find((x) => x.id === userId);
+        if (!u || u.deletedAt == null) return false;
+        const times = table("consentRecord")
+          .filter((c) => c.userId === userId && c.method === "erasure" && c.withdrawnAt != null)
+          .map((c) => time(c.withdrawnAt));
+        return times.length > 0 && Math.abs(time(u.deletedAt) - Math.max(...times)) <= tolerance;
+      };
+    }
+    if (sql.includes('"deletedAt" IS NOT NULL')) return deleted;
+    throw new Error(`erasure-sweep.test: no account test in ${sql}`);
+  };
+  /** A tagged template's text and values, a nested Prisma.sql fragment written in place, as Prisma does. */
+  const flatten = (strings: readonly string[], values: unknown[]): { sql: string; values: unknown[] } => {
+    let sql = strings[0];
+    const out: unknown[] = [];
+    values.forEach((v, i) => {
+      const frag = v as { strings?: unknown; values?: unknown } | null;
+      if (frag && typeof frag === "object" && Array.isArray(frag.strings) && Array.isArray(frag.values)) {
+        const inner = flatten(frag.strings as string[], frag.values as unknown[]);
+        sql += inner.sql;
+        out.push(...inner.values);
+      } else {
+        sql += "?";
+        out.push(v);
+      }
+      sql += strings[i + 1];
+    });
+    return { sql, values: out };
+  };
   const erasureOut = (r: Row) => ({
     userId: r.userId,
     erasedAt: r.erasedAt,
@@ -105,25 +155,32 @@ vi.mock("@/lib/prisma", () => {
     tries: r.tries,
   });
   /** The module's raw statements on "AccountErasure", each answered as Postgres would. */
-  const raw = (kind: "query" | "execute") => async (strings: TemplateStringsArray, ...values: unknown[]) => {
+  const raw = (kind: "query" | "execute") => async (strings: TemplateStringsArray, ...given: unknown[]) => {
     step();
-    const sql = strings.join("?").replace(/\s+/g, " ");
+    const flat = flatten(strings, given);
+    const sql = flat.sql.replace(/\s+/g, " ");
+    const values = flat.values;
     const rows = table("accountErasure");
     const log = (op: string, count?: number) => st.log.push({ model: "accountErasure", op, ...(count !== undefined ? { count } : {}) });
     if (kind === "execute" && sql.includes('INSERT INTO "AccountErasure"') && sql.includes('FROM "ConsentRecord" c')) {
       // The bridge for every erasure with no row (review round 7 of Phase 3:
       // no date bound; review round 8: by the provenance record alone, each
-      // row marked tried at its bridging).
+      // row marked tried at its bridging; review round 9: no longer leaving
+      // out a person with round 5's "erasure_finished" record, which round
+      // 8's statement asked for in its own clause).
       if (!sql.includes('c."withdrawnAt" IS NOT NULL') || !sql.includes('c."userId" IS NOT NULL') || sql.includes("@workwrk.anon") || sql.includes('u."deletedAt"')) {
         throw new Error("erasure-sweep.test: the bridge reads something other than the provenance record");
       }
-      const [part, at, method, finished, limit] = values as [string, string, string, string, number];
+      const leavesOutFinished = sql.includes('f."method" = ?');
+      const [part, at, method, ...rest] = values as [string, string, string, ...unknown[]];
+      const finished = leavesOutFinished ? (rest[0] as string) : null;
+      const limit = rest[rest.length - 1] as number;
       const records = table("consentRecord");
       const byUser = new Map<string, Row>();
       for (const c of records) {
         const u = table("user").find((x) => x.id === c.userId);
         if (c.method !== method || c.withdrawnAt == null || c.userId == null || !u) continue;
-        if (rows.some((r) => r.userId === c.userId) || records.some((f) => f.userId === c.userId && f.method === finished)) continue;
+        if (rows.some((r) => r.userId === c.userId) || (finished !== null && records.some((f) => f.userId === c.userId && f.method === finished))) continue;
         const had = byUser.get(c.userId as string);
         if (!had || (had.createdAt as Date).getTime() < (c.createdAt as Date).getTime()) byUser.set(c.userId as string, c);
       }
@@ -144,8 +201,18 @@ vi.mock("@/lib/prisma", () => {
       log("record");
       return 1;
     }
+    if (kind === "query" && sql.includes('UPDATE "User" x')) {
+      // reanonymise (review round 9 of Phase 3): one account by id, only in
+      // the erased state, only when it lost a value; it answers that state.
+      const [userId] = values as [string];
+      const erased = accountTest(sql)(userId);
+      const u = erased ? table("user").find((x) => x.id === userId && !anonymised(x)) : undefined;
+      if (u) Object.assign(u, ANON(u.id as string));
+      st.log.push({ model: "user", op: "reanonymise", count: u ? 1 : 0, ids: [userId] });
+      return [{ erased, mended: u ? 1 : 0 }];
+    }
     if (kind === "execute" && /^\s*UPDATE "User"/.test(sql)) {
-      // reanonymise (review round 8 of Phase 3): one deleted account by id, only when it lost a value.
+      // reanonymise as round 8 wrote it: one deleted account by id, only when it lost a value.
       const [userId] = values as [string];
       const u = table("user").find((x) => x.id === userId && x.deletedAt != null && !anonymised(x));
       if (u) Object.assign(u, ANON(u.id as string));
@@ -164,18 +231,20 @@ vi.mock("@/lib/prisma", () => {
       // Overdue from the later of erasedAt and createdAt, for deleted accounts; restored apart (review round 8 of Phase 3).
       if (!sql.includes('GREATEST(e."erasedAt", e."createdAt")')) throw new Error("erasure-sweep.test: overdue is not counted from the later moment");
       const [before] = values as [string];
+      const erased = accountTest(sql);
       const open = rows.filter((r) => r.finishedAt === null && table("user").some((u) => u.id === r.userId));
-      const overdue = open.filter((r) => deleted(r.userId) && Math.max(time(r.erasedAt), time(r.createdAt)) < new Date(before).getTime()).length;
-      const restored = open.filter((r) => !deleted(r.userId)).length;
+      const overdue = open.filter((r) => erased(r.userId) && Math.max(time(r.erasedAt), time(r.createdAt)) < new Date(before).getTime()).length;
+      const restored = open.filter((r) => !erased(r.userId)).length;
       log("overdue", overdue);
       return [{ overdue, restored }];
     }
     if (kind === "query" && sql.includes('FROM "AccountErasure" e') && sql.includes("LIMIT")) {
       // The sweep's read, in the partial index's order, leaving out the rows of this tick's earlier pages.
       const [settledBefore, seen, limit] = values as [string, string[], number];
+      const erased = accountTest(sql);
       const hit = rows
         .filter((r) => !seen.includes(r.userId as string))
-        .filter((r) => r.finishedAt === null && deleted(r.userId) && (r.passStartedAt !== null || (r.erasedAt as Date).getTime() <= new Date(settledBefore).getTime()))
+        .filter((r) => r.finishedAt === null && erased(r.userId) && (r.passStartedAt !== null || (r.erasedAt as Date).getTime() <= new Date(settledBefore).getTime()))
         .sort((a, b) => {
           const la = a.lastTriedAt === null ? Number.NEGATIVE_INFINITY : time(a.lastTriedAt);
           const lb = b.lastTriedAt === null ? Number.NEGATIVE_INFINITY : time(b.lastTriedAt);
@@ -183,11 +252,14 @@ vi.mock("@/lib/prisma", () => {
         })
         .slice(0, limit);
       st.log.push({ model: "accountErasure", op: "read", count: hit.length, returned: hit.map((r) => String(r.userId)) });
-      return hit.map(erasureOut);
+      const out = hit.map(erasureOut);
+      st.afterRead?.();
+      return out;
     }
     if (kind === "query" && sql.includes('FROM "AccountErasure" e') && sql.includes('WHERE e."userId" = ?')) {
       const [userId] = values as [string];
-      const hit = rows.filter((r) => r.userId === userId && r.finishedAt === null && deleted(r.userId));
+      const erased = accountTest(sql);
+      const hit = rows.filter((r) => r.userId === userId && r.finishedAt === null && erased(r.userId));
       log("readOne", hit.length);
       return hit.map(erasureOut);
     }
@@ -299,9 +371,29 @@ function seedLongChat(u: string, n: number) {
   );
 }
 
-/** A person's AccountErasure row: by default a pass under way that started after the settle time, so its end finishes it. */
+/**
+ * The erasure's provenance record, as POST /api/me/delete writes it: method
+ * "erasure", withdrawnAt at its moment, by default the account's deletedAt,
+ * which the route sets in the same transaction (review round 9 of Phase 3:
+ * the account is erased only while its deletedAt is that moment).
+ */
+function provenance(userId: string, at?: Date) {
+  const u = (st.tables.user ?? []).find((x) => x.id === userId);
+  const when = at ?? (u?.deletedAt as Date | null | undefined) ?? t(-3 * HOUR);
+  const records = (st.tables.consentRecord ??= []);
+  records.push({ id: `c-${userId}-${records.length + 1}`, userId, method: "erasure", createdAt: when, withdrawnAt: when, policyVersion: "2026-10-06" });
+}
+
+/**
+ * A person's AccountErasure row: by default a pass under way that started
+ * after the settle time, so its end finishes it. With it, the erasure's
+ * provenance record at the account's deletedAt, so the account is in the
+ * erased state (review round 9 of Phase 3).
+ */
 function erasureRow(userId: string, o: { erasedAt?: Date; passStartedAt?: Date | null; lastTriedAt?: Date | null; part?: string; cursor?: unknown; tries?: number; finishedAt?: Date | null; createdAt?: Date } = {}) {
   const erasedAt = o.erasedAt ?? t(-3 * HOUR);
+  const u = (st.tables.user ?? []).find((x) => x.id === userId);
+  provenance(userId, (u?.deletedAt as Date | null | undefined) ?? erasedAt);
   (st.tables.accountErasure ??= []).push({
     userId,
     erasedAt,
@@ -362,6 +454,7 @@ beforeEach(() => {
   st.tick = 0;
   st.dbNow = NOW.getTime();
   st.throwFor = null;
+  st.afterRead = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -468,6 +561,9 @@ describe("continueErasure", () => {
   // sweep began every erasure again from its first row.
   it("runs from the start, saves where it stopped, and never finishes the erasure it began with", async () => {
     seedLongChat("u1", ERASURE_BATCH * 3);
+    // The delete route's one transaction: deletedAt, the provenance record and the row, at one moment.
+    st.tables.user[0].deletedAt = t(0);
+    provenance("u1");
     await recordErasure(prisma as never, "u1", t(0));
     fakeClock(10);
     // Room for the account's anonymisation check (review round 8 of Phase 3), the chats' read, their titles and one batch.
@@ -495,6 +591,30 @@ describe("continueErasure", () => {
     expect(st.log.filter((l) => l.model !== "accountErasure")).toEqual([]);
     expect(firstWords("u1")).toBe(WORDS);
   });
+
+  // Review round 9 of Phase 3: it acted on any deleted account with a row, so
+  // an erased account restored, used again and removed by an Admin was
+  // renamed and blanked by the next pass.
+  it("acts only on an account in the erased state: deletedAt within a minute of the newest erasure record", async () => {
+    seedPerson("u1");
+    const erasedAt = st.tables.user[0].deletedAt as Date;
+    erasureRow("u1");
+    const user = st.tables.user[0];
+    // Restored, renamed and removed by an Admin a day later.
+    Object.assign(user, { email: "max@x.test", firstName: "Max", lastName: "Chen", deletedAt: new Date(erasedAt.getTime() + 24 * 60 * 60_000) });
+    // Before: found, renamed "Deleted User" and blanked.
+    expect(await continueErasure("u1", FAR(), NOW)).toEqual({ found: false, end: null, rows: 0 });
+    expect(firstWords("u1")).toBe(WORDS);
+    expect(user).toMatchObject({ email: "max@x.test", firstName: "Max" });
+    // Just outside the minute: still an ordinary account.
+    user.deletedAt = new Date(erasedAt.getTime() + 60_001);
+    expect(await continueErasure("u1", FAR(), NOW)).toMatchObject({ found: false });
+    // At the minute's edge, on either side: in the erased state, so swept.
+    user.deletedAt = new Date(erasedAt.getTime() - 60_000);
+    expect(await continueErasure("u1", FAR(), NOW)).toMatchObject({ found: true, end: "finished" });
+    expectBlank("u1");
+    expect(user).toMatchObject(ANON("u1"));
+  });
 });
 
 describe("finishErasures", () => {
@@ -509,7 +629,7 @@ describe("finishErasures", () => {
     expectBlank("b");
     expect(rowOf("a").finishedAt).toEqual(NOW);
     // Before: a ConsentRecord "erasure_finished" marked it; the row's finishedAt does now.
-    expect(ofTable("consentRecord")).toEqual([]);
+    expect(ofTable("consentRecord").map((r) => r.method)).toEqual(["erasure", "erasure"]);
     // Finished: never read again.
     st.log = [];
     expect(await finishErasures(NOW, { limit: 50, budgetMs: 60_000 })).toMatchObject({ found: 0, finished: 0 });
@@ -659,7 +779,8 @@ describe("finishErasures", () => {
   // Review round 8: the bridge also asked for the anonymised address and
   // deletedAt, so an account an identity provider renamed, or an Admin
   // restored, was never bridged and kept its words for good.
-  it("gives every erasure with no row its row, however old, by its provenance record alone, with no row and no finished record, and sweeps them the same tick", async () => {
+  // Review round 9: it also left out a person with round 5's finished record.
+  it("gives every erasure with no row its row, however old, by its provenance record alone, round 5's finished ones too, and sweeps them the same tick", async () => {
     for (const u of ["r5", "twice", "finished5", "early", "removed", "has", "renamed", "restoredEarly", "nobody"]) seedPerson(u);
     const at = (iso: string) => new Date(iso);
     // The delete route's record: method "erasure", the userId and withdrawnAt set.
@@ -690,6 +811,11 @@ describe("finishErasures", () => {
       { id: "c12", userId: "nobody", method: "withdrawn", createdAt: at("2026-10-10T06:00:00Z"), withdrawnAt: at("2026-10-10T06:00:00Z"), policyVersion: "2026-10-06" },
     );
     const user = (id: string) => st.tables.user.find((u) => u.id === id)!;
+    // Each erasure's deletedAt is its newest record's moment, as the delete
+    // route writes them in one transaction.
+    for (const [id, iso] of [["r5", "2026-10-10T06:00:00Z"], ["twice", "2026-10-10T07:00:00Z"], ["finished5", "2026-10-10T06:00:00Z"], ["early", "2026-06-01T06:00:00Z"], ["has", "2026-10-10T06:00:00Z"], ["renamed", "2026-09-01T06:00:00Z"]] as const) {
+      user(id).deletedAt = at(iso);
+    }
     user("removed").email = "lea@x.test";
     Object.assign(user("renamed"), { email: "max@x.test", firstName: "Max", lastName: "Chen", status: "ACTIVE" });
     user("restoredEarly").deletedAt = null;
@@ -699,8 +825,11 @@ describe("finishErasures", () => {
     const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
     // Before round 6: no rows; round 5's sweep read the consent records. Before round 7: "early" was never bridged.
     // Before round 8: "renamed" and "restoredEarly" were never bridged (bridged: 3, and "renamed" kept its words).
-    expect(counts).toMatchObject({ bridged: 5, found: 4, finished: 4, restored: 1, reanonymised: 1 });
-    expect(ofTable("accountErasure").map((r) => r.userId).sort()).toEqual(["early", "has", "r5", "renamed", "restoredEarly", "twice"]);
+    // Before round 9: "finished5" was never bridged (bridged: 5, found: 4).
+    expect(counts).toMatchObject({ bridged: 6, found: 5, finished: 5, restored: 1, reanonymised: 1 });
+    expect(ofTable("accountErasure").map((r) => r.userId).sort()).toEqual(["early", "finished5", "has", "r5", "renamed", "restoredEarly", "twice"]);
+    expect(rowOf("finished5")).toMatchObject({ erasedAt: at("2026-10-10T06:00:00Z"), finishedAt: NOW });
+    expectBlank("finished5");
     expect(rowOf("early")).toMatchObject({ erasedAt: at("2026-06-01T06:00:00Z"), finishedAt: NOW });
     expectBlank("early");
     expect(rowOf("r5")).toMatchObject({ erasedAt: at("2026-10-10T06:00:00Z"), passStartedAt: NOW, finishedAt: NOW });
@@ -713,7 +842,7 @@ describe("finishErasures", () => {
     // The restored account: given its row, but never blanked or renamed while it lives.
     expect(rowOf("restoredEarly")).toMatchObject({ finishedAt: null, tries: 0 });
     expect(firstWords("restoredEarly")).toBe(WORDS);
-    for (const u of ["finished5", "removed", "has", "nobody"]) expect(firstWords(u)).toBe(WORDS);
+    for (const u of ["removed", "has", "nobody"]) expect(firstWords(u)).toBe(WORDS);
     expect(user("nobody")).toMatchObject({ email: "nobody@x.test", firstName: "No" });
     expect(user("removed").email).toBe("lea@x.test");
     // Once only.
@@ -729,6 +858,7 @@ describe("finishErasures", () => {
     for (let i = 0; i < n; i++) {
       const u = `old${String(i).padStart(4, "0")}`;
       seedPerson(u);
+      st.tables.user.find((x) => x.id === u)!.deletedAt = t(-90 * 24 * HOUR);
       (st.tables.consentRecord ??= []).push({ id: `c-${u}`, userId: u, method: "erasure", createdAt: t(-90 * 24 * HOUR), withdrawnAt: t(-90 * 24 * HOUR), policyVersion: "2026-04-18" });
     }
     // A fresh erasure's last pass, waiting since its own pass two hours ago.
@@ -781,6 +911,81 @@ describe("finishErasures", () => {
     expect(counts).toMatchObject({ found: 0, overdue: 0, restored: 1, failed: 0 });
     expect(firstWords("back")).toBe(WORDS);
     expect((console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls).toEqual([]);
+  });
+
+  // Review round 9 of Phase 3: an erased account an Admin restored before
+  // round 8, in use again for months, and then removed by an Admin, was read
+  // by the sweep (it is deleted), renamed "Deleted User" and blanked, the new
+  // work with it, and nobody could undo that.
+  it("never re-anonymises or blanks an erased account restored, used again and then removed, and counts it restored, not overdue", async () => {
+    seedPerson("back");
+    const user = st.tables.user.find((u) => u.id === "back")!;
+    const erasedAt = t(-60 * 24 * HOUR);
+    user.deletedAt = erasedAt;
+    // Bridged in round 8 while it lived (restored), so its row is unfinished and old.
+    erasureRow("back", { erasedAt, passStartedAt: t(-20 * 24 * HOUR), lastTriedAt: t(-20 * 24 * HOUR), createdAt: t(-20 * 24 * HOUR) });
+    // Restored, renamed by an Admin, used again (the words seeded are the new work), then removed an hour ago.
+    Object.assign(user, { email: "max@x.test", firstName: "Max", lastName: "Chen", phone: "+44 7700 900000", deletedAt: t(-HOUR) });
+    const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
+    // Before: found 1, reanonymised 1, finished 1, and every word blanked.
+    expect(counts).toMatchObject({ found: 0, finished: 0, reanonymised: 0, blanked: 0, restored: 1, overdue: 0, failed: 0 });
+    expect(user).toMatchObject({ email: "max@x.test", firstName: "Max", lastName: "Chen", phone: "+44 7700 900000" });
+    expect(firstWords("back")).toBe(WORDS);
+    expect(ofTable("agentRoutine", (r) => r.actingForId === "back")[0]).toMatchObject({ name: "Daily brief", status: "active" });
+    expect(rowOf("back")).toMatchObject({ finishedAt: null, tries: 0 });
+    expect((console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls).toEqual([]);
+  });
+
+  it("goes by the minute's edge: an account removed 60 seconds after its erasure is swept, one removed 60.001 seconds after is not", async () => {
+    for (const u of ["inside", "outside"]) seedPerson(u);
+    const erasedAt = t(-3 * HOUR);
+    for (const u of ["inside", "outside"]) erasureRow(u, { erasedAt });
+    st.tables.user.find((u) => u.id === "inside")!.deletedAt = new Date(erasedAt.getTime() + 60_000);
+    st.tables.user.find((u) => u.id === "outside")!.deletedAt = new Date(erasedAt.getTime() + 60_001);
+    const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
+    // Before: both read and finished, "outside" blanked too.
+    expect(counts).toMatchObject({ found: 1, finished: 1, restored: 1 });
+    expectBlank("inside");
+    expect(firstWords("outside")).toBe(WORDS);
+  });
+
+  // Review round 9 of Phase 3: a slice ends at once, writing nothing, when the
+  // account left the erased state after its row was read.
+  it("blanks nothing in a slice whose account left the erased state after its row was read", async () => {
+    seedPerson("left");
+    erasureRow("left");
+    // The read sees the erased state; by the slice, the account's deletedAt has moved.
+    st.afterRead = () => {
+      st.tables.user.find((u) => u.id === "left")!.deletedAt = t(-HOUR);
+    };
+    const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
+    expect(counts).toMatchObject({ found: 1, finished: 0, waiting: 0, failed: 0, restored: 1 });
+    expect(firstWords("left")).toBe(WORDS);
+    expect(rowOf("left")).toMatchObject({ finishedAt: null, tries: 0 });
+    expect(st.log.filter((l) => l.op === "save")).toEqual([]);
+  });
+
+  // Review round 9 of Phase 3: the bridge left out every person with round
+  // 5's "erasure_finished" record, so an erasure round 5 finished and an
+  // identity provider then renamed was never re-anonymised.
+  it("bridges an erasure round 5 finished, and puts back its anonymisation an identity provider rewrote, in one cheap pass", async () => {
+    seedPerson("done5");
+    const at = new Date("2026-10-10T06:00:00Z");
+    const user = st.tables.user.find((u) => u.id === "done5")!;
+    user.deletedAt = at;
+    (st.tables.consentRecord ??= []).push(
+      { id: "c-done5", userId: "done5", method: "erasure", createdAt: at, withdrawnAt: at, policyVersion: "2026-10-06" },
+      { id: "c-done5-f", userId: "done5", method: "erasure_finished", createdAt: new Date("2026-10-10T09:00:00Z"), withdrawnAt: new Date("2026-10-10T09:00:00Z"), policyVersion: "2026-10-06" },
+    );
+    // Round 5 blanked the words; an identity provider then wrote the real address and names back.
+    await blankTeammateHistory("done5", FAR());
+    Object.assign(user, { email: "max@x.test", firstName: "Max", lastName: "Chen", status: "ACTIVE" });
+    st.log = [];
+    const counts = await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
+    // Before: bridged 0, found 0, and the account kept the real address and names for good.
+    expect(counts).toMatchObject({ bridged: 1, found: 1, finished: 1, reanonymised: 1, blanked: 0 });
+    expect(user).toMatchObject(ANON("done5"));
+    expect(rowOf("done5")).toMatchObject({ erasedAt: at, finishedAt: NOW });
   });
 
   // Review round 8 of Phase 3: a bridged old erasure was overdue the moment

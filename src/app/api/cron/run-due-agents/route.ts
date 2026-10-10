@@ -33,7 +33,10 @@
 //      round 8 of Phase 3: several pages a tick while the budget lasts, the
 //      three days counted from the later of the erasure and its bridging, and
 //      an erased account an Admin restored counted apart (`restored`), which
-//      fails nothing: nothing here can finish it.
+//      fails nothing: nothing here can finish it. Review round 9 of Phase 3:
+//      so is one removed after such a restore, and neither is ever blanked
+//      or re-anonymised (the sweep acts only on an account in the state its
+//      erasure left it).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
