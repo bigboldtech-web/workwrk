@@ -32,7 +32,7 @@ import { clampText } from "./clamp";
 import type { TeammateHue } from "./hues";
 import { plainLine } from "./run-view";
 import { ALWAYS_ASK, EDITABLE_FIELD } from "./tool-policy";
-import { isToolName } from "./tool-names";
+import { isConnectorToolName, isToolName } from "./tool-names";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_ERRORS,
@@ -176,6 +176,19 @@ export type TeammateMessageView =
       link?: EventLink | null;
     })
   | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string; agentId?: string });
+
+/**
+ * How an answer's or a routine report's links render (OsMarkdown `links`):
+ * "inert", linking nothing, when the turn read the person's Google
+ * (meta.readGoogle), while it is still arriving (it cannot say yet), or when
+ * any of its calls is a Google tool; else "shown". Review round 4 of Phase 3:
+ * an answer settled after its save failed carries no meta.readGoogle, and its
+ * calls are then all that say it used the person's mail or calendar.
+ */
+export function answerLinks(m: { readGoogle?: true; streaming?: boolean; toolCalls: ReadonlyArray<Pick<AiToolCall, "name">> }): "inert" | "shown" {
+  if (m.readGoogle === true || m.streaming === true) return "inert";
+  return m.toolCalls.some((c) => isConnectorToolName(c.name)) ? "inert" : "shown";
+}
 
 export const AGENT_ACTION_STATUSES = ["PENDING", "RUNNING", "EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"] as const;
 

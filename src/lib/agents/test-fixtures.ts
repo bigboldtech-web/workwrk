@@ -113,6 +113,14 @@ export const fx = {
   runMarks: [] as string[],
   /** The twin check's locks (executor.ts withTwinLock): the key each took, and whether a transaction held it. */
   twinLocks: [] as Array<{ key: string; inTx: boolean }>,
+  /**
+   * Review round 4 of Phase 3: runs closed under their turn (the person's
+   * account erased), people whose account is gone, and every locked read of
+   * budget.ts runStillOpen, in order, with whether a transaction held it.
+   */
+  closedRuns: new Set<string>(),
+  gonePeople: new Set<string>(),
+  runChecks: [] as Array<{ read: string; inTx: boolean }>,
 };
 
 export function resetFixtures(): void {
@@ -138,6 +146,9 @@ export function resetFixtures(): void {
   fx.connectorAccessCalls = [];
   fx.runMarks = [];
   fx.twinLocks = [];
+  fx.closedRuns = new Set();
+  fx.gonePeople = new Set();
+  fx.runChecks = [];
   inTx = false;
 }
 
@@ -293,6 +304,16 @@ export const prismaFake = {
   // what it returns, so a second run returns nothing. outcomesWaiting's read
   // takes the same rows and stamps none.
   $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    // budget.ts runStillOpen's two locked reads (review round 4 of Phase 3): kept apart from fx.sql.
+    const flat = strings.join("?").replace(/\s+/g, " ").trim();
+    if (flat === 'SELECT "status" FROM "AgentRun" WHERE "id" = ? FOR UPDATE') {
+      fx.runChecks.push({ read: `run:${String(values[0])}`, inTx });
+      return fx.closedRuns.has(String(values[0])) ? [{ status: "FAILED" }] : [{ status: "PENDING" }];
+    }
+    if (flat === 'SELECT "id" FROM "User" WHERE "id" = ? AND "deletedAt" IS NULL FOR SHARE') {
+      fx.runChecks.push({ read: `person:${String(values[0])}`, inTx });
+      return fx.gonePeople.has(String(values[0])) ? [] : [{ id: values[0] }];
+    }
     // Prisma.sql fragments (one teammate's filter, the continuable filter) arrive as values.
     const frags = values.filter((v): v is { strings: string[]; values: unknown[] } => Boolean(v) && typeof v === "object" && "strings" in (v as object) && "values" in (v as object));
     const sql = strings.join("?") + frags.map((f) => ` [${f.strings.join("?")}]`).join("");

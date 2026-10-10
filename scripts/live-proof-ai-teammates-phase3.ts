@@ -1257,12 +1257,14 @@ async function main() {
   );
   let view = await max.json("GET", "/api/teammate-connections");
   const opsUse = (view.body.teammates ?? []).find((x: Json) => x.slug === ops.slug);
+  // The Google account the card showed, sent back with every Allow (review round 4 of Phase 3).
+  const shownAccount = view.body.connection?.account;
   check("his card lists Ops: someone else's, Gmail tools, not allowed", opsUse?.own === false && opsUse?.tools?.gmail === true && opsUse?.allowed?.gmail === false && typeof opsUse?.print === "string", opsUse);
   s = await shot(max, `/agents?chat=${ops.slug}&settings=tools`, "p3-picker-workspace-allow.png", showGoogleRows);
   check("Ops's Tools tab: Uses your own Google account once you allow it, with Allow (p3-picker-workspace-allow.png)", shows(s.text, [TOOL_PICKER_NOTES.allow_first, TOOL_PICKER_NOTES.link.allow_first]) && s.exceptions.length === 0, { acted: s.acted, exceptions: s.exceptions });
   s = await shot(max, "/account/connections#ai-google", "p3-connections-allow-switch.png");
   check("the card offers Let Ops use my Gmail (p3-connections-allow-switch.png)", shows(s.text, [CONNECTIONS_COPY.allowGmail("Ops")]) && s.exceptions.length === 0, s.exceptions);
-  const allow = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsUse?.print, organizationId: org.id });
+  const allow = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsUse?.print, account: shownAccount, organizationId: org.id });
   check("Max allows Ops his Gmail", allow.status === 200 && allow.body.teammate?.allowed?.gmail === true, allow);
   const setting = await prisma.agentPersonSetting.findUnique({ where: { agentId_userId: { agentId: ops.id, userId: max.id } }, select: { connectorProducts: true, connectorPrints: true } });
   check("stored with Ops's part prints for Gmail", setting?.connectorProducts.includes("gmail") === true && typeof (setting?.connectorPrints as Json)?.gmail === "object", setting);
@@ -1285,9 +1287,9 @@ async function main() {
   check("Changed since you allowed it: instructions, with Allow again (p3-connections-changed-since.png)", shows(s.text, [CONNECTIONS_COPY.changedSince("instructions"), CONNECTIONS_COPY.allowAgain]) && s.exceptions.length === 0, s.exceptions);
   s = await shot(max, `/agents?chat=${ops.slug}&settings=tools`, "p3-picker-changed.png", showGoogleRows);
   check("Ops's Tools tab: Changed since you allowed it, with Check (p3-picker-changed.png)", shows(s.text, [TOOL_PICKER_NOTES.changed, TOOL_PICKER_NOTES.link.changed]) && s.exceptions.length === 0, { acted: s.acted, exceptions: s.exceptions });
-  const stale = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsUse?.print, organizationId: org.id });
+  const stale = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsUse?.print, account: shownAccount, organizationId: org.id });
   check("allowing again with what the old card showed is refused: teammate_changed", stale.status === 409 && stale.body.code === "teammate_changed", stale);
-  const again = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsAfter?.print, organizationId: org.id });
+  const again = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsAfter?.print, account: shownAccount, organizationId: org.id });
   check("Allow again with what the card shows now works", again.status === 200 && Object.keys(again.body.teammate?.changed ?? {}).length === 0, again);
 
   step = "3 another account at approval";
@@ -1306,6 +1308,9 @@ async function main() {
     { afterSwitch, ai_allows: switched?.searchParams.get("ai_allows") ?? null },
   );
   check("the account it replaced is revoked at once", routesOf(await googleSince(gm), "oauth.revoke").some((e) => e.sub === "sub-max" && e.outcome === "revoked"));
+  // Review round 4 of Phase 3: a card still open on his first account allows nothing in the new one.
+  const fromOldCard = await max.json("PUT", `/api/teammate-connections/teammates/${ops.slug}`, { gmail: true, expect: opsAfter?.print, account: shownAccount, organizationId: org.id });
+  check("an Allow from a card still showing his first account is refused: account_changed", fromOldCard.status === 409 && fromOldCard.body.code === "account_changed", fromOldCard);
   if (acct) {
     gm = await googleMark();
     const approved = await decide(max, [{ id: acct.id }]);

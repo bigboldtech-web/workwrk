@@ -1,4 +1,4 @@
-// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string, organizationId: string }
+// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string, account?: string, organizationId: string }
 //
 // The person lets a workspace teammate (or any teammate someone else may
 // change) use their own Gmail or Google Calendar, or stops it
@@ -44,6 +44,18 @@
 // THE WORKSPACE THE PAGE SHOWED (review round 1 of Phase 3): the body names it
 // (organizationId), and a session switched to another workspace in another
 // tab allows or stops nothing there (409 workspace_changed); the page reloads.
+//
+// THE GOOGLE ACCOUNT THE PAGE SHOWED (review round 4 of Phase 3). A card left
+// open on the old account allowed a teammate into the account the person
+// had since reconnected as on another device (round 3 clears allows at the
+// reconnect itself, and this allow came after it). Turning on sends the
+// card's `account` (connection-views.ts ConnectionView.account, an opaque
+// key), compared with the connection read FOR SHARE in the transaction: one
+// that differs, or is missing (a page from before this), answers 409
+// account_changed and stores nothing, and the card reads again. The allow
+// keeps the key beside its prints (teammate-print.ts allowRecord), and
+// connectorAccess, the picker and the card read an allow given for another
+// account as not allowed.
 
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -53,20 +65,27 @@ import { resolveActingPerson } from "@/lib/agents/acting";
 import { auditAgent } from "@/lib/agents/audit";
 import { CONNECTION_ROUTE_ERRORS, CONNECTIONS_COPY, PRINT_FIELD_WORDS, titleList } from "@/lib/agents/teammate-copy";
 import { sharedMemoriesPrintOf } from "@/lib/agents/memory";
-import { ALLOW_PARTS, allowPrints, changedSinceShown, othersMayChange, type AllowPart } from "@/lib/agents/teammate-print";
+import { ALLOW_PARTS, allowRecord, changedSinceShown, othersMayChange, type AllowPart } from "@/lib/agents/teammate-print";
 import { invalidRequest, loadTeammate, teammateError, teammateNotFound, workspaceModules } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { requireApp } from "@/lib/app-gate";
 import { teammateGoogleUse } from "@/lib/connectors/connection-views-server";
 import { productsOfTools } from "@/lib/connectors/connection-views";
-import { LOCK_WAIT_TX_TIMEOUT_MS, connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
+import { LOCK_WAIT_TX_TIMEOUT_MS, accountKey, connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
 import { CONNECTOR_PRODUCTS, parseProducts, type ConnectorProduct } from "@/lib/connectors/products";
 import { prisma } from "@/lib/prisma";
 
 type Params = { params: Promise<{ slug: string }> };
 
 const bodySchema = z
-  .object({ gmail: z.boolean().optional(), calendar: z.boolean().optional(), expect: z.string().max(400).optional(), organizationId: z.string().min(1).max(200).optional() })
+  .object({
+    gmail: z.boolean().optional(),
+    calendar: z.boolean().optional(),
+    expect: z.string().max(400).optional(),
+    // Optional in the schema only so that a page that sends none answers account_changed, never a bare 400.
+    account: z.string().max(200).optional(),
+    organizationId: z.string().min(1).max(200).optional(),
+  })
   .strict()
   .refine((v) => v.gmail !== undefined || v.calendar !== undefined);
 
@@ -79,6 +98,7 @@ type Written =
   | { ok: true; memories: string }
   | { ok: false; code: "not_connected" }
   | { ok: false; code: "not_granted"; product: ConnectorProduct }
+  | { ok: false; code: "account_changed" }
   | { ok: false; code: "teammate_changed"; changed: AllowPart[] };
 
 export async function PUT(req: Request, { params }: Params) {
@@ -127,23 +147,28 @@ export async function PUT(req: Request, { params }: Params) {
 
   const turningOn = wants.some((w) => w.on);
   const written = await prisma.$transaction(async (tx): Promise<Written> => {
+    // The account the allow is given for: the connection's, read under the lock (see the file header).
+    let account = "";
     if (turningOn) {
       // The person's connection, held until this commits (see the file header).
-      const held = await tx.$queryRaw<Array<{ products: string[] }>>`
-        SELECT "products" FROM "TeammateConnection"
+      const held = await tx.$queryRaw<Array<{ products: string[]; accountSub: string }>>`
+        SELECT "products", "accountSub" FROM "TeammateConnection"
          WHERE "organizationId" = ${viewer.organizationId} AND "userId" = ${viewer.userId} AND "provider" = 'google'
          FOR SHARE`;
       if (held.length === 0) return { ok: false, code: "not_connected" };
       const granted = parseProducts(held[0].products);
       const missing = wants.find((w) => w.on && !granted.includes(w.product));
       if (missing) return { ok: false, code: "not_granted", product: missing.product };
+      account = accountKey("google", held[0].accountSub);
+      if (parsed.data.account !== account) return { ok: false, code: "account_changed" };
     }
     const memories = await sharedMemoriesPrintOf(agent.id, tx);
     if (turningOn) {
       const changed = changedSinceShown(parsed.data.expect ?? "", agent, memories);
       if (changed.length > 0) return { ok: false, code: "teammate_changed", changed };
     }
-    const prints = JSON.stringify(allowPrints(agent, memories));
+    // Written only when turning on, which read the account above.
+    const prints = JSON.stringify(allowRecord(agent, memories, account));
     for (const { product, on } of wants) {
       if (on) {
         await tx.$executeRaw`
@@ -171,6 +196,7 @@ export async function PUT(req: Request, { params }: Params) {
   if (!written.ok) {
     if (written.code === "not_connected") return teammateError(409, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
     if (written.code === "not_granted") return teammateError(409, "not_granted", CONNECTION_ROUTE_ERRORS.notGranted(productWord(written.product)));
+    if (written.code === "account_changed") return teammateError(409, "account_changed", CONNECTION_ROUTE_ERRORS.accountChanged);
     const parts = titleList(written.changed.map((f) => PRINT_FIELD_WORDS[f] ?? f), ALLOW_PARTS.length);
     return NextResponse.json({ error: CONNECTION_ROUTE_ERRORS.teammateChanged(agent.name, parts), code: "teammate_changed", changed: written.changed }, { status: 409 });
   }
@@ -187,5 +213,7 @@ export async function PUT(req: Request, { params }: Params) {
   // on here or off (connection-views-server.ts teammatesWithGoogle, review of
   // step 5), so a product off keeps its line after a switch.
   const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true } });
-  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories) });
+  // Read against the account connected now, as the card's own read does (review round 4 of Phase 3).
+  const now = await connectionFor({ organizationId: viewer.organizationId, userId: viewer.userId });
+  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories, now ? accountKey("google", now.accountSub) : null) });
 }

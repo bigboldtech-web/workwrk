@@ -10,6 +10,8 @@ import {
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
 import { soleAdminWorkspaces } from "@/lib/access/self-facts";
 import { endAllConnectionsOf } from "@/lib/connectors/connections";
+import { OPEN_RUN_STATUSES } from "@/lib/agents/budget";
+import { TURN_ERRORS } from "@/lib/agents/teammate-copy";
 
 /** Thrown inside the transaction when the re-check under the lock refuses. */
 class LastAdminError extends Error {
@@ -43,6 +45,27 @@ class LastAdminError extends Error {
  *    do: their ids, status, times and token counts are the plan's and the
  *    audit's. Their Google connections end first (endAllConnectionsOf), so
  *    no teammate reads their Gmail or Google Calendar after the words go.
+ *    Each request's error goes too, and an Ask AI tool run's (review round 4
+ *    of Phase 3): a Google card's can name the person's two Google addresses
+ *    (CONNECTOR_COPY.accountChanged), a tool's can quote its input.
+ *
+ * A TURN STILL GOING NEVER WRITES AFTER THE BLANKING (review round 4 of Phase
+ * 3). The transaction's FIRST statement fails every open run of theirs
+ * (FAILED, "the account it worked for was deleted", endedAt), and a turn
+ * writes its answer, cards and chat lines only while its run is open and
+ * its person still has an account, checked under the run's lock
+ * (src/lib/agents/budget.ts runStillOpen). Erasure first: the turn waits on
+ * the lock, reads FAILED and writes nothing, and its last run write, asked
+ * only of an open run, leaves the FAILED. The turn first: this statement
+ * waits on the lock until its rows are committed, and the blanking below
+ * reads them. A run claimed after that first statement is not failed by it,
+ * so a turn also checks that its person still has an account (the User row,
+ * FOR SHARE), which this transaction anonymises after it is done with runs:
+ * that turn writes nothing either, and its run ends FAILED keeping none of
+ * its words. Before, an answer, its run's output and its cards written a
+ * moment after the blanking were kept for good. A request still RUNNING
+ * (approved, its tool going) is ended FAILED before the blanking, so the
+ * result it would write after it, by a swap from RUNNING, is never written.
  *
  * Things we RETAIN:
  *  - Aggregated org records (reviews, KPI records, kudos, action items) with
@@ -111,6 +134,26 @@ export async function POST(req: NextRequest) {
 
   try {
     await prisma.$transaction(async (tx) => {
+      // First, before anything else (see the header): every run of theirs
+      // still open is failed, and from here no turn of theirs writes.
+      const now = new Date();
+      const theirRuns = { OR: [{ actingForId: userId }, { triggeredBy: userId }] };
+      await tx.agentRun.updateMany({
+        where: { ...theirRuns, status: { in: [...OPEN_RUN_STATUSES] } },
+        data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.accountDeleted },
+      });
+      // Their runs' words next, before the User row: this transaction takes
+      // no run after it anonymises that row below, the order a turn's writes
+      // take the two in (budget.ts runState), so neither ever waits on the
+      // other in turn. A teammate run's error is one of the engine's own
+      // sentences (TURN_ERRORS), the one above among them, so it stays.
+      await tx.agentRun.updateMany({ where: theirRuns, data: { output: Prisma.DbNull } });
+      // Ask AI's tool runs keep the tool's input there (no actingForId), and
+      // its error, which can quote that input (review round 4 of Phase 3).
+      await tx.agentRun.updateMany({ where: { triggeredBy: userId, actingForId: null }, data: { input: {}, error: null } });
+      // And every request of theirs still running ends, so its result, written by a swap from RUNNING, never lands after the blanking.
+      await tx.agentAction.updateMany({ where: { actingForId: userId, status: "RUNNING" }, data: { status: "FAILED", updatedAt: now } });
+
       // 0) Lock every workspace this person belongs to, in one sorted order
       //    (no deadlock between two deletes), then re-check under the lock.
       //    Another delete of an admin of the same workspace waits here until
@@ -146,13 +189,12 @@ export async function POST(req: NextRequest) {
         tx.ideaComment.deleteMany({ where: { userId } }),
         // Kept, with the network details cleared (see the header).
         tx.activityLog.updateMany({ where: { actorId: userId }, data: { ipAddress: null, userAgent: null } }),
-        // Their AI chats' and AI teammates' records, in every workspace (see the header).
+        // Their AI chats' and AI teammates' records, in every workspace (see
+        // the header); their runs were blanked first of all, above.
         tx.chatMessage.updateMany({ where: { session: { userId } }, data: { content: "Erased", toolCalls: Prisma.DbNull, meta: Prisma.DbNull } }),
         tx.chatSession.updateMany({ where: { userId }, data: { title: null } }),
-        tx.agentAction.updateMany({ where: { actingForId: userId }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull } }),
-        tx.agentRun.updateMany({ where: { OR: [{ actingForId: userId }, { triggeredBy: userId }] }, data: { output: Prisma.DbNull } }),
-        // Ask AI's tool runs keep the tool's input there (no actingForId).
-        tx.agentRun.updateMany({ where: { triggeredBy: userId, actingForId: null }, data: { input: {} } }),
+        // The error too (review round 4 of Phase 3): a Google card's names both of the person's Google addresses.
+        tx.agentAction.updateMany({ where: { actingForId: userId }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull, error: null } }),
         // What their teammates remember about them goes, and the routines that
         // work as them keep no words and never run again (the rows stay, as
         // chats and cards do, so nothing that points at one is left dangling;

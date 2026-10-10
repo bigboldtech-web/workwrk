@@ -3,6 +3,7 @@ import type { DecisionInput, DecisionResult } from "./actions";
 import { ACTION_ERRORS, TEAMMATE_CHAT } from "./teammate-copy";
 import {
   actionViewFromRow,
+  answerLinks,
   activityActionView,
   applyGroupEvent,
   groupAnsweredSince,
@@ -855,5 +856,34 @@ describe("a group's skipped line (review of step 4)", () => {
       { id: "l1", kind: "event", text: "Triage didn't answer: it is paused.", createdAt: at, event: "group_skipped", routineId: null, actionId: null, agentId: "a3", replyTo: "u1" },
     ];
     expect(orderReplies(rows).map((m) => m.id)).toEqual(["u1", "l1", "u2", "a2"]);
+  });
+});
+
+// Review round 4 of Phase 3: an answer's links were inert only by its
+// meta.readGoogle (or while it arrived), so an answer settled after its save
+// failed, which carries no meta, linked an outsider's address on its words
+// even when it had just read the person's mail.
+describe("how an answer's links render (review round 4 of Phase 3)", () => {
+  const call = (name: string) => ({ name, input: null, outcome: null, failed: false, pending: false, durationMs: null });
+
+  it("links nothing in an answer that called a Google tool, with no readGoogle", () => {
+    // Before: "shown".
+    expect(answerLinks({ toolCalls: [call("search_tasks"), call("search_email")] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("list_events")] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("draft_email")] })).toBe("inert");
+  });
+
+  it("keeps the earlier rules: readGoogle, and an answer still arriving, link nothing; any other answer shows its links", () => {
+    expect(answerLinks({ readGoogle: true, toolCalls: [] })).toBe("inert");
+    expect(answerLinks({ streaming: true, toolCalls: [] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("search_tasks"), call("create_task")] })).toBe("shown");
+    expect(answerLinks({ toolCalls: [] })).toBe("shown");
+  });
+
+  it("reads a saved answer's and a report's calls as messageViewFromRow builds them", () => {
+    const answer = messageViewFromRow({ id: "m1", role: "ASSISTANT", content: "See [x](https://evil.test)", kind: null, meta: null, toolCalls: [{ name: "read_email", input: null, result: { count: 1 }, state: "ran" }], createdAt: new Date("2026-10-10T09:00:00Z") } as never);
+    expect(answer && answer.kind === "agent" ? answerLinks(answer) : null).toBe("inert");
+    const report = messageViewFromRow({ id: "m2", role: "ASSISTANT", content: "Done", kind: "REPORT", meta: { routineId: "r1", routineName: "Brief" }, toolCalls: [{ name: "search_email", input: null, result: { count: 2 }, state: "ran" }], createdAt: new Date("2026-10-10T09:00:00Z") } as never);
+    expect(report && report.kind === "report" ? answerLinks(report) : null).toBe("inert");
   });
 });

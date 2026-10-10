@@ -20,6 +20,13 @@ export type ProductState = "on" | "off";
 /** The person's own connection, as their card shows it. */
 export interface ConnectionView {
   accountEmail: string;
+  /**
+   * The Google account as one opaque key (connections.ts accountKey), never
+   * its id: an allow sends it back, and one made after the person
+   * reconnected as another account on another device changes nothing and
+   * answers 409 account_changed (review round 4 of Phase 3).
+   */
+  account: string;
   products: ConnectorProduct[];
   status: "active" | "needs_reconnect";
   connectedAt: string;
@@ -39,7 +46,7 @@ export interface TeammateGoogleUse {
   own: boolean;
   /** The products it has tools for, whether or not the workspace has them on now (review of step 5: teammateProductRows says which are off). */
   tools: ProductSet;
-  /** The products the person let it use. */
+  /** The products the person let it use, while connected as the Google account connected now (review round 4 of Phase 3). */
   allowed: ProductSet;
   /** Per allowed product, what changed since the person allowed it; such a product is not used until allowed again. */
   changed: Partial<Record<ConnectorProduct, AllowPart[]>>;

@@ -12,6 +12,24 @@ import { subjectRowView } from "@/lib/people/review-visibility";
  */
 const TEAMMATE_CHAT_EXPORT_MAX = 5_000;
 
+/**
+ * The most teammate chat messages the whole export carries, across every
+ * teammate and group chat (review round 4 of Phase 3): with only the per chat
+ * cap, a person with many long chats read them all at once, side by side,
+ * and the export could fail or run the server out of memory. Chats are read
+ * one at a time, the most recently active first, each taking its newest
+ * messages up to what is left of this and of TEAMMATE_CHAT_EXPORT_MAX; each
+ * says how many it left out.
+ */
+const TEAMMATE_CHATS_EXPORT_BUDGET = 20_000;
+
+/**
+ * The most requests a teammate asked the person to approve that the export
+ * carries, newest kept, with how many it left out (review round 4 of Phase
+ * 3): each holds what it would send, an email's whole body among them.
+ */
+const TEAMMATE_REQUESTS_EXPORT_MAX = 5_000;
+
 /** The chats with AI teammates: one per teammate, and the group chats (src/lib/agents/group-server.ts GROUP_KIND). */
 const TEAMMATE_CHAT_KINDS = ["TEAMMATE", "TEAMMATE_GROUP"];
 
@@ -26,6 +44,9 @@ const TEAMMATE_CHAT_KINDS = ["TEAMMATE", "TEAMMATE_GROUP"];
  * teammate (AgentPersonSetting), every request a teammate asked them to
  * approve with what it would send or change (AgentAction), and their chats
  * with their teammates, each at most TEAMMATE_CHAT_EXPORT_MAX messages.
+ * Since review round 4, at most TEAMMATE_CHATS_EXPORT_BUDGET chat messages
+ * and TEAMMATE_REQUESTS_EXPORT_MAX requests in all, newest kept, each list
+ * saying how many it left out.
  */
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -55,7 +76,8 @@ export async function GET() {
       consentRecords,
       teammateConnections,
       teammateSettings,
-      teammateRequests,
+      teammateRequestsNewest,
+      teammateRequestsTotal,
       teammateChats,
       teammateMemories,
       teammateRoutines,
@@ -96,18 +118,22 @@ export async function GET() {
         where: { userId },
         select: { agentId: true, connectorProducts: true, approvalRules: true, createdAt: true, updatedAt: true, agent: { select: { name: true, organizationId: true } } },
       }),
+      // The newest, at most TEAMMATE_REQUESTS_EXPORT_MAX, and how many there are.
       prisma.agentAction.findMany({
         where: { actingForId: userId },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: TEAMMATE_REQUESTS_EXPORT_MAX,
         select: {
           id: true, organizationId: true, agentId: true, toolName: true, status: true, preview: true, input: true, editedInput: true,
           createdAt: true, decidedAt: true, executedAt: true, expiresAt: true,
         },
       }),
+      prisma.agentAction.count({ where: { actingForId: userId } }),
+      // The most recently active first: they take the message budget first.
       prisma.chatSession.findMany({
         where: { userId, kind: { in: TEAMMATE_CHAT_KINDS } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true, organizationId: true, kind: true, title: true, agentId: true, createdAt: true },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        select: { id: true, organizationId: true, kind: true, title: true, agentId: true, createdAt: true, updatedAt: true },
       }),
       // What the person's teammates remember about them (person scope), and
       // the routines that work as them (lead, after review round 3 of Phase 3).
@@ -123,21 +149,29 @@ export async function GET() {
       }),
     ]);
 
-    // Each chat's newest messages, oldest first, and how many were left out.
-    const chats = await Promise.all(
-      teammateChats.map(async (c) => {
-        const [total, newest] = await Promise.all([
-          prisma.chatMessage.count({ where: { sessionId: c.id } }),
-          prisma.chatMessage.findMany({
-            where: { sessionId: c.id },
-            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            take: TEAMMATE_CHAT_EXPORT_MAX,
-            select: { id: true, role: true, kind: true, content: true, toolCalls: true, createdAt: true },
-          }),
-        ]);
-        return { ...c, messages: newest.reverse(), messagesLeftOut: Math.max(0, total - newest.length) };
-      }),
-    );
+    // Each chat's newest messages, oldest first, and how many were left out:
+    // one chat at a time, within what is left of the whole budget (see
+    // TEAMMATE_CHATS_EXPORT_BUDGET). A chat past the budget is still listed,
+    // every message counted as left out.
+    const teammateRequests = [...teammateRequestsNewest].reverse();
+    const chats = [];
+    let budget = TEAMMATE_CHATS_EXPORT_BUDGET;
+    for (const c of teammateChats) {
+      const total = await prisma.chatMessage.count({ where: { sessionId: c.id } });
+      const take = Math.min(TEAMMATE_CHAT_EXPORT_MAX, budget, total);
+      const newest =
+        take > 0
+          ? await prisma.chatMessage.findMany({
+              where: { sessionId: c.id },
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take,
+              select: { id: true, role: true, kind: true, content: true, toolCalls: true, createdAt: true },
+            })
+          : [];
+      budget -= newest.length;
+      const { updatedAt, ...chat } = c;
+      chats.push({ ...chat, lastActiveAt: updatedAt, messages: newest.reverse(), messagesLeftOut: Math.max(0, total - newest.length) });
+    }
 
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -177,6 +211,7 @@ export async function GET() {
         })),
         // What each request would send or change, as the person approved it
         // when they changed it on the card (editedInput), else as asked.
+        // Oldest first, the newest TEAMMATE_REQUESTS_EXPORT_MAX.
         teammateRequests: teammateRequests.map((r) => ({
           id: r.id,
           organizationId: r.organizationId,
@@ -190,6 +225,8 @@ export async function GET() {
           executedAt: r.executedAt,
           expiresAt: r.expiresAt,
         })),
+        teammateRequestsLeftOut: Math.max(0, teammateRequestsTotal - teammateRequests.length),
+        // The most recently active first (they took the budget first).
         teammateChats: chats,
         teammateMemories: teammateMemories.map((m) => ({
           teammate: m.agent?.name ?? null,

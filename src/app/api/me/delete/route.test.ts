@@ -68,7 +68,12 @@ vi.mock("@/lib/prisma", () => {
             }
           };
         }
-        if (key === "$executeRaw") return async () => 1;
+        if (key === "$executeRaw") {
+          return async () => {
+            st.calls.push({ model: "$executeRaw", op: "lock", args: {}, inTx: st.inTx });
+            return 1;
+          };
+        }
         if (!models.has(key)) models.set(key, model(key));
         return models.get(key);
       },
@@ -106,10 +111,15 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     // Before: none of these four were written.
     expect(inTx("chatMessage").map((c) => c.args)).toEqual([{ where: { session: { userId: "u-max" } }, data: { content: "Erased", toolCalls: Prisma.DbNull, meta: Prisma.DbNull } }]);
     expect(inTx("chatSession").map((c) => c.args)).toEqual([{ where: { userId: "u-max" }, data: { title: null } }]);
-    expect(inTx("agentAction").map((c) => c.args)).toEqual([{ where: { actingForId: "u-max" }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull } }]);
+    expect(inTx("agentAction").map((c) => c.args)).toEqual([
+      // Review round 4 of Phase 3: a request still running ends first, and every request's error goes too.
+      { where: { actingForId: "u-max", status: "RUNNING" }, data: { status: "FAILED", updatedAt: expect.any(Date) } },
+      { where: { actingForId: "u-max" }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull, error: null } },
+    ]);
     expect(inTx("agentRun").map((c) => c.args)).toEqual([
+      { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }], status: { in: ["PENDING", "RUNNING"] } }, data: { status: "FAILED", endedAt: expect.any(Date), error: "This run stopped because the account it worked for was deleted." } },
       { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }] }, data: { output: Prisma.DbNull } },
-      { where: { triggeredBy: "u-max", actingForId: null }, data: { input: {} } },
+      { where: { triggeredBy: "u-max", actingForId: null }, data: { input: {}, error: null } },
     ]);
     // No workspace named: every workspace the person was in.
     for (const c of [...inTx("chatMessage"), ...inTx("chatSession"), ...inTx("agentAction"), ...inTx("agentRun")]) expect(JSON.stringify(c.args.where)).not.toContain("organizationId");
@@ -153,5 +163,38 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect((await del()).status).toBe(409);
     expect(st.calls.filter((c) => c.op === "updateMany")).toEqual([]);
     expect(st.ended).toEqual([]);
+  });
+});
+
+// Review round 4 of Phase 3: a turn still going during the erasure wrote its
+// answer, its run's output and its cards after the blanking, and they were
+// never erased; and a request's error, which can name the person's two
+// Google addresses (CONNECTOR_COPY.accountChanged), was kept.
+describe("POST /api/me/delete: a turn still going (review round 4 of Phase 3)", () => {
+  it("fails the person's open runs in the transaction's first statement, before any lock, blanking or anonymising", async () => {
+    await del();
+    const tx = st.calls.filter((c) => c.inTx);
+    // Before: the first statement was the workspace lock, and no run was failed at all.
+    expect(tx[0]).toMatchObject({ model: "agentRun", op: "updateMany", args: { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }], status: { in: ["PENDING", "RUNNING"] } }, data: { status: "FAILED" } } });
+    expect((tx[0].args.data as { endedAt: unknown }).endedAt).toBeInstanceOf(Date);
+    // Every run statement comes before the User row is anonymised: the order a turn's writes take the two in.
+    const lastRun = tx.map((c) => c.model).lastIndexOf("agentRun");
+    const user = tx.findIndex((c) => c.model === "user" && c.op === "update");
+    const firstBlank = tx.findIndex((c) => c.model === "chatMessage");
+    expect(lastRun).toBeLessThan(user);
+    expect(user).toBeLessThan(firstBlank);
+    // The running requests end before their words are blanked.
+    const actions = tx.map((c, i) => [c, i] as const).filter(([c]) => c.model === "agentAction");
+    expect(actions.map(([c]) => (c.args.where as { status?: string }).status ?? null)).toEqual(["RUNNING", null]);
+    expect(actions[0][1]).toBeLessThan(user);
+  });
+
+  it("clears every request's error and an Ask AI tool run's, and keeps a teammate run's own sentence", async () => {
+    await del();
+    expect(inTx("agentAction").at(-1)?.args.data).toMatchObject({ error: null });
+    const runs = inTx("agentRun");
+    expect(runs.find((c) => (c.args.where as Record<string, unknown>).actingForId === null)?.args.data).toEqual({ input: {}, error: null });
+    // The teammate runs' blanking leaves their error: one of the engine's own sentences, the erasure's among them.
+    expect(runs[1].args.data).toEqual({ output: Prisma.DbNull });
   });
 });

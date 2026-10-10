@@ -76,7 +76,7 @@ import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
 import { claimUnreportedOutcomes, outcomesWaiting, releaseOutcomes } from "./actions";
-import { RUN_STALE_MS, type TurnTrigger } from "./budget";
+import { OPEN_RUN_STATUSES, RUN_LOCK_TX_TIMEOUT_MS, RUN_STALE_MS, runState, runStillOpen, type TurnTrigger } from "./budget";
 import { connectorTurnAccess, type TurnConnectorAccess } from "./connector-access";
 import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind } from "./connector-rules";
 import { executeToolCall, markRunReadGoogle, wrapToolData, type CallRecord } from "./executor";
@@ -1440,7 +1440,20 @@ async function runLoop(
 
 const ROW_SELECT = { id: true, role: true, content: true, kind: true, meta: true, toolCalls: true, createdAt: true } as const;
 
-/** Step 7's chat rows: the answer, or a routine's report, with its call log; then the card for what it asked. */
+/**
+ * Step 7's chat rows: the answer, or a routine's report, with its call log;
+ * then the card for what it asked. Null when nothing was written: the run is
+ * closed, or the person's account deleted.
+ *
+ * ONLY WHILE THE RUN IS OPEN (review round 4 of Phase 3). A turn still going
+ * when its person erased their account wrote its answer and card after the
+ * erasure had blanked their chats, so they were kept for good. The rows are
+ * written in one short transaction that first locks the run and the person
+ * (budget.ts runState, which says why either order is safe); a run the
+ * erasure failed, or one whose person's account is gone, writes nothing.
+ * The stale-run sweep closes only a run open past RUN_STALE_MS, which by its
+ * own rule no live turn reaches.
+ */
 async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: CallRecord[], at: Date) {
   const report = a.trigger === "ROUTINE";
   const practice = a.practice ? { practice: true } : {};
@@ -1477,40 +1490,43 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
           : {};
   const extra = { ...reply, ...who, ...from, ...read };
   const answerMeta = meta || Object.keys(extra).length > 0 ? { ...(meta ?? {}), ...extra } : null;
-  const assistant = await prisma.chatMessage.create({
-    data: {
-      sessionId: a.sessionId,
-      role: "ASSISTANT",
-      content: text,
-      // An automation's answer has its own kind: the history query reads
-      // only the chat's own turns, so up to 20 a day never push them out.
-      ...(report ? { kind: "REPORT" } : a.origin?.kind === "automation" ? { kind: AUTOMATION_ANSWER_KIND } : {}),
-      ...(answerMeta ? { meta: json(answerMeta) } : {}),
-      modelUsed: s.model,
-      tokensIn: s.tokensIn || null,
-      tokensOut: s.tokensOut || null,
-      finishReason: s.finishReason,
-      ...(s.records.length > 0 ? { toolCalls: json(s.records) } : {}),
-      createdAt: at,
-    },
-    select: ROW_SELECT,
-  });
-  if (proposals.length === 0) return { assistant, approval: null };
-  const firstTitle = toolOutcome(proposals[0].name, proposals[0].result).title ?? APPROVAL_CARD.untitled;
-  const approval = await prisma.chatMessage.create({
-    data: {
-      sessionId: a.sessionId,
-      role: "SYSTEM",
-      kind: "APPROVAL",
-      // The card reads the actions live; the sentence is for any reader that cannot.
-      content: waitingForApprovalLine(firstTitle),
-      meta: json({ actionIds: proposals.map((r) => r.actionId), ...reply, ...(a.group ? { agentId: a.agent.id } : {}) }),
-      // A moment after the answer, so the card always reads below it.
-      createdAt: new Date(at.getTime() + 1),
-    },
-    select: ROW_SELECT,
-  });
-  return { assistant, approval };
+  return prisma.$transaction(async (tx) => {
+    if (!(await runStillOpen(tx, a.runId, a.person.userId))) return null;
+    const assistant = await tx.chatMessage.create({
+      data: {
+        sessionId: a.sessionId,
+        role: "ASSISTANT",
+        content: text,
+        // An automation's answer has its own kind: the history query reads
+        // only the chat's own turns, so up to 20 a day never push them out.
+        ...(report ? { kind: "REPORT" } : a.origin?.kind === "automation" ? { kind: AUTOMATION_ANSWER_KIND } : {}),
+        ...(answerMeta ? { meta: json(answerMeta) } : {}),
+        modelUsed: s.model,
+        tokensIn: s.tokensIn || null,
+        tokensOut: s.tokensOut || null,
+        finishReason: s.finishReason,
+        ...(s.records.length > 0 ? { toolCalls: json(s.records) } : {}),
+        createdAt: at,
+      },
+      select: ROW_SELECT,
+    });
+    if (proposals.length === 0) return { assistant, approval: null };
+    const firstTitle = toolOutcome(proposals[0].name, proposals[0].result).title ?? APPROVAL_CARD.untitled;
+    const approval = await tx.chatMessage.create({
+      data: {
+        sessionId: a.sessionId,
+        role: "SYSTEM",
+        kind: "APPROVAL",
+        // The card reads the actions live; the sentence is for any reader that cannot.
+        content: waitingForApprovalLine(firstTitle),
+        meta: json({ actionIds: proposals.map((r) => r.actionId), ...reply, ...(a.group ? { agentId: a.agent.id } : {}) }),
+        // A moment after the answer, so the card always reads below it.
+        createdAt: new Date(at.getTime() + 1),
+      },
+      select: ROW_SELECT,
+    });
+    return { assistant, approval };
+  }, { timeout: RUN_LOCK_TX_TIMEOUT_MS });
 }
 
 /**
@@ -1594,15 +1610,25 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
   const messages: TeammateMessageView[] = [];
   let assistantMessageId: string | null = null;
   let approvalMessageId: string | null = null;
+  // The run closed under the turn, or its person's account went (review round 4 of Phase 3).
+  let closedUnder = false;
   const endedEarly = s.error !== null;
   if (!failedBeforeAnything) {
     try {
       const rows = await saveTurnRows(a, s, text, proposals, new Date());
-      assistantMessageId = rows.assistant.id;
-      approvalMessageId = rows.approval?.id ?? null;
-      for (const row of [rows.assistant, rows.approval]) {
-        const view = row ? messageViewFromRow(row) : null;
-        if (view) messages.push(view);
+      if (rows) {
+        assistantMessageId = rows.assistant.id;
+        approvalMessageId = rows.approval?.id ?? null;
+        for (const row of [rows.assistant, rows.approval]) {
+          const view = row ? messageViewFromRow(row) : null;
+          if (view) messages.push(view);
+        }
+      } else {
+        // Closed under it (the person's account erased): nothing is written,
+        // as a save that failed, and no caller tells anyone of its cards.
+        console.error(`[agents] turn ${a.runId} not saved: its run was closed`);
+        s.error = TURN_ERRORS.notSaved;
+        closedUnder = true;
       }
     } catch (err) {
       console.error(`[agents] turn ${a.runId} not saved: ${errorLine(err)}`);
@@ -1610,23 +1636,42 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     }
   }
 
-  await prisma.agentRun
-    .updateMany({
-      where: { id: a.runId },
-      data: {
-        status: s.error ? "FAILED" : "SUCCEEDED",
-        // readGoogle: a continue after this run's cards starts as it ended
-        // (startsTainted). Written either way (review round 1 of Phase 3): a
-        // run with no verdict on record, one that stopped before this, reads
-        // as unknown, never as clean.
-        output: json({ text, toolCalls: s.records, finishReason: s.finishReason, practice: a.practice, readGoogle: s.readGoogle }),
-        error: s.error,
-        endedAt: new Date(),
-        tokensIn: s.tokensIn,
-        tokensOut: s.tokensOut,
-        costCents,
+  // Only while the run is still open (review round 4 of Phase 3), under its
+  // lock and the person's (budget.ts runState): a run the erasure failed
+  // keeps its FAILED, its error and no output; one claimed after the
+  // erasure's first statement, whose person is gone now, ends FAILED keeping
+  // nothing the turn said.
+  const endedAt = new Date();
+  const counts = { endedAt, tokensIn: s.tokensIn, tokensOut: s.tokensOut, costCents };
+  await prisma
+    .$transaction(
+      async (tx) => {
+        const state = await runState(tx, a.runId, a.person.userId);
+        // A closed run keeps how it ended and none of the turn's words, but
+        // what the turn spent still counts toward the teammate's month.
+        if (state === "closed") {
+          await tx.agentRun.updateMany({ where: { id: a.runId }, data: { tokensIn: s.tokensIn, tokensOut: s.tokensOut, costCents } });
+          return;
+        }
+        await tx.agentRun.updateMany({
+          where: { id: a.runId, status: { in: [...OPEN_RUN_STATUSES] } },
+          data:
+            state === "person_gone"
+              ? { status: "FAILED", error: TURN_ERRORS.accountDeleted, ...counts }
+              : {
+                  status: s.error ? "FAILED" : "SUCCEEDED",
+                  // readGoogle: a continue after this run's cards starts as it ended
+                  // (startsTainted). Written either way (review round 1 of Phase 3): a
+                  // run with no verdict on record, one that stopped before this, reads
+                  // as unknown, never as clean.
+                  output: json({ text, toolCalls: s.records, finishReason: s.finishReason, practice: a.practice, readGoogle: s.readGoogle }),
+                  error: s.error,
+                  ...counts,
+                },
+        });
       },
-    })
+      { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+    )
     .catch((err) => console.error(`[agents] run ${a.runId} not recorded: ${errorLine(err)}`));
   await prisma.chatSession
     .updateMany({
@@ -1644,7 +1689,8 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
   return {
     assistantMessageId,
     approvalMessageId,
-    proposedActionIds: proposals.map((r) => r.actionId as string),
+    // None once closed under it: a routine's Inbox row and a delegate's line name its cards, which nobody is left to decide.
+    proposedActionIds: closedUnder ? [] : proposals.map((r) => r.actionId as string),
     text,
     failedBeforeAnything,
     giveBack: !s.answered && s.records.length === 0,

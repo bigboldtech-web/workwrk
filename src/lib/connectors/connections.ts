@@ -45,7 +45,7 @@ import { accessV2Tables } from "@/lib/access/flags";
 import { logActivity } from "@/lib/activity";
 import { CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
 import { sharedMemoriesPrintOf } from "@/lib/agents/memory";
-import { ALLOW_PARTS, changedSinceAllowed, othersMayChange, type AllowPart, type PrintedTeammate } from "@/lib/agents/teammate-print";
+import { ALLOW_PARTS, allowedForAccount, changedSinceAllowed, othersMayChange, type AllowPart, type PrintedTeammate } from "@/lib/agents/teammate-print";
 import type { ActingPerson } from "@/lib/agents/acting";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
@@ -264,6 +264,8 @@ function printsOf(raw: unknown, product: ConnectorProduct): unknown {
  *   6. Google did not grant the product            not_granted
  *   7. a teammate someone else may change (teammate-print.ts othersMayChange)
  *      that the person did not allow              not_allowed
+ *      (or allowed while connected as another Google account, review round
+ *      4 of Phase 3: at an approval too)
  *      or that changed since they allowed it      teammate_changed
  *      (its part prints or, since review round 2 of Phase 3, its shared
  *      memories; not at an approval: the person approves the card itself)
@@ -304,8 +306,11 @@ export async function connectorAccess(a: {
             select: { connectorProducts: true, connectorPrints: true },
           });
     if (!setting || !(setting.connectorProducts ?? []).includes(a.product)) return { ok: false, reason: "not_allowed" };
+    const kept = printsOf(setting.connectorPrints, a.product);
+    // Given while connected as another Google account (review round 4 of
+    // Phase 3): the person never allowed this one, at an approval either.
+    if (!allowedForAccount(kept, accountKey("google", connection.accountSub))) return { ok: false, reason: "not_allowed" };
     if (!a.forApproval) {
-      const kept = printsOf(setting.connectorPrints, a.product);
       // An allow with no print kept cannot say the teammate is unchanged.
       if (!kept || typeof kept !== "object") return { ok: false, reason: "teammate_changed", changed: [...ALLOW_PARTS] };
       // Its shared memories, read now: every turn of it reads them (memory.ts).
@@ -850,9 +855,14 @@ const REVOKE_NOW_BUDGET_MS = 8_000;
 async function revokeNow(ids: readonly string[]): Promise<void> {
   const cfg = googleRevokeConfig();
   if (!cfg || ids.length === 0) return;
-  await revokeQueued(ids, cfg, { timeoutMs: REVOKE_NOW_TIMEOUT_MS, budgetMs: REVOKE_NOW_BUDGET_MS }).catch((err) => {
-    console.error(`[connectors] revoke at once failed: ${errorLine(err)}`);
-  });
+  await revokeQueued(ids, cfg, { timeoutMs: REVOKE_NOW_TIMEOUT_MS, budgetMs: REVOKE_NOW_BUDGET_MS })
+    .then((r) => {
+      // Kept for the cron, which says so each tick (review round 4 of Phase 3).
+      if (r.unopenable > 0) console.error(`[connectors] revoke at once: ${r.unopenable} queued token(s) no key opens, kept for the cron`);
+    })
+    .catch((err) => {
+      console.error(`[connectors] revoke at once failed: ${errorLine(err)}`);
+    });
 }
 
 /**
@@ -971,14 +981,27 @@ const REVOKE_AT_ONCE = 5;
  * about a large workspace's Disconnect everyone.
  */
 const SWEEP_REVOKE_AT_ONCE = 10;
-/** A queued revoke is given up after this many tries, or this long. */
+/** A queued revoke is given up after this many tries, or this long (the privacy page's "at most seven days"). */
 const REVOKE_MAX_ATTEMPTS = 6;
 const REVOKE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * The next try of a queued revoke no key opens (review round 4 of Phase 3),
+ * set on its nextAttemptAt: about an hour (the claim's third wait), with no
+ * try counted, since the key is wrong, not the row.
+ */
+const REVOKE_UNOPENABLE_RETRY_MS = 60 * 60 * 1000;
 
 type QueueRow = { id: string; tokenSealed: unknown; attempts: number; createdAt: Date; accountKey: string | null };
 
-/** What telling Google about some queue rows came to. stillHeld: deleted unsent, a live connection holds the account again. */
-export type RevokeCounts = { revoked: number; kept: number; dropped: number; stillHeld: number };
+/**
+ * What telling Google about some queue rows came to. stillHeld: deleted
+ * unsent, a live connection holds the account again. unopenable: kept, no
+ * key opens its token (review round 4 of Phase 3), and counted in kept too.
+ */
+export type RevokeCounts = { revoked: number; kept: number; dropped: number; stillHeld: number; unopenable: number };
+
+/** One row's outcome: "unopenable" is kept, no key opening its token. */
+type TellOutcome = "revoked" | "kept" | "dropped" | "unopenable";
 
 /**
  * How long one revoke may hold its account's lock (review round 2 of Phase
@@ -999,27 +1022,42 @@ const REVOKE_TX_TIMEOUT_MS = 20_000;
  * keyed row, else the client): revoked, or already unknown to Google, the row
  * goes; failed, it stays for the next try, unless it was tried
  * REVOKE_MAX_ATTEMPTS times or is older than seven days, when it is dropped
- * and counted. A token no key opens can never be sent, so it is dropped.
+ * and counted.
+ *
+ * A TOKEN NO KEY OPENS IS KEPT (review round 4 of Phase 3). It was deleted
+ * for good, so a wrong SECRETS_ENCRYPTION_KEY (a rotation with
+ * SECRETS_ENCRYPTION_KEY_PREVIOUS missing in one place, say) silently threw
+ * away every pending revoke, and WorkwrK stayed listed in those people's
+ * Google accounts. Now it counts no try (`claimed`: the sweep's claim
+ * counted one, given back here) and waits about an hour, until a key opens
+ * it, and is dropped only once older than seven days.
  */
 async function tellGoogle(
   db: Prisma.TransactionClient,
   row: QueueRow,
   cfg: GoogleRevokeConfig,
-  o: { timeoutMs?: number; now: Date },
-): Promise<"revoked" | "kept" | "dropped"> {
+  o: { timeoutMs?: number; now: Date; claimed?: boolean },
+): Promise<TellOutcome> {
+  const tooOld = o.now.getTime() - new Date(row.createdAt).getTime() > REVOKE_MAX_AGE_MS;
   let token: string;
   try {
     token = openToken(row.tokenSealed);
   } catch {
-    await db.teammateTokenRevocation.deleteMany({ where: { id: row.id } });
-    return "dropped";
+    if (tooOld) {
+      await db.teammateTokenRevocation.deleteMany({ where: { id: row.id } });
+      return "dropped";
+    }
+    await db.teammateTokenRevocation.updateMany({
+      where: { id: row.id },
+      data: { nextAttemptAt: new Date(o.now.getTime() + REVOKE_UNOPENABLE_RETRY_MS), ...(o.claimed ? { attempts: { decrement: 1 } } : {}) },
+    });
+    return "unopenable";
   }
   const r = await revokeToken(cfg, token, o.timeoutMs);
   if (r === "revoked" || r === "already") {
     await db.teammateTokenRevocation.deleteMany({ where: { id: row.id } });
     return "revoked";
   }
-  const tooOld = o.now.getTime() - new Date(row.createdAt).getTime() > REVOKE_MAX_AGE_MS;
   if (row.attempts >= REVOKE_MAX_ATTEMPTS || tooOld) {
     await db.teammateTokenRevocation.deleteMany({ where: { id: row.id } });
     return "dropped";
@@ -1050,8 +1088,8 @@ async function tellGoogle(
 async function revokeBatch(
   rows: readonly QueueRow[],
   cfg: GoogleRevokeConfig,
-  o: { timeoutMs?: number; now: Date },
-): Promise<{ outcomes: Array<"revoked" | "kept" | "dropped">; stillHeld: number }> {
+  o: { timeoutMs?: number; now: Date; claimed?: boolean },
+): Promise<{ outcomes: TellOutcome[]; stillHeld: number }> {
   const hasKey = (r: QueueRow) => typeof r.accountKey === "string" && r.accountKey.length > 0;
   const keyed = rows.filter(hasKey);
   // Rows from before keys first, on their own: few, and soon past their week.
@@ -1067,7 +1105,7 @@ async function revokeBatch(
       const drop = keyed.filter((r) => held.has(r.accountKey as string)).map((r) => r.id);
       if (drop.length > 0) await tx.teammateTokenRevocation.deleteMany({ where: { id: { in: drop } } });
       const timeoutMs = Math.min(o.timeoutMs ?? REVOKE_UNDER_LOCK_MS, REVOKE_UNDER_LOCK_MS);
-      const sent = await Promise.all(keyed.filter((r) => !held.has(r.accountKey as string)).map((row) => tellGoogle(tx, row, cfg, { timeoutMs, now: o.now })));
+      const sent = await Promise.all(keyed.filter((r) => !held.has(r.accountKey as string)).map((row) => tellGoogle(tx, row, cfg, { timeoutMs, now: o.now, claimed: o.claimed })));
       return { outcomes: sent, stillHeld: drop.length };
     },
     { timeout: REVOKE_TX_TIMEOUT_MS },
@@ -1081,18 +1119,20 @@ async function revokeBatch(
  * live connection holds again goes unsent; revoked, or already unknown to
  * Google, the row goes; failed, it stays for the next try, unless it was
  * tried REVOKE_MAX_ATTEMPTS times or is older than seven days, when it is
- * dropped and counted. A token no key opens can never be sent, so it is
- * dropped and counted.
+ * dropped and counted. A token no key opens is kept for about an hour, no
+ * try counted, and counted as unopenable (review round 4 of Phase 3; it was
+ * dropped). `claimed`: the sweep's claim counted each row's try already.
  */
 async function revokeRows(
   rows: readonly QueueRow[],
   cfg: GoogleRevokeConfig,
-  o: { deadline: number; timeoutMs?: number; now?: Date; atOnce?: number },
+  o: { deadline: number; timeoutMs?: number; now?: Date; atOnce?: number; claimed?: boolean },
 ): Promise<RevokeCounts & { tried: number }> {
   let revoked = 0;
   let kept = 0;
   let dropped = 0;
   let stillHeld = 0;
+  let unopenable = 0;
   let tried = 0;
   const now = o.now ?? new Date();
   const atOnce = Math.max(1, o.atOnce ?? REVOKE_AT_ONCE);
@@ -1100,15 +1140,18 @@ async function revokeRows(
     if (Date.now() >= o.deadline) break;
     const batch = rows.slice(i, i + atOnce);
     tried += batch.length;
-    const r = await revokeBatch(batch, cfg, { timeoutMs: o.timeoutMs, now });
+    const r = await revokeBatch(batch, cfg, { timeoutMs: o.timeoutMs, now, claimed: o.claimed });
     stillHeld += r.stillHeld;
     for (const x of r.outcomes) {
       if (x === "revoked") revoked += 1;
       else if (x === "dropped") dropped += 1;
-      else kept += 1;
+      else {
+        kept += 1;
+        if (x === "unopenable") unopenable += 1;
+      }
     }
   }
-  return { revoked, kept, dropped, stillHeld, tried };
+  return { revoked, kept, dropped, stillHeld, unopenable, tried };
 }
 
 /**
@@ -1118,13 +1161,13 @@ async function revokeRows(
  */
 export async function revokeQueued(ids: readonly string[], cfg: GoogleRevokeConfig, o: { timeoutMs?: number; budgetMs?: number } = {}): Promise<RevokeCounts> {
   const wanted = [...new Set(ids)].slice(0, 1000);
-  if (wanted.length === 0) return { revoked: 0, kept: 0, dropped: 0, stillHeld: 0 };
+  if (wanted.length === 0) return { revoked: 0, kept: 0, dropped: 0, stillHeld: 0, unopenable: 0 };
   const rows = await prisma.teammateTokenRevocation.findMany({
     where: { id: { in: wanted } },
     select: { id: true, tokenSealed: true, attempts: true, createdAt: true, accountKey: true },
   });
   const r = await revokeRows(rows, cfg, { deadline: Date.now() + (o.budgetMs ?? 30_000), timeoutMs: o.timeoutMs });
-  return { revoked: r.revoked, kept: r.kept + (rows.length - r.tried), dropped: r.dropped, stillHeld: r.stillHeld };
+  return { revoked: r.revoked, kept: r.kept + (rows.length - r.tried), dropped: r.dropped, stillHeld: r.stillHeld, unopenable: r.unopenable };
 }
 
 /** People deleted, INACTIVE, or no longer in the workspace (anchored elsewhere with no membership here). */
@@ -1204,6 +1247,14 @@ export type ConnectorSweepCounts = {
  *      moving the next one further out, tried side by side, and claimed again
  *      until `revokeLimit` or the budget runs out.
  * The answer is counts only.
+ *
+ * A WRONG SEALING KEY STOPS THE DRAIN, NOT THE QUEUE (review round 4 of
+ * Phase 3). A row no key opens is kept (tellGoogle), and a claim none of
+ * whose rows opens ends the tick's draining: the key is wrong, not the rows,
+ * so claiming the rest would only push each of them back an hour. The tick
+ * writes one [cron-failure] line with the count, and run-due-agents fails
+ * the tick so the ops alert goes out, long before the seven days after
+ * which such a row is dropped.
  */
 export async function sweepConnections(now: Date, o: { leaversLimit: number; revokeLimit: number; budgetMs: number }): Promise<ConnectorSweepCounts> {
   const deadline = Date.now() + o.budgetMs;
@@ -1225,6 +1276,7 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
   let kept = 0;
   let dropped = 0;
   let stillHeld = 0;
+  let unopenable = 0;
   // Through the revoke settings alone (review of step 2): emptying
   // GOOGLE_AGENT_PRODUCTS, or removing the client, still lets the queue drain.
   // Without the sealing key no token can be opened, so the queue waits for
@@ -1250,15 +1302,21 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
       if (rows.length === 0) break;
       claimed += rows.length;
       // Every claimed row is tried (it already counted a try), all at once.
-      const r = await revokeRows(rows, cfg, { deadline: Number.POSITIVE_INFINITY, now, atOnce: SWEEP_REVOKE_AT_ONCE });
+      const r = await revokeRows(rows, cfg, { deadline: Number.POSITIVE_INFINITY, now, atOnce: SWEEP_REVOKE_AT_ONCE, claimed: true });
       revoked += r.revoked;
       kept += r.kept;
       dropped += r.dropped;
       stillHeld += r.stillHeld;
+      unopenable += r.unopenable;
+      // None of this claim opened: the key is wrong, not the rows (see above).
+      if (r.unopenable > 0 && r.unopenable === rows.length - r.stillHeld) break;
       if (rows.length < take) break;
     }
   }
-  return { statesExpired, leavers, noAccess, closed, suspended, revoked, kept, dropped, stillHeld };
+  if (unopenable > 0) {
+    console.error(`[cron-failure] run-due-agents: ${unopenable} queued Google revoke(s) no key opens, kept for an hour; check SECRETS_ENCRYPTION_KEY and SECRETS_ENCRYPTION_KEY_PREVIOUS`);
+  }
+  return { statesExpired, leavers, noAccess, closed, suspended, revoked, kept, dropped, stillHeld, unopenable };
 }
 
 // ── What Owners and Admins see and set ──────────────────────────────

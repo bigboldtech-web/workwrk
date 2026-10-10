@@ -49,6 +49,17 @@ vi.mock("./budget", () => ({
   claimTeammateTurn: async (a: Row) => (st.claims.push(a), { ok: true, runId: "run1", questionId: "q1" }),
   abandonTurn: async () => {},
   giveBackTurn: async () => {},
+  // Review round 4 of Phase 3: the run check, as the fixtures' fake answers it.
+  runStillOpen: async (_db: unknown, runId: string, personId: string) => {
+    const { fx } = await import("./test-fixtures");
+    return !fx.closedRuns.has(runId) && !fx.gonePeople.has(personId);
+  },
+  runState: async (_db: unknown, runId: string, personId: string) => {
+    const { fx } = await import("./test-fixtures");
+    return fx.closedRuns.has(runId) ? "closed" : fx.gonePeople.has(personId) ? "person_gone" : "open";
+  },
+  RUN_LOCK_TX_TIMEOUT_MS: 20_000,
+  OPEN_RUN_STATUSES: ["PENDING", "RUNNING"],
 }));
 vi.mock("@/lib/ai-client", () => {
   const client = {

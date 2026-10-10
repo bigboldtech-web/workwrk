@@ -34,9 +34,9 @@ vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: vi.fn(async () => n
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
 import { CONNECTIONS_COPY, PRINT_FIELD_WORDS, titleList } from "@/lib/agents/teammate-copy";
-import { allowPrints, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
+import { allowPrints, allowRecord, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
 import { sharedMemoriesPrintOf, sharedMemoriesPrints } from "@/lib/agents/memory";
-import { cdb, resetConnectorDb, seedConnection, type Row } from "./connector-test-db";
+import { cdb, keyOf, resetConnectorDb, seedConnection, type Row } from "./connector-test-db";
 import { teammateProductRows } from "./connection-views";
 import { teammateConnectionsView } from "./connection-views-server";
 
@@ -165,5 +165,29 @@ describe("the Connections card's teammates (review of step 5)", () => {
     ]);
     // Off is said as off, never as a connection to add.
     expect(teammateProductRows(t, ["calendar"], ["calendar"])[0]).toEqual({ product: "gmail", off: true, showSwitch: false, needsAdd: false });
+  });
+  // Review round 4 of Phase 3: the allow kept no Google account, so the card
+  // showed Ops allowed into the account Max reconnected as on another device,
+  // and the connection gave the card nothing to send back to say which
+  // account it showed.
+  it("gives the card the account as an opaque key, never its id, and reads an allow given for another account as not allowed", async () => {
+    cdb.policy.set("org1", ["gmail", "calendar"]);
+    const ops = seedAgent({ slug: "ops" });
+    const none = sharedMemoriesPrint([]);
+    cdb.settings.push({
+      id: "ps1", agentId: ops.id, userId: "u-max", approvalRules: {}, connectorProducts: ["gmail", "calendar"],
+      connectorPrints: { gmail: allowRecord(ops as never, none, keyOf("google", "sub-max")), calendar: allowRecord(ops as never, none, keyOf("google", "sub-old")) },
+    });
+    const view = await teammateConnectionsView(MAX as never);
+    expect(view.connection?.account).toBe(keyOf("google", "sub-max"));
+    // Before: no account at all, and the card could not say which one it showed.
+    expect(JSON.stringify(view)).not.toContain("sub-max");
+    const row = view.teammates.find((t) => t.slug === "ops");
+    // Before: { gmail: true, calendar: true }; Calendar was allowed for the old account only.
+    expect(row?.allowed).toEqual({ gmail: true, calendar: false });
+    expect(row?.changed).toEqual({});
+    // An allow given before the account was kept is the current account's (round 3 clears allows at an account change).
+    cdb.settings[0].connectorPrints = { gmail: allowPrints(ops as never, none), calendar: allowPrints(ops as never, none) };
+    expect((await teammateConnectionsView(MAX as never)).teammates.find((t) => t.slug === "ops")?.allowed).toEqual({ gmail: true, calendar: true });
   });
 });

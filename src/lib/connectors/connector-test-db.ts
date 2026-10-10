@@ -242,14 +242,17 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     wrote("state.delete");
     return [row];
   }
-  if (sql.startsWith('SELECT "products" FROM "TeammateConnection"')) {
+  if (sql.startsWith('SELECT "products", "accountSub" FROM "TeammateConnection"')) {
     // The allow's read of the person's own connection, held until it commits
-    // (review round 2 of Phase 3), so a removal's delete and allow clear wait for it.
+    // (review round 2 of Phase 3), so a removal's delete and allow clear wait
+    // for it; with the account it is given for (review round 4 of Phase 3).
     needs(sql, "the allow's connection read", [`WHERE "organizationId" = ? AND "userId" = ? AND "provider" = 'google'`]);
     if (!sql.endsWith("FOR SHARE")) throw new Error(`connector-test-db: the allow reads the connection FOR SHARE\n${sql}`);
     if (!inTx) throw new Error("connector-test-db: a FOR SHARE read outside a transaction holds nothing");
     cdb.connectionShareReads.push({ organizationId: String(v[0]), userId: String(v[1]), inTx });
-    return cdb.connections.filter((c) => c.organizationId === v[0] && c.userId === v[1] && c.provider === "google").map((c) => ({ products: [...(c.products as string[])] }));
+    return cdb.connections
+      .filter((c) => c.organizationId === v[0] && c.userId === v[1] && c.provider === "google")
+      .map((c) => ({ products: [...(c.products as string[])], accountSub: c.accountSub }));
   }
   if (sql.startsWith('SELECT "id", "accountSub", "refreshTokenSealed" FROM "TeammateConnection"')) {
     needs(sql, "saveOnce's read", ["FOR UPDATE"]);
@@ -573,6 +576,19 @@ export const connectorDb = {
     findMany: async (a: Args) => {
       const ids = ((a.where?.id as { in: string[] }) ?? { in: [] }).in;
       return cdb.revocations.filter((r) => ids.includes(String(r.id))).map((r) => ({ accountKey: null, ...r }));
+    },
+    // A row no key opens, kept for a later try (review round 4 of Phase 3): by its id, its next try moved, a counted try given back.
+    updateMany: async (a: Args) => {
+      if (typeof a.where?.id !== "string") throw new Error("connector-test-db: a queued revoke is put back by its own id");
+      const hit = cdb.revocations.filter((r) => r.id === a.where?.id);
+      for (const r of hit) {
+        for (const [k, val] of Object.entries(a.data ?? {})) {
+          if (val && typeof val === "object" && "decrement" in (val as Row)) r[k] = Number(r[k]) - Number((val as Row).decrement);
+          else r[k] = val;
+        }
+      }
+      if (hit.length) wrote("revocation.putBack");
+      return { count: hit.length };
     },
     deleteMany: async (a: Args) => {
       const before = cdb.revocations.length;

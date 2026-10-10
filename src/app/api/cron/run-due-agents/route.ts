@@ -128,8 +128,11 @@ async function handle(req: Request) {
   // A step that threw fails the tick, and so does a schedule that did not
   // move: it is left for the next tick, but nothing runs it until it moves,
   // so someone is told (review of step 2). One routine's failure stays on
-  // the routine and in its chat.
-  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy, connectors }, stepsFailed + (legacy?.failed ?? 0));
+  // the routine and in its chat. So does a queued Google revoke no key opens
+  // (review round 4 of Phase 3): it is kept, and dropped after seven days, so
+  // the wrong key must be found before then.
+  const unopenable = connectors && connectors.unopenable > 0 ? 1 : 0;
+  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy, connectors }, stepsFailed + (legacy?.failed ?? 0) + unopenable);
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

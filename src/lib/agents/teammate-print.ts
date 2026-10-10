@@ -138,6 +138,35 @@ export function changedSinceAllowed(kept: unknown, now: PrintedTeammate, memorie
   return (kept as Record<string, unknown>).memories === memories ? changed : [...changed, "memories"];
 }
 
+// ── The Google account an allow was given for (review round 4 of Phase 3) ──
+
+/**
+ * What a Google allow keeps for its product: the prints above and the Google
+ * account the person was connected as when they gave it (connections.ts
+ * accountKey: opaque, names no person). A Connections card left open on the
+ * old account allowed a teammate into the account the person had since
+ * reconnected as on another device; round 3 cleared allows only at the
+ * reconnect itself. changedFields and changedSinceAllowed read only the
+ * parts they name, so the extra key changes no print comparison.
+ */
+export function allowRecord(a: PrintedTeammate, memories: string, account: string): Record<AllowPart, string> & { account: string } {
+  return { ...allowPrints(a, memories), account };
+}
+
+/**
+ * Whether a kept allow was given for this Google account. An allow kept
+ * with no account (given before this) belongs to the current one: since
+ * review round 3 every allow is cleared when another account takes the
+ * connection (connections.ts saveOnce), so one that is still here was given
+ * while connected as this account. A kept value that is no allow says
+ * nothing of an account here; changedSinceAllowed refuses it on its own.
+ */
+export function allowedForAccount(kept: unknown, account: string): boolean {
+  if (!kept || typeof kept !== "object" || Array.isArray(kept)) return true;
+  const stored = (kept as Record<string, unknown>).account;
+  return stored === undefined || stored === account;
+}
+
 /** Whether someone other than this person may change the teammate: a workspace one, or anyone else's. */
 export function othersMayChange(agent: { visibility: string; ownerId: string | null }, personId: string): boolean {
   return agent.visibility !== "PRIVATE" || agent.ownerId !== personId;

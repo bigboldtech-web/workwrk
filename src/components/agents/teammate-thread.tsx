@@ -28,6 +28,7 @@ import { Dots } from "@/components/ui/dots";
 import type { TeammateHue } from "@/lib/agents/hues";
 import { RUN_NOW_SENT, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import {
+  answerLinks,
   groupApprovals,
   type ActionView,
   type DecideAnswer,
@@ -139,8 +140,10 @@ export function AgentTurn({ m, teammate, showName = false }: { m: Extract<Teamma
           <div className="text-prose text-ink">
             {/* Every link shows where it goes, and an answer that read the
                 person's Google links nothing (review round 3 of Phase 3);
-                one still arriving cannot say yet, so it links nothing either. */}
-            <OsMarkdown text={m.text} links={m.readGoogle || arriving ? "inert" : "shown"} />
+                one still arriving cannot say yet, so it links nothing either,
+                nor one that called a Google tool, which an answer settled
+                after a failed save shows with no readGoogle (review round 4). */}
+            <OsMarkdown text={m.text} links={answerLinks(m)} />
           </div>
         ) : null}
         {waiting || (arriving && m.text) ? (

@@ -8,6 +8,8 @@ import { stableJson } from "@/lib/automation/definition";
 import {
   ALLOW_PARTS,
   allowPrints,
+  allowRecord,
+  allowedForAccount,
   changedFields,
   changedSinceAllowed,
   changedSinceShown,
@@ -105,5 +107,33 @@ describe("othersMayChange", () => {
     expect(othersMayChange({ visibility: "PRIVATE", ownerId: "u1" }, "u1")).toBe(false);
     expect(othersMayChange({ visibility: "PRIVATE", ownerId: "u2" }, "u1")).toBe(true);
     expect(othersMayChange({ visibility: "WORKSPACE", ownerId: "u1" }, "u1")).toBe(true);
+  });
+});
+
+// Review round 4 of Phase 3: an allow kept no Google account, so a
+// Connections card left open on the old account allowed a teammate into the
+// account the person had since reconnected as on another device.
+describe("the Google account an allow was given for (review round 4 of Phase 3)", () => {
+  const NO_MEMORIES = sharedMemoriesPrint([]);
+
+  it("keeps the account beside the prints, and no print comparison reads it", () => {
+    const kept = allowRecord(PLANNER, NO_MEMORIES, "key-work");
+    expect(kept).toEqual({ ...allowPrints(PLANNER, NO_MEMORIES), account: "key-work" });
+    expect(changedSinceAllowed(kept, PLANNER, NO_MEMORIES)).toEqual([]);
+    expect(changedFields(kept, PLANNER)).toEqual([]);
+    expect(changedSinceAllowed(kept, { ...PLANNER, systemPrompt: "Read everything." }, NO_MEMORIES)).toEqual(["instructions"]);
+  });
+
+  it("reads an allow given for another account as not this account's, and one with no account as the current one's", () => {
+    const kept = allowRecord(PLANNER, NO_MEMORIES, "key-work");
+    expect(allowedForAccount(kept, "key-work")).toBe(true);
+    // Before: no account was kept, so any account read as allowed.
+    expect(allowedForAccount(kept, "key-personal")).toBe(false);
+    // Given before the account was kept: round 3 clears allows at an account change, so it is the current account's.
+    expect(allowedForAccount(allowPrints(PLANNER, NO_MEMORIES), "key-personal")).toBe(true);
+    // An account that is not a string is no account this code wrote.
+    expect(allowedForAccount({ ...allowPrints(PLANNER, NO_MEMORIES), account: null }, "key-work")).toBe(false);
+    // No allow at all says nothing of an account (its own refusal is changedSinceAllowed's).
+    expect(allowedForAccount(undefined, "key-work")).toBe(true);
   });
 });

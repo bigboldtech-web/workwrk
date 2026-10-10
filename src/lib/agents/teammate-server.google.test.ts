@@ -33,9 +33,9 @@ vi.mock("@/lib/app-gate", () => ({ requireApp: vi.fn(async () => null), isOwnerO
 vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: vi.fn(async () => ({ ok: false, reason: "gone" })) }));
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
-import { allowPrints, sharedMemoriesPrint } from "./teammate-print";
+import { allowPrints, allowRecord, sharedMemoriesPrint } from "./teammate-print";
 import { connectorRowStates, workspaceModules } from "./teammate-server";
-import { cdb, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
+import { cdb, keyOf, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
 
 const MAX = { userId: "u-max", organizationId: "org1" };
 
@@ -123,6 +123,17 @@ describe("connectorRowStates", () => {
     expect(await states(ops)).toEqual({ gmail: "changed", calendar: "allow_first" });
     // Another person's teammate they may use is the same: someone else may change it.
     expect(await states(agentRow({ id: "a-hers", visibility: "PRIVATE", ownerId: "u-olivia" }))).toEqual({ gmail: "allow_first", calendar: "allow_first" });
+  });
+
+  // Review round 4 of Phase 3: an allow kept no Google account, so the
+  // picker read Ops as ready in the account Max reconnected as elsewhere.
+  it("asks for an allow again when it was given for another Google account, as for one never given", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-personal" });
+    const ops = agentRow();
+    const none = sharedMemoriesPrint([]);
+    allow(ops, ["gmail", "calendar"], { gmail: allowRecord(ops as never, none, keyOf("google", "sub-work")), calendar: allowRecord(ops as never, none, keyOf("google", "sub-personal")) });
+    // Before: { gmail: "ready", calendar: "ready" }.
+    expect(await states(ops)).toEqual({ gmail: "allow_first", calendar: "ready" });
   });
 
   it("says a connection that stopped working needs reconnecting", async () => {

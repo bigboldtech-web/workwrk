@@ -69,7 +69,7 @@ import { publishToUser } from "@/lib/realtime-bus";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { actorLabelFor, resolveActingPerson, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
-import { claimTeammateTurn, giveBackTurn, type TurnTrigger } from "./budget";
+import { RUN_LOCK_TX_TIMEOUT_MS, claimTeammateTurn, giveBackTurn, runStillOpen, type TurnTrigger } from "./budget";
 import {
   CONNECTOR_TURN_LIMITS,
   connectorAuditFacts,
@@ -338,7 +338,12 @@ async function runDelegation(
   });
   if (!claim.ok) return refuse(claim.message);
   a.counters.delegations += 1;
-  await writeEventLine(session.id, { text: DELEGATION_COPY.askedByLine(a.agent.name, clampText(request, 300)), event: "delegated_asked", agentId: delegate.id });
+  // Both lines only while their turn's run is open (review round 4 of Phase 3): this one the delegate's, the next the caller's.
+  await writeEventLine(
+    session.id,
+    { text: DELEGATION_COPY.askedByLine(a.agent.name, clampText(request, 300)), event: "delegated_asked", agentId: delegate.id },
+    { whileOpen: { runId: claim.runId, personId: person.userId } },
+  );
 
   let turn: Awaited<ReturnType<typeof engine.runTeammateTurn>> | null = null;
   try {
@@ -371,12 +376,16 @@ async function runDelegation(
     : [];
   const titles = waiting.map((w) => (typeof record(w.preview).title === "string" ? (record(w.preview).title as string) : DELEGATION_COPY.askTitle(delegate.name)));
   if (titles.length > 0) {
-    const line = await writeEventLine(a.turn.sessionId, {
-      text: DELEGATION_COPY.delegateWaitingLine(delegate.name, titleList(titles)),
-      event: "delegate_waiting",
-      agentId: a.agent.id,
-      link: { kind: "chat", slug: delegate.slug, actionId: waiting[0].id },
-    });
+    const line = await writeEventLine(
+      a.turn.sessionId,
+      {
+        text: DELEGATION_COPY.delegateWaitingLine(delegate.name, titleList(titles)),
+        event: "delegate_waiting",
+        agentId: a.agent.id,
+        link: { kind: "chat", slug: delegate.slug, actionId: waiting[0].id },
+      },
+      { whileOpen: { runId: a.turn.runId, personId: a.person.userId } },
+    );
     if (line) a.emit?.({ type: "event", message: line });
   }
   // The delegate's chat changed: the person's open tabs read it again.
@@ -525,20 +534,26 @@ async function findTwin(db: Prisma.TransactionClient, person: ActingPerson, tool
  * at once (two teammates in a group, two chats one planted email drives)
  * each found no twin and each made a card, and the person could approve both.
  * Now the second waits for the first to commit, then finds its card. A card
- * with no key is made as before, with no lock.
+ * with no key takes no lock, but is made in a transaction too (review round 4
+ * of Phase 3), so the run check made with it holds until the card is written.
  */
 async function withTwinLock<T>(
   person: ActingPerson,
   tool: ToolName,
   input: Record<string, unknown>,
-  fn: (twin: Twin | null, db: Prisma.TransactionClient | null) => Promise<T>,
+  fn: (twin: Twin | null, db: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   const key = input.dedupeKey;
-  if (!DEDUPED.has(tool) || typeof key !== "string" || key.length === 0) return fn(null, null);
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DEDUPE_LOCK_CLASS}::int, hashtext(${`${person.organizationId}:${person.userId}:${tool}:${key}`}))`;
-    return fn(await findTwin(tx, person, tool, key, new Date()), tx);
-  });
+  if (!DEDUPED.has(tool) || typeof key !== "string" || key.length === 0) {
+    return prisma.$transaction((tx) => fn(null, tx), { timeout: RUN_LOCK_TX_TIMEOUT_MS });
+  }
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DEDUPE_LOCK_CLASS}::int, hashtext(${`${person.organizationId}:${person.userId}:${tool}:${key}`}))`;
+      return fn(await findTwin(tx, person, tool, key, new Date()), tx);
+    },
+    { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -660,6 +675,10 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // waits or failed; the names stay on the card and in the person's own chat
   // (review round 5).
   talkWrite = a.turn.trigger === "TALK";
+  // A turn whose run closed under it (its person's account erased, review
+  // round 4 of Phase 3) changes nothing more: what it made would outlive the
+  // erasure. The rows written below ask again, under the run's lock.
+  if (!(await runStillOpen(prisma, a.turn.runId, a.person.userId))) return refuse(ACTION_ERRORS.personCannot);
   const tainted = a.counters.tainted === true;
   const prepared = await prepareCall(name, checked.input, {
     person,
@@ -701,6 +720,9 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
       if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
         return refuse(tooManyWaiting(person.firstName));
       }
+      // The card is made only while the run is open and its person here,
+      // held until it commits (budget.ts runStillOpen, review round 4 of Phase 3).
+      if (!(await runStillOpen(db, a.turn.runId, person.userId))) return refuse(ACTION_ERRORS.personCannot);
       const made = await proposeAction(
         {
           organizationId: person.organizationId,
@@ -736,6 +758,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     // record as an action decided by their rule, run through the same path
     // as an approval. Already reported: the model reads the result now.
     const actionId = await recordRuleAction(a, name, prepared);
+    if (!actionId) return refuse(ACTION_ERRORS.personCannot);
     const out = await runApprovedAction({
       action: { id: actionId, toolName: name, risk: prepared.risk, sessionId: a.turn.sessionId, runId: a.turn.runId, routineId: a.turn.routineId, preview: prepared.preview },
       input: prepared.input,
@@ -764,7 +787,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const line = eventLineFor(name, ran.result);
   if (line) {
     // The teammate the line is about: a group chat holds several.
-    const message = await writeEventLine(a.turn.sessionId, { ...line, agentId: a.agent.id });
+    const message = await writeEventLine(a.turn.sessionId, { ...line, agentId: a.agent.id }, { whileOpen: { runId: a.turn.runId, personId: a.person.userId } });
     if (message) a.emit?.({ type: "event", message });
   }
   return done("ran", ran.result);
@@ -778,33 +801,44 @@ function toldInTalk(state: CallState, result: unknown): Record<string, unknown> 
   return { ok: true, note: TALK_TEAMMATE_COPY.toldDone };
 }
 
-/** A call the person's own "Don't ask" lets run: on record as decided by their rule, RUNNING, and already reported. */
-async function recordRuleAction(a: ExecuteArgs, tool: ToolName, prepared: Extract<Prepared, { ok: true }>): Promise<string> {
+/**
+ * A call the person's own "Don't ask" lets run: on record as decided by their
+ * rule, RUNNING, and already reported. Null, recording nothing, once the
+ * turn's run closed or its person's account is gone (review round 4 of Phase
+ * 3), checked under the run's lock in the same transaction.
+ */
+async function recordRuleAction(a: ExecuteArgs, tool: ToolName, prepared: Extract<Prepared, { ok: true }>): Promise<string | null> {
   const now = new Date();
-  const row = await prisma.agentAction.create({
-    data: {
-      organizationId: a.person.organizationId,
-      agentId: a.agent.id,
-      actingForId: a.person.userId,
-      sessionId: a.turn.sessionId,
-      runId: a.turn.runId,
-      routineId: a.turn.routineId,
-      toolName: tool,
-      risk: prepared.risk,
-      input: json(prepared.input),
-      preview: json(prepared.preview),
-      targetKey: prepared.targetKey,
-      groupKey: `${a.turn.runId}:${tool}`,
-      status: "RUNNING",
-      decidedVia: "rule",
-      decidedById: a.person.userId,
-      decidedAt: now,
-      reportedAt: now,
-      expiresAt: new Date(now.getTime() + ACTION_TTL_MS),
+  return prisma.$transaction(
+    async (tx) => {
+      if (!(await runStillOpen(tx, a.turn.runId, a.person.userId))) return null;
+      const row = await tx.agentAction.create({
+        data: {
+          organizationId: a.person.organizationId,
+          agentId: a.agent.id,
+          actingForId: a.person.userId,
+          sessionId: a.turn.sessionId,
+          runId: a.turn.runId,
+          routineId: a.turn.routineId,
+          toolName: tool,
+          risk: prepared.risk,
+          input: json(prepared.input),
+          preview: json(prepared.preview),
+          targetKey: prepared.targetKey,
+          groupKey: `${a.turn.runId}:${tool}`,
+          status: "RUNNING",
+          decidedVia: "rule",
+          decidedById: a.person.userId,
+          decidedAt: now,
+          reportedAt: now,
+          expiresAt: new Date(now.getTime() + ACTION_TTL_MS),
+        },
+        select: { id: true },
+      });
+      return row.id;
     },
-    select: { id: true },
-  });
-  return row.id;
+    { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+  );
 }
 
 export interface ApprovedRun {

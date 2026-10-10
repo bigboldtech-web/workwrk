@@ -6,7 +6,7 @@
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActingPerson } from "@/lib/agents/acting";
-import { allowPrints, sharedMemoriesPrint, teammateFieldPrints, type PrintedTeammate } from "@/lib/agents/teammate-print";
+import { allowPrints, allowRecord, sharedMemoriesPrint, teammateFieldPrints, type PrintedTeammate } from "@/lib/agents/teammate-print";
 
 const cfg = vi.hoisted(() => ({
   value: {
@@ -140,6 +140,25 @@ describe("connectorAccess", () => {
     expect((await connectorAccess({ person: person(), agent: agent({ print: changed }), product: "gmail", setting, forApproval: true })).ok).toBe(true);
     // An allow of another product is not this one's.
     expect(await connectorAccess({ person: person(), agent: agent(), product: "calendar", setting })).toEqual({ ok: false, reason: "not_allowed" });
+  });
+
+  // Review round 4 of Phase 3: an allow kept no Google account, so one given
+  // on a card still showing Max's work account let Ops into the personal
+  // account he had reconnected as elsewhere.
+  it("refuses an allow given for another Google account as not allowed, at an approval too, and keeps one given before accounts were kept", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-personal" });
+    const none = sharedMemoriesPrint([]);
+    const forWork = { connectorProducts: ["gmail"], connectorPrints: { gmail: allowRecord(PRINTED, none, keyOf("google", "sub-work")) } };
+    // Before: ok, and Ops read the personal mailbox.
+    expect(await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: forWork })).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: forWork, forApproval: true })).toEqual({ ok: false, reason: "not_allowed" });
+    const forThis = { connectorProducts: ["gmail"], connectorPrints: { gmail: allowRecord(PRINTED, none, keyOf("google", "sub-personal")) } };
+    expect((await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: forThis })).ok).toBe(true);
+    // Given before the account was kept: round 3 clears allows when another account takes the row, so it is this one's.
+    const before = { connectorProducts: ["gmail"], connectorPrints: { gmail: allowPrints(PRINTED, none) } };
+    expect((await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: before })).ok).toBe(true);
+    // The person's own private teammate needs no allow, whatever account.
+    expect((await connectorAccess({ person: person(), agent: agent({ visibility: "PRIVATE", ownerId: "u-max" }), product: "gmail", setting: forWork })).ok).toBe(true);
   });
 
   // Review round 2 of Phase 3: a shared memory an Admin saved on the Memory
@@ -379,7 +398,7 @@ describe("sweepConnections", () => {
 
     expect(cdb.connections.map((c) => c.userId).sort()).toEqual(["u-here", "u-member"]);
     // The two leavers' revokes are queued and confirmed; the stuck one is dropped on its sixth try.
-    expect(out).toEqual({ statesExpired: 1, leavers: 2, noAccess: 0, closed: 0, suspended: 0, revoked: 2, kept: 1, dropped: 1, stillHeld: 0 });
+    expect(out).toEqual({ statesExpired: 1, leavers: 2, noAccess: 0, closed: 0, suspended: 0, revoked: 2, kept: 1, dropped: 1, stillHeld: 0, unopenable: 0 });
     expect(cdb.revocations.map((r) => r.id)).toEqual(["rv-retry"]);
     expect(cdb.states.map((s) => s.id)).toEqual(["st-live"]);
     // The fake reads the leaver rule from the real statement: it is the anti-join on this workspace's membership.
@@ -480,6 +499,79 @@ describe("sweepConnections", () => {
   });
 });
 
+// Review round 4 of Phase 3: a token no key opened was deleted for good, so
+// a wrong SECRETS_ENCRYPTION_KEY (a rotation where _PREVIOUS is missing in
+// one place) silently threw away every pending revoke, and WorkwrK stayed
+// listed in those people's Google accounts.
+describe("a queued revoke no key opens (review round 4 of Phase 3)", () => {
+  const HOUR = 60 * 60 * 1000;
+  /** A token sealed under a key the app no longer holds. */
+  function sealedElsewhere(token: string): unknown {
+    process.env.SECRETS_ENCRYPTION_KEY = "c".repeat(64);
+    const sealed = sealToken(token);
+    process.env.SECRETS_ENCRYPTION_KEY = "a".repeat(64);
+    return sealed;
+  }
+
+  it("is kept with no try counted and its next try about an hour away, and is sent once a key opens it", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    cdb.revocations.push({ id: "rv-1", provider: "google", tokenSealed: sealedElsewhere("rt-1"), reason: "disconnected", attempts: 2, nextAttemptAt: old, createdAt: old, accountKey: null });
+    const now = new Date();
+    const out = await sweepConnections(now, { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    // Before: dropped: 1, and the row deleted for good.
+    expect(out).toMatchObject({ revoked: 0, kept: 1, dropped: 0, unopenable: 1 });
+    expect(cdb.revocations).toHaveLength(1);
+    // The claim counted a try; it is given back, since the key is wrong, not the row.
+    expect(cdb.revocations[0].attempts).toBe(2);
+    expect((cdb.revocations[0].nextAttemptAt as Date).getTime()).toBe(now.getTime() + HOUR);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(console.error).mock.calls.map((c) => String(c[0]))).toContain(
+      "[cron-failure] run-due-agents: 1 queued Google revoke(s) no key opens, kept for an hour; check SECRETS_ENCRYPTION_KEY and SECRETS_ENCRYPTION_KEY_PREVIOUS",
+    );
+    // The key comes back (SECRETS_ENCRYPTION_KEY_PREVIOUS set again): it is sent and goes.
+    vi.stubEnv("SECRETS_ENCRYPTION_KEY_PREVIOUS", "c".repeat(64));
+    cdb.revocations[0].nextAttemptAt = old;
+    expect(await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 })).toMatchObject({ revoked: 1, unopenable: 0 });
+    expect(cdb.revocations).toEqual([]);
+  });
+
+  it("is dropped once older than seven days", async () => {
+    fetchStub(() => ({ status: 200 }));
+    const week = new Date(Date.now() - 7 * 24 * HOUR - 60_000);
+    cdb.revocations.push({ id: "rv-old", provider: "google", tokenSealed: sealedElsewhere("rt-old"), reason: "disconnected", attempts: 0, nextAttemptAt: week, createdAt: week, accountKey: null });
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(out).toMatchObject({ dropped: 1, unopenable: 0 });
+    expect(cdb.revocations).toEqual([]);
+  });
+
+  it("stops the tick's draining when no row of a claim opens, since the key is wrong, not the rows", async () => {
+    const fetch = fetchStub(() => ({ status: 200 }));
+    const old = new Date(Date.now() - 60_000);
+    for (let i = 0; i < 25; i += 1) {
+      cdb.revocations.push({ id: `rv-${i}`, provider: "google", tokenSealed: sealedElsewhere(`rt-${i}`), reason: "disconnected", attempts: 0, nextAttemptAt: old, createdAt: old, accountKey: null });
+    }
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 });
+    // Before: all 25 claimed and deleted. Now one claim of ten, all kept, then the tick stops.
+    expect(cdb.claims).toEqual([10]);
+    expect(out).toMatchObject({ kept: 10, unopenable: 10, dropped: 0 });
+    expect(cdb.revocations).toHaveLength(25);
+    expect(fetch).not.toHaveBeenCalled();
+    // One [cron-failure] line for the tick.
+    expect(vi.mocked(console.error).mock.calls.filter((c) => String(c[0]).startsWith("[cron-failure]"))).toHaveLength(1);
+  });
+
+  it("keeps it the same way when it is tried at once (a disconnect, a hook), no try counted", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.revocations.push({ id: "rv-now", provider: "google", tokenSealed: sealedElsewhere("rt-now"), reason: "disconnected", attempts: 0, nextAttemptAt: new Date(), createdAt: new Date(), accountKey: keyOf("google", "sub-max") });
+    // Before: { dropped: 1 }, and the row gone.
+    expect(await revokeQueued(["rv-now"], REVOKE_CFG as never)).toEqual({ revoked: 0, kept: 1, dropped: 0, stillHeld: 0, unopenable: 1 });
+    expect(cdb.revocations).toHaveLength(1);
+    expect(cdb.revocations[0].attempts).toBe(0);
+    expect((cdb.revocations[0].nextAttemptAt as Date).getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000);
+  });
+});
+
 describe("revokeQueued", () => {
   // Review round 2 of Phase 3: the held check committed, letting the lock go,
   // before the revoke was sent, so a reconnect committing in between deleted
@@ -497,7 +589,7 @@ describe("revokeQueued", () => {
       // Queued before accounts were kept: no lock to take, revoked as before.
       { id: "rv-legacy", provider: "google", tokenSealed: sealToken("rt-legacy"), reason: "left", attempts: 0, nextAttemptAt: new Date(), createdAt: new Date(), accountKey: null },
     );
-    expect(await revokeQueued(["rv-key", "rv-legacy"], { revokeUrl: "https://g.test/revoke", standIn: true }, { timeoutMs: 30_000 })).toEqual({ revoked: 2, kept: 0, dropped: 0, stillHeld: 0 });
+    expect(await revokeQueued(["rv-key", "rv-legacy"], { revokeUrl: "https://g.test/revoke", standIn: true }, { timeoutMs: 30_000 })).toEqual({ revoked: 2, kept: 0, dropped: 0, stillHeld: 0, unopenable: 0 });
     const tokens = fetch.mock.calls.map((c) => new URLSearchParams(String(c[1]?.body)).get("token"));
     const keyed = seen[tokens.indexOf("rt-old")];
     const legacy = seen[tokens.indexOf("rt-legacy")];
@@ -516,7 +608,7 @@ describe("revokeQueued", () => {
     const fetch = fetchStub(() => ({ status: 200 }));
     seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-max" });
     cdb.revocations.push({ id: "rv-1", provider: "google", tokenSealed: sealToken("rt-old"), reason: "disconnected", attempts: 0, nextAttemptAt: new Date(), createdAt: new Date(), accountKey: keyOf("google", "sub-max") });
-    expect(await revokeQueued(["rv-1"], { revokeUrl: "https://g.test/revoke", standIn: true })).toEqual({ revoked: 0, kept: 0, dropped: 0, stillHeld: 1 });
+    expect(await revokeQueued(["rv-1"], { revokeUrl: "https://g.test/revoke", standIn: true })).toEqual({ revoked: 0, kept: 0, dropped: 0, stillHeld: 1, unopenable: 0 });
     expect(cdb.revocations).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
   });
