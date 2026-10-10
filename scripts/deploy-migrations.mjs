@@ -310,6 +310,16 @@ const SQL_MANIFEST = [
   // tick reads that short list. Catalogue-guarded; its first build locks
   // "ConsentRecord" (small) for a moment, once.
   "2026-10-11-ai-teammates-phase3-round7.sql",
+  // AI teammates, Phase 4 (docs/plans/ai-teammates-phase4.md): the new
+  // "TeammateBrowserPolicy", "TeammateBrowserSession", "TeammateBrowserStep"
+  // and "TeammateBrowserShot" tables (a partial unique index of one live
+  // browser per person), "Agent"."browserSites" (CHECK NOT VALID) and
+  // "AgentAction"."readWeb", both with constant defaults (catalogue only),
+  // catalogue-guarded columns, indexes, foreign keys and checks, so a deploy
+  // after the first takes no lock. Before the reload: Prisma selects every
+  // column on a read with no select, and every turn and every card read
+  // touches Agent and AgentAction.
+  "2026-10-11-ai-teammates-phase4.sql",
 ];
 
 /**

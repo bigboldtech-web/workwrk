@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PPMS_TOOL_NAMES, PRODUCT_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isConnectorToolName, isTeammateToolName, isToolName } from "./tool-names";
+import {
+  BROWSER_TOOL_NAMES,
+  CONNECTOR_TOOL_NAMES,
+  CROSS_TOOL_NAMES,
+  PPMS_TOOL_NAMES,
+  PRODUCT_TOOL_NAMES,
+  TEAMMATE_TOOL_NAMES,
+  isBrowserToolName,
+  isConnectorToolName,
+  isTeammateToolName,
+  isToolName,
+} from "./tool-names";
 import { TOOL_VERBS, toolOutcome, toolOutcomeSentence, toolSentence, toolSubject } from "./tool-verbs";
 
 const RETIRED = [
@@ -25,15 +36,23 @@ describe("the Ask AI tool set", () => {
 });
 
 describe("the AI teammate tools", () => {
-  it("are twenty-two (ask_teammate came with Phase 2, the eleven Google tools with Phase 3), apart from the Ask AI names, and in no Ask AI set", () => {
-    expect(TEAMMATE_TOOL_NAMES).toHaveLength(22);
+  it("are thirty-two (ask_teammate came with Phase 2, the eleven Google tools with Phase 3, the ten browser tools with Phase 4), apart from the Ask AI names, and in no Ask AI set", () => {
+    expect(TEAMMATE_TOOL_NAMES).toHaveLength(32);
     expect(CONNECTOR_TOOL_NAMES).toHaveLength(11);
-    expect(new Set([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]).size).toBe(50);
+    expect(BROWSER_TOOL_NAMES).toHaveLength(10);
+    expect(new Set([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]).size).toBe(60);
     for (const t of CONNECTOR_TOOL_NAMES) {
       expect(TEAMMATE_TOOL_NAMES as readonly string[]).toContain(t);
       expect(isConnectorToolName(t)).toBe(true);
+      expect(isBrowserToolName(t)).toBe(false);
+    }
+    for (const t of BROWSER_TOOL_NAMES) {
+      expect(TEAMMATE_TOOL_NAMES as readonly string[]).toContain(t);
+      expect(isBrowserToolName(t)).toBe(true);
+      expect(isConnectorToolName(t)).toBe(false);
     }
     expect(isConnectorToolName("read_talk")).toBe(false);
+    expect(isBrowserToolName("read_email")).toBe(false);
     for (const t of TEAMMATE_TOOL_NAMES) {
       expect(isToolName(t)).toBe(true);
       expect(isTeammateToolName(t)).toBe(true);
@@ -195,5 +214,25 @@ describe("the Google tools' sentences (Phase 3)", () => {
     expect(toolSentence("reply_email", {}, true).text).toBe("Couldn't send the reply");
     expect(toolSentence("create_event", { title: "Focus" })).toEqual({ concept: "calendar", text: 'Added event "Focus"' });
     expect(toolSentence("respond_to_invite", { eventId: "e1", response: "accepted" }).text).toBe("Answered invite");
+  });
+});
+
+describe("the browser tools' sentences (Phase 4)", () => {
+  it("name the site from the stored { site }, and never an address or a page's words", () => {
+    expect(toolSentence("open_page", { site: "docs.proof.test" })).toEqual({ concept: "browser", text: 'Opened "docs.proof.test"' });
+    expect(toolSentence("read_page", { site: "docs.proof.test" }).text).toBe('Read "docs.proof.test"');
+    expect(toolSentence("click", { site: "shop.proof.test" })).toEqual({ concept: "browser", text: 'Clicked on "shop.proof.test"' });
+    // A card's stored input: its typed words and its element are never the subject.
+    expect(toolSentence("type_text", { browserSessionId: "b1", site: "shop.proof.test", element: "e4", text: "4242 4242 4242 4242" }).text).toBe('Typed on "shop.proof.test"');
+    expect(toolSentence("ask_to_take_over", { browserSessionId: "b1", site: "login.proof.test", reason: "sign_in" }).text).toBe('Asked you to take over on "login.proof.test"');
+    expect(toolSentence("close_browser", {}).text).toBe("Closed the browser");
+    expect(toolSentence("select_option", { site: "shop.proof.test" }, true).text).toBe("Couldn't choose the option");
+    // Before: "site" was no subject key, so the row said only "Opened".
+    for (const t of BROWSER_TOOL_NAMES) expect(TOOL_VERBS[t].concept, t).toBe("browser");
+  });
+
+  it("read a waiting act by its neutral title, as the server gives it", () => {
+    const waiting = toolOutcome("click", { status: "waiting_for_approval", actionId: "a1", title: "Click on the page" });
+    expect(toolOutcomeSentence("click", { site: "shop.proof.test" }, waiting).text).toBe("Waiting for your approval: Click on the page");
   });
 });

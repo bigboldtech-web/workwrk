@@ -428,6 +428,11 @@ export const ACTION_VERB: Readonly<Partial<Record<ToolName, string>>> = {
   create_event: "Create event",
   update_event: "Change event",
   cancel_event: "Cancel event",
+  // The person's browser for this chat (Phase 4). Its reads have no card.
+  click: "Click",
+  type_text: "Type into",
+  select_option: "Choose in",
+  ask_to_take_over: "Take over",
 };
 
 /** The card title's verb for respond_to_invite, by the answer it sends: 'Accept "Team sync"'. */
@@ -1024,8 +1029,8 @@ export interface ToolPickerCopy {
 }
 
 /**
- * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 22
- * teammate tools, 50 in all (tool-names.ts). Typed by ToolName, so a tool with no label
+ * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 32
+ * teammate tools, 60 in all (tool-names.ts). Typed by ToolName, so a tool with no label
  * is a compile error; teammate-copy.test.ts holds it to every name too.
  */
 export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
@@ -1080,6 +1085,18 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   update_event: { label: "Change your Google Calendar events", description: "Only events you organize. Asks first when anyone else is on them." },
   cancel_event: { label: "Cancel your Google Calendar events", description: "Only events you organize. Asks first when anyone else is on them." },
   respond_to_invite: { label: "Answer calendar invites", description: "Always asks first. The organizer sees your answer." },
+  // The person's browser for this chat (docs/plans/ai-teammates-phase4.md).
+  // No row in the picker until the computer is on (teammate-views.ts givableTools).
+  open_page: { label: "Open web pages", description: "Only on the sites it may open. Asks first before every click and every word typed." },
+  read_page: { label: "Read web pages", description: "The text you would see on the page. Never what is typed in its fields." },
+  find_on_page: { label: "Find words on a page" },
+  scroll_page: { label: "Scroll pages" },
+  show_page: { label: "Show you the page", description: "A picture in your chat. The teammate doesn't see it." },
+  click: { label: "Click on pages", description: "Always asks first, showing the page and what it would click." },
+  type_text: { label: "Type into pages", description: "Always asks first, showing every word. Never passwords, codes or card numbers." },
+  select_option: { label: "Choose options on pages", description: "Always asks first." },
+  ask_to_take_over: { label: "Ask you to take over", description: "To sign in, enter a code or pay yourself. It sees nothing while you do." },
+  close_browser: { label: "Close the browser" },
 };
 
 /**
@@ -1291,6 +1308,36 @@ export const CONNECTOR_TITLES: Readonly<Partial<Record<ToolName, string>>> = {
   cancel_event: "Cancel an event in Google Calendar",
   respond_to_invite: "Answer a calendar invite",
 };
+
+/**
+ * What a browser step is called wherever the model reads it, now or in a
+ * later turn, and in the history (docs/plans/ai-teammates-phase4.md step 3,
+ * browser-rules.ts browserTitle): never an element's words, which the page
+ * wrote; only the card the person reads shows them.
+ */
+export const BROWSER_TITLES: Readonly<Partial<Record<ToolName, string>>> = {
+  click: "Click on the page",
+  type_text: "Type on the page",
+  select_option: "Choose an option on the page",
+  ask_to_take_over: "Ask you to take over the browser",
+};
+
+/**
+ * The browser tools' sentences (docs/plans/ai-teammates-phase4.md). Step 1
+ * has the one a tool answers before it is built, and the notes a read of a
+ * page adds when it was cut (browser/snapshot.ts); steps 2 and 3 bring the
+ * rest.
+ */
+export const BROWSER_COPY = {
+  /** A browser tool before step 3 builds it. None is offered until then (teammate-tools.ts `computer`). */
+  notYet: "This browser tool isn't ready yet.",
+  /** A page with more text than a read's parts hold. */
+  textBeyond: (parts: number) => `The page's text is longer than ${parts} parts, and the rest isn't shown.`,
+  /** A page with more buttons, fields and lists than a read lists. */
+  moreElements: (n: number) => `Only the first ${n} buttons, fields and lists are listed.`,
+  /** A page with more links than a read lists. */
+  moreLinks: (n: number) => `Only the first ${n} links are listed.`,
+} as const;
 
 /**
  * The person's own Google connection for their AI teammates
@@ -1712,8 +1759,9 @@ export const TALK_TEAMMATE_COPY = {
 /** An AI teammate step in an automation (docs/plans/ai-teammates-phase2.md step 7). */
 /**
  * The parts of a teammate a fingerprint covers, as a person reads them
- * (teammate-print.ts PRINT_FIELDS), and the shared memories a Google allow
- * also covers (ALLOW_PARTS, review round 2 of Phase 3).
+ * (teammate-print.ts PRINT_FIELDS), and the shared memories and allowed
+ * sites a Google allow also covers (ALLOW_PARTS, review round 2 of Phase 3
+ * and Phase 4 Decision 26).
  */
 export const PRINT_FIELD_WORDS: Record<string, string> = {
   name: "name",
@@ -1723,6 +1771,7 @@ export const PRINT_FIELD_WORDS: Record<string, string> = {
   rules: "approval rules",
   model: "model",
   memories: "shared memories",
+  sites: "allowed sites",
 };
 
 export const AUTOMATION_TEAMMATE_COPY = {

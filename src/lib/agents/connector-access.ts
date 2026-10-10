@@ -47,6 +47,8 @@ export const CONNECTOR_AGENT_SELECT = {
   approvalRules: true,
   modelOverride: true,
   productSlug: true,
+  // Phase 4 Decision 26: its allowed sites are part of what an allow covers.
+  browserSites: true,
 } as const;
 
 /** A teammate row as a connector decision reads it (CONNECTOR_AGENT_SELECT, or a superset such as an approval's). */
@@ -61,6 +63,7 @@ export interface ConnectorAgentRow {
   approvalRules: unknown;
   modelOverride: string | null;
   productSlug: string | null;
+  browserSites: string[];
 }
 
 export function connectorAgentFrom(row: ConnectorAgentRow): ConnectorAgent {
@@ -77,6 +80,7 @@ export function connectorAgentFrom(row: ConnectorAgentRow): ConnectorAgent {
       approvalRules: row.approvalRules,
       modelOverride: row.modelOverride,
       productSlug: row.productSlug,
+      browserSites: row.browserSites,
     },
   };
 }

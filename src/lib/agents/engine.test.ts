@@ -24,6 +24,8 @@ interface Req {
 type Row = Record<string, unknown>;
 
 const db = vi.hoisted(() => ({
+  /** What each teammateToolNames call was asked with (Phase 4: its `computer`). */
+  toolOpts: [] as Array<Record<string, unknown>>,
   /** The chat's rows, oldest first. */
   history: [] as Row[],
   historyQueries: [] as Array<{ where: Row; take?: number }>,
@@ -337,10 +339,20 @@ vi.mock("./actions", () => ({
 }));
 
 // The stored set as given, unsorted and with an excluded tool left in: the
-// engine sorts it and drops the excluded one itself.
-vi.mock("./teammate-tools", () => ({
-  teammateToolNames: (agent: { toolNames: unknown }) => (Array.isArray(agent.toolNames) ? [...agent.toolNames] : []),
-}));
+// engine sorts it and drops the excluded one itself. Browser tools only with
+// `computer: true`, as the real one gives them (Phase 4), and every call's
+// options are kept.
+vi.mock("./teammate-tools", async () => {
+  const { BROWSER_TOOL_NAMES } = await import("./tool-names");
+  const browser = new Set<string>(BROWSER_TOOL_NAMES);
+  return {
+    teammateToolNames: (agent: { toolNames: unknown }, opts: Record<string, unknown>) => {
+      db.toolOpts.push({ ...opts });
+      const names: string[] = Array.isArray(agent.toolNames) ? [...agent.toolNames] : [];
+      return opts?.computer === true ? names : names.filter((n) => !browser.has(n));
+    },
+  };
+});
 vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeTools() }));
 // The teammates a teammate may ask (ask_teammate's list in block 2).
 vi.mock("./teammate-server", () => ({ askableTeammates: async () => [{ name: "Project Manager", job: "Keeps <projects> moving." }] }));
@@ -367,6 +379,7 @@ const AGENT = {
   toolNames: ["search_tasks", "post_in_talk", "create_task", "create_contract"] as unknown,
   approvalRules: {} as unknown,
   organizationId: "org",
+  browserSites: [] as string[],
 };
 
 let events: TeammateStreamEvent[] = [];
@@ -431,6 +444,7 @@ function blocksOf(m: { content: string | Array<Record<string, unknown>> }): Arra
 }
 
 beforeEach(() => {
+  db.toolOpts = [];
   db.runStatus = "PENDING";
   db.personGone = false;
   db.lockReads = [];
@@ -1049,6 +1063,38 @@ describe("what a turn saves", () => {
     expect(db.runUpdates[1].data.output).toMatchObject({ practice: true });
     expect(db.requests[1].system[1].text).toContain("This is a practice run: your write tools only report what they would do.");
   });
+});
+
+// The guard of Phase 4 step 1 (docs/plans/ai-teammates-phase4.md): until
+// step 3 wires the computer's access, a turn asks for its tools with the
+// computer off, so a teammate whose stored tools name the browser is offered
+// none of them, whatever started the turn.
+describe("the browser before it is built (Phase 4 step 1)", () => {
+  const BROWSING = { ...AGENT, toolNames: ["search_tasks", "open_page", "read_page", "click", "type_text", "ask_to_take_over", "close_browser"] as unknown };
+  const GROUP = { name: "Offsite crew", selfAgentId: "a1", members: [{ agentId: "a1", name: "Chief of Staff" }, { agentId: "a2", name: "Market Analyst" }], messageId: "u-now" };
+  const decided: AgentActionRow = { id: "o9", toolName: "post_in_talk", risk: "OUTWARD", status: "DENIED", preview: { title: "Post in #general" }, createdAt: new Date(), expiresAt: new Date() };
+  const turns: Array<[string, Partial<TurnArgs>]> = [
+    ["CHAT", {}],
+    ["RESUME", { trigger: "RESUME", userText: null, userMessageId: null, outcomes: [decided] }],
+    ["a group CHAT", { userText: null, group: GROUP }],
+    ["ROUTINE", { trigger: "ROUTINE", userText: null, userMessageId: null, routine: { id: "r1", name: "Daily brief", prompt: "Summarise my tasks." } }],
+    ["DELEGATED", { trigger: "DELEGATED", userText: null, userMessageId: null, origin: { kind: "delegated", by: { agentId: "a9", name: "Chief of Staff", sessionId: "s-cos", runId: "run-cos" }, request: "Open the shop." } }],
+    ["TALK", { trigger: "TALK", userText: "@Chief of Staff open it", userMessageId: null, origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 3, context: [] } }],
+    ["AUTOMATION", { trigger: "AUTOMATION", userText: null, userMessageId: null, origin: { kind: "automation", workflowId: "wf1", workflowName: "Triage", automationRunId: "arun1", instruction: "Open it", values: [] } }],
+  ];
+
+  for (const [label, o] of turns) {
+    it(`offers no browser tool in ${label}, and asks for its tools with the computer off`, async () => {
+      db.replies = [reply([say("Done.")], "end_turn")];
+      await runTeammateTurn(turn({ agent: BROWSING, ...o }));
+      const offered = (db.requests[0].tools ?? []).map((t) => t.name);
+      expect(offered).toContain("search_tasks");
+      for (const t of ["open_page", "read_page", "click", "type_text", "ask_to_take_over", "close_browser"]) expect(offered, `${label} ${t}`).not.toContain(t);
+      // Before: teammateToolNames took no computer, so nothing said the browser was off.
+      expect(db.toolOpts.length).toBeGreaterThan(0);
+      for (const opts of db.toolOpts) expect(opts.computer, label).toBe(false);
+    });
+  }
 });
 
 describe("a group chat (Phase 2)", () => {

@@ -29,7 +29,7 @@ import {
   type RoutineRowLike,
 } from "./teammate-views";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
-import { CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
 import { serverTimeZone, zoneName } from "./schedule-words";
 
 describe("the tools a teammate may be given", () => {
@@ -39,9 +39,9 @@ describe("the tools a teammate may be given", () => {
 
   it("need exactly the modules teammateToolNames takes them out for", () => {
     const every = { toolNames: [...ALL_TOOL_NAMES], productSlug: null };
-    const on = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS });
+    const on = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS, computer: false });
     const missingWithout = (opts: { tablesOn: boolean; talkOn: boolean }) => {
-      const left = new Set(teammateToolNames(every, { ...opts, connectors: NO_PRODUCTS }));
+      const left = new Set(teammateToolNames(every, { ...opts, connectors: NO_PRODUCTS, computer: false }));
       return on.filter((t) => !left.has(t)).sort();
     };
     const needing = (m: "talk" | "tables") => (Object.keys(TOOL_MODULE) as ToolName[]).filter((t) => TOOL_MODULE[t] === m).sort();
@@ -54,15 +54,29 @@ describe("the tools a teammate may be given", () => {
   });
 
   it("hold the Google tools only for a product that is on, by the product teammateToolNames reads (Phase 3)", () => {
-    expect(givableTools(NO_PRODUCTS).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
-    expect(givableTools(NO_PRODUCTS)).toEqual(GIVABLE_TOOLS.filter((t) => !(CONNECTOR_TOOL_NAMES as readonly string[]).includes(t)));
-    const gmailOnly = givableTools({ gmail: true, calendar: false });
+    expect(givableTools(NO_PRODUCTS, true).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
+    expect(givableTools(NO_PRODUCTS, true)).toEqual(GIVABLE_TOOLS.filter((t) => !(CONNECTOR_TOOL_NAMES as readonly string[]).includes(t)));
+    const gmailOnly = givableTools({ gmail: true, calendar: false }, false);
     expect(gmailOnly.filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t)).sort()).toEqual(["draft_email", "read_email", "reply_email", "search_email", "send_email"]);
-    expect([...givableTools({ gmail: true, calendar: true })]).toEqual([...GIVABLE_TOOLS]);
+    expect([...givableTools({ gmail: true, calendar: true }, true)]).toEqual([...GIVABLE_TOOLS]);
     // The map the picker reads is the one teammateToolNames takes them out by.
     const every = { toolNames: [...ALL_TOOL_NAMES], productSlug: null };
-    const offered = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: { gmail: false, calendar: true } });
+    const offered = teammateToolNames(every, { tablesOn: true, talkOn: true, connectors: { gmail: false, calendar: true }, computer: false });
     for (const t of CONNECTOR_TOOL_NAMES) expect(offered.includes(t), t).toBe(TOOL_CONNECTOR[t] === "calendar");
+  });
+
+  it("hold the browser tools only while the computer is available, as teammateToolNames gives them (Phase 4)", () => {
+    const isBrowser = (t: string) => (BROWSER_TOOL_NAMES as readonly string[]).includes(t);
+    // Before: there were no browser tools to give. Now every one is givable, and only with the computer.
+    expect(GIVABLE_TOOLS.filter(isBrowser).sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
+    expect(givableTools({ gmail: true, calendar: true }, false).filter(isBrowser)).toEqual([]);
+    expect(givableTools({ gmail: true, calendar: true }, false)).toEqual(GIVABLE_TOOLS.filter((t) => !isBrowser(t)));
+    expect(givableTools(NO_PRODUCTS, true).filter(isBrowser).sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
+    // A caller that left it out at run time gets no browser row.
+    expect(givableTools(NO_PRODUCTS, undefined as never).filter(isBrowser)).toEqual([]);
+    // The settings table draws no browser row in step 1, whatever the teammate stores.
+    const table = toolSettings({ enabled: ["open_page", "click", "search_tasks"], agentRules: {}, personRules: { click: "always" }, talkOn: true, tablesOn: true, connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS });
+    expect(table.filter((r) => isBrowser(r.name))).toEqual([]);
   });
 });
 
@@ -117,7 +131,7 @@ describe("toolSettings", () => {
   it("lists no Google row while no product is on, whatever the teammate stores (Phase 3)", () => {
     const withGoogle = toolSettings({ enabled: ["search_email", "send_email", "search_tasks"], agentRules: {}, personRules: { send_email: "always" }, talkOn: true, tablesOn: true, connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS });
     for (const t of CONNECTOR_TOOL_NAMES) expect(withGoogle.find((r) => r.name === t), t).toBeUndefined();
-    expect(withGoogle.map((r) => r.name)).toEqual(givableTools(NO_PRODUCTS));
+    expect(withGoogle.map((r) => r.name)).toEqual(givableTools(NO_PRODUCTS, false));
   });
 
   it("gives a Google tool a row only for a product that is on, with the reader's own state, and no other tool one (Phase 3 step 5)", () => {
@@ -160,7 +174,7 @@ describe("a Google row's state (Phase 3 step 5)", () => {
   });
 
   it("is never a Google row for a caller that left the products out", () => {
-    expect(givableTools(undefined as never).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
+    expect(givableTools(undefined as never, false).filter((t) => (CONNECTOR_TOOL_NAMES as readonly string[]).includes(t))).toEqual([]);
   });
 });
 

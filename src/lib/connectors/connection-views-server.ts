@@ -150,7 +150,7 @@ async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet, accou
   ]);
   const withTools = agents
     .filter((a) => canUseAgent(a, viewer))
-    .map((a) => ({ agent: a, tools: teammateToolNames(a, { ...modules, connectors: EVERY_PRODUCT }) }))
+    .map((a) => ({ agent: a, tools: teammateToolNames(a, { ...modules, connectors: EVERY_PRODUCT, computer: false }) }))
     .filter(({ tools }) => {
       const reach = productsOfTools(tools);
       return reach.gmail || reach.calendar;

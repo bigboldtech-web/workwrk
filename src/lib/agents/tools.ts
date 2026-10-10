@@ -1782,9 +1782,10 @@ const getTeamAlignmentRollup: ToolDefinition = {
 
 // The registry, typed against the one name list (tool-names.ts): a missing or
 // extra entry is a compile error, which is what keeps the chat thread's verb
-// map and this table the same 50 names (the 28 Ask AI tools and the 22 AI
+// map and this table the same 60 names (the 28 Ask AI tools and the 32 AI
 // teammate tools, src/lib/agents/teammate-tools.ts, 11 of them the Google
-// connector tools of src/lib/agents/connector-tools.ts).
+// connector tools of src/lib/agents/connector-tools.ts and 10 the browser
+// tools of src/lib/agents/browser-tools.ts).
 //
 // The Ask AI loops look a tool up here by the name the model sent. A
 // teammate tool is in no Ask AI set (CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES), so

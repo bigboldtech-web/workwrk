@@ -11,6 +11,7 @@ import {
   toolsForTrigger,
   ALWAYS_ASK,
   BASE_RISK,
+  BROWSER_TOOLS,
   CONNECTOR_TOOLS,
   EDITABLE_FIELD,
   NOTIFY_ESCALATES,
@@ -28,7 +29,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { CONNECTOR_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
 
 const ALL: ToolName[] = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES];
 
@@ -43,17 +44,17 @@ describe("every tool has a class", () => {
 
   it("matches the 3.3 table", () => {
     const by = (risk: ToolRisk) => ALL.filter((t) => BASE_RISK[t] === risk).sort();
-    // Sending mail and answering an invite cannot be taken back (Phase 3 Decision 8).
-    expect(by("IRREVERSIBLE")).toEqual(["invite_person_with_role", "reply_email", "respond_to_invite", "send_email"]);
+    // Sending mail and answering an invite cannot be taken back (Phase 3 Decision 8), nor acting on a web page (Phase 4 Decision 12).
+    expect(by("IRREVERSIBLE")).toEqual(["ask_to_take_over", "click", "invite_person_with_role", "reply_email", "respond_to_invite", "select_option", "send_email", "type_text"]);
     // A new doc, form or table is open to every member: making one is outward (review round 1).
     expect(by("OUTWARD")).toEqual(["create_data_table", "create_doc", "create_form", "create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
     expect(by("READ")).toEqual([
       // ask_teammate never asks itself: what the teammate it asks would do asks for itself (Phase 2).
-      "ask_teammate", "find_free_time", "get_team_alignment_rollup", "list_data_tables", "list_events", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
-      "list_my_sops", "list_my_weekly_reviews", "read_email", "read_talk", "search_contracts", "search_email", "search_employees", "search_meetings",
-      "search_okrs", "search_sops", "search_tasks",
+      "ask_teammate", "close_browser", "find_free_time", "find_on_page", "get_team_alignment_rollup", "list_data_tables", "list_events", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
+      "list_my_sops", "list_my_weekly_reviews", "open_page", "read_email", "read_page", "read_talk", "scroll_page", "search_contracts", "search_email", "search_employees", "search_meetings",
+      "search_okrs", "search_sops", "search_tasks", "show_page",
     ]);
-    expect(by("INTERNAL")).toHaveLength(ALL.length - 20 - 9 - 4);
+    expect(by("INTERNAL")).toHaveLength(ALL.length - 26 - 9 - 8);
   });
 
   it("gives every Google connector tool its class (Phase 3)", () => {
@@ -74,6 +75,26 @@ describe("every tool has a class", () => {
     for (const t of ["send_email", "reply_email", "respond_to_invite"] as const) expect(ALWAYS_ASK.has(t), t).toBe(true);
     expect([...NOTIFY_ESCALATES].sort()).toEqual(["cancel_event", "create_event", "update_event"]);
     expect([...CONNECTOR_TOOLS].sort()).toEqual([...CONNECTOR_TOOL_NAMES].sort());
+  });
+
+  // Phase 4 Decision 12: reading a page never asks; acting on one always does, on its own card.
+  it("gives every browser tool its class, and never an INTERNAL one (Phase 4)", () => {
+    const want: Record<(typeof BROWSER_TOOL_NAMES)[number], ToolRisk> = {
+      open_page: "READ",
+      read_page: "READ",
+      find_on_page: "READ",
+      scroll_page: "READ",
+      show_page: "READ",
+      close_browser: "READ",
+      click: "IRREVERSIBLE",
+      type_text: "IRREVERSIBLE",
+      select_option: "IRREVERSIBLE",
+      ask_to_take_over: "IRREVERSIBLE",
+    };
+    for (const t of BROWSER_TOOL_NAMES) expect(BASE_RISK[t], t).toBe(want[t]);
+    for (const t of ["click", "type_text", "select_option", "ask_to_take_over"] as const) expect(ALWAYS_ASK.has(t), t).toBe(true);
+    expect([...BROWSER_TOOLS].sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
+    for (const t of BROWSER_TOOL_NAMES) expect(CONNECTOR_TOOLS.has(t), t).toBe(false);
   });
 
   it("an escalation never lowers a class, and an unknown tool is the strictest", () => {
@@ -240,8 +261,10 @@ describe("the limits and the lists", () => {
   it("gives an edit field exactly to the tools the 3.3 table names, each with a label and a length", () => {
     // Phase 3 Decision 14: an email's body, an event's title.
     expect(Object.keys(EDITABLE_FIELD).sort()).toEqual([
-      "comment_on_task", "create_event", "create_meeting", "create_okr", "create_task", "draft_email", "post_in_talk", "reply_email", "send_email", "send_kudos", "update_doc",
+      "comment_on_task", "create_event", "create_meeting", "create_okr", "create_task", "draft_email", "post_in_talk", "reply_email", "send_email", "send_kudos", "type_text", "update_doc",
     ]);
+    // Phase 4: the words a teammate would type, every one on the card, at most what type_text takes.
+    expect(EDITABLE_FIELD.type_text).toMatchObject({ field: "text", maxLength: 2000 });
     expect(EDITABLE_FIELD.send_email).toMatchObject({ field: "body", maxLength: 8000 });
     expect(EDITABLE_FIELD.reply_email?.field).toBe("body");
     expect(EDITABLE_FIELD.draft_email?.field).toBe("body");
@@ -297,10 +320,55 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     // A routine still never asks another teammate.
     expect(toolsForTrigger(all, "ROUTINE")).not.toContain("ask_teammate");
   });
+  // Phase 4 Decision 21: nobody is there to approve a step or take over
+  // anywhere but the person's own chats and continues.
+  it("offers browser tools only in the person's own chats and continues, and a routine keeps its Google tools (Phase 4)", () => {
+    const all: ToolName[] = [...ALL];
+    for (const t of ["ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as const) {
+      const offered = toolsForTrigger(all, t);
+      // Before: a routine kept every browser tool, so it could browse with nobody watching.
+      for (const b of BROWSER_TOOL_NAMES) expect(offered, `${t} ${b}`).not.toContain(b);
+    }
+    for (const t of ["CHAT", "RESUME"] as const) {
+      const offered = toolsForTrigger(all, t);
+      for (const b of BROWSER_TOOL_NAMES) expect(offered, `${t} ${b}`).toContain(b);
+    }
+    // Phase 3 unchanged: a routine still reads and writes the person's Google, and only asks no other teammate.
+    const routine = toolsForTrigger(all, "ROUTINE");
+    for (const c of CONNECTOR_TOOL_NAMES) expect(routine, c).toContain(c);
+    expect(routine).toEqual(all.filter((n) => n !== "ask_teammate" && !BROWSER_TOOLS.has(n)));
+  });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
     expect(BASE_RISK.ask_teammate).toBe("READ");
     expect(MAX_DELEGATIONS_PER_TURN).toBe(3);
+  });
+});
+
+describe("acting on a page never skips the card (Phase 4 Decision 12)", () => {
+  it("asks for a click, a word typed, a choice and a take over, whatever anyone stored", () => {
+    expect(gate("click", "IRREVERSIBLE", { personRules: { click: "always" } })).toBe("ask");
+    expect(gate("click", "READ", { personRules: { click: "always" } })).toBe("ask");
+    expect(gate("type_text", "IRREVERSIBLE", { personRules: { type_text: "always" } })).toBe("ask");
+    expect(gate("select_option", "IRREVERSIBLE", { personRules: { select_option: "always" } })).toBe("ask");
+    expect(gate("ask_to_take_over", "IRREVERSIBLE", { personRules: { ask_to_take_over: "always" } })).toBe("ask");
+    for (const t of ["click", "type_text", "select_option", "ask_to_take_over"] as const) {
+      expect(alwaysKeyFor(t, "IRREVERSIBLE", null), t).toBeNull();
+      expect(canAlwaysAllow(t, "IRREVERSIBLE", null), t).toBe(false);
+    }
+  });
+
+  it("runs its reads at once, whatever is stored", () => {
+    for (const t of ["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "close_browser"] as const) {
+      expect(gate(t, "READ", { agentRules: { [t]: "ask" }, personRules: { [t]: "ask" } }), t).toBe("run");
+    }
+  });
+
+  it("never keeps a Don't ask for an act, so the settings never list one", () => {
+    expect(
+      sanitizeRules({ type_text: "always", click: "always", select_option: "always", ask_to_take_over: "always", "click:outward": "always", open_page: "ask" }, { level: "person", allowedTools: ALL }),
+    ).toEqual({ open_page: "ask" });
+    expect(sanitizeRules({ type_text: "ask" }, { level: "person", allowedTools: ALL })).toEqual({ type_text: "ask" });
   });
 });
 

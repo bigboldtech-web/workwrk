@@ -19,12 +19,24 @@
 // Google is checked against the allow, memories part included; automations
 // use none; and their outward work waits on a card unless the person chose
 // Don't ask for it.
+//
+// AND THE TEAMMATE'S ALLOWED SITES (Phase 4 Decision 26). A manager who
+// widens where a Google-allowed teammate's browser may go repurposes it as
+// surely as one who rewrites its instructions, so an allow keeps a "sites"
+// part, the eighth, after the memories part. Like the memories part it is
+// an allow part only: teammateFingerprint and teammateFieldPrints (the
+// routine and automation prints) are exactly as they were, since routines
+// and automations never get the browser, and changing them would pause every
+// one of them at the deploy. Before Phase 4 no teammate had a site, so an
+// allow or a shown token kept without the part reads its sites as none
+// (EMPTY_SITES_PRINT): no allow pauses at the deploy, and the first site a
+// manager adds stops it.
 
 import { createHash } from "node:crypto";
 import { stableJson } from "@/lib/automation/definition";
 
-/** The parts of a teammate a fingerprint covers. */
-export interface PrintedTeammate {
+/** The parts of a teammate its fingerprint and its part prints cover (routines and automations read only these). */
+export interface FingerprintedTeammate {
   name: string;
   description: string | null;
   systemPrompt: string | null;
@@ -32,6 +44,15 @@ export interface PrintedTeammate {
   approvalRules: unknown;
   modelOverride: string | null;
   productSlug: string | null;
+}
+
+/**
+ * The parts a Google allow covers besides its shared memories: the above and
+ * the teammate's allowed sites (Agent.browserSites, Phase 4). Required, so a
+ * row read without it is a compile error wherever an allow is compared.
+ */
+export interface PrintedTeammate extends FingerprintedTeammate {
+  browserSites: unknown;
 }
 
 /** Each part a person may be told changed, by its key, in the words they read. */
@@ -42,8 +63,11 @@ function hash(v: unknown): string {
   return createHash("sha256").update(stableJson(v)).digest("hex").slice(0, 32);
 }
 
-/** One fingerprint per part, so what changed can be said. */
-export function teammateFieldPrints(a: PrintedTeammate): Record<PrintField, string> {
+/**
+ * One fingerprint per part, so what changed can be said. The routine and
+ * automation part prints: never the sites, so none pauses over them.
+ */
+export function teammateFieldPrints(a: FingerprintedTeammate): Record<PrintField, string> {
   return {
     name: hash(a.name),
     job: hash(a.description ?? ""),
@@ -56,14 +80,16 @@ export function teammateFieldPrints(a: PrintedTeammate): Record<PrintField, stri
 
 /**
  * The whole teammate, as one fingerprint. Worked out as round 9 did, so a
- * version published since then still matches its unchanged teammate.
+ * version published since then still matches its unchanged teammate. Never
+ * the allowed sites (Phase 4): routines and automations never use the
+ * browser, and a change would pause every routine at the deploy.
  */
-export function teammateFingerprint(a: PrintedTeammate): string {
+export function teammateFingerprint(a: FingerprintedTeammate): string {
   return hash([a.name, a.description ?? "", a.systemPrompt ?? "", a.toolNames ?? null, a.approvalRules ?? null, a.modelOverride ?? "", a.productSlug ?? ""]);
 }
 
 /** The parts that differ between a kept set of part prints and the teammate now. */
-export function changedFields(kept: unknown, now: PrintedTeammate): PrintField[] {
+export function changedFields(kept: unknown, now: FingerprintedTeammate): PrintField[] {
   if (!kept || typeof kept !== "object") return [];
   const was = kept as Record<string, unknown>;
   const current = teammateFieldPrints(now);
@@ -73,11 +99,12 @@ export function changedFields(kept: unknown, now: PrintedTeammate): PrintField[]
 /**
  * The teammate as a person was shown it, as one token their page sends back
  * when they allow it (the Connections card, review of step 2): its allow
- * prints in ALLOW_PARTS order, joined by dots. Built from teammateFieldPrints
- * and the shared memories' print (review round 2 of Phase 3: a memory saved
- * while the card was open is never allowed unseen either), so it says nothing
- * beyond what that person may already read of the teammate (its Memory tab
- * shows them its shared memories).
+ * prints in ALLOW_PARTS order, joined by dots. Built from teammateFieldPrints,
+ * the shared memories' print (review round 2 of Phase 3: a memory saved
+ * while the card was open is never allowed unseen either) and the sites part
+ * (Phase 4), so it says nothing beyond what that person may already read of
+ * the teammate (its Memory tab shows them its shared memories, its settings
+ * its allowed sites).
  */
 export function teammateShownPrint(a: PrintedTeammate, memories: string): string {
   const p = allowPrints(a, memories);
@@ -87,15 +114,27 @@ export function teammateShownPrint(a: PrintedTeammate, memories: string): string
 /**
  * The parts that differ between what the person was shown (a
  * teammateShownPrint token) and the teammate now. A token that is not one
- * names every part: nothing can be said to be unchanged. A token from a page
- * loaded before the memories part existed has one part too few, so it is
- * not one, and the page reads the card again.
+ * names every part: nothing can be said to be unchanged.
+ *
+ * A token from a page loaded before Phase 4 has seven parts, no sites: it
+ * reads its sites as none (EMPTY_SITES_PRINT), which is what every teammate
+ * had then, so a Connections card open across the deploy is not refused for
+ * nothing, and one shown before a manager added a site is. A six part token,
+ * from a page loaded before the memories part existed, reads its sites the
+ * same way, and its memories always as changed: nothing can say they are
+ * the ones the person was shown (review round 2 of Phase 3), so it is still
+ * refused and the page reads the card again.
  */
 export function changedSinceShown(shown: string, now: PrintedTeammate, memories: string): AllowPart[] {
   const parts = typeof shown === "string" ? shown.split(".") : [];
-  if (parts.length !== ALLOW_PARTS.length || parts.some((p) => !/^[0-9a-f]{32}$/.test(p))) return [...ALLOW_PARTS];
+  const known = parts.length === ALLOW_PARTS.length || parts.length === ALLOW_PARTS.length - 1 || parts.length === PRINT_FIELDS.length;
+  if (!known || parts.some((p) => !/^[0-9a-f]{32}$/.test(p))) return [...ALLOW_PARTS];
   const current = allowPrints(now, memories);
-  return ALLOW_PARTS.filter((f, i) => parts[i] !== current[f]);
+  const read = (f: AllowPart, i: number): string | null => {
+    if (i < parts.length) return parts[i];
+    return f === "sites" ? EMPTY_SITES_PRINT : null;
+  };
+  return ALLOW_PARTS.filter((f, i) => read(f, i) !== current[f]);
 }
 
 // ── A Google allow (review round 2 of Phase 3) ─────────────────────
@@ -106,9 +145,24 @@ export interface SharedMemory {
   value: unknown;
 }
 
-/** Each part a Google allow covers: the part prints, then the shared memories. */
-export const ALLOW_PARTS = [...PRINT_FIELDS, "memories"] as const;
+/** Each part a Google allow covers: the part prints, then the shared memories, then the allowed sites (Phase 4). */
+export const ALLOW_PARTS = [...PRINT_FIELDS, "memories", "sites"] as const;
 export type AllowPart = (typeof ALLOW_PARTS)[number];
+
+/**
+ * A teammate's allowed sites as its print reads them: the entries as stored,
+ * each once, in one order, so only a change of which sites changes it. A
+ * value that is not a list (a row read without the column, which the
+ * compiler holds every allow path against) is no list of sites, and never
+ * reads as none: an allow compared against it reads as changed.
+ */
+export function sitesPrint(sites: unknown): string {
+  if (!Array.isArray(sites)) return hash({ unreadable: "sites" });
+  return hash([...new Set(sites.filter((s): s is string => typeof s === "string"))].sort());
+}
+
+/** The sites part of a teammate with no site, and of every allow and token kept before Phase 4. */
+export const EMPTY_SITES_PRINT = sitesPrint([]);
 
 /**
  * The "memories" part: the teammate's shared memories, keys and values, in
@@ -120,9 +174,9 @@ export function sharedMemoriesPrint(rows: readonly SharedMemory[]): string {
   return hash(pairs);
 }
 
-/** What a Google allow keeps for its product: the part prints and the memories part. */
+/** What a Google allow keeps for its product: the part prints, the memories part and the sites part. */
 export function allowPrints(a: PrintedTeammate, memories: string): Record<AllowPart, string> {
-  return { ...teammateFieldPrints(a), memories };
+  return { ...teammateFieldPrints(a), memories, sites: sitesPrint(a.browserSites) };
 }
 
 /**
@@ -130,12 +184,19 @@ export function allowPrints(a: PrintedTeammate, memories: string): Record<AllowP
  * Every part when no print was kept. An allow kept before the memories part
  * existed names its memories as changed: nothing can say they are the ones
  * the person allowed (changedFields skips a part it has no print of, which
- * here would keep such an allow valid for good).
+ * here would keep such an allow valid for good). An allow kept before the
+ * sites part existed (Phase 4) reads its sites as none, which every teammate
+ * had then: it holds until a manager adds a site, then names "sites". A
+ * sites part kept as anything but a print names "sites" too.
  */
 export function changedSinceAllowed(kept: unknown, now: PrintedTeammate, memories: string): AllowPart[] {
   if (!kept || typeof kept !== "object" || Array.isArray(kept)) return [...ALLOW_PARTS];
+  const was = kept as Record<string, unknown>;
   const changed: AllowPart[] = changedFields(kept, now);
-  return (kept as Record<string, unknown>).memories === memories ? changed : [...changed, "memories"];
+  if (was.memories !== memories) changed.push("memories");
+  const keptSites = was.sites === undefined ? EMPTY_SITES_PRINT : was.sites;
+  if (keptSites !== sitesPrint(now.browserSites)) changed.push("sites");
+  return changed;
 }
 
 // ── The Google account an allow was given for (review round 4 of Phase 3) ──

@@ -62,6 +62,7 @@ const PRINTED: PrintedTeammate = {
   approvalRules: {},
   modelOverride: null,
   productSlug: null,
+  browserSites: [],
 };
 
 function person(userId = "u-max", organizationId = "org1"): ActingPerson {
@@ -184,6 +185,30 @@ describe("connectorAccess", () => {
     expect(await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: old })).toEqual({ ok: false, reason: "teammate_changed", changed: ["memories"] });
     // At an approval the card itself is what is approved, as for the part prints.
     expect((await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: old, forApproval: true })).ok).toBe(true);
+  });
+
+  // Phase 4 Decision 26: a manager who widens where a Google-allowed
+  // teammate's browser may go changes what the person allowed.
+  it("refuses a workspace teammate whose allowed sites changed since the allow, and keeps an allow kept before sites were part of it", async () => {
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    const none = sharedMemoriesPrint([]);
+    // An allow kept before Phase 4, as production holds them: the part prints and the memories part, no sites.
+    const before = { connectorProducts: ["gmail"], connectorPrints: { gmail: { ...teammateFieldPrints(PRINTED), memories: none, account: keyOf("google", "sub-max") } } };
+    // No allow pauses at the deploy: every teammate had no site then.
+    expect((await connectorAccess({ person: person(), agent: agent(), product: "gmail", setting: before })).ok).toBe(true);
+    const widened = { ...PRINTED, browserSites: ["shop.example.com"] };
+    // Before: the sites were in no print, and Ops kept reading Max's mail with a browser it never had.
+    expect(await connectorAccess({ person: person(), agent: agent({ print: widened }), product: "gmail", setting: before })).toEqual({ ok: false, reason: "teammate_changed", changed: ["sites"] });
+    // Allowed again as it is now; the same sites in another order are the same sites.
+    const now = { connectorProducts: ["gmail"], connectorPrints: { gmail: allowRecord(widened, none, keyOf("google", "sub-max")) } };
+    expect((await connectorAccess({ person: person(), agent: agent({ print: widened }), product: "gmail", setting: now })).ok).toBe(true);
+    const reordered = { ...PRINTED, browserSites: ["shop.example.com", "shop.example.com"] };
+    expect((await connectorAccess({ person: person(), agent: agent({ print: reordered }), product: "gmail", setting: now })).ok).toBe(true);
+    expect(await connectorAccess({ person: person(), agent: agent({ print: { ...PRINTED, browserSites: ["*.example.com"] } }), product: "gmail", setting: now })).toEqual({
+      ok: false,
+      reason: "teammate_changed",
+      changed: ["sites"],
+    });
   });
 
   it("reads the connection only by the acting person, never the teammate's owner or creator", async () => {

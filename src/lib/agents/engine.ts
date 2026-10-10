@@ -165,6 +165,8 @@ export interface TeammateAgent {
   /** Its managers' tightening as stored (sanitizeRules reads it). */
   approvalRules: unknown;
   organizationId: string;
+  /** The sites its browser may open, as stored (Agent.browserSites, Phase 4); none until its managers pick them. */
+  browserSites: string[];
 }
 
 /** The Agent columns a turn reads. */
@@ -179,6 +181,7 @@ export const TEAMMATE_AGENT_SELECT = {
   toolNames: true,
   approvalRules: true,
   organizationId: true,
+  browserSites: true,
 } as const;
 
 export function teammateAgentFrom(row: Prisma.AgentGetPayload<{ select: typeof TEAMMATE_AGENT_SELECT }>): TeammateAgent {
@@ -193,6 +196,7 @@ export function teammateAgentFrom(row: Prisma.AgentGetPayload<{ select: typeof T
     toolNames: row.toolNames,
     approvalRules: row.approvalRules,
     organizationId: row.organizationId,
+    browserSites: row.browserSites,
   };
 }
 
@@ -1218,13 +1222,14 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // person's own chats, continues and routines have Google tools (Phase 3
   // Decision 13).
   const sorted = (names: ToolName[]) => toolsForTrigger(names.filter((name) => !TEAMMATE_EXCLUDED.has(name) && Boolean(TOOLS[name])).sort(), a.trigger);
-  const offered = sorted(teammateToolNames(a.agent, { tablesOn, talkOn, connectors }));
+  // No browser tool is offered until Phase 4 step 3 wires the computer's access (computer: false).
+  const offered = sorted(teammateToolNames(a.agent, { tablesOn, talkOn, connectors, computer: false }));
   // The Google products this teammate's own set reaches in this turn, the
   // switch aside: each is offered only while the person's connection holds
   // it and, for a teammate someone else may change, the person allowed this
   // teammate as it is now. No Google call; nothing later relies on it (the
   // preparation and the handler read it again for every call).
-  const own = teammateToolNames(a.agent, { tablesOn, talkOn, connectors: EVERY_PRODUCT });
+  const own = teammateToolNames(a.agent, { tablesOn, talkOn, connectors: EVERY_PRODUCT, computer: false });
   const reach = sorted(own);
   const held = CONNECTOR_PRODUCTS.filter((p) => reach.some((n) => isConnectorToolName(n) && TOOL_PRODUCT[n] === p));
   // Every Google tool its own set holds, wherever this turn runs: a call to

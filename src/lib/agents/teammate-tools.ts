@@ -1,7 +1,8 @@
 // The eleven tools only an AI teammate uses (docs/plans/ai-teammates.md 3.4,
 // and ask_teammate from Phase 2, which runs in executor.ts), with the eleven
-// Google connector tools of Phase 3 (connector-tools.ts), and the tool set a
-// teammate is given (teammateToolNames).
+// Google connector tools of Phase 3 (connector-tools.ts) and the ten browser
+// tools of Phase 4 (browser-tools.ts), and the tool set a teammate is given
+// (teammateToolNames).
 //
 // EVERY HANDLER ACTS AS THE PERSON, THROUGH THE PERSON'S OWN PATH:
 //   update_task, move_task   patchItemAs (src/lib/items/item-patch.ts), the
@@ -59,6 +60,7 @@ import type { TalkGate } from "@/lib/talk-gate";
 import { TOOL_PRODUCT, type ProductSet } from "@/lib/connectors/products";
 import type { ActingPerson } from "./acting";
 import { clampLimit } from "./collect-readable";
+import { BROWSER_INPUT, BROWSER_TOOLS_DEFS } from "./browser-tools";
 import { CONNECTOR_INPUT, CONNECTOR_TOOLS_DEFS } from "./connector-tools";
 import { MEMORY_LIMITS, forgetFact, rememberFact } from "./memory";
 import { ROUTINE_LIMITS, ROUTINE_SCHEDULE_KINDS, routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
@@ -82,7 +84,7 @@ import {
   statusesSentence,
   unknownPerson,
 } from "./teammate-copy";
-import { CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, isToolName, type TeammateToolName, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, isToolName, type TeammateToolName, type ToolName } from "./tool-names";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
 import type { ToolContext, ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
@@ -1136,7 +1138,7 @@ const askTeammate: ToolDefinition = {
   handler: async () => refused(ERR.teammateOnly),
 };
 
-/** The teammate tools, by name, the Google connector tools with them (tools.ts spreads them into REGISTRY). */
+/** The teammate tools, by name, the Google connector and browser tools with them (tools.ts spreads them into REGISTRY). */
 export const TEAMMATE_TOOLS = {
   update_task: updateTask,
   comment_on_task: commentOnTask,
@@ -1150,6 +1152,7 @@ export const TEAMMATE_TOOLS = {
   read_talk: readTalk,
   ask_teammate: askTeammate,
   ...CONNECTOR_TOOLS_DEFS,
+  ...BROWSER_TOOLS_DEFS,
 } satisfies Record<TeammateToolName, ToolDefinition>;
 
 /** What a teammate always has when its tool set is the legacy one: it can remember, forget and keep a routine. */
@@ -1166,12 +1169,19 @@ const TALK_TOOLS: readonly ToolName[] = ["post_in_talk", "read_talk"];
  * other stored value gives nothing rather than guessing. Then Tables tools
  * only with Tables on, Talk tools only with Talk on, Google tools only for a
  * product `connectors` holds (Phase 3: the stored list keeps them, as it
- * keeps a module's while the module is off), and never a TEAMMATE_EXCLUDED
- * tool. `connectors` is required, so no caller can forget it.
+ * keeps a module's while the module is off), browser tools only with
+ * `computer` (Phase 4: the stored list keeps them too), and never a
+ * TEAMMATE_EXCLUDED tool. `connectors` and `computer` are required, so no
+ * caller can forget them; only `computer: true` gives a browser tool, so a
+ * caller that passed nothing at run time gives none.
+ *
+ * Phase 4 step 1: every caller that offers tools passes `computer: false`,
+ * so no browser tool is offered anywhere until step 3 wires the computer's
+ * access (docs/plans/ai-teammates-phase4.md).
  */
 export function teammateToolNames(
   agent: { toolNames: unknown; productSlug: string | null },
-  opts: { tablesOn: boolean; talkOn: boolean; connectors: ProductSet },
+  opts: { tablesOn: boolean; talkOn: boolean; connectors: ProductSet; computer: boolean },
 ): ToolName[] {
   const names = new Set<ToolName>();
   if (Array.isArray(agent.toolNames)) {
@@ -1185,6 +1195,7 @@ export function teammateToolNames(
   if (!opts.tablesOn) for (const n of TABLES_TOOLS) names.delete(n);
   if (!opts.talkOn) for (const n of TALK_TOOLS) names.delete(n);
   for (const n of CONNECTOR_TOOL_NAMES) if (opts.connectors?.[TOOL_PRODUCT[n]] !== true) names.delete(n);
+  if (opts.computer !== true) for (const n of BROWSER_TOOL_NAMES) names.delete(n);
   for (const n of TEAMMATE_EXCLUDED) names.delete(n);
   return [...names].sort();
 }
@@ -1200,4 +1211,5 @@ export const TEAMMATE_INPUT = {
   create_routine: createRoutineInput,
   ask_teammate: askTeammateInput,
   ...CONNECTOR_INPUT,
+  ...BROWSER_INPUT,
 } as const;

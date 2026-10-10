@@ -125,7 +125,7 @@ export async function PUT(req: Request, { params }: Params) {
   // after the own-teammate answer, so that one keeps its own reason.
   if (wants.some((w) => w.on) && typeof parsed.data.expect !== "string") return invalidRequest();
   const [modules, connectors] = await Promise.all([workspaceModules(viewer.organizationId), workspaceConnectorProducts(viewer.organizationId)]);
-  const tools = teammateToolNames(agent, { ...modules, connectors });
+  const tools = teammateToolNames(agent, { ...modules, connectors, computer: false });
 
   if (wants.some((w) => w.on)) {
     // Read now, as the person is now: a Guest, an agent account, AI off or
@@ -212,7 +212,7 @@ export async function PUT(req: Request, { params }: Params) {
   // The row as the card lists it: by the Google tools the teammate holds,
   // on here or off (connection-views-server.ts teammatesWithGoogle, review of
   // step 5), so a product off keeps its line after a switch.
-  const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true } });
+  const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true }, computer: false });
   // Read against the account connected now, as the card's own read does (review round 4 of Phase 3).
   const now = await connectionFor({ organizationId: viewer.organizationId, userId: viewer.userId });
   return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories, now ? accountKey("google", now.accountSub) : null) });

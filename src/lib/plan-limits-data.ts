@@ -22,3 +22,14 @@ export const TEAMMATE_LIMITS: Record<string, { personal: number; workspace: numb
   SCALE: { personal: 50, workspace: 100 },
   ENTERPRISE: { personal: 99999, workspace: 99999 },
 };
+
+// The computer for AI teammates per plan (docs/plans/ai-teammates-phase4.md
+// Decision 5): minutes a month and sessions a day for the workspace, browsers
+// at once, and one session's longest run. Null: none on this plan. A TRIAL
+// workspace has none whatever its plan (Decision 4, browser/sessions.ts).
+export const BROWSER_LIMITS: Record<string, { minutesPerMonth: number; atOnce: number; sessionMinutes: number; sessionsPerDay: number } | null> = {
+  STARTER: null,
+  GROWTH: { minutesPerMonth: 1000, atOnce: 2, sessionMinutes: 15, sessionsPerDay: 100 },
+  SCALE: { minutesPerMonth: 5000, atOnce: 5, sessionMinutes: 30, sessionsPerDay: 400 },
+  ENTERPRISE: { minutesPerMonth: 20000, atOnce: 20, sessionMinutes: 30, sessionsPerDay: 2000 },
+};

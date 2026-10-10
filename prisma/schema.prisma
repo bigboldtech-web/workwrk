@@ -5252,6 +5252,13 @@ model Agent {
   scheduleRoutineId  String?
   /// no_creator | person_gone | guest | agent_account | no_access | unsupported_schedule | no_schedule | agent_removed
   scheduleMoveReason String?
+  /// Phase 4 (prisma/sql/2026-10-11-ai-teammates-phase4.sql): the sites this
+  /// teammate may open in its browser, chosen by its managers from the
+  /// workspace's allow list (TeammateBrowserPolicy.allowSites). Empty: none.
+  /// Part of a Google allow's prints (teammate-print.ts allowPrints "sites"),
+  /// never of teammateFingerprint or teammateFieldPrints, so no routine or
+  /// automation pauses over it.
+  browserSites       String[] @default([])
 
   runs         AgentRun[]
   memories     AgentMemory[]
@@ -5389,6 +5396,10 @@ model AgentAction {
   /// it never saved its answer or its run.
   /// prisma/sql/2026-10-10-ai-teammates-phase3-round1.sql
   readGoogle     Boolean   @default(false)
+  /// Proposed in a turn that read a web page (Phase 4, Decision 15): it stands
+  /// alone on its card, and a turn told of it starts tainted.
+  /// prisma/sql/2026-10-11-ai-teammates-phase4.sql
+  readWeb        Boolean   @default(false)
   expiresAt      DateTime
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
@@ -5559,6 +5570,105 @@ model TeammateTokenRevocation {
   // A reconnect deletes the account's queued revokes by it (review round 1
   // of Phase 3, prisma/sql/2026-10-10-ai-teammates-phase3-round1.sql).
   @@index([accountKey])
+}
+
+/// Whether a workspace's AI teammates may use a web browser, and where
+/// (Phase 4). No row: off, no site. Written only by the
+/// /api/teammate-browser/policy routes. FK to Organization in the SQL
+/// (prisma/sql/2026-10-11-ai-teammates-phase4.sql).
+model TeammateBrowserPolicy {
+  organizationId String   @id
+  enabled        Boolean  @default(false)
+  /// Hosts, as src/lib/browser/sites.ts parseSiteEntry writes them: "example.com", "*.example.com".
+  allowSites     String[] @default([])
+  blockSites     String[] @default([])
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
+/// One rented browser for ONE person and ONE teammate in ONE workspace
+/// (Phase 4). At most one live per (organizationId, userId): a partial unique
+/// index in prisma/sql/2026-10-11-ai-teammates-phase4.sql, not declared here.
+/// FKs to Organization, User and Agent (CASCADE) live in the SQL.
+model TeammateBrowserSession {
+  id                String    @id @default(cuid())
+  organizationId    String
+  userId            String
+  agentId           String
+  chatSessionId     String?
+  /// "browserbase" | "stand-in"
+  provider          String
+  providerSessionId String?   @unique
+  region            String?
+  /// starting | live | waiting | handed_over | ending | ended
+  status            String    @default("starting")
+  endReason         String?
+  /// The server process that holds its navigation guard (src/lib/browser/live.ts BOOT_ID).
+  bootId            String
+  reservedMinutes   Int
+  startedAt         DateTime  @default(now())
+  endsBy            DateTime
+  lastActiveAt      DateTime  @default(now())
+  /// The turn that holds it; another running turn of the person is refused.
+  lastRunId         String?
+  waitingSince      DateTime?
+  handedOverAt      DateTime?
+  /// The host it is on now, never a path.
+  currentSite       String?
+  endedAt           DateTime?
+  billedMinutes     Int?
+  stopAttempts      Int       @default(0)
+  nextStopAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@index([organizationId, startedAt])
+  @@index([userId, startedAt])
+  @@index([status, lastActiveAt])
+  @@index([agentId])
+  @@index([chatSessionId, startedAt])
+}
+
+/// What a browser session did, as kinds and hosts only (Phase 4 Decision 23),
+/// for its person alone, kept 30 days. Goes with its session (FK in the SQL).
+model TeammateBrowserStep {
+  id               String   @id @default(cuid())
+  browserSessionId String
+  userId           String
+  seq              Int
+  /// open | read | find | scroll | show | click | type | select | take_over | give_back | close | end
+  kind             String
+  site             String?
+  /// ok | refused | failed | waiting | practice
+  outcome          String
+  code             String?
+  actionId         String?
+  shotId           String?
+  at               DateTime @default(now())
+
+  @@unique([browserSessionId, seq])
+  @@index([at])
+}
+
+/// A picture of a page for its person alone (Phase 4): the image is a sealed
+/// file named by id in BROWSER_SHOTS_DIR (src/lib/browser/shots.ts), never in
+/// the database; kept 24 hours. Goes with its session (FK in the SQL).
+model TeammateBrowserShot {
+  id               String   @id @default(cuid())
+  browserSessionId String
+  organizationId   String
+  userId           String
+  /// "page" | "element"
+  kind             String
+  width            Int
+  height           Int
+  bytes            Int
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+
+  @@index([browserSessionId])
+  @@index([expiresAt])
 }
 
 model App {

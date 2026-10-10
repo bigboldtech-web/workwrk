@@ -209,7 +209,8 @@ export function draftToolGroups(
   // Just me until an Owner or Admin chooses otherwise (draftFromTemplate).
   const visibility = d.visibility ?? "PRIVATE";
   return grouped(
-    givableTools(modules.connectors).map((name): ToolPickerRow => {
+    // No browser row until the computer is wired (Phase 4 step 4 passes the workspace's).
+    givableTools(modules.connectors, false).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);
@@ -424,7 +425,8 @@ export function draftProblems(d: Pick<TeammateDraft, DraftField>): Partial<Recor
  */
 export function newTeammateBody(d: TeammateDraft, o: { canCreateWorkspace: boolean; talkOn: boolean; tablesOn: boolean; connectors: ProductSet }): Record<string, unknown> {
   const modules = { talkOn: o.talkOn, tablesOn: o.tablesOn };
-  const givable = new Set<string>(givableTools(o.connectors));
+  // No browser tool is sent until the computer is wired (Phase 4 step 4).
+  const givable = new Set<string>(givableTools(o.connectors, false));
   const toolNames = [...new Set(d.tools)].filter((n) => givable.has(n) && unavailableOf(n, modules) === null).sort();
   const personRules: Record<string, ApprovalChoice> = {};
   for (const name of toolNames) {
