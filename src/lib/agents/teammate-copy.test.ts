@@ -468,6 +468,10 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
     eventTitleLine: [["Board review"], "Event: Board review"],
     toldLine: [["mia@proof.test, outsider@ext.test"], "Told: mia@proof.test, outsider@ext.test"],
     roomsLine: [["Room 4 <c_1@resource.calendar.google.com>"], "Rooms: Room 4 <c_1@resource.calendar.google.com>"],
+    // Review of step 5: where the answer is not the person's alone, only the products held here are named.
+    notHereTalk: [["Gmail"], "Gmail can't be used when a teammate answers in Talk, because the answer is posted for everyone there."],
+    notHereAutomation: [["Google Calendar"], "Google Calendar can't be used in an automation, because its answer goes to fields other people read."],
+    notHereDelegated: [["Gmail and Google Calendar"], "Gmail and Google Calendar can't be used when another teammate asks. Ask this teammate directly."],
   };
   const c = copy.CONNECTOR_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -530,6 +534,40 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
       expect(v).not.toContain('"');
       expect(BANNED.test(String(v))).toBe(false);
     }
+  });
+});
+
+describe("TOOL_PICKER_NOTES (a Google tool's row, Phase 3 step 5)", () => {
+  const STATES = ["ready", "connect_first", "reconnect", "not_granted", "allow_first", "changed"];
+
+  it("words each state as the spec does, and links every one but ready", () => {
+    expect(copy.TOOL_PICKER_NOTES).toEqual({
+      ready: "Uses your own Google account.",
+      connect_first: "Uses your own Google account. Connect Google first.",
+      reconnect: "Your Google connection needs reconnecting.",
+      not_granted: "Your Google connection doesn't include this. Connect again and tick it.",
+      allow_first: "Uses your own Google account once you allow it.",
+      changed: "Changed since you allowed it. Check it and allow it again.",
+      link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+    });
+    expect(Object.keys(copy.TOOL_PICKER_NOTES).filter((k) => k !== "link").sort()).toEqual([...STATES].sort());
+    expect(Object.keys(copy.TOOL_PICKER_NOTES.link).sort()).toEqual(STATES.filter((s) => s !== "ready").sort());
+    const all: Array<[string, string]> = [];
+    strings(copy.TOOL_PICKER_NOTES, "TOOL_PICKER_NOTES", all);
+    expect(all.filter(([, s]) => BANNED.test(s))).toEqual([]);
+  });
+
+  it("says, in the new teammate form, where and when a teammate made for everyone is allowed, with no link (review of step 5)", () => {
+    expect(copy.NEW_TEAMMATE_DIALOG.googleAllowOnceMade).toBe(
+      "Uses your own Google account once you allow it. Allow it in Settings, Calendar & connections once the teammate is made.",
+    );
+    expect(BANNED.test(copy.NEW_TEAMMATE_DIALOG.googleAllowOnceMade)).toBe(false);
+  });
+
+  it("sends a connected person with no Google tools to the picker that now has them (review of step 2)", () => {
+    expect(copy.CONNECTIONS_COPY.noTeammates).toBe("None of your teammates has Google tools yet. Tick them in the Tools and approvals of a teammate you manage.");
+    // The tab it names is the drawer's own.
+    expect(copy.CONNECTIONS_COPY.noTeammates).toContain(copy.TEAMMATE_SETTINGS.tabTools);
   });
 });
 

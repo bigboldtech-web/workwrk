@@ -130,6 +130,20 @@ describe("the person's own work", () => {
     expect(r.record.state).toBe("waiting");
     expect(fx.handlerCalls).toEqual([]);
   });
+
+  it("asks first in a teammate asked by a turn that read the person's Google, and only then (Phase 3 step 5, Decision 9)", async () => {
+    // runDelegation hands the asking turn's taint on (origin.tainted); the
+    // engine starts the delegate's counters with it.
+    const asked = { sessionId: "s2", routineId: null, trigger: "DELEGATED" as const, runId: "run2" };
+    const tainted = await call("create_task", { title: "Pay the invoice" }, { turn: asked, counters: { calls: 0, proposals: 0, delegations: 0, tainted: true } });
+    // Fails without the taint: it ran, from words a planted email may have put in the request.
+    expect(tainted.record.state).toBe("waiting");
+    expect(fx.handlerCalls).toEqual([]);
+    expect(fx.actions).toHaveLength(1);
+    const clean = await call("create_task", { title: "Pay the invoice" }, { turn: asked });
+    expect(clean.record.state).toBe("ran");
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
 });
 
 describe("what other people will see", () => {
@@ -470,10 +484,42 @@ describe("the person's own Google (Phase 3 step 3)", () => {
     const reconnect = await call("send_email", SEND, { ...held, connectorRefusals: { gmail: { reason: "needs_reconnect" } } });
     expect(dataOf(reconnect.modelContent)).toEqual({ error: CONNECTOR_COPY.needsReconnect });
     const talk = await call("search_email", { query: "x" }, { ...held, turn: { sessionId: "s1", routineId: null, trigger: "TALK", runId: "run1" } });
-    expect(dataOf(talk.modelContent)).toEqual({ error: CONNECTOR_COPY.notHereTalk });
+    expect(dataOf(talk.modelContent)).toEqual({ error: CONNECTOR_COPY.notHereTalk("Gmail") });
     // Offered by mistake in a delegated turn, it still never runs there.
     const delegated = await g("search_email", { query: "x" }, { turn: { sessionId: "s1", routineId: null, trigger: "DELEGATED", runId: "run1" } });
-    expect(dataOf(delegated.modelContent)).toEqual({ error: CONNECTOR_COPY.notHereDelegated });
+    expect(dataOf(delegated.modelContent)).toEqual({ error: CONNECTOR_COPY.notHereDelegated("Gmail") });
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  // Review of step 5: a "not here" refusal named Gmail and Google Calendar
+  // whatever the teammate held, while block 2 names only the products it
+  // holds that are on; and a product off in the workspace was refused as
+  // "not here" too, naming a product nobody here can use.
+  it("names, where the answer is not the person's alone, only the products the teammate holds that are on here", async () => {
+    const held = { connectorHeld: ["search_email", "read_email", "list_events"] };
+    const automation = { sessionId: "s1", routineId: null, trigger: "AUTOMATION" as const, runId: "run1" };
+    const gmailOnly = await call("search_email", { query: "x" }, { ...held, turn: automation, connectorNotHere: "automation", connectorNotHereProducts: ["gmail"] });
+    // Before: "Gmail and Google Calendar can't be used in an automation, ..."
+    expect(dataOf(gmailOnly.modelContent)).toEqual({ error: "Gmail can't be used in an automation, because its answer goes to fields other people read." });
+    const both = await call("list_events", { from: "2026-10-12" }, { ...held, turn: automation, connectorNotHere: "automation", connectorNotHereProducts: ["calendar", "gmail"] });
+    expect(dataOf(both.modelContent)).toEqual({ error: "Gmail and Google Calendar can't be used in an automation, because its answer goes to fields other people read." });
+    // The engine's own word for where the answer goes holds over the trigger's.
+    const asked = await call("read_email", { threadId: "t1" }, { ...held, connectorNotHere: "delegated", connectorNotHereProducts: ["gmail"] });
+    expect(dataOf(asked.modelContent)).toEqual({ error: "Gmail can't be used when another teammate asks. Ask this teammate directly." });
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("refuses a Google tool of a product the workspace has off as off, wherever the turn runs, never as not here (review of step 5)", async () => {
+    const held = { connectorHeld: ["search_email", "list_events"] };
+    const talk = { sessionId: "s1", routineId: null, trigger: "TALK" as const, runId: "run1" };
+    const off = await call("search_email", { query: "x" }, { ...held, turn: talk, connectorRefusals: { gmail: { reason: "workspace_off" } } });
+    // Before: "Gmail and Google Calendar can't be used when a teammate answers in Talk, ..."
+    expect(dataOf(off.modelContent)).toEqual({ error: CONNECTOR_COPY.workspaceOff("Gmail") });
+    const unoffered = await call("list_events", { from: "2026-10-12" }, { ...held, turn: talk, connectorRefusals: { calendar: { reason: "not_configured" } } });
+    expect(dataOf(unoffered.modelContent)).toEqual({ error: CONNECTOR_COPY.notConfigured });
+    // A product on here, held: the Talk reason, naming it alone.
+    const on = await call("list_events", { from: "2026-10-12" }, { ...held, turn: talk, connectorNotHere: "talk", connectorNotHereProducts: ["calendar"], connectorRefusals: { gmail: { reason: "workspace_off" } } });
+    expect(dataOf(on.modelContent)).toEqual({ error: CONNECTOR_COPY.notHereTalk("Google Calendar") });
     expect(fx.handlerCalls).toEqual([]);
   });
 

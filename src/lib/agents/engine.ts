@@ -55,6 +55,11 @@
 // 4); a start the database cannot answer asks too, but marks nothing (review
 // of step 3). What the model reads of a Google write's card, now or in a
 // later turn's note, is its kind, never its subject or its event's title.
+// A turn whose answer is posted (Talk), flows into fields others read (an
+// automation) or goes back to the teammate that asked is offered none of it
+// (tool-policy.ts toolsForTrigger, Decision 13): when the teammate's set
+// here holds a Google tool, block 2 says why, and a call to one answers that
+// reason (connectorNotHere, step 5).
 //
 // Server-only: imports prisma.
 
@@ -64,14 +69,14 @@ import { createMessageWithFallback, getAnthropicForOrg, modelFor } from "@/lib/a
 import { aiCostCents } from "@/lib/ai-cost";
 import { workspaceConnectorProducts, type ConnectorRefusal } from "@/lib/connectors/connections";
 import { googleConfig } from "@/lib/connectors/google/config";
-import { CONNECTOR_PRODUCTS, TOOL_PRODUCT, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
+import { CONNECTOR_PRODUCTS, TOOL_PRODUCT, productOfTool, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
 import { claimUnreportedOutcomes, outcomesWaiting, releaseOutcomes } from "./actions";
 import type { TurnTrigger } from "./budget";
 import { connectorTurnAccess, type TurnConnectorAccess } from "./connector-access";
-import { connectorTitle, emptyConnectorCounters } from "./connector-rules";
+import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind } from "./connector-rules";
 import { executeToolCall, wrapToolData, type CallRecord } from "./executor";
 import { memoriesForPrompt } from "./memory";
 import { APPROVAL_CARD, ROUTINE_FALLBACK_NAME, TURN_ERRORS, waitingForApprovalLine } from "./teammate-copy";
@@ -413,7 +418,7 @@ export interface SystemBlockInput {
   automation?: { name: string } | null;
   /** The teammates this one may ask with ask_teammate, as information. */
   askable?: ReadonlyArray<{ name: string; job: string }> | null;
-  /** What it may do with the person's Gmail and Google Calendar this turn, or why not (connectorLines). */
+  /** What it may do with the person's Gmail and Google Calendar this turn, or why not (connectorLines; connectorNotHereLine where the answer is not the person's alone). */
   connectorLines?: string[] | null;
 }
 
@@ -862,6 +867,15 @@ interface Prepared {
   /** The Google tools the teammate's own set holds, whatever this turn offers (executor.ts connectorHeld). */
   connectorHeld: string[];
   /**
+   * Where this turn's answer goes, when that is why it has no Google tool
+   * the teammate holds here (step 5): a Talk post, an automation's fields,
+   * the teammate that asked. Null in the person's own chats and routines, and
+   * when no Google tool of a product on here is in its set.
+   */
+  connectorNotHere: NotHereKind | null;
+  /** The products that refusal names: those the teammate holds tools for that are on here, as block 2's line names them (review of step 5). */
+  connectorNotHereProducts: ConnectorProduct[];
+  /**
    * Whether an earlier Google read can matter to this turn: this deployment
    * offers Google, or the teammate's own set holds a Google tool. Else no turn
    * of this chat could have read one, and startsTainted reads nothing.
@@ -942,6 +956,25 @@ export function connectorLines(firstName: string, access: TurnConnectorAccess): 
     if (why) out.push(`You can't use ${first}'s ${PRODUCT_NAMES[p]} now: ${why}. If ${first} asks for it, say so in one sentence.`);
   }
   return out;
+}
+
+/** Why a turn that is not the person's alone has none of their Google (Decision 13), as block 2 tells the model. */
+const NOT_HERE_WHY: Record<NotHereKind, string> = {
+  talk: "your answer is posted for everyone in the conversation",
+  automation: "your answer goes to fields other people read",
+  delegated: "your answer goes back to the teammate that asked; the person can ask you directly",
+};
+
+/**
+ * Block 2's line for a Talk, automation or delegated turn of a teammate whose
+ * set here holds Google tools (docs/plans/ai-teammates-phase3.md step 5), so
+ * the model can say why it cannot use them. It names only the products those
+ * tools are for: a teammate with Gmail tools alone is never told it has a
+ * calendar to miss.
+ */
+export function connectorNotHereLine(kind: NotHereKind, products: readonly ConnectorProduct[]): string {
+  const names = CONNECTOR_PRODUCTS.filter((p) => products.includes(p)).map((p) => PRODUCT_NAMES[p]);
+  return `Your ${names.join(" and ") || "Gmail and Google Calendar"} tools aren't available here: ${NOT_HERE_WHY[kind]}. If asked, say so in one sentence.`;
 }
 
 /**
@@ -1065,6 +1098,14 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // Every Google tool its own set holds, wherever this turn runs: a call to
   // one it does not hold is refused as any tool it lacks (review of step 3).
   const connectorHeld = own.filter((n) => isConnectorToolName(n));
+  // A turn that posts, flows on or goes back to another teammate has none of
+  // them (toolsForTrigger, Decision 13). When its set here holds some (a
+  // product on in the workspace, which this deployment offers), block 2 says
+  // why and a call to one answers it (executor.ts connectorMissing); with
+  // none, Google is not mentioned at all (step 5).
+  const notHere = notHereKindOf(a.trigger);
+  const heldHere = CONNECTOR_PRODUCTS.filter((p) => connectors[p] === true && connectorHeld.some((n) => productOfTool(n) === p));
+  const connectorNotHere: NotHereKind | null = notHere && heldHere.length > 0 ? notHere : null;
   const google: TurnConnectorAccess =
     held.length > 0
       ? await connectorTurnAccess({
@@ -1079,6 +1120,15 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   for (const p of held) {
     const g = google[p];
     if (g && !g.ok) connectorRefusals[p] = { reason: g.reason, ...(g.changed ? { changed: g.changed } : {}) };
+  }
+  // A product this workspace has off, or this WorkwrK does not offer, is the
+  // reason a call to its tools is refused wherever the turn runs (review of
+  // step 5). A Talk, automation or delegated turn reads no access above, so
+  // it is named here as connectorAccess names it, and such a call never reads
+  // as "not here" for a product nobody here can use.
+  for (const p of CONNECTOR_PRODUCTS) {
+    if (connectors[p] === true || connectorRefusals[p] || !connectorHeld.some((n) => productOfTool(n) === p)) continue;
+    connectorRefusals[p] = { reason: googleConfig() ? "workspace_off" : "not_configured" };
   }
   const askable = enabled.includes("ask_teammate")
     ? await import("./teammate-server").then((m) => m.askableTeammates(a.person.viewer, a.agent.id)).catch(() => [])
@@ -1107,7 +1157,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
       talk: a.trigger === "TALK" && a.origin?.kind === "talk" ? { place: a.origin.place, placeKind: a.origin.placeKind, audience: a.origin.audience } : null,
       automation: a.trigger === "AUTOMATION" && a.origin?.kind === "automation" ? { name: a.origin.workflowName } : null,
       askable,
-      connectorLines: held.length > 0 ? connectorLines(a.person.firstName, google) : null,
+      connectorLines: held.length > 0 ? connectorLines(a.person.firstName, google) : connectorNotHere ? [connectorNotHereLine(connectorNotHere, heldHere)] : null,
     }),
     tools: enabled.map((name) => ({ name, description: TOOLS[name].description, input_schema: TOOLS[name].input_schema as Anthropic.Tool["input_schema"] })),
     enabled,
@@ -1122,6 +1172,8 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     history,
     connectorRefusals,
     connectorHeld,
+    connectorNotHere,
+    connectorNotHereProducts: connectorNotHere ? heldHere : [],
     googleCanMatter: connectorHeld.length > 0 || googleConfig() !== null,
   };
 }
@@ -1231,6 +1283,8 @@ async function runLoop(
         counters,
         connectorRefusals: p.connectorRefusals,
         connectorHeld: p.connectorHeld,
+        connectorNotHere: p.connectorNotHere,
+        connectorNotHereProducts: p.connectorNotHereProducts,
         emit,
       });
       s.tainted = counters.tainted === true;

@@ -12,7 +12,15 @@
 //      dialog's one primary.
 //
 // A template's tool this workspace cannot give now (Talk or Tables off) was
-// left out of its card by the route; the form says so above the tools. The
+// left out of its card by the route; the form says so above the tools. A
+// Google tool has a row only while its product is on here, saying what stands
+// between it and the person's own Google (for one made for everyone, their
+// allow); its link opens their Connections card in another tab, so nothing
+// typed here is lost (docs/plans/ai-teammates-phase3.md step 5). The allow
+// itself has no link: the card lists only teammates that exist, so the line
+// says to allow it there once this one is made, and a Google tool whose
+// product was turned off while the form was open is not sent (review of
+// step 5). The
 // checks are teammate-setup.ts draftProblems (the route's own limits), the
 // request newTeammateBody. A refusal shows the server's sentence (the plan's
 // limit names the plan); anything else, "Couldn't create the teammate. Try
@@ -46,7 +54,8 @@ import {
   type TeammateDraft,
 } from "@/lib/agents/teammate-setup";
 import type { TeammateListData } from "@/lib/agents/teammate-store";
-import type { TeammateRow } from "@/lib/agents/teammate-views";
+import { NO_GOOGLE_ROWS, type TeammateRow } from "@/lib/agents/teammate-views";
+import { NO_PRODUCTS } from "@/lib/connectors/products";
 import type { TemplateCard } from "@/lib/agents/templates";
 import { cn } from "@/lib/utils";
 import { HuePicker } from "./hue-picker";
@@ -81,6 +90,10 @@ function NewTeammateFlow({
   const confirm = useConfirm();
   const shell = useContext(OsShellContext);
   const modules = { talkOn: list?.talkOn ?? true, tablesOn: list?.tablesOn ?? true };
+  // The Google rows (Phase 3 step 5): only for the products on here, as the
+  // list read them for this person. None until the list answers, and none
+  // from an older server.
+  const googleRows = { connectors: list?.connectors ?? NO_PRODUCTS, google: list?.google ?? NO_GOOGLE_ROWS };
   const canCreateWorkspace = list?.canCreateWorkspace === true;
   const cards = list?.templates ?? [];
 
@@ -165,7 +178,7 @@ function NewTeammateFlow({
     setError(null);
     const r = await apiFetch<{ teammate: TeammateRow }>("/api/agents/teammates", {
       method: "POST",
-      json: newTeammateBody(draft, { canCreateWorkspace, ...modules }),
+      json: newTeammateBody(draft, { canCreateWorkspace, ...modules, connectors: googleRows.connectors }),
     });
     setSaving(false);
     if (!r.ok) {
@@ -293,9 +306,11 @@ function NewTeammateFlow({
                   ))}
                   <div className="mt-1">
                     <ToolPicker
-                      groups={draftToolGroups(draft, modules)}
+                      groups={draftToolGroups(draft, { ...modules, ...googleRows })}
                       canTick
                       busy={saving}
+                      // What is typed here is not saved yet: a Google row's link opens its card in another tab.
+                      linksInNewTab
                       onTick={(name, on) => patch({ tools: on ? [...draft.tools.filter((t) => t !== name), name] : draft.tools.filter((t) => t !== name) })}
                       onChoice={(name, value) => patch({ choices: { ...draft.choices, [name]: value } })}
                     />

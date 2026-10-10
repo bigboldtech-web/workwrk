@@ -380,6 +380,9 @@ describe("the truth gates", () => {
     ["pricing", /\bSOC ?2\b|\bISO ?27001\b/i, "a certification nobody holds"],
     // The sandbox.
     ["demo", /sandbox (?:login|workspace|account)/i, "a driveable sandbox that does not exist"],
+    // Google's verification and its security assessment are founder actions
+    // still to come (docs/plans/ai-teammates-phase3.md, review of step 5).
+    ["privacy", /verified by Google|Google[- ]verified|\bCASA\b|security assessment/i, "a Google verification or assessment nobody has passed"],
   ];
 
   for (const [file, pattern, what] of FORBIDDEN) {
@@ -397,4 +400,57 @@ describe("the truth gates", () => {
     expect(files.demo).toContain("flags.sandbox");
     expect(files.demo).toContain("copy-gate: sandbox");
   });
+
+  // Review of step 5. Google's verification looks for the Limited Use
+  // disclosure word for word, and nothing held it or the Google section's
+  // promises, so a restyle could drop one and fail no test.
+  it("keeps Google's Limited Use disclosure on /privacy word for word, linked to the policy itself", () => {
+    expect(visibleText(files.privacy)).toContain(
+      "WorkwrK's use and transfer of information received from Google APIs to any other app will adhere to the Google API Services User Data Policy, including the Limited Use requirements. We do not use data from Google Workspace APIs to develop, improve or train generalized AI or machine learning models.",
+    );
+    expect(renderedOnly(files.privacy)).toContain('<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>');
+  });
+
+  it("keeps where the person's Google is never used, the attachments sentence and the shared-account exception on /privacy", () => {
+    const text = visibleText(files.privacy);
+    expect(text).toContain("never when a teammate answers in Talk, for an automation or for another teammate");
+    expect(text).toContain("It never opens attachments.");
+    expect(text).toContain("unless the same Google account is still connected elsewhere in WorkwrK, ask Google to remove WorkwrK's access");
+  });
+
+  it("says on /privacy what else a teammate reads and keeps of the person's Google", () => {
+    const text = visibleText(files.privacy);
+    // Reads at an approval, and colleagues' busy times for a meeting.
+    expect(text).toContain("and again when you approve what it asked, to check that the email conversation is still there or that the event has not changed since it asked.");
+    expect(text).toContain("To find a time to meet, it can also read, through your account, when up to five colleagues in your workspace are busy, never what they are doing.");
+    // The answer in the run history too, and the tokens in the backups.
+    expect(text).toContain("which stays in your chat with it and in your run history, as every teammate answer does.");
+    expect(text).toContain("Our encrypted backups hold the encrypted tokens too, for at most 90 days, as above.");
+  });
+
+  it("lists on /cookies the cookie connecting Google to AI teammates sets, as long as it lasts", () => {
+    const redirects = readFileSync("src/lib/connectors/connect-redirects.ts", "utf8");
+    const name = /STATE_COOKIE = "([^"]+)"/.exec(redirects)?.[1];
+    expect(name).toBe("wk_tc_state");
+    // Ten minutes, set by the start route.
+    expect(redirects).toContain("STATE_COOKIE_MAX_AGE_S = 600;");
+    expect(readFileSync("src/app/api/teammate-connections/google/start/route.ts", "utf8")).toContain("res.cookies.set(STATE_COOKIE, state,");
+    // Before: six rows, and this cookie in none of them.
+    expect(renderedOnly(files.cookies)).toMatch(/name: "wk_tc_state",\s+purpose:[\s\S]*?duration: "10 minutes",\s+type: "Essential"/);
+  });
 });
+
+/**
+ * What a visitor reads of a route file's prose: renderedOnly, then the JSX
+ * space literals, the tags and the two entities these pages write taken
+ * out, and every run of white space read as one space, so a sentence the
+ * source wraps across lines is matched whole.
+ */
+function visibleText(source: string): string {
+  return renderedOnly(source)
+    .replace(/\{" "\}/g, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ");
+}

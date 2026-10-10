@@ -192,6 +192,61 @@ export default function PrivacyPage() {
                 routine runs only on the schedule its person set. Anything other people would see, such as a post in Talk or a
                 comment on a shared task, waits for that person&apos;s approval unless they chose otherwise.
               </p>
+              {/* Connecting Google to AI teammates (docs/plans/ai-teammates-phase3.md,
+                  Decisions 6, 8, 9 and 16). Only the person connects, their own
+                  account, in one workspace, and it is used only in their own
+                  chats, continues and routines, never in a Talk answer, an
+                  automation or another teammate's ask (Decision 13). A teammate
+                  someone else may change uses it only after the person allows
+                  it, and again after anyone changes the teammate (6). Sending,
+                  replying, answering an invitation and inviting anyone always
+                  wait on a card, with no "Don't ask" (8), and after a teammate
+                  reads Google in an answer everything else it does in that
+                  answer waits too (9). A read's call record keeps only a count;
+                  a card keeps what the person approves; tokens are sealed, and
+                  ending a connection deletes them and queues a revoke at Google
+                  unless the same Google account is still connected elsewhere in
+                  WorkwrK (16, 19). The audit log names who connected, never
+                  their Google address, which is why this says nothing about
+                  Admins seeing counts only. The third paragraph is Google's
+                  Limited Use disclosure, which its verification checks for.
+                  Review of step 5 added what the code also reads and keeps:
+                  at an approval, a reply reads its conversation again and a
+                  change, cancel or answer reads its event again under its
+                  etag (connector-previews.ts); find_free_time reads the
+                  free/busy of up to five live members of the workspace through
+                  the person's account (Decision 11); an answer is kept in the
+                  run's output too (engine.ts, AgentRun.output.text), which
+                  only its person reads (run-query.ts agentRunsWhere). */}
+              <p>
+                If an Owner or Admin turns it on for your workspace, you can connect your own Google account to your AI
+                teammates, for Gmail, Google Calendar or both. Only you can connect it, and it is used only in your own chats
+                and routines with the teammates you allow, never when a teammate answers in Talk, for an automation or for
+                another teammate. A teammate reads your email or calendar only when it uses one of those tools in an answer,
+                and again when you approve what it asked, to check that the email conversation is still there or that the
+                event has not changed since it asked. It never opens attachments. To find a time to meet, it can also read,
+                through your account, when up to five colleagues in your workspace are busy, never what they are doing.
+                Nobody else in your workspace can use your connection or read what a teammate read for you. Sending an
+                email, replying, answering an invitation or inviting anyone always waits for your approval. What a teammate
+                reads in your email or calendar is sent to our model provider to answer you; we do not send it for training,
+                and we do not use it to train any model.
+              </p>
+              <p>
+                We keep your Google tokens encrypted, with the address of the Google account you connected, which only you
+                are shown. Of what a teammate reads, we keep only a count of what it found, and what it wrote back to you,
+                which stays in your chat with it and in your run history, as every teammate answer does. A request it asks
+                you to approve keeps what it would send or change, such as who an email goes to and every word of it, as
+                every teammate request does. When you disconnect, when you leave or are
+                deactivated in the workspace, and when the workspace is deleted, we delete the tokens and, unless the same
+                Google account is still connected elsewhere in WorkwrK, ask Google to remove WorkwrK&apos;s access. You can
+                disconnect at any time in your settings, under Calendar &amp; connections.
+              </p>
+              <p>
+                WorkwrK&apos;s use and transfer of information received from Google APIs to any other app will adhere to the{" "}
+                <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+                including the Limited Use requirements. We do not use data from Google Workspace APIs to develop, improve or
+                train generalized AI or machine learning models.
+              </p>
               <p>
                 Which provider we use, and what their own retention terms say, is a question we will answer in writing
                 before you sign up.
@@ -280,6 +335,19 @@ export default function PrivacyPage() {
                 the workspace they were for, so the deletion cannot tell them apart and keeps them: email{" "}
                 <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and we delete them by hand. Backups keep a
                 copy for at most 90 days, so a deleted workspace is gone from them within 90 days of its deletion.
+              </p>
+              {/* Google for AI teammates (docs/plans/ai-teammates-phase3.md,
+                  Decisions 16 and 19): ending a connection deletes it and
+                  queues its revoke in one transaction; the queue row holds the
+                  sealed token alone until Google confirms, and is dropped after
+                  its last try or seven days. Review of step 5: the nightly
+                  backups (scripts/backup/backup.sh, each file encrypted, at
+                  most 90 days) hold those rows, sealed, like every other row. */}
+              <p>
+                Google connection tokens are deleted when you disconnect or leave, as above; if Google has not yet confirmed
+                that WorkwrK&apos;s access is removed, one encrypted token is kept until it does, for at most seven days. Our
+                encrypted backups hold the encrypted tokens too, for at most 90 days, as above. What a teammate wrote back to
+                you stays in your chat with it and in your run history, and its requests stay as every teammate request does.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>

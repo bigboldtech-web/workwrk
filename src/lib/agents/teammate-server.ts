@@ -19,9 +19,9 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import type { Viewer } from "@/lib/access/types";
 import { UNLIMITED_AI } from "@/lib/ai-allowance";
-// Google tools are shown and given once the workspace switch is read
-// (docs/plans/ai-teammates-phase3.md steps 2 and 5); until then, none.
-import { NO_PRODUCTS } from "@/lib/connectors/products";
+import { connectorAccess, workspaceConnectorProducts, type ConnectorAgent } from "@/lib/connectors/connections";
+import { googleConfig } from "@/lib/connectors/google/config";
+import { CONNECTOR_PRODUCTS, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { plainData } from "./plain-data";
 import { TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
@@ -31,9 +31,21 @@ import { agentMonthUsage } from "./budget";
 import { hueForAgent } from "./hues";
 import { agentUsableWhere, canManageAgent, canUseAgent, type TeammateVisibility } from "./teammate-access";
 import { GROUP_FALLBACK, TEAMMATE_ROUTE_ERRORS, TEAMMATE_SETTINGS, channelPlace, dmPlace, teammateLimitMessage } from "./teammate-copy";
+import { othersMayChange } from "./teammate-print";
 import { lastLineFor, messageViewFromRow, type ActionView, type TeammateMessageView } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
-import { toolSettings, type TeammateDetail, type TeammateLimits, type TeammateRow, type TeammateStatus, type ToolSetting } from "./teammate-views";
+import {
+  NO_GOOGLE_ROWS,
+  connectorRowState,
+  toolSettings,
+  type ConnectorRowState,
+  type ConnectorRowStates,
+  type TeammateDetail,
+  type TeammateLimits,
+  type TeammateRow,
+  type TeammateStatus,
+  type ToolSetting,
+} from "./teammate-views";
 
 // ── Refusals ────────────────────────────────────────────────────────
 
@@ -237,10 +249,68 @@ export async function messagesPage(
   return { session: { id: sessionId }, messages, actions: await actionViews(actionIds, viewerId), hasMore: rows.length > take };
 }
 
-/** Talk and Tables, which some tools need. */
-export async function workspaceModules(organizationId: string): Promise<{ tablesOn: boolean; talkOn: boolean }> {
-  const [tablesOn, talkOn] = await Promise.all([isModuleActive(organizationId, "workwrk-tables"), isModuleActive(organizationId, "workwrk-talk")]);
-  return { tablesOn, talkOn };
+/** What some tools need here: Talk, Tables, and the Google products. */
+export interface WorkspaceModules {
+  tablesOn: boolean;
+  talkOn: boolean;
+  /**
+   * The Google products this workspace turned on, of what this WorkwrK offers
+   * (connections.ts workspaceConnectorProducts; docs/plans/ai-teammates-phase3.md
+   * step 5): a product off gives its tools no row and no turn.
+   */
+  connectors: ProductSet;
+}
+
+/** Talk, Tables and the Google products, which some tools need. */
+export async function workspaceModules(organizationId: string): Promise<WorkspaceModules> {
+  const [tablesOn, talkOn, connectors] = await Promise.all([
+    isModuleActive(organizationId, "workwrk-tables"),
+    isModuleActive(organizationId, "workwrk-talk"),
+    workspaceConnectorProducts(organizationId),
+  ]);
+  return { tablesOn, talkOn, connectors };
+}
+
+/** A teammate not made yet, as the new teammate form reads it: the person's own, so its print is never read (othersMayChange). */
+const UNMADE_PRINT = { name: "", description: null, systemPrompt: null, toolNames: null, approvalRules: null, modelOverride: null, productSlug: null };
+
+/**
+ * How a Google tool's rows read for this person, per product
+ * (docs/plans/ai-teammates-phase3.md step 5): what connections.ts
+ * connectorAccess would answer a turn of this teammate for them now, with no
+ * Google call. The connection is the person's own (Decision 5), and the allow
+ * theirs (Decision 6), so an Owner or Admin sees only their own state, never
+ * anyone else's. With no teammate (the new teammate form), the teammate is the
+ * person's own: allow_first never applies here, and the form adds it for one
+ * made for everyone (teammate-setup.ts draftToolGroups). A product off here
+ * has no row, and reads nothing. `connectors` when the caller read them.
+ */
+export async function connectorRowStates(
+  person: Pick<Viewer, "organizationId" | "userId">,
+  agent: TeammateRecord | null,
+  connectors?: ProductSet,
+): Promise<ConnectorRowStates> {
+  const out: Record<ConnectorProduct, ConnectorRowState> = { ...NO_GOOGLE_ROWS };
+  // A WorkwrK that offers no Google draws no Google row, and reads nothing to say so.
+  if (!googleConfig()) return out;
+  const on = connectors ?? (await workspaceConnectorProducts(person.organizationId));
+  const products = CONNECTOR_PRODUCTS.filter((p) => on[p]);
+  if (products.length === 0) return out;
+  const target: ConnectorAgent = agent
+    ? { id: agent.id, name: agent.name, visibility: agent.visibility, ownerId: agent.ownerId, print: agent }
+    : { id: "", name: "", visibility: "PRIVATE", ownerId: person.userId, print: UNMADE_PRINT };
+  // The person's allow, read once for both products; a teammate of their own has none to read.
+  const setting =
+    agent && othersMayChange(agent, person.userId)
+      ? ((await prisma.agentPersonSetting.findUnique({
+          where: { agentId_userId: { agentId: agent.id, userId: person.userId } },
+          select: { connectorProducts: true, connectorPrints: true },
+        })) ?? null)
+      : null;
+  for (const p of products) {
+    out[p] = connectorRowState(await connectorAccess({ person, agent: target, product: p, setting }));
+  }
+  return out;
 }
 
 // ── The list's rows ─────────────────────────────────────────────────
@@ -430,13 +500,14 @@ async function conversationLabels(organizationId: string, userId: string, ids: r
 
 /**
  * The Tools and approvals table of this teammate for this person
- * (teammate-views.ts toolSettings). `personRules` when the caller already
- * holds them (the approvals PUT, right after saving).
+ * (teammate-views.ts toolSettings), its Google rows only for the products on
+ * here, each with this person's own state (connectorRowStates). `personRules`
+ * when the caller already holds them (the approvals PUT, right after saving).
  */
 export async function toolTable(
   agent: TeammateRecord,
   userId: string,
-  opts: { modules?: { tablesOn: boolean; talkOn: boolean }; personRules?: unknown } = {},
+  opts: { modules?: WorkspaceModules; personRules?: unknown } = {},
 ): Promise<ToolSetting[]> {
   const [modules, personRules] = await Promise.all([
     opts.modules ?? workspaceModules(agent.organizationId),
@@ -446,14 +517,19 @@ export async function toolTable(
           .findUnique({ where: { agentId_userId: { agentId: agent.id, userId } }, select: { approvalRules: true } })
           .then((s) => s?.approvalRules ?? {}),
   ]);
-  const targetLabels = await conversationLabels(agent.organizationId, userId, conversationTargets(personRules));
+  const [targetLabels, google] = await Promise.all([
+    conversationLabels(agent.organizationId, userId, conversationTargets(personRules)),
+    connectorRowStates({ organizationId: agent.organizationId, userId }, agent, modules.connectors),
+  ]);
   return toolSettings({
-    enabled: teammateToolNames(agent, { ...modules, connectors: NO_PRODUCTS }),
+    enabled: teammateToolNames(agent, modules),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
     tablesOn: modules.tablesOn,
     targetLabels,
+    connectors: modules.connectors,
+    google,
   });
 }
 
@@ -469,7 +545,7 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    toolNames: teammateToolNames(agent, { ...modules, connectors: NO_PRODUCTS }),
+    toolNames: teammateToolNames(agent, modules),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,

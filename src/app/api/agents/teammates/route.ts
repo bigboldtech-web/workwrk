@@ -5,7 +5,9 @@
 //   person's. Each row carries what waits for them, the unread dot and the
 //   chat's last line. Also the plan's limits, whether they may make a
 //   workspace teammate, whether Talk and Tables are on (the tools that need
-//   them), and the six starter templates as this workspace can make them now
+//   them), which Google products are on and how their rows read for this
+//   person (`connectors`, `google`: Phase 3 step 5), and the six starter
+//   templates as this workspace can make them now
 //   (templates.ts templateCards: a tool it cannot give is left out and
 //   named). `removed=1` adds the removed ones (Show removed).
 // POST /api/agents/teammates
@@ -26,6 +28,7 @@ import { TEAMMATE_VISIBILITIES, agentUsableWhere, canCreateTeammate, canUseAgent
 import { TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import {
   TEAMMATE_SELECT,
+  connectorRowStates,
   invalidRequest,
   overLimit,
   teammateError,
@@ -67,6 +70,11 @@ export async function GET(req: Request) {
     // waitingTotal already counts the cards in them.
     groupRows(viewer),
   ]);
+  // The new teammate form's Google rows (docs/plans/ai-teammates-phase3.md
+  // step 5): only for the products on here, each with this person's own
+  // state, as for a teammate of their own (the form adds the allow for one
+  // made for everyone). No template holds a Google tool (Decision 28).
+  const google = await connectorRowStates(viewer, null, modules.connectors);
   return NextResponse.json({
     teammates: sortTeammates(rows),
     groups,
@@ -76,6 +84,8 @@ export async function GET(req: Request) {
     limits: { personal: limits.personal, workspace: limits.workspace },
     talkOn: modules.talkOn,
     tablesOn: modules.tablesOn,
+    connectors: modules.connectors,
+    google,
   });
 }
 

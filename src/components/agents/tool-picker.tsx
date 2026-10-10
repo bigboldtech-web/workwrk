@@ -20,14 +20,21 @@
 // Talk conversation, or calls other people will see) is listed under its
 // tool with a Remove. Nothing here ever sets one of those.
 //
+// A Google tool's row (docs/plans/ai-teammates-phase3.md step 5) says, under
+// its label, what stands between the teammate and the reader's own Google
+// now, and links to their Connections card when there is something to do
+// there (teammate-setup.ts connectorNote). The row exists only while its
+// product is on here.
+//
 // The Pickers are absolute children of their row (never portalled), so they
 // work inside the dialog's transformed box (the picker-in-dialog rule).
 
 import { useState } from "react";
+import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { Picker } from "@/components/ui/picker";
 import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, approvalFor, askEveryoneFor, removeChoice } from "@/lib/agents/teammate-copy";
-import { moduleNote, type ToolPickerGroup, type ToolPickerRow } from "@/lib/agents/teammate-setup";
+import { connectorNote, moduleNote, type ToolPickerGroup, type ToolPickerRow } from "@/lib/agents/teammate-setup";
 import type { ApprovalChoice } from "@/lib/agents/tool-policy";
 import type { ToolName } from "@/lib/agents/tool-names";
 import { cn } from "@/lib/utils";
@@ -41,6 +48,7 @@ export function ToolPicker({
   groups,
   canTick,
   busy = false,
+  linksInNewTab = false,
   onTick,
   onChoice,
   onAskEveryone,
@@ -51,6 +59,8 @@ export function ToolPicker({
   canTick: boolean;
   /** A save is on its way: nothing changes until it lands. */
   busy?: boolean;
+  /** A Google row's link opens in another tab: the dialog, where what is typed is not saved yet. */
+  linksInNewTab?: boolean;
   onTick?: (name: ToolName, on: boolean) => void;
   onChoice: (name: ToolName, value: ApprovalChoice) => void;
   onAskEveryone?: (name: ToolName, on: boolean) => void;
@@ -70,6 +80,7 @@ export function ToolPicker({
                 row={r}
                 canTick={canTick}
                 busy={busy}
+                linksInNewTab={linksInNewTab}
                 open={open === r.name}
                 onOpen={(on) => setOpen(on ? r.name : null)}
                 onTick={onTick}
@@ -89,6 +100,7 @@ function ToolRow({
   row: r,
   canTick,
   busy,
+  linksInNewTab,
   open,
   onOpen,
   onTick,
@@ -99,6 +111,7 @@ function ToolRow({
   row: ToolPickerRow;
   canTick: boolean;
   busy: boolean;
+  linksInNewTab: boolean;
   open: boolean;
   onOpen: (open: boolean) => void;
   onTick?: (name: ToolName, on: boolean) => void;
@@ -109,6 +122,7 @@ function ToolRow({
   // Under the label: the checkbox's 18px and the 12px gap, when it shows.
   const indent = canTick ? "ps-[30px]" : "";
   const a = r.approval;
+  const google = r.connector ? connectorNote(r.connector) : null;
   return (
     <li className="flex flex-col gap-1 border-t border-line-soft px-3 py-2 first:border-t-0">
       <div className="flex min-h-8 items-start gap-3">
@@ -125,6 +139,23 @@ function ToolRow({
         <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
           <span className={cn("text-base", r.unavailable ? "text-ink-2" : "text-ink")}>{r.label}</span>
           {r.description ? <span className="text-sm text-ink-2">{r.description}</span> : null}
+          {google ? (
+            <span className="text-sm text-ink-2">
+              {google.text}
+              {google.link ? (
+                <>
+                  {" "}
+                  <Link
+                    href={google.link.href}
+                    className="font-medium text-brand-deep hover:underline"
+                    {...(linksInNewTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                  >
+                    {google.link.label}
+                  </Link>
+                </>
+              ) : null}
+            </span>
+          ) : null}
           {r.unavailable ? <span className="text-sm text-ink-2">{moduleNote(r.unavailable)}</span> : null}
           {a.kind === "per_conversation" ? <span className="text-sm text-ink-2">{NEW_TEAMMATE_DIALOG.talkNote}</span> : null}
           {a.kind === "choice" && a.held ? <span className="text-sm text-ink-2">{TEAMMATE_SETTINGS.askedByManagers}</span> : null}

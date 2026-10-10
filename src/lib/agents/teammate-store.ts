@@ -77,7 +77,8 @@ import {
   type TurnIds,
 } from "./teammate-thread";
 import { sendDecisions } from "./decide-client";
-import type { TeammateLimits, TeammateRow } from "./teammate-views";
+import type { ProductSet } from "@/lib/connectors/products";
+import type { ConnectorRowStates, TeammateLimits, TeammateRow } from "./teammate-views";
 import type { TemplateCard } from "./templates";
 import { TEAMMATE_CHAT } from "./teammate-copy";
 
@@ -1080,6 +1081,10 @@ export interface TeammateListData {
   limits: TeammateLimits;
   talkOn: boolean;
   tablesOn: boolean;
+  /** The Google products on here (Phase 3 step 5); absent from an older server, which offered none. */
+  connectors?: ProductSet;
+  /** How the new teammate form's Google rows read for this person, as for a teammate of their own. */
+  google?: ConnectorRowStates;
 }
 
 /** The teammates this person can use; `removed` adds the removed ones (Show removed). */

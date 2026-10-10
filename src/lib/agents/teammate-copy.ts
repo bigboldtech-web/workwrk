@@ -719,6 +719,12 @@ export const NEW_TEAMMATE_DIALOG = {
   createFailed: "Couldn't create the teammate. Try again.",
   talkOff: "Talk is off in this workspace, so it can't read or post in Talk.",
   tablesOff: "Tables is off in this workspace.",
+  /**
+   * A Google row of a teammate made for everyone, in this form (review of step
+   * 5): the allow is given on the person's Connections card, which lists only
+   * teammates that exist, so the line says when and where, and links nowhere.
+   */
+  googleAllowOnceMade: "Uses your own Google account once you allow it. Allow it in Settings, Calendar & connections once the teammate is made.",
   /** The list of template cards, for a screen reader. */
   templatesLabel: "Templates",
   /** A template tool no teammate may be given yet (TEAMMATE_EXCLUDED), left out of the form. */
@@ -1075,6 +1081,23 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
 };
 
 /**
+ * The line under a Google tool's row in the picker and on the Tools and
+ * approvals tab (docs/plans/ai-teammates-phase3.md step 5), by what stands
+ * between the teammate and the reader's own Google now (teammate-views.ts
+ * ConnectorRowState), and the words of the link to their Connections card.
+ * `ready` has no link: there is nothing to do there.
+ */
+export const TOOL_PICKER_NOTES = {
+  ready: "Uses your own Google account.",
+  connect_first: "Uses your own Google account. Connect Google first.",
+  reconnect: "Your Google connection needs reconnecting.",
+  not_granted: "Your Google connection doesn't include this. Connect again and tick it.",
+  allow_first: "Uses your own Google account once you allow it.",
+  changed: "Changed since you allowed it. Check it and allow it again.",
+  link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+} as const;
+
+/**
  * The Google connector tools' sentences and card lines
  * (docs/plans/ai-teammates-phase3.md steps 3 and 4): what a tool answers when
  * it cannot (each its own reason, connector-rules.ts), what an email card and
@@ -1086,9 +1109,12 @@ export const CONNECTOR_COPY = {
   needsApproval: "This Google action runs only from its approval.",
   notConfigured: "Google isn't set up for AI teammates on this WorkwrK.",
   workspaceOff: (p: string) => `${p} is turned off for AI teammates in this workspace. An Owner or Admin can turn it on in Settings, Apps & modules.`,
-  notHereTalk: "Gmail and Google Calendar can't be used when a teammate answers in Talk, because the answer is posted for everyone there.",
-  notHereAutomation: "Gmail and Google Calendar can't be used in an automation, because its answer goes to fields other people read.",
-  notHereDelegated: "Gmail and Google Calendar can't be used when another teammate asks. Ask this teammate directly.",
+  // Review of step 5: each names only the products the teammate holds tools
+  // for that are on here ("Gmail", "Google Calendar" or both), as block 2's
+  // line does (engine.ts connectorNotHereLine).
+  notHereTalk: (p: string) => `${p} can't be used when a teammate answers in Talk, because the answer is posted for everyone there.`,
+  notHereAutomation: (p: string) => `${p} can't be used in an automation, because its answer goes to fields other people read.`,
+  notHereDelegated: (p: string) => `${p} can't be used when another teammate asks. Ask this teammate directly.`,
   notConnected: "You haven't connected Google to your AI teammates. Connect it in Settings, Calendar & connections.",
   needsReconnect: "Your Google connection stopped working. Reconnect it in Settings, Calendar & connections.",
   notGranted: (p: string) => `Your Google connection doesn't include ${p}. Connect again and tick ${p}.`,
@@ -1289,9 +1315,11 @@ export const CONNECTIONS_COPY = {
   allowAgain: "Allow again",
   /** Beside a teammate's switch for a product the person's connection lacks: turning it on waits for Add. */
   addFirst: (p: string) => `Your Google connection doesn't include ${p}. Add ${p} first.`,
-  // No "tick them" sentence until the picker offers Google tools (step 5): it
-  // would send people to a choice that is not there yet (review of step 2).
-  noTeammates: "None of your teammates has Google tools yet.",
+  // The "tick them" sentence came with the picker's Google rows (step 5;
+  // review of step 2 held it back until the choice was there). Only a
+  // teammate's managers tick its tools, and everyone manages their own, so it
+  // names a teammate they manage.
+  noTeammates: "None of your teammates has Google tools yet. Tick them in the Tools and approvals of a teammate you manage.",
   disconnect: "Disconnect",
   disconnectTitle: "Disconnect Google?",
   disconnectBody: "Your teammates stop using your Gmail and Google Calendar at once, and WorkwrK's access is removed from your Google account. Requests waiting for your approval stay until you reconnect or they expire.",
