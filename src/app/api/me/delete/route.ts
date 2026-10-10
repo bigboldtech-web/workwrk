@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
@@ -11,6 +10,7 @@ import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/ser
 import { soleAdminWorkspaces } from "@/lib/access/self-facts";
 import { endAllConnectionsOf } from "@/lib/connectors/connections";
 import { OPEN_RUN_STATUSES } from "@/lib/agents/budget";
+import { ERASURE_INLINE_BUDGET_MS, ERASURE_METHOD, blankTeammateHistory } from "@/lib/agents/erasure-sweep";
 import { TURN_ERRORS } from "@/lib/agents/teammate-copy";
 
 /** Thrown inside the transaction when the re-check under the lock refuses. */
@@ -49,23 +49,36 @@ class LastAdminError extends Error {
  *    of Phase 3): a Google card's can name the person's two Google addresses
  *    (CONNECTOR_COPY.accountChanged), a tool's can quote its input.
  *
- * A TURN STILL GOING NEVER WRITES AFTER THE BLANKING (review round 4 of Phase
- * 3). The transaction's FIRST statement fails every open run of theirs
- * (FAILED, "the account it worked for was deleted", endedAt), and a turn
- * writes its answer, cards and chat lines only while its run is open and
- * its person still has an account, checked under the run's lock
- * (src/lib/agents/budget.ts runStillOpen). Erasure first: the turn waits on
- * the lock, reads FAILED and writes nothing, and its last run write, asked
- * only of an open run, leaves the FAILED. The turn first: this statement
- * waits on the lock until its rows are committed, and the blanking below
- * reads them. A run claimed after that first statement is not failed by it,
- * so a turn also checks that its person still has an account (the User row,
- * FOR SHARE), which this transaction anonymises after it is done with runs:
- * that turn writes nothing either, and its run ends FAILED keeping none of
- * its words. Before, an answer, its run's output and its cards written a
- * moment after the blanking were kept for good. A request still RUNNING
- * (approved, its tool going) is ended FAILED before the blanking, so the
- * result it would write after it, by a swap from RUNNING, is never written.
+ * TWO PARTS (review round 5 of Phase 3). Blanking a heavy person's whole
+ * history in the one 20 second transaction (30 hourly routines leave about
+ * 260,000 runs and report rows a year) timed it out every time, so they could
+ * never erase their account, and their teammates' answers in flight were lost
+ * while it held their runs.
+ *  (a) One short transaction, in this order: the workspace locks; the
+ *      last-admin re-check under them; the person's open runs and running
+ *      requests failed and their User row anonymised, back to back; the small
+ *      deletes and writes (notifications, idea votes and comments, person
+ *      memories, their routines, at most 30); the consent record. Nothing in
+ *      it reads their whole history.
+ *  (b) After it commits, src/lib/agents/erasure-sweep.ts blankTeammateHistory
+ *      blanks the words listed above, their AI questions' text and the
+ *      network details of their activity rows, in batches of 500 rows, each
+ *      its own short statement, for up to 20 seconds. The account is deleted
+ *      once (a) commits, so the answer is a success whether or not (b)
+ *      finished; the teammates cron (finishErasures) blanks whatever is left,
+ *      within minutes, and reads them again until nothing can still arrive.
+ * Their AI questions and activity rows grow by one a teammate turn or write,
+ * so they left (a) as well.
+ *
+ * A TURN STILL GOING NEVER KEEPS WHAT IT WRITES (review rounds 4 and 5 of
+ * Phase 3). A turn writes its answer, cards and chat lines only while its run
+ * is open and its person still has an account, checked under the run's lock
+ * and the person's (src/lib/agents/budget.ts runState). So once (a) commits,
+ * every run of theirs reads closed or person_gone, and no turn of theirs
+ * writes again. A turn that saved before then (the run statement or the User
+ * update waited on its locks until it had) has its rows blanked by (b) or the
+ * sweep. A request still RUNNING (approved, its tool going) is ended FAILED
+ * in (a), so the result its swap from RUNNING would write never lands.
  *
  * Things we RETAIN:
  *  - Aggregated org records (reviews, KPI records, kudos, action items) with
@@ -133,38 +146,33 @@ export async function POST(req: NextRequest) {
   });
 
   try {
+    // (a) The short transaction (see the header): nothing in it reads the
+    // person's whole history.
     await prisma.$transaction(async (tx) => {
-      // First, before anything else (see the header): every run of theirs
-      // still open is failed, and from here no turn of theirs writes.
-      const now = new Date();
-      const theirRuns = { OR: [{ actingForId: userId }, { triggeredBy: userId }] };
-      await tx.agentRun.updateMany({
-        where: { ...theirRuns, status: { in: [...OPEN_RUN_STATUSES] } },
-        data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.accountDeleted },
-      });
-      // Their runs' words next, before the User row: this transaction takes
-      // no run after it anonymises that row below, the order a turn's writes
-      // take the two in (budget.ts runState), so neither ever waits on the
-      // other in turn. A teammate run's error is one of the engine's own
-      // sentences (TURN_ERRORS), the one above among them, so it stays.
-      await tx.agentRun.updateMany({ where: theirRuns, data: { output: Prisma.DbNull } });
-      // Ask AI's tool runs keep the tool's input there (no actingForId), and
-      // its error, which can quote that input (review round 4 of Phase 3).
-      await tx.agentRun.updateMany({ where: { triggeredBy: userId, actingForId: null }, data: { input: {}, error: null } });
-      // And every request of theirs still running ends, so its result, written by a swap from RUNNING, never lands after the blanking.
-      await tx.agentAction.updateMany({ where: { actingForId: userId, status: "RUNNING" }, data: { status: "FAILED", updatedAt: now } });
-
-      // 0) Lock every workspace this person belongs to, in one sorted order
+      // 1) Lock every workspace this person belongs to, in one sorted order
       //    (no deadlock between two deletes), then re-check under the lock.
       //    Another delete of an admin of the same workspace waits here until
-      //    this one commits, so it counts this person as gone.
+      //    this one commits, so it counts this person as gone. First, so a
+      //    run claimed while this waits is still failed below (review round
+      //    5 of Phase 3: the runs were failed before this wait).
       for (const orgId of lockOrgs) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`me.delete:${orgId}`}))`;
       }
       const stillSole = await soleAdminWorkspaces(userId, tx);
       if (stillSole.length > 0) throw new LastAdminError(stillSole);
 
-      // 1) Anonymize the user row
+      // 2) Every run of theirs still open is failed, every request of theirs
+      //    still running ends (so its result, written by a swap from RUNNING,
+      //    never lands), and the User row is anonymised, back to back with
+      //    nothing that waits between them. A turn takes the same two in the
+      //    same order, run then person (budget.ts runState), and this takes no
+      //    run after the person, so neither ever waits on the other in turn.
+      const now = new Date();
+      await tx.agentRun.updateMany({
+        where: { OR: [{ actingForId: userId }, { triggeredBy: userId }], status: { in: [...OPEN_RUN_STATUSES] } },
+        data: { status: "FAILED", endedAt: now, error: TURN_ERRORS.accountDeleted },
+      });
+      await tx.agentAction.updateMany({ where: { actingForId: userId, status: "RUNNING" }, data: { status: "FAILED", updatedAt: now } });
       await tx.user.update({
         where: { id: userId },
         data: {
@@ -176,25 +184,17 @@ export async function POST(req: NextRequest) {
           dateOfBirth: null,
           passwordHash: randomPassword,
           status: "INACTIVE",
-          deletedAt: new Date(),
+          deletedAt: now,
           tokenVersion: { increment: 1 },
         },
       });
 
-      // 2) Hard-delete data that is safe to remove
+      // 3) The small deletes and writes, each bounded by the person (their
+      //    words are blanked after the commit, below).
       await Promise.all([
         tx.notification.deleteMany({ where: { userId } }),
-        tx.aIQuery.updateMany({ where: { userId }, data: { query: "Erased", response: null } }),
         tx.ideaVote.deleteMany({ where: { userId } }),
         tx.ideaComment.deleteMany({ where: { userId } }),
-        // Kept, with the network details cleared (see the header).
-        tx.activityLog.updateMany({ where: { actorId: userId }, data: { ipAddress: null, userAgent: null } }),
-        // Their AI chats' and AI teammates' records, in every workspace (see
-        // the header); their runs were blanked first of all, above.
-        tx.chatMessage.updateMany({ where: { session: { userId } }, data: { content: "Erased", toolCalls: Prisma.DbNull, meta: Prisma.DbNull } }),
-        tx.chatSession.updateMany({ where: { userId }, data: { title: null } }),
-        // The error too (review round 4 of Phase 3): a Google card's names both of the person's Google addresses.
-        tx.agentAction.updateMany({ where: { actingForId: userId }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull, error: null } }),
         // What their teammates remember about them goes, and the routines that
         // work as them keep no words and never run again (the rows stay, as
         // chats and cards do, so nothing that points at one is left dangling;
@@ -203,11 +203,12 @@ export async function POST(req: NextRequest) {
         tx.agentRoutine.updateMany({ where: { actingForId: userId }, data: { name: "Erased", prompt: "Erased", status: "paused", pausedReason: "person_gone", nextRunAt: null } }),
       ]);
 
-      // 3) Log the erasure request itself (required evidence)
+      // 4) Log the erasure request itself (required evidence). The sweep
+      //    finds the erasures it has not finished by this record.
       await tx.consentRecord.create({
         data: {
           userId,
-          method: "erasure",
+          method: ERASURE_METHOD,
           necessary: true,
           preferences: false,
           analytics: false,
@@ -218,19 +219,30 @@ export async function POST(req: NextRequest) {
           policyVersion: POLICY_VERSION,
           ipAddress,
           userAgent,
-          withdrawnAt: new Date(),
+          withdrawnAt: now,
         },
       });
     }, { timeout: 20_000, maxWait: 10_000 });
-
-    return jsonSuccess({
-      ok: true,
-      message:
-        "Account anonymized. Some organizational records are retained in anonymized form as permitted by GDPR Art. 17(3) and our retention policy.",
-    });
   } catch (err) {
     if (err instanceof LastAdminError) return lastAdmin();
     console.error("[delete] failed:", err);
     return jsonError("Failed to delete account", 500);
   }
+
+  // (b) The account is deleted. Their words go now, in batches within a
+  // budget; whatever this leaves, or a failure, the sweep finishes
+  // (src/lib/agents/erasure-sweep.ts finishErasures), so the answer is a
+  // success either way.
+  try {
+    const pass = await blankTeammateHistory(userId, Date.now() + ERASURE_INLINE_BUDGET_MS);
+    if (!pass.done) console.error(`[delete] account ${userId}: words left for the erasure sweep after ${pass.rows} rows`);
+  } catch (err) {
+    console.error(`[delete] account ${userId}: words left for the erasure sweep: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+  }
+
+  return jsonSuccess({
+    ok: true,
+    message:
+      "Account anonymized. Some organizational records are retained in anonymized form as permitted by GDPR Art. 17(3) and our retention policy.",
+  });
 }

@@ -47,6 +47,7 @@ vi.mock("./budget", () => ({
     return fx.closedRuns.has(runId) ? "closed" : fx.gonePeople.has(personId) ? "person_gone" : "open";
   },
   RUN_LOCK_TX_TIMEOUT_MS: 20_000,
+  RUN_LOCK_TX_MAX_WAIT_MS: 10_000,
   OPEN_RUN_STATUSES: ["PENDING", "RUNNING"],
 }));
 vi.mock("./engine", () => ({

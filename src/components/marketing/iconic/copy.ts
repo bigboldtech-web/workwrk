@@ -177,7 +177,9 @@ export const LEGAL_COPY = {
     // a meeting time, and keeps its answer in the run history too; section 6
     // says the backups hold the encrypted tokens for as long as backups last.
     // Review round 3 of Phase 3, the same day: section 6 says deleting one's
-    // account erases the words of a teammate's answers and requests.
+    // account erases the words of a teammate's answers and requests. Review
+    // round 5 of Phase 3, the same day: at once, or within a day for a very
+    // long history.
     updated: "10 October 2026",
   },
   terms: {

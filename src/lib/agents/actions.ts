@@ -74,7 +74,7 @@ import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { resolveActingPerson, type ActingResult } from "./acting";
-import { RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "./budget";
+import { RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "./budget";
 import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
 import { connectorAgentFrom } from "./connector-access";
 import { connectorRefusalSentence, productWord } from "./connector-rules";
@@ -268,7 +268,8 @@ export interface EventLine {
  * turn's run is open and its person still has an account, checked under the
  * run's lock in the same transaction (budget.ts runStillOpen; review round 4
  * of Phase 3: a line written after the person's account erasure had blanked
- * their chats was kept for good).
+ * their chats was kept for good). It waits up to RUN_LOCK_TX_MAX_WAIT_MS to
+ * start (review round 5 of Phase 3).
  */
 export async function writeEventLine(
   sessionId: string | null,
@@ -289,7 +290,7 @@ export async function writeEventLine(
     const row = open
       ? await prisma.$transaction(
           async (tx) => ((await runStillOpen(tx, open.runId, open.personId)) ? tx.chatMessage.create({ data, select }) : null),
-          { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+          { timeout: RUN_LOCK_TX_TIMEOUT_MS, maxWait: RUN_LOCK_TX_MAX_WAIT_MS },
         )
       : await prisma.chatMessage.create({ data, select });
     return row ? messageViewFromRow(row) : null;
@@ -385,9 +386,18 @@ export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClien
  * What waits for this person's decision now: everything, Ask AI's own
  * included, for MAX_PENDING_PER_PERSON; only their teammates' for the AI
  * sidebar's count on AI teammates (`teammatesOnly`), where Ask AI's are not.
+ * `db`: the caller's transaction, when it counts while holding one
+ * (executor.ts withTwinLock; review round 5 of Phase 3: on the base client
+ * the count asked for a second connection while the transaction held its
+ * first).
  */
-export async function waitingCount(organizationId: string, userId: string, now: Date = new Date(), opts: { teammatesOnly?: boolean } = {}): Promise<number> {
-  return prisma.agentAction.count({
+export async function waitingCount(
+  organizationId: string,
+  userId: string,
+  now: Date = new Date(),
+  opts: { teammatesOnly?: boolean; db?: Pick<Prisma.TransactionClient, "agentAction"> } = {},
+): Promise<number> {
+  return (opts.db ?? prisma).agentAction.count({
     where: { organizationId, actingForId: userId, status: "PENDING", expiresAt: { gt: now }, ...(opts.teammatesOnly ? { agentId: { not: null } } : {}) },
   });
 }

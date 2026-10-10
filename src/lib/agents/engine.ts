@@ -76,7 +76,7 @@ import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import type { ActingPerson } from "./acting";
 import { claimUnreportedOutcomes, outcomesWaiting, releaseOutcomes } from "./actions";
-import { OPEN_RUN_STATUSES, RUN_LOCK_TX_TIMEOUT_MS, RUN_STALE_MS, runState, runStillOpen, type TurnTrigger } from "./budget";
+import { OPEN_RUN_STATUSES, RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, RUN_STALE_MS, runState, runStillOpen, type TurnTrigger } from "./budget";
 import { connectorTurnAccess, type TurnConnectorAccess } from "./connector-access";
 import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind } from "./connector-rules";
 import { executeToolCall, markRunReadGoogle, wrapToolData, type CallRecord } from "./executor";
@@ -1453,6 +1453,13 @@ const ROW_SELECT = { id: true, role: true, content: true, kind: true, meta: true
  * erasure failed, or one whose person's account is gone, writes nothing.
  * The stale-run sweep closes only a run open past RUN_STALE_MS, which by its
  * own rule no live turn reaches.
+ *
+ * ONE MORE TRY WHEN IT NEVER WROTE (review round 5 of Phase 3). Under pool
+ * pressure the transaction could not start in time, or timed out before it
+ * committed (P2028; P2024 when no connection came from the pool), and the
+ * answer was lost. Either way nothing was written, so it is tried once more;
+ * a second failure is "couldn't be saved", as before. It waits up to
+ * RUN_LOCK_TX_MAX_WAIT_MS to start, not Prisma's 2 seconds.
  */
 async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: CallRecord[], at: Date) {
   const report = a.trigger === "ROUTINE";
@@ -1490,7 +1497,7 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
           : {};
   const extra = { ...reply, ...who, ...from, ...read };
   const answerMeta = meta || Object.keys(extra).length > 0 ? { ...(meta ?? {}), ...extra } : null;
-  return prisma.$transaction(async (tx) => {
+  const save = () => prisma.$transaction(async (tx) => {
     if (!(await runStillOpen(tx, a.runId, a.person.userId))) return null;
     const assistant = await tx.chatMessage.create({
       data: {
@@ -1526,7 +1533,27 @@ async function saveTurnRows(a: TurnArgs, s: TurnState, text: string, proposals: 
       select: ROW_SELECT,
     });
     return { assistant, approval };
-  }, { timeout: RUN_LOCK_TX_TIMEOUT_MS });
+  }, RUN_LOCK_TX_OPTIONS);
+  try {
+    return await save();
+  } catch (err) {
+    if (!neverWrote(err)) throw err;
+    console.error(`[agents] turn ${a.runId} save did not start in time, trying once more: ${errorLine(err)}`);
+    return save();
+  }
+}
+
+/** A run-lock transaction's limits (budget.ts): how long it may last, and wait to start (review round 5 of Phase 3). */
+const RUN_LOCK_TX_OPTIONS = { timeout: RUN_LOCK_TX_TIMEOUT_MS, maxWait: RUN_LOCK_TX_MAX_WAIT_MS };
+
+/**
+ * A transaction that never committed anything: it could not start in time
+ * or timed out and was rolled back (P2028), or no connection came from the
+ * pool (P2024). Safe to try again (review round 5 of Phase 3).
+ */
+function neverWrote(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  return code === "P2028" || code === "P2024";
 }
 
 /**
@@ -1638,9 +1665,10 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
 
   // Only while the run is still open (review round 4 of Phase 3), under its
   // lock and the person's (budget.ts runState): a run the erasure failed
-  // keeps its FAILED, its error and no output; one claimed after the
-  // erasure's first statement, whose person is gone now, ends FAILED keeping
-  // nothing the turn said.
+  // keeps its FAILED and its error, and the turn writes it no output; one
+  // claimed after the erasure's run statement, whose person is gone now, ends
+  // FAILED keeping nothing the turn said. Either way it waits up to
+  // RUN_LOCK_TX_MAX_WAIT_MS to start (review round 5 of Phase 3).
   const endedAt = new Date();
   const counts = { endedAt, tokensIn: s.tokensIn, tokensOut: s.tokensOut, costCents };
   await prisma
@@ -1670,7 +1698,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
                 },
         });
       },
-      { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+      RUN_LOCK_TX_OPTIONS,
     )
     .catch((err) => console.error(`[agents] run ${a.runId} not recorded: ${errorLine(err)}`));
   await prisma.chatSession

@@ -2,14 +2,15 @@
 // erasure blanked the person's AIQuery rows and nothing an AI teammate kept:
 // their chats (Gmail summaries in a teammate's answers), the requests they
 // approved (the whole body of every email they sent or replied to, and
-// other people's addresses), and their runs' output all stayed for good. Now
-// the same transaction blanks each, in every workspace, keeping the rows'
-// ids, status and counts; and their Google connections end before it, so no
+// other people's addresses), and their runs' output all stayed for good.
+// Review round 5 of Phase 3: blanking them in the one transaction timed out
+// for a heavy person, so the transaction is short and the words are blanked
+// in batches after it commits (src/lib/agents/erasure-sweep.ts, tested in
+// erasure-sweep.test.ts); and their Google connections end before it, so no
 // teammate reads their mail into a chat just blanked.
 
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Prisma } from "@/generated/prisma";
 
 type Args = { where?: Record<string, unknown>; data?: Record<string, unknown>; select?: unknown };
 
@@ -21,6 +22,9 @@ const st = vi.hoisted(() => ({
   soleInTx: [] as string[],
   ended: [] as Array<{ userId: string; reason: string; at: number }>,
   endThrows: false,
+  /** Review round 5 of Phase 3: the batched blanking after the commit, and what it answers. */
+  blanks: [] as Array<{ userId: string; deadline: number; at: number; inTx: boolean }>,
+  blankAnswer: { done: true, rows: 3 } as { done: boolean; rows: number } | Error,
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -35,13 +39,26 @@ vi.mock("@/lib/compliance/server", () => ({
   POLICY_VERSION: "2026-10-06",
 }));
 vi.mock("@/lib/access/self-facts", () => ({
-  soleAdminWorkspaces: async (_userId: string, db?: unknown) => (db ? st.soleInTx : st.sole),
+  soleAdminWorkspaces: async (_userId: string, db?: unknown) => {
+    // The re-check under the lock is a statement of the transaction too.
+    if (db) st.calls.push({ model: "soleAdmin", op: "recheck", args: {}, inTx: st.inTx });
+    return db ? st.soleInTx : st.sole;
+  },
 }));
 vi.mock("@/lib/connectors/connections", () => ({
   endAllConnectionsOf: async (userId: string, reason: string) => {
     st.ended.push({ userId, reason, at: st.calls.length });
     if (st.endThrows) throw new Error("connection reset");
     return 1;
+  },
+}));
+vi.mock("@/lib/agents/erasure-sweep", () => ({
+  ERASURE_INLINE_BUDGET_MS: 20_000,
+  ERASURE_METHOD: "erasure",
+  blankTeammateHistory: async (userId: string, deadline: number) => {
+    st.blanks.push({ userId, deadline, at: st.calls.length, inTx: st.inTx });
+    if (st.blankAnswer instanceof Error) throw st.blankAnswer;
+    return st.blankAnswer;
   },
 }));
 vi.mock("@/lib/prisma", () => {
@@ -62,7 +79,9 @@ vi.mock("@/lib/prisma", () => {
           return async (fn: (tx: unknown) => Promise<unknown>) => {
             st.inTx = true;
             try {
-              return await fn(prisma);
+              const out = await fn(prisma);
+              st.calls.push({ model: "$commit", op: "commit", args: {}, inTx: true });
+              return out;
             } finally {
               st.inTx = false;
             }
@@ -89,6 +108,7 @@ function del(body: unknown = { confirm: "DELETE" }) {
 }
 
 const inTx = (model: string, op = "updateMany") => st.calls.filter((c) => c.model === model && c.op === op && c.inTx);
+const txCalls = () => st.calls.filter((c) => c.inTx);
 
 beforeEach(() => {
   st.calls = [];
@@ -97,6 +117,8 @@ beforeEach(() => {
   st.soleInTx = [];
   st.ended = [];
   st.endThrows = false;
+  st.blanks = [];
+  st.blankAnswer = { done: true, rows: 3 };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -105,32 +127,7 @@ afterEach(() => {
 });
 
 describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)", () => {
-  it("blanks, in its transaction and in every workspace, the person's chats, the requests they were asked to approve and their runs' output", async () => {
-    const res = await del();
-    expect(res.status).toBe(200);
-    // Before: none of these four were written.
-    expect(inTx("chatMessage").map((c) => c.args)).toEqual([{ where: { session: { userId: "u-max" } }, data: { content: "Erased", toolCalls: Prisma.DbNull, meta: Prisma.DbNull } }]);
-    expect(inTx("chatSession").map((c) => c.args)).toEqual([{ where: { userId: "u-max" }, data: { title: null } }]);
-    expect(inTx("agentAction").map((c) => c.args)).toEqual([
-      // Review round 4 of Phase 3: a request still running ends first, and every request's error goes too.
-      { where: { actingForId: "u-max", status: "RUNNING" }, data: { status: "FAILED", updatedAt: expect.any(Date) } },
-      { where: { actingForId: "u-max" }, data: { input: {}, editedInput: Prisma.DbNull, preview: {}, result: Prisma.DbNull, error: null } },
-    ]);
-    expect(inTx("agentRun").map((c) => c.args)).toEqual([
-      { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }], status: { in: ["PENDING", "RUNNING"] } }, data: { status: "FAILED", endedAt: expect.any(Date), error: "This run stopped because the account it worked for was deleted." } },
-      { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }] }, data: { output: Prisma.DbNull } },
-      { where: { triggeredBy: "u-max", actingForId: null }, data: { input: {}, error: null } },
-    ]);
-    // No workspace named: every workspace the person was in.
-    for (const c of [...inTx("chatMessage"), ...inTx("chatSession"), ...inTx("agentAction"), ...inTx("agentRun")]) expect(JSON.stringify(c.args.where)).not.toContain("organizationId");
-    // The rows stay (their ids, status and counts): nothing of these is deleted.
-    for (const m of ["chatMessage", "chatSession", "agentAction", "agentRun"]) expect(st.calls.filter((c) => c.model === m && c.op.startsWith("delete"))).toEqual([]);
-    // The existing guarantees hold: the AI questions worded "Erased", and the erasure's own record.
-    expect(inTx("aIQuery").map((c) => c.args.data)).toEqual([{ query: "Erased", response: null }]);
-    expect(st.calls.filter((c) => c.model === "consentRecord" && c.op === "create" && c.inTx)).toHaveLength(1);
-  });
-
-  it("deletes what teammates remember about the person, and leaves their routines no words and no next run (lead, after review round 3)", async () => {
+  it("deletes what teammates remember about the person, and leaves their routines no words and no next run, in its transaction (lead, after review round 3)", async () => {
     await del();
     // Before: neither was touched.
     const ofModel = (model: string) => st.calls.filter((c) => c.model === model);
@@ -138,23 +135,26 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect(ofModel("agentRoutine").map((c) => [c.op, c.args, c.inTx])).toEqual([["updateMany", { where: { actingForId: "u-max" }, data: { name: "Erased", prompt: "Erased", status: "paused", pausedReason: "person_gone", nextRunAt: null } }, true]]);
     // A teammate's shared memories (scope "agent") are the workspace's, never deleted here.
     expect(JSON.stringify(ofModel("agentMemory").map((c) => c.args))).not.toContain('"agent"');
+    // The erasure's own record, in the transaction.
+    expect(st.calls.filter((c) => c.model === "consentRecord" && c.op === "create" && c.inTx).map((c) => (c.args.data as { method: string }).method)).toEqual(["erasure"]);
   });
 
-  it("ends the person's Google connections before the transaction that blanks their chats, and an end that fails never stops the erasure", async () => {
+  it("ends the person's Google connections before the transaction, and an end that fails never stops the erasure", async () => {
     await del();
     expect(st.ended).toHaveLength(1);
     expect(st.ended[0]).toMatchObject({ userId: "u-max", reason: "left" });
-    const firstBlank = st.calls.findIndex((c) => c.model === "chatMessage" && c.op === "updateMany");
     // Before: it ran after the commit, so a teammate could read their mail into a chat just blanked.
-    expect(st.ended[0].at).toBeLessThan(firstBlank);
+    const firstTx = st.calls.findIndex((c) => c.inTx);
+    expect(st.ended[0].at).toBeLessThanOrEqual(firstTx);
     expect(st.calls.slice(0, st.ended[0].at).some((c) => c.inTx)).toBe(false);
 
     st.calls = [];
     st.ended = [];
+    st.blanks = [];
     st.endThrows = true;
     const res = await del();
     expect(res.status).toBe(200);
-    expect(inTx("chatMessage")).toHaveLength(1);
+    expect(st.blanks).toHaveLength(1);
   });
 
   it("blanks nothing when the request is refused", async () => {
@@ -163,38 +163,82 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect((await del()).status).toBe(409);
     expect(st.calls.filter((c) => c.op === "updateMany")).toEqual([]);
     expect(st.ended).toEqual([]);
+    expect(st.blanks).toEqual([]);
   });
 });
 
 // Review round 4 of Phase 3: a turn still going during the erasure wrote its
-// answer, its run's output and its cards after the blanking, and they were
-// never erased; and a request's error, which can name the person's two
-// Google addresses (CONNECTOR_COPY.accountChanged), was kept.
-describe("POST /api/me/delete: a turn still going (review round 4 of Phase 3)", () => {
-  it("fails the person's open runs in the transaction's first statement, before any lock, blanking or anonymising", async () => {
+// answer, its run's output and its cards after the blanking; review round 5:
+// the runs were failed before the workspace locks' wait, so a run claimed
+// during it kept its output for good.
+describe("POST /api/me/delete: a turn still going (review rounds 4 and 5 of Phase 3)", () => {
+  it("takes the workspace locks and re-checks the last admin before any run statement", async () => {
     await del();
-    const tx = st.calls.filter((c) => c.inTx);
-    // Before: the first statement was the workspace lock, and no run was failed at all.
-    expect(tx[0]).toMatchObject({ model: "agentRun", op: "updateMany", args: { where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }], status: { in: ["PENDING", "RUNNING"] } }, data: { status: "FAILED" } } });
-    expect((tx[0].args.data as { endedAt: unknown }).endedAt).toBeInstanceOf(Date);
-    // Every run statement comes before the User row is anonymised: the order a turn's writes take the two in.
-    const lastRun = tx.map((c) => c.model).lastIndexOf("agentRun");
-    const user = tx.findIndex((c) => c.model === "user" && c.op === "update");
-    const firstBlank = tx.findIndex((c) => c.model === "chatMessage");
-    expect(lastRun).toBeLessThan(user);
-    expect(user).toBeLessThan(firstBlank);
-    // The running requests end before their words are blanked.
-    const actions = tx.map((c, i) => [c, i] as const).filter(([c]) => c.model === "agentAction");
-    expect(actions.map(([c]) => (c.args.where as { status?: string }).status ?? null)).toEqual(["RUNNING", null]);
-    expect(actions[0][1]).toBeLessThan(user);
+    const tx = txCalls();
+    // Before: the first statement failed the runs, before the locks' wait.
+    expect(tx.slice(0, 2).map((c) => c.model)).toEqual(["$executeRaw", "soleAdmin"]);
+    const firstRun = tx.findIndex((c) => c.model === "agentRun");
+    expect(firstRun).toBe(2);
   });
 
-  it("clears every request's error and an Ask AI tool run's, and keeps a teammate run's own sentence", async () => {
+  it("fails the open runs, ends the running requests and anonymises the User row back to back", async () => {
     await del();
-    expect(inTx("agentAction").at(-1)?.args.data).toMatchObject({ error: null });
-    const runs = inTx("agentRun");
-    expect(runs.find((c) => (c.args.where as Record<string, unknown>).actingForId === null)?.args.data).toEqual({ input: {}, error: null });
-    // The teammate runs' blanking leaves their error: one of the engine's own sentences, the erasure's among them.
-    expect(runs[1].args.data).toEqual({ output: Prisma.DbNull });
+    const tx = txCalls();
+    const firstRun = tx.findIndex((c) => c.model === "agentRun");
+    expect(tx.slice(firstRun, firstRun + 3).map((c) => [c.model, c.op])).toEqual([
+      ["agentRun", "updateMany"],
+      ["agentAction", "updateMany"],
+      ["user", "update"],
+    ]);
+    expect(tx[firstRun].args).toEqual({
+      where: { OR: [{ actingForId: "u-max" }, { triggeredBy: "u-max" }], status: { in: ["PENDING", "RUNNING"] } },
+      data: { status: "FAILED", endedAt: expect.any(Date), error: "This run stopped because the account it worked for was deleted." },
+    });
+    expect(tx[firstRun + 1].args).toEqual({ where: { actingForId: "u-max", status: "RUNNING" }, data: { status: "FAILED", updatedAt: expect.any(Date) } });
+    expect(tx[firstRun + 2].args.data).toMatchObject({ email: "deleted-u-max@workwrk.anon", status: "INACTIVE", deletedAt: expect.any(Date), tokenVersion: { increment: 1 } });
+    // No run after the person: the order a turn takes the two in.
+    expect(tx.slice(firstRun + 3).some((c) => c.model === "agentRun")).toBe(false);
+  });
+
+  it("runs no update of the person's whole history inside the transaction", async () => {
+    await del();
+    // Before: every chat message, chat title, request, run, AI question and activity row of theirs, in this one transaction.
+    for (const model of ["chatMessage", "chatSession", "aIQuery", "activityLog"]) expect(st.calls.filter((c) => c.model === model && c.inTx)).toEqual([]);
+    // The only run and request statements are the bounded ones: open runs, running requests.
+    expect(inTx("agentRun").map((c) => (c.args.where as { status?: unknown }).status)).toEqual([{ in: ["PENDING", "RUNNING"] }]);
+    expect(inTx("agentAction").map((c) => (c.args.where as { status?: unknown }).status)).toEqual(["RUNNING"]);
+  });
+
+  it("blanks the person's words in batches after the commit, outside the transaction, within its budget", async () => {
+    const before = Date.now();
+    const res = await del();
+    expect(res.status).toBe(200);
+    expect(st.blanks).toHaveLength(1);
+    const commit = st.calls.findIndex((c) => c.model === "$commit");
+    expect(commit).toBeGreaterThan(0);
+    // Before: inside the transaction, before its commit.
+    expect(st.blanks[0]).toMatchObject({ userId: "u-max", inTx: false });
+    expect(st.blanks[0].at).toBeGreaterThan(commit);
+    expect(st.blanks[0].deadline).toBeGreaterThanOrEqual(before + 20_000);
+    expect(st.blanks[0].deadline).toBeLessThanOrEqual(Date.now() + 20_000);
+  });
+
+  it("answers success once the transaction committed, when the batches throw or run out of time", async () => {
+    st.blankAnswer = new Error("canceling statement due to statement timeout");
+    const thrown = await del();
+    expect(thrown.status).toBe(200);
+    expect(await thrown.json()).toMatchObject({ ok: true });
+    st.blankAnswer = { done: false, rows: 500 };
+    const unfinished = await del();
+    expect(unfinished.status).toBe(200);
+    expect(await unfinished.json()).toMatchObject({ ok: true });
+  });
+
+  it("blanks nothing after a refusal under the lock", async () => {
+    st.soleInTx = ["org1"];
+    expect((await del()).status).toBe(409);
+    expect(st.blanks).toEqual([]);
+    // Refused before any run statement.
+    expect(st.calls.filter((c) => c.model === "agentRun")).toEqual([]);
   });
 });

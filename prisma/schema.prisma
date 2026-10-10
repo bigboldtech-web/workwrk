@@ -5286,6 +5286,10 @@ model AgentRun {
   @@index([status])
   @@index([sessionId, startedAt])
   @@index([routineId, startedAt])
+  // One person's runs in id order, for an account erasure's batches
+  // (src/lib/agents/erasure-sweep.ts; review round 5 of Phase 3).
+  // prisma/sql/2026-10-10-ai-teammates-phase3-round5.sql
+  @@index([triggeredBy, id])
 }
 
 /// What a teammate remembers. scope "person" + scopeId = the person's userId

@@ -22,6 +22,12 @@
 //      accounts and deleted or closed workspaces (review of step 2) and of
 //      suspended ones (review round 1 of Phase 3), and revokes Google has
 //      not confirmed are tried again (docs/plans/ai-teammates-phase3.md step 2).
+//   5. Account erasures of the last 30 days are finished
+//      (src/lib/agents/erasure-sweep.ts finishErasures): the words of a
+//      deleted person's teammate chats, requests and runs that the erasure's
+//      own pass left, or that arrived late, are blanked in batches, and each
+//      erasure is recorded finished once nothing can still arrive (review
+//      round 5 of Phase 3).
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
@@ -35,6 +41,7 @@
 
 import { sweepActions } from "@/lib/agents/actions";
 import { sweepStaleRuns } from "@/lib/agents/budget";
+import { finishErasures, type ErasureSweepCounts } from "@/lib/agents/erasure-sweep";
 import { convertLegacySchedules, type LegacyScheduleCounts } from "@/lib/agents/legacy-schedules";
 import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines-server";
 import { sweepConnections } from "@/lib/connectors/connections";
@@ -67,6 +74,15 @@ const LEGACY_MOVER = { limit: 100 } as const;
 const CONNECTOR_SWEEP = { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 } as const;
 
 type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
+
+/**
+ * The erasure sweep (review round 5 of Phase 3): up to 50 unfinished
+ * erasures a tick, oldest first, within 20 seconds, so the tick stays inside
+ * the crontab's curl --max-time 290 after the routines' 120 and the
+ * connectors' 20. A finished erasure is never read again, so the budget goes
+ * to those with words left.
+ */
+const ERASURE_SWEEP = { limit: 50, budgetMs: 20_000 } as const;
 
 function errorLine(err: unknown): string {
   return err instanceof Error ? (err.message.split("\n").pop() ?? err.message) : String(err);
@@ -125,14 +141,29 @@ async function handle(req: Request) {
     console.error(`[cron-failure] run-due-agents: the connector sweep threw: ${errorLine(err)}`);
   }
 
+  // 5. Account erasures whose words are not all blanked yet.
+  let erasures: ErasureSweepCounts | null = null;
+  try {
+    erasures = await finishErasures(now, ERASURE_SWEEP);
+  } catch (err) {
+    stepsFailed += 1;
+    console.error(`[cron-failure] run-due-agents: the erasure sweep threw: ${errorLine(err)}`);
+  }
+
   // A step that threw fails the tick, and so does a schedule that did not
   // move: it is left for the next tick, but nothing runs it until it moves,
   // so someone is told (review of step 2). One routine's failure stays on
   // the routine and in its chat. So does a queued Google revoke no key opens
   // (review round 4 of Phase 3): it is kept, and dropped after seven days, so
-  // the wrong key must be found before then.
+  // the wrong key must be found before then. So does an erasure whose pass
+  // threw (review round 5 of Phase 3): it is tried again each tick, but a
+  // deleted person's words must not wait on it unseen.
   const unopenable = connectors && connectors.unopenable > 0 ? 1 : 0;
-  return cronResult("run-due-agents", { actions, staleRuns, routines, legacySchedules: legacy, connectors }, stepsFailed + (legacy?.failed ?? 0) + unopenable);
+  return cronResult(
+    "run-due-agents",
+    { actions, staleRuns, routines, legacySchedules: legacy, connectors, erasures },
+    stepsFailed + (legacy?.failed ?? 0) + unopenable + (erasures?.failed ?? 0),
+  );
 }
 
 // Any throw answers 500 and alerts like a failed run (src/lib/cron-result.ts).

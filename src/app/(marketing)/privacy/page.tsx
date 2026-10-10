@@ -346,13 +346,19 @@ export default function PrivacyPage() {
                   Review round 3 of Phase 3: deleting one's account
                   (src/app/api/me/delete) now blanks the words of the
                   person's teammate chats, of the requests they were asked to
-                  approve and of their runs' output, so "stays" ends there. */}
+                  approve and of their runs' output, so "stays" ends there.
+                  Review round 5 of Phase 3: the account goes at once and the
+                  words in batches after it, the request's own pass, then the
+                  teammates cron every ten minutes
+                  (src/lib/agents/erasure-sweep.ts), so a very long history
+                  can take a while; "within a day" leaves the cron room to
+                  catch up. */}
               <p>
                 Google connection tokens are deleted when you disconnect or leave, as above; if Google has not yet confirmed
                 that WorkwrK&apos;s access is removed, one encrypted token is kept until it does, for at most seven days. Our
                 encrypted backups hold the encrypted tokens too, for at most 90 days, as above. What a teammate wrote back to
                 you stays in your chat with it and in your run history, and its requests stay as every teammate request does,
-                until you delete your account, which erases their words.
+                until you delete your account, which erases their words at once, or within a day for a very long history.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>

@@ -69,7 +69,7 @@ import { publishToUser } from "@/lib/realtime-bus";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { actorLabelFor, resolveActingPerson, toolCtxFor, type ActingPerson } from "./acting";
 import { proposeAction, waitingCount, writeEventLine, type EventLine } from "./actions";
-import { RUN_LOCK_TX_TIMEOUT_MS, claimTeammateTurn, giveBackTurn, runStillOpen, type TurnTrigger } from "./budget";
+import { RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, claimTeammateTurn, giveBackTurn, runStillOpen, type TurnTrigger } from "./budget";
 import {
   CONNECTOR_TURN_LIMITS,
   connectorAuditFacts,
@@ -536,6 +536,12 @@ async function findTwin(db: Prisma.TransactionClient, person: ActingPerson, tool
  * Now the second waits for the first to commit, then finds its card. A card
  * with no key takes no lock, but is made in a transaction too (review round 4
  * of Phase 3), so the run check made with it holds until the card is written.
+ *
+ * EVERY READ IN `fn` GOES THROUGH `db` (review round 5 of Phase 3): one on the
+ * base client asks for a second connection while this one is held, so with
+ * the routine runner's 10 turns at a time the pool (10) could run dry and
+ * every card wait to its timeout, its answer lost. Each branch also waits up
+ * to RUN_LOCK_TX_MAX_WAIT_MS to start, not Prisma's 2 seconds.
  */
 async function withTwinLock<T>(
   person: ActingPerson,
@@ -544,16 +550,14 @@ async function withTwinLock<T>(
   fn: (twin: Twin | null, db: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   const key = input.dedupeKey;
+  const opts = { timeout: RUN_LOCK_TX_TIMEOUT_MS, maxWait: RUN_LOCK_TX_MAX_WAIT_MS };
   if (!DEDUPED.has(tool) || typeof key !== "string" || key.length === 0) {
-    return prisma.$transaction((tx) => fn(null, tx), { timeout: RUN_LOCK_TX_TIMEOUT_MS });
+    return prisma.$transaction((tx) => fn(null, tx), opts);
   }
-  return prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DEDUPE_LOCK_CLASS}::int, hashtext(${`${person.organizationId}:${person.userId}:${tool}:${key}`}))`;
-      return fn(await findTwin(tx, person, tool, key, new Date()), tx);
-    },
-    { timeout: RUN_LOCK_TX_TIMEOUT_MS },
-  );
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${DEDUPE_LOCK_CLASS}::int, hashtext(${`${person.organizationId}:${person.userId}:${tool}:${key}`}))`;
+    return fn(await findTwin(tx, person, tool, key, new Date()), tx);
+  }, opts);
 }
 
 /**
@@ -717,7 +721,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
         if (twin.state === "maybe_sent") return refuse(event ? CONNECTOR_COPY.maybeSentEvent : CONNECTOR_COPY.maybeSent, { actionId: twin.id });
         return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: event ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting });
       }
-      if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
+      // Counted on the transaction's own client (review round 5 of Phase 3).
+      if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId, new Date(), { db })) >= MAX_PENDING_PER_PERSON) {
         return refuse(tooManyWaiting(person.firstName));
       }
       // The card is made only while the run is open and its person here,
@@ -837,7 +842,7 @@ async function recordRuleAction(a: ExecuteArgs, tool: ToolName, prepared: Extrac
       });
       return row.id;
     },
-    { timeout: RUN_LOCK_TX_TIMEOUT_MS },
+    { timeout: RUN_LOCK_TX_TIMEOUT_MS, maxWait: RUN_LOCK_TX_MAX_WAIT_MS },
   );
 }
 
