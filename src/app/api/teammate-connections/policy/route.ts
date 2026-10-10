@@ -1,5 +1,5 @@
 // GET /api/teammate-connections/policy
-// PUT /api/teammate-connections/policy { gmail?: boolean, calendar?: boolean, organizationId? }
+// PUT /api/teammate-connections/policy { gmail?: boolean, calendar?: boolean, organizationId }
 //
 // The workspace switch for Google in AI teammates, per product, and the
 // numbers behind it (docs/plans/ai-teammates-phase3.md step 2, Decisions 1,
@@ -65,7 +65,9 @@ export async function PUT(req: Request) {
   if (!fresh.admin) return teammateError(403, "stale_session", CONNECTION_ROUTE_ERRORS.adminsOnly);
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
-  // A caller that names no workspace (an API client, a page from before this) is answered as before.
+  // The workspace the page showed, required: optional in the schema only so
+  // that naming none answers workspace_changed below, never a bare 400
+  // (comment corrected in review round 2 of Phase 3).
   const shownIn = parsed.data.organizationId;
   // Required (lead, after review round 1): a page that names no workspace,
   // such as one loaded before this release, reloads rather than act on

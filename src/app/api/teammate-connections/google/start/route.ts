@@ -1,4 +1,4 @@
-// GET /api/teammate-connections/google/start?products=gmail,calendar
+// GET /api/teammate-connections/google/start?products=gmail,calendar&ws=<organizationId>
 //
 // Begins connecting the signed-in person's own Google account to their AI
 // teammates in this workspace (docs/plans/ai-teammates-phase3.md step 2). A
@@ -10,15 +10,25 @@
 //   2. another host: the same request on the app host first (the state
 //      cookie, the session and the registered redirect address live there)
 //   3. the AI app (signed out goes to sign in)              person_cannot
-//   4. someone a teammate can act for here (not a Guest, not an agent
+//   4. the workspace the card showed (ws) is the session's  workspace_changed
+//   5. someone a teammate can act for here (not a Guest, not an agent
 //      account, not gone; resolveActingPerson, Decision 27) person_cannot
-//   5. ten starts in ten minutes                            rate_limited
-//   6. the products asked, plus what the connection already has (a
+//   6. ten starts in ten minutes                            rate_limited
+//   7. the products asked, plus what the connection already has (a
 //      reconnect keeps it), within what the workspace has on
 //                                                           workspace_off, bad_products
 // Then a PKCE pair and a state (only its hash stored, the verifier sealed),
 // and the redirect to Google with the state in an HttpOnly cookie that only
 // these two routes ever see.
+//
+// THE WORKSPACE THE CARD SHOWED (review round 2 of Phase 3), as the four
+// change routes since review round 1: Connect, Reconnect and Add name it
+// (ws), and a session switched to another workspace in another tab connects
+// nothing there. Without it, Reconnect on a card showing workspace A made a
+// connection in B with A's products, B's private teammates with Google tools
+// began reading the mail there, and A stayed broken. A link that names no
+// workspace (a page loaded before this release) is refused the same way, so
+// the card reloads rather than connect whichever workspace the session holds.
 
 import { type NextRequest } from "next/server";
 import { resolveActingPerson } from "@/lib/agents/acting";
@@ -50,6 +60,8 @@ export async function GET(req: NextRequest) {
   const gate = await requireApp("ai");
   if ("error" in gate) return gate.error.status === 401 ? toLogin() : connectFailed("person_cannot");
   const viewer = gate.viewer;
+  // Before anything is read or stored (see the file header).
+  if (url.searchParams.get("ws") !== viewer.organizationId) return connectFailed("workspace_changed");
   const acting = await resolveActingPerson(viewer.organizationId, viewer.userId);
   if (!acting.ok) return connectFailed("person_cannot");
   const person = acting.person;

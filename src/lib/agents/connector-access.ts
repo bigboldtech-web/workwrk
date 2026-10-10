@@ -32,7 +32,7 @@ import type { ConnectorProduct } from "@/lib/connectors/products";
 import type { ActingPerson } from "./acting";
 import { connectorRefusalSentence } from "./connector-rules";
 import { CONNECTOR_COPY } from "./teammate-copy";
-import type { PrintField } from "./teammate-print";
+import type { AllowPart } from "./teammate-print";
 
 /** The Agent columns a connector decision reads: who may change it, and every part its prints cover. */
 export const CONNECTOR_AGENT_SELECT = {
@@ -174,7 +174,7 @@ export async function calendarZoneFor(person: Pick<ActingPerson, "timezone" | "s
 }
 
 /** Per product a turn's teammate holds tools for: whether it may use it this turn, and if not why. */
-export type TurnConnectorAccess = Partial<Record<ConnectorProduct, { ok: true } | { ok: false; reason: ConnectorRefusal; changed?: PrintField[] }>>;
+export type TurnConnectorAccess = Partial<Record<ConnectorProduct, { ok: true } | { ok: false; reason: ConnectorRefusal; changed?: AllowPart[] }>>;
 
 /**
  * What a turn is offered of these products (engine.ts prepareTurn), with the

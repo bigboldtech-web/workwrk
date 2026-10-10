@@ -31,7 +31,7 @@ import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type E
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
-import { AGENT_SLUG, PERSON, fx, resetFixtures, seedAction } from "./test-fixtures";
+import { AGENT_SLUG, PERSON, fx, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 let events: TeammateStreamEvent[] = [];
 
@@ -464,6 +464,56 @@ describe("the person's own Google (Phase 3 step 3)", () => {
     expect(fx.actions).toHaveLength(2);
   });
 
+  // Review round 2 of Phase 3: a send whose outcome Google never confirmed
+  // (a timeout or a 5xx after the send, or a card the sweep failed stuck
+  // RUNNING) ended FAILED, which was no twin, so the continue's "send it
+  // again" made a fresh identical card and the same email could go out twice.
+  it("asks nothing for an email identical to one whose outcome is unknown in the last ten minutes, and says to check Sent first", async () => {
+    const unknown = (o: Partial<ActionRowFx>) =>
+      seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", status: "FAILED", input: sendCard("k1").input, error: CONNECTOR_COPY.unknownOutcomeEmail, result: { unknownOutcome: true }, decidedAt: new Date(Date.now() - 30 * 60 * 1000), ...o });
+    const failed = unknown({ updatedAt: new Date(Date.now() - 5 * 60 * 1000) });
+    fx.cards.send_email = sendCard("k1");
+    const again = await g("send_email", SEND);
+    // Before: a second card, and approving it could send the email again.
+    expect(fx.actions).toHaveLength(1);
+    expect(again.record).toMatchObject({ state: "failed", actionId: null });
+    expect(dataOf(again.modelContent)).toEqual({ actionId: failed.id, error: CONNECTOR_COPY.maybeSent });
+    // Failed longer ago than that: the person may mean to send it, on a card of its own.
+    failed.updatedAt = new Date(Date.now() - 11 * 60 * 1000);
+    expect((await g("send_email", SEND)).record.state).toBe("waiting");
+    expect(fx.actions).toHaveLength(2);
+    // One that failed for a known reason a moment ago (nothing was sent) is no twin either.
+    fx.actions = [];
+    unknown({ result: null, error: CONNECTOR_COPY.googleRejectedEmail, updatedAt: new Date() });
+    expect((await g("send_email", SEND)).record.state).toBe("waiting");
+    expect(fx.actions).toHaveLength(2);
+  });
+
+  it("keeps on the card, as a flag, that an approved send's outcome is unknown, and then asks nothing more for that email", async () => {
+    fx.answers.send_email = { error: CONNECTOR_COPY.unknownOutcomeEmail, unknownOutcome: true };
+    const row = seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", status: "RUNNING", input: sendCard("k1").input, decidedAt: new Date() });
+    const approved = {
+      action: { id: row.id, toolName: "send_email", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: sendCard("k1").input,
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL" as const,
+      decidedVia: "person" as const,
+      holdNotSent: true,
+    };
+    expect(await runApprovedAction(approved)).toMatchObject({ status: "FAILED", error: CONNECTOR_COPY.unknownOutcomeEmail });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", error: CONNECTOR_COPY.unknownOutcomeEmail, result: { unknownOutcome: true } });
+    fx.cards.send_email = sendCard("k1");
+    expect(dataOf((await g("send_email", SEND)).modelContent)).toEqual({ actionId: row.id, error: CONNECTOR_COPY.maybeSent });
+    expect(fx.actions).toHaveLength(1);
+    // A failure Google named (nothing sent) keeps no flag.
+    fx.actions = [];
+    fx.answers.send_email = { error: CONNECTOR_COPY.googleRejectedEmail };
+    const refused = seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", status: "RUNNING", input: sendCard("k1").input, decidedAt: new Date() });
+    await runApprovedAction({ ...approved, action: { ...approved.action, id: refused.id } });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", result: null });
+  });
+
   // Review round 1 of Phase 3: the check and the insert were two steps with
   // nothing between them, so two turns at once each made a card.
   it("checks for a twin and makes the card under one lock on the key, inside one transaction", async () => {
@@ -669,6 +719,13 @@ describe("the person's own Google Calendar (Phase 3 step 4)", () => {
     fx.cards.create_event = card("ev2");
     await c("create_event", { ...EVENT, title: "Plan 2", attendees: ["mia@proof.test"] });
     expect(fx.actions).toHaveLength(2);
+    // Review round 2 of Phase 3: one Google never confirmed a moment ago may have emailed every invitee.
+    fx.actions = [];
+    const unconfirmed = seedAction({ toolName: "create_event", risk: "IRREVERSIBLE", status: "FAILED", input: card("ev1").input, error: CONNECTOR_COPY.unknownOutcomeCalendar, result: { unknownOutcome: true } });
+    fx.cards.create_event = card("ev1");
+    const maybe = await c("create_event", { ...EVENT, attendees: ["mia@proof.test"] });
+    expect(fx.actions).toHaveLength(1);
+    expect(dataOf(maybe.modelContent)).toEqual({ actionId: unconfirmed.id, error: CONNECTOR_COPY.maybeSentEvent });
   });
 
   it("refuses the sixth calendar write of an answer, whichever kind, and the fifth calendar read (Decision 22)", async () => {

@@ -1,4 +1,4 @@
-// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string, organizationId?: string }
+// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string, organizationId: string }
 //
 // The person lets a workspace teammate (or any teammate someone else may
 // change) use their own Gmail or Google Calendar, or stops it
@@ -25,6 +25,22 @@
 // One statement per product, by INSERT ... ON CONFLICT, so two tabs switching
 // two products at once never lose each other's change.
 //
+// AN ALLOW NEVER OUTLIVES ITS CONNECTION (review round 2 of Phase 3). The
+// writes run in one transaction that first reads the person's connection
+// FOR SHARE, and turning on is refused not_connected (or not_granted) when
+// it is gone or lacks the product. A removal (a disconnect in another tab,
+// Disconnect everyone, a suspension, the leaver sweep) deletes that row and
+// clears the person's allows in one transaction (connections.ts
+// removeConnections), so the two take turns: the clear runs after this
+// allow, or this allow finds no connection. Before, an allow read the
+// connection, the removal committed, and the allow was written after the
+// clear, to let the teammate back in at a reconnect months later.
+//
+// THE SHARED MEMORIES ARE PART OF IT (review round 2 of Phase 3): the prints
+// stored carry the teammate's shared memories' print beside the part prints
+// (teammate-print.ts allowPrints), read in the same transaction, and
+// `expect` covers them too.
+//
 // THE WORKSPACE THE PAGE SHOWED (review round 1 of Phase 3): the body names it
 // (organizationId), and a session switched to another workspace in another
 // tab allows or stops nothing there (409 workspace_changed); the page reloads.
@@ -36,14 +52,15 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { auditAgent } from "@/lib/agents/audit";
 import { CONNECTION_ROUTE_ERRORS, CONNECTIONS_COPY, PRINT_FIELD_WORDS, titleList } from "@/lib/agents/teammate-copy";
-import { changedSinceShown, othersMayChange, teammateFieldPrints } from "@/lib/agents/teammate-print";
+import { sharedMemoriesPrintOf } from "@/lib/agents/memory";
+import { ALLOW_PARTS, allowPrints, changedSinceShown, othersMayChange, type AllowPart } from "@/lib/agents/teammate-print";
 import { invalidRequest, loadTeammate, teammateError, teammateNotFound, workspaceModules } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { requireApp } from "@/lib/app-gate";
 import { teammateGoogleUse } from "@/lib/connectors/connection-views-server";
 import { productsOfTools } from "@/lib/connectors/connection-views";
 import { connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
-import { CONNECTOR_PRODUCTS, type ConnectorProduct } from "@/lib/connectors/products";
+import { CONNECTOR_PRODUCTS, parseProducts, type ConnectorProduct } from "@/lib/connectors/products";
 import { prisma } from "@/lib/prisma";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -57,12 +74,21 @@ function productWord(p: ConnectorProduct): string {
   return p === "gmail" ? CONNECTIONS_COPY.gmail : CONNECTIONS_COPY.calendar;
 }
 
+/** What the transaction came to: written, or the refusal that stopped it before any write. */
+type Written =
+  | { ok: true; memories: string }
+  | { ok: false; code: "not_connected" }
+  | { ok: false; code: "not_granted"; product: ConnectorProduct }
+  | { ok: false; code: "teammate_changed"; changed: AllowPart[] };
+
 export async function PUT(req: Request, { params }: Params) {
   const viewer = await viewerFromSession();
   if (!viewer) return teammateError(401, "signed_out", CONNECTIONS_COPY.signedOut);
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
-  // A caller that names no workspace (an API client, a page from before this) is answered as before.
+  // The workspace the page showed, required: optional in the schema only so
+  // that naming none answers workspace_changed below, never a bare 400
+  // (comment corrected in review round 2 of Phase 3).
   const shownIn = parsed.data.organizationId;
   // Required (lead, after review round 1): a page that names no workspace,
   // such as one loaded before this release, reloads rather than act on
@@ -97,34 +123,58 @@ export async function PUT(req: Request, { params }: Params) {
       if (!connection) return teammateError(409, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
       if (!connection.products.includes(product)) return teammateError(409, "not_granted", CONNECTION_ROUTE_ERRORS.notGranted(productWord(product)));
     }
-    const changed = changedSinceShown(parsed.data.expect ?? "", agent);
-    if (changed.length > 0) {
-      const parts = titleList(changed.map((f) => PRINT_FIELD_WORDS[f] ?? f), 6);
-      return NextResponse.json({ error: CONNECTION_ROUTE_ERRORS.teammateChanged(agent.name, parts), code: "teammate_changed", changed }, { status: 409 });
-    }
   }
 
-  const prints = JSON.stringify(teammateFieldPrints(agent));
-  for (const { product, on } of wants) {
-    if (on) {
-      await prisma.$executeRaw`
-        INSERT INTO "AgentPersonSetting" ("id", "agentId", "userId", "approvalRules", "connectorProducts", "connectorPrints", "createdAt", "updatedAt")
-        VALUES (${`c${randomBytes(12).toString("hex")}`}, ${agent.id}, ${viewer.userId}, '{}'::jsonb, ARRAY[${product}::text],
-                jsonb_build_object(${product}::text, ${prints}::jsonb), (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
-        ON CONFLICT ("agentId", "userId") DO UPDATE SET
-          "connectorProducts" = CASE WHEN ${product}::text = ANY("AgentPersonSetting"."connectorProducts") THEN "AgentPersonSetting"."connectorProducts"
-                                     ELSE array_append("AgentPersonSetting"."connectorProducts", ${product}::text) END,
-          "connectorPrints" = jsonb_set(CASE WHEN jsonb_typeof("AgentPersonSetting"."connectorPrints") = 'object' THEN "AgentPersonSetting"."connectorPrints" ELSE '{}'::jsonb END,
-                                        ARRAY[${product}::text], ${prints}::jsonb, true),
-          "updatedAt" = (now() AT TIME ZONE 'UTC')`;
-    } else {
-      await prisma.$executeRaw`
-        UPDATE "AgentPersonSetting"
-           SET "connectorProducts" = array_remove("connectorProducts", ${product}::text),
-               "connectorPrints" = CASE WHEN jsonb_typeof("connectorPrints") = 'object' THEN "connectorPrints" - ${product}::text ELSE NULL END,
-               "updatedAt" = (now() AT TIME ZONE 'UTC')
-         WHERE "agentId" = ${agent.id} AND "userId" = ${viewer.userId}`;
+  const turningOn = wants.some((w) => w.on);
+  const written = await prisma.$transaction(async (tx): Promise<Written> => {
+    if (turningOn) {
+      // The person's connection, held until this commits (see the file header).
+      const held = await tx.$queryRaw<Array<{ products: string[] }>>`
+        SELECT "products" FROM "TeammateConnection"
+         WHERE "organizationId" = ${viewer.organizationId} AND "userId" = ${viewer.userId} AND "provider" = 'google'
+         FOR SHARE`;
+      if (held.length === 0) return { ok: false, code: "not_connected" };
+      const granted = parseProducts(held[0].products);
+      const missing = wants.find((w) => w.on && !granted.includes(w.product));
+      if (missing) return { ok: false, code: "not_granted", product: missing.product };
     }
+    const memories = await sharedMemoriesPrintOf(agent.id, tx);
+    if (turningOn) {
+      const changed = changedSinceShown(parsed.data.expect ?? "", agent, memories);
+      if (changed.length > 0) return { ok: false, code: "teammate_changed", changed };
+    }
+    const prints = JSON.stringify(allowPrints(agent, memories));
+    for (const { product, on } of wants) {
+      if (on) {
+        await tx.$executeRaw`
+          INSERT INTO "AgentPersonSetting" ("id", "agentId", "userId", "approvalRules", "connectorProducts", "connectorPrints", "createdAt", "updatedAt")
+          VALUES (${`c${randomBytes(12).toString("hex")}`}, ${agent.id}, ${viewer.userId}, '{}'::jsonb, ARRAY[${product}::text],
+                  jsonb_build_object(${product}::text, ${prints}::jsonb), (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+          ON CONFLICT ("agentId", "userId") DO UPDATE SET
+            "connectorProducts" = CASE WHEN ${product}::text = ANY("AgentPersonSetting"."connectorProducts") THEN "AgentPersonSetting"."connectorProducts"
+                                       ELSE array_append("AgentPersonSetting"."connectorProducts", ${product}::text) END,
+            "connectorPrints" = jsonb_set(CASE WHEN jsonb_typeof("AgentPersonSetting"."connectorPrints") = 'object' THEN "AgentPersonSetting"."connectorPrints" ELSE '{}'::jsonb END,
+                                          ARRAY[${product}::text], ${prints}::jsonb, true),
+            "updatedAt" = (now() AT TIME ZONE 'UTC')`;
+      } else {
+        await tx.$executeRaw`
+          UPDATE "AgentPersonSetting"
+             SET "connectorProducts" = array_remove("connectorProducts", ${product}::text),
+                 "connectorPrints" = CASE WHEN jsonb_typeof("connectorPrints") = 'object' THEN "connectorPrints" - ${product}::text ELSE NULL END,
+                 "updatedAt" = (now() AT TIME ZONE 'UTC')
+           WHERE "agentId" = ${agent.id} AND "userId" = ${viewer.userId}`;
+      }
+    }
+    return { ok: true, memories };
+  });
+  if (!written.ok) {
+    if (written.code === "not_connected") return teammateError(409, "not_connected", CONNECTION_ROUTE_ERRORS.notConnected);
+    if (written.code === "not_granted") return teammateError(409, "not_granted", CONNECTION_ROUTE_ERRORS.notGranted(productWord(written.product)));
+    const parts = titleList(written.changed.map((f) => PRINT_FIELD_WORDS[f] ?? f), ALLOW_PARTS.length);
+    return NextResponse.json({ error: CONNECTION_ROUTE_ERRORS.teammateChanged(agent.name, parts), code: "teammate_changed", changed: written.changed }, { status: 409 });
+  }
+  // Audited once the writes committed, one row per product as before.
+  for (const { product, on } of wants) {
     await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent, action: "approvals_changed", metadata: { connector: { product, on } } });
   }
 
@@ -136,5 +186,5 @@ export async function PUT(req: Request, { params }: Params) {
   // on here or off (connection-views-server.ts teammatesWithGoogle, review of
   // step 5), so a product off keeps its line after a switch.
   const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true } });
-  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting) });
+  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories) });
 }

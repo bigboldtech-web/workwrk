@@ -24,7 +24,7 @@ import type { ConnectorRefusal } from "@/lib/connectors/connections";
 import type { GoogleFailure } from "@/lib/connectors/google/http";
 import { CONNECTOR_LIMITS as L, CONNECTOR_PRODUCTS, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
 import { CONNECTIONS_COPY, CONNECTOR_COPY, CONNECTOR_TITLES, PRINT_FIELD_WORDS, titleList } from "./teammate-copy";
-import { PRINT_FIELDS, type PrintField } from "./teammate-print";
+import { ALLOW_PARTS, type AllowPart } from "./teammate-print";
 import type { ConnectorToolName } from "./tool-names";
 
 /** A product as the person reads it: "Gmail", "Google Calendar". */
@@ -33,7 +33,7 @@ export function productWord(p: ConnectorProduct): string {
 }
 
 /** Why a teammate may not use this product of the person's Google now, as the sentence the model and the tool row read. */
-export function connectorRefusalSentence(r: { reason: ConnectorRefusal; changed?: readonly PrintField[] }, agentName: string, product: ConnectorProduct): string {
+export function connectorRefusalSentence(r: { reason: ConnectorRefusal; changed?: readonly AllowPart[] }, agentName: string, product: ConnectorProduct): string {
   const p = productWord(product);
   switch (r.reason) {
     case "not_configured":
@@ -51,9 +51,10 @@ export function connectorRefusalSentence(r: { reason: ConnectorRefusal; changed?
     case "not_allowed":
       return CONNECTOR_COPY.notAllowed(agentName, p);
     case "teammate_changed": {
-      // No part named: nothing can be said to be unchanged, so every part is.
-      const parts = r.changed && r.changed.length > 0 ? r.changed : PRINT_FIELDS;
-      return CONNECTOR_COPY.teammateChanged(agentName, titleList(parts.map((f) => PRINT_FIELD_WORDS[f] ?? f), 6));
+      // No part named: nothing can be said to be unchanged, so every part is
+      // (its shared memories too, review round 2 of Phase 3).
+      const parts = r.changed && r.changed.length > 0 ? r.changed : ALLOW_PARTS;
+      return CONNECTOR_COPY.teammateChanged(agentName, titleList(parts.map((f) => PRINT_FIELD_WORDS[f] ?? f), ALLOW_PARTS.length));
     }
   }
 }

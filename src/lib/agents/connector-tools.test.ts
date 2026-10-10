@@ -311,7 +311,8 @@ describe("the writes", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     routes[`POST /gmail/v1/users/me/messages/send`] = () => "timeout";
     const r = await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act1" }));
-    expect(r).toEqual({ error: CONNECTOR_COPY.unknownOutcomeEmail });
+    // Flagged, never told by its sentence (review round 2 of Phase 3): the card keeps it, and the same email is not asked for again.
+    expect(r).toEqual({ error: CONNECTOR_COPY.unknownOutcomeEmail, unknownOutcome: true });
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 
@@ -342,7 +343,7 @@ describe("the writes", () => {
     routes[`POST /gmail/v1/users/me/drafts`] = () => "timeout";
     const draft = await run("draft_email", { to: ["boss@ext.test"], cc: [], subject: "Re: Invoice due", body: "Draft text", account: ACCOUNT });
     // Before: "Google didn't confirm it was sent. Check your Sent folder", for a draft that is never sent.
-    expect(draft).toEqual({ error: CONNECTOR_COPY.unknownOutcomeDraft });
+    expect(draft).toEqual({ error: CONNECTOR_COPY.unknownOutcomeDraft, unknownOutcome: true });
     routes[`POST /gmail/v1/users/me/messages/send`] = () => ({ status: 400, json: { error: { code: 400 } } });
     // Before: "Check the search words or the id".
     expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: CONNECTOR_COPY.googleRejectedEmail });
@@ -364,7 +365,7 @@ describe("the writes", () => {
     cdb.agents.push({ id: "a1", slug: "inbox-helper", name: "Inbox helper", organizationId: "org1", status: "ENABLED", visibility: "PRIVATE", ownerId: "u-max", description: "", systemPrompt: "", toolNames: [], approvalRules: {}, modelOverride: null, productSlug: null });
     seedConnection({ organizationId: "org1", userId: "u-max", accountSub: ACCOUNT.sub, accountEmail: ACCOUNT.email, products: ["gmail"], refreshTokenSealed: sealToken("r"), accessTokenSealed: sealToken("a"), accessTokenExpiresAt: new Date(Date.now() + 3_600_000) });
     routes[`POST /gmail/v1/users/me/messages/send`] = () => "timeout";
-    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act3" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeEmail });
+    expect(await run("send_email", SEND, ctx({ trigger: "APPROVAL", actionId: "act3" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeEmail, unknownOutcome: true });
     // In a turn, nothing is held: only an approval can wait.
     routes[`POST /gmail/v1/users/me/drafts`] = () => ({ status: 429 });
     expect(await run("draft_email", { to: ["boss@ext.test"], cc: [], subject: "x", body: "y", account: ACCOUNT })).toEqual({ error: CONNECTOR_COPY.googleBusy(30) });
@@ -606,7 +607,7 @@ describe("the calendar's tools (step 4)", () => {
     expect(await run("respond_to_invite", { ...answer, attendeeEmail: undefined }, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
     calls = [];
     routes[`PATCH ${EVENTS}/e-invite`] = () => "timeout";
-    expect(await run("respond_to_invite", answer, ctx({ trigger: "APPROVAL", actionId: "act2" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeCalendar });
+    expect(await run("respond_to_invite", answer, ctx({ trigger: "APPROVAL", actionId: "act2" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeCalendar, unknownOutcome: true });
     expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
   });
 

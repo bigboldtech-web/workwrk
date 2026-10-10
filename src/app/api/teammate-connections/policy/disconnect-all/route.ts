@@ -1,4 +1,4 @@
-// POST /api/teammate-connections/policy/disconnect-all { confirm: "disconnect", organizationId? }
+// POST /api/teammate-connections/policy/disconnect-all { confirm: "disconnect", organizationId }
 //
 // An Owner or Admin ends every person's Google connection for AI teammates
 // in this workspace (docs/plans/ai-teammates-phase3.md step 2, Decision 21).
@@ -35,8 +35,10 @@ import { authOptions } from "@/lib/auth";
 import { removeConnections, revokeQueued } from "@/lib/connectors/connections";
 import { googleRevokeConfig } from "@/lib/connectors/google/config";
 
-// organizationId: the workspace the page showed. A caller that names none (an
-// API client, a page from before this) is answered as before.
+// organizationId: the workspace the page showed, required. It is optional in
+// the schema only so that a caller that names none (an API client, a page
+// from before review round 1 of Phase 3) answers workspace_changed, never a
+// bare 400 (comment corrected in review round 2 of Phase 3).
 const bodySchema = z.object({ confirm: z.literal("disconnect"), organizationId: z.string().min(1).max(200).optional() });
 
 export async function POST(req: Request) {

@@ -143,8 +143,15 @@ export const TAINTING_TOOLS: ReadonlySet<ConnectorToolName> = new Set<ConnectorT
  * ".." is a path segment fetch resolves, so an id the model wrote from a
  * planted email could reach another Google address, and a 403 there marked
  * the person's whole connection broken. At most 1024 characters.
+ *
+ * A SPLIT SERIES TOO (review round 2 of Phase 3). Editing "this and
+ * following events" of a repeating event gives the new series an id with
+ * "_R" and the moment it starts ("<base>_R20261013T150000"), and its single
+ * times that id with their own suffix; list_events hands those back, and
+ * refusing them made the teammate unable to change an event it had just
+ * listed. The segment is held to its exact shape, still with no dot.
  */
-export const EVENT_ID_PATTERN = /^[a-z0-9_-]+(?:_\d{8}(?:T\d{6}Z)?)?$/;
+export const EVENT_ID_PATTERN = /^[a-z0-9_-]+(?:_R\d{8}T\d{6})?(?:_\d{8}(?:T\d{6}Z)?)?$/;
 
 /** Whether a text is an event id Google could have given (EVENT_ID_PATTERN), checked before any URL is built. */
 export function isEventId(id: unknown): id is string {

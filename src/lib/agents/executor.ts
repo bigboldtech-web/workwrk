@@ -99,7 +99,7 @@ import {
   titleList,
   tooManyWaiting,
 } from "./teammate-copy";
-import type { PrintField } from "./teammate-print";
+import type { AllowPart } from "./teammate-print";
 import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
@@ -181,7 +181,7 @@ export interface ExecuteArgs {
    */
   counters: { calls: number; proposals: number; delegations: number; tainted?: boolean; readGoogle?: boolean; connector?: ConnectorCounters };
   /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
-  connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: PrintField[] }>>;
+  connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: AllowPart[] }>>;
   /**
    * The Google tools this teammate's own set holds, whatever this turn offers
    * (engine.ts prepareTurn). A call to one it does not hold is refused as any
@@ -468,8 +468,12 @@ const SENT_TWIN_MS = 10 * 60 * 1000;
 /** The class of the twin check's advisory lock: its own key space (the two int form), apart from every other lock. */
 const DEDUPE_LOCK_CLASS = 73_021;
 
-/** A twin of a card about to be made: one waiting for the person, or one sent (or being sent) a moment ago. */
-type Twin = { id: string; state: "waiting" | "sent" };
+/**
+ * A twin of a card about to be made: one waiting for the person, one sent (or
+ * being sent) a moment ago, or one that may have been sent a moment ago
+ * (review round 2 of Phase 3).
+ */
+type Twin = { id: string; state: "waiting" | "sent" | "maybe_sent" };
 
 /**
  * A send or a reply exactly like one already waiting for this person (the
@@ -485,8 +489,17 @@ type Twin = { id: string; state: "waiting" | "sent" };
  * again" in the continue made a fresh identical card, and the person
  * approved it thinking it was another. Read inside the caller's transaction,
  * under the key's lock (withTwinLock).
+ *
+ * REVIEW ROUND 2 OF PHASE 3. So is one that ended in the last ten minutes
+ * with an outcome nobody knows (result.unknownOutcome: Google timed out or
+ * answered 5xx after the send, runApprovedAction; or the sweep failed it
+ * stuck RUNNING, actions.ts sweepActions). Gmail may have sent it, and the
+ * continue told "it didn't work" asked for the very same email again on a
+ * fresh card, which the person approved thinking the first had failed. The
+ * ten minutes run from when it failed (updatedAt, set then).
  */
 async function findTwin(db: Prisma.TransactionClient, person: ActingPerson, tool: ToolName, key: string, now: Date): Promise<Twin | null> {
+  const since = new Date(now.getTime() - SENT_TWIN_MS);
   const row = await db.agentAction.findFirst({
     where: {
       organizationId: person.organizationId,
@@ -496,13 +509,14 @@ async function findTwin(db: Prisma.TransactionClient, person: ActingPerson, tool
       OR: [
         { status: "PENDING", expiresAt: { gt: now } },
         { status: "RUNNING" },
-        { status: "EXECUTED", executedAt: { gt: new Date(now.getTime() - SENT_TWIN_MS) } },
+        { status: "EXECUTED", executedAt: { gt: since } },
+        { status: "FAILED", updatedAt: { gt: since }, result: { path: ["unknownOutcome"], equals: true } },
       ],
     },
     select: { id: true, status: true },
   });
   if (!row) return null;
-  return { id: row.id, state: row.status === "PENDING" ? "waiting" : "sent" };
+  return { id: row.id, state: row.status === "PENDING" ? "waiting" : row.status === "FAILED" ? "maybe_sent" : "sent" };
 }
 
 /**
@@ -680,6 +694,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
         const event = name === "create_event";
         // Sent, or being sent: nothing more is asked, and the call says so as its outcome.
         if (twin.state === "sent") return refuse(event ? CONNECTOR_COPY.alreadySentEvent : CONNECTOR_COPY.alreadySent, { actionId: twin.id });
+        // Maybe sent (review round 2 of Phase 3): nothing more is asked, and the person is told to look first.
+        if (twin.state === "maybe_sent") return refuse(event ? CONNECTOR_COPY.maybeSentEvent : CONNECTOR_COPY.maybeSent, { actionId: twin.id });
         return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: event ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting });
       }
       if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {
@@ -847,7 +863,15 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
       return { status: "HELD", code: held, error: typeof said === "string" && said ? said : (outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed), data };
     }
     const error = outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed;
-    await prisma.agentAction.updateMany({ where: { id: a.action.id, status: "RUNNING" }, data: { status: "FAILED", error } });
+    // A write Google may have carried out (connector-tools.ts failed) says so
+    // on the card, as a flag, never by its sentence: for ten minutes the same
+    // email or invitation is not asked for again (findTwin, review round 2 of
+    // Phase 3). updatedAt is when it failed, which that window counts from.
+    const unknown = record(data).unknownOutcome === true;
+    await prisma.agentAction.updateMany({
+      where: { id: a.action.id, status: "RUNNING" },
+      data: { status: "FAILED", error, ...(unknown ? { result: json({ unknownOutcome: true }), updatedAt: new Date() } : {}) },
+    });
     return { status: "FAILED", error, data };
   }
   const href = outcome.href ?? a.action.preview?.target?.href ?? null;

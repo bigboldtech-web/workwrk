@@ -184,6 +184,8 @@ class Person {
     readonly name: string,
     readonly email: string,
     readonly id: string,
+    /** The workspace the card shows them: Connect, Reconnect and Add name it (review round 2 of Phase 3). */
+    readonly workspaceId: string,
   ) {}
 
   async signIn(): Promise<void> {
@@ -480,9 +482,9 @@ interface Started {
   cookieLine: string | null;
 }
 
-/** GET the start route as `who`, never following it. */
+/** GET the start route as `who`, never following it, for the workspace their card shows (ws, as the card's links send it). */
 async function startConnect(who: Person, products = "gmail,calendar"): Promise<Started> {
-  const res = await fetch(`${BASE}${START_PATH}?products=${encodeURIComponent(products)}`, { headers: { cookie: who.cookie }, redirect: "manual" });
+  const res = await fetch(`${BASE}${START_PATH}?products=${encodeURIComponent(products)}&ws=${encodeURIComponent(who.workspaceId)}`, { headers: { cookie: who.cookie }, redirect: "manual" });
   const location = locationOf(res);
   if (res.status === 307 && location && !sameOrigin(location, BASE)) {
     throw new Error(`The start route sent the browser to ${location.origin}, its canonical host: run the dev server with NEXTAUTH_URL and NEXT_PUBLIC_APP_URL set to ${BASE}, or set BASE to that host.`);
@@ -719,7 +721,7 @@ async function makeWorkspace() {
       data: { email, passwordHash: hash, firstName, lastName, organizationId: org.id, accessLevel: accessLevel as never, status: "ACTIVE", ...(orgRole ? { orgRole: orgRole as never } : {}) },
     });
     await prisma.organizationMembership.create({ data: { userId: user.id, organizationId: org.id, role: accessLevel as never, isPrimary: true } });
-    return new Person(firstName, email, user.id);
+    return new Person(firstName, email, user.id, org.id);
   };
   const olivia = await person("Olivia", "Owner", "SUPER_ADMIN");
   const max = await person("Max", "Member", "EMPLOYEE");

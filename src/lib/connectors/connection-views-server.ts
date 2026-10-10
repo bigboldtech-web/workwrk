@@ -15,7 +15,8 @@ import type { Viewer } from "@/lib/access/types";
 import { isOwnerOrAdmin } from "@/lib/app-gate";
 import { hueForAgent } from "@/lib/agents/hues";
 import { agentUsableWhere, canUseAgent } from "@/lib/agents/teammate-access";
-import { changedFields, othersMayChange, PRINT_FIELDS, teammateShownPrint, type PrintField } from "@/lib/agents/teammate-print";
+import { sharedMemoriesPrints } from "@/lib/agents/memory";
+import { changedSinceAllowed as changedParts, othersMayChange, teammateShownPrint, type AllowPart } from "@/lib/agents/teammate-print";
 import { TEAMMATE_SELECT, workspaceModules, type TeammateRecord } from "@/lib/agents/teammate-server";
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { prisma } from "@/lib/prisma";
@@ -34,25 +35,32 @@ function stateOf(set: ProductSet): Record<ConnectorProduct, "on" | "off"> {
   return { gmail: set.gmail ? "on" : "off", calendar: set.calendar ? "on" : "off" };
 }
 
-/** Per allowed product, what changed since the person allowed it (every part when no print was kept). */
-function changedSinceAllowed(agent: TeammateRecord, allowed: ProductSet, prints: unknown): Partial<Record<ConnectorProduct, PrintField[]>> {
-  const out: Partial<Record<ConnectorProduct, PrintField[]>> = {};
+/**
+ * Per allowed product, what changed since the person allowed it (every part
+ * when no print was kept), its shared memories included (review round 2 of
+ * Phase 3), as connections.ts connectorAccess decides it.
+ */
+function changedSinceAllowed(agent: TeammateRecord, allowed: ProductSet, prints: unknown, memories: string): Partial<Record<ConnectorProduct, AllowPart[]>> {
+  const out: Partial<Record<ConnectorProduct, AllowPart[]>> = {};
   const kept = prints && typeof prints === "object" && !Array.isArray(prints) ? (prints as Record<string, unknown>) : {};
   for (const p of CONNECTOR_PRODUCTS) {
     if (!allowed[p]) continue;
-    const print = kept[p];
-    const changed = print && typeof print === "object" ? changedFields(print, agent) : [...PRINT_FIELDS];
+    const changed = changedParts(kept[p], agent, memories);
     if (changed.length > 0) out[p] = changed;
   }
   return out;
 }
 
-/** One teammate's row on the card, for this person. */
+/**
+ * One teammate's row on the card, for this person. `memories`: its shared
+ * memories' print (memory.ts sharedMemoriesPrintOf), read by the caller.
+ */
 export function teammateGoogleUse(
   agent: TeammateRecord,
   viewerId: string,
   tools: readonly string[],
   setting: { connectorProducts: string[]; connectorPrints: unknown } | null,
+  memories: string,
 ): TeammateGoogleUse {
   const own = !othersMayChange(agent, viewerId);
   const allowed = own ? productSet([]) : productSet(setting?.connectorProducts);
@@ -64,8 +72,8 @@ export function teammateGoogleUse(
     own,
     tools: productsOfTools(tools),
     allowed,
-    changed: own ? {} : changedSinceAllowed(agent, allowed, setting?.connectorPrints ?? null),
-    print: teammateShownPrint(agent),
+    changed: own ? {} : changedSinceAllowed(agent, allowed, setting?.connectorPrints ?? null, memories),
+    print: teammateShownPrint(agent, memories),
   };
 }
 
@@ -128,12 +136,16 @@ async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet): Prom
       return reach.gmail || reach.calendar;
     });
   if (withTools.length === 0) return [];
-  const settings = await prisma.agentPersonSetting.findMany({
-    where: { userId: viewer.userId, agentId: { in: withTools.map((w) => w.agent.id) } },
-    select: { agentId: true, connectorProducts: true, connectorPrints: true },
-  });
+  const ids = withTools.map((w) => w.agent.id);
+  const [settings, memories] = await Promise.all([
+    prisma.agentPersonSetting.findMany({
+      where: { userId: viewer.userId, agentId: { in: ids } },
+      select: { agentId: true, connectorProducts: true, connectorPrints: true },
+    }),
+    sharedMemoriesPrints(ids),
+  ]);
   const settingOf = new Map(settings.map((s) => [s.agentId, s]));
-  return withTools.map(({ agent, tools }) => teammateGoogleUse(agent, viewer.userId, tools, settingOf.get(agent.id) ?? null));
+  return withTools.map(({ agent, tools }) => teammateGoogleUse(agent, viewer.userId, tools, settingOf.get(agent.id) ?? null, memories.get(agent.id) ?? ""));
 }
 
 /** GET /api/teammate-connections, for the signed-in person. */

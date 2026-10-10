@@ -292,11 +292,15 @@ async function touch(o: Opened): Promise<void> {
  * A failed Google call in the person's words (connector-rules.ts
  * googleFailureSentence), the tool's own sentence for its own product. At an
  * approval, a failure before anything was sent carries `held`, so the card
- * waits to be approved again (review of step 3).
+ * waits to be approved again (review of step 3). A write Google may have
+ * carried out (unknown_outcome) carries `unknownOutcome`, which the card
+ * keeps (executor.ts runApprovedAction), so the same email or invitation is
+ * not asked for again a moment later (review round 2 of Phase 3).
  */
 async function failed(r: { failure: GoogleFailure; retryAfter?: number }, notFound: string, tool: ConnectorToolName, t: TeammateToolContext): Promise<Refusal> {
   const rules = await connectorRules();
   const error = rules.googleFailureSentence(r, { product: TOOL_PRODUCT[tool], notFound, tool });
+  if (r.failure === "unknown_outcome") return { error, unknownOutcome: true };
   const held = t.trigger === "APPROVAL" ? rules.heldForFailure(r.failure) : null;
   return held ? { error, held } : refused(error);
 }
