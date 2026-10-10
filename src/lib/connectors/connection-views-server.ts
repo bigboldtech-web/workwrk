@@ -96,7 +96,18 @@ async function connectionView(viewer: Viewer): Promise<ConnectionView | null> {
   };
 }
 
-/** The teammates this person may use whose tools, here and now, reach a Google product. */
+/** Every product: a teammate's stored Google tools, whatever the workspace has on now. */
+const EVERY_PRODUCT: ProductSet = { gmail: true, calendar: true };
+
+/**
+ * The teammates this person may use whose tools reach a Google product, by
+ * what each holds, whether or not the product is on now (review of step 5).
+ * Counted by "on now", a teammate holding only Gmail tools while Gmail was
+ * off read as none, and the card said nobody has Google tools beside a
+ * teammate that does; its row says the product is off instead
+ * (connection-views.ts teammateProductRows). With every product off the
+ * card shows the workspace's own line in their place, so nothing is read.
+ */
 async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet): Promise<TeammateGoogleUse[]> {
   if (!connectors.gmail && !connectors.calendar) return [];
   if (viewer.orgRole === "GUEST" || viewer.isAgent) return [];
@@ -111,7 +122,7 @@ async function teammatesWithGoogle(viewer: Viewer, connectors: ProductSet): Prom
   ]);
   const withTools = agents
     .filter((a) => canUseAgent(a, viewer))
-    .map((a) => ({ agent: a, tools: teammateToolNames(a, { ...modules, connectors }) }))
+    .map((a) => ({ agent: a, tools: teammateToolNames(a, { ...modules, connectors: EVERY_PRODUCT }) }))
     .filter(({ tools }) => {
       const reach = productsOfTools(tools);
       return reach.gmail || reach.calendar;

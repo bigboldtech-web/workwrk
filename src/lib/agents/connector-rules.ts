@@ -22,7 +22,7 @@
 
 import type { ConnectorRefusal } from "@/lib/connectors/connections";
 import type { GoogleFailure } from "@/lib/connectors/google/http";
-import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
+import { CONNECTOR_LIMITS as L, CONNECTOR_PRODUCTS, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
 import { CONNECTIONS_COPY, CONNECTOR_COPY, CONNECTOR_TITLES, PRINT_FIELD_WORDS, titleList } from "./teammate-copy";
 import { PRINT_FIELDS, type PrintField } from "./teammate-print";
 import type { ConnectorToolName } from "./tool-names";
@@ -67,8 +67,17 @@ export function notHereKindOf(trigger: string): NotHereKind | null {
   return null;
 }
 
-export function notHereSentence(kind: NotHereKind): string {
-  return kind === "talk" ? CONNECTOR_COPY.notHereTalk : kind === "automation" ? CONNECTOR_COPY.notHereAutomation : CONNECTOR_COPY.notHereDelegated;
+/**
+ * Why a Google call is refused where the answer is not the person's alone,
+ * naming only `products`: the ones the teammate holds tools for that are on
+ * here (review of step 5), as block 2 names them (engine.ts
+ * connectorNotHereLine), so a teammate with Gmail tools alone is never said to
+ * have a calendar. None given names both, as block 2's line does.
+ */
+export function notHereSentence(kind: NotHereKind, products: readonly ConnectorProduct[] = CONNECTOR_PRODUCTS): string {
+  const named = CONNECTOR_PRODUCTS.filter((p) => products.includes(p));
+  const p = (named.length > 0 ? named : CONNECTOR_PRODUCTS).map(productWord).join(" and ");
+  return kind === "talk" ? CONNECTOR_COPY.notHereTalk(p) : kind === "automation" ? CONNECTOR_COPY.notHereAutomation(p) : CONNECTOR_COPY.notHereDelegated(p);
 }
 
 /** Whether a turn started this way may use Google at all: the person's own chats and continues, and their routines (Decision 13). */

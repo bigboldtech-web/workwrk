@@ -719,6 +719,12 @@ export const NEW_TEAMMATE_DIALOG = {
   createFailed: "Couldn't create the teammate. Try again.",
   talkOff: "Talk is off in this workspace, so it can't read or post in Talk.",
   tablesOff: "Tables is off in this workspace.",
+  /**
+   * A Google row of a teammate made for everyone, in this form (review of step
+   * 5): the allow is given on the person's Connections card, which lists only
+   * teammates that exist, so the line says when and where, and links nowhere.
+   */
+  googleAllowOnceMade: "Uses your own Google account once you allow it. Allow it in Settings, Calendar & connections once the teammate is made.",
   /** The list of template cards, for a screen reader. */
   templatesLabel: "Templates",
   /** A template tool no teammate may be given yet (TEAMMATE_EXCLUDED), left out of the form. */
@@ -1103,9 +1109,12 @@ export const CONNECTOR_COPY = {
   needsApproval: "This Google action runs only from its approval.",
   notConfigured: "Google isn't set up for AI teammates on this WorkwrK.",
   workspaceOff: (p: string) => `${p} is turned off for AI teammates in this workspace. An Owner or Admin can turn it on in Settings, Apps & modules.`,
-  notHereTalk: "Gmail and Google Calendar can't be used when a teammate answers in Talk, because the answer is posted for everyone there.",
-  notHereAutomation: "Gmail and Google Calendar can't be used in an automation, because its answer goes to fields other people read.",
-  notHereDelegated: "Gmail and Google Calendar can't be used when another teammate asks. Ask this teammate directly.",
+  // Review of step 5: each names only the products the teammate holds tools
+  // for that are on here ("Gmail", "Google Calendar" or both), as block 2's
+  // line does (engine.ts connectorNotHereLine).
+  notHereTalk: (p: string) => `${p} can't be used when a teammate answers in Talk, because the answer is posted for everyone there.`,
+  notHereAutomation: (p: string) => `${p} can't be used in an automation, because its answer goes to fields other people read.`,
+  notHereDelegated: (p: string) => `${p} can't be used when another teammate asks. Ask this teammate directly.`,
   notConnected: "You haven't connected Google to your AI teammates. Connect it in Settings, Calendar & connections.",
   needsReconnect: "Your Google connection stopped working. Reconnect it in Settings, Calendar & connections.",
   notGranted: (p: string) => `Your Google connection doesn't include ${p}. Connect again and tick ${p}.`,

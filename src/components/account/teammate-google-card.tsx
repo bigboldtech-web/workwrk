@@ -18,6 +18,9 @@
  * WHAT IT SAYS TEAMMATES MAY USE is what Google granted AND the workspace has
  * on now; a granted product the workspace turned off is named as such, and
  * with every product off the workspace's own line takes the teammates' place.
+ * The teammates are listed by the Google tools they hold, on or off (review
+ * of step 5): a product off reads as off on its row, never as "none of your
+ * teammates has Google tools".
  * An allow sends back the teammate as the card showed it (`print`), so a
  * teammate changed since is refused and the card reads again.
  *
@@ -37,7 +40,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { CONNECTIONS_COPY as C, PRINT_FIELD_WORDS, titleList } from "@/lib/agents/teammate-copy";
-import { teammateConnectSentence, type TeammateConnectionsView, type TeammateGoogleUse } from "@/lib/connectors/connection-views";
+import { teammateConnectSentence, teammateProductRows, type TeammateConnectionsView, type TeammateGoogleUse } from "@/lib/connectors/connection-views";
 import { CONNECTOR_PRODUCTS, type ConnectorProduct } from "@/lib/connectors/products";
 
 /** What the connect flow put in the URL, read once by the page. */
@@ -237,7 +240,10 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
         ) : (
           <ul className="cxn__cals">
             {view.teammates.map((t) => {
-              const changedProducts = CONNECTOR_PRODUCTS.filter((p) => (t.changed[p] ?? []).length > 0);
+              // Per product it holds tools for, on here or off (review of step 5).
+              const rows = teammateProductRows(t, on, connection.products);
+              // "Allow again" only for a product on here: one off cannot be allowed (product_off).
+              const changedProducts = CONNECTOR_PRODUCTS.filter((p) => on.includes(p) && (t.changed[p] ?? []).length > 0);
               const changedParts = [...new Set(changedProducts.flatMap((p) => t.changed[p] ?? []))].map((f) => PRINT_FIELD_WORDS[f] ?? f);
               return (
                 <li key={t.slug}>
@@ -245,20 +251,28 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                     <Bot aria-hidden /> {t.name}
                   </span>
                   {t.own ? (
-                    <span className="cxn__note">{C.ownTeammate}</span>
+                    <>
+                      {rows.some((r) => !r.off) ? <span className="cxn__note">{C.ownTeammate}</span> : null}
+                      {rows.filter((r) => r.off).map((r) => (
+                        <span key={r.product} className="cxn__note">{C.productTurnedOff(productWord(r.product), ws)}</span>
+                      ))}
+                    </>
                   ) : (
                     <>
-                      {CONNECTOR_PRODUCTS.filter((p) => t.tools[p]).map((p) => {
+                      {rows.map(({ product: p, off, showSwitch, needsAdd }) => {
                         const label = p === "gmail" ? C.allowGmail(t.name) : C.allowCalendar(t.name);
+                        // A product the workspace turned off says so (review of step
+                        // 5), with its switch only while an allow is on, so the
+                        // person can always turn it off (Decision 27).
+                        if (!showSwitch) return <p key={p} className="cxn__note">{C.productTurnedOff(productWord(p), ws)}</p>;
                         // A product the connection lacks cannot be allowed until it is
                         // added (the PUT answers not_granted, review of step 2); one
                         // allowed already can always be turned off (Decision 27).
-                        const needsAdd = !connection.products.includes(p) && !t.allowed[p];
                         return (
                           <label key={p} className="cxn__cal-switch">
                             <span>
                               {label}
-                              {needsAdd ? <em>{C.addFirst(productWord(p))}</em> : null}
+                              {off ? <em>{C.productTurnedOff(productWord(p), ws)}</em> : needsAdd ? <em>{C.addFirst(productWord(p))}</em> : null}
                             </span>
                             <Switch
                               checked={t.allowed[p]}

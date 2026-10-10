@@ -873,6 +873,8 @@ interface Prepared {
    * when no Google tool of a product on here is in its set.
    */
   connectorNotHere: NotHereKind | null;
+  /** The products that refusal names: those the teammate holds tools for that are on here, as block 2's line names them (review of step 5). */
+  connectorNotHereProducts: ConnectorProduct[];
   /**
    * Whether an earlier Google read can matter to this turn: this deployment
    * offers Google, or the teammate's own set holds a Google tool. Else no turn
@@ -1119,6 +1121,15 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     const g = google[p];
     if (g && !g.ok) connectorRefusals[p] = { reason: g.reason, ...(g.changed ? { changed: g.changed } : {}) };
   }
+  // A product this workspace has off, or this WorkwrK does not offer, is the
+  // reason a call to its tools is refused wherever the turn runs (review of
+  // step 5). A Talk, automation or delegated turn reads no access above, so
+  // it is named here as connectorAccess names it, and such a call never reads
+  // as "not here" for a product nobody here can use.
+  for (const p of CONNECTOR_PRODUCTS) {
+    if (connectors[p] === true || connectorRefusals[p] || !connectorHeld.some((n) => productOfTool(n) === p)) continue;
+    connectorRefusals[p] = { reason: googleConfig() ? "workspace_off" : "not_configured" };
+  }
   const askable = enabled.includes("ask_teammate")
     ? await import("./teammate-server").then((m) => m.askableTeammates(a.person.viewer, a.agent.id)).catch(() => [])
     : null;
@@ -1162,6 +1173,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     connectorRefusals,
     connectorHeld,
     connectorNotHere,
+    connectorNotHereProducts: connectorNotHere ? heldHere : [],
     googleCanMatter: connectorHeld.length > 0 || googleConfig() !== null,
   };
 }
@@ -1272,6 +1284,7 @@ async function runLoop(
         connectorRefusals: p.connectorRefusals,
         connectorHeld: p.connectorHeld,
         connectorNotHere: p.connectorNotHere,
+        connectorNotHereProducts: p.connectorNotHereProducts,
         emit,
       });
       s.tainted = counters.tainted === true;

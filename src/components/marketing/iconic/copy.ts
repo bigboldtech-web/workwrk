@@ -172,7 +172,10 @@ export const LEGAL_COPY = {
     // connecting Google to AI teammates reads, sends to the model provider and
     // keeps, how to disconnect, and Google's Limited Use disclosure; section 6
     // says when its tokens are deleted (docs/plans/ai-teammates-phase3.md
-    // step 5).
+    // step 5). The review of step 5, the same day: section 3 says a teammate
+    // reads Google again at an approval, reads colleagues' busy times to find
+    // a meeting time, and keeps its answer in the run history too; section 6
+    // says the backups hold the encrypted tokens for as long as backups last.
     updated: "10 October 2026",
   },
   terms: {
@@ -188,13 +191,16 @@ export const LEGAL_COPY = {
     // sentence cannot say six while the table shows seven.
     sub: (count: number) => `${count} cookies, all of them ours. No analytics vendor, no ad network, no pixel.`,
     // The previous six rows (ww_session, ww_csrf, ww_preferences, ww_attrib,
-    // ww_consent, _ga) were invented and were replaced wholesale with the six
+    // ww_consent, _ga) were invented and were replaced wholesale with the
     // cookies this codebase actually sets. That is a new disclosure, so it
     // carries the date it was written rather than the old one's. 5 October
     // 2026: section 4 no longer claims a recorded answer covers cookies added
     // later, and the banner asks only about preferences. 6 October 2026:
-    // section 1 names the random id a consent record is filed under.
-    updated: "6 October 2026",
+    // section 1 names the random id a consent record is filed under. 10
+    // October 2026: the table gains wk_tc_state, the cookie connecting Google
+    // to AI teammates sets, and sections 1 and 3 say what it is for (review of
+    // step 5, docs/plans/ai-teammates-phase3.md).
+    updated: "10 October 2026",
   },
 } as const;
 

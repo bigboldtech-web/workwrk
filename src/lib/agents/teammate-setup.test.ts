@@ -253,7 +253,7 @@ describe("the new teammate form", () => {
       choices: { create_task: "always", send_kudos: "always", post_in_talk: "always", invite_person_with_role: "always", update_task: "ask", search_tasks: "ask" },
       visibility: "WORKSPACE",
     };
-    expect(newTeammateBody(d, { canCreateWorkspace: false, talkOn: true, tablesOn: false })).toEqual({
+    expect(newTeammateBody(d, { canCreateWorkspace: false, talkOn: true, tablesOn: false, connectors: NO_PRODUCTS })).toEqual({
       template: null,
       name: "Weekly reporter",
       hue: "sky",
@@ -264,8 +264,8 @@ describe("the new teammate form", () => {
       visibility: "PRIVATE",
       personRules: { send_kudos: "always" },
     });
-    expect(newTeammateBody({ ...d, choices: {} }, { canCreateWorkspace: true, ...ALL_ON })).toMatchObject({ visibility: "WORKSPACE", toolNames: expect.arrayContaining(["create_data_table"]) });
-    expect(newTeammateBody({ ...d, choices: {} }, { canCreateWorkspace: true, ...ALL_ON })).not.toHaveProperty("personRules");
+    expect(newTeammateBody({ ...d, choices: {} }, { canCreateWorkspace: true, ...ALL_ON, connectors: NO_PRODUCTS })).toMatchObject({ visibility: "WORKSPACE", toolNames: expect.arrayContaining(["create_data_table"]) });
+    expect(newTeammateBody({ ...d, choices: {} }, { canCreateWorkspace: true, ...ALL_ON, connectors: NO_PRODUCTS })).not.toHaveProperty("personRules");
   });
 });
 
@@ -360,19 +360,45 @@ describe("a Google tool's row (docs/plans/ai-teammates-phase3.md step 5)", () =>
     const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Inbox helper", job: "Reads my email.", tools: ["search_email", "send_email", "search_tasks"] };
     const groups = draftToolGroups(d, { ...ALL_ON, connectors: BOTH, google: READY });
     expect(rowOf(groups, "send_email")).toMatchObject({ on: true, approval: { kind: "always_asks" } });
-    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON }).toolNames).toEqual(["search_email", "search_tasks", "send_email"]);
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: BOTH }).toolNames).toEqual(["search_email", "search_tasks", "send_email"]);
   });
 
-  it("names, in a save of the tab, the Google products whose rows it showed, and only those", () => {
-    const gmailOnly = table({ enabled: ["search_email", "search_tasks"], connectors: { gmail: true, calendar: false }, google: READY });
-    expect(toolsPatch(gmailOnly, "search_email", false)).toEqual({ toolNames: ["search_tasks"], connectorRows: ["gmail"] });
-    expect(toolsPatch(table({ enabled: ["search_tasks"], connectors: BOTH, google: READY }), "list_events", true)).toEqual({
-      toolNames: ["list_events", "search_tasks"],
-      connectorRows: ["gmail", "calendar"],
+  it("sends no Google tool whose product was turned off while the form was open (review of step 5)", () => {
+    const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Inbox helper", job: "Reads my email.", tools: ["search_email", "read_email", "list_events", "search_tasks"] };
+    // Ticked while Gmail was on; Gmail went off before Create, and its rows went with it.
+    const gmailOff = { gmail: false, calendar: true };
+    for (const t of GMAIL_TOOLS) expect(names(draftToolGroups(d, { ...ALL_ON, connectors: gmailOff, google: READY })), t).not.toContain(t);
+    // Before: ["list_events", "read_email", "search_email", "search_tasks"], Gmail tools nobody could see or untick.
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: gmailOff }).toolNames).toEqual(["list_events", "search_tasks"]);
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS }).toolNames).toEqual(["search_tasks"]);
+  });
+
+  it("asks for the allow of a teammate made for everyone with no link, since the card lists only teammates that exist (review of step 5)", () => {
+    const row = rowOf(draftToolGroups({ tools: ["search_email"], choices: {}, visibility: "WORKSPACE" }, { ...ALL_ON, connectors: BOTH, google: READY }), "search_email");
+    expect(row?.connector).toEqual({ product: "gmail", state: "allow_first", unmade: true });
+    // Before: an Allow link to a card that cannot list the teammate yet.
+    expect(connectorNote(row?.connector ?? { state: "ready" })).toEqual({
+      text: "Uses your own Google account once you allow it. Allow it in Settings, Calendar & connections once the teammate is made.",
+      link: null,
     });
-    // No Google row shown: none named, so the route keeps every stored Google tool.
-    const none = table({ enabled: ["search_email", "search_tasks"], connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS });
-    expect(toolsPatch(none, "create_task", true)).toEqual({ toolNames: ["create_task", "search_tasks"], connectorRows: [] });
+    // A connection to make or mend can be done before the teammate exists: its link stays.
+    const connect = rowOf(draftToolGroups({ tools: [], choices: {}, visibility: "WORKSPACE" }, { ...ALL_ON, connectors: BOTH, google: NO_GOOGLE_ROWS }), "search_email");
+    expect(connect?.connector).toEqual({ product: "gmail", state: "connect_first" });
+    expect(connectorNote(connect?.connector ?? { state: "ready" }).link).toEqual({ label: "Connect", href: GOOGLE_CONNECTIONS_HREF });
+    // The tab's allow, for a teammate that exists, keeps its link.
+    const tab = settingsToolGroups(table({ enabled: ["search_email"], connectors: BOTH, google: { gmail: "allow_first", calendar: "ready" } }), { canManage: true, workspace: true });
+    expect(connectorNote(rowOf(tab, "search_email")?.connector ?? { state: "ready" }).link).toEqual({ label: "Allow", href: GOOGLE_CONNECTIONS_HREF });
+  });
+
+  // Review of step 5: a tick sent the whole set the tab showed, so a tab read
+  // before someone else's change wrote back what it showed (a Gmail tool
+  // removed meanwhile came back; one added meanwhile was dropped).
+  it("sends, for a tick of the tab, only that one tool's change, never the set the tab shows", () => {
+    // What the tab shows never reaches the request: a tab that still shows
+    // read_email on, removed in another tab since, sends only its tick.
+    expect(toolsPatch("create_doc", true)).toEqual({ toolChanges: { add: ["create_doc"] } });
+    expect(toolsPatch("search_email", false)).toEqual({ toolChanges: { remove: ["search_email"] } });
+    expect(Object.keys(toolsPatch("create_doc", true))).toEqual(["toolChanges"]);
   });
 
   it("is never ticked by a template or by Start from scratch (Decision 28)", () => {

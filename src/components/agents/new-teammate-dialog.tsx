@@ -16,7 +16,11 @@
 // Google tool has a row only while its product is on here, saying what stands
 // between it and the person's own Google (for one made for everyone, their
 // allow); its link opens their Connections card in another tab, so nothing
-// typed here is lost (docs/plans/ai-teammates-phase3.md step 5). The
+// typed here is lost (docs/plans/ai-teammates-phase3.md step 5). The allow
+// itself has no link: the card lists only teammates that exist, so the line
+// says to allow it there once this one is made, and a Google tool whose
+// product was turned off while the form was open is not sent (review of
+// step 5). The
 // checks are teammate-setup.ts draftProblems (the route's own limits), the
 // request newTeammateBody. A refusal shows the server's sentence (the plan's
 // limit names the plan); anything else, "Couldn't create the teammate. Try
@@ -174,7 +178,7 @@ function NewTeammateFlow({
     setError(null);
     const r = await apiFetch<{ teammate: TeammateRow }>("/api/agents/teammates", {
       method: "POST",
-      json: newTeammateBody(draft, { canCreateWorkspace, ...modules }),
+      json: newTeammateBody(draft, { canCreateWorkspace, ...modules, connectors: googleRows.connectors }),
     });
     setSaving(false);
     if (!r.ok) {

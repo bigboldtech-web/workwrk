@@ -5,9 +5,10 @@
 // the route's table of its tools for this person (teammate-views.ts
 // toolSettings, rows by teammate-setup.ts settingsToolGroups).
 //
-//   its managers   tick its tools (PATCH toolNames, with the Google products
-//                  whose rows it showed: teammate-setup.ts toolsPatch, so a
-//                  Google tool nobody was shown is kept as stored) and, on a
+//   its managers   tick its tools (PATCH toolChanges: the one tool ticked,
+//                  added or removed, never the whole set, so a tab read
+//                  before someone else's change changes only that tool;
+//                  teammate-setup.ts toolsPatch, review of step 5) and, on a
 //                  workspace teammate, "Ask everyone first" (PATCH
 //                  agentRules: they only tighten)
 //   everyone       their own "Ask me first" / "Don't ask" per tool
@@ -80,7 +81,7 @@ export function ToolsTab({
           groups={groups}
           canTick={manages}
           busy={busy}
-          onTick={(name: ToolName, on: boolean) => void patch(toolsPatch(t.tools, name, on))}
+          onTick={(name: ToolName, on: boolean) => void patch(toolsPatch(name, on))}
           onChoice={(name, value) => void putRules(choiceEdit(name, value))}
           onAskEveryone={(name, ask) => void patch({ agentRules: agentRulesWith(t.tools, name, ask) })}
           onRemoveRule={(key) => void putRules(ruleRemoval(key))}

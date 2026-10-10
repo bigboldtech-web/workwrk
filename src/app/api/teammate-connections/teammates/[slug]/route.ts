@@ -122,5 +122,9 @@ export async function PUT(req: Request, { params }: Params) {
     where: { agentId_userId: { agentId: agent.id, userId: viewer.userId } },
     select: { connectorProducts: true, connectorPrints: true },
   });
-  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, tools, setting) });
+  // The row as the card lists it: by the Google tools the teammate holds,
+  // on here or off (connection-views-server.ts teammatesWithGoogle, review of
+  // step 5), so a product off keeps its line after a switch.
+  const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true } });
+  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting) });
 }

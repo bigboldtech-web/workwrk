@@ -468,6 +468,10 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
     eventTitleLine: [["Board review"], "Event: Board review"],
     toldLine: [["mia@proof.test, outsider@ext.test"], "Told: mia@proof.test, outsider@ext.test"],
     roomsLine: [["Room 4 <c_1@resource.calendar.google.com>"], "Rooms: Room 4 <c_1@resource.calendar.google.com>"],
+    // Review of step 5: where the answer is not the person's alone, only the products held here are named.
+    notHereTalk: [["Gmail"], "Gmail can't be used when a teammate answers in Talk, because the answer is posted for everyone there."],
+    notHereAutomation: [["Google Calendar"], "Google Calendar can't be used in an automation, because its answer goes to fields other people read."],
+    notHereDelegated: [["Gmail and Google Calendar"], "Gmail and Google Calendar can't be used when another teammate asks. Ask this teammate directly."],
   };
   const c = copy.CONNECTOR_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -551,6 +555,13 @@ describe("TOOL_PICKER_NOTES (a Google tool's row, Phase 3 step 5)", () => {
     const all: Array<[string, string]> = [];
     strings(copy.TOOL_PICKER_NOTES, "TOOL_PICKER_NOTES", all);
     expect(all.filter(([, s]) => BANNED.test(s))).toEqual([]);
+  });
+
+  it("says, in the new teammate form, where and when a teammate made for everyone is allowed, with no link (review of step 5)", () => {
+    expect(copy.NEW_TEAMMATE_DIALOG.googleAllowOnceMade).toBe(
+      "Uses your own Google account once you allow it. Allow it in Settings, Calendar & connections once the teammate is made.",
+    );
+    expect(BANNED.test(copy.NEW_TEAMMATE_DIALOG.googleAllowOnceMade)).toBe(false);
   });
 
   it("sends a connected person with no Google tools to the picker that now has them (review of step 2)", () => {

@@ -47,7 +47,7 @@ const db = vi.hoisted(() => ({
   replies: [] as unknown[],
   requests: [] as Req[],
   streamed: 0,
-  executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown; tainted?: boolean; readGoogle?: boolean; connectorRefusals?: unknown; connectorHeld?: unknown; connectorNotHere?: unknown }>,
+  executed: [] as Array<{ name: string; input: unknown; enabled: unknown; agentRules: unknown; personRules: unknown; tainted?: boolean; readGoogle?: boolean; connectorRefusals?: unknown; connectorHeld?: unknown; connectorNotHere?: unknown; connectorNotHereProducts?: unknown }>,
   /** The chat's rows can't be written. */
   saveThrows: false,
   /** What each claim asked for. */
@@ -202,6 +202,7 @@ vi.mock("./executor", () => ({
     connectorRefusals?: unknown;
     connectorHeld?: unknown;
     connectorNotHere?: unknown;
+    connectorNotHereProducts?: unknown;
   }) => {
     db.executed.push({
       name: a.name,
@@ -215,6 +216,8 @@ vi.mock("./executor", () => ({
       connectorHeld: a.connectorHeld,
       // Left out of the record when there is none, as the rows above were written before it.
       connectorNotHere: a.connectorNotHere ?? undefined,
+      // The same for the products it names (review of step 5): none is left out.
+      connectorNotHereProducts: Array.isArray(a.connectorNotHereProducts) && a.connectorNotHereProducts.length > 0 ? a.connectorNotHereProducts : undefined,
     });
     a.counters.calls += 1;
     if (a.name === "search_email") {
@@ -1497,8 +1500,9 @@ describe("the person's own Google (Phase 3 step 3)", () => {
       expect(block2).toContain(`Your Gmail tools aren't available here: ${why}. If asked, say so in one sentence.`);
       expect(block2).not.toContain("You can use Priya's Gmail");
       expect(block2).not.toContain("Google Calendar");
-      // The executor answers the real reason (executor.ts connectorMissing).
-      expect(db.executed[0]).toMatchObject({ name: "search_email", connectorNotHere: kind });
+      // The executor answers the real reason (executor.ts connectorMissing),
+      // naming only the products block 2 names (review of step 5).
+      expect(db.executed[0]).toMatchObject({ name: "search_email", connectorNotHere: kind, connectorNotHereProducts: ["gmail"] });
       // Nothing about the person's connection is read for a turn that cannot use it.
       expect(db.connectionLookups).toEqual([]);
     });
@@ -1527,6 +1531,10 @@ describe("the person's own Google (Phase 3 step 3)", () => {
     await runTeammateTurn(turn({ agent: GMAIL_AGENT, trigger: "TALK", userText: "@Ops hi", userMessageId: null, origin: TALK_ORIGIN }));
     expect(db.requests[0].system[1].text).not.toContain("aren't available here");
     expect(db.executed[0].connectorNotHere).toBeUndefined();
+    // A call to one answers that Gmail is off, never "not here" (review of
+    // step 5). Before: no reason was passed, and the call named Talk, Gmail and
+    // Google Calendar.
+    expect(db.executed[0].connectorRefusals).toEqual({ gmail: { reason: "workspace_off" } });
     // A WorkwrK that offers no Google never mentions it.
     vi.stubEnv("GOOGLE_AGENT_PRODUCTS", "");
     await runTeammateTurn(turn({ agent: GMAIL_AGENT, trigger: "AUTOMATION", userText: null, userMessageId: null, origin: AUTO_ORIGIN }));

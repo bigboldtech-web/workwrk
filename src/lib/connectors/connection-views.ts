@@ -13,7 +13,7 @@
 import type { TeammateHue } from "@/lib/agents/hues";
 import { CONNECT_ERROR_WORDS } from "@/lib/agents/teammate-copy";
 import type { PrintField } from "@/lib/agents/teammate-print";
-import { TOOL_PRODUCT, type ConnectorProduct, type ProductSet } from "./products";
+import { CONNECTOR_PRODUCTS, TOOL_PRODUCT, type ConnectorProduct, type ProductSet } from "./products";
 
 export type ProductState = "on" | "off";
 
@@ -37,7 +37,7 @@ export interface TeammateGoogleUse {
   avatar: string | null;
   /** The person's own private teammate: it uses what they ticked in its tools, with no allow (Decision 6). */
   own: boolean;
-  /** The products it has tools for, with the workspace's switch. */
+  /** The products it has tools for, whether or not the workspace has them on now (review of step 5: teammateProductRows says which are off). */
   tools: ProductSet;
   /** The products the person let it use. */
   allowed: ProductSet;
@@ -83,6 +83,38 @@ export function productsOfTools(toolNames: readonly string[]): ProductSet {
     if (Object.prototype.hasOwnProperty.call(TOOL_PRODUCT, n)) out[TOOL_PRODUCT[n as keyof typeof TOOL_PRODUCT]] = true;
   }
   return out;
+}
+
+/** One product a teammate's row on the card shows (teammateProductRows). */
+export interface TeammateProductRow {
+  product: ConnectorProduct;
+  /** The workspace has it off: the row says so (CONNECTIONS_COPY.productTurnedOff). */
+  off: boolean;
+  /** The allow switch: always for a product that is on; for one that is off, only while it is allowed, so it can be turned off. */
+  showSwitch: boolean;
+  /** On, but the person's connection lacks it and nothing is allowed yet: turning it on waits for Add. */
+  needsAdd: boolean;
+}
+
+/**
+ * What a teammate's row on the Connections card shows for each product it
+ * holds tools for (review of step 5). A product the workspace has off says
+ * so: before, the teammate was left out, and the card said none of the
+ * person's teammates had Google tools beside one that did. An allow already
+ * given stays switchable, so the person can always turn it off (Decision
+ * 27); nothing new is allowed until the product is back on (the allow route
+ * answers product_off). `on`: the products on here; `granted`: the products
+ * the person's connection holds.
+ */
+export function teammateProductRows(
+  t: Pick<TeammateGoogleUse, "tools" | "allowed">,
+  on: readonly ConnectorProduct[],
+  granted: readonly ConnectorProduct[],
+): TeammateProductRow[] {
+  return CONNECTOR_PRODUCTS.filter((p) => t.tools[p]).map((p) => {
+    const off = !on.includes(p);
+    return { product: p, off, showSwitch: !off || t.allowed[p], needsAdd: !off && !granted.includes(p) && !t.allowed[p] };
+  });
 }
 
 /**

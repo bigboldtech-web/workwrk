@@ -193,6 +193,12 @@ export interface ExecuteArgs {
    * the trigger).
    */
   connectorNotHere?: NotHereKind | null;
+  /**
+   * The Google products the teammate holds tools for that are on here, which
+   * that refusal names, as block 2 does (review of step 5). Left out: the
+   * called tool's own product.
+   */
+  connectorNotHereProducts?: readonly ConnectorProduct[];
   emit?: (e: TeammateStreamEvent) => void;
 }
 
@@ -411,7 +417,7 @@ interface DoneExtra {
 function connectorPrecheck(a: ExecuteArgs, name: ConnectorToolName): string | null {
   if (!connectorTrigger(a.turn.trigger)) {
     const kind = notHereKindOf(a.turn.trigger);
-    return kind ? notHereSentence(kind) : ACTION_ERRORS.toolOff;
+    return kind ? notHereSentence(kind, notHereProducts(a, name)) : ACTION_ERRORS.toolOff;
   }
   const c = (a.counters.connector ??= emptyConnectorCounters());
   if (c.calls >= CONNECTOR_LIMITS.callsPerTurn) return CONNECTOR_COPY.tooManyThisTurn;
@@ -424,17 +430,28 @@ function connectorPrecheck(a: ExecuteArgs, name: ConnectorToolName): string | nu
   return null;
 }
 
+/** The products a "not here" refusal names: the held ones on here, else the called tool's own (review of step 5). */
+function notHereProducts(a: ExecuteArgs, name: ConnectorToolName): readonly ConnectorProduct[] {
+  const held = a.connectorNotHereProducts ?? [];
+  return held.length > 0 ? held : [TOOL_PRODUCT[name]];
+}
+
 /**
  * Why this turn was not offered a Google tool the model called anyway: a tool
- * the teammate does not hold at all, then where its answer goes, else the
- * person's connection or allow.
+ * the teammate does not hold at all; then a product this workspace has off,
+ * or this WorkwrK does not offer, wherever the turn runs; then where its
+ * answer goes; else the person's connection or allow. Review of step 5: a
+ * product off is its own reason, never "not here", which named a product
+ * nobody here can use, and a "not here" names only the products the teammate
+ * holds tools for that are on, as block 2 does.
  */
 function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
   if (!(a.connectorHeld ?? []).includes(name)) return ACTION_ERRORS.toolOff;
-  const kind = a.connectorNotHere ?? notHereKindOf(a.turn.trigger);
-  if (kind) return notHereSentence(kind);
   const product = TOOL_PRODUCT[name];
   const refusal = a.connectorRefusals?.[product];
+  if (refusal && (refusal.reason === "workspace_off" || refusal.reason === "not_configured")) return connectorRefusalSentence(refusal, a.agent.name, product);
+  const kind = a.connectorNotHere ?? notHereKindOf(a.turn.trigger);
+  if (kind) return notHereSentence(kind, notHereProducts(a, name));
   return refusal ? connectorRefusalSentence(refusal, a.agent.name, product) : ACTION_ERRORS.toolOff;
 }
 

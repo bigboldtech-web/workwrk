@@ -4,7 +4,12 @@
 // authorization matrix, a requireApp that answers a Guest the way the real
 // gate does (404), and the Apps settings gate the workspace agent routes use
 // (requireManageApps). Every write that changed a row is recorded in
-// `routeDb.writes`, so a test can say that a refusal wrote nothing. The tests
+// `routeDb.writes`, so a test can say that a refusal wrote nothing.
+// Transactions run one at a time, in the order they began, as the PATCH's
+// lock on the Agent row makes them (SELECT ... FOR UPDATE, review of step 5):
+// each waits for the one before it to commit. That lock is the one raw
+// statement known here; it throws outside a transaction, where a row lock is
+// released at once, and any other raw statement throws too. The tests
 // mock the real modules with these: vi.mock("@/lib/prisma", async () =>
 // ({ prisma: (await import("@/lib/agents/teammate-route-fixtures")).routeDb })).
 //
@@ -134,6 +139,7 @@ export function resetRouteDb(): void {
   db.runs = [];
   db.memories = [];
   routeDb.writes.length = 0;
+  routeDb.locks.length = 0;
   seq = 0;
 }
 
@@ -206,9 +212,33 @@ function pickMany(rows: Row[], a: Args): Row[] {
     .map(copy);
 }
 
+/** Where the next transaction waits: the one before it, committed (see the file header). */
+let txTurn: Promise<unknown> = Promise.resolve();
+
+/** The raw statements the routes send, by their text (see the file header). */
+function raw(strings: TemplateStringsArray, values: unknown[], inTx: boolean): Row[] {
+  const sql = strings.join("?").replace(/\s+/g, " ").trim();
+  if (sql === 'SELECT "toolNames", "productSlug" FROM "Agent" WHERE "id" = ? FOR UPDATE') {
+    if (!inTx) throw new Error("teammate-route-fixtures: a row lock outside a transaction is released at once");
+    routeDb.locks.push(String(values[0]));
+    const row = db.agents.find((r) => r.id === values[0]);
+    return row ? [{ toolNames: row.toolNames ?? null, productSlug: row.productSlug ?? null }] : [];
+  }
+  throw new Error(`teammate-route-fixtures: unknown raw statement ${sql}`);
+}
+
 /** The prisma calls the teammate routes make, over `db`. */
 export const routeDb = {
   writes: [] as string[],
+  /** The Agent rows locked FOR UPDATE, by id, in order. */
+  locks: [] as string[],
+  $transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+    const tx = { ...routeDb, $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => raw(strings, values, true) };
+    const run = txTurn.then(() => fn(tx));
+    txTurn = run.catch(() => undefined);
+    return run;
+  },
+  $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => raw(strings, values, false),
   agent: {
     findFirst: async (a: Args) => copy(db.agents.find((r) => matches(r, a.where))),
     findMany: async (a: Args) => pickMany(db.agents, a),

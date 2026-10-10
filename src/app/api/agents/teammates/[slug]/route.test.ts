@@ -71,6 +71,7 @@ import { DELETE as deleteMemory, PATCH as patchMemory } from "../../memories/[id
 import { DELETE as deleteRoutine, PATCH as patchRoutine } from "../../routines/[id]/route";
 import { POST as runRoutineNow } from "../../routines/[id]/run/route";
 import { PEOPLE, db, jsonRequest, paramsOf, resetRouteDb, routeDb, seedAgent, type FakeViewer } from "@/lib/agents/teammate-route-fixtures";
+import { toolsPatch } from "@/lib/agents/teammate-setup";
 
 const PRIVATE_SLUG = "t-planner-aaaaaa";
 const SHARED_SLUG = "status-reporter";
@@ -342,6 +343,75 @@ describe("removing, pausing and adding back", () => {
       { fields: ["tools"] },
       { fields: ["tools"] },
     ]);
+  });
+
+  // Review of step 5: a tick of the tools tab sent the whole set the tab
+  // showed, read before the request and written after it with no compare.
+  describe("a tick of the tools tab", () => {
+    it("changes only the tool it names, so a tab read before another's removal never puts a Gmail tool back", async () => {
+      seedAgent({ slug: PRIVATE_SLUG, name: "Inbox helper", visibility: "PRIVATE", ownerId: "u-max", toolNames: ["read_email", "search_email", "search_tasks"] });
+      db.viewer = PEOPLE.max;
+      // One tab unticks Read your Gmail.
+      expect((await call(patchTeammate(jsonRequest("PATCH", toolsPatch("read_email", false)), slugged(PRIVATE_SLUG)))).status).toBe(200);
+      expect(db.agents[0].toolNames).toEqual(["search_email", "search_tasks"]);
+      // Another, opened before that and still showing it ticked, ticks Create docs.
+      const stale = await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_doc", true)), slugged(PRIVATE_SLUG)));
+      expect(stale.status).toBe(200);
+      // Before: that tab sent its whole set with read_email in it, and the teammate read its owner's mail again.
+      expect(db.agents[0].toolNames).toEqual(["create_doc", "search_email", "search_tasks"]);
+      expect(routeDb.locks).toEqual([`a-${PRIVATE_SLUG}`, `a-${PRIVATE_SLUG}`]);
+      expect(mocks.audits.filter((a) => a.action === "edited").map((a) => a.metadata)).toEqual([{ fields: ["tools"] }, { fields: ["tools"] }]);
+    });
+
+    it("lands two ticks made at the same moment, each on the list the other wrote", async () => {
+      seedShared({ toolNames: ["search_email", "search_tasks"] });
+      db.viewer = PEOPLE.admin;
+      const [added, removed] = await Promise.all([
+        call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", true)), slugged(SHARED_SLUG))),
+        call(patchTeammate(jsonRequest("PATCH", toolsPatch("search_email", false)), slugged(SHARED_SLUG))),
+      ]);
+      expect([added.status, removed.status]).toEqual([200, 200]);
+      // Before: each wrote what it read, and the second undid the first.
+      expect(db.agents[0].toolNames).toEqual(["create_task", "search_tasks"]);
+      expect(routeDb.locks).toEqual([`a-${SHARED_SLUG}`, `a-${SHARED_SLUG}`]);
+    });
+
+    it("keeps the module rule: a Talk tool is neither added nor removed while Talk is off, and unknown or excluded names do nothing", async () => {
+      seedShared({ toolNames: ["read_talk", "search_tasks"] });
+      db.viewer = PEOPLE.admin;
+      modules.talkOn = false;
+      await call(patchTeammate(jsonRequest("PATCH", { toolChanges: { add: ["post_in_talk", "drop_database", "create_contract"], remove: ["read_talk"] } }), slugged(SHARED_SLUG)));
+      expect(db.agents[0].toolNames).toEqual(["read_talk", "search_tasks"]);
+      expect(routeDb.writes).toEqual([]);
+      // A name both added and removed is removed: a change never grants what it also takes away.
+      modules.talkOn = true;
+      await call(patchTeammate(jsonRequest("PATCH", { toolChanges: { add: ["create_task"], remove: ["create_task", "read_talk"] } }), slugged(SHARED_SLUG)));
+      expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
+    });
+
+    it("writes a whole list, the form older pages send, under the same lock, by the rule it had", async () => {
+      seedShared({ toolNames: ["search_email", "search_tasks"] });
+      db.viewer = PEOPLE.admin;
+      // A Gmail row's save and, at the same moment, a save from a page that names no product.
+      const [gmailRow, older] = await Promise.all([
+        call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks"], connectorRows: ["gmail"] }), slugged(SHARED_SLUG))),
+        call(patchTeammate(jsonRequest("PATCH", { toolNames: ["create_task", "search_tasks"] }), slugged(SHARED_SLUG))),
+      ]);
+      expect([gmailRow.status, older.status]).toEqual([200, 200]);
+      // Whichever is first, the other reads what it wrote. Before: the older
+      // page's save kept the Gmail tool as it had read it, and put it back.
+      expect(db.agents[0].toolNames).not.toContain("search_email");
+      expect(db.agents[0].toolNames).toContain("search_tasks");
+      expect(routeDb.locks).toEqual([`a-${SHARED_SLUG}`, `a-${SHARED_SLUG}`]);
+    });
+
+    it("refuses a body that sends a whole list and a change at once, and writes nothing", async () => {
+      seedShared();
+      db.viewer = PEOPLE.admin;
+      const both = await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks"], toolChanges: { add: ["create_task"] } }), slugged(SHARED_SLUG)));
+      expect(both).toEqual({ status: 400, body: { error: "Check the details and try again.", code: "invalid" } });
+      expect(routeDb.writes).toEqual([]);
+    });
   });
 
   it("changes a removed teammate only by adding it back, within the plan's limit", async () => {

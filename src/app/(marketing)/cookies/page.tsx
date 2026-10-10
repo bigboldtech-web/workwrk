@@ -38,6 +38,17 @@ export const metadata: Metadata = {
  *   wwrk_consent             src/app/api/consent/route.ts, 180 days
  *   NEXT_LOCALE              src/i18n/request.ts, 365 days
  *   NEXT_CURRENCY            src/lib/currency-server.ts, 365 days
+ *   wk_tc_state              src/app/api/teammate-connections/google/start/route.ts
+ *                            (STATE_COOKIE in src/lib/connectors/connect-redirects.ts),
+ *                            10 minutes, cleared by the callback route
+ *   gcal_state               src/app/api/integrations/google-calendar/connect/route.ts,
+ *                            10 minutes, cleared by its callback route
+ *
+ * The last two were missing (review of step 5,
+ * docs/plans/ai-teammates-phase3.md): wk_tc_state from the release that
+ * shipped connecting Google to AI teammates, and gcal_state since the Google
+ * Calendar sync shipped. Each is set only on the way to Google and checked on
+ * the way back, on that one path.
  *
  * There is no analytics row and no marketing row because nothing in the
  * codebase sets one. The banner still asks, because the consent record is
@@ -76,6 +87,20 @@ const COOKIES = [
     duration: "365 days",
     type: "Functional",
   },
+  {
+    name: "wk_tc_state",
+    purpose:
+      "Checks that connecting your Google account to your AI teammates finishes in the browser that started it. Set only while you connect, and cleared when Google sends you back.",
+    duration: "10 minutes",
+    type: "Essential",
+  },
+  {
+    name: "gcal_state",
+    purpose:
+      "Checks that connecting Google Calendar to your WorkwrK calendar finishes in the browser that started it, and for whom. Set only while you connect, and cleared when Google sends you back.",
+    duration: "10 minutes",
+    type: "Essential",
+  },
 ];
 
 export default function CookiesPage() {
@@ -105,8 +130,9 @@ export default function CookiesPage() {
             <>
             <p>
               Cookies are small text files stored in your browser. Ours keep you logged in, remember the language and
-              currency you picked, and remember that you have seen the cookie notice. No analytics vendor, no ad network
-              and no pixel runs on this site.
+              currency you picked, remember that you have seen the cookie notice, and check that connecting your Google
+              account to your AI teammates finishes where it started. No analytics vendor, no ad network and no pixel runs
+              on this site.
             </p>
             <p>
               One thing is written on our side rather than yours. When you dismiss the cookie notice we keep a record that
@@ -159,8 +185,9 @@ export default function CookiesPage() {
             <>
               <p>
                 Essential cookies are required for the service to work and cannot be disabled. The language and
-                currency cookies are set only when you pick a language or a currency. There is nothing optional to
-                opt in to, so the banner on your first visit is a notice, not a choice.
+                currency cookies are set only when you pick a language or a currency, and the Google connect cookie
+                only while you connect your Google account to your AI teammates. There is nothing optional to opt in
+                to, so the banner on your first visit is a notice, not a choice.
               </p>
               <p>
                 You can also block all cookies in your browser settings. The service will not work properly without
