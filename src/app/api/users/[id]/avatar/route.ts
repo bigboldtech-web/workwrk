@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { writeUpload } from "@/lib/local-uploads";
+import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
 
 /** Own photo always; someone else's only via the alignment ladder
  *  (org-wide levels, or a manager whose tree contains the target). */
@@ -27,6 +28,9 @@ export async function POST(
     where: { id, organizationId: orgId },
   });
   if (!user) return jsonError("User not found", 404);
+  // A photo on an account its own person erased would name them again
+  // (review round 8 of Phase 3). Clearing one (DELETE) stays allowed.
+  if (await isErasedAccount(prisma, id)) return jsonSuccess(ACCOUNT_ERASED, 409);
 
   const formData = await req.formData();
   const file = formData.get("file") as File;

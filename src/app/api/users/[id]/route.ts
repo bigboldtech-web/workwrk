@@ -15,6 +15,13 @@
 //   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and the
 //           manager tier over their own chain.
 //
+// An account its own person erased (POST /api/me/delete) is never restored
+// or edited here: 409 `account_erased` (review round 8 of Phase 3). Before, a
+// restore set deletedAt back to null and an edit could name the "Deleted
+// User" again, and the erasure sweep then never recognised the account, so
+// their AI teammates' words stayed for good. Only a deactivation, and a
+// removal, still go through: switching someone off is never refused.
+//
 // The legacy Task table (dead since Phase 2) and the check-ins no writer
 // ever fed are no longer read here.
 
@@ -58,6 +65,7 @@ import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endConnectionsFor } from "@/lib/connectors/connections";
+import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -349,6 +357,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       fields: forbidden,
     });
   }
+  // An erased account keeps its anonymisation (see the header): only a
+  // deactivation goes through (review round 8 of Phase 3).
+  const deactivationOnly = Object.keys(body).length === 1 && body.status === "INACTIVE";
+  if (!deactivationOnly && (await isErasedAccount(prisma, id))) return err(409, ACCOUNT_ERASED.error, { code: ACCOUNT_ERASED.code });
 
   const data: Record<string, unknown> = {};
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : v);
@@ -648,6 +660,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (restore ? !access.restore : !access.remove) {
     return err(403, "You can only remove people in your reporting line.");
   }
+  // An erased account is never brought back (see the header; review round 8
+  // of Phase 3): a restore set deletedAt back to null.
+  if (restore && (await isErasedAccount(prisma, id))) return err(409, ACCOUNT_ERASED.error, { code: ACCOUNT_ERASED.code });
 
   if (restore) {
     // A restored person takes a seat again (src/lib/seats.ts), checked and

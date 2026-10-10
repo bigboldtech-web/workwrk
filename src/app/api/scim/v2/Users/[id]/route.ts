@@ -7,6 +7,15 @@
 // DELETE soft-deactivates by default (status = INACTIVE), not a hard
 // row drop. Real deletion is a separate hard-delete admin action; an
 // IdP de-provision should never lose audit trail.
+//
+// AN ERASED ACCOUNT (review round 8 of Phase 3). A person who deleted their
+// own account (POST /api/me/delete) is gone for the identity provider: GET,
+// PUT and PATCH answer as for an unknown user, so a push never writes their
+// real address and names back onto the anonymised row, and active:true never
+// brings it back. Before, a push did both, and the erasure sweep then never
+// recognised the account, so their AI teammates' words stayed for good. A
+// deprovision (active:false, or DELETE) still answers a harmless success,
+// its other fields dropped: identity providers retry on errors.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -15,6 +24,18 @@ import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorks
 import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { isErasedAccount } from "@/lib/compliance/erased-account";
+
+/**
+ * A request to an erased account (see the header): only a deprovision goes
+ * on, with every other field dropped; anything else is refused as for an
+ * unknown user. Changes `data` in place; answers whether to refuse.
+ */
+function refuseForErased(data: Record<string, unknown>): boolean {
+  if (data.status !== "INACTIVE") return true;
+  for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+  return false;
+}
 
 export async function GET(
   req: NextRequest,
@@ -36,7 +57,7 @@ export async function GET(
       updatedAt: true,
     },
   });
-  if (!user) return scimError(404, "User not found");
+  if (!user || (await isErasedAccount(prisma, id))) return scimError(404, "User not found");
   return scimResponse(userToScim({ ...user, externalId: null }));
 }
 
@@ -72,6 +93,7 @@ export async function PUT(
     data.status = body.active ? "ACTIVE" : "INACTIVE";
   }
 
+  if ((await isErasedAccount(prisma, id)) && refuseForErased(data)) return scimError(404, "User not found");
   if (Object.keys(data).length === 0) return scimError(400, "No fields to update");
   if (auth.workspaceInactive) {
     // Suspended or cancelled: only a deprovision goes through. An identity
@@ -185,6 +207,7 @@ export async function PATCH(
     // unsupported attributes rather than 400-ing the whole request.
   }
 
+  if ((await isErasedAccount(prisma, id)) && refuseForErased(data)) return scimError(404, "User not found");
   if (Object.keys(data).length === 0) {
     return scimResponse(userToScim({ ...existing, externalId: null }));
   }
