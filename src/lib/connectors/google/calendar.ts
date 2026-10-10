@@ -28,6 +28,7 @@
 
 import { createHash } from "node:crypto";
 import { isZone, momentOf, startOfDay, wallClock } from "../free-time";
+import { isEventId } from "../products";
 
 function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -55,8 +56,14 @@ export function calendarUrl(base: string, path: string, params: Array<[string, s
 /** The person's own primary calendar's events: the only calendar the tools read or write. */
 export const PRIMARY_EVENTS = "calendars/primary/events";
 
-/** One event of the person's primary calendar, its id a single path part whatever it holds. */
+/**
+ * One event of the person's primary calendar. Only an id Google could have
+ * given (products.ts isEventId, review round 1 of Phase 3): every input that
+ * names an event is held to it first, so this throws only on a path that
+ * skipped that check, and no address is ever built from anything else.
+ */
 export function eventPath(id: string): string {
+  if (!isEventId(id)) throw new Error("not an event id");
   return `${PRIMARY_EVENTS}/${encodeURIComponent(id)}`;
 }
 

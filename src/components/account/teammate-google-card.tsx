@@ -121,29 +121,43 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
     document.getElementById("ai-google")?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [view]);
 
+  // The workspace this card was read in (review round 1 of Phase 3): every
+  // change sends it, and a route whose session moved to another workspace in
+  // another tab changes nothing there and answers workspace_changed, so the
+  // whole page reloads into the workspace the person is in now.
+  const shownIn = view?.organizationId ?? "";
+
   const setAllow = useCallback(async (t: TeammateGoogleUse, changes: Partial<Record<ConnectorProduct, boolean>>) => {
     setBusy(`allow:${t.slug}`);
     // `expect`: the teammate as this card showed it, so the allow covers what the person saw.
     const r = await apiFetch<{ teammate: TeammateGoogleUse }>(`/api/teammate-connections/teammates/${encodeURIComponent(t.slug)}`, {
       method: "PUT",
-      json: { ...changes, expect: t.print },
+      json: { ...changes, expect: t.print, organizationId: shownIn },
     });
     setBusy(null);
     if (!r.ok) {
       toast(r.error || C.allowFailed, { tone: "danger" });
+      if (r.code === "workspace_changed") { window.location.reload(); return; }
       // It changed while the card was open: read again, so the new parts are shown.
       if (r.code === "teammate_changed") void load();
       return;
     }
     setView((v) => (v ? { ...v, teammates: v.teammates.map((x) => (x.slug === t.slug ? r.data.teammate : x)) } : v));
-  }, [toast, load]);
+  }, [toast, load, shownIn]);
 
   async function disconnect() {
     setBusy("disconnect");
-    const r = await apiFetch<{ disconnected: boolean; revoked: "now" | "queued" | "kept_shared" }>("/api/teammate-connections/google", { method: "DELETE" });
+    const r = await apiFetch<{ disconnected: boolean; revoked: "now" | "queued" | "kept_shared" }>("/api/teammate-connections/google", {
+      method: "DELETE",
+      json: { organizationId: shownIn },
+    });
     setBusy(null);
     setConfirmOpen(false);
-    if (!r.ok) { toast(r.error || C.disconnectFailed, { tone: "danger" }); return; }
+    if (!r.ok) {
+      toast(r.error || C.disconnectFailed, { tone: "danger" });
+      if (r.code === "workspace_changed") window.location.reload();
+      return;
+    }
     toast(r.data.revoked === "kept_shared" ? `${C.disconnectedToast}. ${C.sharedNote}` : C.disconnectedToast);
     void load();
   }

@@ -37,6 +37,8 @@ export interface ActionRowFx {
   result: unknown;
   error: string | null;
   reportedAt: Date | null;
+  /** Asked in a turn that read the person's Google (review round 1 of Phase 3). */
+  readGoogle?: boolean;
   expiresAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -107,6 +109,10 @@ export const fx = {
   /** What connectorAccess answers (connectorFake), and what it was asked. */
   connectorAccess: { ok: true } as { ok: true } | { ok: false; reason: string; changed?: string[] },
   connectorAccessCalls: [] as Array<{ product: string; forApproval?: boolean; agent: { id: string; visibility: string; ownerId: string | null } }>,
+  /** Runs marked at once as having read Google (executor.ts markRunReadGoogle, review round 1 of Phase 3). */
+  runMarks: [] as string[],
+  /** The twin check's locks (executor.ts withTwinLock): the key each took, and whether a transaction held it. */
+  twinLocks: [] as Array<{ key: string; inTx: boolean }>,
 };
 
 export function resetFixtures(): void {
@@ -130,6 +136,9 @@ export function resetFixtures(): void {
   fx.connectors = { gmail: false, calendar: false };
   fx.connectorAccess = { ok: true };
   fx.connectorAccessCalls = [];
+  fx.runMarks = [];
+  fx.twinLocks = [];
+  inTx = false;
 }
 
 /** One request in the table, PENDING for the person unless told otherwise. */
@@ -197,7 +206,37 @@ const rows = (where?: Record<string, unknown>) => fx.actions.filter((r) => match
 /** A read hands back a copy, as a database does: a later write never changes what was read. Ask AI's own have no teammate. */
 const withAgent = (r: ActionRowFx) => ({ ...r, agent: r.agentId ? { ...fx.agent } : null });
 
+let inTx = false;
+
 export const prismaFake = {
+  // One transaction: the same fake, with its writes known to be inside it.
+  $transaction: async <T>(fn: (tx: unknown) => Promise<T>): Promise<T> => {
+    const was = inTx;
+    inTx = true;
+    try {
+      return await fn(prismaFake);
+    } finally {
+      inTx = was;
+    }
+  },
+  // The statements the executor runs itself (review round 1 of Phase 3): the
+  // run's mark, merged into what the run holds, and the twin check's lock.
+  $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join("?").replace(/\s+/g, " ").trim();
+    fx.sql.push(sql);
+    if (sql.startsWith('UPDATE "AgentRun" SET "output" = jsonb_set(')) {
+      if (!sql.includes(`CASE WHEN jsonb_typeof("output") = 'object' THEN "output" ELSE '{}'::jsonb END, '{readGoogle}', 'true'::jsonb, true)`)) {
+        throw new Error(`test-fixtures: the run's mark must merge into what the run holds\n${sql}`);
+      }
+      fx.runMarks.push(String(values[0]));
+      return 1;
+    }
+    if (sql === "SELECT pg_advisory_xact_lock(?::int, hashtext(?))") {
+      fx.twinLocks.push({ key: String(values[1]), inTx });
+      return 1;
+    }
+    throw new Error(`test-fixtures: unknown statement ${sql}`);
+  },
   agentRun: {
     findUnique: async (a: { where: { id: string } }) => (a.where.id in fx.runTriggers ? { input: { trigger: fx.runTriggers[a.where.id] } } : null),
   },

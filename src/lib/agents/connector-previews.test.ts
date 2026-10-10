@@ -450,6 +450,24 @@ describe("the calendar's cards (step 4)", () => {
     expect(await prepareCall("cancel_event", { eventId: "e-gone" }, ctx())).toEqual({ ok: false, error: C.eventNotFound });
   });
 
+  // Review round 1 of Phase 3: an eventId of ".." from a planted email was
+  // sent as a path fetch resolves (the calendar itself), and a 403 there
+  // marked the person's whole connection broken.
+  it("refuses an event id Google could never have given before any address is built, and a 404 on one the model wrote breaks nothing", async () => {
+    for (const eventId of ["..", ".", "e/../x", "e%2e%2e", "Team.Sync", "e team"]) {
+      for (const tool of ["update_event", "cancel_event", "respond_to_invite"] as const) {
+        const r = await prepareCall(tool, { eventId, title: "x", response: "accepted" }, ctx());
+        expect(r).toMatchObject({ ok: false });
+        expect(r).not.toHaveProperty("readGoogle");
+      }
+    }
+    expect(calendarCalls()).toEqual([]);
+    // Shaped as Google shapes them, but not there: not found, and the connection is as it was.
+    expect(await prepareCall("cancel_event", { eventId: "7cbh8rpc10lrc0ckih9tafss99" }, ctx())).toEqual({ ok: false, error: C.eventNotFound });
+    expect(cdb.connections[0]).toMatchObject({ status: "active", statusReason: null });
+    expect(cdb.notifications).toEqual([]);
+  });
+
   it("holds a card to the event's etag: unchanged it prepares again, changed at the approval it ends with eventChanged (Decisions 12 and 15)", async () => {
     const first = ok(await prepareCall("cancel_event", { eventId: "e-team" }, ctx()));
     expect(first.input).toMatchObject({ eventId: "e-team", etag: '"e-team-1"', notify: 2, account: ACCOUNT });

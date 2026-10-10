@@ -11,6 +11,7 @@ import {
   PRODUCT_SCOPES,
   TAINTING_TOOLS,
   TOOL_PRODUCT,
+  isEventId,
   parseProducts,
   productOfTool,
   productSet,
@@ -96,5 +97,22 @@ describe("the tools and their products", () => {
 
   it("holds the spec's limits", () => {
     expect(CONNECTOR_LIMITS).toMatchObject({ callsPerTurn: 12, perPersonPerMinute: 30, searchMax: 20, bodyChars: 4000, threadChars: 20_000, eventsMax: 50, listWindowDays: 31, freeWindowDays: 14, freeOthersMax: 5 });
+  });
+});
+
+// Review round 1 of Phase 3: an id the model wrote from a planted email is
+// checked before any address is built from it.
+describe("isEventId", () => {
+  it("takes the ids Google gives, an instance's suffix included, and the stand-in's hyphens", () => {
+    for (const id of ["7cbh8rpc10lrc0ckih9tafss99", "_68r3ac9h6co3ib9k6os4ab9k6", "abc123_20261013", "abc123_20261013T100000Z", "e-solo", "e-weekly_20261013"]) {
+      expect(isEventId(id)).toBe(true);
+    }
+  });
+  it("refuses a dot, a slash, an escape, a space, capitals outside the suffix, nothing, and more than 1024 characters", () => {
+    for (const id of ["..", ".", "a.b", "a/b", "e%2e%2e", "a b", "Team", "", "a".repeat(1025), "abc_20261013T100000z"]) {
+      expect(isEventId(id)).toBe(false);
+    }
+    expect(isEventId(null)).toBe(false);
+    expect(isEventId(12)).toBe(false);
   });
 });

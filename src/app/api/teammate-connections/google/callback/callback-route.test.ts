@@ -33,7 +33,7 @@ vi.mock("@/lib/connectors/google/config", () => ({
 vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: vi.fn(async () => st.viewer) }));
 vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: vi.fn(async () => st.acting) }));
 
-import { cdb, connectorDb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
+import { cdb, connectorDb, keyOf, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { createState } from "@/lib/connectors/oauth-state";
 import { openToken, sealToken } from "@/lib/connectors/seal";
 import { GET } from "./route";
@@ -252,5 +252,70 @@ describe("after the code exchange", () => {
     expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("workspace_closed");
     expect(cdb.connections).toEqual([]);
     expect(calls).toContain(CFG.revokeUrl);
+  });
+
+  // Review round 1 of Phase 3: a suspended workspace took new connections.
+  it("refuses a workspace suspended meanwhile, and revokes the grant it just made", async () => {
+    const calls = google({ scope: CAL });
+    const state = await begin(["calendar"]);
+    cdb.suspendedOrgs.add("org1");
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("workspace_closed");
+    expect(cdb.connections).toEqual([]);
+    expect(calls).toContain(CFG.revokeUrl);
+  });
+
+  // Review round 1 of Phase 3: the callback read the switch before the code
+  // exchange, so a connect finishing after "Turn off and disconnect everyone"
+  // stored a connection after everyone's had ended.
+  it("stores nothing when the product was turned off after the callback read the switch, and lets the grant go", async () => {
+    const calls = google({ scope: CAL });
+    const state = await begin(["calendar"]);
+    // The callback's read saw Calendar on; an Admin turned it off before the save.
+    vi.spyOn(connectorDb.teammateConnectorPolicy, "findUnique").mockResolvedValueOnce({ products: ["calendar"], updatedAt: new Date() } as never);
+    cdb.policy.set("org1", []);
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("workspace_off");
+    expect(cdb.connections).toEqual([]);
+    expect(calls).toContain(CFG.revokeUrl);
+    // The save read the switch under a share lock, in its own transaction.
+    expect(cdb.policyReads).toEqual([{ lock: "share", inTx: true }]);
+  });
+});
+
+describe("a grant nothing keeps (review round 1 of Phase 3)", () => {
+  // Before: revoked once and forgotten; a Google that did not answer left
+  // WorkwrK listed in the person's Google account for good.
+  it("queues the revoke with its account key when Google does not confirm it, for the cron to drain", async () => {
+    const calls = google({ scope: [GMAIL[0]], revoke: 503 });
+    const state = await begin(["gmail"]);
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("no_access");
+    expect(calls.filter((u) => u === CFG.revokeUrl)).toHaveLength(1);
+    expect(cdb.revocations).toHaveLength(1);
+    expect(cdb.revocations[0]).toMatchObject({ reason: "disconnected", accountKey: keyOf("google", "sub-max") });
+    expect(openToken(cdb.revocations[0].tokenSealed)).toBe("refresh-new");
+    expect(cdb.events.find((e) => e.op === "revocation.create")?.inTx).toBe(true);
+  });
+
+  // Before: whether the account was held elsewhere was a count with no lock,
+  // so a connect of it saving elsewhere at that moment could be revoked.
+  it("decides whether the account is held elsewhere under the account's lock, before the held check", async () => {
+    google({ scope: [GMAIL[0]] });
+    const state = await begin(["gmail"]);
+    await callback(`code=c1&state=${state}`, state);
+    // The decision's own lock, and the queue's again just before it tells Google.
+    expect(cdb.locks).toEqual([
+      { keys: [keyOf("google", "sub-max")], inTx: true },
+      { keys: [keyOf("google", "sub-max")], inTx: true },
+    ]);
+    // Revoked and gone from the queue once Google confirmed.
+    expect(cdb.revocations).toEqual([]);
+  });
+
+  it("queues nothing and tells Google nothing when another live connection holds the account", async () => {
+    seedConnection({ organizationId: "org2", userId: "u-max", accountSub: "sub-max" });
+    const calls = google({ scope: [GMAIL[0]] });
+    const state = await begin(["gmail"]);
+    expect(outcome(await callback(`code=c1&state=${state}`, state)).get("ai_error")).toBe("no_access");
+    expect(calls).not.toContain(CFG.revokeUrl);
+    expect(cdb.revocations).toEqual([]);
   });
 });

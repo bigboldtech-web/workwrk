@@ -117,9 +117,41 @@ describe("googleCall", () => {
     const conn = connection({ expiresInMs: 10_000 });
     // Reconnected as another account: tokenVersion 2.
     cdb.connections[0].tokenVersion = 2;
+    cdb.connections[0].accountSub = "sub-other";
     const r = await googleCall(conn, CFG, { method: "POST", url: "https://g.test/gmail/v1/users/me/messages/send", body: { raw: "x" }, write: true });
     expect(r).toEqual({ ok: false, failure: "needs_reconnect" });
     expect(calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
+  });
+
+  // Review round 1 of Phase 3: a reconnect of the same account during a call
+  // answered "reconnect", seconds after the person did.
+  it("goes on with the reconnect's own token when the same account was connected again meanwhile, still holding the call's products", async () => {
+    const { calls } = fetchQueue([{ status: 200, json: { access_token: "old-grant-access", expires_in: 3600 } }, { status: 200, json: { messages: [] } }]);
+    const conn = connection({ expiresInMs: 10_000 });
+    // Max reconnected the same Google account while this call was on its way.
+    Object.assign(cdb.connections[0], { tokenVersion: 2, accessTokenSealed: sealToken("reconnect-access"), accessTokenExpiresAt: new Date(Date.now() + 3_600_000) });
+    const r = await googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false });
+    expect(r).toEqual({ ok: true, data: { messages: [] }, etag: null });
+    expect(calls.map((c) => c.url)).toEqual([CFG.tokenUrl, GMAIL]);
+    expect(calls[1].auth).toBe("Bearer reconnect-access");
+    // The reconnect's row is left as it was: this call's refresh stored nothing.
+    expect(cdb.connections[0].tokenVersion).toBe(2);
+    expect(openToken(cdb.connections[0].accessTokenSealed)).toBe("reconnect-access");
+  });
+
+  it("still answers needs_reconnect when the reconnect of the same account dropped a product the call was opened for, or is broken", async () => {
+    let q = fetchQueue([{ status: 200, json: { access_token: "old-grant-access", expires_in: 3600 } }]);
+    let conn = connection({ expiresInMs: 10_000 });
+    Object.assign(cdb.connections[0], { tokenVersion: 2, products: ["calendar"], accessTokenSealed: sealToken("reconnect-access"), accessTokenExpiresAt: new Date(Date.now() + 3_600_000) });
+    expect(await googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false })).toEqual({ ok: false, failure: "needs_reconnect" });
+    expect(q.calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
+
+    resetConnectorDb();
+    q = fetchQueue([{ status: 200, json: { access_token: "old-grant-access", expires_in: 3600 } }]);
+    conn = connection({ expiresInMs: 10_000 });
+    Object.assign(cdb.connections[0], { tokenVersion: 2, status: "needs_reconnect" });
+    expect(await googleCall(conn, CFG, { method: "GET", url: GMAIL, write: false })).toEqual({ ok: false, failure: "needs_reconnect" });
+    expect(q.calls.map((c) => c.url)).toEqual([CFG.tokenUrl]);
   });
 
   it("answers unknown_outcome for a write that timed out, after one fetch and no retry", async () => {

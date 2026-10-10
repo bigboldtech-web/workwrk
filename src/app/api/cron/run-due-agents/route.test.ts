@@ -76,8 +76,9 @@ describe("one tick", () => {
     expect(now.toISOString()).toBe("2026-10-06T09:00:00.000Z");
     expect(st.processDueRoutines).toHaveBeenCalledWith(now, { limit: 200, budgetMs: 120_000, concurrency: 10 });
     expect(st.convertLegacySchedules).toHaveBeenCalledWith(now, { limit: 100 });
-    // Step 4 (docs/plans/ai-teammates-phase3.md step 2): within its own budget.
-    expect(st.sweepConnections).toHaveBeenCalledWith(now, { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    // Step 4 (docs/plans/ai-teammates-phase3.md step 2): within its own budget,
+    // 500 revokes a tick (review round 1 of Phase 3: 50 left a large queue for hours).
+    expect(st.sweepConnections).toHaveBeenCalledWith(now, { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 });
   });
 
   it("answers in counts only, naming nobody", async () => {

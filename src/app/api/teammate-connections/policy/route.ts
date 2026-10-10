@@ -1,5 +1,5 @@
 // GET /api/teammate-connections/policy
-// PUT /api/teammate-connections/policy { gmail?: boolean, calendar?: boolean }
+// PUT /api/teammate-connections/policy { gmail?: boolean, calendar?: boolean, organizationId? }
 //
 // The workspace switch for Google in AI teammates, per product, and the
 // numbers behind it (docs/plans/ai-teammates-phase3.md step 2, Decisions 1,
@@ -17,6 +17,15 @@
 // PUT asks freshWorkspaceActor, as the users route does, and an Admin demoted
 // or removed a moment ago cannot turn Gmail on for the workspace. GET returns
 // counts only and keeps the gate alone.
+//
+// REVIEW ROUND 1 OF PHASE 3. The audit row says what this write changed, from
+// the switch as it was just before it and as it left it (setPolicyProduct
+// reads both under one lock), never from a read made before another Admin's
+// change landed. And PUT names the workspace the page showed
+// (organizationId), as Disconnect everyone does, since "Turn off and
+// disconnect everyone" sends this first: a session switched to another
+// workspace in another tab changes nothing there (409 workspace_changed), and
+// the page reloads.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -31,10 +40,9 @@ import { connectorPolicyView } from "@/lib/connectors/connection-views-server";
 import { setPolicyProduct } from "@/lib/connectors/connections";
 import { googleConfig } from "@/lib/connectors/google/config";
 import { CONNECTOR_PRODUCTS, productSet, type ConnectorProduct } from "@/lib/connectors/products";
-import { prisma } from "@/lib/prisma";
 
 const bodySchema = z
-  .object({ gmail: z.boolean().optional(), calendar: z.boolean().optional() })
+  .object({ gmail: z.boolean().optional(), calendar: z.boolean().optional(), organizationId: z.string().min(1).max(200).optional() })
   .strict()
   .refine((v) => v.gmail !== undefined || v.calendar !== undefined);
 
@@ -57,6 +65,12 @@ export async function PUT(req: Request) {
   if (!fresh.admin) return teammateError(403, "stale_session", CONNECTION_ROUTE_ERRORS.adminsOnly);
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
+  // A caller that names no workspace (an API client, a page from before this) is answered as before.
+  const shownIn = parsed.data.organizationId;
+  // Required (lead, after review round 1): a page that names no workspace,
+  // such as one loaded before this release, reloads rather than act on
+  // whichever workspace the session holds now.
+  if (shownIn !== viewer.organizationId) return teammateError(409, "workspace_changed", CONNECTION_ROUTE_ERRORS.workspaceChanged);
 
   const wants = CONNECTOR_PRODUCTS.filter((p) => parsed.data[p] !== undefined).map((p) => ({ product: p, on: parsed.data[p] === true }));
   if (wants.some((w) => w.on)) {
@@ -66,31 +80,25 @@ export async function PUT(req: Request) {
     if (notOffered) return teammateError(409, "not_offered", CONNECTION_ROUTE_ERRORS.notOffered(productWord(notOffered.product)));
   }
 
-  // What it was, for the audit row and for `turnedOff`; the write itself never reads it.
-  const before = productSet(
-    (
-      await prisma.teammateConnectorPolicy.findUnique({
-        where: { organizationId_provider: { organizationId: viewer.organizationId, provider: "google" } },
-        select: { products: true },
-      })
-    )?.products,
-  );
   const turnedOff: ConnectorProduct[] = [];
   for (const { product, on } of wants) {
-    const after = productSet(await setPolicyProduct(viewer.organizationId, product, on, viewer.userId));
+    // What it was and what it is, both from this write (see the file header).
+    const changed = await setPolicyProduct(viewer.organizationId, product, on, viewer.userId);
+    const before = productSet(changed.before);
+    const after = productSet(changed.after);
     if (before[product] === after[product]) continue;
     if (!after[product]) turnedOff.push(product);
     await logActivity({
       type: "teammate_connectors.changed",
       actorId: viewer.userId,
       organizationId: viewer.organizationId,
-      description: CONNECTOR_POLICY_COPY.auditChanged(productWord(product), on),
+      description: CONNECTOR_POLICY_COPY.auditChanged(productWord(product), after[product]),
       targetId: viewer.organizationId,
       targetType: "organization",
       oldValue: { provider: "google", product, on: before[product] },
       newValue: { provider: "google", product, on: after[product] },
       metadata: { provider: "google", product },
-      severity: on ? "warning" : "info",
+      severity: after[product] ? "warning" : "info",
     });
   }
   return NextResponse.json({ ...(await connectorPolicyView(viewer.organizationId)), turnedOff });

@@ -816,6 +816,25 @@ describe("what an approval card batches (Phase 3, review of step 3)", () => {
     expect(parts.batch.map((a) => a.id)).toEqual(["t1", "t2"]);
     expect(parts.alone).toEqual([]);
   });
+
+  // Review round 1 of Phase 3: after a planted email, a memory, a routine and
+  // a Talk post sat in the batch, ticked and closed, one "Approve 4" away
+  // with their words never on screen.
+  it("gives every request asked after a Google read a card of its own, whatever its class, and keeps the rest batched", () => {
+    const read = (id: string, toolName: string, risk: string) => actionViewFromRow(action({ id, toolName, risk, groupKey: `run1:${toolName}`, readGoogle: true }));
+    const memory = read("m1", "remember", "INTERNAL");
+    const routine = read("r1", "create_routine", "INTERNAL");
+    const post = read("p1", "post_in_talk", "OUTWARD");
+    const task = view("t1", "create_task", "INTERNAL");
+    const other = view("t2", "create_task", "OUTWARD");
+    expect(memory.readGoogle).toBe(true);
+    const parts = approvalCardParts([memory, task, routine, other, post]);
+    expect(parts.alone.map((a) => a.id)).toEqual(["m1", "r1", "p1"]);
+    expect(parts.batch.map((a) => a.id)).toEqual(["t1", "t2"]);
+    // A card read with the column false, or from before it, is no different from before.
+    expect(actionViewFromRow(action({ id: "x1", toolName: "create_task", risk: "INTERNAL", readGoogle: false }))).not.toHaveProperty("readGoogle");
+    expect(view("x2", "create_task", "INTERNAL")).not.toHaveProperty("readGoogle");
+  });
 });
 
 describe("a group's skipped line (review of step 4)", () => {

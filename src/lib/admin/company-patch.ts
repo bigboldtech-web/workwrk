@@ -28,7 +28,7 @@ import { seatsAreUnlimited } from "@/lib/admin/companies-list";
 import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
 import { subscriptionStillOpen } from "@/services/billing";
-import { endWorkspaceConnections } from "@/lib/connectors/connections";
+import { endSuspendedWorkspaceConnections, endWorkspaceConnections } from "@/lib/connectors/connections";
 
 /** A company cancelled here is deleted this many days later, as an Owner's own delete is. */
 const STAFF_CANCEL_GRACE_DAYS = 30;
@@ -447,6 +447,15 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   if (result.changed?.includes("status") && result.company?.status === "CANCELLED") {
     await endWorkspaceConnections(id, "workspace_deleted", null).catch((e) => {
       console.error(`[connectors] staff closure hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+    });
+  }
+  // A company suspended here: nobody can sign in to use their connection or
+  // end it, and its routines kept reading their mail, so they end now too,
+  // each person told why (review round 1 of Phase 3). The sweep catches any
+  // this misses.
+  if (result.changed?.includes("status") && result.company?.status === "SUSPENDED") {
+    await endSuspendedWorkspaceConnections(id).catch((e) => {
+      console.error(`[connectors] staff suspension hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
   }
 

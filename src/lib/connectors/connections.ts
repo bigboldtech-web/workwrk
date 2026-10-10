@@ -24,7 +24,9 @@
 // is revoked, is decided under a per-account lock (lockAccounts), taken by
 // every path that decides it: a removal after its delete, a connect for the
 // new account and the one it replaces, the hard delete, and the queue just
-// before it tells Google. Without it two removals of one account at the same
+// before it tells Google; since review round 1 of Phase 3 also a connect's
+// grant nothing kept (discardConnectGrant), and a connect deletes the
+// revokes queued for its account under it. Without it two removals of one account at the same
 // moment each saw the other's row and neither queued a revoke, and a revoke
 // queued a minute before a reconnect of the same account ended the new grant
 // too. A queue row keeps its account only as accountKey (sha256 of provider
@@ -78,16 +80,34 @@ export function accountKey(provider: string, sub: string): string {
 
 /**
  * Hold the per-account lock of these accounts until the transaction ends
- * (see ONE GOOGLE ACCOUNT above). In one sorted order everywhere (ORDER BY
- * in the statement, so the database sorts, and its volatile lock calls run
- * in that order), so two transactions never wait on each other. $executeRaw,
- * never $queryRaw: pg_advisory_xact_lock answers void, which a query cannot
- * read back.
+ * (see ONE GOOGLE ACCOUNT above). In one order everywhere, so two
+ * transactions never wait on each other: the order of the lock ids
+ * themselves (ORDER BY the hashed id, in the statement, so the database
+ * sorts and its volatile lock calls run in that order). Review round 1 of
+ * Phase 3: sorting by the account key while locking its 32 bit hash let two
+ * keys that share a hash be taken in opposite orders by two transactions,
+ * a deadlock in a large deployment. DISTINCT on the id, so two keys that
+ * share one are locked once. $executeRaw, never $queryRaw:
+ * pg_advisory_xact_lock answers void, which a query cannot read back.
  */
 async function lockAccounts(tx: Prisma.TransactionClient, keys: readonly string[]): Promise<void> {
   const wanted = [...new Set(keys)];
   if (wanted.length === 0) return;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || k)) FROM unnest(${wanted}::text[]) AS k ORDER BY k`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(s.h) FROM (SELECT DISTINCT hashtext('tc-sub:' || k) AS h FROM unnest(${wanted}::text[]) AS k) s ORDER BY s.h`;
+}
+
+/**
+ * The workspaces whose people a teammate may act for: ACTIVE, and TRIAL
+ * (every new self-serve workspace starts there; the rest of the product
+ * reads the two as live, reminders.ts LIVE_STATUS). SUSPENDED and CANCELLED
+ * are closed: nobody can sign in to them (review round 1 of Phase 3).
+ */
+const LIVE_WORKSPACE = new Set(["ACTIVE", "TRIAL"]);
+
+/** Whether this workspace is one a teammate may use anyone's Google in now. */
+async function workspaceLive(organizationId: string): Promise<boolean> {
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
+  return Boolean(org && LIVE_WORKSPACE.has(String(org.status)));
 }
 
 /** Who ended a connection, as its audit row names them: a person (the admin who acted), or the system. */
@@ -118,8 +138,20 @@ export interface LiveConnection {
   lastUsedAt: Date | null;
 }
 
-/** Why a teammate may not use a product of the person's Google now, each its own reason. */
-export type ConnectorRefusal = "not_configured" | "workspace_off" | "not_connected" | "needs_reconnect" | "not_granted" | "not_allowed" | "teammate_changed";
+/**
+ * Why a teammate may not use a product of the person's Google now, each its
+ * own reason. workspace_closed: the workspace is suspended or closed (review
+ * round 1 of Phase 3).
+ */
+export type ConnectorRefusal =
+  | "not_configured"
+  | "workspace_closed"
+  | "workspace_off"
+  | "not_connected"
+  | "needs_reconnect"
+  | "not_granted"
+  | "not_allowed"
+  | "teammate_changed";
 
 /** The teammate a connector call is for: who may change it, and what it is now (its part prints). */
 export interface ConnectorAgent {
@@ -223,11 +255,12 @@ function printsOf(raw: unknown, product: ConnectorProduct): unknown {
  * Whether this teammate may use this product of the person's Google now, and
  * if not, the one reason why, checked in this order:
  *   1. this deployment offers no Google            not_configured
- *   2. the workspace has the product off           workspace_off
- *   3. the person has no connection here           not_connected
- *   4. it stopped working                          needs_reconnect
- *   5. Google did not grant the product            not_granted
- *   6. a teammate someone else may change (teammate-print.ts othersMayChange)
+ *   2. the workspace is suspended or closed        workspace_closed
+ *   3. the workspace has the product off           workspace_off
+ *   4. the person has no connection here           not_connected
+ *   5. it stopped working                          needs_reconnect
+ *   6. Google did not grant the product            not_granted
+ *   7. a teammate someone else may change (teammate-print.ts othersMayChange)
  *      that the person did not allow              not_allowed
  *      or that changed since they allowed it      teammate_changed
  *      (not at an approval: the person approves the card itself)
@@ -236,6 +269,12 @@ function printsOf(raw: unknown, product: ConnectorProduct): unknown {
  * Only the person's workspace and id are read, so the picker's rows ask the
  * very same question for the signed-in person (teammate-server.ts
  * connectorRowStates, step 5).
+ *
+ * A SUSPENDED WORKSPACE USES NOBODY'S GOOGLE (review round 1 of Phase 3).
+ * Its people are signed out and cannot get back in to disconnect, but its
+ * routines kept running on their mail. Every call, preparation, approval and
+ * turn asks here, so none of them reads or sends anything there; the sweep
+ * ends such connections (sweepConnections).
  */
 export async function connectorAccess(a: {
   person: Pick<ActingPerson, "organizationId" | "userId">;
@@ -246,7 +285,8 @@ export async function connectorAccess(a: {
 }): Promise<ConnectorAccess> {
   const cfg = googleConfig();
   if (!cfg) return { ok: false, reason: "not_configured" };
-  const on = await policyProducts(a.person.organizationId, cfg);
+  const [live, on] = await Promise.all([workspaceLive(a.person.organizationId), policyProducts(a.person.organizationId, cfg)]);
+  if (!live) return { ok: false, reason: "workspace_closed" };
   if (!on[a.product]) return { ok: false, reason: "workspace_off" };
   const connection = await connectionFor({ organizationId: a.person.organizationId, userId: a.person.userId });
   if (!connection) return { ok: false, reason: "not_connected" };
@@ -336,7 +376,7 @@ export async function touchUsed(connectionId: string, agentId: string): Promise<
 
 export type SaveConnectionResult =
   | { ok: true; id: string; replaced: boolean; reconnect: boolean; queued: string[] }
-  | { ok: false; code: "exchange_failed" | "workspace_closed" };
+  | { ok: false; code: "exchange_failed" | "workspace_closed" | "workspace_off" };
 
 function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
@@ -354,9 +394,25 @@ async function saveOnce(a: {
     // A workspace its Owner deleted, or staff closed, takes no new connection
     // (review of step 2): its connections ended when it was closed, and one
     // made now would hold the person's tokens until the hard delete, 30 days
-    // on. A close that commits after this read is caught by the cron sweep.
+    // on. Nor does one staff suspended (review round 1 of Phase 3): nobody
+    // there can use it or get in to end it. A close that commits after this
+    // read is caught by the cron sweep.
     const org = await tx.organization.findUnique({ where: { id: a.organizationId }, select: { status: true } });
-    if (!org || org.status === "CANCELLED") return { ok: false, code: "workspace_closed" };
+    if (!org || !LIVE_WORKSPACE.has(String(org.status))) return { ok: false, code: "workspace_closed" };
+    // Every product this connect stores must still be on here (review round 1
+    // of Phase 3). The callback read the switch before the code exchange, so
+    // an Admin's "Turn off and disconnect everyone" landing in between let
+    // the connect store a connection after everyone's had ended. The row is
+    // read FOR SHARE: a change of the switch waits for this to commit (and
+    // Disconnect everyone, after it, then ends this one too), or this reads
+    // the change and stores nothing.
+    const policy = await tx.$queryRaw<Array<{ products: string[] }>>`
+      SELECT "products" FROM "TeammateConnectorPolicy"
+       WHERE "organizationId" = ${a.organizationId} AND "provider" = 'google'
+       FOR SHARE`;
+    const switched = productSet(policy[0]?.products);
+    const offered = googleConfig()?.products ?? [];
+    if (a.products.length === 0 || !a.products.every((p) => switched[p] && offered.includes(p))) return { ok: false, code: "workspace_off" };
     // The person's row, locked: a second callback at the same moment waits
     // here, then reads what this one wrote.
     const rows = await tx.$queryRaw<Array<{ id: string; accountSub: string; refreshTokenSealed: unknown }>>`
@@ -371,6 +427,13 @@ async function saveOnce(a: {
     const newKey = accountKey("google", a.claims.sub);
     const oldKey = existing ? accountKey("google", existing.accountSub) : null;
     await lockAccounts(tx, oldKey ? [newKey, oldKey] : [newKey]);
+    // A revoke queued for this account before now is superseded (review
+    // round 1 of Phase 3): it names this grant, and Google revokes a grant
+    // per client and account, so sent after this commit it would end the
+    // connection this saves. Deleted under the account's lock, so the queue,
+    // which decides under the same lock, either sent it before this or never
+    // finds it.
+    await tx.teammateTokenRevocation.deleteMany({ where: { accountKey: newKey } });
     const now = new Date();
     const access = {
       accessTokenSealed: json(sealToken(a.tokens.accessToken)),
@@ -498,9 +561,35 @@ export async function saveConnection(a: {
   return result;
 }
 
-/** Whether a live connection (any person, any workspace) holds this Google account. */
-export async function accountHeld(sub: string): Promise<boolean> {
-  return (await prisma.teammateConnection.count({ where: { provider: "google", accountSub: sub } })) > 0;
+/**
+ * A grant a connect made and keeps nothing of (the callback's ways out once
+ * Google issued it: no product granted, a save refused, a throw), let go of
+ * as every other revoke is (review round 1 of Phase 3). Whether another live
+ * connection holds the same Google account is decided under the account's
+ * lock (lockAccounts), so a connect of it saving elsewhere at that moment is
+ * waited for and seen, never revoked; and the revoke is queued in that
+ * transaction, with its accountKey, before it is tried at once, so one Google
+ * does not confirm is drained by the cron instead of leaving WorkwrK listed
+ * in the person's Google account for good. The token was only ever in
+ * memory, so without the queue nothing could try it again. `token`: the
+ * refresh token, else the access token (either revokes the grant).
+ */
+export async function discardConnectGrant(token: string, sub: string): Promise<void> {
+  if (!googleRevokeConfig() || !token) return;
+  const key = accountKey("google", sub);
+  const id = await prisma.$transaction(async (tx) => {
+    await lockAccounts(tx, [key]);
+    const held = await tx.teammateConnection.count({ where: { provider: "google", accountSub: sub } });
+    if (held > 0) return null;
+    const queuedId = revocationId();
+    // "disconnected": the connect is undone, as a disconnect would undo it
+    // (the queue's CHECK names no reason of its own for it, and is not widened).
+    await tx.teammateTokenRevocation.create({
+      data: { id: queuedId, provider: "google", tokenSealed: json(sealToken(token)), reason: "disconnected", accountKey: key },
+    });
+    return queuedId;
+  });
+  if (id) await revokeNow([id]);
 }
 
 // ── Ending connections ──────────────────────────────────────────────
@@ -517,24 +606,44 @@ const REMOVE_MAX = 1_000_000;
 
 type Removed = { id: string; organizationId: string; userId: string };
 
+/** Which Inbox row a removal with `notify` writes: an Owner or Admin ended it, or the workspace was suspended. */
+export type RemoveNotice = "admin" | "suspended";
+
 /**
  * End every connection `where` matches. Each chunk is one transaction: the
- * rows deleted (RETURNING their sealed refresh tokens), their accounts locked
+ * rows deleted (RETURNING their sealed refresh tokens), their people's allows
+ * for the workspace's teammates cleared, their accounts locked
  * (lockAccounts), and a revoke queued for every Google account no live row
  * still holds (the transaction sees its own deletes, so only rows that stay
  * are read; and the check runs after the lock, so a removal of the same
  * account committing meanwhile is seen, never both of them deciding the other
  * still holds it). After each commit, the audit
  * rows (one per connection, ids and the reason only) and, with `notify`, one
- * Inbox row per person, both in batches of 500. `limit` caps how many end
- * (the sweep's per-tick share).
+ * Inbox row per person (`notice` says which), both in batches of 500.
+ * `limit` caps how many end (the sweep's per-tick share). `onChunk` hears
+ * each chunk's count as it commits, so a caller can record what ended even
+ * when a later chunk throws.
+ *
+ * IT STOPS ONLY WHEN A CHUNK ENDS NOTHING (review round 1 of Phase 3). A
+ * chunk's subquery reads its 500 ids once; a row another removal deletes
+ * before this one locks it is skipped, so a short chunk does not mean none
+ * are left. Stopping at a short chunk ended Disconnect everyone after the
+ * first chunk a person's own disconnect touched, with thousands still live.
+ *
+ * ALLOWS END WITH THE CONNECTION (review round 1 of Phase 3). A person's
+ * allows for a workspace teammate (AgentPersonSetting.connectorProducts and
+ * connectorPrints) are cleared in the chunk that ends their connection: a
+ * reconnect months later, for one private teammate say, must never let a
+ * workspace teammate back into their mail on a choice made before.
  */
 export async function removeConnections(a: {
   where: Prisma.Sql;
   reason: RemoveReason;
   actor: RemoveActor;
   notify?: boolean;
+  notice?: RemoveNotice;
   limit?: number;
+  onChunk?: (ended: number) => void;
 }): Promise<{ removed: Removed[]; queued: string[] }> {
   const removed: Removed[] = [];
   const queued: string[] = [];
@@ -548,6 +657,7 @@ export async function removeConnections(a: {
            WHERE "id" IN (SELECT "id" FROM "TeammateConnection" WHERE ${a.where} LIMIT ${take})
           RETURNING "id", "organizationId", "userId", "provider", "accountSub", "refreshTokenSealed"`;
         if (gone.length === 0) return { gone: [] as Removed[], queued: [] as string[] };
+        await clearAllows(tx, gone);
         // After the delete, before the held check (review of step 2).
         await lockAccounts(tx, gone.map((g) => accountKey(g.provider, g.accountSub)));
         const subs = [...new Set(gone.map((g) => g.accountSub))];
@@ -569,16 +679,34 @@ export async function removeConnections(a: {
       },
       { timeout: 60_000 },
     );
+    // Nothing ended: nothing matches now (see above).
+    if (chunk.gone.length === 0) break;
     removed.push(...chunk.gone);
     queued.push(...chunk.queued);
+    a.onChunk?.(chunk.gone.length);
     await afterRemoved(chunk.gone, a);
-    if (chunk.gone.length < take) break;
   }
   return { removed, queued };
 }
 
+/**
+ * The allows of the people whose connections these were, for the teammates
+ * of that workspace, cleared (see ALLOWS END WITH THE CONNECTION above).
+ * Inside the chunk's transaction. Only rows that hold an allow are written.
+ */
+async function clearAllows(tx: Prisma.TransactionClient, gone: ReadonlyArray<Pick<Removed, "organizationId" | "userId">>): Promise<void> {
+  const pairs = [...new Map(gone.map((g) => [`${g.organizationId}\u0000${g.userId}`, g])).values()];
+  if (pairs.length === 0) return;
+  await tx.$executeRaw`
+    UPDATE "AgentPersonSetting" s
+       SET "connectorProducts" = ARRAY[]::text[], "connectorPrints" = NULL, "updatedAt" = (now() AT TIME ZONE 'UTC')
+      FROM "Agent" a, unnest(${pairs.map((p) => p.organizationId)}::text[], ${pairs.map((p) => p.userId)}::text[]) AS g("organizationId", "userId")
+     WHERE s."userId" = g."userId" AND a."id" = s."agentId" AND a."organizationId" = g."organizationId"
+       AND (cardinality(s."connectorProducts") > 0 OR s."connectorPrints" IS NOT NULL)`;
+}
+
 /** The audit rows, and the Inbox rows with `notify`, for connections just ended. */
-async function afterRemoved(gone: readonly Removed[], a: { reason: RemoveReason; actor: RemoveActor; notify?: boolean }): Promise<void> {
+async function afterRemoved(gone: readonly Removed[], a: { reason: RemoveReason; actor: RemoveActor; notify?: boolean; notice?: RemoveNotice }): Promise<void> {
   if (gone.length === 0) return;
   const system = a.actor === SYSTEM_ACTOR || !a.actor.id;
   for (let i = 0; i < gone.length; i += AFTER_BATCH) {
@@ -606,6 +734,8 @@ async function afterRemoved(gone: readonly Removed[], a: { reason: RemoveReason;
   const names = new Map(
     (await prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }).catch(() => [])).map((o) => [o.id, o.name]),
   );
+  // The same title either way: what ended is the person's connection; the message says why.
+  const message = a.notice === "suspended" ? CONNECTIONS_COPY.workspaceSuspendedMessage : CONNECTIONS_COPY.disconnectedByAdminMessage;
   for (let i = 0; i < gone.length; i += AFTER_BATCH) {
     const batch = gone.slice(i, i + AFTER_BATCH);
     try {
@@ -614,7 +744,7 @@ async function afterRemoved(gone: readonly Removed[], a: { reason: RemoveReason;
           userId: r.userId,
           type: "agent_connection",
           title: CONNECTIONS_COPY.disconnectedByAdminTitle,
-          message: CONNECTIONS_COPY.disconnectedByAdminMessage(names.get(r.organizationId)?.trim() || "your workspace"),
+          message: message(names.get(r.organizationId)?.trim() || "your workspace"),
           link: connectionsHref(r.organizationId),
         })),
       });
@@ -690,6 +820,28 @@ export async function endWorkspaceConnections(organizationId: string, reason: "w
 }
 
 /**
+ * Staff suspending a workspace (src/lib/admin/company-patch.ts; review round
+ * 1 of Phase 3): nobody can sign in to it, so nobody there could use their
+ * connection or disconnect it, and its routines kept reading their mail.
+ * Every connection in it ends now, as the system, and Google is told; each
+ * person gets the Inbox row that says it ended and why, which they read in
+ * any other workspace they belong to. Reason no_access: nobody has access
+ * there now (the queue's CHECK names no reason of its own for it, and is not
+ * widened). The sweep ends any this misses.
+ */
+export async function endSuspendedWorkspaceConnections(organizationId: string): Promise<number> {
+  const { removed, queued } = await removeConnections({
+    where: Prisma.sql`"organizationId" = ${organizationId}`,
+    reason: "no_access",
+    actor: SYSTEM_ACTOR,
+    notify: true,
+    notice: "suspended",
+  });
+  await revokeNow(queued);
+  return removed.length;
+}
+
+/**
  * The hard delete's own step (org-hard-delete, inside its transaction, before
  * the Organization row goes): a revoke queued for every connection of the
  * workspace whose Google account no other workspace's connection holds. The
@@ -703,17 +855,18 @@ export async function endWorkspaceConnections(organizationId: string, reason: "w
  * other workspace holds is queued whatever runs meanwhile (a connect of it
  * committing elsewhere is caught when the queue tells Google), so it needs
  * no lock; locking every account of a large workspace would fill the lock
- * table inside the hard delete's one transaction.
+ * table inside the hard delete's one transaction. Taken in the order of the
+ * lock ids, as lockAccounts takes them (review round 1 of Phase 3).
  */
 export async function queueWorkspaceRevocations(tx: Prisma.TransactionClient, organizationId: string): Promise<number> {
   await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || s.k))
-      FROM (SELECT DISTINCT encode(sha256(convert_to(c."provider" || ':' || c."accountSub", 'UTF8')), 'hex') AS k
+    SELECT pg_advisory_xact_lock(s.h)
+      FROM (SELECT DISTINCT hashtext('tc-sub:' || encode(sha256(convert_to(c."provider" || ':' || c."accountSub", 'UTF8')), 'hex')) AS h
               FROM "TeammateConnection" c
              WHERE c."organizationId" = ${organizationId}
                AND EXISTS (SELECT 1 FROM "TeammateConnection" o
                             WHERE o."provider" = c."provider" AND o."accountSub" = c."accountSub" AND o."organizationId" <> ${organizationId})) s
-     ORDER BY s.k`;
+     ORDER BY s.h`;
   return tx.$executeRaw`
     INSERT INTO "TeammateTokenRevocation" ("id", "provider", "tokenSealed", "reason", "attempts", "nextAttemptAt", "createdAt", "accountKey")
     SELECT 'rv_' || md5(c."id" || clock_timestamp()::text || random()::text), c."provider", c."refreshTokenSealed", 'workspace_deleted', 0,
@@ -727,8 +880,16 @@ export async function queueWorkspaceRevocations(tx: Prisma.TransactionClient, or
 
 // ── Telling Google ──────────────────────────────────────────────────
 
-/** Revokes tried at once, side by side. */
+/** Revokes tried at once, side by side, inside a person's request. */
 const REVOKE_AT_ONCE = 5;
+/**
+ * The cron's: each claim takes this many and tries them side by side
+ * (review round 1 of Phase 3). Ten at a time keeps Google's load bounded,
+ * and one claim's worst case is one revoke's timeout, so the tick's budget
+ * still holds; five at a time with 50 a tick took hours to tell Google
+ * about a large workspace's Disconnect everyone.
+ */
+const SWEEP_REVOKE_AT_ONCE = 10;
 /** A queued revoke is given up after this many tries, or this long. */
 const REVOKE_MAX_ATTEMPTS = 6;
 const REVOKE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -773,7 +934,7 @@ async function dropStillHeld(rows: readonly QueueRow[]): Promise<Set<string>> {
 async function revokeRows(
   rows: readonly QueueRow[],
   cfg: GoogleRevokeConfig,
-  o: { deadline: number; timeoutMs?: number; now?: Date },
+  o: { deadline: number; timeoutMs?: number; now?: Date; atOnce?: number },
 ): Promise<RevokeCounts & { tried: number }> {
   let revoked = 0;
   let kept = 0;
@@ -781,9 +942,10 @@ async function revokeRows(
   let stillHeld = 0;
   let tried = 0;
   const now = o.now ?? new Date();
-  for (let i = 0; i < rows.length; i += REVOKE_AT_ONCE) {
+  const atOnce = Math.max(1, o.atOnce ?? REVOKE_AT_ONCE);
+  for (let i = 0; i < rows.length; i += atOnce) {
     if (Date.now() >= o.deadline) break;
-    const batch = rows.slice(i, i + REVOKE_AT_ONCE);
+    const batch = rows.slice(i, i + atOnce);
     tried += batch.length;
     const held = await dropStillHeld(batch);
     stillHeld += held.size;
@@ -874,6 +1036,16 @@ const CLOSED_WHERE = Prisma.sql`"id" IN (
       SELECT c."id" FROM "TeammateConnection" c JOIN "Organization" o ON o."id" = c."organizationId"
        WHERE o."status" = 'CANCELLED')`;
 
+/**
+ * Workspaces neither live nor closed: SUSPENDED, and any status added later
+ * (review round 1 of Phase 3). Nobody can sign in there, to use a connection
+ * or to end it, so it ends, as the suspension's own hook ends them, and each
+ * person is told why (endSuspendedWorkspaceConnections).
+ */
+const SUSPENDED_WHERE = Prisma.sql`"id" IN (
+      SELECT c."id" FROM "TeammateConnection" c JOIN "Organization" o ON o."id" = c."organizationId"
+       WHERE o."status" NOT IN ('ACTIVE', 'TRIAL', 'CANCELLED'))`;
+
 export type ConnectorSweepCounts = {
   statesExpired: number;
   /** Connections ended because their person left (reason sweep). */
@@ -882,19 +1054,24 @@ export type ConnectorSweepCounts = {
   noAccess: number;
   /** Because their workspace was deleted or closed. */
   closed: number;
+  /** Because their workspace was suspended (reason no_access, the person told). */
+  suspended: number;
 } & RevokeCounts;
 
 /**
  * The cron's step (run-due-agents step 4), each part on its own:
  *   1. connects nobody finished are deleted;
- *   2. connections end, as the system, with no notice, the hooks may have
- *      missed a path (Decision 20), within one share of `leaversLimit`:
- *      a person deleted, INACTIVE, or no longer in the workspace (reason
- *      sweep); a person who is now a Guest or an agent account there
- *      (no_access); a workspace deleted or closed (workspace_deleted);
- *   3. queued revokes are claimed five at a time (FOR UPDATE SKIP LOCKED, so
+ *   2. connections end, as the system, the hooks may have missed a path
+ *      (Decision 20), within one share of `leaversLimit`: a person deleted,
+ *      INACTIVE, or no longer in the workspace (reason sweep); a person who
+ *      is now a Guest or an agent account there (no_access); a workspace
+ *      deleted or closed (workspace_deleted); none of them with a notice; and
+ *      a workspace suspended (no_access, each person told why, review round 1
+ *      of Phase 3);
+ *   3. queued revokes are claimed ten at a time (FOR UPDATE SKIP LOCKED, so
  *      two ticks never take one row twice), each claim counting a try and
- *      moving the next one further out, and tried until the budget runs out.
+ *      moving the next one further out, tried side by side, and claimed again
+ *      until `revokeLimit` or the budget runs out.
  * The answer is counts only.
  */
 export async function sweepConnections(now: Date, o: { leaversLimit: number; revokeLimit: number; budgetMs: number }): Promise<ConnectorSweepCounts> {
@@ -902,15 +1079,16 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
   const statesExpired = await prisma.$executeRaw`DELETE FROM "TeammateOAuthState" WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')`;
 
   let room = Math.max(0, o.leaversLimit);
-  const end = async (where: Prisma.Sql, reason: RemoveReason): Promise<number> => {
+  const end = async (where: Prisma.Sql, reason: RemoveReason, notice?: RemoveNotice): Promise<number> => {
     if (room <= 0) return 0;
-    const { removed } = await removeConnections({ where, reason, actor: SYSTEM_ACTOR, limit: room });
+    const { removed } = await removeConnections({ where, reason, actor: SYSTEM_ACTOR, limit: room, ...(notice ? { notify: true, notice } : {}) });
     room -= removed.length;
     return removed.length;
   };
   const leavers = await end(LEAVERS_WHERE, "sweep");
   const noAccess = await end(noAccessWhere(accessV2Tables()), "no_access");
   const closed = await end(CLOSED_WHERE, "workspace_deleted");
+  const suspended = await end(SUSPENDED_WHERE, "no_access", "suspended");
 
   let revoked = 0;
   let kept = 0;
@@ -924,7 +1102,7 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
   if (cfg) {
     let claimed = 0;
     while (claimed < o.revokeLimit && Date.now() < deadline) {
-      const take = Math.min(REVOKE_AT_ONCE, o.revokeLimit - claimed);
+      const take = Math.min(SWEEP_REVOKE_AT_ONCE, o.revokeLimit - claimed);
       // Each try waits longer for the next: 15 minutes, then 30, an hour, two,
       // four, so six tries cover a Google outage of most of a working day
       // rather than an hour and a quarter.
@@ -940,7 +1118,8 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
         RETURNING "id", "tokenSealed", "attempts", "createdAt", "accountKey"`;
       if (rows.length === 0) break;
       claimed += rows.length;
-      const r = await revokeRows(rows, cfg, { deadline: Number.POSITIVE_INFINITY, now });
+      // Every claimed row is tried (it already counted a try), all at once.
+      const r = await revokeRows(rows, cfg, { deadline: Number.POSITIVE_INFINITY, now, atOnce: SWEEP_REVOKE_AT_ONCE });
       revoked += r.revoked;
       kept += r.kept;
       dropped += r.dropped;
@@ -948,7 +1127,7 @@ export async function sweepConnections(now: Date, o: { leaversLimit: number; rev
       if (rows.length < take) break;
     }
   }
-  return { statesExpired, leavers, noAccess, closed, revoked, kept, dropped, stillHeld };
+  return { statesExpired, leavers, noAccess, closed, suspended, revoked, kept, dropped, stillHeld };
 }
 
 // ── What Owners and Admins see and set ──────────────────────────────
@@ -967,22 +1146,53 @@ export async function connectorCounts(organizationId: string): Promise<{ connect
 }
 
 /**
- * Turn one product on or off for the workspace: one statement, never a read
- * and a write of the array, so two Admins switching two products at once
- * never lose each other's change. The products after it.
+ * The class of the workspace switch's advisory lock: its own key space (the
+ * two int form), apart from the per-account locks' (lockAccounts, the one
+ * key form), so a hash shared by a workspace and an account can never make
+ * the two wait on each other.
  */
-export async function setPolicyProduct(organizationId: string, product: ConnectorProduct, on: boolean, actorId: string): Promise<ConnectorProduct[]> {
-  const rows = await prisma.$queryRaw<Array<{ products: string[] }>>`
-    INSERT INTO "TeammateConnectorPolicy" ("organizationId", "provider", "products", "updatedById", "createdAt", "updatedAt")
-    VALUES (${organizationId}, 'google', CASE WHEN ${on}::boolean THEN ARRAY[${product}::text] ELSE ARRAY[]::text[] END, ${actorId},
-            (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
-    ON CONFLICT ("organizationId", "provider") DO UPDATE SET
-      "products" = CASE WHEN ${on}::boolean
-        THEN (CASE WHEN ${product}::text = ANY("TeammateConnectorPolicy"."products") THEN "TeammateConnectorPolicy"."products"
-                   ELSE array_append("TeammateConnectorPolicy"."products", ${product}::text) END)
-        ELSE array_remove("TeammateConnectorPolicy"."products", ${product}::text) END,
-      "updatedById" = ${actorId},
-      "updatedAt" = (now() AT TIME ZONE 'UTC')
-    RETURNING "products"`;
-  return parseProducts(rows[0]?.products ?? []);
+const POLICY_LOCK_CLASS = 73_020;
+
+/**
+ * Turn one product on or off for the workspace, answering the products as
+ * they were just before this write and as it left them. The write is one
+ * statement that changes the array where it is (array_append or
+ * array_remove), never an array worked out here, so two Admins switching
+ * two products at once never lose each other's change.
+ *
+ * WHAT IT WAS IS READ IN THE SAME TRANSACTION, UNDER A LOCK (review round 1
+ * of Phase 3). The route read it once before the write, so another Admin's
+ * change landing in between went unaudited: on, B turns it off, A turns it
+ * on, and A's request saw on before and on after, so Gmail ended on with
+ * the last audit row saying it was turned off. Here a per-workspace lock
+ * (taken whether or not the row exists yet) and the row's own FOR UPDATE make
+ * every change wait for the one before it, so before and after are exactly
+ * this write's.
+ */
+export async function setPolicyProduct(
+  organizationId: string,
+  product: ConnectorProduct,
+  on: boolean,
+  actorId: string,
+): Promise<{ before: ConnectorProduct[]; after: ConnectorProduct[] }> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${POLICY_LOCK_CLASS}::int, hashtext(${organizationId}))`;
+    const was = await tx.$queryRaw<Array<{ products: string[] }>>`
+      SELECT "products" FROM "TeammateConnectorPolicy"
+       WHERE "organizationId" = ${organizationId} AND "provider" = 'google'
+       FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<{ products: string[] }>>`
+      INSERT INTO "TeammateConnectorPolicy" ("organizationId", "provider", "products", "updatedById", "createdAt", "updatedAt")
+      VALUES (${organizationId}, 'google', CASE WHEN ${on}::boolean THEN ARRAY[${product}::text] ELSE ARRAY[]::text[] END, ${actorId},
+              (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+      ON CONFLICT ("organizationId", "provider") DO UPDATE SET
+        "products" = CASE WHEN ${on}::boolean
+          THEN (CASE WHEN ${product}::text = ANY("TeammateConnectorPolicy"."products") THEN "TeammateConnectorPolicy"."products"
+                     ELSE array_append("TeammateConnectorPolicy"."products", ${product}::text) END)
+          ELSE array_remove("TeammateConnectorPolicy"."products", ${product}::text) END,
+        "updatedById" = ${actorId},
+        "updatedAt" = (now() AT TIME ZONE 'UTC')
+      RETURNING "products"`;
+    return { before: parseProducts(was[0]?.products ?? []), after: parseProducts(rows[0]?.products ?? []) };
+  });
 }

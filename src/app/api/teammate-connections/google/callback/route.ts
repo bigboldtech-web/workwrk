@@ -22,9 +22,11 @@
 //   9. the code exchange, and the account it names       exchange_failed
 //  10. Google granted none of it: the new grant revoked
 //      unless another live connection holds the account no_access
-// Then saveConnection, and Google is told at once about an account this one
-// replaced (the cron drains what fails). Every answer once the state matched
-// clears the cookie.
+// Then saveConnection, which refuses, inside its own transaction, a workspace
+// suspended or closed meanwhile (workspace_closed) and a product turned off
+// meanwhile (workspace_off, review round 1 of Phase 3), and Google is told at
+// once about an account this one replaced (the cron drains what fails).
+// Every answer once the state matched clears the cookie.
 //
 // ONCE GOOGLE HAS ISSUED A GRANT, NOTHING IS LEFT BEHIND (review of step 2).
 // Everything after the code exchange runs in one try: any way out that
@@ -38,9 +40,9 @@ import type { NextRequest, NextResponse } from "next/server";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { connectDone, connectFailed, stateCookieOptions, STATE_COOKIE } from "@/lib/connectors/connect-redirects";
-import { accountHeld, revokeQueued, saveConnection, workspaceConnectorProducts } from "@/lib/connectors/connections";
+import { discardConnectGrant, revokeQueued, saveConnection, workspaceConnectorProducts } from "@/lib/connectors/connections";
 import { googleConfig, googleRevokeConfig } from "@/lib/connectors/google/config";
-import { exchangeCode, idTokenClaims, revokeToken, type GoogleTokens } from "@/lib/connectors/google/oauth";
+import { exchangeCode, idTokenClaims, type GoogleTokens } from "@/lib/connectors/google/oauth";
 import { consumeState } from "@/lib/connectors/oauth-state";
 import { productsGranted } from "@/lib/connectors/products";
 
@@ -65,13 +67,14 @@ function errorLine(err: unknown): string {
  * The grant this connect made and keeps nothing of, revoked at Google,
  * unless it is the very grant another live connection of the same account
  * still uses (Decision 19). Through the revoke settings alone
- * (googleRevokeConfig).
+ * (googleRevokeConfig). Review round 1 of Phase 3: decided under the
+ * account's lock, so a connect of the same account saving elsewhere at that
+ * moment is never revoked, and queued with the account's key before it is
+ * tried, so a revoke Google does not confirm is drained by the cron
+ * (connections.ts discardConnectGrant).
  */
 async function discardGrant(tokens: GoogleTokens, sub: string): Promise<void> {
-  const revoker = googleRevokeConfig();
-  if (!revoker) return;
-  if (await accountHeld(sub)) return;
-  await revokeToken(revoker, tokens.refreshToken ?? tokens.accessToken);
+  await discardConnectGrant(tokens.refreshToken ?? tokens.accessToken, sub);
 }
 
 export async function GET(req: NextRequest) {

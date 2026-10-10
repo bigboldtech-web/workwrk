@@ -54,6 +54,35 @@ describe("connector-test-db", () => {
 
   it("refuses an account lock taken outside a transaction, which would hold nothing", async () => {
     const keys = ["k1"];
-    await expect(connectorDb.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || k)) FROM unnest(${keys}::text[]) AS k ORDER BY k`).rejects.toThrow(/outside a transaction/);
+    await expect(
+      connectorDb.$executeRaw`SELECT pg_advisory_xact_lock(s.h) FROM (SELECT DISTINCT hashtext('tc-sub:' || k) AS h FROM unnest(${keys}::text[]) AS k) s ORDER BY s.h`,
+    ).rejects.toThrow(/outside a transaction/);
+  });
+
+  // Review round 1 of Phase 3: the order must be the lock ids', never the keys'.
+  it("refuses account locks sorted by the key rather than by the lock id", async () => {
+    const keys = ["k1", "k2"];
+    await expect(
+      connectorDb.$transaction(() => connectorDb.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tc-sub:' || k)) FROM unnest(${keys}::text[]) AS k ORDER BY k`),
+    ).rejects.toThrow(/unknown statement/);
+  });
+
+  it("refuses the member check written with an OR, which no index can serve", async () => {
+    const emails = ["a@x.test"];
+    await expect(
+      connectorDb.$queryRaw`SELECT lower(u."email") AS "email" FROM "User" u WHERE lower(u."email") = ANY(${emails}::text[]) AND (u."organizationId" = ${"org1"} OR EXISTS (SELECT 1))`,
+    ).rejects.toThrow(/member check lacks/);
+  });
+
+  it("refuses an allows clear that is not joined through the teammate's own workspace", async () => {
+    const orgs = ["org1"];
+    const users = ["u1"];
+    await expect(
+      connectorDb.$executeRaw`UPDATE "AgentPersonSetting" s SET "connectorProducts" = ARRAY[]::text[], "connectorPrints" = NULL FROM unnest(${orgs}::text[], ${users}::text[]) AS g("organizationId", "userId") WHERE s."userId" = g."userId"`,
+    ).rejects.toThrow(/allows cleared at a removal lacks/);
+  });
+
+  it("refuses a read of the switch that takes no row lock", async () => {
+    await expect(connectorDb.$queryRaw`SELECT "products" FROM "TeammateConnectorPolicy" WHERE "organizationId" = ${"org1"} AND "provider" = 'google'`).rejects.toThrow(/under a lock/);
   });
 });

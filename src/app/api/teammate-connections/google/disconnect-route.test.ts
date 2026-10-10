@@ -30,7 +30,12 @@ vi.mock("@/lib/app-gate", () => ({ requireApp: vi.fn(async () => { throw new Err
 
 import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { sealToken } from "@/lib/connectors/seal";
-import { DELETE } from "./route";
+import { DELETE as DELETE_ROUTE } from "./route";
+
+/** The card's DELETE: it names the workspace the card was read in (review round 1 of Phase 3). */
+function DELETE(organizationId: unknown = "org1") {
+  return DELETE_ROUTE(new Request("https://app.test/api/teammate-connections/google", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ organizationId }) }));
+}
 
 const MAX = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false };
 
@@ -107,5 +112,45 @@ describe("DELETE /api/teammate-connections/google", () => {
     expect(await res.json()).toEqual({ disconnected: true, revoked: "now" });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(cdb.revocations).toEqual([]);
+  });
+
+  // Review round 1 of Phase 3: a card open for workspace X removed the
+  // connection of whichever workspace the session had moved to.
+  it("removes nothing when the session is in another workspace than the card showed", async () => {
+    const fetch = revokeAnswers(200);
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("rt-max") });
+    const res = await DELETE("org-x");
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "workspace_changed" });
+    expect((await DELETE(null)).status).toBe(409);
+    expect(cdb.connections).toHaveLength(1);
+    expect(cdb.revocations).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+    // A caller that names no workspace (a page from before this release) reloads too, and nothing changes.
+    const unnamed = await DELETE_ROUTE(new Request("https://app.test/api/teammate-connections/google", { method: "DELETE" }));
+    expect(unnamed.status).toBe(409);
+    expect(await unnamed.json()).toMatchObject({ code: "workspace_changed" });
+    expect(cdb.connections).toHaveLength(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // Review round 1 of Phase 3: an allow outlived the disconnect, and a
+  // reconnect months later let a workspace teammate back into the mail.
+  it("clears the person's allows for this workspace's teammates, in the delete's transaction, and no one else's", async () => {
+    revokeAnswers(200);
+    cdb.agents.push({ id: "a-ops", organizationId: "org1" }, { id: "a-far", organizationId: "org2" });
+    cdb.settings.push(
+      { id: "ps1", agentId: "a-ops", userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "x" } } },
+      { id: "ps2", agentId: "a-far", userId: "u-max", approvalRules: {}, connectorProducts: ["gmail"], connectorPrints: { gmail: { name: "y" } } },
+      { id: "ps3", agentId: "a-ops", userId: "u-lea", approvalRules: {}, connectorProducts: ["calendar"], connectorPrints: { calendar: { name: "z" } } },
+    );
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max", refreshTokenSealed: sealToken("rt-max") });
+    expect((await DELETE()).status).toBe(200);
+    expect(cdb.settings.map((s) => [s.id, s.connectorProducts, s.connectorPrints])).toEqual([
+      ["ps1", [], null],
+      ["ps2", ["gmail"], { gmail: { name: "y" } }],
+      ["ps3", ["calendar"], { calendar: { name: "z" } }],
+    ]);
+    expect(cdb.events.find((e) => e.op === "setting.clear")?.inTx).toBe(true);
   });
 });

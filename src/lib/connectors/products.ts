@@ -132,3 +132,21 @@ export const CONNECTOR_LIMITS = {
 
 /** Reads whose results are other people's words: a turn that ran one asks before every write (Decision 9). */
 export const TAINTING_TOOLS: ReadonlySet<ConnectorToolName> = new Set<ConnectorToolName>(["search_email", "read_email", "list_events"]);
+
+/**
+ * A Google Calendar event id, as Google forms one (review round 1 of Phase
+ * 3): base32hex letters and digits (lower case), with Google's underscores
+ * (a leading one, and before a repeating event's instance suffix, a day
+ * "_20261013" or a moment "_20261013T100000Z"). A hyphen is let through too,
+ * since the test stand-in names its events with one (scripts/google-stand-in.mjs);
+ * it can never form a path segment of its own. Never a dot: an id of "." or
+ * ".." is a path segment fetch resolves, so an id the model wrote from a
+ * planted email could reach another Google address, and a 403 there marked
+ * the person's whole connection broken. At most 1024 characters.
+ */
+export const EVENT_ID_PATTERN = /^[a-z0-9_-]+(?:_\d{8}(?:T\d{6}Z)?)?$/;
+
+/** Whether a text is an event id Google could have given (EVENT_ID_PATTERN), checked before any URL is built. */
+export function isEventId(id: unknown): id is string {
+  return typeof id === "string" && id.length <= 1024 && EVENT_ID_PATTERN.test(id);
+}

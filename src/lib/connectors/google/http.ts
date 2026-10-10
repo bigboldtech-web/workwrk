@@ -21,7 +21,10 @@
 // stored by a compare-and-swap on tokenVersion (and status active), so two
 // refreshes at once both write a valid token, and one from before a
 // reconnect writes nothing, and then uses nothing: a token the swap could not
-// store answers not_connected or needs_reconnect (review of step 2).
+// store answers not_connected or needs_reconnect (review of step 2), except
+// after a reconnect of the same account that still holds the call's
+// products, where the reconnect's own token is used (review round 1 of
+// Phase 3).
 // invalid_grant marks the connection needs_reconnect by the same swap
 // (connections.ts markNeedsReconnect); invalid_client is WorkwrK's own
 // credentials and marks nothing; anything else is Google being unavailable
@@ -79,6 +82,17 @@ function logFailure(failure: GoogleFailure | string, status: number | string): v
 
 type AccessResult = { ok: true; accessToken: string } | { ok: false; failure: GoogleFailure };
 
+/** A stored access token with more than a minute left, opened; null when there is none, or no key opens it. */
+function storedToken(sealed: unknown, expiresAt: Date | null): string | null {
+  if (!sealed || !expiresAt || expiresAt.getTime() - Date.now() <= FRESH_FOR_MS) return null;
+  try {
+    return openToken(sealed);
+  } catch {
+    // Sealed under a key no longer held: a refresh writes a new one.
+    return null;
+  }
+}
+
 /**
  * A fresh access token for this connection: Google's refresh answer, stored
  * only while the row still has the tokenVersion it was read with.
@@ -106,16 +120,28 @@ export async function refreshFor(conn: LiveConnection, cfg: GoogleConfig): Promi
     // marked broken meanwhile. A disconnect that kept a shared account's
     // grant at Google leaves this refresh token working, so the new token
     // would still read or write the old account after the person ended it.
-    // It is never used; the row as it is now says why.
+    // It is never used; the row as it is now says what is.
     const now = await prisma.teammateConnection
-      .findUnique({ where: { id: conn.id }, select: { tokenVersion: true, status: true } })
+      .findUnique({
+        where: { id: conn.id },
+        select: { tokenVersion: true, status: true, accountSub: true, products: true, accessTokenSealed: true, accessTokenExpiresAt: true },
+      })
       .catch(() => undefined);
     if (now === undefined) return { ok: false, failure: "unavailable" };
     if (now === null) return { ok: false, failure: "not_connected" };
-    if (now.tokenVersion !== conn.tokenVersion || now.status !== "active") return { ok: false, failure: "needs_reconnect" };
     // Unchanged: only the write failed (the database, a moment), and the
     // token is this very connection's.
-    return { ok: true, accessToken: r.accessToken };
+    if (now.tokenVersion === conn.tokenVersion && now.status === "active") return { ok: true, accessToken: r.accessToken };
+    // Reconnected meanwhile, the same Google account, still holding every
+    // product this call was opened for (review round 1 of Phase 3): the call
+    // goes on with the reconnect's own token, as the next call would, rather
+    // than telling the person to reconnect seconds after they did. Another
+    // account, a product gone, or a row marked broken keeps the answer below.
+    if (now.status === "active" && now.tokenVersion > conn.tokenVersion && now.accountSub === conn.accountSub && conn.products.every((p) => now.products.includes(p))) {
+      const stored = storedToken(now.accessTokenSealed, now.accessTokenExpiresAt);
+      return { ok: true, accessToken: stored ?? r.accessToken };
+    }
+    return { ok: false, failure: "needs_reconnect" };
   }
   if (r.kind === "invalid_grant") {
     await markNeedsReconnect(conn, "revoked");
@@ -156,13 +182,8 @@ function accessFor(conn: LiveConnection, cfg: GoogleConfig, force: boolean): Pro
   if (conn.status !== "active") return Promise.resolve<AccessResult>({ ok: false, failure: "needs_reconnect" });
   const refreshed = REFRESHED.get(conn);
   if (refreshed) return refreshed;
-  if (!force && conn.accessTokenSealed && conn.accessTokenExpiresAt && conn.accessTokenExpiresAt.getTime() - Date.now() > FRESH_FOR_MS) {
-    try {
-      return Promise.resolve<AccessResult>({ ok: true, accessToken: openToken(conn.accessTokenSealed) });
-    } catch {
-      // Sealed under a key no longer held: a refresh writes a new one.
-    }
-  }
+  const stored = force ? null : storedToken(conn.accessTokenSealed, conn.accessTokenExpiresAt);
+  if (stored) return Promise.resolve<AccessResult>({ ok: true, accessToken: stored });
   return refreshOnce(conn, cfg);
 }
 

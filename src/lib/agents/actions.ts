@@ -188,6 +188,8 @@ const VIEW_SELECT = {
   expiresAt: true,
   decidedAt: true,
   executedAt: true,
+  // Asked after a Google read: its card stands alone (review round 1 of Phase 3).
+  readGoogle: true,
 } as const;
 
 /** A row as a decision reads it: the card's columns, what runs, and the teammate as it is now. */
@@ -324,13 +326,23 @@ export interface ProposeInput {
   targetKey: string | null;
   /** One card groups the actions of one run and one tool: "<runId>:<tool>". */
   groupKey: string | null;
+  /**
+   * Asked in a turn that read the person's Google, or could not tell (review
+   * round 1 of Phase 3): stored on the row, so the card stands alone and a
+   * turn told of it starts tainted, whatever happens to the turn after.
+   */
+  readGoogle?: boolean;
   now?: Date;
 }
 
-/** Ask the person: one PENDING action, waiting ACTION_TTL_MS for their decision. */
-export async function proposeAction(a: ProposeInput): Promise<ActionView> {
+/**
+ * Ask the person: one PENDING action, waiting ACTION_TTL_MS for their
+ * decision. `db`: the caller's transaction, when the card is made under a
+ * lock it holds (executor.ts withTwinLock).
+ */
+export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClient | null = null): Promise<ActionView> {
   const now = a.now ?? new Date();
-  const row = await prisma.agentAction.create({
+  const row = await (db ?? prisma).agentAction.create({
     data: {
       organizationId: a.organizationId,
       agentId: a.agentId,
@@ -345,6 +357,7 @@ export async function proposeAction(a: ProposeInput): Promise<ActionView> {
       targetKey: a.targetKey,
       groupKey: a.groupKey,
       status: "PENDING",
+      readGoogle: a.readGoogle === true,
       expiresAt: new Date(now.getTime() + ACTION_TTL_MS),
     },
     select: VIEW_SELECT,
@@ -860,7 +873,7 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
         LIMIT ${limit}
       )
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
-      "sessionId", "runId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt"`;
+      "sessionId", "runId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt", "readGoogle"`;
   const at = (v: Date | string) => new Date(v).getTime();
   return [...rows].sort((x, y) => at(x.createdAt) - at(y.createdAt));
 }

@@ -1,4 +1,4 @@
-// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string }
+// PUT /api/teammate-connections/teammates/[slug] { gmail?: boolean, calendar?: boolean, expect?: string, organizationId?: string }
 //
 // The person lets a workspace teammate (or any teammate someone else may
 // change) use their own Gmail or Google Calendar, or stops it
@@ -24,6 +24,10 @@
 //
 // One statement per product, by INSERT ... ON CONFLICT, so two tabs switching
 // two products at once never lose each other's change.
+//
+// THE WORKSPACE THE PAGE SHOWED (review round 1 of Phase 3): the body names it
+// (organizationId), and a session switched to another workspace in another
+// tab allows or stops nothing there (409 workspace_changed); the page reloads.
 
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -45,7 +49,7 @@ import { prisma } from "@/lib/prisma";
 type Params = { params: Promise<{ slug: string }> };
 
 const bodySchema = z
-  .object({ gmail: z.boolean().optional(), calendar: z.boolean().optional(), expect: z.string().max(400).optional() })
+  .object({ gmail: z.boolean().optional(), calendar: z.boolean().optional(), expect: z.string().max(400).optional(), organizationId: z.string().min(1).max(200).optional() })
   .strict()
   .refine((v) => v.gmail !== undefined || v.calendar !== undefined);
 
@@ -58,6 +62,12 @@ export async function PUT(req: Request, { params }: Params) {
   if (!viewer) return teammateError(401, "signed_out", CONNECTIONS_COPY.signedOut);
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
+  // A caller that names no workspace (an API client, a page from before this) is answered as before.
+  const shownIn = parsed.data.organizationId;
+  // Required (lead, after review round 1): a page that names no workspace,
+  // such as one loaded before this release, reloads rather than act on
+  // whichever workspace the session holds now.
+  if (shownIn !== viewer.organizationId) return teammateError(409, "workspace_changed", CONNECTION_ROUTE_ERRORS.workspaceChanged);
   const { slug } = await params;
   const agent = await loadTeammate(slug, viewer);
   if (!agent) return teammateNotFound();

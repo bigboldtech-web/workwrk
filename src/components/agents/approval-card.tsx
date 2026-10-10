@@ -21,7 +21,10 @@
 //   teammate-thread.ts standsAlone) is never in the batch (review of step 3):
 //   each is its own card beside it, its recipients, account, outside-workspace
 //   line and every word of its body always in view, so "Approve {k}" can
-//   never send one the person did not look at.
+//   never send one the person did not look at. Nor is anything asked after
+//   the teammate read the person's email or calendar (ActionView.readGoogle,
+//   review round 1 of Phase 3): a memory or a post a planted email shaped is
+//   read whole and approved by its own click.
 // Edit: a textarea held to the field's length; Approve with changes, Cancel.
 // It starts from the field's own value as it will run (ActionView
 // editableValue, through editStartText), never the card's words: a title
