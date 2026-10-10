@@ -49,10 +49,12 @@
 // so on its answer (meta.readGoogle) and its run (output.readGoogle), and
 // reads back in later turns as information, never as the teammate's own
 // words, the line of what its calls did included. A continue after such a
-// turn's card or answer, a teammate it asked, and a group's later answer to
-// the same message start the same way (Decision 9); a start the database
-// cannot answer asks too, but marks nothing (review of step 3). What the
-// model reads of a Google write's card is its kind, never its subject.
+// turn's card or answer, a teammate it asked, a group's later answer to the
+// same message, and any turn told of a decided Google card or of a card whose
+// run read Google start the same way (Decision 9; the last, review of step
+// 4); a start the database cannot answer asks too, but marks nothing (review
+// of step 3). What the model reads of a Google write's card, now or in a
+// later turn's note, is its kind, never its subject or its event's title.
 //
 // Server-only: imports prisma.
 
@@ -713,7 +715,9 @@ function resultObjectId(result: unknown): string | null {
  * what it made. A Google write that waits, or that a practice run only
  * described, is named by its kind (connectorTitle), never by the title a
  * record holds: one saved before the review of step 3 can quote a subject
- * from someone else's email.
+ * from someone else's email. A Google call that ran is named with no subject
+ * from its input either (review of step 4): every Google tool reads as its
+ * kind wherever the model reads it.
  */
 function callSummary(entry: unknown): string | null {
   const c = rec(entry);
@@ -721,7 +725,7 @@ function callSummary(entry: unknown): string | null {
   if (!name) return null;
   const read = toolOutcome(name, c.result, typeof c.errorText === "string" ? c.errorText : null);
   const outcome = read.state && isConnectorToolName(name) ? { ...read, title: connectorTitle(name) } : read;
-  const sentence = toolOutcomeSentence(name, rec(c.input), outcome).text;
+  const sentence = toolOutcomeSentence(name, isConnectorToolName(name) ? null : rec(c.input), outcome).text;
   if (outcome.failed) return dataText(outcome.message ? `${sentence}: ${outcome.message}` : sentence, ACTION_ITEM_MAX);
   const id = outcome.state ? null : resultObjectId(c.result);
   return dataText(id ? `${sentence} (id ${id})` : sentence, ACTION_ITEM_MAX);
@@ -747,13 +751,20 @@ function noteResult(raw: unknown): unknown {
  * (3.6 step 5). The titles and reasons are the server's, escaped so none can
  * close the note; a done request's result is the tool's own answer, inside
  * <tool_data>. Null when there is nothing to tell.
+ *
+ * A GOOGLE CARD IS NAMED BY ITS KIND (connectorTitle, review of step 4). Its
+ * own title quotes an email's subject or an event's title as Google sent
+ * them, written by whoever wrote the email or organized the event, and this
+ * note is read in a turn that may not start tainted: a denied invite whose
+ * title held an instruction otherwise reached a later chat or routine turn as
+ * the server's own line.
  */
 export function outcomeNote(rows: readonly AgentActionRow[], firstName: string, opts: { more?: boolean } = {}): string | null {
   const lines: string[] = [];
   let room = NOTE_RESULTS_MAX;
   for (const row of rows) {
     const view = actionViewFromRow(row);
-    const title = dataText(view.preview.title, 200);
+    const title = dataText(isConnectorToolName(row.toolName) ? connectorTitle(row.toolName) : view.preview.title, 200);
     if (view.status === "EXECUTED") {
       const head = `- ${view.edited ? "Approved after editing" : "Approved and done"}: ${title}.`;
       const block = wrapToolData(row.toolName, noteResult(row.result));
@@ -949,15 +960,31 @@ export function connectorLines(firstName: string, access: TurnConnectorAccess): 
  * It reads nothing when no Google read can matter (`canMatter`). "unknown"
  * asks before every write, the safe side, but marks nothing on the turn's
  * rows (review of step 3).
+ *
+ * WHATEVER STARTED IT, A TURN TOLD OF A GOOGLE CARD STARTS TAINTED (review of
+ * step 4). A card the person denied, let expire or approved from the Inbox
+ * is told at their next message or the next routine run, not by a continue,
+ * so a chat or a routine turn told of a decided Google card, or of any card
+ * whose run read Google, asks before every write too: its note now names
+ * the card by its kind (outcomeNote), and this keeps the turn safe whatever
+ * reached it with the card.
  */
 type TaintStart = "tainted" | "clean" | "unknown";
 
 async function startsTainted(a: TurnArgs, outcomes: readonly AgentActionRow[], canMatter: boolean): Promise<TaintStart> {
   if (a.trigger === "DELEGATED") return a.origin?.kind === "delegated" && a.origin.tainted === true ? "tainted" : "clean";
-  if (!canMatter || (a.trigger !== "RESUME" && !(a.trigger === "CHAT" && a.group))) return "clean";
+  if (!canMatter) return "clean";
+  if (outcomes.some((o) => isConnectorToolName(o.toolName))) return "tainted";
+  const runIds = [...new Set(outcomes.map((o) => o.runId).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (a.trigger !== "RESUME" && !(a.trigger === "CHAT" && a.group) && runIds.length === 0) return "clean";
   try {
+    if (a.trigger !== "RESUME" && runIds.length > 0) {
+      // A chat or a routine told of outcomes: the runs they came from (see above).
+      if ((await prisma.agentRun.count({ where: { id: { in: runIds }, output: { path: ["readGoogle"], equals: true } } })) > 0) return "tainted";
+      if ((await prisma.agentRun.count({ where: { id: { in: runIds }, endedAt: null } })) > 0) return "unknown";
+      if (!(a.trigger === "CHAT" && a.group)) return "clean";
+    }
     if (a.trigger === "RESUME") {
-      const runIds = [...new Set(outcomes.map((o) => o.runId).filter((id): id is string => typeof id === "string" && id.length > 0))];
       const asked = await prisma.chatMessage.findFirst({
         where: { sessionId: a.sessionId, role: "USER" },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],

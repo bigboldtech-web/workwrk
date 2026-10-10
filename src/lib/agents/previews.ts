@@ -653,10 +653,10 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       };
     }
 
-    // The Google writes (docs/plans/ai-teammates-phase3.md step 3): their
-    // own preparation, which reads the person's connection now. The
-    // calendar's answer notYet until step 4 builds them, so nothing the model
-    // wrote is ever proposed unchecked. Their reads never reach here.
+    // The Google writes (docs/plans/ai-teammates-phase3.md steps 3 and 4):
+    // their own preparation, which reads the person's connection now, so
+    // nothing the model wrote is ever proposed unchecked. Their reads never
+    // reach here.
     case "search_email":
     case "read_email":
     case "draft_email":

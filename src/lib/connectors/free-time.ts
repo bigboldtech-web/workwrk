@@ -8,7 +8,8 @@
 // midnight as "24" on some runtimes), so a day across a daylight saving
 // change keeps its 09:00 to 18:00 on the wall clock. Every zone in use today
 // is a whole number of quarter hours from UTC, so a quarter hour in UTC is a
-// quarter hour on the wall too.
+// quarter hour on the wall too. A day starts at its first moment on the wall
+// clock, even where a change skips its midnight (startOfDay, review of step 4).
 
 export interface Interval {
   /** Milliseconds since the epoch. */
@@ -41,8 +42,8 @@ function formatFor(zone: string): Intl.DateTimeFormat {
   return f;
 }
 
-/** The wall clock in `zone` at `at`. */
-function wallClock(at: number, zone: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } {
+/** The wall clock in `zone` at `at` (also the calendar tools' clock, google/calendar.ts). */
+export function wallClock(at: number, zone: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } {
   const p: Record<string, string> = {};
   for (const part of formatFor(zone).formatToParts(new Date(at))) p[part.type] = part.value;
   // A runtime that still says "24" means the midnight that starts the day.
@@ -56,10 +57,51 @@ function offsetAt(at: number, zone: string): number {
 }
 
 /** The moment a wall-clock time happens in `zone`: guessed, then corrected once for a change of offset in between. */
-function momentOf(y: number, mo: number, d: number, h: number, mi: number, zone: string): number {
+export function momentOf(y: number, mo: number, d: number, h: number, mi: number, zone: string): number {
   const asUtc = Date.UTC(y, mo - 1, d, h, mi);
   const first = asUtc - offsetAt(asUtc, zone);
   return asUtc - offsetAt(first, zone);
+}
+
+/** How far either side of momentOf's guess the first moment of a day is looked for: no change of offset moves a day by more. */
+const DAY_SEARCH_MS = 26 * 60 * 60_000;
+
+/**
+ * The first moment of a day on the clock of `zone`: usually its 00:00. Where
+ * a daylight saving change skips midnight (America/Santiago on 6 September
+ * 2026 goes from 23:59:59 straight to 01:00), the day starts where the
+ * change ends, and momentOf's guess for 00:00 lands an hour early, on the
+ * day before: a window ending that day lost its last hour, and the next began
+ * an hour early (review of step 4). Then the first moment whose wall-clock day
+ * is this one is found by halving, to the millisecond.
+ */
+export function startOfDay(y: number, mo: number, d: number, zone: string): number {
+  const want = Date.UTC(y, mo - 1, d);
+  const dayAt = (at: number) => {
+    const w = wallClock(at, zone);
+    return Date.UTC(w.y, w.mo - 1, w.d);
+  };
+  const guess = momentOf(y, mo, d, 0, 0, zone);
+  if (dayAt(guess) === want && dayAt(guess - 1) < want) return guess;
+  // On a day before this one, and on this one or after.
+  let lo = guess - DAY_SEARCH_MS;
+  let hi = guess + DAY_SEARCH_MS;
+  while (hi - lo > 1) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (dayAt(mid) >= want) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** A working day's opening or closing moment: a day's 00:00, or "24:00" (the next day's start), is a day boundary, read as startOfDay reads one. */
+function boundaryOrMoment(y: number, mo: number, d: number, h: number, mi: number, zone: string): number {
+  if (h === 0 && mi === 0) return startOfDay(y, mo, d, zone);
+  if (h === 24) {
+    const next = new Date(Date.UTC(y, mo - 1, d + 1));
+    return startOfDay(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), zone);
+  }
+  return momentOf(y, mo, d, h, mi, zone);
 }
 
 /** "09:00" as hours and minutes; "24:00" ends a day. Null for anything else. */
@@ -72,7 +114,8 @@ function hoursMinutes(s: string): { h: number; m: number } | null {
   return { h, m: mi };
 }
 
-function isZone(zone: string): boolean {
+/** Whether Intl knows `zone`. */
+export function isZone(zone: string): boolean {
   try {
     formatFor(zone);
     return true;
@@ -134,11 +177,11 @@ export function freeSlots(a: {
   for (let k = 0; k < MAX_DAYS; k += 1) {
     const day = new Date(Date.UTC(first.y, first.mo - 1, first.d + k));
     const [y, mo, d] = [day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate()];
-    const dayOpen = momentOf(y, mo, d, open.h, open.m, a.zone);
+    const dayOpen = boundaryOrMoment(y, mo, d, open.h, open.m, a.zone);
     if (dayOpen >= end) break;
     if (!days.has(day.getUTCDay())) continue;
     const windowStart = Math.max(dayOpen, start);
-    const windowEnd = Math.min(momentOf(y, mo, d, close.h, close.m, a.zone), end);
+    const windowEnd = Math.min(boundaryOrMoment(y, mo, d, close.h, close.m, a.zone), end);
     if (windowEnd <= windowStart) continue;
 
     // The gaps between the busy blocks inside this day's window.

@@ -41,16 +41,18 @@
 // answers why (a Talk answer, an allow missing, a connection to reconnect).
 //
 // A TURN THAT READ GOOGLE ASKS BEFORE EVERY WRITE (Decision 9). After a
-// search_email, read_email or list_events that worked, or a reply's
-// preparation, which reads its conversation (review of step 3), every later
+// search_email, read_email or list_events that worked, or a preparation that
+// read other people's words (a reply's conversation, review of step 3; the
+// event a calendar change, cancel or answer names, step 4), every later
 // call above READ in the turn waits on a card, whatever the person chose not
 // to be asked about, and its card offers no "don't ask again"; a teammate
 // this turn asks starts the same way. What such a read keeps in the call log
 // is its count (Decision 16), though the model read it all. A Google write's
 // card title is the person's alone: the model and the call log name the
-// write by its kind (connectorTitle), never by a subject. A send or a reply
-// identical to one already waiting points at that card and makes no second
-// one, and adds nothing to this turn's approval row (Decision 23).
+// write by its kind (connectorTitle), never by a subject. A send, a reply or
+// an invitation identical to one already waiting points at that card and
+// makes no second one, and adds nothing to this turn's approval row
+// (Decision 23; the invitation, review of step 4).
 //
 // Server-only: imports prisma.
 
@@ -435,7 +437,10 @@ function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
  * A send or a reply exactly like one already waiting for this person (the
  * same recipients, subject, body and conversation: the preparation's
  * dedupeKey), which a planted loop would otherwise ask for again and again,
- * so one "Approve 5" sends five (Decision 23).
+ * so one "Approve 5" sends five (Decision 23). An invitation the same way:
+ * the same people, title, times and account (calendar.ts eventDedupeKey,
+ * review of step 4). A card with no key (a new event with nobody invited)
+ * has no twin.
  */
 async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string } | null> {
   const key = input.dedupeKey;
@@ -551,8 +556,9 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     agentRules: a.agentRules,
     tainted,
   });
-  // A reply's preparation read its conversation in Gmail: from here the turn
-  // has read other people's words, as after search_email (review of step 3).
+  // A reply's preparation read its conversation in Gmail, or a calendar
+  // write's the event it names (step 4): from here the turn has read other
+  // people's words, as after search_email (review of step 3).
   if (prepared.readGoogle) {
     a.counters.tainted = true;
     a.counters.readGoogle = true;
@@ -568,13 +574,16 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // and the person's "Don't ask" is not read (Decision 9).
   const gate = tainted ? "ask" : gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
   if (gate === "ask") {
-    if (name === "send_email" || name === "reply_email") {
+    // An invitation too (review of step 4): two identical create_event cards
+    // would each email every invitee and make a second event.
+    if (name === "send_email" || name === "reply_email" || name === "create_event") {
       const twin = await waitingTwin(person, name, prepared.input);
       if (twin) {
         // The answer points at the card that already waits; the record names
         // no action of its own, so this turn's approval row never shows the
         // same email a second time, nor in another chat (review of step 3).
-        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: CONNECTOR_COPY.alreadyWaiting });
+        const note = name === "create_event" ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting;
+        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note });
       }
     }
     if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {

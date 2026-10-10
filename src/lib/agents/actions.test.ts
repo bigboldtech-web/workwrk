@@ -745,6 +745,19 @@ describe("a Google card meets the person's Google as it is now (Phase 3 step 3)"
     expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ status: "FAILED", error: CONNECTOR_COPY.unknownOutcomeEmail });
   });
 
+  it("leaves a calendar card waiting, agent_paused, when its handler met the teammate paused or removed after the approval's own check (review of step 4)", async () => {
+    fx.agent.toolNames = ["search_tasks", "create_task", "create_event"];
+    fx.connectors = { gmail: true, calendar: true };
+    fx.cards.create_event = { title: 'Create event "Plan"' };
+    fx.answers.create_event = { error: CONNECTOR_COPY.teammateOff, held: "agent_paused" };
+    const row = seedAction({ toolName: "create_event", risk: "IRREVERSIBLE", input: { title: "Plan", attendees: ["mia@proof.test"] }, preview: { title: 'Create event "Plan"' } });
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    // Before: FAILED for good, though nothing was sent and the teammate could be turned back on.
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "agent_paused", error: CONNECTOR_COPY.stillWaits(CONNECTOR_COPY.teammateOff) }]);
+    expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null, error: null, preview: { title: 'Create event "Plan"' } });
+    expect(fx.messages).toEqual([]);
+  });
+
   it("reads the person again just before each send, never trusting the copy read at the start of the request (review of step 3)", async () => {
     const first = sendCard();
     const second = sendCard();

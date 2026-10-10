@@ -258,16 +258,25 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
     return [{ products: next }];
   }
   if (sql.startsWith('SELECT lower(u."email") AS "email" FROM "User" u')) {
-    // Who of an email's recipients is a live person of this workspace (connector-previews.ts outsideCount).
+    // Who of these addresses is a live member of this workspace, neither a
+    // Guest nor an agent account (connector-access.ts workspaceMembersAmong,
+    // review of step 4: the no-access sweep's rule, read the other way).
     needs(sql, "the workspace member check", [
       `WHERE lower(u."email") = ANY(?::text[])`,
       `u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
-      `(u."organizationId" = ? OR EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ?))`,
+      `(u."organizationId" = ? AND u."accessLevel" <> 'AGENT' AND NOT (?::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN')))`,
+      `OR (u."organizationId" <> ? AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ? AND m."role" <> 'AGENT'))`,
     ]);
-    const [emails, org] = v as [string[], string];
+    const [emails, org, guestColumnRead] = v as [string[], string, boolean];
     return cdb.users
       .filter((u) => !u.deletedAt && u.status !== "INACTIVE" && emails.includes(String(u.email).toLowerCase()))
-      .filter((u) => u.organizationId === org || cdb.memberships.some((m) => m.userId === u.id && m.organizationId === org))
+      .filter((u) => {
+        if (u.organizationId === org) {
+          const level = legacyLevelOfRow(u);
+          return level !== "AGENT" && !(guestColumnRead === true && u.orgRole === "GUEST" && level !== "SUPER_ADMIN" && level !== "COMPANY_ADMIN");
+        }
+        return cdb.memberships.some((m) => m.userId === u.id && m.organizationId === org && m.role !== "AGENT");
+      })
       .map((u) => ({ email: String(u.email).toLowerCase() }));
   }
   throw new Error(`connector-test-db: unknown query ${sql}`);
