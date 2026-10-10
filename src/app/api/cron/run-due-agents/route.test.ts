@@ -38,7 +38,7 @@ const run = async () => {
 const COUNTS = { due: 3, succeeded: 2, failed: 0, skipped: 0, missed: 1, paused: 0, taken: 0, deferred: 0 };
 const MOVED = { found: 3, moved: 1, stopped: 2, taken: 0, failed: 0 };
 const SWEPT = { statesExpired: 2, leavers: 1, revoked: 3, kept: 1, dropped: 0 };
-const ERASED = { found: 2, blanked: 1500, finished: 1, waiting: 1, failed: 0, overdue: 0, bridged: 0 };
+const ERASED = { found: 2, blanked: 1500, finished: 1, waiting: 1, failed: 0, overdue: 0, restored: 0, reanonymised: 0, bridged: 0 };
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date("2026-10-06T09:00:00Z"), toFake: ["Date"] });
@@ -161,6 +161,17 @@ describe("one tick", () => {
     expect(overdue.status).toBe(500);
     expect(overdue.body.erasures).toMatchObject({ failed: 0, overdue: 1 });
     expect((await run()).status).toBe(200);
+  });
+
+  // Review round 8 of Phase 3: an erasure whose account an Admin restored is
+  // never swept, so it counted overdue from its third day and failed every
+  // tick for something nothing here can finish (finishErasures now counts it
+  // apart, erasure-sweep.test.ts). The count rides in the body and fails nothing.
+  it("passes the tick with restored erasures counted in the body", async () => {
+    st.finishErasures.mockResolvedValueOnce({ ...ERASED, restored: 2, reanonymised: 1 });
+    const out = await run();
+    expect(out.status).toBe(200);
+    expect(out.body.erasures).toMatchObject({ restored: 2, reanonymised: 1, overdue: 0 });
   });
 
   it("fails the tick when the move throws, after the routines ran", async () => {

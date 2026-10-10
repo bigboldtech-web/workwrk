@@ -29,7 +29,11 @@
 //      once nothing can still arrive (review round 5 of Phase 3). Each one
 //      goes on from where it stopped, every one gets a fair slice of the
 //      budget, none is dropped for its age, and one not finished three days
-//      after it was asked fails the tick (review round 6 of Phase 3).
+//      after it was asked fails the tick (review round 6 of Phase 3). Review
+//      round 8 of Phase 3: several pages a tick while the budget lasts, the
+//      three days counted from the later of the erasure and its bridging, and
+//      an erased account an Admin restored counted apart (`restored`), which
+//      fails nothing: nothing here can finish it.
 // Each step is its own: one that throws is logged and fails the tick, and the
 // steps after it still run. The body is counts only: no workspace, teammate
 // or person is named (docs/plans/ai-teammates.md 3.9).
@@ -84,7 +88,9 @@ type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
  * finished erasure is never read again, so the budget goes to those with
  * words left. Review round 6 of Phase 3: least recently tried first, each
  * given a fair share of the 20 seconds, so one heavy history never holds up
- * the rest.
+ * the rest. Review round 8 of Phase 3: 50 is a page; while the budget lasts
+ * the sweep reads more pages, up to ERASURE_PAGES_PER_TICK (erasure-sweep.ts),
+ * so a backlog of light erasures drains at the speed of the budget.
  */
 const ERASURE_SWEEP = { limit: 50, budgetMs: 20_000 } as const;
 
