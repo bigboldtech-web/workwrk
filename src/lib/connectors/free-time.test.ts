@@ -4,7 +4,7 @@
 // nothing starts before now.
 
 import { describe, expect, it } from "vitest";
-import { freeSlots, type Interval } from "./free-time";
+import { freeSlots, startOfDay, type Interval } from "./free-time";
 
 const at = (iso: string) => new Date(iso).getTime();
 const block = (from: string, to: string): Interval => ({ start: at(from), end: at(to) });
@@ -56,6 +56,15 @@ describe("freeSlots", () => {
     const r = slots({ now: new Date("2026-10-12T10:07:00Z"), from: new Date("2026-10-12T00:00:00Z"), to: new Date("2026-10-13T00:00:00Z") });
     expect(iso(r)).toEqual([["2026-10-12T10:15:00.000Z", "2026-10-12T18:00:00.000Z"]]);
     expect(slots({ now: new Date("2026-10-13T00:00:00Z"), from: new Date("2026-10-12T00:00:00Z"), to: new Date("2026-10-13T00:00:00Z") })).toEqual([]);
+  });
+
+  it("opens a working day that starts at 00:00 at the day's first moment, where a daylight saving change skips midnight (review of step 4)", () => {
+    // America/Santiago goes from 23:59:59 on 5 September 2026 straight to 01:00 on the 6th (04:00 UTC).
+    const r = slots({ zone: "America/Santiago", workDays: [0], dayStart: "00:00", dayEnd: "02:00", from: new Date("2026-09-05T00:00:00Z"), to: new Date("2026-09-08T00:00:00Z") });
+    // Before: 03:00 UTC, an hour of the Saturday before offered as Sunday's.
+    expect(iso(r)).toEqual([["2026-09-06T04:00:00.000Z", "2026-09-06T05:00:00.000Z"]]);
+    expect(startOfDay(2026, 9, 6, "America/Santiago")).toBe(at("2026-09-06T04:00:00Z"));
+    expect(startOfDay(2026, 10, 12, "UTC")).toBe(at("2026-10-12T00:00:00Z"));
   });
 
   it("keeps only windows long enough, on quarter hours, and finds nothing from nonsense", () => {

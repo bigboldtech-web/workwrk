@@ -3,8 +3,10 @@
 // the facts the tools and the cards use out, and the times both ways.
 //
 // TIMES ARE THE PERSON'S, AND FIXED AS MOMENTS AT ONCE. A day or a wall-clock
-// time the model writes is read on the clock of the person's zone (acting.ts
-// personZone) and turned into one moment when the call is first prepared.
+// time the model writes is read on the clock of the person's zone (the one
+// they chose, else their Google Calendar's: connector-access.ts
+// calendarZoneFor, review of step 4) and turned into one moment when the call
+// is first prepared.
 // The card, the stored input and Google all carry that moment, never the
 // words, so a zone changed in settings between a card and its approval moves
 // nothing the person approved. The wall clock is free-time.ts's (Intl with
@@ -24,7 +26,8 @@
 // event, or is invited to it, is read from Google's own flags (organizer.self,
 // attendees[].self), never from an address someone could write.
 
-import { isZone, momentOf, wallClock } from "../free-time";
+import { createHash } from "node:crypto";
+import { isZone, momentOf, startOfDay, wallClock } from "../free-time";
 
 function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -96,10 +99,14 @@ export function weekdayOf(day: string): number {
   return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
 }
 
-/** The moment `day` starts on the clock of `zone`. */
+/**
+ * The moment `day` starts on the clock of `zone`: its first moment, even
+ * where a daylight saving change skips its midnight (free-time.ts startOfDay,
+ * review of step 4).
+ */
 export function dayStart(day: string, zone: string): number {
   const [y, mo, d] = day.split("-").map(Number);
-  return momentOf(y, mo, d, 0, 0, zoneOr(zone));
+  return startOfDay(y, mo, d, zoneOr(zone));
 }
 
 /** A moment's day and time on the clock of `zone`: "2026-10-13" and "10:00". */
@@ -191,7 +198,12 @@ export function sameTimes(a: EventTimes | null, b: EventTimes | null): boolean {
   return Date.parse(a.start) === Date.parse(b.start) && Date.parse(a.end) === Date.parse(b.end);
 }
 
-/** Times a card stored (its input), read back: null for anything this file did not write. */
+/**
+ * Times a card stored (its input), read back: null for anything this file did
+ * not write. A timed event may have no length (its start and its end the same
+ * moment): Google allows one, and a move of it keeps its length (review of
+ * step 4); a new event's end still comes after its start (eventTimes).
+ */
 export function storedTimes(v: unknown): EventTimes | null {
   const r = rec(v);
   if (r.kind === "day") {
@@ -203,7 +215,7 @@ export function storedTimes(v: unknown): EventTimes | null {
     const s = Date.parse(str(r.start));
     const e = Date.parse(str(r.end));
     const zone = str(r.zone);
-    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || !isZone(zone)) return null;
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e < s || !isZone(zone)) return null;
     return { kind: "time", start: iso(s), end: iso(e), zone };
   }
   return null;
@@ -234,7 +246,12 @@ export function timesForModel(t: EventTimes, zone: string): { start: string; end
   return { start: localStamp(Date.parse(t.start), zone), end: localStamp(Date.parse(t.end), zone), allDay: false };
 }
 
-/** An event's times as Google sent them, or null when they can't be read. */
+/**
+ * An event's times as Google sent them, or null when they can't be read. An
+ * event with no length (its end its start, which Google allows) reads with
+ * its times: without them list_events showed none, and a move of it was
+ * refused as a bad time (review of step 4).
+ */
 function timesOf(start: unknown, end: unknown, zone: string): EventTimes | null {
   const s = rec(start);
   const e = rec(end);
@@ -247,7 +264,7 @@ function timesOf(start: unknown, end: unknown, zone: string): EventTimes | null 
   }
   const st = Date.parse(str(s.dateTime));
   const et = Date.parse(str(e.dateTime));
-  if (!Number.isFinite(st) || !Number.isFinite(et) || et <= st) return null;
+  if (!Number.isFinite(st) || !Number.isFinite(et) || et < st) return null;
   const own = str(s.timeZone);
   return { kind: "time", start: iso(st), end: iso(et), zone: own && isZone(own) ? own : zoneOr(zone) };
 }
@@ -343,19 +360,52 @@ export function isSelf(p: Pick<EventPerson, "self" | "email">, accountEmail: str
   return p.self || p.email.toLowerCase() === accountEmail.toLowerCase();
 }
 
-/** The most people a stored card's list may hold (a meeting of hundreds is still one card). */
-const STORED_ATTENDEES_MAX = 2000;
+/**
+ * The event's own list with who is added and less who is taken off, as a
+ * change sends it back (Google replaces a PATCH's list whole). Built from the
+ * event as read at the approval, never kept on the card: a card keeps only
+ * who it adds and takes off (Decision 16, review of step 4). Addresses are
+ * matched in lower case; someone already on it is not added twice.
+ */
+export function attendeesAfter(ev: Pick<EventFacts, "writableAttendees">, adds: readonly string[], removes: readonly string[]): Array<Record<string, unknown>> {
+  const lower = (v: unknown) => str(v).trim().toLowerCase();
+  const gone = new Set(removes.map(lower));
+  const kept = ev.writableAttendees.filter((a) => !gone.has(lower(a.email)));
+  const on = new Set(kept.map((a) => lower(a.email)));
+  const added = [...new Set(adds.map(lower))].filter((a) => a && !on.has(a) && !gone.has(a)).map((email) => ({ email }));
+  return [...kept, ...added];
+}
 
-/** The people a card stored for a change (its input), read back: null for anything this file did not write. */
-export function storedAttendees(v: unknown): Array<Record<string, unknown>> | null {
-  if (!Array.isArray(v) || v.length > STORED_ATTENDEES_MAX) return null;
-  const out: Array<Record<string, unknown>> = [];
-  for (const raw of v) {
-    const a = rec(raw);
-    if (!plainAddress(a.email)) return null;
-    out.push(writableAttendee(a));
-  }
-  return out;
+/**
+ * The zone of the person's own Google Calendar, from an events read of it
+ * (its top-level timeZone): what the calendar tools read days and times in
+ * when the person never saved a zone of their own (review of step 4). Null
+ * for anything Intl does not know.
+ */
+export function calendarZoneOf(raw: unknown): string | null {
+  const z = str(rec(raw).timeZone).trim();
+  return z && z.length <= 100 && isZone(z) ? z : null;
+}
+
+/** What the zone read asks Google for: one event at most, and of the answer only its zone. */
+export const ZONE_READ_PARAMS: Array<[string, string]> = [
+  ["maxResults", "1"],
+  ["fields", "timeZone"],
+];
+
+/**
+ * The same invitation, whoever asked for it (review of step 4, as Decision
+ * 23 is for an email): a sha256 of the people invited (lower case, each
+ * once, sorted), the exact title, the times as the card fixed them and the
+ * Google account. Two identical invitations waiting at once share it, so a
+ * second points at the first card and nobody is invited twice.
+ */
+export function eventDedupeKey(e: { attendees: readonly string[]; title: string; times: EventTimes; accountSub: string }): string {
+  const people = [...new Set((e.attendees ?? []).map((a) => String(a).trim().toLowerCase()).filter(Boolean))].sort();
+  const times = e.times.kind === "day" ? ["day", e.times.start, e.times.end] : ["time", e.times.start, e.times.end, e.times.zone];
+  return createHash("sha256")
+    .update(JSON.stringify([people, String(e.title ?? ""), times, String(e.accountSub ?? "")]))
+    .digest("hex");
 }
 
 /**

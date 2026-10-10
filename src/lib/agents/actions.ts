@@ -56,10 +56,11 @@
 // token before the swap; a calendar card's event is read again and a change
 // since (its etag, Decision 12) ends it. Anything found before Google was
 // sent the write, by the preparation, a refresh or the handler itself (a
-// grant revoked, Google busy or not
-// answering), leaves it PENDING too (connection_needed or retry_later), with
-// a sentence that says it can be approved again; only a write whose outcome
-// is unknown, or that Google refused as written, ends it (review of step 3).
+// grant revoked, Google busy or not answering, or the teammate paused or
+// removed since this approval's own check, review of step 4), leaves it
+// PENDING too (connection_needed, retry_later or agent_paused), with a
+// sentence that says it can be approved again; only a write whose outcome is
+// unknown, or that Google refused as written, ends it (review of step 3).
 // The person is read again just before each Google card's swap.
 //
 // Server-only: imports prisma.

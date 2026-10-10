@@ -127,11 +127,14 @@ export function googleFailureSentence(
  * stays PENDING and can be approved again (review of step 3).
  *   connection_needed  the person connects, reconnects or adds the product first
  *   retry_later        Google, or WorkwrK's own link to it, is not answering now
+ *   agent_paused       the teammate was paused or removed between the approval's
+ *                      own check and its Google call (review of step 4): the
+ *                      card waits, as a paused teammate's card always does
  */
-export type HeldCode = "connection_needed" | "retry_later";
+export type HeldCode = "connection_needed" | "retry_later" | "agent_paused";
 
 export function isHeldCode(v: unknown): v is HeldCode {
-  return v === "connection_needed" || v === "retry_later";
+  return v === "connection_needed" || v === "retry_later" || v === "agent_paused";
 }
 
 /**
@@ -145,8 +148,14 @@ export function heldForFailure(failure: GoogleFailure): HeldCode | null {
   return null;
 }
 
-/** The person's connection refusing a card at its approval: only a connection to make or mend waits; any other reason ends it. */
+/**
+ * The person's connection refusing a card at its approval: a connection to
+ * make or mend waits, and so does a teammate paused or removed meanwhile
+ * (review of step 4: before, the card FAILED for good though nothing was
+ * sent); any other reason ends it.
+ */
 export function heldForRefusal(reason: ConnectorRefusal | "teammate_off"): HeldCode | null {
+  if (reason === "teammate_off") return "agent_paused";
   return reason === "not_connected" || reason === "needs_reconnect" || reason === "not_granted" ? "connection_needed" : null;
 }
 

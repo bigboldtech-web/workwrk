@@ -76,7 +76,7 @@ function freshAgent() {
 
 /** A refusal may carry `held` (an approval that can wait, connector-rules.ts HeldCode) and `readGoogle` (the preparation read Gmail). */
 type Card =
-  | { ok: false; error: string; held?: "connection_needed" | "retry_later"; readGoogle?: true }
+  | { ok: false; error: string; held?: "connection_needed" | "retry_later" | "agent_paused"; readGoogle?: true }
   | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown>; readGoogle?: true };
 
 export const fx = {

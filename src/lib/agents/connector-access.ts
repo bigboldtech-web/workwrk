@@ -15,11 +15,19 @@
 // (connectorTurnAccess), only to decide what it offers and what block 2 says:
 // it makes no Google call, and nothing later relies on it.
 //
+// Two facts the calls share live here too (review of step 4): who of some
+// addresses are members of this workspace (workspaceMembersAmong), and the
+// zone a calendar call reads and writes days and times in (calendarZoneFor).
+//
 // Server-only: imports prisma.
 
 import { prisma } from "@/lib/prisma";
+import { accessV2Tables } from "@/lib/access/flags";
+import { isZone } from "@/lib/connectors/free-time";
 import { connectorAccess, type ConnectorAgent, type ConnectorRefusal, type LiveConnection } from "@/lib/connectors/connections";
+import { PRIMARY_EVENTS, ZONE_READ_PARAMS, calendarUrl, calendarZoneOf } from "@/lib/connectors/google/calendar";
 import { googleConfig, type GoogleConfig } from "@/lib/connectors/google/config";
+import { googleCall, type GoogleFailure } from "@/lib/connectors/google/http";
 import type { ConnectorProduct } from "@/lib/connectors/products";
 import type { ActingPerson } from "./acting";
 import { connectorRefusalSentence } from "./connector-rules";
@@ -104,21 +112,55 @@ export async function openConnector(a: { person: ActingPerson; agentId: string; 
 }
 
 /**
- * Which of these addresses, lower case, are live people of this workspace
- * (an anchored member, or a member through a second membership): one query.
- * A card counts who is outside the workspace by it (connector-previews.ts
- * outsideCount), and find_free_time reads the free/busy of no one else
- * (Decision 11: never outsiders).
+ * Which of these addresses, lower case, are live members of this workspace:
+ * one query. A card counts who is outside the workspace by it
+ * (connector-previews.ts outsideCount), and find_free_time reads the
+ * free/busy of no one else (Decision 11: members only, never outsiders).
+ *
+ * A MEMBER, NOT ANY ROW HERE (review of step 4). Not deleted, not INACTIVE,
+ * and neither a Guest nor an agent account, at the level held in this
+ * workspace, read as the step 2 sweep reads it (connections.ts noAccessWhere,
+ * the other half of the same rule): where the person is anchored, their own
+ * level, with the stored User.orgRole narrowing a Member to a Guest only
+ * while ACCESS_V2_TABLES is on (org-role.ts effectiveOrgRole); through a
+ * second membership, that membership's role. Before, a client added as a
+ * Guest passed find_free_time's check, and a card that invited one said
+ * "Everyone on it is in this workspace."
  */
 export async function workspaceMembersAmong(organizationId: string, emails: readonly string[]): Promise<Set<string>> {
   const wanted = [...new Set(emails.map((e) => e.toLowerCase()))];
   if (wanted.length === 0) return new Set();
+  const guestColumnRead = accessV2Tables();
   const rows = await prisma.$queryRaw<Array<{ email: string }>>`
     SELECT lower(u."email") AS "email" FROM "User" u
      WHERE lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
-       AND (u."organizationId" = ${organizationId}
-            OR EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))`;
+       AND ((u."organizationId" = ${organizationId}
+             AND u."accessLevel" <> 'AGENT'
+             AND NOT (${guestColumnRead}::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN')))
+         OR (u."organizationId" <> ${organizationId}
+             AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND m."role" <> 'AGENT')))`;
   return new Set(rows.map((r) => String(r.email).toLowerCase()));
+}
+
+/** Where the calendar tools read days and times, or why not: Google's own failure, or no zone known at all. */
+export type CalendarZone = { ok: true; zone: string } | { ok: false; failure: GoogleFailure; retryAfter?: number } | { ok: false; unknown: true };
+
+/**
+ * The zone a calendar tool call reads and writes days and times in (review
+ * of step 4): the zone the person chose; else the zone of their own Google
+ * Calendar, from one read of its events (asking only for the zone), made
+ * once for the call and kept nowhere after it; else none, and the tool asks
+ * the person to set one. Never the workspace's zone or UTC on their behalf:
+ * the app shows someone who never picked a zone their device's, so "15:00"
+ * read in another zone made an event at the wrong hour with no card.
+ */
+export async function calendarZoneFor(person: Pick<ActingPerson, "timezone" | "savedTimezone">, connection: LiveConnection, cfg: GoogleConfig): Promise<CalendarZone> {
+  const saved = person.savedTimezone === undefined ? person.timezone : person.savedTimezone;
+  if (saved && isZone(saved)) return { ok: true, zone: saved };
+  const r = await googleCall<unknown>(connection, cfg, { method: "GET", url: calendarUrl(cfg.calendarBase, PRIMARY_EVENTS, ZONE_READ_PARAMS), write: false });
+  if (!r.ok) return { ok: false, failure: r.failure, ...(r.retryAfter !== undefined ? { retryAfter: r.retryAfter } : {}) };
+  const zone = calendarZoneOf(r.data);
+  return zone ? { ok: true, zone } : { ok: false, unknown: true };
 }
 
 /** Per product a turn's teammate holds tools for: whether it may use it this turn, and if not why. */

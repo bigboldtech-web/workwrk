@@ -463,6 +463,11 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
     calendarOf: [["max@mail.test"], "Calendar: max@mail.test"],
     timedSpan: [["Tue 13 Oct, 15:00", "16:00", "Kolkata time"], "Tue 13 Oct, 15:00 to 16:00, Kolkata time"],
     allDaySpan: [["Tue 13 Oct", "Thu 15 Oct"], "Tue 13 Oct to Thu 15 Oct, all day"],
+    // Review of step 4: every word that goes out, and everyone told, on a card that cannot be taken back.
+    subjectLine: [["Re: Invoice due"], "Subject: Re: Invoice due"],
+    eventTitleLine: [["Board review"], "Event: Board review"],
+    toldLine: [["mia@proof.test, outsider@ext.test"], "Told: mia@proof.test, outsider@ext.test"],
+    roomsLine: [["Room 4 <c_1@resource.calendar.google.com>"], "Rooms: Room 4 <c_1@resource.calendar.google.com>"],
   };
   const c = copy.CONNECTOR_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {

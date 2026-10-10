@@ -73,6 +73,14 @@ export interface ActingPerson {
   email: string;
   /** prefs.home.locale.timezone, else the workspace's working calendar, else "UTC". */
   timezone: string;
+  /**
+   * The zone the person chose (prefs.home.locale.timezone), or null when they
+   * never picked one and `timezone` is the workspace's or UTC: the calendar
+   * tools then read the zone of their own Google Calendar, never a zone the
+   * app does not show them (review of step 4). resolveActingPerson always
+   * says which; a person built without it is taken to have chosen `timezone`.
+   */
+  savedTimezone?: string | null;
   /** The person's viewer here at the level they hold here (viewerHeldIn), hydrated. */
   viewer: Viewer;
 }
@@ -88,12 +96,23 @@ export type ActingResult = { ok: true; person: ActingPerson } | { ok: false; rea
  * words and for a schedule the person picks.
  */
 export async function personZone(userId: string, organizationId: string): Promise<string> {
+  return (await personZones(userId, organizationId)).zone;
+}
+
+/**
+ * The zone the person's dates are written in (personZone), and the one they
+ * chose themselves, null when they never picked one: the app then shows them
+ * their device's zone, never the workspace's (preferences.ts
+ * orgLocaleDefaults), so the calendar tools must not take the workspace's
+ * either (review of step 4). One preference read.
+ */
+export async function personZones(userId: string, organizationId: string): Promise<{ zone: string; saved: string | null }> {
   const prefs = await getEffectivePreferences(userId, organizationId).catch(() => null);
   const own = prefs?.home?.locale?.timezone;
-  if (own && isValidTimeZone(own)) return own;
+  if (own && isValidTimeZone(own)) return { zone: own, saved: own };
   const org = await readOrgWorkSchedule(organizationId);
-  if (org.timezone && isValidTimeZone(org.timezone)) return org.timezone;
-  return "UTC";
+  if (org.timezone && isValidTimeZone(org.timezone)) return { zone: org.timezone, saved: null };
+  return { zone: "UTC", saved: null };
 }
 
 /**
@@ -122,6 +141,7 @@ export async function resolveActingPerson(organizationId: string, userId: string
   const ai = await can(viewer, "view", { type: "app", key: "ai" });
   if (!ai.allowed) return { ok: false, reason: "ai_off" };
   const name = `${row.firstName ?? ""} ${row.lastName ?? ""}`.trim() || row.email;
+  const zones = await personZones(userId, organizationId);
   return {
     ok: true,
     person: {
@@ -132,7 +152,8 @@ export async function resolveActingPerson(organizationId: string, userId: string
       name,
       firstName: (row.firstName ?? "").trim() || name,
       email: row.email,
-      timezone: await personZone(userId, organizationId),
+      timezone: zones.zone,
+      savedTimezone: zones.saved,
       viewer,
     },
   };

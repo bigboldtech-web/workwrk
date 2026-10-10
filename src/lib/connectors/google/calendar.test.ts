@@ -2,15 +2,20 @@
 // docs/plans/ai-teammates-phase3.md step 4): a wall-clock time is read on the
 // person's clock across a daylight saving change; an all-day event's end is
 // its last day here and the day after only at Google, both ways; a card's
-// stored times and people are read back only as this file wrote them; who
-// organizes an event, or is the person, is Google's own flag; and free/busy
-// keeps busy blocks and whose calendar could not be read.
+// stored times are read back only as this file wrote them, and a change's
+// people are built from the event as read; a day starts at its first moment;
+// who organizes an event, or is the person, is Google's own flag; and
+// free/busy keeps busy blocks and whose calendar could not be read.
 
 import { describe, expect, it } from "vitest";
 import {
+  attendeesAfter,
   busyBlocks,
+  calendarZoneOf,
   changedTimes,
   dayPart,
+  dayStart,
+  eventDedupeKey,
   eventFacts,
   eventTimes,
   googlePatchTimes,
@@ -18,7 +23,6 @@ import {
   localStamp,
   readWhen,
   realDay,
-  storedAttendees,
   storedTimes,
   timesForModel,
   type When,
@@ -82,6 +86,44 @@ describe("days and times", () => {
     expect(storedTimes({ kind: "day", start: "2026-10-15", end: "2026-10-14" })).toBeNull();
     expect(storedTimes("2026-10-13")).toBeNull();
   });
+
+  it("starts a day at its first moment, even where a daylight saving change skips its midnight (review of step 4)", () => {
+    // America/Santiago goes from 23:59:59 on 5 September 2026 straight to 01:00 on the 6th (04:00 UTC).
+    // Before: 03:00 UTC, 23:00 on the 5th, so a window ending on the 5th lost its last hour.
+    expect(dayStart("2026-09-06", "America/Santiago")).toBe(at("2026-09-06T04:00:00Z"));
+    expect(localStamp(dayStart("2026-09-06", "America/Santiago"), "America/Santiago")).toBe("2026-09-06T01:00");
+    // An ordinary midnight, either side of the change, is its 00:00.
+    expect(dayStart("2026-09-05", "America/Santiago")).toBe(at("2026-09-05T04:00:00Z"));
+    expect(dayStart("2026-09-07", "America/Santiago")).toBe(at("2026-09-07T03:00:00Z"));
+    expect(dayStart("2026-10-13", "Asia/Kolkata")).toBe(at("2026-10-12T18:30:00Z"));
+  });
+
+  it("reads an event with no length with its times, and moves it keeping no length (review of step 4)", () => {
+    const f = eventFacts({ id: "e-mark", start: { dateTime: "2026-10-13T10:00:00Z" }, end: { dateTime: "2026-10-13T10:00:00Z" } }, "UTC");
+    // Before: null, so list_events showed no times and a move was refused as a bad time.
+    expect(f?.times).toEqual({ kind: "time", start: "2026-10-13T10:00:00.000Z", end: "2026-10-13T10:00:00.000Z", zone: "UTC" });
+    const moved = changedTimes(f?.times ?? null, { kind: "time", at: at("2026-10-14T09:00:00Z") }, null, "UTC");
+    expect(moved).toEqual({ kind: "time", start: "2026-10-14T09:00:00.000Z", end: "2026-10-14T09:00:00.000Z", zone: "UTC" });
+    // What the card stores for it reads back at the approval.
+    expect(storedTimes(moved)).toEqual(moved);
+    // An end before the start is still no event.
+    expect(eventFacts({ id: "e-bad", start: { dateTime: "2026-10-13T11:00:00Z" }, end: { dateTime: "2026-10-13T10:00:00Z" } }, "UTC")?.times).toBeNull();
+  });
+
+  it("reads the zone of the person's Google Calendar only as a zone Intl knows (review of step 4)", () => {
+    expect(calendarZoneOf({ timeZone: "America/New_York", items: [] })).toBe("America/New_York");
+    expect(calendarZoneOf({ timeZone: "Not/AZone" })).toBeNull();
+    expect(calendarZoneOf({})).toBeNull();
+  });
+
+  it("keys the same invitation the same, whatever the order or case of the people (review of step 4)", () => {
+    const times = { kind: "time" as const, start: "2026-10-13T15:00:00.000Z", end: "2026-10-13T16:00:00.000Z", zone: "UTC" };
+    const one = eventDedupeKey({ attendees: ["mia@proof.test", "Olivia@Proof.test"], title: "Plan", times, accountSub: "sub-max" });
+    expect(eventDedupeKey({ attendees: ["olivia@proof.test", "MIA@proof.test", "mia@proof.test"], title: "Plan", times, accountSub: "sub-max" })).toBe(one);
+    expect(eventDedupeKey({ attendees: ["mia@proof.test", "olivia@proof.test"], title: "Plan 2", times, accountSub: "sub-max" })).not.toBe(one);
+    expect(eventDedupeKey({ attendees: ["mia@proof.test", "olivia@proof.test"], title: "Plan", times: { ...times, end: "2026-10-13T17:00:00.000Z" }, accountSub: "sub-max" })).not.toBe(one);
+    expect(eventDedupeKey({ attendees: ["mia@proof.test", "olivia@proof.test"], title: "Plan", times, accountSub: "sub-other" })).not.toBe(one);
+  });
 });
 
 describe("events", () => {
@@ -118,10 +160,24 @@ describe("events", () => {
     expect(eventFacts({ summary: "no id" }, "UTC")).toBeNull();
   });
 
-  it("reads a card's stored people back only with an address and their writable fields", () => {
-    expect(storedAttendees([{ email: "mia@proof.test", responseStatus: "accepted", self: true }])).toEqual([{ email: "mia@proof.test", responseStatus: "accepted" }]);
-    expect(storedAttendees([{ responseStatus: "accepted" }])).toBeNull();
-    expect(storedAttendees("mia@proof.test")).toBeNull();
+  it("builds a change's list from the event as read, with who is added and less who is taken off, only their writable fields (review of step 4)", () => {
+    const ev = eventFacts(
+      {
+        id: "e-team",
+        attendees: [
+          { email: "max@mail.test", self: true, organizer: true, responseStatus: "accepted" },
+          { email: "Mia@Proof.test", responseStatus: "accepted", comment: "Late" },
+          { email: "outsider@ext.test", responseStatus: "needsAction" },
+        ],
+      },
+      "UTC",
+    );
+    if (!ev) throw new Error("expected an event");
+    expect(attendeesAfter(ev, ["olivia@proof.test", "MIA@proof.test", "olivia@proof.test"], ["outsider@ext.test"])).toEqual([
+      { email: "max@mail.test", responseStatus: "accepted" },
+      { email: "Mia@Proof.test", responseStatus: "accepted", comment: "Late" },
+      { email: "olivia@proof.test" },
+    ]);
   });
 
   it("keeps free/busy's busy blocks, and names whose calendar Google could not read", () => {

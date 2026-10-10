@@ -359,7 +359,12 @@ function BatchCard({ actions, agentName, deciding, onDecide }: ApprovalCardProps
 
 /* ─────────────────────────── the parts ─────────────────────────── */
 
-/** A waiting request's text and facts: the exact words in a quote block, then who sees it and the undo. `whole`: every word, never clipped. */
+/**
+ * A waiting request's text and facts: the exact words in a quote block, then
+ * who sees it and the undo. `whole`: every word, never clipped. A fact line
+ * may carry a whole title, subject or place, so a long word wraps rather than
+ * run off the card (review of step 4).
+ */
 function Details({ a, whole = false }: { a: ActionView; whole?: boolean }) {
   const [shown, setAll] = useState(false);
   const all = shown || whole;
@@ -377,7 +382,7 @@ function Details({ a, whole = false }: { a: ActionView; whole?: boolean }) {
         </div>
       ) : null}
       {a.preview.lines?.map((line, i) => (
-        <p key={i} className="mt-1 text-sm text-ink-2">{line}</p>
+        <p key={i} className="mt-1 break-words text-sm text-ink-2">{line}</p>
       ))}
       {a.preview.undo ? <p className="mt-1 text-sm text-ink-2">{a.preview.undo}</p> : null}
     </>

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/connector-test-db")).connectorDb }));
 
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { sealToken } from "@/lib/connectors/seal";
 import { prepareCall, type PrepareContext, type Prepared } from "./previews";
@@ -24,9 +25,10 @@ import { CONNECTOR_COPY, EDIT_FIELD_LABELS, EVENT_CHANGE_LABELS, changeLine } fr
 const BASE = "https://g.test";
 const ACCOUNT = { sub: "sub-max", email: "max@mail.test" };
 
-function ctx(o: { trigger?: string; tainted?: boolean; zone?: string } = {}): PrepareContext {
+/** `saved`: the zone the person chose, null when they never picked one (acting.ts savedTimezone); left out, `zone` is theirs. */
+function ctx(o: { trigger?: string; tainted?: boolean; zone?: string; saved?: string | null } = {}): PrepareContext {
   return {
-    person: { userId: "u-max", organizationId: "org1", name: "Max Chen", firstName: "Max", email: "max@proof.test", timezone: o.zone ?? "UTC" } as never,
+    person: { userId: "u-max", organizationId: "org1", name: "Max Chen", firstName: "Max", email: "max@proof.test", timezone: o.zone ?? "UTC", ...(o.saved !== undefined ? { savedTimezone: o.saved } : {}) } as never,
     teammate: { agentId: "a1", agentName: "Inbox helper", trigger: (o.trigger ?? "CHAT") as never },
     ...(o.tainted ? { tainted: true } : {}),
   };
@@ -182,6 +184,39 @@ describe("send_email's card", () => {
     expect(await prepareCall("send_email", first.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: CONNECTOR_COPY.accountChanged("max@mail.test", "max.other@mail.test") });
   });
 
+  it("shows every word of a subject the title line cut, whole on a line of its own, on a send and a reply (review of step 4)", async () => {
+    const subject = `Budget ${"x".repeat(100)} the words past the cut ${"y".repeat(60)}`;
+    const r = ok(await prepareCall("send_email", { to: ["olivia@proof.test"], subject, body: "x" }, ctx()));
+    // Before: only its first 79 characters, while Approve sent them all.
+    expect(r.preview.title).not.toContain("past the cut");
+    expect(r.preview.lines?.[0]).toBe(CONNECTOR_COPY.subjectLine(subject));
+    // A subject the title holds whole has no line of its own.
+    expect(ok(await prepareCall("send_email", { to: ["olivia@proof.test"], subject: "Hi", body: "x" }, ctx())).preview.lines?.[0]).toBe(CONNECTOR_COPY.toLine("olivia@proof.test"));
+    // A reply's subject is the sender's own words.
+    threadMessages = [threadMessage("m2", { From: "Boss <boss@ext.test>", To: "max@mail.test", Subject: subject, "Message-ID": "<m2@ext.test>" })];
+    const reply = ok(await prepareCall("reply_email", { threadId: "t1", body: "Paid." }, ctx()));
+    expect(reply.preview.lines?.[0]).toBe(CONNECTOR_COPY.subjectLine(`Re: ${subject}`));
+    // A draft sends nothing: its card is as it was.
+    expect(ok(await prepareCall("draft_email", { to: ["olivia@proof.test"], subject, body: "x" }, ctx())).preview.lines?.[0]).toBe(CONNECTOR_COPY.toLine("olivia@proof.test"));
+  });
+
+  it("counts a Guest and an agent account as outside the workspace, read as the rest of the app reads them (review of step 4)", async () => {
+    vi.stubEnv("ACCESS_V2_TABLES", "true");
+    cdb.users.push(
+      // A client added as a Guest; an agent account here; one through a second membership.
+      { id: "u-client", email: "client@proof.test", organizationId: "org1", deletedAt: null, status: "ACTIVE", ...legacyLevelRow("EMPLOYEE"), orgRole: "GUEST" },
+      { id: "u-bot", email: "bot@proof.test", organizationId: "org1", deletedAt: null, status: "ACTIVE", ...legacyLevelRow("AGENT") },
+      { id: "u-bot2", email: "bot2@proof.test", organizationId: "org2", deletedAt: null, status: "ACTIVE" },
+    );
+    cdb.memberships.push({ userId: "u-bot2", organizationId: "org1", role: "AGENT" });
+    const r = ok(await prepareCall("send_email", { to: ["olivia@proof.test", "client@proof.test", "bot@proof.test", "bot2@proof.test"], subject: "Hi", body: "x" }, ctx()));
+    // Before: "Everyone on it is in this workspace."
+    expect(r.preview.lines).toContain(CONNECTOR_COPY.outsideLine(3));
+    // The stored Guest role narrows a Member only while the access tables are read, as everywhere else.
+    vi.stubEnv("ACCESS_V2_TABLES", "");
+    expect(ok(await prepareCall("send_email", { to: ["olivia@proof.test", "client@proof.test"], subject: "Hi", body: "x" }, ctx())).preview.lines).toContain(CONNECTOR_COPY.outsideLine(0));
+  });
+
   it("is refused before Google is asked when the person did not allow this workspace teammate", async () => {
     cdb.agents[0].visibility = "WORKSPACE";
     cdb.agents[0].ownerId = "olivia";
@@ -320,9 +355,14 @@ describe("the calendar's cards (step 4)", () => {
     ...o,
   });
   const calendarCalls = () => calls.filter((u) => u.pathname.startsWith("/calendar/"));
+  /** The zone reads: the list of the primary calendar's events, asked for its zone alone (review of step 4). */
+  const zoneReads = () => calls.filter((u) => u.pathname === "/calendar/v3/calendars/primary/events");
+  /** What that read answers: the zone of the person's Google Calendar. */
+  let calendarList: Record<string, unknown> = {};
   const C = CONNECTOR_COPY;
 
   beforeEach(() => {
+    calendarList = { timeZone: "America/New_York" };
     vi.stubEnv("GOOGLE_AGENT_PRODUCTS", "gmail,calendar");
     cdb.policy.set("org1", ["gmail", "calendar"]);
     cdb.connections[0].products = ["gmail", "calendar"];
@@ -349,6 +389,7 @@ describe("the calendar's cards (step 4)", () => {
         const url = new URL(String(raw));
         calls.push(url);
         if (url.pathname === "/token") return new Response(JSON.stringify(tokenReply.json), { status: tokenReply.status });
+        if (url.pathname === "/calendar/v3/calendars/primary/events") return new Response(JSON.stringify(calendarList), { status: 200 });
         const m = /^\/calendar\/v3\/calendars\/primary\/events\/(.+)$/.exec(url.pathname);
         const ev = m ? events[decodeURIComponent(m[1])] : undefined;
         if (ev) return new Response(JSON.stringify(ev), { status: 200, headers: { etag: String(ev.etag) } });
@@ -420,12 +461,14 @@ describe("the calendar's cards (step 4)", () => {
     expect(changed).not.toHaveProperty("held");
   });
 
-  it("respond_to_invite is IRREVERSIBLE whatever is on the event, and sends back its own list with only the answer changed (Decision 8)", async () => {
+  it("respond_to_invite is IRREVERSIBLE whatever is on the event, and keeps only the person's own address on it (Decision 8; review of step 4)", async () => {
     const r = ok(await prepareCall("respond_to_invite", { eventId: "e-invite", response: "accepted" }, ctx()));
     expect(r.risk).toBe("IRREVERSIBLE");
     expect(r.readGoogle).toBe(true);
-    expect(r.input).toMatchObject({ eventId: "e-invite", response: "accepted", etag: '"e-invite-1"', account: ACCOUNT });
-    expect(r.input.eventAttendees).toEqual([{ email: "boss@ext.test", responseStatus: "accepted" }, { email: ACCOUNT.email, responseStatus: "accepted" }]);
+    expect(r.input).toEqual({ eventId: "e-invite", response: "accepted", etag: '"e-invite-1"', attendeeEmail: ACCOUNT.email, account: ACCOUNT });
+    // Before: the event's whole list, every guest's address, name and note, stored on the card.
+    expect(r.input).not.toHaveProperty("eventAttendees");
+    expect(JSON.stringify(r.input)).not.toContain("boss@ext.test");
     expect(r.preview).toMatchObject({ title: 'Accept "Board review"', lines: [C.whenLine("Wed 14 Oct, 09:00 to 10:00, UTC"), C.organizerSees("Boss"), C.calendarOf(ACCOUNT.email)] });
     expect(r.preview).not.toHaveProperty("alwaysKey");
     // The person's own event has no invite to answer; one they are not on, nothing either.
@@ -438,7 +481,14 @@ describe("the calendar's cards (step 4)", () => {
     const team = ok(await prepareCall("cancel_event", { eventId: "e-team" }, ctx()));
     expect(team.risk).toBe("IRREVERSIBLE");
     expect(team.preview.title).toBe('Cancel event "Team sync"');
-    expect(team.preview.lines).toEqual([C.whenLine("Tue 13 Oct, 10:00 to 11:00, UTC"), C.tellsCancelled(2), C.outsideLine(1), C.calendarOf(ACCOUNT.email)]);
+    // Who is told, by address (review of step 4: before, only how many).
+    expect(team.preview.lines).toEqual([
+      C.whenLine("Tue 13 Oct, 10:00 to 11:00, UTC"),
+      C.tellsCancelled(2),
+      C.toldLine("mia@proof.test, outsider@ext.test"),
+      C.outsideLine(1),
+      C.calendarOf(ACCOUNT.email),
+    ]);
     const solo = ok(await prepareCall("cancel_event", { eventId: "e-solo" }, ctx()));
     expect(solo.risk).toBe("INTERNAL");
     expect(solo.input.notify).toBe(0);
@@ -467,21 +517,24 @@ describe("the calendar's cards (step 4)", () => {
     expect(r.input.times).toEqual({ kind: "time", start: "2026-10-15T04:30:00.000Z", end: "2026-10-15T05:30:00.000Z", zone: "Asia/Kolkata" });
     // Mia is on it already, and the person is never taken off their own event.
     expect(r.input).toMatchObject({ addAttendees: ["olivia@proof.test"], removeAttendees: ["outsider@ext.test"], notify: 3 });
-    expect(r.input.eventAttendees).toEqual([{ email: ACCOUNT.email, responseStatus: "accepted" }, { email: "mia@proof.test", responseStatus: "accepted" }, { email: "olivia@proof.test" }]);
+    // Only who it adds and takes off: the list is built at the approval (review of step 4).
+    expect(r.input).not.toHaveProperty("eventAttendees");
     expect(r.preview.lines).toEqual([
       C.whenLine("Tue 13 Oct, 15:30 to 16:30, Kolkata time"),
       changeLine(EVENT_CHANGE_LABELS.time, "Thu 15 Oct, 10:00 to 11:00, Kolkata time"),
       changeLine(EVENT_CHANGE_LABELS.adds, "olivia@proof.test"),
       changeLine(EVENT_CHANGE_LABELS.removes, "outsider@ext.test"),
-      // Mia, the outsider taken off, and Olivia are told.
+      // Mia, the outsider taken off, and Olivia are told, each named.
       C.tellsPeople(3),
+      C.toldLine("mia@proof.test, outsider@ext.test, olivia@proof.test"),
       C.outsideLine(1),
       C.calendarOf(ACCOUNT.email),
     ]);
     // The person moved to New York since: the approval runs the moment the card showed, not 10:00 there.
     const approved = ok(await prepareCall("update_event", r.input, ctx({ trigger: "APPROVAL", zone: "America/New_York" })));
     expect(approved.input.times).toEqual(r.input.times);
-    expect(approved.input).toMatchObject({ etag: '"e-team-1"', notify: 3, eventAttendees: r.input.eventAttendees });
+    expect(approved.input).toMatchObject({ etag: '"e-team-1"', notify: 3, addAttendees: ["olivia@proof.test"], removeAttendees: ["outsider@ext.test"] });
+    expect(approved.input).not.toHaveProperty("eventAttendees");
   });
 
   it("update_event of the person's own event with nobody on it is INTERNAL, and a change that changes nothing is refused", async () => {
@@ -491,5 +544,122 @@ describe("the calendar's cards (step 4)", () => {
     expect(r.input).not.toHaveProperty("eventAttendees");
     expect(r.preview.lines).toContain(C.onlyYourCalendar);
     expect(await prepareCall("update_event", { eventId: "e-solo", title: "Focus block" }, ctx())).toEqual({ ok: false, error: C.nothingToChangeEvent, readGoogle: true });
+  });
+
+  // ── Review of step 4 ──
+
+  /** Whether every character of `text` is on the card: in its title or whole on one of its lines. */
+  const onCard = (p: Ok, text: string) => [p.preview.title, ...(p.preview.lines ?? [])].some((l) => l.includes(text));
+  // 200 characters each, the most a title and a place may be; the tail is past the title line's cut.
+  const LONG_TITLE = `Quarterly planning ${"q".repeat(100)} and the words past the cut ${"t".repeat(53)}`;
+  const LONG_PLACE = `Head office ${"p".repeat(120)} the room past the cut ${"r".repeat(45)}`;
+
+  it("shows every word an invitation sends, its whole title and place, and none is cut (review of step 4)", async () => {
+    expect(LONG_TITLE).toHaveLength(200);
+    expect(LONG_PLACE).toHaveLength(200);
+    const r = ok(await prepareCall("create_event", { title: LONG_TITLE, location: LONG_PLACE, start: "2026-10-13T15:00", end: "2026-10-13T16:00", attendees: ["outsider@ext.test"] }, ctx()));
+    expect(r.risk).toBe("IRREVERSIBLE");
+    // Before: only the first 79 characters of each, while Approve sent all 200.
+    expect(r.preview.title).not.toContain("past the cut");
+    expect(onCard(r, LONG_TITLE)).toBe(true);
+    expect(onCard(r, LONG_PLACE)).toBe(true);
+    expect(r.preview.lines?.[0]).toBe(changeLine(EVENT_CHANGE_LABELS.title, LONG_TITLE));
+    expect(r.preview.lines).toContain(changeLine(EVENT_CHANGE_LABELS.place, LONG_PLACE));
+    // A change others are on, the same: its new title and place whole, and the event's own title.
+    events["e-team"] = { ...events["e-team"], summary: LONG_TITLE };
+    const change = ok(await prepareCall("update_event", { eventId: "e-team", title: `${LONG_TITLE.slice(0, 199)}!`, location: LONG_PLACE }, ctx()));
+    expect(change.risk).toBe("IRREVERSIBLE");
+    expect(onCard(change, `${LONG_TITLE.slice(0, 199)}!`)).toBe(true);
+    expect(onCard(change, LONG_PLACE)).toBe(true);
+    expect(change.preview.lines).toContain(C.eventTitleLine(LONG_TITLE));
+    // A cancel and an answer name the event's whole title too.
+    expect(onCard(ok(await prepareCall("cancel_event", { eventId: "e-team" }, ctx())), LONG_TITLE)).toBe(true);
+    events["e-invite"] = { ...events["e-invite"], summary: LONG_TITLE };
+    expect(onCard(ok(await prepareCall("respond_to_invite", { eventId: "e-invite", response: "declined" }, ctx())), LONG_TITLE)).toBe(true);
+  });
+
+  it("names who a change or a cancel tells, cut only between whole addresses, with rooms apart and in no count of people (review of step 4)", async () => {
+    const people = Array.from({ length: 25 }, (_, i) => ({ email: `colleague.number${i}@finance.acme.test`, responseStatus: "accepted" }));
+    events["e-big"] = calEvent("e-big", {
+      attendees: [{ ...SELF, organizer: true }, ...people, { email: "c_room4@resource.calendar.google.com", displayName: "Room 4", resource: true, responseStatus: "accepted" }],
+    });
+    const r = ok(await prepareCall("cancel_event", { eventId: "e-big" }, ctx()));
+    // The 25 people and the room are told; the room is no person and nobody's inbox outside.
+    expect(r.input.notify).toBe(26);
+    const lines = r.preview.lines ?? [];
+    expect(lines).toContain(C.tellsCancelled(25));
+    expect(lines).toContain(C.outsideLine(25));
+    expect(lines).toContain(C.roomsLine("Room 4 <c_room4@resource.calendar.google.com>"));
+    const told = lines.find((l) => l.startsWith("Told: "));
+    if (!told) throw new Error("expected who is told");
+    // Every address shown is whole; the rest are counted.
+    const shown = told.slice("Told: ".length).replace(/ and \d+ more address(es)?$/, "").split(", ");
+    for (const a of shown) expect(people.map((p) => p.email)).toContain(a);
+    expect(told).toBe(C.toldLine(C.moreAddresses(shown.join(", "), 25 - shown.length)));
+    expect(told).not.toContain("resource.calendar");
+    // A list Google cut short says so.
+    events["e-big"] = { ...events["e-big"], attendeesOmitted: true };
+    expect(ok(await prepareCall("cancel_event", { eventId: "e-big" }, ctx())).preview.lines).toContain(C.othersUnlisted);
+  });
+
+  it("answers an invite whose guest list Google hides, with the person's own entry alone (review of step 4)", async () => {
+    // A company all-hands: Google lists only the person, and says it left the rest out.
+    events["e-allhands"] = calEvent("e-allhands", { summary: "All hands", organizer: { email: "ceo@proof.test", displayName: "CEO" }, attendeesOmitted: true, attendees: [{ ...SELF, responseStatus: "needsAction" }] });
+    const r = ok(await prepareCall("respond_to_invite", { eventId: "e-allhands", response: "accepted" }, ctx()));
+    // Before: refused, with a sentence about changing who is invited.
+    expect(r.risk).toBe("IRREVERSIBLE");
+    expect(r.input).toEqual({ eventId: "e-allhands", response: "accepted", etag: '"e-allhands-1"', attendeeEmail: ACCOUNT.email, account: ACCOUNT });
+    expect(r.preview.lines).toContain(C.organizerSees("CEO"));
+  });
+
+  it("keys an invitation so a second identical one points at the first card, and a new event with nobody invited has no key (review of step 4)", async () => {
+    const asked = { title: "Plan", start: "2026-10-13T15:00", end: "2026-10-13T16:00" };
+    const one = ok(await prepareCall("create_event", { ...asked, attendees: ["mia@proof.test", "Olivia@Proof.test"] }, ctx()));
+    const two = ok(await prepareCall("create_event", { ...asked, attendees: ["olivia@proof.test", "mia@proof.test"] }, ctx()));
+    expect(typeof one.input.dedupeKey).toBe("string");
+    expect(two.input.dedupeKey).toBe(one.input.dedupeKey);
+    expect(ok(await prepareCall("create_event", { ...asked, title: "Plan 2", attendees: ["mia@proof.test"] }, ctx())).input.dedupeKey).not.toBe(one.input.dedupeKey);
+    expect(ok(await prepareCall("create_event", asked, ctx())).input).not.toHaveProperty("dedupeKey");
+  });
+
+  it("reads days and times in the zone of the person's Google Calendar when they never chose one, and asks them to set one when neither says (review of step 4)", async () => {
+    const asked = { title: "Focus", start: "2026-10-13T15:00", end: "2026-10-13T16:00" };
+    // Max, in New York, never saved a zone; the workspace's (UTC here) is not his.
+    const r = ok(await prepareCall("create_event", asked, ctx({ zone: "UTC", saved: null })));
+    // Before: 15:00 UTC, 11:00 in New York, added with no card.
+    expect(r.input.times).toEqual({ kind: "time", start: "2026-10-13T19:00:00.000Z", end: "2026-10-13T20:00:00.000Z", zone: "America/New_York" });
+    expect(r.preview.lines?.[0]).toBe(C.whenLine("Tue 13 Oct, 15:00 to 16:00, New York time"));
+    // One read, asking Google for the zone alone; nothing of it is kept but the times it fixed.
+    expect(zoneReads()).toHaveLength(1);
+    expect(zoneReads()[0].searchParams.get("fields")).toBe("timeZone");
+    expect(Object.keys(r.input).sort()).toEqual(["account", "attendees", "end", "start", "times", "title"]);
+    // A zone the person chose wins, and nothing is read for it.
+    calls = [];
+    expect(ok(await prepareCall("create_event", asked, ctx({ zone: "Asia/Kolkata", saved: "Asia/Kolkata" }))).input.times).toMatchObject({ zone: "Asia/Kolkata" });
+    expect(zoneReads()).toEqual([]);
+    // Neither: the person is asked to set one.
+    calendarList = {};
+    expect(await prepareCall("create_event", asked, ctx({ saved: null }))).toEqual({ ok: false, error: C.noTimeZone });
+  });
+
+  it("moves an event with no length, and says why when an event's own times can't be read (review of step 4)", async () => {
+    events["e-mark"] = calEvent("e-mark", { start: { dateTime: "2026-10-13T10:00:00Z" }, end: { dateTime: "2026-10-13T10:00:00Z" } });
+    const moved = ok(await prepareCall("update_event", { eventId: "e-mark", start: "2026-10-14T09:00" }, ctx()));
+    // Before: refused as a bad time, though the time was written right.
+    expect(moved.input.times).toEqual({ kind: "time", start: "2026-10-14T09:00:00.000Z", end: "2026-10-14T09:00:00.000Z", zone: "UTC" });
+    expect(ok(await prepareCall("update_event", moved.input, ctx({ trigger: "APPROVAL" }))).input.times).toEqual(moved.input.times);
+    events["e-odd"] = { ...calEvent("e-odd"), start: {}, end: {} };
+    expect(await prepareCall("update_event", { eventId: "e-odd", start: "2026-10-14T09:00" }, ctx())).toEqual({ ok: false, error: C.eventTimesUnknown, readGoogle: true });
+  });
+
+  it("at its approval leaves the card waiting, agent_paused, when the teammate was paused or removed meanwhile, never failed (review of step 4)", async () => {
+    const first = ok(await prepareCall("create_event", { title: "Plan", start: "2026-10-13T15:00", end: "2026-10-13T16:00", attendees: ["mia@proof.test"] }, ctx()));
+    const mail = ok(await prepareCall("send_email", { to: ["olivia@proof.test"], subject: "Hi", body: "x" }, ctx()));
+    cdb.agents[0].status = "DISABLED";
+    // Before: no held, so the approval failed the card for good though nothing was sent.
+    expect(await prepareCall("create_event", first.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: C.teammateOff, held: "agent_paused" });
+    expect(await prepareCall("send_email", mail.input, ctx({ trigger: "APPROVAL" }))).toEqual({ ok: false, error: C.teammateOff, held: "agent_paused" });
+    // In a turn nothing is held: only an approval can wait.
+    expect(await prepareCall("create_event", { title: "Plan", start: "2026-10-13T15:00", end: "2026-10-13T16:00" }, ctx())).toEqual({ ok: false, error: C.teammateOff });
   });
 });

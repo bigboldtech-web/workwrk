@@ -416,7 +416,8 @@ describe("the Google connector tools (Phase 3; their Google calls are tested in 
       ["create_event", { ...INPUT, attendees: ["mia@x.com"], times }],
       ["update_event", { ...INPUT, etag: '"1"', notify: 2 }],
       ["cancel_event", { ...INPUT, etag: '"1"', notify: 2 }],
-      ["respond_to_invite", { ...INPUT, etag: '"1"', eventAttendees: [{ email: "boss@x.com" }, { email: "priya@x.com" }] }],
+      // As its card stores it since the review of step 4: only the person's own entry.
+      ["respond_to_invite", { ...INPUT, etag: '"1"', attendeeEmail: "max@x.com" }],
     ];
     for (const [name, input] of asked) expect(await TEAMMATE_TOOLS[name].handler(ctx(), input), name).toEqual({ error: "This Google action runs only from its approval." });
     expect(h.personCalls).toBe(0);

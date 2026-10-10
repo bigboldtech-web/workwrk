@@ -554,6 +554,21 @@ describe("the person's own Google Calendar (Phase 3 step 4)", () => {
     expect(dataOf(r.modelContent)).toEqual({ status: "waiting_for_approval", actionId: fx.actions[0].id, title: "Add an event to Google Calendar" });
   });
 
+  it("points a second identical invitation at the first card and makes none (review of step 4, as Decision 23 for an email)", async () => {
+    const card = (key: string) => ({ risk: "IRREVERSIBLE" as const, title: 'Create event "Plan"', input: { ...EVENT, attendees: ["mia@proof.test"], dedupeKey: key } });
+    fx.cards.create_event = card("ev1");
+    await c("create_event", { ...EVENT, attendees: ["mia@proof.test"] });
+    const again = await c("create_event", { ...EVENT, attendees: ["mia@proof.test"] });
+    // Before: a second card, and Approve on both emailed every invitee twice and made two events.
+    expect(fx.actions).toHaveLength(1);
+    expect(again.record).toMatchObject({ state: "waiting", actionId: null, result: { status: "waiting_for_approval", actionId: fx.actions[0].id } });
+    expect(dataOf(again.modelContent)).toEqual({ status: "waiting_for_approval", actionId: fx.actions[0].id, title: "Add an event to Google Calendar", note: CONNECTOR_COPY.alreadyWaitingEvent });
+    // Another invitation is its own card.
+    fx.cards.create_event = card("ev2");
+    await c("create_event", { ...EVENT, title: "Plan 2", attendees: ["mia@proof.test"] });
+    expect(fx.actions).toHaveLength(2);
+  });
+
   it("refuses the sixth calendar write of an answer, whichever kind, and the fifth calendar read (Decision 22)", async () => {
     const counters = fresh();
     expect((await c("create_event", EVENT, { counters })).record.state).toBe("ran");

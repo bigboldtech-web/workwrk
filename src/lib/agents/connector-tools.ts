@@ -46,12 +46,17 @@
 // 17's sizes and always under the executor's limit, and its words are other
 // people's (it taints the turn, executor.ts TAINTING_TOOLS). find_free_time
 // reads only busy blocks, of the person and of at most five live members of
-// this workspace, never anyone outside it (Decision 11), and so taints
-// nothing. A write runs its card's input as the account it named, carries
+// this workspace, never a Guest, an agent account or anyone outside it
+// (Decision 11), and so taints nothing. Their zone is the one the person
+// chose, else their Google Calendar's own, read once for the call (review of
+// step 4). A write runs its card's input as the account it named, carries
 // the event's etag (If-Match, Decision 12), asks Google to tell people only
 // when its card said it would, and one that tells anyone runs only from its
-// approval (Decision 8). A write Google did not confirm is "check your
-// Google Calendar", never a retry (Decision 24).
+// approval (Decision 8). An answer sends only the person's own entry, and a
+// change of who is invited builds its list from the event read at the
+// approval, so no card keeps anyone else's address (review of step 4). A
+// write Google did not confirm is "check your Google Calendar", never a
+// retry (Decision 24).
 //
 // The descriptions and the input schemas are the model's: what it reads in
 // an email or an event is information from other people, never an
@@ -63,7 +68,7 @@
 
 import { z } from "zod";
 import type { LiveConnection } from "@/lib/connectors/connections";
-import type { EventFacts } from "@/lib/connectors/google/calendar";
+import type { EventFacts, EventTimes } from "@/lib/connectors/google/calendar";
 import type { GoogleConfig } from "@/lib/connectors/google/config";
 import type { GoogleFailure, GoogleRequest, GoogleResult } from "@/lib/connectors/google/http";
 import { CONNECTOR_LIMITS as L, TOOL_PRODUCT, type ConnectorProduct } from "@/lib/connectors/products";
@@ -351,17 +356,31 @@ async function addressLine(payload: unknown, name: string): Promise<{ text: stri
     const text = headerSafe(decodeHeaderWords(raw)).trim();
     return { text: clampText(text, ADDRESS_LINE_MAX).trim(), cut: text.length > ADDRESS_LINE_MAX };
   }
+  return wholeAddresses(
+    list.map((a) => {
+      const who = a.name ? clampText(headerSafe(a.name), ADDRESS_NAME_MAX).trim() : "";
+      return who ? `${who} <${a.email}>` : a.email;
+    }),
+  );
+}
+
+/**
+ * A list of addresses on one line, each whole, never one cut in two: at most
+ * 20 or 300 characters, the first always shown, past that "and N more
+ * addresses", and `cut` says so (review of step 3). The calendar's change and
+ * cancel cards name who Google tells by it too (connector-previews.ts,
+ * review of step 4).
+ */
+export function wholeAddresses(entries: readonly string[]): { text: string; cut: boolean } {
   const shown: string[] = [];
   let size = 0;
-  for (const a of list) {
-    const who = a.name ? clampText(headerSafe(a.name), ADDRESS_NAME_MAX).trim() : "";
-    const one = who ? `${who} <${a.email}>` : a.email;
+  for (const one of entries) {
     const add = one.length + (shown.length > 0 ? 2 : 0);
     if (shown.length > 0 && (shown.length >= ADDRESSES_SHOWN || size + add > ADDRESS_LINE_MAX)) break;
     shown.push(one);
     size += add;
   }
-  const more = list.length - shown.length;
+  const more = entries.length - shown.length;
   return more > 0 ? { text: CONNECTOR_COPY.moreAddresses(shown.join(", "), more), cut: true } : { text: shown.join(", "), cut: false };
 }
 
@@ -666,14 +685,29 @@ async function windowDays(fromRaw: string, toRaw: string | undefined, max: numbe
 
 const isoOf = (ms: number) => new Date(ms).toISOString();
 
+/**
+ * The zone this call reads and answers days and times in (connector-access.ts
+ * calendarZoneFor, review of step 4): the person's own, else their Google
+ * Calendar's, read once for the call; with neither, the person is asked to
+ * set one rather than a zone being guessed for them.
+ */
+async function calendarZone(o: Opened, t: TeammateToolContext, tool: ConnectorToolName): Promise<string | Refusal> {
+  const z = await (await connectorAccess()).calendarZoneFor(o.person, o.connection, o.cfg);
+  if (z.ok) return z.zone;
+  if ("failure" in z) return failed(z, CONNECTOR_COPY.googleRefused, tool, t);
+  return refused(CONNECTOR_COPY.noTimeZone);
+}
+
 /** The most people of one event the model reads; the rest are counted (attendeeCount). */
 const ATTENDEES_SHOWN = 10;
 /** The longest place shown. */
 const PLACE_SHOWN = 200;
 
-/** An event's text as the model reads it: one line, at most `max`. */
-function eventText(s: string, max: number): string {
-  return clampText(s.replace(/\s+/g, " ").trim(), max).trim();
+/** An event's text as the model reads it: one line, at most `max`; `cut` when that left any of it out. */
+function eventText(s: string, max: number): { text: string; cut: boolean } {
+  const line = s.replace(/\s+/g, " ").trim();
+  const text = clampText(line, max).trim();
+  return { text, cut: text.length < line.length };
 }
 
 /**
@@ -681,9 +715,10 @@ function eventText(s: string, max: number): string {
  * (Decision 17): its description read as the person would see it (hidden
  * HTML dropped, gmail-parse.ts) and at most 500 characters, at most ten of
  * its people with how many there are, and whether it is one time of a
- * repeating event.
+ * repeating event. `textCut` when a title, a place or a name was cut short,
+ * which the note says too (review of step 4: before, those cuts said nothing).
  */
-async function eventRow(f: EventFacts, zone: string, accountEmail: string): Promise<{ row: Record<string, unknown>; descriptionCut: boolean; attendeesCut: boolean }> {
+async function eventRow(f: EventFacts, zone: string, accountEmail: string): Promise<{ row: Record<string, unknown>; descriptionCut: boolean; attendeesCut: boolean; textCut: boolean }> {
   const [{ htmlToText }, { isSelf, timesForModel }] = await Promise.all([gmailParse(), calendar()]);
   const times = f.times ? timesForModel(f.times, zone) : null;
   const text = f.description ? htmlToText(f.description).trim() : "";
@@ -691,34 +726,38 @@ async function eventRow(f: EventFacts, zone: string, accountEmail: string): Prom
   const descriptionCut = description.length < text.length;
   const self = f.attendees.find((p) => isSelf(p, accountEmail)) ?? null;
   const shown = f.attendees.slice(0, ATTENDEES_SHOWN);
-  return {
-    row: {
-      eventId: f.id,
-      title: eventText(f.title, L.titleMax),
-      start: times?.start ?? null,
-      end: times?.end ?? null,
-      allDay: times?.allDay ?? false,
-      location: eventText(f.location, PLACE_SHOWN),
-      organizer: f.organizer ? { name: f.organizer.name ? eventText(f.organizer.name, ADDRESS_NAME_MAX) : null, email: f.organizer.email, self: f.organizer.self } : null,
-      attendees: shown.map((p) => ({ name: p.name ? eventText(p.name, ADDRESS_NAME_MAX) : null, email: p.email, response: p.response })),
-      attendeeCount: f.attendees.length,
-      myResponse: f.organizer?.self === true ? "organizer" : (self?.response ?? null),
-      description,
-      ...(descriptionCut ? { descriptionCut: true } : {}),
-      repeating: f.instance,
-    },
-    descriptionCut,
-    attendeesCut: f.attendees.length > shown.length || f.attendeesOmitted,
+  let textCut = false;
+  const cutTo = (s: string, max: number): string => {
+    const t = eventText(s, max);
+    textCut ||= t.cut;
+    return t.text;
   };
+  const row: Record<string, unknown> = {
+    eventId: f.id,
+    title: cutTo(f.title, L.titleMax),
+    start: times?.start ?? null,
+    end: times?.end ?? null,
+    allDay: times?.allDay ?? false,
+    location: cutTo(f.location, PLACE_SHOWN),
+    organizer: f.organizer ? { name: f.organizer.name ? cutTo(f.organizer.name, ADDRESS_NAME_MAX) : null, email: f.organizer.email, self: f.organizer.self } : null,
+    attendees: shown.map((p) => ({ name: p.name ? cutTo(p.name, ADDRESS_NAME_MAX) : null, email: p.email, response: p.response })),
+    attendeeCount: f.attendees.length,
+    myResponse: f.organizer?.self === true ? "organizer" : (self?.response ?? null),
+    description,
+    ...(descriptionCut ? { descriptionCut: true } : {}),
+    repeating: f.instance,
+  };
+  return { row, descriptionCut, attendeesCut: f.attendees.length > shown.length || f.attendeesOmitted, textCut };
 }
 
 /** list_events' note: whose words these are, and each way the answer was cut (Decision 17). */
-function calendarNoteOf(p: { more: boolean; descriptionsCut: boolean; attendeesCut: boolean }): string {
+function calendarNoteOf(p: { more: boolean; descriptionsCut: boolean; attendeesCut: boolean; textCut: boolean }): string {
   return [
     CONNECTOR_COPY.calendarNote,
     ...(p.more ? [CONNECTOR_COPY.moreEvents] : []),
     ...(p.descriptionsCut ? [CONNECTOR_COPY.descriptionsCut] : []),
     ...(p.attendeesCut ? [CONNECTOR_COPY.attendeesCut] : []),
+    ...(p.textCut ? [CONNECTOR_COPY.eventTextCut] : []),
   ].join(" ");
 }
 
@@ -749,8 +788,9 @@ async function listEventsRun(ctx: ToolContext, raw: Record<string, unknown>): Pr
   if (isRefused(days)) return days;
   const o = await openFor(ctx, t, "calendar");
   if (isRefused(o)) return o;
+  const zone = await calendarZone(o, t, "list_events");
+  if (isRefused(zone)) return zone;
   const { addDays, calendarUrl, dayStart, eventFacts, PRIMARY_EVENTS } = await calendar();
-  const zone = o.person.timezone;
   const limit = parsed.data.limit ?? L.eventsMax;
   const params: Array<[string, string]> = [
     ["timeMin", isoOf(dayStart(days.from, zone))],
@@ -772,21 +812,23 @@ async function listEventsRun(ctx: ToolContext, raw: Record<string, unknown>): Pr
   const rows: Array<Record<string, unknown>> = [];
   let descriptionsCut = false;
   let attendeesCut = false;
+  let textCut = false;
   for (const f of facts.slice(0, limit)) {
     const one = await eventRow(f, zone, o.connection.accountEmail);
     rows.push(one.row);
     descriptionsCut ||= one.descriptionCut;
     attendeesCut ||= one.attendeesCut;
+    textCut ||= one.textCut;
   }
   const answer = () => {
-    const cut = more || descriptionsCut || attendeesCut;
+    const cut = more || descriptionsCut || attendeesCut || textCut;
     return {
       count: rows.length,
       events: rows,
       window: { from: days.from, to: days.to, zone },
       ...(more ? { more: true } : {}),
       ...(cut ? { partial: true } : {}),
-      note: calendarNoteOf({ more, descriptionsCut, attendeesCut }),
+      note: calendarNoteOf({ more, descriptionsCut, attendeesCut, textCut }),
     };
   };
   while (JSON.stringify(answer()).length > READ_ANSWER_MAX) {
@@ -823,9 +865,9 @@ function weekdayName(n: number): string {
  * The person's working days (their own schedule, else the workspace's:
  * work-schedule.ts effectivePersonSchedule; a schedule of no fixed days is
  * every day, never none), and the workspace's holidays in these days as
- * blocks of busy time on the person's clock.
+ * blocks of busy time on the person's clock (`zone`, the call's own).
  */
-async function workingDaysOf(person: ActingPerson, days: { from: string; to: string }): Promise<{ days: number[]; closed: Array<{ start: number; end: number }> }> {
+async function workingDaysOf(person: ActingPerson, days: { from: string; to: string }, zone: string): Promise<{ days: number[]; closed: Array<{ start: number; end: number }> }> {
   const [{ readOrgWorkSchedule }, { effectivePersonSchedule }, { prisma }, { addDays, dayStart, daysBetween }] = await Promise.all([workScheduleServer(), workSchedule(), db(), calendar()]);
   const org = await readOrgWorkSchedule(person.organizationId);
   let own: unknown = null;
@@ -839,7 +881,7 @@ async function workingDaysOf(person: ActingPerson, days: { from: string; to: str
   const workDays = schedule.workdays.length > 0 ? [...schedule.workdays] : [0, 1, 2, 3, 4, 5, 6];
   const closed = schedule.holidays
     .filter((h) => daysBetween(days.from, h.date) >= 0 && daysBetween(h.date, days.to) >= 0)
-    .map((h) => ({ start: dayStart(h.date, person.timezone), end: dayStart(addDays(h.date, 1), person.timezone) }));
+    .map((h) => ({ start: dayStart(h.date, zone), end: dayStart(addDays(h.date, 1), zone) }));
   return { days: workDays, closed };
 }
 
@@ -881,8 +923,9 @@ async function findFreeTimeRun(ctx: ToolContext, raw: Record<string, unknown>): 
     const outsider = people.find((p) => !members.has(p));
     if (outsider) return refused(CONNECTOR_COPY.notMember(outsider));
   }
+  const zone = await calendarZone(o, t, "find_free_time");
+  if (isRefused(zone)) return zone;
   const { addDays, busyBlocks, calendarUrl, dayStart, localStamp } = await calendar();
-  const zone = o.person.timezone;
   const from = dayStart(days.from, zone);
   const to = dayStart(addDays(days.to, 1), zone);
   // A read sent as a POST: tried again on a timeout like any read (google/http.ts).
@@ -896,7 +939,7 @@ async function findFreeTimeRun(ctx: ToolContext, raw: Record<string, unknown>): 
   const read = busyBlocks(r.data, [PRIMARY, ...people]);
   // Never offered as free when the person's own calendar went unread.
   if (read.unread.includes(PRIMARY)) return refused(CONNECTOR_COPY.ownFreeBusyFailed);
-  const hours = await workingDaysOf(o.person, days);
+  const hours = await workingDaysOf(o.person, days, zone);
   const { freeSlots } = await freeTime();
   const slots = freeSlots({
     busy: [...read.busy, ...hours.closed],
@@ -973,14 +1016,28 @@ async function createEventRun(ctx: ToolContext, raw: Record<string, unknown>): P
   const r = await call<unknown>(o, { method: "POST", url: calendarUrl(o.cfg.calendarBase, PRIMARY_EVENTS, sendUpdates(attendees.length > 0)), body, write: true });
   if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "create_event", t);
   await touch(o);
-  return { ok: true, event: { id: str(rec(r.data).id) || null, start: timesForModel(times, o.person.timezone).start } };
+  return { ok: true, event: { id: str(rec(r.data).id) || null, start: timesForModel(times, zoneOfTimes(times, o.person.timezone)).start } };
+}
+
+/**
+ * The zone a write's answer names its start in: the one its card fixed the
+ * times in (review of step 4), never a zone read again; a day is a day in any.
+ */
+function zoneOfTimes(times: EventTimes, fallback: string): string {
+  return times.kind === "time" ? times.zone : fallback;
 }
 
 /**
  * update_event: the card's changes to an event the person organizes, only
  * while it is the version the card read (If-Match its etag: a change since
- * fails as eventChanged, Decision 12). The people it sends back are the
- * event's own list as read, with who is added and less who is taken off.
+ * fails as eventChanged, Decision 12).
+ *
+ * WHO IS INVITED IS WORKED OUT HERE, AT THE APPROVAL (review of step 4). The
+ * card keeps only who it adds and takes off (Decision 16), never the event's
+ * list of people: the event is read again, it must still be the version the
+ * card read, and the list sent is that event's own, with who is added and
+ * less who is taken off (calendar.ts attendeesAfter). A list Google did not
+ * send whole is never sent back, which would drop the people it left out.
  */
 async function updateEventRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
   const t = ctx.teammate;
@@ -989,23 +1046,37 @@ async function updateEventRun(ctx: ToolContext, raw: Record<string, unknown>): P
   if (!parsed.success) return badInputOf(parsed.error);
   const stored = eventStoredInput.safeParse(raw);
   if (!stored.success) return refused(ERR.notAllowed);
-  const { calendarUrl, eventPath, googlePatchTimes, storedAttendees, storedTimes, timesForModel } = await calendar();
+  const { attendeesAfter, calendarUrl, eventFacts, eventPath, googlePatchTimes, storedTimes, timesForModel } = await calendar();
   const times = raw.times === undefined ? null : storedTimes(raw.times);
   if (raw.times !== undefined && !times) return refused(ERR.notAllowed);
-  const people = raw.eventAttendees === undefined ? null : storedAttendees(raw.eventAttendees);
-  if (raw.eventAttendees !== undefined && !people) return refused(ERR.notAllowed);
   const d = parsed.data;
+  const adds = d.addAttendees ?? [];
+  const removes = d.removeAttendees ?? [];
+  const { isEmailAddress } = await gmailMime();
+  if (![...adds, ...removes].every((a) => isEmailAddress(a))) return refused(ERR.notAllowed);
+  const changesPeople = adds.length > 0 || removes.length > 0;
   const body: Record<string, unknown> = {
     ...(d.title !== undefined ? { summary: d.title } : {}),
     ...(d.description !== undefined ? { description: d.description } : {}),
     ...(d.location !== undefined ? { location: d.location } : {}),
     ...(times ? googlePatchTimes(times) : {}),
-    ...(people ? { attendees: people } : {}),
   };
-  if (Object.keys(body).length === 0) return refused(CONNECTOR_COPY.nothingToChangeEvent);
+  if (Object.keys(body).length === 0 && !changesPeople) return refused(CONNECTOR_COPY.nothingToChangeEvent);
   const tells = stored.data.notify > 0;
   const o = await openWrite(ctx, t, raw, tells);
   if (isRefused(o)) return o;
+  if (changesPeople) {
+    // Who is added or taken off is always told (its preparation counts them
+    // in `notify`), so this runs only from its approval, whatever was stored.
+    if (!fromApproval(t)) return refused(CONNECTOR_COPY.needsApproval);
+    const got = await call<unknown>(o, { method: "GET", url: calendarUrl(o.cfg.calendarBase, eventPath(d.eventId)), write: false });
+    if (!got.ok) return failed(got, CONNECTOR_COPY.eventNotFound, "update_event", t);
+    const ev = eventFacts(got.data, o.person.timezone);
+    if (!ev || ev.status === "cancelled") return refused(CONNECTOR_COPY.eventNotFound);
+    if ((ev.etag ?? got.etag ?? null) !== stored.data.etag) return refused(CONNECTOR_COPY.eventChanged);
+    if (ev.attendeesOmitted) return refused(CONNECTOR_COPY.attendeesHidden);
+    body.attendees = attendeesAfter(ev, adds, removes);
+  }
   const r = await call<unknown>(o, {
     method: "PATCH",
     url: calendarUrl(o.cfg.calendarBase, eventPath(d.eventId), sendUpdates(tells)),
@@ -1015,7 +1086,7 @@ async function updateEventRun(ctx: ToolContext, raw: Record<string, unknown>): P
   });
   if (!r.ok) return failed(r, CONNECTOR_COPY.eventNotFound, "update_event", t);
   await touch(o);
-  return { ok: true, event: { id: str(rec(r.data).id) || d.eventId, ...(times ? { start: timesForModel(times, o.person.timezone).start } : {}) } };
+  return { ok: true, event: { id: str(rec(r.data).id) || d.eventId, ...(times ? { start: timesForModel(times, zoneOfTimes(times, o.person.timezone)).start } : {}) } };
 }
 
 /** cancel_event: an event the person organizes, deleted only while it is the version the card read; the people on it told when the card said so. */
@@ -1042,10 +1113,15 @@ async function cancelEventRun(ctx: ToolContext, raw: Record<string, unknown>): P
 }
 
 /**
- * respond_to_invite: the person's answer, sent as the event's own list with
- * only their answer changed (Google takes a list whole), only while it is
- * the version the card read. The organizer is told, so it runs only from its
- * approval (Decision 8).
+ * respond_to_invite: the person's answer, only while it is the version the
+ * card read. The organizer is told, so it runs only from its approval
+ * (Decision 8).
+ *
+ * ONLY THE PERSON'S OWN ENTRY IS SENT (review of step 4), with
+ * attendeesOmitted: Google's documented way to change only one's own answer.
+ * Nobody else's address, name or note is kept on the card or sent back, and
+ * an invite whose guest list Google hides (an all-hands, a webinar) can be
+ * answered too.
  */
 async function respondToInviteRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
   const t = ctx.teammate;
@@ -1053,15 +1129,16 @@ async function respondToInviteRun(ctx: ToolContext, raw: Record<string, unknown>
   const parsed = CONNECTOR_INPUT.respond_to_invite.safeParse(raw);
   if (!parsed.success) return badInputOf(parsed.error);
   const etag = etagInput.safeParse(raw.etag);
-  const { calendarUrl, eventPath, storedAttendees } = await calendar();
-  const people = storedAttendees(raw.eventAttendees);
-  if (!etag.success || !people || people.length === 0) return refused(ERR.notAllowed);
+  const own = str(raw.attendeeEmail).trim();
+  const { isEmailAddress } = await gmailMime();
+  if (!etag.success || !isEmailAddress(own)) return refused(ERR.notAllowed);
+  const { calendarUrl, eventPath } = await calendar();
   const o = await openWrite(ctx, t, raw, true);
   if (isRefused(o)) return o;
   const r = await call<unknown>(o, {
     method: "PATCH",
     url: calendarUrl(o.cfg.calendarBase, eventPath(parsed.data.eventId), sendUpdates(true)),
-    body: { attendees: people },
+    body: { attendees: [{ email: own, responseStatus: parsed.data.response }], attendeesOmitted: true },
     ifMatch: etag.data,
     write: true,
   });

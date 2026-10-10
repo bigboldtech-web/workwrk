@@ -49,9 +49,10 @@
 // this turn asks starts the same way. What such a read keeps in the call log
 // is its count (Decision 16), though the model read it all. A Google write's
 // card title is the person's alone: the model and the call log name the
-// write by its kind (connectorTitle), never by a subject. A send or a reply
-// identical to one already waiting points at that card and makes no second
-// one, and adds nothing to this turn's approval row (Decision 23).
+// write by its kind (connectorTitle), never by a subject. A send, a reply or
+// an invitation identical to one already waiting points at that card and
+// makes no second one, and adds nothing to this turn's approval row
+// (Decision 23; the invitation, review of step 4).
 //
 // Server-only: imports prisma.
 
@@ -436,7 +437,10 @@ function connectorMissing(a: ExecuteArgs, name: ConnectorToolName): string {
  * A send or a reply exactly like one already waiting for this person (the
  * same recipients, subject, body and conversation: the preparation's
  * dedupeKey), which a planted loop would otherwise ask for again and again,
- * so one "Approve 5" sends five (Decision 23).
+ * so one "Approve 5" sends five (Decision 23). An invitation the same way:
+ * the same people, title, times and account (calendar.ts eventDedupeKey,
+ * review of step 4). A card with no key (a new event with nobody invited)
+ * has no twin.
  */
 async function waitingTwin(person: ActingPerson, tool: ToolName, input: Record<string, unknown>): Promise<{ id: string } | null> {
   const key = input.dedupeKey;
@@ -570,13 +574,16 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // and the person's "Don't ask" is not read (Decision 9).
   const gate = tainted ? "ask" : gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
   if (gate === "ask") {
-    if (name === "send_email" || name === "reply_email") {
+    // An invitation too (review of step 4): two identical create_event cards
+    // would each email every invitee and make a second event.
+    if (name === "send_email" || name === "reply_email" || name === "create_event") {
       const twin = await waitingTwin(person, name, prepared.input);
       if (twin) {
         // The answer points at the card that already waits; the record names
         // no action of its own, so this turn's approval row never shows the
         // same email a second time, nor in another chat (review of step 3).
-        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note: CONNECTOR_COPY.alreadyWaiting });
+        const note = name === "create_event" ? CONNECTOR_COPY.alreadyWaitingEvent : CONNECTOR_COPY.alreadyWaiting;
+        return done("waiting", { status: "waiting_for_approval", actionId: twin.id, title: modelTitle, note });
       }
     }
     if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId)) >= MAX_PENDING_PER_PERSON) {

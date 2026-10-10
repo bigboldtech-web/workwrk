@@ -91,6 +91,13 @@ describe("resolveActingPerson", () => {
     db.orgZone = null;
     expect(await resolveActingPerson("org", "me")).toMatchObject({ person: { timezone: "UTC" } });
   });
+
+  it("says whether the person chose their zone, so the calendar tools never take the workspace's for theirs (review of step 4)", async () => {
+    expect(await resolveActingPerson("org", "me")).toMatchObject({ person: { timezone: "Asia/Kolkata", savedTimezone: "Asia/Kolkata" } });
+    // Never picked one: dates still read in the workspace's, but nothing says it is theirs.
+    db.zone = null;
+    expect(await resolveActingPerson("org", "me")).toMatchObject({ person: { timezone: "Europe/London", savedTimezone: null } });
+  });
 });
 
 describe("the tool context", () => {

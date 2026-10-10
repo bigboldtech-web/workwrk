@@ -17,6 +17,7 @@ vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/connectors/c
 const acting = vi.hoisted(() => ({ person: null as Record<string, unknown> | null }));
 vi.mock("./acting", () => ({ actingPersonFor: async () => acting.person }));
 
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { cdb, resetConnectorDb, seedConnection } from "@/lib/connectors/connector-test-db";
 import { sealToken } from "@/lib/connectors/seal";
 import { CONNECTOR_TOOLS_DEFS, READ_ANSWER_MAX } from "./connector-tools";
@@ -591,24 +592,94 @@ describe("the calendar's tools (step 4)", () => {
     expect(await run("cancel_event", { eventId: "e-solo", notify: 0, account: ACCOUNT })).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
   });
 
-  it("answers an invite only from its approval, with the event's own list, once; one Google did not confirm is unconfirmed (Decisions 8 and 24)", async () => {
+  it("answers an invite only from its approval, with the person's own entry alone, once; one Google did not confirm is unconfirmed (Decisions 8 and 24; review of step 4)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const answer = {
-      eventId: "e-invite",
-      response: "accepted",
-      etag: '"e-invite-1"',
-      eventAttendees: [{ email: "boss@ext.test", responseStatus: "accepted" }, { email: ACCOUNT.email, responseStatus: "accepted" }],
-      account: ACCOUNT,
-    };
+    const answer = { eventId: "e-invite", response: "accepted", etag: '"e-invite-1"', attendeeEmail: ACCOUNT.email, account: ACCOUNT };
     expect(await run("respond_to_invite", answer)).toEqual({ error: CONNECTOR_COPY.needsApproval });
     expect(calls).toEqual([]);
     routes[`PATCH ${EVENTS}/e-invite`] = () => ({ status: 200, json: { id: "e-invite" } });
     expect(await run("respond_to_invite", answer, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ ok: true, event: { id: "e-invite" }, response: "accepted" });
-    expect(calls[0]).toMatchObject({ method: "PATCH", ifMatch: '"e-invite-1"', body: { attendees: answer.eventAttendees } });
+    // Google's way to change only one's own answer: nobody else's entry is sent back, or needed.
+    expect(calls[0]).toMatchObject({ method: "PATCH", ifMatch: '"e-invite-1"', body: { attendees: [{ email: ACCOUNT.email, responseStatus: "accepted" }], attendeesOmitted: true } });
     expect(calls[0].url.searchParams.get("sendUpdates")).toBe("all");
+    // A card with no address of the person's own on record is never sent on a guess.
+    expect(await run("respond_to_invite", { ...answer, attendeeEmail: undefined }, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
     calls = [];
     routes[`PATCH ${EVENTS}/e-invite`] = () => "timeout";
     expect(await run("respond_to_invite", answer, ctx({ trigger: "APPROVAL", actionId: "act2" }))).toEqual({ error: CONNECTOR_COPY.unknownOutcomeCalendar });
     expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+  });
+
+  // ── Review of step 4 ──
+
+  it("builds who is invited from the event read at the approval, only while it is the version the card read, never from a list the card kept", async () => {
+    let etag = '"e-team-1"';
+    routes[`GET ${EVENTS}/e-team`] = () => ({
+      status: 200,
+      json: {
+        ...event("e-team", { attendees: [{ email: ACCOUNT.email, self: true, organizer: true, responseStatus: "accepted" }, { email: "mia@proof.test", responseStatus: "accepted", comment: "Running late" }, { email: "outsider@ext.test" }] }),
+        etag,
+      },
+    });
+    routes[`PATCH ${EVENTS}/e-team`] = () => ({ status: 200, json: { id: "e-team" } });
+    const change = { eventId: "e-team", addAttendees: ["olivia@proof.test"], removeAttendees: ["outsider@ext.test"], etag: '"e-team-1"', notify: 3, account: ACCOUNT };
+    expect(await run("update_event", change, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ ok: true, event: { id: "e-team" } });
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch).toMatchObject({ ifMatch: '"e-team-1"' });
+    expect(patch?.body).toEqual({
+      attendees: [{ email: ACCOUNT.email, responseStatus: "accepted" }, { email: "mia@proof.test", responseStatus: "accepted", comment: "Running late" }, { email: "olivia@proof.test" }],
+    });
+    // A list a card kept from before is never what is sent.
+    calls = [];
+    await run("update_event", { ...change, eventAttendees: [{ email: "x@evil.test" }] }, ctx({ trigger: "APPROVAL", actionId: "act2" }));
+    expect(JSON.stringify(calls.find((c) => c.method === "PATCH")?.body)).not.toContain("x@evil.test");
+    // Changed since its card: nothing is sent.
+    etag = '"e-team-2"';
+    calls = [];
+    expect(await run("update_event", change, ctx({ trigger: "APPROVAL", actionId: "act3" }))).toEqual({ error: CONNECTOR_COPY.eventChanged });
+    expect(calls.filter((c) => c.method === "PATCH")).toEqual([]);
+    // Never without its approval.
+    expect(await run("update_event", change)).toEqual({ error: CONNECTOR_COPY.needsApproval });
+  });
+
+  it("at its approval says the card can wait, agent_paused, when the teammate was paused or removed meanwhile (review of step 4)", async () => {
+    cdb.agents[0].status = "DISABLED";
+    // Before: no held, so the card failed for good though nothing was sent.
+    expect(await run("create_event", { ...CREATE, attendees: ["mia@proof.test"] }, ctx({ trigger: "APPROVAL", actionId: "act1" }))).toEqual({ error: CONNECTOR_COPY.teammateOff, held: "agent_paused" });
+    expect(await run("send_email", { to: ["olivia@proof.test"], cc: [], subject: "Hi", body: "x", account: ACCOUNT }, ctx({ trigger: "APPROVAL", actionId: "act2" }))).toEqual({ error: CONNECTOR_COPY.teammateOff, held: "agent_paused" });
+    expect(calls).toEqual([]);
+  });
+
+  it("reads the days in the zone of the person's Google Calendar when they never chose one, once for the call (review of step 4)", async () => {
+    acting.person = { ...PERSON, timezone: "UTC", savedTimezone: null };
+    routes[`GET ${EVENTS}`] = (url) => (url.searchParams.get("fields") === "timeZone" ? { status: 200, json: { timeZone: "Asia/Kolkata" } } : { status: 200, json: { items: [] } });
+    const r = await run("list_events", { from: "2026-10-13" });
+    // Before: UTC midnights for someone the app shows another zone.
+    const list = calls.filter((c) => c.url.searchParams.get("fields") !== "timeZone");
+    expect(list[0].url.searchParams.get("timeMin")).toBe("2026-10-12T18:30:00.000Z");
+    expect(r).toMatchObject({ window: { zone: "Asia/Kolkata" } });
+    expect(calls.filter((c) => c.url.searchParams.get("fields") === "timeZone")).toHaveLength(1);
+    // Neither the person nor their calendar says: asked to set one, nothing read in a guess.
+    routes[`GET ${EVENTS}`] = () => ({ status: 200, json: {} });
+    expect(await run("find_free_time", { from: "2026-10-12", durationMinutes: 30 })).toEqual({ error: CONNECTOR_COPY.noTimeZone });
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("says when list_events cut a title, a place or a name (review of step 4)", async () => {
+    routes[`GET ${EVENTS}`] = () => ({ status: 200, json: { items: [event("e-long", { summary: "T".repeat(260) })] } });
+    const r = await run("list_events", { from: "2026-10-13" });
+    expect(((r.events as Array<{ title: string }>)[0].title).length).toBe(200);
+    // Before: cut with nothing said, and not partial.
+    expect(r).toMatchObject({ partial: true, note: `${CONNECTOR_COPY.calendarNote} ${CONNECTOR_COPY.eventTextCut}` });
+  });
+
+  it("finds time only with members: never a Guest or an agent account (Decision 11; review of step 4)", async () => {
+    vi.stubEnv("ACCESS_V2_TABLES", "true");
+    cdb.users.push({ id: "u-client", email: "client@proof.test", organizationId: "org1", deletedAt: null, status: "ACTIVE", ...legacyLevelRow("EMPLOYEE"), orgRole: "GUEST" });
+    cdb.users.push({ id: "u-bot", email: "bot@proof.test", organizationId: "org1", deletedAt: null, status: "ACTIVE", ...legacyLevelRow("AGENT") });
+    // Before: the client passed as a member, and their busy blocks were read.
+    expect(await run("find_free_time", { from: "2026-10-12", durationMinutes: 30, with: ["client@proof.test"] })).toEqual({ error: CONNECTOR_COPY.notMember("client@proof.test") });
+    expect(await run("find_free_time", { from: "2026-10-12", durationMinutes: 30, with: ["bot@proof.test"] })).toEqual({ error: CONNECTOR_COPY.notMember("bot@proof.test") });
+    expect(calls).toEqual([]);
   });
 });
