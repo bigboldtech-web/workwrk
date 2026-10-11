@@ -294,6 +294,11 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     timeCap: [[15], "The browser closed: it reached its 15 minutes."],
     // Follow-up to review round 1 of Phase 4: a call that waited behind an end, in the card's own words.
     closedBecause: [["You stopped it."], 'The browser closed before this step, and the browser card says why: "You stopped it."'],
+    // Review round 4 of Phase 4: a Stop holds for the rest of its answer, and the sentence never invites a new browser.
+    closedForAnswer: [
+      ["You stopped it."],
+      'The browser closed in this answer, and the browser card says why: "You stopped it." A teammate doesn\'t open another one in the same answer. If the person wants one, they can ask in a new message.',
+    ],
     notAllowedSite: [["exfil.proof.test"], "exfil.proof.test isn't one of the sites this teammate may open."],
     blockedSite: [["blocked.proof.test"], "blocked.proof.test is blocked in this workspace."],
     sensitiveField: [["Max"], "That's a password, code or payment field. Ask Max to take over and type it themselves."],

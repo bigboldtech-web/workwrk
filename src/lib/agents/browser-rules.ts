@@ -41,7 +41,7 @@ import { BROWSER_TURN_LIMITS, CLICK_WARNINGS, type ClickWarning } from "@/lib/br
 import { redactPageText } from "@/lib/browser/redact";
 import { sealWords, type SealedFingerprint } from "@/lib/browser/snapshot";
 import type { SiteVerdict } from "@/lib/browser/sites";
-import { FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type NavOutcome, type StepKind } from "@/lib/browser/types";
+import { END_HOLDS, FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type EndReason, type NavOutcome, type StepKind } from "@/lib/browser/types";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
 import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
@@ -74,19 +74,54 @@ export type BrowserRefusal =
   | "other_turn"
   | "person_has_it"
   | "restarted"
-  | "time_cap";
+  | "time_cap"
+  | "closed_in_answer";
+
+/**
+ * A browser that closed, in its end's own words (review round 1 of Phase 4):
+ * "WorkwrK restarted" only when it did, the time cap with its minutes when
+ * they are known, and every other end in a sentence of its own that names
+ * the reason as the browser card does (BROWSER_COPY.closedBecause, Decision
+ * 33). Follow-up to review round 1 of Phase 4: before, the switch, the plan
+ * and a closed workspace borrowed a fresh call's refusal, and every other
+ * end put the card's line after "Open a page to start a new one". An end
+ * with no known reason says only that the browser closed. Here since review
+ * round 4 of Phase 4, so the executor's card and every refusal read it too
+ * (browser-tools.ts exports it as before).
+ */
+export function closedSentence(endReason: string | null | undefined, minutes?: number): string {
+  if (endReason === "restarted") return BROWSER_COPY.restarted;
+  if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
+  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
+  return endReason && Object.hasOwn(ended, endReason) ? BROWSER_COPY.closedBecause(ended[endReason]) : BROWSER_COPY.browserClosed;
+}
+
+/** Whether an end holds for the rest of its answer (review round 4 of Phase 4, browser/types.ts END_HOLDS). Anything not an end reason does not. */
+export function endHolds(endReason: unknown): endReason is EndReason {
+  return typeof endReason === "string" && Object.hasOwn(END_HOLDS, endReason) && END_HOLDS[endReason as EndReason] === true;
+}
+
+/**
+ * open_page refused after a browser of this answer ended for a reason that
+ * holds (review round 4 of Phase 4): the card's ended line, quoted, and no
+ * invitation to open another. A reason that does not hold reads as the
+ * card's plain "Closed.", never as a reason it was not.
+ */
+export function closedForAnswerSentence(endReason: unknown): string {
+  return BROWSER_COPY.closedForAnswer(endHolds(endReason) ? BROWSER_PANEL_COPY.ENDED_WORDS[endReason] : BROWSER_PANEL_COPY.ENDED_WORDS.left);
+}
 
 /**
  * Why a browser call can't run now, in the person's words (Decision 33).
  * `first` is the person's first name; `extra` what the refusal carried
  * (another teammate's name, the provider's wait, the workspace's cap, a
- * session's minutes).
+ * session's minutes, an end's reason).
  */
 export function browserRefusalSentence(
   reason: BrowserRefusal,
   agentName: string,
   first: string,
-  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number } = {},
+  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number; endReason?: string | null } = {},
 ): string {
   switch (reason) {
     case "not_configured":
@@ -126,7 +161,8 @@ export function browserRefusalSentence(
     case "none":
       return BROWSER_COPY.noBrowserYet;
     case "ended":
-      return BROWSER_COPY.browserClosed;
+      // In its end's own words when the refusal carried them (review round 4 of Phase 4).
+      return closedSentence(extra.endReason, extra.minutes);
     case "other_turn":
       return BROWSER_COPY.otherTurn;
     case "person_has_it":
@@ -134,7 +170,10 @@ export function browserRefusalSentence(
     case "restarted":
       return BROWSER_COPY.restarted;
     case "time_cap":
-      return extra.minutes && extra.minutes > 0 ? BROWSER_COPY.timeCap(extra.minutes) : BROWSER_COPY.browserClosed;
+      // With no minutes known, the card's reason, never "Open a page" (review round 4 of Phase 4).
+      return closedSentence("time_cap", extra.minutes);
+    case "closed_in_answer":
+      return closedForAnswerSentence(extra.endReason);
   }
 }
 

@@ -37,6 +37,10 @@ const h = vi.hoisted(() => ({
   shots: [] as Row[],
   /** The session as sessionNow reads it under the lock (review round 1 of Phase 4). */
   now: null as null | Row,
+  /** Whether this call's own end wins (review round 4 of Phase 4: false when the person's Stop won first). */
+  endWins: true,
+  /** What sessionNow answers first, read by read, before `now` (review round 4 of Phase 4). */
+  nowQueue: [] as Row[],
 }));
 
 vi.mock("./acting", () => ({ actingPersonFor: async () => h.person }));
@@ -64,13 +68,13 @@ vi.mock("@/lib/browser/sessions", () => ({
   },
   endBrowserSession: async (rowId: string, reason: string, actor: unknown, o?: unknown) => {
     h.ends.push([rowId, reason, actor, o]);
-    return true;
+    return h.endWins;
   },
   stepsUsedUp: async () => h.capped,
   releaseWaiting: async (rowId: unknown) => {
     h.released.push(rowId);
   },
-  sessionNow: async () => h.now,
+  sessionNow: async () => (h.nowQueue.length > 0 ? h.nowQueue.shift() : h.now),
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
@@ -82,6 +86,7 @@ vi.mock("@/lib/browser/shots", () => ({
 }));
 
 import { BROWSER_TOOLS_DEFS, closedSentence } from "./browser-tools";
+import { BrowserLost } from "@/lib/browser/cdp-driver";
 import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext, TeammateToolContext } from "./tools";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
@@ -205,6 +210,8 @@ beforeEach(() => {
   h.shotId = "sh0123456789abcdef0123456789abcdef";
   h.shots = [];
   h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
+  h.endWins = true;
+  h.nowQueue = [];
   f.navigate = [];
   f.clicks = [];
   f.nav = null;
@@ -647,5 +654,99 @@ describe("closedSentence: a browser that ended, in one sentence of its own (foll
     // Before: the time cap with no minutes known said only "The browser closed. Open a page to start a new one."
     expect(closedSentence("time_cap")).toBe('The browser closed before this step, and the browser card says why: "Closed: it reached its time limit."');
     for (const r of [null, undefined, "", "nonsense", "constructor", "toString"]) expect(closedSentence(r), String(r)).toBe(BROWSER_COPY.browserClosed);
+  });
+});
+
+// Review round 4 of Phase 4: a Stop holds for the rest of its answer. The
+// sessions module is mocked here; the same flows over the real one are in
+// src/lib/browser/sessions.test.ts.
+describe("a Stop holds for the rest of its answer (review round 4 of Phase 4)", () => {
+  /** Words that invite the model to open a new browser. */
+  const INVITES = /Open a page|open_page first|start a new one/;
+  const stoppedWords = 'The browser closed before this step, and the browser card says why: "You stopped it."';
+  /** open_page refused after an end that holds, word for word (BROWSER_COPY.closedForAnswer). */
+  const held = (why: string) => `The browser closed in this answer, and the browser card says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`;
+
+  it("answers a Stop that closed the connection during a call by the Stop, never 'Open a page', in every call that meets the page", async () => {
+    // The person's Stop won the end, so the call's own provider_ended end does not.
+    h.endWins = false;
+    const liveNow = h.now as Row;
+    h.now = { ...liveNow, status: "ended", endReason: "stopped" };
+    const lost = new BrowserLost();
+    const calls: Array<[keyof typeof BROWSER_TOOLS_DEFS, Row, () => void]> = [
+      ["open_page", { url: "http://docs.proof.test/" }, () => void (f.nav = () => ({ ok: false, code: "lost" }))],
+      ["read_page", {}, () => void (f.snapshotThrows = lost)],
+      ["find_on_page", { text: "code" }, () => void (f.snapshotThrows = lost)],
+    ];
+    for (const [tool, input, arm] of calls) {
+      live("http://shop.proof.test/checkout");
+      // Live when the call took the lock; stopped by the time it settled.
+      h.nowQueue = [liveNow];
+      arm();
+      const out = await run(tool, input);
+      // Before: "The browser closed. Open a page to start a new one."
+      expect(out, tool).toEqual({ error: stoppedWords });
+      expect(INVITES.test(String(out.error)), tool).toBe(false);
+      f.nav = null;
+      f.snapshotThrows = null;
+    }
+    // Each still asked its own end first, which the Stop had already won.
+    expect(h.ends.map((e) => e[1])).toEqual(["provider_ended", "provider_ended", "provider_ended"]);
+  });
+
+  it("keeps the browser service's own end, and its own sentence, as it was", async () => {
+    live("http://shop.proof.test/checkout");
+    h.endWins = false;
+    f.nav = () => ({ ok: false, code: "lost" });
+    const liveNow = h.now as Row;
+    // The guard's own lost-connection end won (sessions.ts guardHooks onLost).
+    h.nowQueue = [liveNow];
+    h.now = { ...liveNow, status: "ending", endReason: "provider_ended" };
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.browserClosed });
+    // A row already gone says only that it closed.
+    h.nowQueue = [liveNow];
+    h.now = null;
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.browserClosed });
+  });
+
+  it("refuses open_page in the answer whose browser a person ended, before the address, the taint or the one start, and starts nothing", async () => {
+    for (const endReason of ["stopped", "admin_stopped", "turned_off", "teammate_off"]) {
+      h.uses = [{ ok: false, reason: "ended", endReason }];
+      const said = held((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[endReason]);
+      // Before: a new browser started (useBrowserSession answered none, sessions.test.ts).
+      expect(await run("open_page", { url: "http://docs.proof.test/" }), endReason).toEqual({ error: said });
+      expect(await run("open_page", { url: "http://exfil.proof.test/" }, ctx({ tainted: true, mayStart: false })), endReason).toEqual({ error: said });
+      expect(INVITES.test(said), endReason).toBe(false);
+    }
+    expect(h.openCalls).toEqual([]);
+    expect(f.navigate).toEqual([]);
+    expect(marks).toEqual({ starts: 0, webReads: 0 });
+  });
+
+  it("lets open_page start a new browser after an end no person chose", async () => {
+    for (const endReason of ["idle", "provider_ended", "restarted", "start_failed", "time_cap", "waited_too_long", "take_over_too_long", "closed_by_teammate", null]) {
+      h.uses = [{ ok: false, reason: "ended", ...(endReason ? { endReason } : {}) }];
+      live();
+      h.openCalls = [];
+      expect(await run("open_page", { url: "http://docs.proof.test/" }), String(endReason)).toEqual({ ok: true, site: "docs.proof.test", note: BROWSER_COPY.openedNote });
+      expect(h.openCalls, String(endReason)).toHaveLength(1);
+    }
+  });
+
+  it("says why when the start lock finds a person's end in this answer", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    h.opened = { ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true };
+    // Before: the refusal had no sentence of its own.
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: held("You stopped it.") });
+    // A start the Stop met on its way counts as the answer's one start.
+    expect(marks.starts).toBe(1);
+  });
+
+  it("answers every other call after the end in its end's own words", async () => {
+    h.uses = [{ ok: false, reason: "ended", endReason: "stopped" }];
+    for (const tool of ["read_page", "find_on_page", "scroll_page", "show_page"] as const) {
+      expect(await run(tool, { text: "x", direction: "down" }), tool).toEqual({ error: stoppedWords });
+    }
+    expect(await run("close_browser", {})).toEqual({ ok: true, closed: false, note: BROWSER_COPY.notOpen });
   });
 });

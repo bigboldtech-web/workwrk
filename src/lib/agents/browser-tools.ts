@@ -62,6 +62,18 @@
 // (recheckUnderLock). A browser gone when the call's turn came says the
 // same (goneAnswer).
 //
+// A STOP HOLDS FOR THE REST OF ITS ANSWER (review round 4 of Phase 4). A
+// browser of this person and teammate that this run used, or that a person
+// ended while this run answered, is read even once it ended
+// (sessions.ts useBrowserSession), so every later call says why in its end's
+// own words (closedSentence), never "No page is open. Open one with
+// open_page first"; a Stop that closed the connection during a call says
+// so too (settle). For an end a person chose (browser/types.ts END_HOLDS),
+// open_page starts no new browser in that run, refused before and again
+// under the start lock (sessions.ts openBrowserSession), in a sentence that
+// never invites one. A system end (idle, a restart) still lets it start
+// one. A later run, a new message, may always start one.
+//
 // No runtime import from teammate-tools.ts, which imports this file: what
 // the handlers need loads on first use, as connector-tools.ts does, so Ask
 // AI keeps loading exactly what it loaded before.
@@ -69,9 +81,9 @@
 import { z } from "zod";
 import type { ActingPerson } from "./acting";
 import type { ComputerAgent } from "./browser-access";
-import { browserRefusalSentence, storedCardInput, verdictSentence } from "./browser-rules";
+import { browserRefusalSentence, closedForAnswerSentence, closedSentence, endHolds, storedCardInput, verdictSentence } from "./browser-rules";
 import type { HeldCode } from "./connector-rules";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
 import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
@@ -162,21 +174,10 @@ async function openFor(ctx: ToolContext, t: TeammateToolContext): Promise<Opened
 }
 
 /**
- * A browser that closed, in its end's own words (review round 1 of Phase 4):
- * "WorkwrK restarted" only when it did, the time cap with its minutes when
- * they are known, and every other end in a sentence of its own that names
- * the reason as the browser card does (BROWSER_COPY.closedBecause, Decision
- * 33). Follow-up to review round 1 of Phase 4: before, the switch, the plan
- * and a closed workspace borrowed a fresh call's refusal, and every other
- * end put the card's line after "Open a page to start a new one". An end
- * with no known reason says only that the browser closed.
+ * A browser that closed, in its end's own words (browser-rules.ts
+ * closedSentence since review round 4 of Phase 4, exported here as before).
  */
-export function closedSentence(endReason: string | null | undefined, minutes?: number): string {
-  if (endReason === "restarted") return BROWSER_COPY.restarted;
-  if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
-  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
-  return endReason && Object.hasOwn(ended, endReason) ? BROWSER_COPY.closedBecause(ended[endReason]) : BROWSER_COPY.browserClosed;
-}
+export { closedSentence };
 
 /** Why a call is refused once it has the lock (recheckUnderLock, goneAnswer). `closed`: the session ended. */
 type Moved = { error: string; held?: HeldCode; closed?: true };
@@ -217,12 +218,23 @@ export async function goneAnswer(rowId: string): Promise<Moved> {
   return { error: closedSentence(after?.endReason, after?.reservedMinutes), closed: true };
 }
 
-/** The person's browser for this teammate, as this turn uses it; or why not. `none`: no browser is open. */
-async function turnSession(o: Opened): Promise<{ rowId: string } | { none: true } | Refusal> {
+/**
+ * The person's browser for this teammate, as this turn uses it; or why not.
+ * `none`: no browser is open, and none of this run's ended in a way that
+ * holds. A browser this run used that ended (sessions.ts useBrowserSession,
+ * review round 4 of Phase 4) says why, in its end's own words, to every
+ * call; to open_page (`opening`), an end that holds for the answer (a
+ * person chose it, browser/types.ts END_HOLDS) refuses with a sentence
+ * that never invites a new browser, and any other end lets it start one.
+ */
+async function turnSession(o: Opened, opts: { opening?: boolean } = {}): Promise<{ rowId: string } | { none: true } | Refusal> {
   const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, purpose: "model" });
   if (use.ok) return { rowId: use.row.id };
   if (use.reason === "none") return { none: true };
-  if (use.reason === "ended") return refused(closedSentence(use.endReason, use.minutes));
+  if (use.reason === "ended") {
+    if (opts.opening !== true) return refused(closedSentence(use.endReason, use.minutes));
+    return endHolds(use.endReason) ? refused(closedForAnswerSentence(use.endReason)) : { none: true };
+  }
   return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes }));
 }
 
@@ -241,7 +253,18 @@ async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall)
     await s.recordStep(rowId, o.person.userId, { ...call.step, actionId: o.t.actionId ?? null }, whileOpen);
   }
   if (call.site !== undefined) await s.setCurrentSite(rowId, call.site);
-  if (call.lost) await s.endBrowserSession(rowId, "provider_ended", s.SYSTEM_END).catch(() => false);
+  if (call.lost) {
+    const mine = await s.endBrowserSession(rowId, "provider_ended", s.SYSTEM_END).catch(() => false);
+    // Another end won (review round 4 of Phase 4): the person's Stop during
+    // the call closed the connection. Its own reason, never "Open a page".
+    // A step that may have gone through keeps its own sentence.
+    if (!mine && call.answer.error === BROWSER_COPY.browserClosed) {
+      const now = await s.sessionNow(rowId).catch(() => null);
+      if (now && (now.status === "ending" || now.status === "ended") && now.endReason && now.endReason !== "provider_ended") {
+        return { ...call.answer, error: closedSentence(now.endReason, now.reservedMinutes) };
+      }
+    }
+  }
   return call.answer;
 }
 
@@ -305,6 +328,7 @@ async function modelCall<T extends z.ZodType>(
   ctx: ToolContext,
   schema: T,
   raw: Record<string, unknown>,
+  opts: { opening?: boolean } = {},
 ): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true } } | Refusal> {
   const t = ctx.teammate;
   if (!t) return refused(ERR.teammateOnly);
@@ -312,14 +336,14 @@ async function modelCall<T extends z.ZodType>(
   if (!parsed.success) return badInput(parsed.error);
   const o = await openFor(ctx, t);
   if (isRefused(o)) return o;
-  const session = await turnSession(o);
+  const session = await turnSession(o, opts);
   if (isRefused(session)) return session;
   return { o, input: parsed.data, session };
 }
 
 /** open_page (see the file header): starts the browser when none is open. */
 async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
-  const m = await modelCall(ctx, BROWSER_INPUT.open_page, raw);
+  const m = await modelCall(ctx, BROWSER_INPUT.open_page, raw, { opening: true });
   if (isRefused(m)) return m;
   const { o, input } = m;
   const tainted = o.t.browser?.tainted === true;
@@ -337,7 +361,7 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
       if (opened.reachedProvider) o.t.browser?.onStart();
       // Read again once the start was on record (review round 1 of Phase 4, sessions.ts startStillAllowed).
       if (opened.reason === "person_cant") return refused(ERR.personCant);
-      return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce }));
+      return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce, endReason: opened.endReason }));
     }
     o.t.browser?.onStart();
     rowId = opened.rowId;

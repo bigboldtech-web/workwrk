@@ -31,6 +31,8 @@ const st = vi.hoisted(() => ({
   acting: new Map<string, { ok: boolean; reason?: string }>(),
   /** The rows whose browser was told to leave its page (handle.blank). */
   blanks: [] as string[],
+  /** Run just before the provider is asked for a browser (review round 4 of Phase 4: a Stop that lands while a start waits on it). */
+  beforeCreate: null as null | (() => Promise<void>),
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -48,12 +50,18 @@ vi.mock("@/lib/agents/acting", () => ({
     const r = st.acting.get(userId) ?? { ok: true };
     return r.ok ? { ok: true, person: { userId } } : { ok: false, reason: r.reason };
   },
+  // The browser tools' own read of the person (review round 4 of Phase 4: the tools over this real module).
+  actingPersonFor: async (ctx: { orgId: string; userId: string }) => {
+    const r = st.acting.get(ctx.userId) ?? { ok: true };
+    return r.ok ? { userId: ctx.userId, organizationId: ctx.orgId, firstName: "Max", name: "Max Chen", email: "max@proof.test" } : null;
+  },
 }));
 vi.mock("./browserbase", async (importOriginal) => {
   const real = await importOriginal<typeof import("./browserbase")>();
   return {
     createProviderSession: async (_cfg: unknown, a: { rowId: string; timeoutSeconds: number }) => {
       st.created.push(a);
+      if (st.beforeCreate) await st.beforeCreate();
       return st.createAnswer;
     },
     releaseProviderSession: async (cfg: Parameters<typeof real.releaseProviderSession>[0], id: string, o?: { timeoutMs?: number }) => {
@@ -75,7 +83,8 @@ vi.mock("./cdp-driver", () => ({
   attachBrowser: async (_url: string, hooks: unknown) => {
     st.hooks = hooks;
     if (st.attachThrows) throw new Error("no guard");
-    return { close: async () => void (st.closes += 1), currentUrl: () => "about:blank" };
+    // navigate: a page opened on a browser just started (review round 4 of Phase 4).
+    return { close: async () => void (st.closes += 1), currentUrl: () => "about:blank", navigate: async (u: string) => ({ ok: true, url: u, site: new URL(u).hostname }) };
   },
 }));
 
@@ -95,6 +104,8 @@ import {
   refreshLiveRules,
   releaseWaiting,
   RETRY_MAX,
+  runEnds,
+  runEndsLookbackMs,
   setComputerEnabled,
   setCurrentSite,
   stepsUsedUp,
@@ -112,6 +123,10 @@ import {
 import type { GuardHooks } from "./cdp-driver";
 import type { ActingPerson } from "@/lib/agents/acting";
 import type { ComputerAgent } from "@/lib/agents/browser-access";
+import { prepareBrowser } from "@/lib/agents/browser-previews";
+import { BROWSER_TOOLS_DEFS } from "@/lib/agents/browser-tools";
+import type { PrepareContext } from "@/lib/agents/previews";
+import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 
 const ENV = {
   BROWSER_OFFERED: "1",
@@ -965,7 +980,10 @@ describe("a start read again once it is on record (review round 1 of Phase 4)", 
     expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "left" });
     st.acting = new Map();
     bdb.t.agents[0].status = "DISABLED";
-    expect(await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-1", access: before })).toEqual({ ok: false, reason: "teammate_off" });
+    // Review round 4 of Phase 4: in run-1 the end above holds, and the start says so before anything; another message's run reads again.
+    expect(await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-1", access: before })).toEqual({ ok: false, reason: "closed_in_answer", endReason: "left" });
+    expect(bdb.t.sessions).toHaveLength(1);
+    expect(await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-2", access: before })).toEqual({ ok: false, reason: "teammate_off" });
     expect(bdb.t.sessions[1]).toMatchObject({ status: "ended", endReason: "teammate_off" });
     expect(st.created).toEqual([]);
   });
@@ -1144,5 +1162,311 @@ describe("whose browser an end row is about (review round 1 of Phase 4)", () => 
       ["u-max", "u-max"],
       ["u-olivia", "u-2"],
     ]);
+  });
+});
+
+// ── Review round 4 of Phase 4: a Stop holds for the rest of its answer ──
+//
+// Before, a model call read only the person's live row: once a browser
+// ended, every later call of the answer heard "No page is open. Open one
+// with open_page first", and open_page started a new paid browser right
+// after the person pressed Stop. The flows below run the real browser tools
+// and the card's preparation over this real module.
+
+const PERSON_STOP = { id: "u-max", type: "person" } as const;
+/** Words that invite the model to open a new browser. */
+const INVITES = /Open a page|open_page first|start a new one/;
+const STOPPED = 'The browser closed before this step, and the browser card says why: "You stopped it."';
+/** open_page refused after an end that holds, word for word (BROWSER_COPY.closedForAnswer), `why` the card's ended line. */
+const held = (why: string) => `The browser closed in this answer, and the browser card says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`;
+const heldStop = () => held("You stopped it.");
+
+/** A run of the person's, open, started `ago` ms before now. */
+function runOf(id: string, ago = 60_000): void {
+  bdb.t.runs.push({ id, status: "RUNNING", startedAt: new Date(Date.now() - ago), endedAt: null });
+}
+
+/** An earlier answer's run, over: it holds no browser now. */
+function earlierRun(id: string): void {
+  bdb.t.runs.push({ id, status: "COMPLETED", startedAt: new Date(Date.now() - 10 * 60_000), endedAt: new Date(Date.now() - 5 * 60_000) });
+}
+
+/** A browser call of `runId`'s answer as the executor hands it (executor.ts), and what the call told the turn. */
+function turnCtx(runId: string) {
+  const told = { starts: 0, webReads: 0 };
+  const ctx = {
+    orgId: "org1",
+    userId: "u-max",
+    teammate: {
+      agentId: "a-shop",
+      agentName: "Shopper",
+      sessionId: "chat-1",
+      routineId: null,
+      trigger: "CHAT" as const,
+      timezone: "UTC",
+      runId,
+      browser: { tainted: false, mayStart: true, onStart: () => void (told.starts += 1), onWebRead: () => void (told.webReads += 1) },
+    },
+  };
+  return { ctx, told };
+}
+
+const callTool = async (name: keyof typeof BROWSER_TOOLS_DEFS, input: Record<string, unknown>, ctx: unknown) => (await BROWSER_TOOLS_DEFS[name].handler(ctx as never, input)) as Record<string, unknown>;
+
+const prepCtx = (runId: string): PrepareContext =>
+  ({ person: MAX, teammate: { agentId: "a-shop", agentName: "Shopper", trigger: "CHAT" }, tainted: true, taintedBy: "web", turn: { runId, sessionId: "chat-1" } }) as unknown as PrepareContext;
+
+const DOCS_PAGE = { url: "https://docs.proof.test/guide", title: "Guide", contentType: "text/html", blocks: ["The guide"], elements: [], links: [] };
+
+/** A live browser this process holds on a docs page, which reads and opens as a real one does; `navigate` replaced when given. */
+function docsBrowser(o: Record<string, unknown>, navigate?: (u: string) => Promise<unknown>) {
+  const row = liveHere(o, "https://docs.proof.test/guide");
+  Object.assign(liveBrowser(String(row.id))!.handle, {
+    snapshot: async () => DOCS_PAGE,
+    navigate: navigate ?? (async (u: string) => ({ ok: true, url: u, site: new URL(u).hostname })),
+    documentId: () => "doc.1",
+  });
+  return row;
+}
+
+describe("useBrowserSession reads this run's ended browser once none is live (review round 4 of Phase 4)", () => {
+  const use = (runId: string | null = "run-A", agentId = "a-shop") => useBrowserSession({ person: MAX, agentId, runId, purpose: "model" });
+
+  it("answers a browser this run used by its end's own reason, and none only when this run never had one", async () => {
+    expect(await use()).toEqual({ ok: false, reason: "none" });
+    const row = seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-A", endedAt: new Date() });
+    // Before: none, and the model was told to open a page.
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "stopped" });
+    row.endReason = "idle";
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "idle" });
+    row.endReason = "time_cap";
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "time_cap", minutes: 15 });
+    // Still ending (its release not confirmed): the same.
+    row.status = "ending";
+    row.endedAt = null;
+    row.endReason = "admin_stopped";
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "admin_stopped" });
+    // Another run's (that never began here), another teammate's, or no run at all: none.
+    expect(await use("run-B")).toEqual({ ok: false, reason: "none" });
+    expect(await use("run-A", "a-res")).toEqual({ ok: false, reason: "none" });
+    expect(await use(null)).toEqual({ ok: false, reason: "none" });
+  });
+
+  it("answers a browser a person ended while this run answered, though an earlier answer used it last; a system end of it, or a Stop before the run began, is none", async () => {
+    runOf("run-A", 60_000);
+    const row = seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-P", endedAt: new Date() });
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "stopped" });
+    // No person chose it: this run never had it.
+    row.endReason = "idle";
+    expect(await use()).toEqual({ ok: false, reason: "none" });
+    // Before the run began: a later message is never held by it.
+    row.endReason = "stopped";
+    row.endedAt = new Date(Date.now() - 2 * 60_000);
+    expect(await use()).toEqual({ ok: false, reason: "none" });
+  });
+
+  it("names an end that holds before a newer one of the same run that does not", async () => {
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-A", startedAt: new Date(Date.now() - 5 * 60_000), endedAt: new Date() });
+    seedSession({ status: "ended", endReason: "idle", lastRunId: "run-A", startedAt: new Date(Date.now() - 60_000), endedAt: new Date() });
+    expect(await use()).toEqual({ ok: false, reason: "ended", endReason: "stopped" });
+  });
+});
+
+describe("runEnds (review round 4 of Phase 4)", () => {
+  const ask = (now = new Date()) => runEnds(browserDb as never, { organizationId: "org1", userId: "u-max", agentId: "a-shop", runId: "run-A" }, now);
+
+  it("reads only the person's rows of this teammate of the last few hours, at most 25, newest first", async () => {
+    const m = browserDb.teammateBrowserSession as { findMany: (a: unknown) => Promise<unknown> };
+    const spy = vi.spyOn(m, "findMany");
+    const now = new Date();
+    await ask(now);
+    const arg = spy.mock.calls[0][0] as { where: Record<string, unknown>; take: number; orderBy: unknown };
+    expect(arg.where).toMatchObject({ userId: "u-max", organizationId: "org1", agentId: "a-shop", status: { in: ["ending", "ended"] }, startedAt: { gte: new Date(now.getTime() - runEndsLookbackMs()) } });
+    expect(arg).toMatchObject({ take: 25, orderBy: { startedAt: "desc" } });
+    // A run's longest life, a session's longest and the provider's grace.
+    expect(runEndsLookbackMs()).toBe(2 * 60 * 60_000 + 30 * 60_000 + 60_000);
+    // A row started before that is never read, though this run's id is on it.
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-A", startedAt: new Date(now.getTime() - runEndsLookbackMs() - 1000), endedAt: now });
+    expect(await ask(now)).toEqual({ last: null, held: null });
+  });
+
+  it("reads an end's moment as the earlier of endedAt and its end step, and an end with neither on record as now", async () => {
+    const t0 = Date.now();
+    runOf("run-A", 60_000);
+    // Stopped before run-A began; its release was confirmed later, so endedAt is late and the end step says when.
+    const early = seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-P", startedAt: new Date(t0 - 10 * 60_000), endedAt: new Date(t0 - 1000) });
+    seedStep({ browserSessionId: early.id, userId: "u-max", seq: 1, kind: "end", at: new Date(t0 - 2 * 60_000) });
+    expect(await ask()).toEqual({ last: null, held: null });
+    // Stopped while run-A ran, its release still being tried: its end step.
+    const ending = seedSession({ status: "ending", endReason: "stopped", lastRunId: "run-P", startedAt: new Date(t0 - 5 * 60_000), endedAt: null });
+    seedStep({ browserSessionId: ending.id, userId: "u-max", seq: 1, kind: "end", at: new Date(t0 - 10_000) });
+    expect(await ask()).toEqual({ last: { rowId: ending.id, endReason: "stopped", reservedMinutes: 15 }, held: { rowId: ending.id, endReason: "stopped", reservedMinutes: 15 } });
+    // An end still being written (no endedAt, no step yet) is happening now.
+    bdb.t.steps = bdb.t.steps.filter((x) => x.browserSessionId !== ending.id);
+    expect((await ask()).held).toMatchObject({ rowId: ending.id });
+  });
+});
+
+describe("openBrowserSession holds a Stop for the rest of its answer (review round 4 of Phase 4)", () => {
+  it("refuses a start in the run whose browser a person ended, read under the start lock, asking the provider for nothing", async () => {
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-1", endedAt: new Date() });
+    const m = browserDb.teammateBrowserSession as { findMany: (a: unknown) => Promise<unknown> };
+    const orig = m.findMany;
+    const seen: Array<{ locks: number; inTx: number }> = [];
+    vi.spyOn(m, "findMany").mockImplementation(async (a: unknown) => {
+      seen.push({ locks: bdb.locks.length, inTx: bdb.inTx });
+      return orig(a);
+    });
+    // Before: a new browser started.
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped" });
+    expect(seen[0]).toEqual({ locks: 1, inTx: 1 });
+    expect(bdb.locks[0]).toMatchObject({ cls: START_LOCK_CLASS, inTx: true });
+    expect(st.created).toEqual([]);
+    expect(bdb.t.sessions).toHaveLength(1);
+  });
+
+  it("starts in the same run after an end no person chose, and in a later run after a Stop", async () => {
+    seedSession({ status: "ended", endReason: "idle", lastRunId: "run-1", endedAt: new Date() });
+    expect(await open()).toMatchObject({ ok: true });
+    resetBrowserDb();
+    resetLiveRegistryForTests();
+    seedOrg();
+    seedPolicy();
+    seedAgent();
+    seedUser();
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-0", endedAt: new Date(Date.now() - 60_000) });
+    runOf("run-1", 1000);
+    expect(await open()).toMatchObject({ ok: true });
+  });
+
+  it("says a Stop that landed while the browser started, never that it may try again", async () => {
+    st.beforeCreate = async () => {
+      const r = bdb.t.sessions.find((x) => x.status === "starting");
+      await endBrowserSession(String(r!.id), "stopped", PERSON_STOP);
+    };
+    // Before: start_failed, "The browser didn't start. Try again in a moment."
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true });
+    expect(st.released).toEqual(["pv-new"]);
+    st.beforeCreate = null;
+  });
+});
+
+describe("a Stop holds for the rest of its answer, through the tools (review round 4 of Phase 4)", () => {
+  afterEach(() => {
+    st.beforeCreate = null;
+  });
+
+  it("a Stop during open_page: the call says so, and open_page later in the same answer starts nothing, never inviting one", async () => {
+    earlierRun("run-P");
+    runOf("run-A");
+    // Started in an earlier answer, so this answer may still start one (mayStart).
+    const row = docsBrowser({ lastRunId: "run-P" }, async () => {
+      // The person presses Stop while the page loads: the end closes the connection and the command in flight fails.
+      await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+      throw new Error("The browser connection is gone");
+    });
+    const { ctx, told } = turnCtx("run-A");
+    const said: Array<Record<string, unknown>> = [];
+    said.push(await callTool("open_page", { url: "https://docs.proof.test/next" }, ctx));
+    // Before: "The browser closed. Open a page to start a new one."
+    expect(said[0]).toEqual({ error: STOPPED });
+    expect(row).toMatchObject({ status: "ended", endReason: "stopped" });
+    said.push(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx));
+    expect(said[1]).toEqual({ error: heldStop() });
+    said.push(await callTool("read_page", {}, ctx));
+    expect(said[2]).toEqual({ error: STOPPED });
+    // Nothing started: no new row, the provider never asked, the answer's one start unused.
+    expect(bdb.t.sessions).toHaveLength(1);
+    expect(st.created).toEqual([]);
+    expect(told.starts).toBe(0);
+    for (const s of said) expect(INVITES.test(JSON.stringify(s)), JSON.stringify(s)).toBe(false);
+  });
+
+  it("a Stop between calls: read_page says the person stopped it, never that no page is open, and open_page starts nothing", async () => {
+    earlierRun("run-P");
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-P" });
+    const { ctx, told } = turnCtx("run-A");
+    expect(await callTool("read_page", {}, ctx)).toMatchObject({ site: "docs.proof.test" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    // Before: "No page is open. Open one with open_page first."
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: STOPPED });
+    expect(await callTool("find_on_page", { text: "guide" }, ctx)).toEqual({ error: STOPPED });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: heldStop() });
+    expect(bdb.t.sessions).toHaveLength(1);
+    expect(st.created).toEqual([]);
+    expect(told.starts).toBe(0);
+  });
+
+  it("a card's first preparation after a Stop says the person stopped it", async () => {
+    earlierRun("run-P");
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-P" });
+    const { ctx } = turnCtx("run-A");
+    expect(await callTool("read_page", {}, ctx)).toMatchObject({ site: "docs.proof.test" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    // Before: "No page is open. Open one with open_page first."
+    expect(await prepareBrowser("click", { element: "e1" }, prepCtx("run-A"))).toEqual({ error: STOPPED });
+    expect(await prepareBrowser("ask_to_take_over", { reason: "sign_in" }, prepCtx("run-A"))).toEqual({ error: STOPPED });
+  });
+
+  it("an idle end in the same answer: the next call names it, and open_page starts a new browser", async () => {
+    earlierRun("run-P");
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-P" });
+    const { ctx, told } = turnCtx("run-A");
+    // This answer used the browser without meeting a page (a refused address), so it may still start one.
+    expect(await callTool("open_page", { url: "https://exfil.proof.test/" }, ctx)).toEqual({ error: BROWSER_COPY.notAllowedSite("exfil.proof.test") });
+    expect(row.lastRunId).toBe("run-A");
+    await endBrowserSession(String(row.id), "idle", SYSTEM_END);
+    // Before: "No page is open. Open one with open_page first."
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: 'The browser closed before this step, and the browser card says why: "Closed after 5 idle minutes."' });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ ok: true, site: "docs.proof.test", note: BROWSER_COPY.openedNote });
+    expect(st.created).toHaveLength(1);
+    expect(told.starts).toBe(1);
+    expect(bdb.t.sessions.filter((x) => x.status === "live")).toHaveLength(1);
+  });
+
+  it("a Stop holds only for its own answer: the person's next message may start a new browser", async () => {
+    runOf("run-P", 10 * 60_000);
+    const row = docsBrowser({ lastRunId: "run-P" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    // In the answer it landed in, nothing starts. Before: a new browser started.
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, turnCtx("run-P").ctx)).toEqual({ error: heldStop() });
+    expect(st.created).toEqual([]);
+    // The person's next message, after the Stop.
+    await new Promise((r) => setTimeout(r, 5));
+    runOf("run-A", 0);
+    const later = turnCtx("run-A");
+    expect(await callTool("read_page", {}, later.ctx)).toEqual({ error: BROWSER_COPY.noBrowserYet });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, later.ctx)).toEqual({ ok: true, site: "docs.proof.test", note: BROWSER_COPY.openedNote });
+    expect(st.created).toHaveLength(1);
+    expect(later.told.starts).toBe(1);
+  });
+
+  it("holds a Stop that lands while an answer runs, before that answer used the browser", async () => {
+    earlierRun("run-P");
+    runOf("run-A", 60_000);
+    const row = docsBrowser({ lastRunId: "run-P" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    const { ctx, told } = turnCtx("run-A");
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: STOPPED });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: heldStop() });
+    expect(st.created).toEqual([]);
+    expect(told.starts).toBe(0);
+  });
+
+  it("lets a fresh refusal of the computer win over the held sentence", async () => {
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-A" });
+    await endWorkspaceBrowserSessions("org1", "turned_off", "u-olivia");
+    expect(row).toMatchObject({ status: "ended", endReason: "turned_off" });
+    bdb.t.policies[0].enabled = false;
+    const { ctx } = turnCtx("run-A");
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: BROWSER_COPY.workspaceOff });
+    // Switched on again in the same answer: the end still holds for it.
+    bdb.t.policies[0].enabled = true;
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: held("Closed: the computer was turned off in this workspace.") });
+    expect(st.created).toEqual([]);
   });
 });

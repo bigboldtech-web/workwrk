@@ -111,6 +111,7 @@ import {
   browserRefusalSentence,
   browserStored,
   browserTitle,
+  closedSentence,
   emptyBrowserCounters,
   type BrowserCounters,
   type BrowserNotHere,
@@ -1034,7 +1035,16 @@ async function askBrowserCard(
         where: { id: sessionRow, organizationId: person.organizationId, userId: person.userId, agentId: a.agent.id, status: { in: ["live", "waiting"] } },
         data: { status: "waiting", waitingSince: now },
       });
-      if (waiting.count !== 1) return { refusal: BROWSER_COPY.browserClosed };
+      if (waiting.count !== 1) {
+        // Why the swap found nothing to swap, read in the same transaction
+        // (review round 4 of Phase 4): the person took the browser in that
+        // moment, or an end landed, each its own sentence; "The browser
+        // closed. Open a page" only when the row is gone.
+        const after = await s.sessionNow(sessionRow, db);
+        if (after?.status === "handed_over") return { refusal: BROWSER_COPY.personHasIt(person.firstName) };
+        if (after && (after.status === "ending" || after.status === "ended")) return { refusal: closedSentence(after.endReason, after.reservedMinutes) };
+        return { refusal: BROWSER_COPY.browserClosed };
+      }
       const view = await proposeAction(
         {
           organizationId: person.organizationId,
