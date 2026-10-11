@@ -19,6 +19,11 @@
 // Nothing here sets one of those per-target choices. The footer says how
 // approvals work. A removed teammate's tools cannot change; the person's own
 // choices still can.
+//
+// The teammate's Allowed sites (browser-sites.tsx, docs/plans/ai-teammates-phase4.md
+// step 4) follow the tools while it holds a browser tool, which has a row
+// only while the computer is available here. A tick sends one tool's change,
+// so a computer switched off never drops a stored browser tool.
 
 import { useState } from "react";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -29,12 +34,14 @@ import type { TeammateDetail, ToolSetting } from "@/lib/agents/teammate-views";
 import type { ApprovalChoice } from "@/lib/agents/tool-policy";
 import type { ToolName } from "@/lib/agents/tool-names";
 import { ToolPicker } from "../tool-picker";
+import { BrowserSites } from "./browser-sites";
 
 export function ToolsTab({
   teammate: t,
   canManage,
   onSaved,
   onTools,
+  onReload,
 }: {
   teammate: TeammateDetail;
   canManage: boolean;
@@ -42,12 +49,16 @@ export function ToolsTab({
   onSaved: (t: TeammateDetail) => void;
   /** PUT .../approvals' answer: the whole table as it now stands. */
   onTools: (tools: ToolSetting[]) => void;
+  /** A site of the teammate changed: the drawer reads it again, so its browser rows say whether it may open one. */
+  onReload?: () => void;
 }) {
   const { toast } = useOsToast();
   const [busy, setBusy] = useState(false);
   const manages = canManage && t.status !== "ARCHIVED";
   const groups = settingsToolGroups(t.tools, { canManage: manages, workspace: t.visibility === "WORKSPACE" });
   const base = `/api/agents/teammates/${encodeURIComponent(t.slug)}`;
+  // A browser row exists only while the computer is available here, so one ticked means both. A removed teammate has no sites to pick.
+  const browsing = t.status !== "ARCHIVED" && t.tools.some((x) => x.browser !== null && x.enabled);
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
@@ -87,6 +98,7 @@ export function ToolsTab({
           onRemoveRule={(key) => void putRules(ruleRemoval(key))}
         />
       )}
+      {browsing ? <BrowserSites slug={t.slug} onChanged={onReload} /> : null}
       <p className="m-0 text-sm text-ink-2">{TEAMMATE_SETTINGS.toolsFooter}</p>
     </div>
   );

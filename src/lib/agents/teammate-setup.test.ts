@@ -11,6 +11,8 @@ import {
   GOOGLE_CONNECTIONS_HREF,
   TOOL_GROUPS,
   agentRulesWith,
+  browserNote,
+  browserSiteRows,
   choiceEdit,
   connectorNote,
   defaultChoice,
@@ -25,6 +27,7 @@ import {
   newTeammateBody,
   ruleRemoval,
   settingsToolGroups,
+  siteChange,
   toolGroupOf,
   toolNamesWith,
   toolsPatch,
@@ -37,7 +40,7 @@ import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { CONNECTOR_ROW_STATES, GIVABLE_TOOLS, NO_GOOGLE_ROWS, givableTools, toolSettings } from "./teammate-views";
 import { templateCards } from "./templates";
 import { BASE_RISK } from "./tool-policy";
-import { CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
 
 const ALL_ON = { talkOn: true, tablesOn: true };
 /** No Google product on: what every surface had before Phase 3 step 5. */
@@ -405,5 +408,103 @@ describe("a Google tool's row (docs/plans/ai-teammates-phase3.md step 5)", () =>
     for (const card of [...templateCards(ALL_ON), null]) {
       for (const t of draftFromTemplate(card, ALL_ON).tools) expect((CONNECTOR_TOOL_NAMES as readonly string[]).includes(t), `${card?.key ?? "scratch"}: ${t}`).toBe(false);
     }
+  });
+});
+
+// Phase 4 step 4 (docs/plans/ai-teammates-phase4.md): the browser rows, only
+// while the computer is available here, and the teammate's Allowed sites.
+describe("a browser tool's row (Phase 4 step 4)", () => {
+  const names = (groups: readonly ToolPickerGroup[]) => groups.flatMap((g) => g.rows.map((r) => r.name));
+  const tab = (o: { enabled: ToolName[]; computer?: { state: "ready" | "pick_sites" } | null }) =>
+    toolSettings({ agentRules: {}, personRules: {}, talkOn: true, tablesOn: true, ...NO_GOOGLE, ...o });
+
+  it("is not drawn while the computer is not available, in the form or on the tab, whatever the teammate stores", () => {
+    for (const computer of [false, undefined]) {
+      const form = draftToolGroups({ tools: ["open_page", "search_tasks"], choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer });
+      for (const t of BROWSER_TOOL_NAMES) expect(names(form), t).not.toContain(t);
+    }
+    for (const computer of [null, undefined]) {
+      const stored = tab({ enabled: ["open_page", "click", "search_tasks"], computer });
+      for (const canManage of [true, false]) {
+        const groups = settingsToolGroups(stored, { canManage, workspace: true });
+        for (const t of BROWSER_TOOL_NAMES) expect(names(groups), t).not.toContain(t);
+      }
+    }
+  });
+
+  it("is drawn for every browser tool once the computer is available, reads in Look things up and Always asks first", () => {
+    const form = draftToolGroups({ tools: [], choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer: true });
+    for (const t of BROWSER_TOOL_NAMES) expect(names(form), t).toContain(t);
+    expect(groupOf(form, "open_page")).toBe("look_up");
+    expect(groupOf(form, "click")).toBe("always_asks");
+    expect(rowOf(form, "click")?.approval).toEqual({ kind: "always_asks" });
+    expect(rowOf(form, "type_text")?.approval).toEqual({ kind: "always_asks" });
+    expect(rowOf(form, "read_page")?.approval).toEqual({ kind: "never_asks" });
+    // Every other row has no browser line.
+    expect(rowOf(form, "search_tasks")?.browser).toBeNull();
+  });
+
+  it("says, in the new teammate form, that its sites are picked once it is made", () => {
+    const form = draftToolGroups({ tools: ["open_page"], choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer: true });
+    expect(rowOf(form, "open_page")).toMatchObject({ on: true, browser: { state: "pick_sites", unmade: true } });
+    expect(browserNote(rowOf(form, "open_page")!.browser!)).toBe("Pick its sites in its settings after you make it.");
+  });
+
+  it("says, on the tab, to pick its sites while it has none, and that it is ready once it has one", () => {
+    const none = settingsToolGroups(tab({ enabled: ["open_page"], computer: { state: "pick_sites" } }), { canManage: true, workspace: false });
+    expect(rowOf(none, "open_page")).toMatchObject({ on: true, browser: { state: "pick_sites" } });
+    expect(browserNote(rowOf(none, "open_page")!.browser!)).toBe("Pick the sites it may open in its settings.");
+    const ready = settingsToolGroups(tab({ enabled: ["open_page"], computer: { state: "ready" } }), { canManage: false, workspace: true });
+    expect(browserNote(rowOf(ready, "open_page")!.browser!)).toBe("Uses a web browser for you, on its allowed sites.");
+    // Someone who does not manage it sees only the tools it has.
+    expect(names(ready)).toEqual(["open_page"]);
+  });
+
+  it("is sent by the new teammate form only while the computer is available", () => {
+    const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Shopper", job: "Buys things.", tools: ["open_page", "click", "search_tasks"] };
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true }).toolNames).toEqual(["click", "open_page", "search_tasks"]);
+    // Turned off while the form was open: its rows went, so nothing the person can no longer see is sent.
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: false }).toolNames).toEqual(["search_tasks"]);
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS }).toolNames).toEqual(["search_tasks"]);
+  });
+
+  it("is never ticked by a template or by Start from scratch (Decision 31)", () => {
+    for (const card of [...templateCards(ALL_ON), null]) {
+      for (const t of draftFromTemplate(card, ALL_ON).tools) expect((BROWSER_TOOL_NAMES as readonly string[]).includes(t), `${card?.key ?? "scratch"}: ${t}`).toBe(false);
+    }
+  });
+});
+
+describe("a teammate's Allowed sites (Phase 4 step 4)", () => {
+  it("lists a checkbox per workspace site, ticked when the teammate has it", () => {
+    expect(browserSiteRows({ workspaceSites: ["docs.proof.test", "*.example.com"], blockSites: [], sites: ["docs.proof.test"] })).toEqual([
+      { site: "docs.proof.test", on: true, note: null, canAdd: true },
+      { site: "*.example.com", on: false, note: null, canAdd: true },
+    ]);
+  });
+
+  it("keeps a site the workspace no longer allows, ticked so it can be taken away, and says so", () => {
+    const rows = browserSiteRows({ workspaceSites: ["docs.proof.test"], blockSites: [], sites: ["docs.proof.test", "shop.proof.test"] });
+    expect(rows[1]).toEqual({ site: "shop.proof.test", on: true, note: "not_in_workspace", canAdd: false });
+  });
+
+  it("says a blocked site is blocked: one it holds can be taken away, one it does not cannot be ticked", () => {
+    const rows = browserSiteRows({
+      workspaceSites: ["shop.proof.test", "*.example.com", "docs.proof.test"],
+      blockSites: ["shop.proof.test", "example.com"],
+      sites: ["*.example.com", "evil.example.com"],
+    });
+    expect(rows).toEqual([
+      { site: "shop.proof.test", on: false, note: "blocked", canAdd: false },
+      // A block entry over a wildcard's own host takes the wildcard whole (the route's rule).
+      { site: "*.example.com", on: true, note: "blocked", canAdd: false },
+      { site: "docs.proof.test", on: false, note: null, canAdd: true },
+      { site: "evil.example.com", on: true, note: "not_in_workspace", canAdd: false },
+    ]);
+  });
+
+  it("sends one site's change for one tick, never the list", () => {
+    expect(siteChange("docs.proof.test", true)).toEqual({ add: "docs.proof.test" });
+    expect(siteChange("docs.proof.test", false)).toEqual({ remove: "docs.proof.test" });
   });
 });

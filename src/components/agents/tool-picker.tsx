@@ -26,6 +26,11 @@
 // there (teammate-setup.ts connectorNote). The row exists only while its
 // product is on here.
 //
+// A browser tool's row (docs/plans/ai-teammates-phase4.md step 4) exists only
+// while the computer is available here, and says under its label whether the
+// teammate has a site it may open (teammate-setup.ts browserNote). It ticks
+// like any other tool; every browser step but reading always asks first.
+//
 // The Pickers are absolute children of their row (never portalled), so they
 // work inside the dialog's transformed box (the picker-in-dialog rule).
 
@@ -34,7 +39,7 @@ import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { Picker } from "@/components/ui/picker";
 import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, approvalFor, askEveryoneFor, removeChoice } from "@/lib/agents/teammate-copy";
-import { connectorNote, moduleNote, type ToolPickerGroup, type ToolPickerRow } from "@/lib/agents/teammate-setup";
+import { browserNote, connectorNote, moduleNote, type ToolPickerGroup, type ToolPickerRow } from "@/lib/agents/teammate-setup";
 import type { ApprovalChoice } from "@/lib/agents/tool-policy";
 import type { ToolName } from "@/lib/agents/tool-names";
 import { cn } from "@/lib/utils";
@@ -156,6 +161,7 @@ function ToolRow({
               ) : null}
             </span>
           ) : null}
+          {r.browser ? <span className="text-sm text-ink-2">{browserNote(r.browser)}</span> : null}
           {r.unavailable ? <span className="text-sm text-ink-2">{moduleNote(r.unavailable)}</span> : null}
           {a.kind === "per_conversation" ? <span className="text-sm text-ink-2">{NEW_TEAMMATE_DIALOG.talkNote}</span> : null}
           {a.kind === "choice" && a.held ? <span className="text-sm text-ink-2">{TEAMMATE_SETTINGS.askedByManagers}</span> : null}

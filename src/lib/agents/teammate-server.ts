@@ -23,6 +23,9 @@ import { connectorAccess, workspaceConnectorProducts, type ConnectorAgent } from
 import { googleConfig } from "@/lib/connectors/google/config";
 import { CONNECTOR_PRODUCTS, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
+import { browserConfig } from "@/lib/browser/config";
+import { workspaceSitesOf } from "@/lib/browser/policy";
+import { effectiveSites } from "@/lib/browser/sites";
 import { plainData } from "./plain-data";
 import { TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
@@ -251,7 +254,7 @@ export async function messagesPage(
   return { session: { id: sessionId }, messages, actions: await actionViews(actionIds, viewerId), hasMore: rows.length > take };
 }
 
-/** What some tools need here: Talk, Tables, and the Google products. */
+/** What some tools need here: Talk, Tables, the Google products and the computer. */
 export interface WorkspaceModules {
   tablesOn: boolean;
   talkOn: boolean;
@@ -261,16 +264,55 @@ export interface WorkspaceModules {
    * step 5): a product off gives its tools no row and no turn.
    */
   connectors: ProductSet;
+  /**
+   * Whether this workspace's teammates may use the computer now
+   * (docs/plans/ai-teammates-phase4.md step 4, browser/sessions.ts
+   * workspaceComputer: this WorkwrK offers it, the workspace is live, not a
+   * trial, on Growth or above, and the switch is on): the browser tools have
+   * rows, and a turn may offer them, only then.
+   */
+  computer: boolean;
 }
 
-/** Talk, Tables and the Google products, which some tools need. */
+/**
+ * Whether the computer is available in this workspace now. Nothing is read
+ * when this WorkwrK does not offer it, and a read that fails reads as off
+ * (no browser row), never as on. sessions.ts is imported when needed, as
+ * actions.ts does: it imports the actions this module reads.
+ */
+async function computerOn(organizationId: string): Promise<boolean> {
+  if (!browserConfig()) return false;
+  try {
+    const { workspaceComputer } = await import("@/lib/browser/sessions");
+    return (await workspaceComputer(organizationId)).available;
+  } catch {
+    return false;
+  }
+}
+
+/** Talk, Tables, the Google products and the computer, which some tools need. */
 export async function workspaceModules(organizationId: string): Promise<WorkspaceModules> {
-  const [tablesOn, talkOn, connectors] = await Promise.all([
+  const [tablesOn, talkOn, connectors, computer] = await Promise.all([
     isModuleActive(organizationId, "workwrk-tables"),
     isModuleActive(organizationId, "workwrk-talk"),
     workspaceConnectorProducts(organizationId),
+    computerOn(organizationId),
   ]);
-  return { tablesOn, talkOn, connectors };
+  return { tablesOn, talkOn, connectors, computer };
+}
+
+/**
+ * How this teammate's browser rows read now (Phase 4 step 4), or null when
+ * the computer is not available here (no browser row): ready when it has a
+ * site it may open (sites.ts effectiveSites: its own within the workspace's
+ * allow list, none the block list covers), else pick_sites. A list that
+ * cannot be read reads as none.
+ */
+async function browserRows(agent: Pick<TeammateRecord, "organizationId" | "browserSites">, modules: WorkspaceModules): Promise<{ state: "ready" | "pick_sites" } | null> {
+  if (!modules.computer) return null;
+  const workspace = await workspaceSitesOf(agent.organizationId).catch(() => ({ allow: [], block: [] }));
+  const own = Array.isArray(agent.browserSites) ? agent.browserSites.filter((x): x is string => typeof x === "string") : [];
+  return { state: effectiveSites(own, workspace).length > 0 ? "ready" : "pick_sites" };
 }
 
 /** A teammate not made yet, as the new teammate form reads it: the person's own, so its print is never read (othersMayChange). */
@@ -519,13 +561,14 @@ export async function toolTable(
           .findUnique({ where: { agentId_userId: { agentId: agent.id, userId } }, select: { approvalRules: true } })
           .then((s) => s?.approvalRules ?? {}),
   ]);
-  const [targetLabels, google] = await Promise.all([
+  const [targetLabels, google, computer] = await Promise.all([
     conversationLabels(agent.organizationId, userId, conversationTargets(personRules)),
     connectorRowStates({ organizationId: agent.organizationId, userId }, agent, modules.connectors),
+    browserRows(agent, modules),
   ]);
   return toolSettings({
-    // No browser tool until Phase 4 step 3 wires the computer (computer: false).
-    enabled: teammateToolNames(agent, { ...modules, computer: false }),
+    // A browser tool is on, and has a row, only while the computer is available here (Phase 4 step 4).
+    enabled: teammateToolNames(agent, modules),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
@@ -533,6 +576,7 @@ export async function toolTable(
     targetLabels,
     connectors: modules.connectors,
     google,
+    computer,
   });
 }
 
@@ -548,7 +592,7 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    toolNames: teammateToolNames(agent, { ...modules, computer: false }),
+    toolNames: teammateToolNames(agent, modules),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,

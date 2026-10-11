@@ -1114,6 +1114,16 @@ export const TOOL_PICKER_NOTES = {
   allow_first: "Uses your own Google account once you allow it.",
   changed: "Changed since you allowed it. Check it and allow it again.",
   link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+  /**
+   * A browser tool's row (docs/plans/ai-teammates-phase4.md step 4), by
+   * whether the teammate has a site it may open now (teammate-setup.ts
+   * browserNote): ready, no site picked yet, or a teammate not made yet.
+   */
+  browser: {
+    ready: "Uses a web browser for you, on its allowed sites.",
+    pick_sites: "Pick the sites it may open in its settings.",
+    unmade: "Pick its sites in its settings after you make it.",
+  },
 } as const;
 
 /**
@@ -1549,6 +1559,8 @@ export const BROWSER_POLICY_COPY = {
   saved: "Saved",
   saveFailed: "Couldn't save that. Try again.",
   confirmNeeded: "Confirm to stop every browser.",
+  /** What the section's load error names (step 4: ErrorState's "Couldn't load {what}"). */
+  errorWhat: "the computer for AI teammates",
 } as const;
 
 /** A teammate's own allowed sites (docs/plans/ai-teammates-phase4.md step 2; the drawer's section is step 4). */
@@ -1561,6 +1573,8 @@ export const BROWSER_SITES_COPY = {
   blocked: (s: string) => `${s} is blocked in the workspace.`,
   auditChanged: (name: string, site: string, added: boolean) => `${added ? "Let" : "Stopped"} ${name} ${added ? "open" : "opening"} ${site}`,
   saveFailed: "Couldn't save that. Try again.",
+  /** The drawer's Allowed sites could not be read (step 4: the spec names the section, not this line). */
+  loadFailed: "Couldn't load the allowed sites.",
 } as const;
 
 /** The /api/teammate-browser routes' refusals (docs/plans/ai-teammates-phase4.md step 2). */
@@ -1649,6 +1663,27 @@ export const BROWSER_PANEL_COPY = {
   },
   startedLine: "Opened a browser for you.",
   liveViewFailed: "Couldn't show the browser. Try again.",
+  // Step 4: the few words the spec names by their part only.
+  /** The take over card's second button, which says no (the spec's "Not now"). */
+  notNow: "Not now",
+  /** The live view's frame title, read by screen readers (the spec: "the live view has a title"). */
+  liveViewTitle: "Live view of your teammate's browser",
+  /** The waiting chip's link to the card that waits (the spec: "a link to its card"). */
+  seeRequest: "See the request",
+  /** A step's picture, as its thumbnail button names it. */
+  openPicture: "Open the picture of the page",
+  /** A browser card that could not be read. */
+  loadFailed: "Couldn't load the browser.",
+  tryAgain: "Try again",
+  /** A Take over that could not hand the browser over. */
+  takeOverFailed: "Couldn't hand you the browser. Try again.",
+  /** Done or Give it back that did not go through. */
+  giveBackFailed: "Couldn't give the browser back. Try again.",
+  // Review of Phase 4 step 4.
+  /** Above the frame the person has, under Done and Give it back: nothing focuses it for them. */
+  clickToUse: "Click into the browser below to use it.",
+  /** Beside an open browser's thumbnail of the newest page it showed the person. */
+  latestPicture: "The latest page it showed you",
 } as const;
 
 /**

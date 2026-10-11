@@ -99,11 +99,15 @@ type ToolsEdit =
  * switch says now; for any other, what is stored stays, neither dropped nor
  * added. A request that names no product keeps every stored Google tool.
  *
- * A BROWSER TOOL (Phase 4) is read as stored either way (STORED_COMPUTER),
- * and no page draws a browser row yet (step 4 brings them), so a whole list
- * says nothing of one: what is stored stays, neither dropped nor added, as
- * for a Google product whose rows were not shown. Worst case otherwise: a
- * save of any other tool silently drops a browser tool its managers chose.
+ * A BROWSER TOOL (Phase 4) is read as stored either way (STORED_COMPUTER).
+ * The Tools and approvals tab draws its rows only while the computer is
+ * available here (step 4) and sends one tick at a time, so a change names a
+ * browser tool only when its managers ticked it; a whole list comes only
+ * from pages and API clients that never drew a browser row, so it says
+ * nothing of one: what is stored stays, neither dropped nor added, as for a
+ * Google product whose rows were not shown. Worst case otherwise: a save of
+ * any other tool while the computer is off silently drops a browser tool its
+ * managers chose.
  */
 function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, edit: ToolsEdit, modules: WorkspaceModules): ToolName[] {
   const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);

@@ -32,9 +32,21 @@
 // one tool's change, never the whole set (toolsPatch, review of step 5), so
 // the route changes only that tool in what is stored.
 //
+// THE COMPUTER (docs/plans/ai-teammates-phase4.md step 4). A browser tool has
+// a row only while the computer is available here (givableTools with the
+// workspace's `computer`: this WorkwrK offers it, the plan has it, it is not
+// a trial and an Owner or Admin turned it on). Its row says whether the
+// teammate has a site it may open (browserNote): ready, pick its sites in
+// its settings, or, in the new teammate form, pick them once it is made. A
+// tick sends that one tool's change, as for any tool, so a computer switched
+// off never drops a stored browser tool: its row is gone, and nothing the
+// tab sends names it. The teammate's Allowed sites (browserSiteRows) are one
+// checkbox per workspace site, each tick one change.
+//
 // Pure: no React, no fetch, no prisma.
 
 import type { ConnectorProduct, ProductSet } from "@/lib/connectors/products";
+import { entryMatches } from "@/lib/browser/sites";
 import type { TeammateHue } from "./hues";
 import type { TeammateVisibility } from "./teammate-access";
 import { NEW_TEAMMATE_DIALOG, TEAMMATE_SETTINGS, TOOL_PICKER_COPY, TOOL_PICKER_NOTES, asksFirstInLine, dontAskInLine } from "./teammate-copy";
@@ -43,15 +55,16 @@ import {
   TOOL_CONNECTOR,
   TOOL_MODULE,
   givableTools,
+  type BrowserRowState,
   type ConnectorRowState,
   type ConnectorRowStates,
   type ToolSetting,
 } from "./teammate-views";
 import type { TemplateCard, TemplateKey } from "./templates";
 import { ALWAYS_ASK, BASE_RISK, TARGET_SCOPED_ALWAYS, type ApprovalChoice, type ToolRisk } from "./tool-policy";
-import { isConnectorToolName, type ToolName } from "./tool-names";
+import { isBrowserToolName, isConnectorToolName, type ToolName } from "./tool-names";
 
-export type { ConnectorRowState, ConnectorRowStates };
+export type { BrowserRowState, ConnectorRowState, ConnectorRowStates };
 
 // ── Groups ──────────────────────────────────────────────────────────
 
@@ -138,6 +151,13 @@ export interface ToolPickerRow {
    * any other tool.
    */
   connector: { product: ConnectorProduct; state: ConnectorRowState; unmade?: true } | null;
+  /**
+   * A browser tool (Phase 4 step 4): whether the teammate has a site it may
+   * open now. `unmade`: the new teammate form, where its sites can be picked
+   * only once it is made. Null for any other tool, and no row at all while
+   * the computer is not available here.
+   */
+  browser: { state: BrowserRowState; unmade?: true } | null;
 }
 
 /** Where a Google row's link goes: the reader's own card, in My settings, Calendar & connections (Decision 25). */
@@ -154,6 +174,12 @@ export function connectorNote(c: { state: ConnectorRowState; unmade?: boolean })
   if (c.state === "ready") return { text: TOOL_PICKER_NOTES.ready, link: null };
   if (c.state === "allow_first" && c.unmade) return { text: NEW_TEAMMATE_DIALOG.googleAllowOnceMade, link: null };
   return { text: TOOL_PICKER_NOTES[c.state], link: { label: TOOL_PICKER_NOTES.link[c.state], href: GOOGLE_CONNECTIONS_HREF } };
+}
+
+/** A browser row's line under its label (TOOL_PICKER_NOTES.browser). No link: the sites are picked on the same tab, below the tools. */
+export function browserNote(b: { state: BrowserRowState; unmade?: boolean }): string {
+  if (b.unmade) return TOOL_PICKER_NOTES.browser.unmade;
+  return b.state === "ready" ? TOOL_PICKER_NOTES.browser.ready : TOOL_PICKER_NOTES.browser.pick_sites;
 }
 
 export interface ToolPickerGroup {
@@ -203,14 +229,15 @@ function draftConnectorState(state: ConnectorRowState, visibility: TeammateVisib
  */
 export function draftToolGroups(
   d: { tools: readonly ToolName[]; choices: Readonly<Record<string, ApprovalChoice>>; visibility?: TeammateVisibility },
-  modules: { talkOn: boolean; tablesOn: boolean; connectors: ProductSet; google: ConnectorRowStates },
+  /** `computer`: whether it is available here (GET /api/agents/teammates); absent reads as not, so no browser row. */
+  modules: { talkOn: boolean; tablesOn: boolean; connectors: ProductSet; google: ConnectorRowStates; computer?: boolean },
 ): ToolPickerGroup[] {
   const ticked = new Set<string>(d.tools);
   // Just me until an Owner or Admin chooses otherwise (draftFromTemplate).
   const visibility = d.visibility ?? "PRIVATE";
   return grouped(
-    // No browser row until the computer is wired (Phase 4 step 4 passes the workspace's).
-    givableTools(modules.connectors, false).map((name): ToolPickerRow => {
+    // A browser row only while the computer is available here (Phase 4 step 4).
+    givableTools(modules.connectors, modules.computer === true).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);
@@ -228,6 +255,8 @@ export function draftToolGroups(
         rules: [],
         // The allow waits for the teammate to exist (connectorNote, review of step 5).
         connector: product && state ? { product, state, ...(state === "allow_first" ? { unmade: true as const } : {}) } : null,
+        // A teammate not made yet has no sites: they are picked in its settings once it is.
+        browser: isBrowserToolName(name) ? { state: "pick_sites", unmade: true } : null,
       };
     }),
   );
@@ -256,6 +285,8 @@ export function settingsToolGroups(tools: readonly ToolSetting[], o: { canManage
       rules: choiceRulesOf(t),
       // The route's table has a Google row only while its product is on here, with the reader's own state.
       connector: t.connector ?? null,
+      // And a browser row only while the computer is available here (Phase 4 step 4).
+      browser: t.browser ?? null,
     };
   });
   return grouped(o.canManage ? rows : rows.filter((r) => r.on || r.rules.length > 0));
@@ -423,10 +454,15 @@ export function draftProblems(d: Pick<TeammateDraft, DraftField>): Partial<Recor
  * sending it: their private teammate reads their mail the day Gmail comes
  * back on, with no step of theirs.
  */
-export function newTeammateBody(d: TeammateDraft, o: { canCreateWorkspace: boolean; talkOn: boolean; tablesOn: boolean; connectors: ProductSet }): Record<string, unknown> {
+export function newTeammateBody(
+  d: TeammateDraft,
+  o: { canCreateWorkspace: boolean; talkOn: boolean; tablesOn: boolean; connectors: ProductSet; computer?: boolean },
+): Record<string, unknown> {
   const modules = { talkOn: o.talkOn, tablesOn: o.tablesOn };
-  // No browser tool is sent until the computer is wired (Phase 4 step 4).
-  const givable = new Set<string>(givableTools(o.connectors, false));
+  // A browser tool only while the computer is available here (Phase 4 step
+  // 4): one whose row went while the form was open is not sent, as a Google
+  // tool whose product went off is not.
+  const givable = new Set<string>(givableTools(o.connectors, o.computer === true));
   const toolNames = [...new Set(d.tools)].filter((n) => givable.has(n) && unavailableOf(n, modules) === null).sort();
   const personRules: Record<string, ApprovalChoice> = {};
   for (const name of toolNames) {
@@ -446,6 +482,49 @@ export function newTeammateBody(d: TeammateDraft, o: { canCreateWorkspace: boole
     visibility: o.canCreateWorkspace ? d.visibility : "PRIVATE",
     ...(Object.keys(personRules).length > 0 ? { personRules } : {}),
   };
+}
+
+// ── A teammate's allowed sites (Phase 4 step 4) ─────────────────────
+
+/**
+ * One row of the teammate's Allowed sites: a checkbox per site of the
+ * workspace's allow list, ticked when the teammate has it; and, after them,
+ * every site the teammate still holds that the workspace list no longer has
+ * (`not_in_workspace`), ticked so its managers can take it away. A site a
+ * workspace block entry covers reads `blocked`: one the teammate holds can
+ * be taken away, one it does not hold cannot be ticked (the route refuses it).
+ */
+export interface BrowserSiteRow {
+  site: string;
+  on: boolean;
+  note: "not_in_workspace" | "blocked" | null;
+  /** The checkbox can be ticked on: a site of the workspace's list that no block entry covers. */
+  canAdd: boolean;
+}
+
+/** An entry's own host: "*.example.com" and "example.com" are both "example.com" (the route's rule). */
+function siteBase(entry: string): string {
+  return entry.startsWith("*.") ? entry.slice(2) : entry;
+}
+
+export function browserSiteRows(v: { workspaceSites: readonly string[]; blockSites: readonly string[]; sites: readonly string[] }): BrowserSiteRow[] {
+  const held = new Set(v.sites);
+  const listed = new Set(v.workspaceSites);
+  const blocked = (s: string) => v.blockSites.some((b) => entryMatches(b, siteBase(s)));
+  const rows: BrowserSiteRow[] = v.workspaceSites.map((site) => {
+    const isBlocked = blocked(site);
+    return { site, on: held.has(site), note: isBlocked ? "blocked" : null, canAdd: !isBlocked };
+  });
+  for (const site of v.sites) {
+    if (listed.has(site)) continue;
+    rows.push({ site, on: true, note: blocked(site) ? "blocked" : "not_in_workspace", canAdd: false });
+  }
+  return rows;
+}
+
+/** One tick of the Allowed sites: that one site added or taken away (PUT .../sites), never the whole list. */
+export function siteChange(site: string, on: boolean): { add: string } | { remove: string } {
+  return on ? { add: site } : { remove: site };
 }
 
 // ── The Instructions tab ────────────────────────────────────────────

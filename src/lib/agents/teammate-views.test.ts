@@ -74,9 +74,31 @@ describe("the tools a teammate may be given", () => {
     expect(givableTools(NO_PRODUCTS, true).filter(isBrowser).sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
     // A caller that left it out at run time gets no browser row.
     expect(givableTools(NO_PRODUCTS, undefined as never).filter(isBrowser)).toEqual([]);
-    // The settings table draws no browser row in step 1, whatever the teammate stores.
+    // The settings table draws no browser row while the computer is not available, whatever the teammate stores.
     const table = toolSettings({ enabled: ["open_page", "click", "search_tasks"], agentRules: {}, personRules: { click: "always" }, talkOn: true, tablesOn: true, connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS });
     expect(table.filter((r) => isBrowser(r.name))).toEqual([]);
+    expect(toolSettings({ enabled: ["open_page"], agentRules: {}, personRules: {}, talkOn: true, tablesOn: true, connectors: NO_PRODUCTS, google: NO_GOOGLE_ROWS, computer: null }).filter((r) => isBrowser(r.name))).toEqual([]);
+  });
+
+  it("draws a row for every browser tool once the computer is available, with how its sites read, and never Don't ask for a step (Phase 4 step 4)", () => {
+    const isBrowser = (t: string) => (BROWSER_TOOL_NAMES as readonly string[]).includes(t);
+    const table = toolSettings({
+      enabled: ["open_page", "click", "search_tasks"],
+      // A "Don't ask" stored for a click by hand never holds: it always asks.
+      agentRules: {},
+      personRules: { click: "always" },
+      talkOn: true,
+      tablesOn: true,
+      connectors: NO_PRODUCTS,
+      google: NO_GOOGLE_ROWS,
+      computer: { state: "pick_sites" },
+    });
+    expect(table.filter((r) => isBrowser(r.name)).map((r) => r.name).sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
+    const row = (n: string) => table.find((r) => r.name === n);
+    expect(row("open_page")).toMatchObject({ enabled: true, risk: "READ", browser: { state: "pick_sites" }, connector: null });
+    expect(row("read_page")).toMatchObject({ enabled: false, browser: { state: "pick_sites" } });
+    expect(row("click")).toMatchObject({ enabled: true, risk: "IRREVERSIBLE", alwaysAsks: true, canDontAsk: false, gate: "ask" });
+    expect(row("search_tasks")?.browser).toBeNull();
   });
 });
 
@@ -169,7 +191,8 @@ describe("a Google row's state (Phase 3 step 5)", () => {
   });
 
   it("has a line for every state, and starts at nothing connected", () => {
-    expect(Object.keys(TOOL_PICKER_NOTES).filter((k) => k !== "link").sort()).toEqual([...CONNECTOR_ROW_STATES].sort());
+    // `browser` holds the browser rows' lines (Phase 4 step 4), not a Google state.
+    expect(Object.keys(TOOL_PICKER_NOTES).filter((k) => k !== "link" && k !== "browser").sort()).toEqual([...CONNECTOR_ROW_STATES].sort());
     expect(NO_GOOGLE_ROWS).toEqual({ gmail: "connect_first", calendar: "connect_first" });
   });
 

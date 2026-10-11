@@ -17,6 +17,14 @@ vi.mock("@/lib/entitlements", () => ({
 const waiting = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 vi.mock("@/lib/agents/actions", () => ({ waitingCount: async (...a: unknown[]) => (waiting.calls.push(a), 0) }));
 vi.mock("@/lib/agents/budget", () => ({ agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }) }));
+// Phase 4 step 4: whether the computer is available here (browser/sessions.ts workspaceComputer).
+const computer = vi.hoisted(() => ({ available: false, reads: 0 }));
+vi.mock("@/lib/browser/sessions", () => ({
+  workspaceComputer: async () => {
+    computer.reads += 1;
+    return { available: computer.available, reason: computer.available ? null : "workspace_off", plan: "GROWTH", policy: { enabled: computer.available, allowSites: [], blockSites: [], updatedAt: null } };
+  },
+}));
 const audits: Array<{ action: string; agent: { slug: string } }> = [];
 vi.mock("@/lib/agents/audit", () => ({ auditAgent: async (a: { action: string; agent: { slug: string } }) => void audits.push(a) }));
 
@@ -37,7 +45,36 @@ beforeEach(() => {
   audits.length = 0;
   modules.talkOn = true;
   modules.tablesOn = true;
+  computer.available = false;
+  computer.reads = 0;
 });
+
+/** This WorkwrK offering the computer (browser/config.ts browserConfig), for one test. */
+const OFFERED = {
+  BROWSER_OFFERED: "1",
+  BROWSER_PROVIDER: "stand-in",
+  BROWSERBASE_API_KEY: "stand-in",
+  BROWSERBASE_PROJECT_ID: "stand-in",
+  BROWSERBASE_BASE_URL: "http://127.0.0.1:8789",
+  BROWSER_REGION: "us-east-1",
+  BROWSER_SHOTS_DIR: "/tmp/wk-teammates-route-test-shots",
+  SECRETS_ENCRYPTION_KEY: "4".repeat(64),
+};
+async function withComputerOffered<T>(run: () => Promise<T>): Promise<T> {
+  const saved: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(OFFERED)) {
+    saved[k] = process.env[k];
+    process.env[k] = v;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 
 describe("POST /api/agents/teammates: who may make which", () => {
   it("lets a member make a private teammate of their own, stored as one", async () => {
@@ -182,6 +219,21 @@ describe("GET /api/agents/teammates", () => {
     // No template starts with a Google tool (Decision 28).
     const google = ["search_email", "read_email", "draft_email", "send_email", "reply_email", "list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"];
     for (const card of body.templates as Array<{ key: string; tools: string[] }>) expect(card.tools.filter((t) => google.includes(t)), card.key).toEqual([]);
+  });
+
+  it("answers whether the computer is available here, for the form's browser rows, reading nothing on a WorkwrK that offers none (Phase 4 step 4)", async () => {
+    db.viewer = PEOPLE.max;
+    expect((await list()).body.computer).toBe(false);
+    expect(computer.reads).toBe(0);
+    await withComputerOffered(async () => {
+      expect((await list()).body.computer).toBe(false);
+      computer.available = true;
+      expect((await list()).body.computer).toBe(true);
+    });
+    expect(computer.reads).toBe(2);
+    // No template starts with a browser tool (Decision 31).
+    const { body } = await list();
+    for (const card of body.templates as Array<{ key: string; tools: string[] }>) expect(card.tools.filter((t) => t.endsWith("_page") || t === "click"), card.key).toEqual([]);
   });
 
   it("adds the removed ones only when asked, and searches names and jobs", async () => {

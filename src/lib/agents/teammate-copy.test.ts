@@ -758,8 +758,14 @@ describe("TOOL_PICKER_NOTES (a Google tool's row, Phase 3 step 5)", () => {
       allow_first: "Uses your own Google account once you allow it.",
       changed: "Changed since you allowed it. Check it and allow it again.",
       link: { connect_first: "Connect", reconnect: "Reconnect", not_granted: "Connect", allow_first: "Allow", changed: "Check" },
+      // Phase 4 step 4: a browser tool's row, exactly as the spec words it.
+      browser: {
+        ready: "Uses a web browser for you, on its allowed sites.",
+        pick_sites: "Pick the sites it may open in its settings.",
+        unmade: "Pick its sites in its settings after you make it.",
+      },
     });
-    expect(Object.keys(copy.TOOL_PICKER_NOTES).filter((k) => k !== "link").sort()).toEqual([...STATES].sort());
+    expect(Object.keys(copy.TOOL_PICKER_NOTES).filter((k) => k !== "link" && k !== "browser").sort()).toEqual([...STATES].sort());
     expect(Object.keys(copy.TOOL_PICKER_NOTES.link).sort()).toEqual(STATES.filter((s) => s !== "ready").sort());
     const all: Array<[string, string]> = [];
     strings(copy.TOOL_PICKER_NOTES, "TOOL_PICKER_NOTES", all);

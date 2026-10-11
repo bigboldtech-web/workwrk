@@ -119,7 +119,8 @@ export const TOOL_CONNECTOR = TOOL_PRODUCT;
  * tools of a product that is off (docs/plans/ai-teammates-phase3.md), and
  * without the browser tools unless the computer is available here
  * (docs/plans/ai-teammates-phase4.md), so a row that could never work is
- * never shown. Phase 4 step 1: every caller passes `computer` false.
+ * never shown. Phase 4 step 4: the picker and the Tools and approvals tab
+ * pass the workspace's (teammate-server.ts WorkspaceModules.computer).
  */
 export function givableTools(connectors: ProductSet, computer: boolean): ToolName[] {
   // Read as teammateToolNames reads them: a caller that left one out gets no Google row and no browser row.
@@ -227,7 +228,16 @@ export interface ToolSetting {
   scoped: ScopedChoice[];
   /** A Google tool: its product, and what stands between it and the reader's own Google now. Null for any other tool. */
   connector: { product: ConnectorProduct; state: ConnectorRowState } | null;
+  /**
+   * A browser tool (docs/plans/ai-teammates-phase4.md step 4), only while the
+   * computer is available here: whether the teammate has a site it may open
+   * now (ready) or none yet (pick_sites). Null for any other tool.
+   */
+  browser: { state: BrowserRowState } | null;
 }
+
+/** Whether a browser tool's row can work now: the teammate has a site it may open, or its managers must pick one first. */
+export type BrowserRowState = "ready" | "pick_sites";
 
 function ownChoice(rules: ApprovalRules, key: string): ApprovalChoice | null {
   if (!Object.prototype.hasOwnProperty.call(rules, key)) return null;
@@ -257,6 +267,12 @@ export function toolSettings(a: {
   connectors: ProductSet;
   /** How each product's rows read for this person (teammate-server.ts connectorRowStates). */
   google: ConnectorRowStates;
+  /**
+   * The computer, when it is available here (Phase 4 step 4): how the browser
+   * rows read for this teammate. Absent or null, there is no browser row, as
+   * givableTools gives none without `computer`.
+   */
+  computer?: { state: BrowserRowState } | null;
 }): ToolSetting[] {
   const on = new Set<string>(a.enabled);
   const agentRules = sanitizeRules(a.agentRules, { level: "agent", allowedTools: ALL_TOOL_NAMES });
@@ -271,8 +287,9 @@ export function toolSettings(a: {
     const label = Object.prototype.hasOwnProperty.call(labels, target) ? labels[target] : null;
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
-  // No browser row until the computer is wired (Phase 4 step 4 passes the workspace's).
-  return givableTools(a.connectors, false).map((name): ToolSetting => {
+  // A browser row only while the computer is available here (Phase 4 step 4).
+  const computer = a.computer ?? null;
+  return givableTools(a.connectors, computer !== null).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];
@@ -292,6 +309,7 @@ export function toolSettings(a: {
       alwaysAsks: risk === "IRREVERSIBLE" || ALWAYS_ASK.has(name),
       scoped: scoped.get(name) ?? [],
       connector: product ? { product, state: a.google?.[product] ?? NO_GOOGLE_ROWS[product] } : null,
+      browser: computer && isBrowserToolName(name) ? { state: computer.state } : null,
     };
   });
 }

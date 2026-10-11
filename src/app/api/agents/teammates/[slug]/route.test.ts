@@ -28,8 +28,14 @@ const mocks = vi.hoisted(() => ({
   resolveActingPerson: vi.fn(),
   endTeammateBrowserSessions: vi.fn<(agentId: string) => Promise<number>>(async () => 0),
 }));
+// Phase 4 step 4: whether the computer is available here, and the workspace's site lists.
+const computer = vi.hoisted(() => ({ available: false, allow: [] as string[], block: [] as string[] }));
 // Phase 4 (Decision 6): a teammate paused, removed or losing its browser tools closes its browsers.
-vi.mock("@/lib/browser/sessions", () => ({ endTeammateBrowserSessions: mocks.endTeammateBrowserSessions }));
+vi.mock("@/lib/browser/sessions", () => ({
+  endTeammateBrowserSessions: mocks.endTeammateBrowserSessions,
+  workspaceComputer: async () => ({ available: computer.available, reason: computer.available ? null : "workspace_off", plan: "GROWTH", policy: { enabled: computer.available, allowSites: computer.allow, blockSites: computer.block, updatedAt: null } }),
+}));
+vi.mock("@/lib/browser/policy", () => ({ workspaceSitesOf: async () => ({ allow: computer.allow, block: computer.block }) }));
 vi.mock("@/lib/agents/audit", () => ({ auditAgent: async (a: { action: string; metadata?: Record<string, unknown> }) => void mocks.audits.push(a) }));
 vi.mock("@/lib/agents/actions", () => ({
   cancelPendingActionsOf: mocks.cancelPendingActionsOf,
@@ -100,7 +106,37 @@ beforeEach(() => {
   vi.clearAllMocks();
   modules.talkOn = true;
   modules.tablesOn = true;
+  computer.available = false;
+  computer.allow = [];
+  computer.block = [];
 });
+
+/** This WorkwrK offering the computer (browser/config.ts browserConfig), for one test. */
+const OFFERED = {
+  BROWSER_OFFERED: "1",
+  BROWSER_PROVIDER: "stand-in",
+  BROWSERBASE_API_KEY: "stand-in",
+  BROWSERBASE_PROJECT_ID: "stand-in",
+  BROWSERBASE_BASE_URL: "http://127.0.0.1:8789",
+  BROWSER_REGION: "us-east-1",
+  BROWSER_SHOTS_DIR: "/tmp/wk-teammate-route-test-shots",
+  SECRETS_ENCRYPTION_KEY: "4".repeat(64),
+};
+async function withComputerOffered<T>(run: () => Promise<T>): Promise<T> {
+  const saved: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(OFFERED)) {
+    saved[k] = process.env[k];
+    process.env[k] = v;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 
 type Expect = { get: number; patch: number; del: number; canManage?: boolean };
 
@@ -396,6 +432,55 @@ describe("removing, pausing and adding back", () => {
     // Its own tick, its managers' word, removes it.
     await call(patchTeammate(jsonRequest("PATCH", toolsPatch("open_page", false)), slugged(SHARED_SLUG)));
     expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
+  });
+
+  // Phase 4 step 4: the Tools and approvals tab draws the browser rows only
+  // while the computer is available here, and sends one tick at a time.
+  it("keeps a stored open_page through a one-change PATCH while the computer is off (Phase 4 step 4)", async () => {
+    seedShared({ toolNames: ["open_page", "read_page", "search_tasks"], browserSites: ["docs.proof.test"] });
+    db.viewer = PEOPLE.admin;
+    await withComputerOffered(async () => {
+      // Offered here, but an Owner or Admin turned it off: no browser row, and the tick of another tool keeps it.
+      const ticked = await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", true)), slugged(SHARED_SLUG)));
+      expect(ticked.status).toBe(200);
+      // Fails without the keep (toolsAfter read with the computer as it is now): open_page and read_page were dropped.
+      expect(db.agents[0].toolNames).toEqual(["create_task", "open_page", "read_page", "search_tasks"]);
+      expect(ticked.body.teammate.toolNames).toEqual(["create_task", "search_tasks"]);
+      expect(ticked.body.teammate.tools.some((t: { name: string }) => t.name === "open_page")).toBe(false);
+      expect(mocks.endTeammateBrowserSessions).not.toHaveBeenCalled();
+    });
+    // And when this WorkwrK offers none at all.
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", false)), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["open_page", "read_page", "search_tasks"]);
+  });
+
+  it("draws the browser rows once the computer is available, saying whether the teammate has a site it may open (Phase 4 step 4)", async () => {
+    seedShared({ toolNames: ["open_page", "search_tasks"], browserSites: ["docs.proof.test"] });
+    db.viewer = PEOPLE.admin;
+    await withComputerOffered(async () => {
+      computer.available = true;
+      const browserRow = (body: { teammate: { tools: Array<{ name: string; enabled: boolean; browser: unknown }> } }, name: string) => body.teammate.tools.find((t) => t.name === name);
+      // The workspace allows nothing yet: its managers must pick a site first.
+      const none = await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)));
+      expect(none.body.teammate.toolNames).toEqual(["open_page", "search_tasks"]);
+      expect(browserRow(none.body, "open_page")).toMatchObject({ enabled: true, browser: { state: "pick_sites" } });
+      expect(browserRow(none.body, "click")).toMatchObject({ enabled: false, browser: { state: "pick_sites" } });
+      expect(browserRow(none.body, "search_tasks")).toMatchObject({ browser: null });
+      // Its site within the workspace's list: ready.
+      computer.allow = ["docs.proof.test"];
+      const ready = await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)));
+      expect(browserRow(ready.body, "open_page")).toMatchObject({ browser: { state: "ready" } });
+      // A block entry over it takes it away again.
+      computer.block = ["docs.proof.test"];
+      const blocked = await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)));
+      expect(browserRow(blocked.body, "open_page")).toMatchObject({ browser: { state: "pick_sites" } });
+      // Its managers' own tick of a browser tool, its row now drawn, adds it.
+      computer.block = [];
+      const added = await call(patchTeammate(jsonRequest("PATCH", toolsPatch("click", true)), slugged(SHARED_SLUG)));
+      expect(added.status).toBe(200);
+      expect(db.agents[0].toolNames).toEqual(["click", "open_page", "search_tasks"]);
+      expect(added.body.teammate.toolNames).toEqual(["click", "open_page", "search_tasks"]);
+    });
   });
 
   // Review of step 5: a tick of the tools tab sent the whole set the tab

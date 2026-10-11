@@ -38,6 +38,7 @@ vi.mock("@/lib/browser/cdp-driver", () => ({ attachBrowser: async () => Promise.
 import { saveShot } from "@/lib/browser/shots";
 import { bdb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSession, seedUser } from "@/lib/browser/browser-test-db";
 import { BOOT_ID, putLiveBrowser, resetLiveRegistryForTests } from "@/lib/browser/live";
+import { takeOverForStep, takeOverRequestOf, type BrowserSessionView } from "@/lib/browser/views";
 import { GET as LIST } from "./route";
 import { GET as ONE } from "./[id]/route";
 import { POST as LIVE_VIEW } from "./[id]/live-view/route";
@@ -289,5 +290,56 @@ describe("Done", () => {
     expect(body).toMatchObject({ session: { status: "waiting" }, resume: false });
     expect(bdb.t.sessions.find((s) => s.id === id)).toMatchObject({ status: "waiting", waitingSince: asked });
     expect(bdb.t.actions[0].status).toBe("PENDING");
+  });
+});
+
+// Review of Phase 4 step 4: a take over request is answered by whichever card takes the browser, and Done continues the chat once.
+describe("a take over request and the browser card (review of Phase 4 step 4)", () => {
+  const ask = (id: string) => ({ id: "c-take", organizationId: "org1", sessionId: "chat-1", agentId: "a-shop", toolName: "ask_to_take_over", status: "PENDING", actingForId: "u-max", input: { browserSessionId: id } });
+  const viewOf = async (id: string): Promise<BrowserSessionView> => (await ONE(new Request("https://app.test/x"), p(id))).json();
+
+  /** Done, then Done again: the chat continues once, and the card's line is written once. */
+  async function doneTwice(id: string) {
+    const first = await (await DONE(post({ finished: true }), p(id))).json();
+    expect(first).toMatchObject({ session: { status: "live" }, resume: true, chat: { kind: "teammate", slug: "shopper" } });
+    const again = await DONE(post({ finished: true }), p(id));
+    expect([again.status, (await again.json()).code]).toEqual([409, "not_handed_over"]);
+    expect(bdb.t.actions[0]).toMatchObject({ status: "EXECUTED", result: { data: { done: true } } });
+    expect(st.lines).toEqual([expect.objectContaining({ actionId: "c-take", event: "action_approved" })]);
+  }
+
+  it("the browser card's Take over names the request that waits, so Done continues the chat once", async () => {
+    const row = live({ status: "waiting", waitingSince: new Date() });
+    const id = String(row.id);
+    bdb.t.actions.push(ask(id));
+    const view = await viewOf(id);
+    expect(view.waiting).toEqual({ actionId: "c-take", kind: "take_over" });
+    // What the card's button sends (browser-card.tsx): before, nothing, which left the request waiting and Done continuing nothing.
+    const res = await TAKE_OVER(post({ actionId: takeOverRequestOf(view) }), p(id));
+    expect(res.status).toBe(200);
+    expect(bdb.t.actions[0]).toMatchObject({ status: "RUNNING", decidedVia: "person" });
+    await doneTwice(id);
+  });
+
+  it("names a request still waiting while the person has the browser, and the card drawn for it answers it", async () => {
+    // Taken from the browser card without naming the request (a page from before, or one read before it was asked).
+    const row = live({ status: "handed_over", handedOverAt: new Date() });
+    const id = String(row.id);
+    bdb.t.actions.push(ask(id));
+    const view = await viewOf(id);
+    // Before: null while handed over, so the card drawn for the request returned and the request was never answered.
+    expect(view).toMatchObject({ status: "handed_over", waiting: { actionId: "c-take", kind: "take_over" } });
+    expect(takeOverForStep(view, "c-take")).toBe("take");
+    const res = await TAKE_OVER(post({ actionId: "c-take" }), p(id));
+    expect(res.status).toBe(200);
+    expect(row.status).toBe("handed_over");
+    expect(bdb.t.actions[0]).toMatchObject({ status: "RUNNING" });
+    // Read again, handed over through it: nothing more is sent for it, ever.
+    const after = await viewOf(id);
+    expect(after.waiting).toBeNull();
+    expect(takeOverForStep(after, "c-take")).toBe("done");
+    await doneTwice(id);
+    // Back to live after Done: the card drawn for it still sends nothing (before, a second take over and "already decided").
+    expect(takeOverForStep(await viewOf(id), "c-take")).toBe("done");
   });
 });

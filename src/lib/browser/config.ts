@@ -31,6 +31,7 @@
 // Server-only: reads the environment.
 
 import path from "node:path";
+import { BROWSERBASE_LIVE_VIEW_ORIGIN, liveViewOriginOk } from "./live-view-origin";
 import { appHostsFrom, effectiveSites, FIXTURE_SUFFIX, type SiteRules, type WorkspaceSites } from "./sites";
 import type { BrowserProviderName } from "./types";
 
@@ -67,9 +68,8 @@ export interface BrowserReleaseConfig {
   standIn: boolean;
 }
 
-/** Browserbase's API and the origin its live view is served from. **verify:** against Browserbase's reference before production (Founder action 3). */
+/** Browserbase's API (its live view's origin is live-view-origin.ts's). **verify:** against Browserbase's reference before production (Founder action 3). */
 const BROWSERBASE_API = "https://api.browserbase.com";
-const BROWSERBASE_LIVE_VIEW_ORIGIN = "https://www.browserbase.com";
 
 /** A region as the provider names one: "us-east-1", "eu-central-1". */
 const REGION = /^[a-z]{2}-[a-z]+-\d$/;
@@ -226,12 +226,7 @@ export function fixtureSuffixFor(cfg: Pick<BrowserConfig, "standIn"> | null): st
 
 /**
  * Whether a live view address may be shown (Decision 19): its origin is the
- * provider's, over https (the stand-in's own origin outside production).
+ * provider's, over https (the stand-in's own origin outside production). Pure,
+ * in live-view-origin.ts, so the browser card repeats it in the page (step 4).
  */
-export function liveViewOriginOk(url: string, cfg: Pick<BrowserConfig, "liveViewOrigins" | "standIn">): boolean {
-  if (typeof url !== "string" || !URL.canParse(url)) return false;
-  const u = new URL(url);
-  if (u.username || u.password) return false;
-  if (u.protocol !== "https:" && !(cfg.standIn && u.protocol === "http:")) return false;
-  return cfg.liveViewOrigins.includes(u.origin);
-}
+export { liveViewOriginOk };
