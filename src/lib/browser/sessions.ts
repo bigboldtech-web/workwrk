@@ -67,7 +67,7 @@ import { BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere,
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
 import { LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
-import { endedLine, sessionMinutes, stepLine, type BrowserPolicyView, type BrowserSessionView, type BrowserUsage, type ComputerRefusal } from "./views";
+import { endedLine, sessionMinutes, stepViewOf, type BrowserPolicyView, type BrowserSessionView, type BrowserUsage, type ComputerRefusal } from "./views";
 
 export type { ComputerRefusal } from "./views";
 
@@ -977,6 +977,7 @@ export async function browserPolicyView(organizationId: string): Promise<Browser
   const reason = w.reason === "workspace_off" ? null : w.reason;
   const available = reason === null;
   return {
+    organizationId,
     available,
     reason,
     plan: w.plan,
@@ -1128,6 +1129,7 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
     const status = (STATUS_SET.has(r.status) ? r.status : "ended") as SessionStatus;
     return {
       id: r.id,
+      organizationId: r.organizationId,
       agentId: r.agentId,
       agentName: names.get(r.agentId) ?? "",
       status,
@@ -1139,18 +1141,8 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
       endedLine: status === "ended" || status === "ending" ? endedLine((r.endReason as EndReason | null) ?? null) : null,
       minutes: sessionMinutes(r, now),
       waiting: waitingCard && (status === "waiting" || status === "live") ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" } : null,
-      steps: steps
-        .filter((s) => s.browserSessionId === r.id)
-        .map((s) => ({
-          seq: s.seq,
-          kind: s.kind as StepKind,
-          site: s.site,
-          outcome: s.outcome as StepOutcome,
-          code: s.code,
-          at: s.at.toISOString(),
-          shotId: s.shotId,
-          line: stepLine({ kind: s.kind as StepKind, site: s.site, outcome: s.outcome as StepOutcome }),
-        })),
+      // A step's host alone (views.ts stepViewOf, step 4): never a path, whatever a row holds.
+      steps: steps.filter((s) => s.browserSessionId === r.id).map(stepViewOf),
       shots: shots.filter((s) => s.browserSessionId === r.id).map((s) => ({ id: s.id, kind: s.kind === "element" ? "element" : "page", at: s.createdAt.toISOString(), expiresAt: s.expiresAt.toISOString() })),
     };
   });

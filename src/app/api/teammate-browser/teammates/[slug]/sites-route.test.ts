@@ -64,6 +64,8 @@ afterEach(() => {
 describe("a teammate's allowed sites", () => {
   it("reads the workspace's lists and the teammate's sites, and whether this person may change them", async () => {
     expect(await (await GET(new Request("https://app.test/x"), params)).json()).toEqual({
+      // The workspace it was read in (step 4): the drawer sends it back with every change.
+      organizationId: "org1",
       workspaceSites: ["docs.proof.test", "shop.proof.test", "*.example.com"],
       blockSites: ["evil.example.com", "shop.proof.test"],
       sites: ["docs.proof.test"],

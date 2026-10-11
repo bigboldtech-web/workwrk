@@ -76,7 +76,7 @@ import {
   type TeammateStreamEvent,
   type TurnIds,
 } from "./teammate-thread";
-import { sendDecisions } from "./decide-client";
+import { sendDecisions, type ResumeChat } from "./decide-client";
 import type { ProductSet } from "@/lib/connectors/products";
 import type { ConnectorRowStates, TeammateLimits, TeammateRow } from "./teammate-views";
 import type { TemplateCard } from "./templates";
@@ -968,6 +968,22 @@ async function decide(slug: string, decisions: TeammateDecision[], opts: { alway
   return { ok: true, results };
 }
 
+/**
+ * The person handed their browser back (docs/plans/ai-teammates-phase4.md
+ * step 4, POST .../take-over/done): when the teammate's take over card moved
+ * (`resume`), its own chat is read again for the card's line and continues
+ * once, only while it is open in this tab, as a decision's answer does
+ * (decide). A browser never runs in a group chat, so only a teammate's own
+ * chat continues.
+ */
+export async function continueAfterTakeOver(r: { resume: boolean; chat: ResumeChat | null }): Promise<void> {
+  notifyAiChatsChanged();
+  const slug = r.chat?.kind === "teammate" ? r.chat.slug : null;
+  if (!slug || (shown.get(slug) ?? 0) === 0) return;
+  await refresh(slug);
+  if (r.resume && (shown.get(slug) ?? 0) > 0) void resume(slug);
+}
+
 /** The person has read the chat up to now: the list's unread dot clears. */
 async function markRead(slug: string): Promise<void> {
   const r = await apiFetch(`${chatBase(slug)}/read`, { method: "POST", keepalive: true });
@@ -1085,6 +1101,8 @@ export interface TeammateListData {
   connectors?: ProductSet;
   /** How the new teammate form's Google rows read for this person, as for a teammate of their own. */
   google?: ConnectorRowStates;
+  /** Whether the computer is available here (Phase 4 step 4): the form's browser rows; absent from an older server, which offered none. */
+  computer?: boolean;
 }
 
 /** The teammates this person can use; `removed` adds the removed ones (Show removed). */
@@ -1144,4 +1162,4 @@ export function useTeammateList(opts: { removed: boolean }) {
 }
 
 /** The store's own actions without React, for its tests (teammate-store.stop.test.ts). */
-export const teammateStoreForTests = { open, send, refresh, resume, retry, tryAgainContinue, clearError, setDraft, decide, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };
+export const teammateStoreForTests = { open, send, refresh, resume, retry, tryAgainContinue, clearError, setDraft, decide, continueAfterTakeOver, stateOf, show: (key: string) => shown.set(key, (shown.get(key) ?? 0) + 1) };

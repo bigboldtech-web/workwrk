@@ -42,7 +42,8 @@ function sitesOf(agent: { browserSites: unknown }): string[] {
 
 async function body(agent: TeammateRecord, viewer: Viewer, sites: string[]) {
   const [workspace, w] = await Promise.all([workspaceSitesOf(viewer.organizationId), workspaceComputer(viewer.organizationId)]);
-  return { workspaceSites: [...workspace.allow], blockSites: [...workspace.block], sites, canManage: canManageAgent(agent, viewer), available: w.available };
+  // The workspace it was read in (step 4): the drawer sends it back with every change.
+  return { organizationId: viewer.organizationId, workspaceSites: [...workspace.allow], blockSites: [...workspace.block], sites, canManage: canManageAgent(agent, viewer), available: w.available };
 }
 
 export async function GET(_req: Request, { params }: Params) {

@@ -32,6 +32,20 @@
 // In flight the buttons give way to "Approving…". Decided: a chip and the
 // line the outcome reads as (teammate-thread.ts decidedLine), with what it
 // made and Open.
+//
+// The browser's cards (docs/plans/ai-teammates-phase4.md steps 3 and 4), each
+// its own card (standsAlone: they cannot be taken back):
+//   a click, a typing or a choice: the picture of the page around what it
+//     acts on under the title (preview.shot, read only from
+//     /api/teammate-browser/shots/<id>, browser/views.ts shotSrc), then the
+//     words it would type and the lines, then Approve, Edit and Deny as any
+//     card; a picture gone since reads pictureGone
+//   a take over request (preview.browser.takeOver): Take over (secondary) in
+//     place of Approve, which POSTs take-over with the card's id and hands
+//     the browser to that session's browser card in the thread, scrolled into
+//     view and interactive (browser-card.tsx BrowserCardsProvider), or draws
+//     that card under this one where none is on screen (the Inbox); Not now
+//     denies it. While the person has the browser the card reads You have it.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -40,7 +54,8 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { Dots } from "@/components/ui/dots";
 import { clampText } from "@/lib/agents/clamp";
-import { APPROVAL_CARD, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
+import { APPROVAL_CARD, BROWSER_PANEL_COPY, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
+import { shotSrc } from "@/lib/browser/views";
 import {
   approvalCardParts,
   clipCardBody,
@@ -55,6 +70,7 @@ import { RUN_TONE_COLOR, type RunTone } from "@/lib/automation/run-status";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import { cn } from "@/lib/utils";
+import { BrowserCard, useBrowserCards } from "./browser-card";
 
 const SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-60";
 const GHOST = "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-60";
@@ -72,6 +88,9 @@ const CHIP: Record<AgentActionStatus, { label: string; tone: RunTone }> = {
   EXPIRED: { label: APPROVAL_CARD.expired, tone: "neutral" },
   CANCELLED: { label: APPROVAL_CARD.cancelled, tone: "neutral" },
 };
+
+/** A take over request while the person has the browser (Phase 4). */
+const HANDED_OVER_CHIP: { label: string; tone: RunTone } = { label: BROWSER_PANEL_COPY.handedOver, tone: "info" };
 
 /** A request's status as its card's chip reads it: the settings' Activity tab lists them with it. */
 export function ActionStatusChip({ status, className }: { status: AgentActionStatus; className?: string }) {
@@ -130,61 +149,98 @@ function approval(id: string, edit?: string): TeammateDecision {
 function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }: ApprovalCardProps & { action: ActionView; whole?: boolean }) {
   const datePrefs = useDatePrefs();
   const decide = useDecide(onDecide);
+  const cards = useBrowserCards();
   const [edit, setEdit] = useState<string | null>(null);
-  const approving = a.status === "RUNNING" || deciding[a.id] === "approve";
+  // The teammate asks the person to take its browser over (Phase 4): Take over, never Approve.
+  const takeOverOf = a.preview.browser?.takeOver ? a.preview.browser.sessionId : null;
+  const [takingOver, setTakingOver] = useState(false);
+  // No browser card of that session on screen (the Inbox, or a chat whose
+  // browser line is above what is loaded): this card draws one under itself,
+  // and in the Inbox, where no thread holds one, whenever the person has it.
+  const [inline, setInline] = useState(false);
+  // The person has the browser: the card waits for Done, never "Approving".
+  const handedOver = takeOverOf !== null && a.status === "RUNNING";
+  const approving = !handedOver && (a.status === "RUNNING" || deciding[a.id] === "approve");
   const denying = deciding[a.id] === "deny";
   const waiting = a.status === "PENDING" && !approving;
-  const chip = approving ? CHIP.RUNNING : CHIP[a.status];
+  const chip = handedOver ? HANDED_OVER_CHIP : approving ? CHIP.RUNNING : CHIP[a.status];
   const editable = a.preview.editable;
 
   async function approveWithChanges(text: string) {
     if (await decide([approval(a.id, text)], "approve")) setEdit(null);
   }
 
+  async function takeOver(sessionId: string) {
+    const card = cards?.handleFor(sessionId) ?? null;
+    if (!card) {
+      setInline(true);
+      return;
+    }
+    setTakingOver(true);
+    await card.takeOver(a.id);
+    setTakingOver(false);
+  }
+
   return (
-    <section data-action-id={a.id} aria-label={a.preview.title} className="rounded-lg border border-line bg-raised p-3">
-      <StatusChip color={RUN_TONE_COLOR[chip.tone]} label={chip.label} />
-      <h3 className="mt-2 break-words text-base font-medium text-ink">{a.preview.title}</h3>
-      {waiting || approving ? <Details a={a} whole={whole} /> : <Outcome a={a} agentName={agentName} />}
-      {waiting ? (
-        <p className="mt-2 text-sm text-ink-2" title={formatDateTitle(a.expiresAt, datePrefs)}>
-          {waitsUntil(formatDate(a.expiresAt, datePrefs, "datetime"))}
-        </p>
-      ) : null}
-      {approving ? (
-        <Approving />
-      ) : waiting && edit !== null && editable ? (
-        <EditBox
-          label={editable.label}
-          maxLength={editable.maxLength}
-          value={edit}
-          onChange={setEdit}
-          onApprove={() => void approveWithChanges(edit)}
-          onCancel={() => setEdit(null)}
-        />
-      ) : waiting ? (
-        <>
+    <>
+      <section data-action-id={a.id} aria-label={a.preview.title} className="rounded-lg border border-line bg-raised p-3">
+        <StatusChip color={RUN_TONE_COLOR[chip.tone]} label={chip.label} />
+        <h3 className="mt-2 break-words text-base font-medium text-ink">{a.preview.title}</h3>
+        {waiting || approving || handedOver ? <Details a={a} whole={whole} /> : <Outcome a={a} agentName={agentName} />}
+        {waiting ? (
+          <p className="mt-2 text-sm text-ink-2" title={formatDateTitle(a.expiresAt, datePrefs)}>
+            {waitsUntil(formatDate(a.expiresAt, datePrefs, "datetime"))}
+          </p>
+        ) : null}
+        {approving ? (
+          <Approving />
+        ) : waiting && edit !== null && editable ? (
+          <EditBox
+            label={editable.label}
+            maxLength={editable.maxLength}
+            value={edit}
+            onChange={setEdit}
+            onApprove={() => void approveWithChanges(edit)}
+            onCancel={() => setEdit(null)}
+          />
+        ) : waiting && takeOverOf ? (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className={SECONDARY} disabled={denying} onClick={() => void decide([approval(a.id)], "approve")}>
-              <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {APPROVAL_CARD.approve}
+            <button type="button" className={SECONDARY} disabled={denying || takingOver || inline} onClick={() => void takeOver(takeOverOf)}>
+              {BROWSER_PANEL_COPY.takeOver}
             </button>
-            {editable ? (
-              <button type="button" className={GHOST} disabled={denying} onClick={() => setEdit(clampText(editStartText(a), editable.maxLength))}>
-                {APPROVAL_CARD.edit}
-              </button>
-            ) : null}
-            <button type="button" className={DANGER_GHOST} disabled={denying} onClick={() => void decide([{ id: a.id, decision: "deny" }], "deny")}>
-              {APPROVAL_CARD.deny}
+            <button type="button" className={GHOST} disabled={denying || takingOver} onClick={() => void decide([{ id: a.id, decision: "deny" }], "deny")}>
+              {BROWSER_PANEL_COPY.notNow}
             </button>
           </div>
-          {a.always.allowed && a.always.label ? (
-            <button type="button" className={cn(LINK, "mt-2 text-start")} disabled={denying} onClick={() => void decide([approval(a.id)], "approve", { always: true })}>
-              {a.always.label}
-            </button>
-          ) : null}
-        </>
+        ) : waiting ? (
+          <>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" className={SECONDARY} disabled={denying} onClick={() => void decide([approval(a.id)], "approve")}>
+                <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {APPROVAL_CARD.approve}
+              </button>
+              {editable ? (
+                <button type="button" className={GHOST} disabled={denying} onClick={() => setEdit(clampText(editStartText(a), editable.maxLength))}>
+                  {APPROVAL_CARD.edit}
+                </button>
+              ) : null}
+              <button type="button" className={DANGER_GHOST} disabled={denying} onClick={() => void decide([{ id: a.id, decision: "deny" }], "deny")}>
+                {APPROVAL_CARD.deny}
+              </button>
+            </div>
+            {a.always.allowed && a.always.label ? (
+              <button type="button" className={cn(LINK, "mt-2 text-start")} disabled={denying} onClick={() => void decide([approval(a.id)], "approve", { always: true })}>
+                {a.always.label}
+              </button>
+            ) : null}
+          </>
+        ) : null}
+      </section>
+      {takeOverOf && (inline || (handedOver && cards === null)) ? (
+        <div className="mt-2">
+          <BrowserCard browserSessionId={takeOverOf} takeOverFor={a.id} />
+        </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -374,6 +430,7 @@ function Details({ a, whole = false }: { a: ActionView; whole?: boolean }) {
   const body = a.preview.body ? clipCardBody(a.preview.body) : null;
   return (
     <>
+      {a.preview.shot ? <PagePicture shot={a.preview.shot} /> : null}
       {body ? (
         <div className="mt-2 rounded-md bg-subtle px-3 py-2">
           <p className="whitespace-pre-wrap break-words text-base text-ink">{all ? a.preview.body : body.text}</p>
@@ -417,6 +474,29 @@ function Outcome({ a, agentName }: { a: ActionView; agentName: string }) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A browser card's picture of the page around what it acts on (Phase 4
+ * Decision 16: the person's alone, never the model's), read only from its
+ * route; one deleted since (its day passed) reads as gone.
+ */
+function PagePicture({ shot }: { shot: { id: string; width: number; height: number } }) {
+  const [gone, setGone] = useState(false);
+  const src = shotSrc(shot.id);
+  if (!src || gone) return <p className="mt-2 text-sm text-ink-2">{BROWSER_PANEL_COPY.pictureGone}</p>;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={BROWSER_PANEL_COPY.picture}
+      loading="lazy"
+      width={shot.width}
+      height={shot.height}
+      onError={() => setGone(true)}
+      className="mt-2 block h-auto max-w-full rounded-md border border-line"
+    />
   );
 }
 

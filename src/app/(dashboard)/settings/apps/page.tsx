@@ -17,6 +17,12 @@
 //                  and Disconnect everyone (teammate-google-section.tsx;
 //                  docs/plans/ai-teammates-phase3.md step 2), drawn only once
 //                  this WorkwrK offers Google, for Owners and Admins
+//   5. Computer for AI teammates  #ai-browser: the switch, the region, the
+//                  sites teammates may open and the blocked sites, this
+//                  month's usage and Stop every browser
+//                  (teammate-browser-section.tsx; docs/plans/ai-teammates-phase4.md
+//                  step 4), drawn only once this WorkwrK offers the computer,
+//                  for Owners and Admins
 //
 // Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
 // complete apps object, and checks the response really holds it. Hidden and
@@ -49,6 +55,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useSettingsSection } from "@/hooks/use-settings-section";
 import { ModulesSection } from "./modules-section";
+import { TeammateBrowserSection } from "./teammate-browser-section";
 import { TeammateGoogleSection } from "./teammate-google-section";
 
 // The rail's own tier vocabulary (AccessTier), in plain words: a vocabulary
@@ -378,6 +385,8 @@ export default function AppsSettingsPage() {
         </section>
 
         <TeammateGoogleSection />
+
+        <TeammateBrowserSection />
 
         <RequestsSection />
 

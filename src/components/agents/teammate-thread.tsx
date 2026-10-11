@@ -20,7 +20,13 @@
 //   ApprovalCard   one card for what a turn asked (approval-card.tsx), its
 //                  actions grouped by teammate-thread.ts groupApprovals; when
 //                  none of them can be read here, the row's own sentence
+//   BrowserCard    a teammate's browser (docs/plans/ai-teammates-phase4.md
+//                  step 4, browser-card.tsx), in place of the browser_started
+//                  line that names it; the browser_ended line stays a line.
+//                  The thread holds its browser cards (BrowserCardsProvider)
+//                  so a take over card hands the browser to the one on screen
 
+import { useCallback, useMemo } from "react";
 import { Clock } from "lucide-react";
 import { OsMarkdown } from "@/components/layout/os/markdown";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
@@ -37,6 +43,7 @@ import {
   type TeammateSettingsTab,
 } from "@/lib/agents/teammate-thread";
 import { ApprovalCard } from "./approval-card";
+import { BrowserCard, BrowserCardsProvider } from "./browser-card";
 import { ReportBubble } from "./report-bubble";
 import { SystemLine } from "./system-line";
 import { TeammateAvatar } from "./teammate-avatar";
@@ -71,42 +78,65 @@ export function TeammateThread({
   onOpenSettings: (tab?: TeammateSettingsTab, from?: TeammateMessageView) => void;
   onPauseRoutine: (routineId: string) => void;
 }) {
+  // The waiting browser card links to its request only when that card is drawn here.
+  const hasRequest = useCallback((id: string) => Object.prototype.hasOwnProperty.call(actions, id), [actions]);
+  // An open browser card reads itself again when the chat's lines, the answer's steps or its cards' statuses change.
+  const tick = useMemo(() => {
+    const last = messages[messages.length - 1];
+    const steps = last && last.kind === "agent" ? last.toolCalls.filter((c) => !c.pending).length : 0;
+    return `${messages.length}:${last?.id ?? ""}:${steps}:${Object.values(actions).map((a) => `${a.id}=${a.status}`).join(",")}`;
+  }, [messages, actions]);
   return (
-    <div className="flex flex-col gap-5">
-      {messages.map((m) => {
-        switch (m.kind) {
-          case "user":
-            return <UserBubble key={m.id} m={m} />;
-          case "agent":
-            return <AgentTurn key={m.id} m={m} teammate={teammateFor?.(m) ?? teammate} showName={showNames} />;
-          case "report":
-            return <ReportBubble key={m.id} m={m} teammate={teammate} />;
-          case "event":
-            return <SystemLine key={m.id} m={m} onOpenSettings={(tab) => onOpenSettings(tab, m)} onPauseRoutine={onPauseRoutine} />;
-          case "approval": {
-            const cards = groupApprovals(m.actionIds, actions).groups.flatMap((g) => g.actions);
-            if (cards.length === 0) {
+    <BrowserCardsProvider hasRequest={hasRequest} tick={tick}>
+      <div className="flex flex-col gap-5">
+        {messages.map((m) => {
+          switch (m.kind) {
+            case "user":
+              return <UserBubble key={m.id} m={m} />;
+            case "agent":
+              return <AgentTurn key={m.id} m={m} teammate={teammateFor?.(m) ?? teammate} showName={showNames} />;
+            case "report":
+              return <ReportBubble key={m.id} m={m} teammate={teammate} />;
+            case "event": {
+              const line = <SystemLine key={m.id} m={m} onOpenSettings={(tab) => onOpenSettings(tab, m)} onPauseRoutine={onPauseRoutine} />;
+              // A browser opened for this chat draws its card, the line it replaces shown only when the card cannot be read.
+              if (m.event === "browser_started" && m.browserSessionId) {
+                return (
+                  <div key={m.id} className="flex gap-3">
+                    <span className="w-[18px] shrink-0" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <BrowserCard browserSessionId={m.browserSessionId} fallback={line} />
+                    </div>
+                  </div>
+                );
+              }
+              return line;
+            }
+            case "approval": {
+              const cards = groupApprovals(m.actionIds, actions).groups.flatMap((g) => g.actions);
+              if (cards.length === 0) {
+                return (
+                  <div key={m.id} className="flex min-h-6 items-center justify-center gap-2 text-center text-sm text-ink-2">
+                    <Clock className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
+                    <span className="min-w-0 break-words">{m.text}</span>
+                  </div>
+                );
+              }
               return (
-                <div key={m.id} className="flex min-h-6 items-center justify-center gap-2 text-center text-sm text-ink-2">
-                  <Clock className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
-                  <span className="min-w-0 break-words">{m.text}</span>
+                <div key={m.id} className="flex gap-3">
+                  <span className="w-[18px] shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <ApprovalCard actions={cards} agentName={(teammateFor?.(m) ?? teammate).name} deciding={deciding} onDecide={onDecide} />
+                  </div>
                 </div>
               );
             }
-            return (
-              <div key={m.id} className="flex gap-3">
-                <span className="w-[18px] shrink-0" aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <ApprovalCard actions={cards} agentName={(teammateFor?.(m) ?? teammate).name} deciding={deciding} onDecide={onDecide} />
-                </div>
-              </div>
-            );
+            default:
+              return null;
           }
-          default:
-            return null;
-        }
-      })}
-    </div>
+        })}
+      </div>
+    </BrowserCardsProvider>
   );
 }
 

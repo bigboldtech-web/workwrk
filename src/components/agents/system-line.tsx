@@ -37,7 +37,7 @@ const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   delegate_waiting: Clock,
   talk_asked: MessageSquare,
   automation_asked: Workflow,
-  // Phase 4: a browser opened and closed (step 4 draws the opened one as its card).
+  // Phase 4: a browser opened and closed (teammate-thread.tsx draws the opened one as its browser card).
   browser_started: Globe,
   browser_ended: Globe,
 };

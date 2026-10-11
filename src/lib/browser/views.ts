@@ -6,7 +6,7 @@
 //
 // Pure: types and words, safe on the client.
 
-import { BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_PANEL_COPY, BROWSER_POLICY_COPY } from "@/lib/agents/teammate-copy";
 import type { EndReason, SessionStatus, StepKind, StepOutcome } from "./types";
 
 /** Why the computer cannot be used here, each its own reason (Decision 33; sessions.ts computerAccess). */
@@ -36,6 +36,8 @@ export interface BrowserStepView {
 
 export interface BrowserSessionView {
   id: string;
+  /** The workspace it was read in (step 4): every write from its card sends it, and a session switched in another tab answers workspace_changed. */
+  organizationId: string;
   agentId: string;
   agentName: string;
   status: SessionStatus;
@@ -52,6 +54,8 @@ export interface BrowserSessionView {
 }
 
 export interface BrowserPolicyView {
+  /** The workspace it was read in (step 4): every change from the section sends it. */
+  organizationId: string;
   /** The computer can be turned on here: this WorkwrK offers it, the plan has it, the workspace is live and not on a trial. */
   available: boolean;
   /** Why not, when not (never workspace_off, which is the switch itself). */
@@ -67,9 +71,30 @@ export interface BrowserPolicyView {
 
 const STEP_WORDS = BROWSER_PANEL_COPY.STEP_WORDS;
 
+/** A host as a step or a card names it: letters, digits, hyphens and underscores between dots. */
+const HOST = /^(?=.{1,253}$)[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
+
+/**
+ * A site reduced to its host, or null (step 4: "a view's steps never carry a
+ * path"). Steps keep a host only (Decision 23), so this is the last guard: a
+ * value that carries more (a path, a query, a user name, a port) shows its
+ * host alone, and one that is not a host at all shows as no site.
+ */
+export function hostOf(site: string | null | undefined): string | null {
+  if (typeof site !== "string") return null;
+  const t = site.trim().toLowerCase();
+  if (!t) return null;
+  if (HOST.test(t)) return t;
+  // An address with a scheme as it is; anything else as a host with more after it ("site/path", "user@site:port").
+  const whole = /^[a-z][a-z0-9+.-]*:\/\//.test(t) ? t : `https://${t}`;
+  const parsed = URL.canParse(whole) ? new URL(whole) : null;
+  const host = parsed?.hostname ?? "";
+  return HOST.test(host) ? host : null;
+}
+
 /** What a step did, by its kind and host alone. */
 export function stepLine(s: { kind: StepKind; site: string | null; outcome: StepOutcome }): string {
-  const site = s.site && s.site.trim() ? s.site : STEP_WORDS.unknownSite;
+  const site = hostOf(s.site) ?? STEP_WORDS.unknownSite;
   switch (s.kind) {
     case "open":
     case "read":
@@ -95,6 +120,63 @@ export function endedLine(reason: EndReason | null): string {
   if (!reason) return BROWSER_PANEL_COPY.closed;
   const words = (BROWSER_PANEL_COPY.ENDED_WORDS as Readonly<Record<string, string>>)[reason];
   return words ?? BROWSER_PANEL_COPY.closed;
+}
+
+/**
+ * One step as its person's card lists it, from its row: its host alone
+ * (hostOf), never an address path, an element's words or typed text.
+ */
+export function stepViewOf(s: { seq: number; kind: string; site: string | null; outcome: string; code: string | null; at: Date; shotId: string | null }): BrowserStepView {
+  const kind = s.kind as StepKind;
+  const outcome = s.outcome as StepOutcome;
+  const site = hostOf(s.site);
+  return { seq: s.seq, kind, site, outcome, code: s.code, at: s.at.toISOString(), shotId: s.shotId, line: stepLine({ kind, site, outcome }) };
+}
+
+/** The word after a step's line for its outcome ("not allowed"), empty for one that went as asked. */
+export function outcomeWord(outcome: StepOutcome): string {
+  return (BROWSER_PANEL_COPY.OUTCOME_WORDS as Readonly<Record<string, string>>)[outcome] ?? "";
+}
+
+/**
+ * What the browser card shows for a session (step 4): live (Watch and Take
+ * over offered), waiting (a step waits for the person's card), handed over
+ * (the person has it), or closed. A browser still starting reads as live
+ * (its live view answers busy until it is), one ending as closed.
+ */
+export type BrowserCardState = "live" | "waiting" | "handed_over" | "closed";
+
+export function browserCardState(v: Pick<BrowserSessionView, "status" | "waiting">): BrowserCardState {
+  switch (v.status) {
+    case "handed_over":
+      return "handed_over";
+    case "waiting":
+      return "waiting";
+    case "live":
+    case "starting":
+      return v.waiting ? "waiting" : "live";
+    default:
+      return "closed";
+  }
+}
+
+/** Where a picture of a page is read from: the person's own, through its route only (Decision 16). Null for an id that is not one. */
+export function shotSrc(id: string | null | undefined): string | null {
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  return `/api/teammate-browser/shots/${encodeURIComponent(id)}`;
+}
+
+/** About this month's cost, in US dollars (Decision 34: only from the founder's rate). */
+export function costWords(cents: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.max(0, cents) / 100);
+}
+
+/** The usage lines the settings section shows (Decision 30: numbers only), the cost only when a rate is set. */
+export function usageLines(u: BrowserUsage): string[] {
+  const P = BROWSER_POLICY_COPY;
+  const lines = [P.minutes(u.minutesUsed, u.minutesCap), P.atOnce(u.atOnce, u.atOnceCap), P.today(u.sessionsToday, u.sessionsTodayCap)];
+  if (typeof u.costCents === "number" && Number.isFinite(u.costCents)) lines.push(P.cost(costWords(u.costCents)));
+  return lines;
 }
 
 /** A session row's minutes: what it was billed once ended, else the minutes it has run, at least one once started. */

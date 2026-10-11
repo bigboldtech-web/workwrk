@@ -158,6 +158,7 @@ describe("connectorRowStates", () => {
 describe("workspaceModules", () => {
   it("carries the Google products on here, within what this WorkwrK offers", async () => {
     cdb.policy.set("org1", ["calendar"]);
-    expect(await workspaceModules("org1")).toEqual({ tablesOn: true, talkOn: true, connectors: { gmail: false, calendar: true } });
+    // And no computer while this WorkwrK offers none (Phase 4 step 4): nothing about it is read.
+    expect(await workspaceModules("org1")).toEqual({ tablesOn: true, talkOn: true, connectors: { gmail: false, calendar: true }, computer: false });
   });
 });

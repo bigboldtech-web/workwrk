@@ -1175,9 +1175,11 @@ const TALK_TOOLS: readonly ToolName[] = ["post_in_talk", "read_talk"];
  * caller can forget them; only `computer: true` gives a browser tool, so a
  * caller that passed nothing at run time gives none.
  *
- * Phase 4 step 1: every caller that offers tools passes `computer: false`,
- * so no browser tool is offered anywhere until step 3 wires the computer's
- * access (docs/plans/ai-teammates-phase4.md).
+ * Phase 4 (docs/plans/ai-teammates-phase4.md): a turn passes whether the
+ * workspace may use the computer now (engine.ts prepareTurn), the Tools and
+ * approvals tab and the teammate's settings the workspace's
+ * (teammate-server.ts WorkspaceModules.computer, step 4), and the Google
+ * views `computer: false`, since they list Google tools only.
  */
 export function teammateToolNames(
   agent: { toolNames: unknown; productSlug: string | null },

@@ -153,7 +153,7 @@ export function TeammateSettingsDrawer({
   } else if (!t || !current) {
     body = <SkeletonLines lines={5} />;
   } else if (tab === "tools") {
-    body = <ToolsTab key={t.slug} teammate={t} canManage={current.canManage} onSaved={saved} onTools={tools} />;
+    body = <ToolsTab key={t.slug} teammate={t} canManage={current.canManage} onSaved={saved} onTools={tools} onReload={() => void load(t.slug)} />;
   } else if (tab === "memory") {
     body = <MemoryTab key={t.slug} teammate={t} canManage={current.canManage} />;
   } else if (tab === "routines") {
