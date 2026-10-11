@@ -129,6 +129,13 @@ describe("today's hrefs and the sidebar", () => {
     expect(filterSettingsPages("").length).toBe(SETTINGS_PAGE_LIST.length);
     expect(filterSettingsPages("zzz")).toEqual([]);
   });
+  it("finds Apps & modules by the computer for AI teammates (docs/plans/ai-teammates-phase4.md step 5)", () => {
+    // Before: none of these found the page that holds its switch and sites.
+    for (const q of ["browser", "computer", "allowed sites", "Allowed sites"]) {
+      expect(filterSettingsPages(q, "workspace").map((p) => p.key), q).toContain("apps");
+    }
+    expect(SETTINGS_PAGES.apps.keywords.filter((k) => k === "ai teammates")).toHaveLength(1);
+  });
   it("derives the 8.4 redirect rows from the aliases", () => {
     const rows = settingsAliasRedirects();
     expect(rows).toContainEqual({ source: "/settings/permissions", destination: "/settings/access" });

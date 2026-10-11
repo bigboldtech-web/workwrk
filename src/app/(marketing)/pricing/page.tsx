@@ -63,7 +63,7 @@ import { stopShipped } from "@/components/marketing/data/tuesday";
 // The enforced limits, straight from the constant the server reads. It is a
 // pure object with zero imports, so a page can read it without pulling
 // prisma in behind it.
-import { PLAN_LIMITS, TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
+import { BROWSER_LIMITS, PLAN_LIMITS, TEAMMATE_LIMITS } from "@/lib/plan-limits-data";
 
 const SITE = "https://workwrk.com";
 const STARTER = tier("starter");
@@ -111,6 +111,15 @@ const TEAMMATE_CAP = {
   growth: TEAMMATE_LIMITS.GROWTH,
   scale: TEAMMATE_LIMITS.SCALE,
 } as const;
+
+/**
+ * The computer for AI teammates per tier, read from the caps a browser's
+ * start counts against (BROWSER_LIMITS, docs/plans/ai-teammates-phase4.md
+ * Decision 5): minutes a month and browsers at once for the workspace.
+ * Starter has none, and a trial none whatever its plan. Its row shows only
+ * while flags.teammateComputer is true, once it is on in production.
+ */
+const BROWSER_CAP = { growth: BROWSER_LIMITS.GROWTH, scale: BROWSER_LIMITS.SCALE } as const;
 
 /** "50" or "2,000", in the page's own locale-free grouping. */
 function cap(n: number): string {
@@ -163,6 +172,20 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
         `${cap(TEAMMATE_CAP.growth.personal)} each, ${cap(TEAMMATE_CAP.growth.workspace)} shared`,
         `${cap(TEAMMATE_CAP.scale.personal)} each, ${cap(TEAMMATE_CAP.scale.workspace)} shared`,
       ],
+      // The computer for AI teammates: written now, shown only once it is on
+      // in production (flags.teammateComputer, Founder action 8 of
+      // docs/plans/ai-teammates-phase4.md), since a row a buyer reads is a
+      // commitment and nothing runs until the founder configures it.
+      ...(flags.teammateComputer
+        ? ([
+            [
+              "AI teammates' web browser (minutes a month, at once)",
+              false,
+              `${cap(BROWSER_CAP.growth!.minutesPerMonth)} minutes, ${BROWSER_CAP.growth!.atOnce} at once`,
+              `${cap(BROWSER_CAP.scale!.minutesPerMonth)} minutes, ${BROWSER_CAP.scale!.atOnce} at once`,
+            ],
+          ] as Array<[string, CompareValue, CompareValue, CompareValue]>)
+        : []),
       ...(stopShipped(6)
         ? ([["Answers sourced from the entities they read", true, true, true]] as Array<
             [string, CompareValue, CompareValue, CompareValue]

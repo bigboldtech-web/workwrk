@@ -50,6 +50,29 @@ const TYPE_META: Record<EntryType, { label: string }> = {
   docs:        { label: "Docs" },
 };
 
+/*
+ * WRITTEN, NOT LISTED: the computer for AI teammates
+ * (docs/plans/ai-teammates-phase4.md step 5, Decision 32). It ships only
+ * when Founder actions 1 to 7 are done and the computer is on in
+ * production (Founder action 8): then it goes at the top of ENTRIES below,
+ * dated the day production was turned on, in the same commit that sets
+ * flags.teammateComputer to true. Until then nothing here is live, and this
+ * page lists only what is.
+ *
+ *   {
+ *     date: "<the day production is turned on>",
+ *     title: "AI teammates can use a web browser for you",
+ *     items: [
+ *       { type: "feature", text: "On Growth and above, an Owner or Admin can let AI teammates open and read web pages on the sites the workspace allows, in the person's own chats. It is off until they turn it on." },
+ *       { type: "feature", text: "Watch the browser live in the chat, take it over to sign in or pay yourself, and stop it at any time." },
+ *       { type: "security", text: "Every click, every word typed and every choice waits for your approval on a card showing the page. Teammates refuse to type into password, code and card number fields, and see nothing while you take over." },
+ *     ],
+ *   },
+ *
+ * The last line is the spec's with "never type passwords, codes or card
+ * numbers" made what the code does: the refusal is by the field's kind
+ * (src/lib/browser/classes.ts), as the privacy policy's section 3 says.
+ */
 const ENTRIES: readonly { date: string; version?: string; title: string; items: readonly { type: EntryType; text: string }[] }[] = [
   // From main's merges since 2026-09-21. A release still behind a switch
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is

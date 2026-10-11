@@ -247,8 +247,78 @@ export default function PrivacyPage() {
                 including the Limited Use requirements. We do not use data from Google Workspace APIs to develop, improve or
                 train generalized AI or machine learning models.
               </p>
+              {/* The computer for AI teammates (docs/plans/ai-teammates-phase4.md,
+                  Decisions 6, 9, 11, 12, 16 to 19 and 23, step 5). The browser
+                  is the person's alone, for one teammate, in their own
+                  one-teammate chat (21), at the browser provider, fresh each
+                  time with no saved context and recording off, released when
+                  close_browser runs, Stop is pressed, 5 idle minutes pass or
+                  its time cap comes (6, 7); the session, live view, steps and
+                  pictures routes read by the viewer's own id, so an Owner or
+                  Admin sees usage and never a browser (29, 30). Growth and
+                  above, and never a trial whatever its plan (4): the sentence
+                  names the plan a workspace needs. It opens only a host the
+                  teammate's and the workspace's lists both allow, never a
+                  private or internal one (9, 10), and once a page was read
+                  only a link a page showed (11). Reads run at once;
+                  click, type_text and select_option always ask on their own
+                  card, with a picture of the page where one could be taken
+                  (12). The model reads a page's visible words, redacted and
+                  clipped, and never a picture (16, 17). Typing is refused
+                  into a field the driver classes as a password, a one-time
+                  code, a card number or code or expiry, or a bank account
+                  (18); field values never leave the browser, only whether a
+                  field is filled (page-reader.ts); while the person has the
+                  browser every browser tool is locked and the model hears
+                  only { done } (19). No downloads, uploads or PDFs (20), and
+                  no stored sign-in profiles (8). Steps keep kind, host,
+                  outcome, code and time for 30 days, the sweep deletes them
+                  after; pictures are sealed files outside the database and
+                  the backups, 24 hours; page text is never kept; a card keeps
+                  what it would do; chat and run records keep the host and
+                  counts (23); the audit rows name hosts, kinds and roles,
+                  never typed text, an element's words or a path (24).
+                  Made truer than the spec's words, each after reading the
+                  code: "What a page shows" became the words a page shows,
+                  never a picture (16); "never types a password" became the
+                  fields it recognises, since the refusal is by the field's
+                  class (18); "never sees what you type" gained "in a page's
+                  fields", since after a take over it may read the page, which
+                  can show back what was typed once it was sent;
+                  "told only that you finished" became whether, since Give it
+                  back is told too (19); "nothing you sign in to is kept"
+                  became no sign-in, since the steps and the audit keep the
+                  site you signed in on; the steps say how each went, which
+                  the row keeps; and the answer, which can quote a page, stays
+                  in the chat and the run history as every answer does. */}
               <p>
-                Which provider we use, and what their own retention terms say, is a question we will answer in writing
+                If an Owner or Admin turns it on for your workspace, which needs the Growth plan or above, an AI teammate can
+                use a web browser for you, in your own chats with it. The browser runs at our browser provider for that one
+                chat and is never shared: nobody else, an Owner or Admin included, can watch it, use it or reach what you sign
+                in to in it, and it is closed and deleted when the teammate finishes, after a few idle minutes, or at its time
+                limit. A teammate opens only the sites your workspace and that teammate allow, and never private or internal
+                addresses. It opens and reads pages at once; every click, every word it types and every choice waits for your
+                approval on a card that shows the page. The words a page shows are sent to our model provider to answer you,
+                never a picture of the page; we do not send them for training, and we do not use them to train any model. A
+                teammate never types into a field it recognises as one for a password, a one-time code or a card number, and
+                never sees what you type in a page&apos;s fields: to sign in or pay, you take over the browser yourself while
+                the teammate sees nothing, and it is told only whether you finished, then may read the page as you left it.
+                It cannot download or upload files, and no sign-in you make in it is kept after the browser closes.
+              </p>
+              <p>
+                For you alone, we keep a list of the steps a teammate took in the browser, the kind of step, the site, how it
+                went and when, for 30 days. Pictures of pages shown on its cards and in your chat are kept encrypted for 24
+                hours, for you alone, and are not in our backups. We never keep the text of the pages it read; what it wrote
+                back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate
+                answer does. A request it asks you to approve keeps what it would do, such as the words it would type, as
+                every teammate request does. Owners and Admins see in the audit log which sites a teammate opened for you and
+                what kind of steps it took, never what it read or typed.
+              </p>
+              {/* "Which provider" became "Which providers" in step 5 of
+                  docs/plans/ai-teammates-phase4.md: this section now names a
+                  browser provider beside the model provider. */}
+              <p>
+                Which providers we use, and what their own retention terms say, is a question we will answer in writing
                 before you sign up.
               </p>
               {/* THE EMBEDDINGS SENTENCE IS GONE. It read as a protective
@@ -276,11 +346,16 @@ export default function PrivacyPage() {
                   sub-processor list is worse than no list, so this asks
                   rather than asserts. It is the one paragraph on the page
                   that should become a table the day someone writes the
-                  deployment's inventory down. */}
+                  deployment's inventory down. The browser provider (step 5 of
+                  docs/plans/ai-teammates-phase4.md) is named by kind only, as
+                  the others are, and only where a workspace turns the
+                  computer on: Founder actions 1 and 2 sign its DPA and add it
+                  to the list sent on request. */}
               <p>
                 We use a small number of sub-processors to run the service: a hosting provider, a payment processor, a
-                transactional email provider and a model provider for the AI features. We will give you the current
-                list, by name, in writing, before you sign up or at any point after.
+                transactional email provider, a model provider for the AI features and, where a workspace turns on the
+                computer for AI teammates, a provider that runs those browsers. We will give you the current list, by name,
+                in writing, before you sign up or at any point after.
               </p>
               <p>
                 Email <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and ask for the sub-processor
@@ -366,6 +441,24 @@ export default function PrivacyPage() {
                 you stays in your chat with it and in your run history, and its requests stay as every teammate request does,
                 until you delete your account, which erases their words at once for most histories, or within a few days for a very long one.
               </p>
+              {/* The computer for AI teammates (docs/plans/ai-teammates-phase4.md
+                  Decision 23, step 5): the teammates cron's browser sweep
+                  (src/lib/browser/sessions.ts sweepBrowserSessions) deletes
+                  steps older than 30 days and pictures past their 24 hours
+                  (src/lib/browser/shots.ts, which refuses one past its time
+                  before the sweep comes). The steps are rows, so the nightly
+                  database dump holds them like every other row, for at most
+                  90 days; the pictures are sealed files in BROWSER_SHOTS_DIR,
+                  which browser/config.ts refuses anywhere inside the app's
+                  folder, and scripts/backup/backup.sh copies only the
+                  database and the app's two upload folders. That backups
+                  sentence is beyond the spec's, which named only the 30 days
+                  and the 24 hours. */}
+              <p>
+                A teammate&apos;s browser steps are deleted 30 days after they were taken, and pictures of pages 24 hours after
+                they were taken. Our encrypted backups hold the steps, as they hold every other record, for at most 90 days,
+                and never the pictures.
+              </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>
           ),
@@ -379,10 +472,22 @@ export default function PrivacyPage() {
                retrieval and backups. There is one deployment and no such
                choice exists, which made a privacy policy, of all documents,
                the place the site over-promised hardest. */
-            <p>
-              There is one deployment, and you do not choose a region for it. If where your data is stored is a
-              requirement for you, ask us before you sign up rather than after.
-            </p>
+            <>
+              <p>
+                There is one deployment, and you do not choose a region for it. If where your data is stored is a
+                requirement for you, ask us before you sign up rather than after.
+              </p>
+              {/* The computer for AI teammates (docs/plans/ai-teammates-phase4.md
+                  Decision 25, step 5): one region per deployment,
+                  BROWSER_REGION, chosen under the provider's DPA. The settings
+                  section shows it (teammate-browser-section.tsx regionLine)
+                  only to Owners and Admins, so the sentence names them rather
+                  than saying Settings shows it to everyone. */}
+              <p>
+                An AI teammate&apos;s browser runs in the region our browser provider runs it in for this deployment, which
+                Owners and Admins see in Settings, Apps &amp; modules.
+              </p>
+            </>
           ),
         },
         {

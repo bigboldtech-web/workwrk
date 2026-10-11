@@ -106,6 +106,12 @@ describe("the claim flags", () => {
     expect(flags.competitorImporters).toBe(false);
   });
 
+  it("keeps the computer for AI teammates off the site until it is on in production", () => {
+    // docs/plans/ai-teammates-phase4.md Founder action 8: the lead flips it,
+    // with the changelog entry, once the founder has turned it on.
+    expect(flags.teammateComputer).toBe(false);
+  });
+
   it("keeps the customers nav link hidden, per the decision", () => {
     expect(flags.customersNavLink).toBe(false);
   });

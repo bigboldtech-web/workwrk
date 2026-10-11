@@ -201,13 +201,30 @@ export default function CookiesPage() {
           // are Google Analytics". There is no gtag and no googletagmanager
           // anywhere in src: the page disclosed a vendor the site does not
           // load. What is true is the stronger sentence.
+          //
+          // The one exception (docs/plans/ai-teammates-phase4.md step 5,
+          // Decision 19): the live view of an AI teammate's browser is an
+          // iframe from the browser provider's own origin
+          // (src/components/agents/browser-card.tsx, embedded only when
+          // src/lib/browser/live-view-origin.ts says the origin is the
+          // provider's), loaded only when the person presses Watch or takes
+          // the browser over. What that frame stores is set by the provider,
+          // and nobody here has read it yet: Founder action 6 asks the
+          // provider which cookies and local storage it keeps, and each then
+          // gets a row in the table above. Until those rows exist, the second
+          // sentence says "Every cookie in the table above", not the spec's
+          // "Every other cookie", since no row there is the provider's; it
+          // becomes "Every other" in the commit that adds them.
           id: "third",
           title: "4. Third party cookies",
           body: (
             <>
               <p>
-                None. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech,
-                no retargeting pixel and no social network tracker on this site or in the product.
+                None set by anyone else, with one exception you start yourself: when you watch or take over an AI
+                teammate&apos;s browser, the picture of that browser is a frame from our browser provider&apos;s own site, and
+                what that frame keeps in your browser is the provider&apos;s. Every cookie in the table above is set by
+                workwrk itself. We load no analytics vendor, no ad tech, no retargeting pixel and no social network tracker
+                on this site or in the product.
               </p>
               <p>
                 The banner asks nothing, because the site sets nothing optional. If we ever add another kind of cookie,

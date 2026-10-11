@@ -358,6 +358,7 @@ describe("the truth gates", () => {
     cookies: readFileSync("src/app/(marketing)/cookies/page.tsx", "utf8"),
     pricing: readFileSync("src/app/(marketing)/pricing/page.tsx", "utf8"),
     demo: readFileSync("src/app/(marketing)/demo/page.tsx", "utf8"),
+    changelog: readFileSync("src/app/(marketing)/changelog/page.tsx", "utf8"),
   };
 
   /** A claim, and the file it must not appear as a rendered string in. */
@@ -383,6 +384,9 @@ describe("the truth gates", () => {
     // Google's verification and its security assessment are founder actions
     // still to come (docs/plans/ai-teammates-phase3.md, review of step 5).
     ["privacy", /verified by Google|Google[- ]verified|\bCASA\b|security assessment/i, "a Google verification or assessment nobody has passed"],
+    // The computer for AI teammates keeps no sign-in between browsers
+    // (docs/plans/ai-teammates-phase4.md Decision 8, step 5).
+    ["privacy", /stored (?:sign[- ]in )?profiles?/i, "a stored sign-in profile nothing keeps"],
   ];
 
   for (const [file, pattern, what] of FORBIDDEN) {
@@ -393,7 +397,9 @@ describe("the truth gates", () => {
 
   it("still states the two absences the proof rests on", () => {
     expect(files.privacy).toContain("We hold no third party privacy certification or audit yet");
-    expect(files.cookies).toContain("None. Every cookie in the table above is set by workwrk itself");
+    // Step 5 of docs/plans/ai-teammates-phase4.md: one exception the person starts, then the same absence.
+    expect(visibleText(files.cookies)).toContain("None set by anyone else, with one exception you start yourself:");
+    expect(visibleText(files.cookies)).toContain("Every cookie in the table above is set by workwrk itself.");
   });
 
   it("gates the sandbox line on the flag rather than deleting the branch", () => {
@@ -431,6 +437,99 @@ describe("the truth gates", () => {
     // Review round 6 of Phase 3: a day was not true for the worst case (a history of about a million rows, or many erasures at once).
     expect(text).toContain("and its requests stay as every teammate request does, until you delete your account, which erases their words at once for most histories, or within a few days for a very long one.");
     expect(text).not.toContain("within a day");
+  });
+
+  // Step 5 of docs/plans/ai-teammates-phase4.md: the computer for AI
+  // teammates on /privacy. The key clauses are pinned, each as the code
+  // makes it true; the spec's "never sees what you type", "told only that you
+  // finished" and "nothing you sign in to is kept" were made exact (the page's
+  // comment says why), and the answers keep what they quoted.
+  it("says on /privacy what the computer for AI teammates does, sends and keeps", () => {
+    const text = visibleText(files.privacy);
+    expect(text).toContain("If an Owner or Admin turns it on for your workspace, which needs the Growth plan or above, an AI teammate can use a web browser for you, in your own chats with it.");
+    expect(text).toContain("The browser runs at our browser provider for that one chat and is never shared: nobody else, an Owner or Admin included, can watch it, use it or reach what you sign in to in it");
+    expect(text).toContain("A teammate opens only the sites your workspace and that teammate allow, and never private or internal addresses.");
+    expect(text).toContain("every click, every word it types and every choice waits for your approval on a card that shows the page.");
+    // Decision 16: the model never sees a picture of a page.
+    expect(text).toContain("The words a page shows are sent to our model provider to answer you, never a picture of the page; we do not send them for training, and we do not use them to train any model.");
+    // Decision 18: the refusal is by the field's kind.
+    expect(text).toContain("A teammate never types into a field it recognises as one for a password, a one-time code or a card number");
+    // Field values never leave the browser; after Done it may read the page.
+    expect(text).toContain("never sees what you type in a page's fields: to sign in or pay, you take over the browser yourself while the teammate sees nothing, and it is told only whether you finished, then may read the page as you left it.");
+    expect(text).toContain("It cannot download or upload files, and no sign-in you make in it is kept after the browser closes.");
+    // The second paragraph: what is kept, for whom, and for how long.
+    expect(text).toContain("For you alone, we keep a list of the steps a teammate took in the browser, the kind of step, the site, how it went and when, for 30 days.");
+    expect(text).toContain("Pictures of pages shown on its cards and in your chat are kept encrypted for 24 hours, for you alone, and are not in our backups.");
+    expect(text).toContain("We never keep the text of the pages it read; what it wrote back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate answer does.");
+    expect(text).toContain("A request it asks you to approve keeps what it would do, such as the words it would type, as every teammate request does.");
+    expect(text).toContain("Owners and Admins see in the audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.");
+    // Sections 4, 6 and 7.
+    expect(text).toContain("a model provider for the AI features and, where a workspace turns on the computer for AI teammates, a provider that runs those browsers.");
+    expect(text).toContain("A teammate's browser steps are deleted 30 days after they were taken, and pictures of pages 24 hours after they were taken. Our encrypted backups hold the steps, as they hold every other record, for at most 90 days, and never the pictures.");
+    expect(text).toContain("An AI teammate's browser runs in the region our browser provider runs it in for this deployment, which Owners and Admins see in Settings, Apps & modules.");
+    // The spec's wordings that are not true of the code, kept off.
+    expect(text).not.toContain("nothing you sign in to is kept");
+    expect(text).not.toContain("told only that you finished");
+    expect(text).not.toContain("What a page shows is sent");
+    // And the date moved with them.
+    expect(LEGAL_COPY.privacy.updated).toBe("11 October 2026");
+  });
+
+  it("never says a browser is recorded on /privacy, nor keeps a sign-in profile", () => {
+    const text = visibleText(files.privacy);
+    const from = text.indexOf("If an Owner or Admin turns it on for your workspace, which needs the Growth plan");
+    const to = text.indexOf("never what it read or typed.");
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const browser = [
+      text.slice(from, to),
+      ...text.split(/(?<=\.) /).filter((sentence) => /browser/i.test(sentence)),
+    ].join(" ");
+    // Recording is off per session (Decision 7): "recorded" reads as a video of the person's browsing.
+    expect(browser).not.toMatch(/\brecord(?:ed|ing|s)?\b/i);
+    expect(text).not.toMatch(/stored (?:sign[- ]in )?profiles?/i);
+  });
+
+  it("names on /cookies the browser provider's frame as the one third party exception, and no row for it yet", () => {
+    const text = visibleText(files.cookies);
+    expect(text).toContain(
+      "None set by anyone else, with one exception you start yourself: when you watch or take over an AI teammate's browser, the picture of that browser is a frame from our browser provider's own site, and what that frame keeps in your browser is the provider's. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech, no retargeting pixel and no social network tracker on this site or in the product.",
+    );
+    // No row of the table is the provider's until Founder action 6 adds them,
+    // so "Every other cookie" waits for the commit that does (the comment says so).
+    expect(text).not.toContain("Every other cookie in the table above");
+    expect(files.cookies).toContain("Founder action 6");
+    expect(LEGAL_COPY.cookies.updated).toBe("11 October 2026");
+  });
+
+  it("keeps every dash and double hyphen off the browser's text on /privacy, /cookies and the waiting changelog entry", () => {
+    for (const [name, text] of [
+      ["privacy", visibleText(files.privacy)],
+      ["cookies", visibleText(files.cookies)],
+      ["changelog", files.changelog.slice(files.changelog.indexOf("WRITTEN, NOT LISTED"), files.changelog.indexOf("const ENTRIES"))],
+    ] as const) {
+      expect(`${name}: ${DASH.test(text)}`).toBe(`${name}: false`);
+      expect(`${name}: ${DOUBLE_HYPHEN.test(text)}`).toBe(`${name}: false`);
+    }
+  });
+
+  it("writes the computer's changelog entry but lists it only once it is on in production", () => {
+    // Written now, in a comment above ENTRIES (Decision 32).
+    expect(files.changelog).toContain('title: "AI teammates can use a web browser for you"');
+    expect(files.changelog).toContain("Founder actions 1 to 7");
+    // Not on the page: nothing a visitor reads names it.
+    expect(renderedOnly(files.changelog)).not.toContain("AI teammates can use a web browser for you");
+    expect(renderedOnly(files.changelog)).not.toContain("take it over to sign in or pay yourself");
+  });
+
+  it("writes the browser row of the pricing matrix from the enforced caps, behind flags.teammateComputer", () => {
+    expect(files.pricing).toContain("const BROWSER_CAP = { growth: BROWSER_LIMITS.GROWTH, scale: BROWSER_LIMITS.SCALE } as const;");
+    expect(files.pricing).toContain('import { BROWSER_LIMITS, PLAN_LIMITS, TEAMMATE_LIMITS } from "@/lib/plan-limits-data";');
+    // The row sits inside the flag's branch, Starter has none, and its numbers are read, never typed.
+    expect(files.pricing).toMatch(
+      /\.\.\.\(flags\.teammateComputer\s*\?\s*\(\[\s*\[\s*"AI teammates' web browser \(minutes a month, at once\)",\s*false,\s*`\$\{cap\(BROWSER_CAP\.growth!\.minutesPerMonth\)\} minutes, \$\{BROWSER_CAP\.growth!\.atOnce\} at once`,\s*`\$\{cap\(BROWSER_CAP\.scale!\.minutesPerMonth\)\} minutes, \$\{BROWSER_CAP\.scale!\.atOnce\} at once`,\s*\],\s*\]/,
+    );
+    expect(files.pricing.match(/AI teammates' web browser/g)?.length).toBe(1);
   });
 
   it("lists on /cookies the cookie connecting Google to AI teammates sets, as long as it lasts", () => {

@@ -70,6 +70,11 @@
 // open (browser-access.ts browserTurnAccess); block 2 lists those sites as
 // information, or says why not (Decision 33), and a call to a browser tool
 // it was not offered answers its real reason (executor.ts browserMissing).
+// A routine, a Talk answer, an automation, another teammate's ask and a
+// group chat never get it: when the teammate holds browser tools and its
+// workspace may use the computer now, block 2 says why in one line
+// (browserNotHereLine, step 5); a deployment or workspace without the
+// computer never mentions it, as Google's line names only products on here.
 // Nothing is offered while browserConfig() is null, as it is in production
 // until the founder configures it. A turn that met a page is marked so on
 // its answer (meta.readWeb), on its run (output.readWeb, the moment it
@@ -466,7 +471,7 @@ export interface SystemBlockInput {
   askable?: ReadonlyArray<{ name: string; job: string }> | null;
   /** What it may do with the person's Gmail and Google Calendar this turn, or why not (connectorLines; connectorNotHereLine where the answer is not the person's alone). */
   connectorLines?: string[] | null;
-  /** What it may do with a web browser for the person this turn, and on which sites, or why not (browserLines, Phase 4). */
+  /** What it may do with a web browser for the person this turn, and on which sites, or why not (browserLines, Phase 4); or that where it runs is why it has none (browserNotHereLine, step 5). */
   browserLines?: string[] | null;
 }
 
@@ -1088,6 +1093,30 @@ export function connectorNotHereLine(kind: NotHereKind, products: readonly Conne
 }
 
 /**
+ * Why a turn that is not the person's own one-teammate chat has no browser
+ * (Phase 4 Decision 21), as block 2 tells the model (step 5): nobody is there
+ * to approve a step or take over, or the answer is not the person's alone.
+ */
+const BROWSER_NOT_HERE_WHY: Record<BrowserNotHere, string> = {
+  talk: "your answer is posted for everyone in the conversation",
+  automation: "nobody is there to approve its steps",
+  delegated: "your answer goes back to the teammate that asked; the person can ask you directly",
+  routine: "nobody is watching a routine to approve its steps or take over",
+  group: "a group chat has several teammates and one browser; the person can ask you in your own chat",
+};
+
+/**
+ * Block 2's line for a routine, Talk, automation, delegated or group turn of
+ * a teammate whose own set holds browser tools, while its workspace may use
+ * the computer (docs/plans/ai-teammates-phase4.md step 5), so the model can
+ * say why it cannot browse here; a call to one answers the same reason
+ * (executor.ts browserPrecheck and browserMissing).
+ */
+export function browserNotHereLine(kind: BrowserNotHere): string {
+  return `Your browser tools aren't available here: ${BROWSER_NOT_HERE_WHY[kind]}. If asked, say so in one sentence.`;
+}
+
+/**
  * Why the computer can't be used this turn, as block 2 tells the model
  * (docs/plans/ai-teammates-phase4.md step 3); not_configured says nothing (a
  * deployment with no computer never mentions it), nor does a teammate that
@@ -1377,7 +1406,12 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
       ? // One that cannot be read offers no browser, and says nothing of why.
         await browserTurnAccess({ person: a.person, agentId: a.agent.id }).catch((): BrowserTurnAccess => ({ ok: false, reason: "not_configured" }))
       : null;
-  const enabled = offered.filter((name) => (!isConnectorToolName(name) || google[TOOL_PRODUCT[name]]?.ok === true) && (!isBrowserToolName(name) || browser?.ok === true));
+  // Where it runs is why it has none (step 5): said in block 2 only for a
+  // teammate holding browser tools in a workspace that may use the computer
+  // now, so a deployment or workspace without it never mentions a browser
+  // (as Google's line names only the products on here).
+  const browserNotHereSaid = browserNotHere !== null && browserHeld.length > 0 && computer.available ? browserNotHere : null;
+  const enabled =offered.filter((name) => (!isConnectorToolName(name) || google[TOOL_PRODUCT[name]]?.ok === true) && (!isBrowserToolName(name) || browser?.ok === true));
   const connectorRefusals: Prepared["connectorRefusals"] = {};
   for (const p of held) {
     const g = google[p];
@@ -1420,7 +1454,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
       automation: a.trigger === "AUTOMATION" && a.origin?.kind === "automation" ? { name: a.origin.workflowName } : null,
       askable,
       connectorLines: held.length > 0 ? connectorLines(a.person.firstName, google) : connectorNotHere ? [connectorNotHereLine(connectorNotHere, heldHere)] : null,
-      browserLines: browser ? browserLines(a.person.firstName, browser) : null,
+      browserLines: browser ? browserLines(a.person.firstName, browser) : browserNotHereSaid ? [browserNotHereLine(browserNotHereSaid)] : null,
     }),
     tools: enabled.map((name) => ({ name, description: TOOLS[name].description, input_schema: TOOLS[name].input_schema as Anthropic.Tool["input_schema"] })),
     enabled,

@@ -180,8 +180,14 @@ export const LEGAL_COPY = {
     // account erases the words of a teammate's answers and requests. Review
     // round 5 of Phase 3, the same day: at once, or within a day for a very
     // long history. Review round 6 of Phase 3, the same day: at once for most
-    // histories, or within a few days for a very long one.
-    updated: "10 October 2026",
+    // histories, or within a few days for a very long one. 11 October 2026:
+    // section 3 says what the computer for AI teammates does, sends to the
+    // model provider and keeps; section 4 names a browser provider among the
+    // sub-processors; section 6 says when browser steps and pictures are
+    // deleted, and that backups hold the steps and never the pictures;
+    // section 7 says where the browsers run (docs/plans/ai-teammates-phase4.md
+    // step 5).
+    updated: "11 October 2026",
   },
   terms: {
     eyebrow: "Terms",
@@ -204,8 +210,11 @@ export const LEGAL_COPY = {
     // section 1 names the random id a consent record is filed under. 10
     // October 2026: the table gains wk_tc_state, the cookie connecting Google
     // to AI teammates sets, and sections 1 and 3 say what it is for (review of
-    // step 5, docs/plans/ai-teammates-phase3.md).
-    updated: "10 October 2026",
+    // step 5, docs/plans/ai-teammates-phase3.md). 11 October 2026: section 4
+    // names the one exception a person starts themselves, the browser
+    // provider's frame when they watch or take over an AI teammate's browser
+    // (docs/plans/ai-teammates-phase4.md step 5).
+    updated: "11 October 2026",
   },
 } as const;
 

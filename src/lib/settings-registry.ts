@@ -127,7 +127,8 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   page("workspace", "apps", "Apps & modules", "/settings/apps", "Boxes", {
     group: "Workspace",
     aliases: ["/settings/modules"],
-    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates"],
+    // "browser" to "allowed sites": the computer for AI teammates, its own section (#ai-browser, docs/plans/ai-teammates-phase4.md step 5).
+    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates", "browser", "computer", "allowed sites"],
   }),
   page("workspace", "members", "Members", "/settings/members", "Users", {
     group: "People",

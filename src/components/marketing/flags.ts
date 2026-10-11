@@ -94,6 +94,12 @@ export const flags = {
   aiPeopleRecommendations: false,
   /** Running WorkwrK inside the customer's own AWS or GCP account. */
   customerHostedDeployment: false,
+  /**
+   * The computer for AI teammates. Only once it is on in production
+   * (docs/plans/ai-teammates-phase4.md Founder action 8). It shows the
+   * pricing matrix's browser row.
+   */
+  teammateComputer: false,
 } as const;
 
 export type FlagName = keyof typeof flags;
