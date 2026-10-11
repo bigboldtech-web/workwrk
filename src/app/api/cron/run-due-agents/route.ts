@@ -22,7 +22,19 @@
 //      accounts and deleted or closed workspaces (review of step 2) and of
 //      suspended ones (review round 1 of Phase 3), and revokes Google has
 //      not confirmed are tried again (docs/plans/ai-teammates-phase3.md step 2).
-//   5. Account erasures are finished (src/lib/agents/erasure-sweep.ts
+//   5. The computer for AI teammates' browsers are kept honest
+//      (src/lib/browser/sessions.ts sweepBrowserSessions;
+//      docs/plans/ai-teammates-phase4.md step 2, Decision 27): starts that
+//      never finished, browsers whose guard was lost to a restart, past their
+//      time, held or waiting too long, idle once their turn ended, and those
+//      of leavers, Guests, AI off, a workspace turned off, suspended, closed
+//      or below Growth, and paused or changed teammates are ended; releases
+//      the provider did not confirm are tried again; provider browsers tagged
+//      with this deployment whose row is gone are released (the reaper);
+//      steps past 30 days and pictures past 24 hours are deleted. The
+//      provider's own time limit (the reserve plus a minute) is the backstop
+//      between ticks.
+//   6. Account erasures are finished (src/lib/agents/erasure-sweep.ts
 //      finishErasures): the words of a deleted person's teammate chats,
 //      requests and runs that the erasure's own pass left, or that arrived
 //      late, are blanked in batches, and each erasure is recorded finished
@@ -53,6 +65,7 @@ import { sweepStaleRuns } from "@/lib/agents/budget";
 import { finishErasures, type ErasureSweepCounts } from "@/lib/agents/erasure-sweep";
 import { convertLegacySchedules, type LegacyScheduleCounts } from "@/lib/agents/legacy-schedules";
 import { processDueRoutines, type DueRoutineCounts } from "@/lib/agents/routines-server";
+import { sweepBrowserSessions, type BrowserSweepCounts } from "@/lib/browser/sessions";
 import { sweepConnections } from "@/lib/connectors/connections";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
@@ -83,6 +96,15 @@ const LEGACY_MOVER = { limit: 100 } as const;
 const CONNECTOR_SWEEP = { leaversLimit: 500, revokeLimit: 500, budgetMs: 20_000 } as const;
 
 type ConnectorSweepCounts = Awaited<ReturnType<typeof sweepConnections>>;
+
+/**
+ * The browser sweep (docs/plans/ai-teammates-phase4.md step 2): up to 200
+ * sessions a part, within 20 seconds, so the tick stays inside the crontab's
+ * curl --max-time 290 after the routines' 120 and the connectors' 20. Live
+ * browsers are few (each plan's at once, BROWSER_MAX_AT_ONCE for the
+ * deployment), so 200 covers every one each tick.
+ */
+const BROWSER_SWEEP = { limit: 200, budgetMs: 20_000 } as const;
 
 /**
  * The erasure sweep (review round 5 of Phase 3): up to 50 unfinished
@@ -154,7 +176,17 @@ async function handle(req: Request) {
     console.error(`[cron-failure] run-due-agents: the connector sweep threw: ${errorLine(err)}`);
   }
 
-  // 5. Account erasures whose words are not all blanked yet.
+  // 5. The computer for AI teammates: browsers that must end, releases not
+  //    confirmed, the reaper, and what is kept past its time.
+  let browsers: BrowserSweepCounts | null = null;
+  try {
+    browsers = await sweepBrowserSessions(now, BROWSER_SWEEP);
+  } catch (err) {
+    stepsFailed += 1;
+    console.error(`[cron-failure] run-due-agents: the browser sweep threw: ${errorLine(err)}`);
+  }
+
+  // 6. Account erasures whose words are not all blanked yet.
   let erasures: ErasureSweepCounts | null = null;
   try {
     erasures = await finishErasures(now, ERASURE_SWEEP);
@@ -172,12 +204,13 @@ async function handle(req: Request) {
   // threw (review round 5 of Phase 3): it is tried again each tick, but a
   // deleted person's words must not wait on it unseen. So does an erasure
   // not finished three days after it was asked (review round 6 of Phase 3):
-  // it is still swept, but something is holding it up.
+  // it is still swept, but something is holding it up. So does a part of
+  // the browser sweep that threw (Phase 4): the rest of it still ran.
   const unopenable = connectors && connectors.unopenable > 0 ? 1 : 0;
   return cronResult(
     "run-due-agents",
-    { actions, staleRuns, routines, legacySchedules: legacy, connectors, erasures },
-    stepsFailed + (legacy?.failed ?? 0) + unopenable + (erasures?.failed ?? 0) + (erasures?.overdue ?? 0),
+    { actions, staleRuns, routines, legacySchedules: legacy, connectors, browsers, erasures },
+    stepsFailed + (legacy?.failed ?? 0) + unopenable + (browsers?.failed ?? 0) + (erasures?.failed ?? 0) + (erasures?.overdue ?? 0),
   );
 }
 

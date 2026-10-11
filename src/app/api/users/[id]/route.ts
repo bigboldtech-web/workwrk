@@ -71,7 +71,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
-import { endConnectionsFor } from "@/lib/connectors/connections";
+import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
@@ -570,10 +570,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const user = outcome.user;
   if (!user) return err(404, "User not found");
   // A deactivated person's Google stops serving their AI teammates here, and
-  // Google is told (docs/plans/ai-teammates-phase3.md Decision 20). After the
-  // commit, never failing the edit: the cron sweep ends any this misses.
+  // Google is told (docs/plans/ai-teammates-phase3.md Decision 20), and their
+  // teammates' browsers close (docs/plans/ai-teammates-phase4.md Decision 27).
+  // After the commit, never failing the edit: the cron sweeps end any this misses.
   if (deactivating) {
-    await endConnectionsFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
+    await endTeammateAccessFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
       console.error(`[connectors] deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
   } else if (roleChange?.changed && roleChange.after.level === "AGENT") {
@@ -583,7 +584,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Member, so no Guest is made here; a Guest written elsewhere (the Guest
     // invitation's orgRole) is ended by the cron sweep (connections.ts
     // sweepConnections, no_access).
-    await endConnectionsFor(ctx.organizationId, [id], "no_access", ctx.userId).catch((e) => {
+    await endTeammateAccessFor(ctx.organizationId, [id], "no_access", ctx.userId).catch((e) => {
       console.error(`[connectors] role change hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
   }
@@ -725,8 +726,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (removed === "already") return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
   if (removed) return removed;
   // A removed person's Google stops serving their AI teammates, and Google is
-  // told (Decision 20); the cron sweep ends any this misses.
-  await endConnectionsFor(ctx.organizationId, [id], "left", ctx.userId).catch((e) => {
+  // told (Decision 20), and their teammates' browsers close (Phase 4 Decision
+  // 27); the cron sweeps end any this misses.
+  await endTeammateAccessFor(ctx.organizationId, [id], "left", ctx.userId).catch((e) => {
     console.error(`[connectors] removal hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
   });
   void logActivity({

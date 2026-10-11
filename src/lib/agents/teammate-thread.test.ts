@@ -164,6 +164,15 @@ describe("messageViewFromRow", () => {
     expect(answer({ origin: "delegated" })).not.toHaveProperty("origin");
     expect(answer({ origin: { kind: "delegated", byName: "x".repeat(201) } })).not.toHaveProperty("origin");
   });
+  // Phase 4 step 2: a browser opened and closed are lines of their own, naming their browser by a ref.
+  it("reads a browser line's event and its browser, a ref of at most 200 characters", () => {
+    const line = (meta: Record<string, unknown>) => messageViewFromRow(row({ role: "SYSTEM", kind: "EVENT", content: "Opened a browser for you.", meta }));
+    expect(line({ event: "browser_started", agentId: "a1", browserSessionId: "bs1" })).toMatchObject({ kind: "event", event: "browser_started", agentId: "a1", browserSessionId: "bs1" });
+    expect(line({ event: "browser_ended", browserSessionId: "bs1" })).toMatchObject({ event: "browser_ended", browserSessionId: "bs1" });
+    expect(line({ event: "browser_started", browserSessionId: "x".repeat(201) })).not.toHaveProperty("browserSessionId");
+    expect(line({ event: "browser_started", browserSessionId: 7 })).not.toHaveProperty("browserSessionId");
+  });
+
   it("reads an event line's teammate, message and link, and builds the link's address itself (Phase 2)", () => {
     const line = (meta: Record<string, unknown>) => messageViewFromRow(row({ role: "SYSTEM", kind: "EVENT", content: "Asked by Chief of Staff: which tasks are stuck", meta }));
     expect(line({ event: "delegate_waiting", agentId: "a1", replyTo: "u1", link: { kind: "chat", slug: "t-pm-abc", actionId: "x1" } })).toMatchObject({

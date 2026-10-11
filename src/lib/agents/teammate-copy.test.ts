@@ -276,6 +276,14 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     // Review of Phase 4 step 1: links left out for what their address carries, and lists whose options were left out.
     linksLeftOut: [[3], "3 links whose addresses carry a code, a token or a key aren't listed."],
     optionsLeftOut: [[2], "The options of 2 lists aren't shown."],
+    // Step 2: the guard's notes, a session's cancelled cards and a take over's outcome.
+    redirectRefused: [["blocked.proof.test"], "That page sent the browser on to blocked.proof.test, which isn't allowed, so it stopped there."],
+    popupClosed: [["exfil.proof.test"], "The page tried to open a new tab on exfil.proof.test. It was closed; open it here if it's a link you read."],
+    // Review of Phase 4 step 2: the page a browser was on, left when its site was taken away.
+    siteNoLongerAllowed: [["shop.proof.test"], "shop.proof.test isn't allowed any more, so the browser left that page."],
+    cancelledClosed: [["Closed after 5 idle minutes."], "Cancelled: the browser closed before you decided, so nothing was done. Closed after 5 idle minutes."],
+    takeOverDoneNote: [["Max"], "Max finished the step in the browser. Nothing they typed or saw is shared with you. Read the page again before you carry on."],
+    takeOverStoppedNote: [["Max"], "Max gave the browser back without finishing. Ask them what to do next."],
   };
   const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -291,6 +299,79 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
   it("says one link and one list in the singular", () => {
     expect(copy.BROWSER_COPY.linksLeftOut(1)).toBe("1 link whose address carries a code, a token or a key isn't listed.");
     expect(copy.BROWSER_COPY.optionsLeftOut(1)).toBe("The options of 1 list aren't shown.");
+  });
+});
+
+// Phase 4 step 2: the settings, the teammate's sites, the routes' refusals, the card's words and the audit lines.
+describe("the computer's step 2 copy (Phase 4)", () => {
+  const GROUPS: Record<string, [Record<string, unknown>, Record<string, [unknown[], string]>]> = {
+    BROWSER_POLICY_COPY: [
+      copy.BROWSER_POLICY_COPY as unknown as Record<string, unknown>,
+      {
+        regionLine: [["eu-central-1"], "Browsers run in eu-central-1."],
+        remove: [["example.com"], "Remove example.com"],
+        tooMany: [[200], "A list can hold at most 200 sites."],
+        minutes: [[120, 1000], "120 of 1000 browser minutes used."],
+        atOnce: [[1, 2], "1 of 2 running now."],
+        today: [[7, 100], "7 of 100 sessions today."],
+        cost: [["$2.40"], "About $2.40 of browser time this month."],
+        stoppedAll: [[1], "Stopped 1 browser."],
+        auditChanged: [[false], "Turned off the computer for AI teammates"],
+        auditSite: [["block", "evil.example.com", true], "Added evil.example.com to the blocked sites"],
+        auditStoppedAll: [[3], "Stopped every teammate browser in the workspace: 3 browsers"],
+      },
+    ],
+    BROWSER_SITES_COPY: [
+      copy.BROWSER_SITES_COPY as unknown as Record<string, unknown>,
+      {
+        notInWorkspace: [["shop.example.com"], "shop.example.com isn't allowed in the workspace any more."],
+        blocked: [["shop.example.com"], "shop.example.com is blocked in the workspace."],
+        auditChanged: [["Shopper", "docs.example.com", false], "Stopped Shopper opening docs.example.com"],
+      },
+    ],
+    BROWSER_ROUTE_ERRORS: [
+      copy.BROWSER_ROUTE_ERRORS as unknown as Record<string, unknown>,
+      {
+        notInWorkspaceList: [["x.example.com"], "x.example.com isn't one of the sites the workspace allows."],
+        blocked: [["x.example.com"], "x.example.com is blocked in this workspace."],
+        rateLimited: [[1], "Too many tries. Try again in 1 second."],
+      },
+    ],
+    BROWSER_PANEL_COPY: [
+      copy.BROWSER_PANEL_COPY as unknown as Record<string, unknown>,
+      {
+        endsAt: [["10:42"], "Closes by 10:42"],
+        minutesUsed: [[1], "1 minute"],
+      },
+    ],
+    BROWSER_AUDIT_COPY: [
+      copy.BROWSER_AUDIT_COPY as unknown as Record<string, unknown>,
+      {
+        sessionEnded: [[4], "Closed a browser after 4 minutes"],
+        takeOverStarted: [["login.proof.test"], "Took over the browser on login.proof.test"],
+        takeOverEnded: [[true], "Finished in the browser and gave it back"],
+      },
+    ],
+  };
+  for (const [group, [g, said]] of Object.entries(GROUPS)) {
+    it(`${group} lists every builder`, () => {
+      expect(Object.keys(g).filter((k) => typeof g[k] === "function").sort()).toEqual(Object.keys(said).sort());
+    });
+    for (const [name, [args, sentence]] of Object.entries(said)) {
+      it(`${group}.${name} says what the spec says`, () => {
+        const made = (g[name] as (...a: unknown[]) => string)(...args);
+        expect(made).toBe(sentence);
+        expect(BANNED.test(made)).toBe(false);
+      });
+    }
+  }
+  it("names every site problem and every end reason, and every step kind's words hold the rule", () => {
+    expect(Object.keys(copy.BROWSER_POLICY_COPY.SITE_PROBLEM_WORDS).sort()).toEqual(["app", "credentials", "internal", "invalid", "ip", "port", "too_long", "wildcard"]);
+    const words = copy.BROWSER_PANEL_COPY.STEP_WORDS as Record<string, unknown>;
+    for (const [k, w] of Object.entries(words)) {
+      const made = typeof w === "function" ? (w as (s: string) => string)("docs.proof.test") : String(w);
+      expect(BANNED.test(made), k).toBe(false);
+    }
   });
 });
 

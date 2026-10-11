@@ -9,7 +9,10 @@
 // erasure-sweep.test.ts); and their Google connections end before it, so no
 // teammate reads their mail into a chat just blanked. Review round 6 of
 // Phase 3: the transaction writes the person's AccountErasure row, the
-// erasure's progress, and the pass after the commit goes on from it.
+// erasure's progress, and the pass after the commit goes on from it. AI
+// teammates Phase 4 (Decision 27): their teammates' browsers close before
+// the transaction too (leaver-hooks.ts endAllTeammateAccessOf), and nothing
+// of their browser steps is touched inside it (the erasure sweep's part).
 
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +27,9 @@ const st = vi.hoisted(() => ({
   soleInTx: [] as string[],
   ended: [] as Array<{ userId: string; reason: string; at: number }>,
   endThrows: false,
+  /** Phase 4: their browsers ended, and when, and whether that throws. */
+  browsersEnded: [] as Array<{ userId: string; actorId: string | null; at: number }>,
+  browserEndThrows: false,
   /** Review round 5 of Phase 3: the batched blanking after the commit (round 6: continueErasure), and what it answers. */
   blanks: [] as Array<{ userId: string; deadline: number; at: number; inTx: boolean }>,
   blankAnswer: { found: true, end: "settling", rows: 3 } as { found: boolean; end: string | null; rows: number } | Error,
@@ -51,6 +57,13 @@ vi.mock("@/lib/connectors/connections", () => ({
   endAllConnectionsOf: async (userId: string, reason: string) => {
     st.ended.push({ userId, reason, at: st.calls.length });
     if (st.endThrows) throw new Error("connection reset");
+    return 1;
+  },
+}));
+vi.mock("@/lib/browser/sessions", () => ({
+  endAllBrowserSessionsOf: async (userId: string, actorId: string | null) => {
+    st.browsersEnded.push({ userId, actorId, at: st.calls.length });
+    if (st.browserEndThrows) throw new Error("provider down");
     return 1;
   },
 }));
@@ -122,6 +135,8 @@ beforeEach(() => {
   st.soleInTx = [];
   st.ended = [];
   st.endThrows = false;
+  st.browsersEnded = [];
+  st.browserEndThrows = false;
   st.blanks = [];
   st.blankAnswer = { found: true, end: "settling", rows: 3 };
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -162,12 +177,37 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect(st.blanks).toHaveLength(1);
   });
 
+  // Phase 4 (Decision 27): a browser signed in to their accounts never outlives the erasure.
+  it("closes the person's teammate browsers before the transaction, even when Google's half fails, and a close that fails never stops the erasure", async () => {
+    await del();
+    expect(st.browsersEnded).toEqual([{ userId: "u-max", actorId: "u-max", at: expect.any(Number) }]);
+    const firstTx = st.calls.findIndex((c) => c.inTx);
+    expect(st.browsersEnded[0].at).toBeLessThanOrEqual(firstTx);
+    // Nothing of the browser tables is read or written inside the short transaction.
+    expect(txCalls().filter((c) => /teammateBrowser/i.test(c.model))).toEqual([]);
+
+    st.calls = [];
+    st.browsersEnded = [];
+    st.blanks = [];
+    st.endThrows = true;
+    expect((await del()).status).toBe(200);
+    expect(st.browsersEnded).toHaveLength(1);
+
+    st.calls = [];
+    st.blanks = [];
+    st.endThrows = false;
+    st.browserEndThrows = true;
+    expect((await del()).status).toBe(200);
+    expect(st.blanks).toHaveLength(1);
+  });
+
   it("blanks nothing when the request is refused", async () => {
     expect((await del({ confirm: "nope" })).status).toBe(400);
     st.sole = ["org1"];
     expect((await del()).status).toBe(409);
     expect(st.calls.filter((c) => c.op === "updateMany")).toEqual([]);
     expect(st.ended).toEqual([]);
+    expect(st.browsersEnded).toEqual([]);
     expect(st.blanks).toEqual([]);
   });
 });

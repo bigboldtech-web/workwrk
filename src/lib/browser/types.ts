@@ -156,10 +156,14 @@ export interface RawSnapshot {
   links: RawLink[];
 }
 
-/** A navigation's outcome: the page it reached, or why it stopped where it was. */
+/**
+ * A navigation's outcome: the page it reached, or why it stopped where it
+ * was. `unreachable` (step 2, toward Decision 33): the site did not answer
+ * or its name did not resolve, its own reason rather than "too slow".
+ */
 export type NavOutcome =
   | { ok: true; url: string; site: string }
-  | { ok: false; code: "blocked_hop" | "not_html" | "timeout" | "lost" | "private_address"; host?: string };
+  | { ok: false; code: "blocked_hop" | "not_html" | "timeout" | "lost" | "private_address" | "unreachable"; host?: string };
 
 /**
  * An act's outcome. `lost_before`: nothing was sent, so the card may wait to
@@ -171,10 +175,10 @@ export type ActOutcome =
   | { ok: false; code: "not_found" | "changed" | "covered" | "frame" | "disabled" | "sensitive" | "lost_before" | "unknown_outcome" | "blocked_hop"; host?: string };
 
 /**
- * One browser, as the driver hands it out (step 2, cdp-driver.ts
- * attachBrowser): driven only through the guard it was attached with
- * (Decision 7). Typed here so every part reads one shape; nothing in step 1
- * makes one.
+ * One browser, as the driver hands it out (cdp-driver.ts attachBrowser):
+ * driven only through the guard it was attached with (Decision 7). A call
+ * made after the connection was lost throws BrowserLost (cdp-driver.ts);
+ * the acts answer lost_before or unknown_outcome instead.
  */
 export interface BrowserHandle {
   navigate(url: string): Promise<NavOutcome>;
@@ -186,5 +190,12 @@ export interface BrowserHandle {
   type(target: ElementFingerprint, text: string, pressEnter: boolean): Promise<ActOutcome>;
   select(target: ElementFingerprint, option: string): Promise<ActOutcome>;
   currentUrl(): string;
+  /**
+   * Leave the page for about:blank, nothing of it read, found or pictured
+   * meanwhile (review of Phase 4 step 2: a site the rules no longer allow,
+   * sessions.ts refreshLiveRules). Never asks the verdict: about:blank is no
+   * site.
+   */
+  blank(): Promise<void>;
   close(): Promise<void>;
 }

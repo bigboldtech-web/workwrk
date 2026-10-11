@@ -95,6 +95,13 @@ const nextConfig: NextConfig = {
     turbopackFileSystemCacheForDev: process.env.WORKWRK_DEV_FS_CACHE !== "0",
   },
 
+  // THE COMPUTER FOR AI TEAMMATES SPEAKS TO ITS BROWSER OVER `ws`
+  // (docs/plans/ai-teammates-phase4.md Decision 35; src/lib/browser/cdp.ts).
+  // Production runs Node 20, which has no global WebSocket. `ws` is loaded
+  // from node_modules with Node's own require, never bundled: bundled, it
+  // loses its optional native helpers, which it requires by name.
+  serverExternalPackages: ["ws"],
+
   // Security headers on every response (both hosts). Production sent none: any
   // page could be framed by another site (clickjacking), browsers could sniff
   // a file's type, the full URL went out as the referrer, and nothing pinned

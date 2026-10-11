@@ -103,6 +103,44 @@ function decryptWithKey(blob: unknown, key: Buffer): string {
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
 }
 
+/**
+ * Bytes sealed with the same key and cipher, for files outside the database
+ * (the computer for AI teammates' pictures of pages,
+ * docs/plans/ai-teammates-phase4.md Decision 23; src/lib/browser/shots.ts):
+ * "wks1", then the 12 byte IV, the 16 byte tag and the ciphertext. Opened
+ * with the configured key or, while a key is rotated, the previous one, as
+ * decryptSecret is.
+ */
+const BYTES_MAGIC = Buffer.from("wks1", "ascii");
+
+export function encryptBytes(plain: Uint8Array): Buffer {
+  if (!plain || plain.length === 0) throw new Error("Cannot encrypt nothing");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", masterKey(), iv);
+  const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([BYTES_MAGIC, iv, cipher.getAuthTag(), ct]);
+}
+
+function decryptBytesWithKey(sealed: Uint8Array, key: Buffer): Buffer {
+  const b = Buffer.from(sealed);
+  if (b.length < 4 + 12 + 16 + 1 || !b.subarray(0, 4).equals(BYTES_MAGIC)) throw new Error("Invalid sealed bytes");
+  const iv = b.subarray(4, 16);
+  const tag = b.subarray(16, 32);
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(b.subarray(32)), decipher.final()]);
+}
+
+export function decryptBytes(sealed: Uint8Array): Buffer {
+  try {
+    return decryptBytesWithKey(sealed, masterKey());
+  } catch (err) {
+    const previous = process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
+    if (!previous) throw err;
+    return decryptBytesWithKey(sealed, keyFrom(previous));
+  }
+}
+
 /** Last 4 chars of a key, used as a non-secret hint in the UI. */
 export function keyHint(plaintext: string): string {
   if (plaintext.length <= 4) return "…" + plaintext;

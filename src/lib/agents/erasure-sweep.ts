@@ -91,20 +91,32 @@
 //     rows and writes only those still holding words; the questions of their
 //     teammates' turns are blanked with each batch of runs first, by id;
 //   - what their teammates remember about them, and their routines' words,
-//     which a tool may have saved in the instant before the commit.
+//     which a tool may have saved in the instant before the commit;
+//   - their teammates' browser steps (kinds and hosts) and pictures of
+//     pages, deleted, and the host a session of theirs was on, blanked
+//     (docs/plans/ai-teammates-phase4.md; part "browser", after the requests:
+//     a picture can show a page as sensitive as an email). Read through
+//     their sessions, by ("userId", "startedAt"), BROWSER_SESSION_BATCH at a
+//     time, each batch's steps and pictures one statement each; never in the
+//     erasure's own transaction, since a person's steps are not bounded
+//     small. The session rows stay, as the AIQuery rows do: their minutes
+//     are the workspace's month count. Their browsers were closed before the
+//     erasure began (leaver-hooks.ts endAllTeammateAccessOf), and no step of
+//     a deleted person is written after it (browser/sessions.ts recordStep).
 // Each batch reads the next ERASURE_BATCH rows in its index's order from
 // where the last stopped, whether or not they still hold words, and writes
 // only those that do (review round 6 of Phase 3: a read for rows holding
 // words walked every blank row before the next one, so a pass over a long
 // history already blanked was one unbounded statement). Every part is the
 // same update the erasure made before, split; no row is deleted but the
-// memories, as before.
+// memories, as before, and (Phase 4) the browser steps and pictures.
 //
 // Server-only: imports prisma.
 
 import { Prisma } from "@/generated/prisma";
 import { ERASURE_METHOD, erasedStateSql } from "@/lib/compliance/erased-account";
 import { prisma } from "@/lib/prisma";
+import { deleteShotsOfSessions } from "@/lib/browser/shots";
 import { RUN_STALE_MS } from "./budget";
 
 export { ERASURE_METHOD };
@@ -153,8 +165,21 @@ export const ERASURE_PAGES_PER_TICK = 4;
  */
 export const ERASURE_BRIDGE_PER_TICK = 25;
 
-/** The parts of one pass, in order (the CHECK on "AccountErasure"."part"). The most sensitive first: chats and requests hold whole email bodies. */
-export const ERASURE_PARTS = ["chats", "requests", "runs", "questions", "activity", "memories", "routines"] as const;
+/**
+ * The parts of one pass, in order (the CHECK on "AccountErasure"."part",
+ * prisma/sql/2026-10-11-ai-teammates-phase4-erasure.sql). The most sensitive
+ * first: chats and requests hold whole email bodies, and pictures of pages
+ * (Phase 4, "browser") can show as much.
+ */
+export const ERASURE_PARTS = ["chats", "requests", "browser", "runs", "questions", "activity", "memories", "routines"] as const;
+
+/**
+ * A person's browser sessions one statement reads at a time (Phase 4): each
+ * holds at most 301 steps (browser/classes.ts SESSION_CAPS.stepsPerSession
+ * and its end step) and 20 pictures, so a batch's steps are at most about
+ * 3,000 rows in one delete.
+ */
+export const BROWSER_SESSION_BATCH = 10;
 export type ErasurePart = (typeof ERASURE_PARTS)[number];
 
 /**
@@ -162,7 +187,8 @@ export type ErasurePart = (typeof ERASURE_PARTS)[number];
  *   chats: { after } every chat of theirs up to that id is done, or
  *          { chat, at?, id? } that chat is under way, its messages done
  *          through (at, id);
- *   requests: { at, id }; runs: { id }; the rest are one statement each.
+ *   requests: { at, id }; browser: { at, id } (a session's startedAt and
+ *   id); runs: { id }; the rest are one statement each.
  */
 export type ErasureCursor = Record<string, string> | null;
 
@@ -318,6 +344,38 @@ async function blankRuns(userId: string, p: Progress, deadline: number): Promise
   }
 }
 
+/** Sessions after this one in (startedAt, id) order, for the index on ("userId", "startedAt"). */
+function afterStarted(c: { createdAt: Date; id: string }) {
+  return { startedAt: { gte: c.createdAt }, OR: [{ startedAt: { gt: c.createdAt } }, { id: { gt: c.id } }] };
+}
+
+/**
+ * Their teammates' browser steps and pictures of pages, deleted, and the
+ * host their sessions were on, blanked, in every workspace, a batch of
+ * sessions at a time (see the header).
+ */
+async function blankBrowser(userId: string, p: Progress, deadline: number): Promise<boolean> {
+  for (;;) {
+    if (Date.now() >= deadline) return false;
+    const place = keyOf(p.cursor);
+    const batch: Array<{ id: string; startedAt: Date }> = await prisma.teammateBrowserSession.findMany({
+      where: { userId, ...(place ? { AND: [afterStarted(place)] } : {}) },
+      orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+      take: BROWSER_SESSION_BATCH,
+      select: { id: true, startedAt: true },
+    });
+    if (batch.length > 0) {
+      const ids = batch.map((s) => s.id);
+      p.rows += (await prisma.teammateBrowserStep.deleteMany({ where: { browserSessionId: { in: ids } } })).count;
+      p.rows += await deleteShotsOfSessions(ids);
+      p.rows += (await prisma.teammateBrowserSession.updateMany({ where: { id: { in: ids }, currentSite: { not: null } }, data: { currentSite: null } })).count;
+      const last = batch[batch.length - 1];
+      p.cursor = { at: last.startedAt.toISOString(), id: last.id };
+    }
+    if (batch.length < BROWSER_SESSION_BATCH) return true;
+  }
+}
+
 /** A part that is one statement (see the header). */
 function once(step: (userId: string) => Promise<{ count: number }>) {
   return async (userId: string, p: Progress, deadline: number): Promise<boolean> => {
@@ -330,6 +388,7 @@ function once(step: (userId: string) => Promise<{ count: number }>) {
 const PART_RUNNERS: Record<ErasurePart, (userId: string, p: Progress, deadline: number) => Promise<boolean>> = {
   chats: blankChats,
   requests: blankRequests,
+  browser: blankBrowser,
   runs: blankRuns,
   questions: once((userId) => prisma.aIQuery.updateMany({ where: { userId, ...QUESTION_WORDS }, data: { query: ERASED, response: null } })),
   activity: once((userId) =>
@@ -661,7 +720,7 @@ function errorLine(err: unknown): string {
 }
 
 /**
- * Each tick (src/app/api/cron/run-due-agents step 5, see the header): the
+ * Each tick (src/app/api/cron/run-due-agents step 6, see the header): the
  * bridge for the erasures made before round 6; then pages of at most
  * `limit` unfinished erasures of accounts in the erased state (review round
  * 9 of Phase 3: before, of any deleted account), least recently tried

@@ -33,7 +33,7 @@ vi.mock("@/lib/connectors/google/config", () => ({
   googleRedirectUri: () => "https://app.test/api/teammate-connections/google/callback",
 }));
 
-import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount } from "./actions";
+import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount, writeEventLine } from "./actions";
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { AGENT_SLUG, PERSON, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
@@ -773,5 +773,14 @@ describe("a Google card meets the person's Google as it is now (Phase 3 step 3)"
     // Before: one read for the whole request, and the second email went too.
     expect(fx.handlerCalls).toHaveLength(1);
     expect(fx.actions.find((r) => r.id === second.id)?.status).toBe("PENDING");
+  });
+});
+
+// Phase 4 step 2: a browser's lines name their browser in meta, as a ref, for its card (step 4).
+describe("writeEventLine carries a browser line's browser", () => {
+  it("writes browserSessionId into the line's meta, and nothing for a line without one", async () => {
+    await writeEventLine("s1", { text: "Opened a browser for you.", event: "browser_started", agentId: "a1", browserSessionId: "bs1" });
+    await writeEventLine("s1", { text: "Closed.", event: "browser_ended", browserSessionId: null });
+    expect(fx.messages.map((m) => m.meta)).toEqual([{ event: "browser_started", agentId: "a1", browserSessionId: "bs1" }, { event: "browser_ended" }]);
   });
 });

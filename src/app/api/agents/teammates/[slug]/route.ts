@@ -9,6 +9,11 @@
 //        chats, memories and activity are kept), what it asked that still
 //        waits is cancelled, and every routine with it pauses (agent_removed).
 //
+// A teammate paused, removed, or whose browser tools are all taken away
+// closes its browsers at once, after the write (docs/plans/ai-teammates-phase4.md
+// Decision 6, browser/sessions.ts endTeammateBrowserSessions), never failing
+// the route; the cron sweep ends any this misses.
+//
 // docs/plans/ai-teammates.md 4. Another person's private teammate is the same
 // 404 as a missing one on every method. Every refusal is { error, code }.
 
@@ -18,6 +23,8 @@ import type { Prisma } from "@/generated/prisma";
 import { requireApp } from "@/lib/app-gate";
 import { prisma } from "@/lib/prisma";
 import { cancelPendingActionsOf } from "@/lib/agents/actions";
+import { holdsBrowserTool } from "@/lib/agents/browser-access";
+import { endTeammateBrowserSessions } from "@/lib/browser/sessions";
 import { auditAgent, type AgentAuditAction } from "@/lib/agents/audit";
 import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { isTeammateHue } from "@/lib/agents/hues";
@@ -237,6 +244,8 @@ export async function PATCH(req: Request, { params }: Params) {
   };
 
   let updated: TeammateRecord = agent;
+  // Its stored browser tools all taken away by this write (Phase 4): its browsers close.
+  let browserToolsDropped = false;
   if (toolsEdit && modules) {
     // ONE WRITE, UNDER A LOCK ON THE ROW (review of step 5). The stored tools
     // are read FOR UPDATE inside the transaction that writes them, so a second
@@ -255,6 +264,7 @@ export async function PATCH(req: Request, { params }: Params) {
       if (!sameList(next, stored.toolNames)) {
         data.toolNames = next;
         edited.push("tools");
+        browserToolsDropped = holdsBrowserTool(stored.toolNames) && !holdsBrowserTool(next);
         // An agent made before teammates has its tools chosen here for the
         // first time: it is a teammate from now on, which the old loop never
         // runs (legacy-agents.ts), so its Workspace agents schedule stops here,
@@ -282,6 +292,7 @@ export async function PATCH(req: Request, { params }: Params) {
   if (edited.length > 0) audits.push({ action: "edited", metadata: { fields: edited } });
   if (rulesChanged) audits.push({ action: "approvals_changed", metadata: { scope: "agent" } });
   for (const a of audits) await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent: updated, ...a });
+  if ((statusChanged && status === "DISABLED") || browserToolsDropped) await closeBrowsers(agent.id);
 
   return NextResponse.json({ teammate: await teammateDetail(updated, viewer), canManage: true, ...(scheduleStopped ? { scheduleStopped: true } : {}) });
 }
@@ -307,5 +318,13 @@ export async function DELETE(_req: Request, { params }: Params) {
   });
   for (const r of routines) await pauseRoutine(r, "agent_removed");
   await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent, action: "removed" });
+  await closeBrowsers(agent.id);
   return NextResponse.json({ ok: true });
+}
+
+/** Its browsers close (see the file header); a failure is logged and the sweep ends them. */
+async function closeBrowsers(agentId: string): Promise<void> {
+  await endTeammateBrowserSessions(agentId).catch((e) => {
+    console.error(`[browser] teammate hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
 }

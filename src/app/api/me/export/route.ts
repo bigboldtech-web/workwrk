@@ -57,6 +57,21 @@ const TEAMMATE_EXPORT_PAGE = 100;
 const ACTIVITY_EXPORT_MAX = 10_000;
 const NOTIFICATIONS_EXPORT_MAX = 10_000;
 
+/**
+ * The most browser steps (AI teammates Phase 4: what a teammate did in a
+ * browser for the person, as kinds and sites only) the export carries,
+ * newest kept, within what is left of TEAMMATE_EXPORT_BYTE_BUDGET, with how
+ * many it left out. Steps are kept 30 days, so they are read through the
+ * person's sessions of the last 31 days (by "userId", "startedAt"),
+ * BROWSER_SESSIONS_PER_READ sessions at a time.
+ */
+const BROWSER_STEPS_EXPORT_MAX = 20_000;
+const BROWSER_SESSIONS_PER_READ = 20;
+const BROWSER_STEPS_DAYS = 31;
+
+/** What the export says beside the browser steps (Phase 4). */
+const BROWSER_STEPS_NOTE = "Each step an AI teammate took in a web browser for you: its kind, the site and when. Steps are kept 30 days. What the pages showed and what was typed in them are never kept.";
+
 /** The top-level reads run this many at a time, never all at once (review round 5 of Phase 3). */
 const EXPORT_READS_AT_ONCE = 5;
 
@@ -116,6 +131,13 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * read a page at a time; activity rows and notifications keep the newest
  * ACTIVITY_EXPORT_MAX and NOTIFICATIONS_EXPORT_MAX; and the reads run
  * EXPORT_READS_AT_ONCE at a time.
+ *
+ * AI TEAMMATES' BROWSER STEPS (Phase 4): what a teammate did in a browser for
+ * the person, as kinds and sites only (never a page's text or an address
+ * path, which are never kept), the newest BROWSER_STEPS_EXPORT_MAX within
+ * what is left of the byte budget after the chats, with how many were left
+ * out. Pictures of pages are not in it: they are kept 24 hours, for the
+ * person to see in their chat.
  */
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -311,6 +333,32 @@ export async function GET() {
       chats.push({ ...chat, lastActiveAt: updatedAt, messages: newest.reverse(), messagesLeftOut: Math.max(0, total - newest.length) });
     }
 
+    // Then the browser steps (Phase 4): newest first, through the person's
+    // sessions of the last BROWSER_STEPS_DAYS days, kinds and sites only.
+    const since = new Date(Date.now() - BROWSER_STEPS_DAYS * 24 * 60 * 60 * 1000);
+    const browserSessions: Array<{ id: string; organizationId: string }> = await prisma.teammateBrowserSession.findMany({
+      where: { userId, startedAt: { gte: since } },
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+      select: { id: true, organizationId: true },
+    });
+    const orgOfSession = new Map(browserSessions.map((b) => [b.id, b.organizationId]));
+    const browserStepsTotal = browserSessions.length > 0 ? await prisma.teammateBrowserStep.count({ where: { browserSessionId: { in: browserSessions.map((b) => b.id) } } }) : 0;
+    const browserStepsNewest = [];
+    for (let i = 0; i < browserSessions.length && browserStepsNewest.length < BROWSER_STEPS_EXPORT_MAX && !bytesOut; i += BROWSER_SESSIONS_PER_READ) {
+      const ids = browserSessions.slice(i, i + BROWSER_SESSIONS_PER_READ).map((b) => b.id);
+      const page: Array<{ browserSessionId: string; kind: string; site: string | null; outcome: string; at: Date }> = await prisma.teammateBrowserStep.findMany({
+        where: { browserSessionId: { in: ids } },
+        orderBy: [{ at: "desc" }, { id: "desc" }],
+        take: BROWSER_STEPS_EXPORT_MAX - browserStepsNewest.length,
+        select: { browserSessionId: true, kind: true, site: true, outcome: true, at: true },
+      });
+      for (const st of page) {
+        const row = { at: st.at, organizationId: orgOfSession.get(st.browserSessionId) ?? null, kind: st.kind, site: st.site, outcome: st.outcome };
+        if (!take(row)) break;
+        browserStepsNewest.push(row);
+      }
+    }
+
     const payload = {
       exportedAt: new Date().toISOString(),
       legalBasis: "GDPR Art. 15 / CCPA Right to Know",
@@ -357,6 +405,10 @@ export async function GET() {
         // The most recently active first (they took the budget first).
         teammateChats: chats,
         teammateChatsNote: TOOL_CALLS_NOTE,
+        // Oldest first, the newest BROWSER_STEPS_EXPORT_MAX within the byte budget (Phase 4).
+        teammateBrowserSteps: browserStepsNewest.reverse(),
+        teammateBrowserStepsLeftOut: Math.max(0, browserStepsTotal - browserStepsNewest.length),
+        teammateBrowserStepsNote: BROWSER_STEPS_NOTE,
         teammateMemories: teammateMemories.map((m) => ({
           teammate: m.agent?.name ?? null,
           organizationId: m.agent?.organizationId ?? null,

@@ -4,7 +4,9 @@
 // workspace, after the write commits, and a failure there never fails the
 // edit (the cron sweep ends what it misses). Before step 2 nothing ended it:
 // a deactivated person's tokens stayed until the person came back to remove
-// them, which they no longer could.
+// them, which they no longer could. AI teammates Phase 4 (Decision 27): the
+// same hook closes their teammates' browsers too (leaver-hooks.ts
+// endTeammateAccessFor, its two halves mocked here as the modules they are).
 
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { NextRequest } from "next/server";
@@ -12,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const st = vi.hoisted(() => ({
   endConnectionsFor: vi.fn(async () => 1),
+  endBrowserSessionsFor: vi.fn(async () => 1),
   updates: [] as Array<Record<string, unknown>>,
   /** The target's row, as findFirst answers it. */
   target: {} as Record<string, unknown>,
@@ -50,6 +53,7 @@ vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: "u-ad
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/activity", () => ({ logActivity: async () => undefined }));
 vi.mock("@/lib/connectors/connections", () => ({ endConnectionsFor: st.endConnectionsFor }));
+vi.mock("@/lib/browser/sessions", () => ({ endBrowserSessionsFor: st.endBrowserSessionsFor }));
 vi.mock("@/lib/access/flags", () => ({ accessV2Resolver: () => false }));
 vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => ({ ok: true, admin: true, owner: false }) }));
 vi.mock("@/lib/access/membership", () => ({
@@ -104,6 +108,7 @@ function patch(body: unknown) {
 
 beforeEach(() => {
   st.endConnectionsFor.mockReset().mockResolvedValue(1);
+  st.endBrowserSessionsFor.mockReset().mockResolvedValue(1);
   st.updates = [];
   st.target = { ...TARGET };
   st.erasedAt = null;
@@ -118,16 +123,27 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     expect(st.updates[0]).toMatchObject({ status: "INACTIVE" });
     expect(st.endConnectionsFor).toHaveBeenCalledTimes(1);
     expect(st.endConnectionsFor).toHaveBeenCalledWith("org1", ["u-max"], "deactivated", "u-admin");
+    // Phase 4: endTeammateAccessFor closes their teammates' browsers here too.
+    expect(st.endBrowserSessionsFor).toHaveBeenCalledTimes(1);
+    expect(st.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["u-max"], "deactivated", "u-admin");
   });
 
   it("another status change ends nothing", async () => {
     const res = await patch({ status: "ON_LEAVE" });
     expect(res.status).toBe(200);
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
+    expect(st.endBrowserSessionsFor).not.toHaveBeenCalled();
   });
 
-  it("never fails the deactivation when ending the connection fails", async () => {
+  it("never fails the deactivation when ending the connection fails, and still closes the browsers", async () => {
     st.endConnectionsFor.mockRejectedValueOnce(new Error("database down"));
+    const res = await patch({ status: "INACTIVE" });
+    expect(res.status).toBe(200);
+    expect(st.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["u-max"], "deactivated", "u-admin");
+  });
+
+  it("never fails the deactivation when closing the browsers fails", async () => {
+    st.endBrowserSessionsFor.mockRejectedValueOnce(new Error("provider down"));
     const res = await patch({ status: "INACTIVE" });
     expect(res.status).toBe(200);
   });
@@ -136,6 +152,7 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     const res = await DELETE(new NextRequest("https://app.test/api/users/u-max", { method: "DELETE" }), params);
     expect(res.status).toBe(200);
     expect(st.endConnectionsFor).toHaveBeenCalledWith("org1", ["u-max"], "left", "u-admin");
+    expect(st.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["u-max"], "left", "u-admin");
   });
 
   // Review of step 2: an agent account can hold no connection (Decision 27).
@@ -152,6 +169,7 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     const res = await patch({ orgRole: "MEMBER", memberTier: "AGENT" });
     expect(res.status).toBe(200);
     expect(st.endConnectionsFor).toHaveBeenCalledWith("org1", ["u-max"], "no_access", "u-admin");
+    expect(st.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["u-max"], "no_access", "u-admin");
   });
 
   it("another role change ends nothing", async () => {

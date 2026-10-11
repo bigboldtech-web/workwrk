@@ -326,6 +326,13 @@ const SQL_MANIFEST = [
   // foreign keys and checks, so a deploy after the first takes no lock. New
   // and empty, so nothing waits on them.
   "2026-10-11-ai-teammates-phase4.sql",
+  // AI teammates, Phase 4 step 2: the CHECK on "AccountErasure"."part"
+  // replaced under its own name with the erasure's new part "browser" (the
+  // person's browser steps and pictures), guarded on its definition in
+  // pg_constraint, so a later deploy takes no lock and round 6's file never
+  // adds the old list back. Every row the old list allowed the new one does.
+  // Before the reload: the new build's erasure pass saves that part.
+  "2026-10-11-ai-teammates-phase4-erasure.sql",
 ];
 
 /**

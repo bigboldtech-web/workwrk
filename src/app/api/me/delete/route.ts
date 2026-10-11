@@ -8,7 +8,7 @@ import {
 } from "@/lib/api-helpers";
 import { getClientIp, getVisitorGeo, POLICY_VERSION } from "@/lib/compliance/server";
 import { soleAdminWorkspaces } from "@/lib/access/self-facts";
-import { endAllConnectionsOf } from "@/lib/connectors/connections";
+import { endAllTeammateAccessOf } from "@/lib/agents/leaver-hooks";
 import { OPEN_RUN_STATUSES } from "@/lib/agents/budget";
 import { ERASURE_INLINE_BUDGET_MS, ERASURE_METHOD, continueErasure, recordErasure } from "@/lib/agents/erasure-sweep";
 import { TURN_ERRORS } from "@/lib/agents/teammate-copy";
@@ -43,8 +43,12 @@ class LastAdminError extends Error {
  *    event's guests), and their runs' output (an answer's text and calls);
  *    the input of Ask AI's tool runs too. The rows stay, as the AIQuery rows
  *    do: their ids, status, times and token counts are the plan's and the
- *    audit's. Their Google connections end first (endAllConnectionsOf), so
- *    no teammate reads their Gmail or Google Calendar after the words go.
+ *    audit's. Their Google connections end first, and their teammates'
+ *    browsers close (leaver-hooks.ts endAllTeammateAccessOf; Phase 4), so no
+ *    teammate reads their Gmail or Google Calendar, or a page they are
+ *    signed in to, after the words go. Their browser steps (kinds and
+ *    hosts) and pictures of pages are deleted by the erasure's pass (part
+ *    "browser").
  *    Each request's error goes too, and an Ask AI tool run's (review round 4
  *    of Phase 3): a Google card's can name the person's two Google addresses
  *    (CONNECTOR_COPY.accountChanged), a tool's can quote its input.
@@ -143,8 +147,12 @@ export async function POST(req: NextRequest) {
   // teammate could still read their mail into a chat the erasure had just
   // blanked), never failing it: the cron sweep ends any missed. A refusal
   // under the lock below, a race no up-front check can rule out, leaves them
-  // disconnected, which connecting again undoes.
-  await endAllConnectionsOf(userId, "left", userId).catch((e) => {
+  // disconnected, which connecting again undoes. Their teammates' browsers
+  // close here too, in every workspace (docs/plans/ai-teammates-phase4.md
+  // Decision 27), so none is still signed in to their accounts after the
+  // erasure; their browser steps and pictures go with the erasure sweep
+  // (erasure-sweep.ts, part "browser"), never inside the short transaction.
+  await endAllTeammateAccessOf(userId, userId).catch((e) => {
     console.error(`[connectors] account deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
   });
 

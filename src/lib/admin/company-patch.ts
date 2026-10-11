@@ -28,7 +28,7 @@ import { seatsAreUnlimited } from "@/lib/admin/companies-list";
 import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial-end";
 import { MODULES } from "@/lib/modules";
 import { subscriptionStillOpen } from "@/services/billing";
-import { endSuspendedWorkspaceConnections, endWorkspaceConnections } from "@/lib/connectors/connections";
+import { endWorkspaceTeammateAccess } from "@/lib/agents/leaver-hooks";
 
 /** A company cancelled here is deleted this many days later, as an Owner's own delete is. */
 const STAFF_CANCEL_GRACE_DAYS = 30;
@@ -445,7 +445,8 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   // (docs/plans/ai-teammates-phase3.md Decision 20). Never failing the patch:
   // the cron sweep ends any this misses on its next tick (review of step 2).
   if (result.changed?.includes("status") && result.company?.status === "CANCELLED") {
-    await endWorkspaceConnections(id, "workspace_deleted", null).catch((e) => {
+    // Its teammates' browsers close at once too (docs/plans/ai-teammates-phase4.md Decision 27).
+    await endWorkspaceTeammateAccess(id, "workspace_deleted", null).catch((e) => {
       console.error(`[connectors] staff closure hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
   }
@@ -454,7 +455,7 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
   // each person told why (review round 1 of Phase 3). The sweep catches any
   // this misses.
   if (result.changed?.includes("status") && result.company?.status === "SUSPENDED") {
-    await endSuspendedWorkspaceConnections(id).catch((e) => {
+    await endWorkspaceTeammateAccess(id, "suspended", null).catch((e) => {
       console.error(`[connectors] staff suspension hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
   }

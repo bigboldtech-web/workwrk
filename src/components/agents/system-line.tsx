@@ -13,7 +13,7 @@
 //
 // A line whose event this code does not know still shows its words.
 
-import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Info, MessageSquare, PenLine, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
+import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Globe, Info, MessageSquare, PenLine, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { LINE_LINKS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import { eventLinkHref, type TeammateEventKind, type TeammateMessageView, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
@@ -37,6 +37,9 @@ const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   delegate_waiting: Clock,
   talk_asked: MessageSquare,
   automation_asked: Workflow,
+  // Phase 4: a browser opened and closed (step 4 draws the opened one as its card).
+  browser_started: Globe,
+  browser_ended: Globe,
 };
 
 const LINK = "whitespace-nowrap font-medium text-brand-deep hover:underline";

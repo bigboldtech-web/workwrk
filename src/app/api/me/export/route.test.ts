@@ -48,6 +48,15 @@ vi.mock("@/lib/prisma", () => {
         if (name === "chatMessage") return page(rows.filter((r) => r.sessionId === args.where?.sessionId).reverse(), args);
         // The requests, notifications and activity rows: newest first, at most `take` (review rounds 4 and 5 of Phase 3).
         if (["agentAction", "notification", "activityLog"].includes(name) && args.take !== undefined) return page([...rows].reverse(), args);
+        // Phase 4: the person's browser sessions, by their own id; their steps by session, newest first.
+        if (name === "teammateBrowserSession") return rows.filter((r) => r.userId === args.where?.userId);
+        if (name === "teammateBrowserStep") {
+          const ids = (args.where?.browserSessionId as { in: string[] }).in;
+          return rows
+            .filter((r) => ids.includes(String(r.browserSessionId)))
+            .sort((a, b) => (b.at as Date).getTime() - (a.at as Date).getTime())
+            .slice(0, args.take);
+        }
         return rows;
       }),
     findUnique: (args: Args) =>
@@ -61,6 +70,7 @@ vi.mock("@/lib/prisma", () => {
         const rows = (st.rows[name] ?? []) as Array<Record<string, unknown>>;
         // Only a chat's messages are counted by chat: every other row in the double is the person's.
         if (name === "chatMessage") return rows.filter((r) => r.sessionId === args.where?.sessionId).length;
+        if (name === "teammateBrowserStep") return rows.filter((r) => (args.where?.browserSessionId as { in: string[] }).in.includes(String(r.browserSessionId))).length;
         return rows.length;
       }),
   });
@@ -200,6 +210,43 @@ describe("GET /api/me/export: AI teammates' records (review round 3 of Phase 3)"
 // not, and every chat was read at once through Promise.all, so a heavy
 // user's export could fail or run the server out of memory; and every
 // request a teammate ever asked them to approve was read with no cap.
+// AI teammates Phase 4 (the reconciliation note): the person's browser steps,
+// as kinds and sites only, within the byte budget and with how many were left out.
+describe("GET /api/me/export: the person's browser steps (Phase 4)", () => {
+  it("carries their own steps, oldest first, as when, where, kind and outcome only, never anyone else's", async () => {
+    st.rows.teammateBrowserSession = [
+      { id: "bs-max", userId: "u-max", organizationId: "org1" },
+      { id: "bs-lea", userId: "u-lea", organizationId: "org1" },
+    ];
+    st.rows.teammateBrowserStep = [
+      { id: "s1", browserSessionId: "bs-max", kind: "open", site: "docs.proof.test", outcome: "ok", code: null, actionId: null, shotId: "sh1", at: new Date("2026-10-11T10:00:00Z") },
+      { id: "s2", browserSessionId: "bs-max", kind: "click", site: "shop.proof.test", outcome: "waiting", code: null, actionId: "a1", shotId: null, at: new Date("2026-10-11T10:01:00Z") },
+      { id: "s3", browserSessionId: "bs-lea", kind: "open", site: "lea.proof.test", outcome: "ok", code: null, actionId: null, shotId: null, at: new Date("2026-10-11T10:02:00Z") },
+    ];
+    const { records } = await exported();
+    expect(records.teammateBrowserSteps).toEqual([
+      { at: "2026-10-11T10:00:00.000Z", organizationId: "org1", kind: "open", site: "docs.proof.test", outcome: "ok" },
+      { at: "2026-10-11T10:01:00.000Z", organizationId: "org1", kind: "click", site: "shop.proof.test", outcome: "waiting" },
+    ]);
+    expect(records.teammateBrowserStepsLeftOut).toBe(0);
+    expect(records.teammateBrowserStepsNote).toMatch(/kind, the site and when/);
+    // Read through the person's own sessions of the last 31 days.
+    const sessions = callOf("teammateBrowserSession");
+    expect(sessions?.args.where).toMatchObject({ userId: "u-max", startedAt: { gte: expect.any(Date) } });
+  });
+
+  it("keeps the newest 20,000 and says how many it left out", async () => {
+    st.rows.teammateBrowserSession = [{ id: "bs-max", userId: "u-max", organizationId: "org1" }];
+    const base = Date.parse("2026-10-11T00:00:00Z");
+    st.rows.teammateBrowserStep = Array.from({ length: 20_005 }, (_, i) => ({ id: `s${i}`, browserSessionId: "bs-max", kind: "read", site: "docs.proof.test", outcome: "ok", at: new Date(base + i * 1000) }));
+    const { records } = await exported();
+    const steps = records.teammateBrowserSteps as Array<{ at: string }>;
+    expect(steps).toHaveLength(20_000);
+    expect(records.teammateBrowserStepsLeftOut).toBe(5);
+    expect(steps[0].at).toBe(new Date(base + 5 * 1000).toISOString());
+  });
+});
+
 describe("GET /api/me/export: bounded as a whole (review round 4 of Phase 3)", () => {
   const msg = (sessionId: string, i: number) => ({ id: `${sessionId}-m${i}`, sessionId, role: "USER", kind: null, content: "w", toolCalls: null, createdAt: "2026-10-08T09:00:00.000Z" });
   const chat = (id: string) => ({ id, organizationId: "org1", kind: "TEAMMATE", title: id, agentId: `a-${id}`, createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-09T09:00:00.000Z" });
