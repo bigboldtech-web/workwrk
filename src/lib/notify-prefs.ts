@@ -24,6 +24,9 @@ export type NotifyType =
   | "status_changes"
   | "followed_status"
   | "due_reminders"
+  // No sender yet, so no switch shows it (HELD_INBOX_KEYS in
+  // src/lib/account/notification-presets.ts names what turns it back on);
+  // the type stays for notifyItemsDueToday and for a choice already stored.
   | "overdue"
   | "kudos";
 

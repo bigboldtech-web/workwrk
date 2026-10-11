@@ -26,6 +26,7 @@ import { SettingsRow } from "@/components/settings/settings-row";
 import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/settings/settings-form";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 /** One field save that failed: what it sent and showed, so Retry resends exactly that. */
@@ -257,7 +258,7 @@ export function MemberDrawer({
         {m.role === "MEMBER" ? (
           <SettingsRow
             label="Tier"
-            helper="Decides which manager pages they open until the new access roles are on. Agent is for frontline staff."
+            helper={`Decides which manager pages they open until the new access roles are on. Agent: ${AGENT_TIER_BLURB}`}
             savedAt={saved.tier}
             error={errFor("tier")}
             readOnlyValue={canEdit ? undefined : m.tierLabel ?? "Member"}

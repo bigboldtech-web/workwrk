@@ -138,12 +138,15 @@ export interface PrepareContext {
  * a browser card's preparation read the page (browser-previews.ts), the same
  * way (Phase 4 Decision 15). `held`, at an approval: nothing was sent and
  * the card can wait (connector-rules.ts HeldCode), so it stays PENDING
- * rather than FAILED.
+ * rather than FAILED. `forPerson`, at a browser card's approval: the
+ * person's own words for its failure, which the card, its chat line and the
+ * Inbox show (polish after review round 6 of Phase 4); `error` stays the
+ * teammate's, told in its outcome note.
  */
 export type Prepared =
   | { ok: true; tool: ToolName; input: Record<string, unknown>; risk: ToolRisk; preview: ActionPreview; targetKey: string | null; readGoogle?: true; readWeb?: true }
   /** `detail`: what the model can retry with, as the tool would answer it (the ids of Lists that share a name). */
-  | { ok: false; error: string; detail?: Record<string, unknown>; held?: HeldCode; readGoogle?: true; readWeb?: true };
+  | { ok: false; error: string; detail?: Record<string, unknown>; held?: HeldCode; readGoogle?: true; readWeb?: true; forPerson?: string };
 
 /** What one tool's preparation found, before the shared fields are added (connector-previews.ts and browser-previews.ts build one too). */
 export interface Found {
@@ -243,10 +246,11 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
 
   const found = await prepareOne(tool, raw, ctx);
   if ("error" in found) {
-    const { error, held, readGoogle, readWeb, ...detail } = found as { error: string; held?: unknown; readGoogle?: unknown; readWeb?: unknown } & Record<string, unknown>;
+    const { error, held, readGoogle, readWeb, forPerson, ...detail } = found as { error: string; held?: unknown; readGoogle?: unknown; readWeb?: unknown; forPerson?: unknown } & Record<string, unknown>;
     return {
       ...fail(error, detail),
       ...(isHeldCode(held) ? { held } : {}),
+      ...(typeof forPerson === "string" && forPerson ? { forPerson } : {}),
       ...(readGoogle === true ? { readGoogle: true as const } : {}),
       ...(readWeb === true ? { readWeb: true as const } : {}),
     };

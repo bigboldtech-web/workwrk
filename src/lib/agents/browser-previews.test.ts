@@ -54,7 +54,7 @@ vi.mock("@/lib/browser/shots", () => ({
 
 import { prepareBrowser } from "./browser-previews";
 import type { PrepareContext } from "./previews";
-import { BROWSER_COPY } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY } from "./teammate-copy";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { readOn } from "@/lib/browser/page-calls";
 import { fingerprintOf, sealFingerprint } from "@/lib/browser/snapshot";
@@ -219,7 +219,8 @@ describe("at its approval", () => {
     h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"], rulesVersion: 0 };
     h.use = { ok: false, reason: "ended" };
     // Review round 5 of Phase 4: the continue that hears this card starts tainted, so it is never invited to open a page.
-    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.closedNoOther });
+    // Polish after review round 6: the person reads their own words beside it.
+    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.closedNoOther, forPerson: BROWSER_PANEL_COPY.stepClosed(null) });
   });
 
   it("never approves a take over request: Take over decides it", async () => {
@@ -323,6 +324,63 @@ describe("review round 5 of Phase 4", () => {
   it("never invites one at an approval, whose continue starts tainted", async () => {
     const input = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(el({})), role: "button", name: "Place order", shotId: null, shot: null };
     h.use = { ok: false, reason: "restarted" };
-    expect(await prepareBrowser("click", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    // Polish after review round 6: the person reads their own words beside it.
+    expect(await prepareBrowser("click", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.restartedNoOther, forPerson: BROWSER_PANEL_COPY.stepClosed("Closed: WorkwrK restarted.") });
+  });
+});
+
+// Polish after review round 6 of Phase 4: at an approval the person reads
+// their own words; a failed start is told in its own; and a turn that can
+// start no browser is never invited to.
+describe("polish after review round 6 of Phase 4", () => {
+  /** What the teammate is told, never shown to the person. */
+  const MODEL_WORDS = /the person|open_page|close_browser|This answer|A teammate doesn't|Open a page|start a new one/i;
+  const withTurn = (o: { tainted: boolean; mayStart?: boolean }): PrepareContext =>
+    ({
+      person: PERSON,
+      teammate: { agentId: "a1", agentName: "Shopper", trigger: "CHAT" },
+      tainted: o.tainted,
+      taintedBy: "web",
+      turn: { runId: "run1", sessionId: "chat1", ...(o.mayStart === undefined ? {} : { mayStart: o.mayStart }) },
+    }) as unknown as PrepareContext;
+  const input = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(el({})), role: "button", name: "Place order", shotId: null, shot: null };
+
+  it("tells the person at an approval in their own words, never closedNoOther, restartedNoOther or noBrowserYet", async () => {
+    const cases: Array<[Row, string, string]> = [
+      [{ ok: false, reason: "ended" }, BROWSER_COPY.closedNoOther, BROWSER_PANEL_COPY.stepClosed(null)],
+      [{ ok: false, reason: "restarted" }, BROWSER_COPY.restartedNoOther, BROWSER_PANEL_COPY.stepClosed("Closed: WorkwrK restarted.")],
+      [{ ok: false, reason: "ended", endReason: "stopped" }, BROWSER_COPY.closedBecause("You stopped it."), BROWSER_PANEL_COPY.stepClosed("You stopped it.")],
+      // The card's session row gone. Before: "No page is open. Open one with open_page first." on the card.
+      [{ ok: false, reason: "none" }, BROWSER_COPY.noBrowserNoOther, BROWSER_PANEL_COPY.stepClosed(null)],
+    ];
+    for (const [use, said, forPerson] of cases) {
+      h.use = use;
+      // Before: { error: <the teammate's sentence> } alone, the card's failed line and its chat line.
+      expect(await prepareBrowser("click", input, prep("APPROVAL")), JSON.stringify(use)).toEqual({ error: said, forPerson });
+      expect(MODEL_WORDS.test(forPerson)).toBe(false);
+    }
+  });
+
+  it("a turn that can start no browser is never told to open one: no browser yet, its most steps, a failed start", async () => {
+    for (const c of [withTurn({ tainted: true }), withTurn({ tainted: false, mayStart: false })]) {
+      h.use = { ok: false, reason: "none" };
+      // Before: "No page is open. Open one with open_page first."
+      expect(await prepareBrowser("click", { element: "e1" }, c)).toEqual({ error: BROWSER_COPY.noBrowserNoOther });
+      h.use = { ok: false, reason: "ended", endReason: "start_failed" };
+      // Before: 'The browser closed before this step, and the browser card says why: "It didn't start."'
+      expect(await prepareBrowser("click", { element: "e1" }, c)).toEqual({ error: BROWSER_COPY.startFailedNoOther });
+      h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
+      h.capped = true;
+      // Before: "This browser took its most steps. Close it with close_browser, then open a page to start a new one."
+      expect(await prepareBrowser("click", { element: "e1" }, c)).toEqual({ error: BROWSER_COPY.tooManyStepsNoOther });
+      h.capped = false;
+    }
+    // A turn that may still start one keeps the invitation.
+    const may = withTurn({ tainted: false, mayStart: true });
+    h.use = { ok: false, reason: "none" };
+    expect(await prepareBrowser("click", { element: "e1" }, may)).toEqual({ error: BROWSER_COPY.noBrowserYet });
+    h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
+    h.capped = true;
+    expect(await prepareBrowser("click", { element: "e1" }, may)).toEqual({ error: BROWSER_COPY.tooManySteps });
   });
 });

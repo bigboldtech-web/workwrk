@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { profileDirty, profileDraftOf, profilePatch } from "./profile-form";
 import { presenceChoiceOf, presenceExpiryFor } from "./presence-choices";
-import { activeMute, isMuteForever, mutedUntilFor, presetOf, presetValues } from "./notification-presets";
+import { activeMute, HELD_INBOX_KEYS, inboxKeyOn, isMuteForever, mutedUntilFor, presetOf, presetValues, TASK_INBOX_KEYS } from "./notification-presets";
 import { localeCookieFor, timeZoneOptions } from "./locale-options";
 import { SECURITY_EVENT_LABEL } from "./security-events";
 import { decodePresence, encodePresence } from "../people/presence-codec";
@@ -82,6 +84,40 @@ describe("notification presets and mute", () => {
     expect(placeMuteKeys({ boardId: "b", folderId: "f", spaceId: "s" })).toEqual(["list:b", "board:b", "folder:f", "space:s"]);
     expect(mutedObjectKeys({ notifications: { muted: ["space:s", 3] } })).toEqual(["space:s"]);
     expect(mutedObjectKeys(null)).toEqual([]);
+  });
+});
+
+// Overdue had a switch (on by default, and in Focused) but nothing ever sent
+// a task_overdue notification: notifyItemsDueToday is written and no job
+// calls it. A switch with nothing behind it promises a ping that never comes,
+// so it is held back until a sender exists, and the choice a person already
+// stored is left exactly as it is.
+describe("the held Overdue switch", () => {
+  const page = readFileSync(join(__dirname, "..", "..", "app", "(dashboard)", "account", "notifications", "page.tsx"), "utf8");
+
+  it("is not a switch while nothing sends it", () => {
+    expect(TASK_INBOX_KEYS as readonly string[]).not.toContain("overdue");
+    expect(HELD_INBOX_KEYS).toContain("overdue");
+  });
+
+  it("is neither written nor read by a preset, so a stored choice stays as it is", () => {
+    expect(presetValues("default")).not.toHaveProperty("overdue");
+    expect(presetValues("focused")).not.toHaveProperty("overdue");
+    // A stored overdue choice no switch shows never turns the preset into Custom.
+    expect(presetOf({ overdue: false })).toBe("default");
+    expect(presetOf({ ...presetValues("focused"), overdue: false })).toBe("focused");
+  });
+
+  it("keeps reading a stored choice the same way, for when a sender lands", () => {
+    expect(inboxKeyOn({ overdue: false }, "overdue")).toBe(false);
+    expect(inboxKeyOn({ due_reminders: false }, "overdue")).toBe(false);
+    expect(inboxKeyOn({}, "overdue")).toBe(true);
+  });
+
+  it("shows on the page only as a Coming soon row, and Focused no longer promises it", () => {
+    expect(page).not.toMatch(/key: "overdue"/);
+    expect(page).toMatch(/<UpcomingOnly>\s*<ComingSoonRow label="Overdue: /);
+    expect(page).not.toMatch(/Focused keeps only[^"]*overdue/);
   });
 });
 

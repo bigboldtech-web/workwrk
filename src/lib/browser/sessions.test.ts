@@ -1539,7 +1539,8 @@ describe("an approved step held on a browser a Stop closed fails, never waits (r
     });
     const out = await callTool("click", clickInput(rowId), approvalCtx());
     // Before: { error: "The browser service didn't answer. Try again in a moment.", held: "retry_later" }, and the card went back to waiting.
-    expect(out).toEqual({ error: STOPPED });
+    // Polish after review round 6 of Phase 4: the person reads their own words beside the teammate's.
+    expect(out).toEqual({ error: STOPPED, forPerson: "The browser closed before the step could run, so nothing was done. You stopped it." });
     expect(row).toMatchObject({ status: "ended", endReason: "stopped" });
     // The end's cancel skipped the RUNNING card: its approval fails it (executor.ts), never back to PENDING.
     expect(bdb.t.actions[0]).toMatchObject({ status: "RUNNING" });
@@ -1780,5 +1781,60 @@ describe("an answer that can start no browser is never told to open one (review 
     expect(await callTool("read_page", {}, ctx)).toEqual({ error: BROWSER_COPY.restartedNoOther });
     expect(await callTool("open_page", { url: "https://docs.proof.test/guide" }, ctx)).toEqual({ error: held("Closed: WorkwrK restarted.") });
     expect(st.created).toEqual([]);
+  });
+});
+
+// Polish after review round 6 of Phase 4: a start that failed drew no
+// browser card, so a later call of the same answer never names one.
+describe("a retry after a failed start, over this module (polish after review round 6 of Phase 4)", () => {
+  /** A browser call of `runId`'s answer whose one start is used once it reached the provider, as the executor's counters say it. */
+  function counted(runId: string) {
+    const told = { starts: 0, webReads: 0 };
+    const ctx = {
+      orgId: "org1",
+      userId: "u-max",
+      teammate: {
+        agentId: "a-shop",
+        agentName: "Shopper",
+        sessionId: "chat-1",
+        routineId: null,
+        trigger: "CHAT" as const,
+        timezone: "UTC",
+        runId,
+        browser: {
+          tainted: false,
+          get mayStart() {
+            return told.starts === 0;
+          },
+          onStart: () => void (told.starts += 1),
+          onWebRead: () => void (told.webReads += 1),
+        },
+      },
+    };
+    return { ctx, told };
+  }
+
+  it("answers the retry and every other call by the start's own reason, never the browser card, never try again, and starts nothing more", async () => {
+    runOf("run-A");
+    st.createAnswer = { ok: false, failure: "unavailable" };
+    const { ctx, told } = counted("run-A");
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: BROWSER_COPY.providerUnavailable });
+    expect(told.starts).toBe(1);
+    expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "start_failed", lastRunId: "run-A" });
+    // No browser card: its started line is written only once a start went live.
+    expect(st.lines.filter((l) => l.line.event === "browser_started")).toEqual([]);
+    st.createAnswer = { ok: true, data: { providerSessionId: "pv-new", connectUrl: "ws://127.0.0.1:9/devtools/browser/x" } };
+    const retry = await callTool("open_page", { url: "https://docs.proof.test/" }, ctx);
+    // Before: 'The browser closed in this answer, and the browser card says why: "It didn't start." A teammate doesn't open another one ...'
+    expect(retry).toEqual({ error: BROWSER_COPY.startFailedNoOther });
+    expect(String(retry.error)).not.toMatch(/browser card|Try again|closed/);
+    // Before: 'The browser closed before this step, and the browser card says why: "It didn't start."'
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: BROWSER_COPY.startFailedNoOther });
+    expect(st.created).toHaveLength(1);
+    // A new message is a new answer: it may start one.
+    runOf("run-B");
+    const later = counted("run-B");
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, later.ctx)).toEqual({ ok: true, site: "docs.proof.test", note: BROWSER_COPY.openedNote });
+    expect(st.created).toHaveLength(2);
   });
 });

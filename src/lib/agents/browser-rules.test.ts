@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   BROWSER_TOOL_COUNTS,
   actSentence,
+  approvalRefusal,
   browserActOutcome,
   browserAuditFacts,
   browserCard,
@@ -18,6 +19,7 @@ import {
   browserStored,
   browserTitle,
   closedForAnswerSentence,
+  closedForPersonLine,
   closedSentence,
   endHolds,
   pageKey,
@@ -296,7 +298,8 @@ describe("a browser that closed, told to an answer that can start no other", () 
     expect(closedSentence(null, undefined, { mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
     expect(closedSentence("nonsense", undefined, { mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
     expect(closedSentence("restarted", undefined, { mayOpen: false })).toBe(BROWSER_COPY.restartedNoOther);
-    for (const r of END_REASONS.filter((x) => x !== "restarted")) {
+    // A failed start has its own sentence since the polish after review round 6 (below).
+    for (const r of END_REASONS.filter((x) => x !== "restarted" && x !== "start_failed")) {
       const said = closedSentence(r, undefined, { mayOpen: false });
       expect(said, r).toBe(closedSentence(r));
       expect(INVITES.test(said), r).toBe(false);
@@ -317,7 +320,8 @@ describe("a browser that closed, told to an answer that can start no other", () 
   });
 
   it("closedForAnswerSentence quotes any known reason when asked, a reason it does not know as the card's plain line", () => {
-    for (const r of END_REASONS) {
+    // A failed start drew no card: its own sentence since the polish after review round 6 (below).
+    for (const r of END_REASONS.filter((x) => x !== "start_failed")) {
       const said = closedForAnswerSentence(r, { anyReason: true });
       expect(said, r).toBe(BROWSER_COPY.closedForAnswer((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]));
       expect(INVITES.test(said), r).toBe(false);
@@ -325,5 +329,73 @@ describe("a browser that closed, told to an answer that can start no other", () 
     for (const r of [null, undefined, "", "nonsense", "constructor"]) expect(closedForAnswerSentence(r, { anyReason: true }), String(r)).toBe(BROWSER_COPY.closedForAnswer("Closed."));
     // Not asked: a reason that does not hold still reads "Closed." (round 4).
     expect(closedForAnswerSentence("idle")).toBe(BROWSER_COPY.closedForAnswer("Closed."));
+  });
+});
+
+// Polish after review round 6 of Phase 4: the person reads their own words at
+// an approval, a failed start is never told as a closed browser with a card,
+// and no answer that can start a browser is invited to.
+describe("polish after review round 6 of Phase 4", () => {
+  /** What the teammate is told, never shown to the person: "the person", a tool's name, what this answer may open. */
+  const MODEL_WORDS = /the person|open_page|close_browser|This answer|A teammate doesn't|Open a page|start a new one/i;
+  const INVITES = /Open a page|open_page first|start a new one|Open the page again|Try again/;
+  const DASH = /\u2014|\u2013|--/;
+
+  it("says a browser that closed before an approved step in the person's words: the browser card's own end line, never the teammate's sentence", () => {
+    for (const r of END_REASONS) {
+      const line = closedForPersonLine(r);
+      expect(line, r).toBe(BROWSER_PANEL_COPY.stepClosed((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]));
+      expect(MODEL_WORDS.test(line), r).toBe(false);
+      expect(DASH.test(line), r).toBe(false);
+    }
+    for (const r of [null, undefined, "", "nonsense", "constructor", 1]) expect(closedForPersonLine(r), String(r)).toBe("The browser closed before the step could run, so nothing was done.");
+    expect(closedForPersonLine("stopped")).toBe("The browser closed before the step could run, so nothing was done. You stopped it.");
+    for (const line of [BROWSER_PANEL_COPY.stepsUsedUp, BROWSER_PANEL_COPY.stepClosed(null)]) {
+      expect(MODEL_WORDS.test(line), line).toBe(false);
+      expect(DASH.test(line), line).toBe(false);
+    }
+  });
+
+  it("answers a card's own session refused at its approval with the teammate's sentence and, for a browser closed or gone, the person's own", () => {
+    // Before: the one sentence, closedNoOther or restartedNoOther, reached the card and the chat line.
+    expect(approvalRefusal("ended", "Shopper", "Max")).toEqual({ error: BROWSER_COPY.closedNoOther, forPerson: closedForPersonLine(null) });
+    expect(approvalRefusal("restarted", "Shopper", "Max")).toEqual({ error: BROWSER_COPY.restartedNoOther, forPerson: closedForPersonLine("restarted") });
+    expect(approvalRefusal("ended", "Shopper", "Max", { endReason: "stopped" })).toEqual({ error: BROWSER_COPY.closedBecause("You stopped it."), forPerson: closedForPersonLine("stopped") });
+    expect(approvalRefusal("ended", "Shopper", "Max", { endReason: "time_cap", minutes: 15 })).toEqual({ error: BROWSER_COPY.timeCap(15), forPerson: closedForPersonLine("time_cap") });
+    expect(approvalRefusal("time_cap", "Shopper", "Max", { minutes: 15 })).toEqual({ error: BROWSER_COPY.timeCap(15), forPerson: closedForPersonLine("time_cap") });
+    // The card's session row gone: before, "No page is open. Open one with open_page first." on the card.
+    expect(approvalRefusal("none", "Shopper", "Max")).toEqual({ error: BROWSER_COPY.noBrowserNoOther, forPerson: closedForPersonLine(null) });
+    // A refusal whose sentence is the person's already keeps it alone.
+    expect(approvalRefusal("other_teammate", "Shopper", "Max", {})).toEqual({ error: BROWSER_COPY.otherTeammateUnnamed });
+    for (const reason of ["ended", "restarted", "time_cap", "none"] as const) {
+      const r = approvalRefusal(reason, "Shopper", "Max");
+      expect(INVITES.test(r.error), reason).toBe(false);
+      expect(r.forPerson && MODEL_WORDS.test(r.forPerson), reason).toBe(false);
+    }
+  });
+
+  it("tells no browser open as an invitation only where the answer may still start one", () => {
+    // Before: noBrowserYet whatever the answer could do.
+    expect(browserRefusalSentence("none", "Shopper", "Max", { mayOpen: false })).toBe(BROWSER_COPY.noBrowserNoOther);
+    expect(browserRefusalSentence("none", "Shopper", "Max", { mayOpen: true })).toBe(BROWSER_COPY.noBrowserYet);
+    expect(browserRefusalSentence("none", "Shopper", "Max")).toBe(BROWSER_COPY.noBrowserYet);
+    for (const s of [BROWSER_COPY.noBrowserNoOther, BROWSER_COPY.tooManyStepsNoOther, BROWSER_COPY.startFailedNoOther]) {
+      expect(INVITES.test(s), s).toBe(false);
+      expect(DASH.test(s), s).toBe(false);
+    }
+  });
+
+  it("says a failed start in its own words, never the browser card it never drew, and never try again where the answer can't", () => {
+    // Before: 'The browser closed before this step, and the browser card says why: "It didn't start."', and for open_page's retry closedForAnswer's.
+    expect(closedSentence("start_failed", undefined, { mayOpen: false })).toBe(BROWSER_COPY.startFailedNoOther);
+    expect(closedForAnswerSentence("start_failed", { anyReason: true })).toBe(BROWSER_COPY.startFailedNoOther);
+    expect(closedForAnswerSentence("start_failed")).toBe(BROWSER_COPY.startFailedNoOther);
+    expect(browserRefusalSentence("ended", "Shopper", "Max", { endReason: "start_failed", mayOpen: false })).toBe(BROWSER_COPY.startFailedNoOther);
+    // An answer that may still start one: no page is open, and it may open one.
+    expect(closedSentence("start_failed", undefined, { mayOpen: true })).toBe(BROWSER_COPY.noBrowserYet);
+    for (const s of [closedSentence("start_failed", undefined, { mayOpen: false }), closedForAnswerSentence("start_failed", { anyReason: true })]) {
+      expect(s).not.toMatch(/browser card|closed/);
+      expect(INVITES.test(s), s).toBe(false);
+    }
   });
 });

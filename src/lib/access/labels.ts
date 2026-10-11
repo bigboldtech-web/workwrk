@@ -59,3 +59,28 @@ export const LIST_ROLE_BLURB = {
 /** The order every role picker renders, widest first. */
 export const OBJECT_ROLE_ORDER: readonly ObjectRole[] = ["FULL", "EDIT", "COMMENT", "VIEW"];
 export const ORG_ROLE_ORDER: readonly OrgRole[] = ["OWNER", "ADMIN", "MEMBER", "GUEST"];
+
+/**
+ * The Agent tier, in the one sentence every screen that explains it shows:
+ * the invite dialog's "This is an agent account" box, the Members drawer's
+ * Tier row and the Who can do what page. The tier is User.accessLevel AGENT,
+ * a Member with the Agent flag (spec 2.1 and 2.4, decision D13): a person on
+ * frontline work, never a bot or a service. An AI teammate holds no tier of
+ * its own; it acts as the person who runs it (src/lib/agents/acting.ts).
+ *
+ * Every claim is one the server enforces for every Agent:
+ *   - never deletes a task: item-role.ts allowsItemAction, whatever the level
+ *   - never creates a Space: space-create.ts (the manager tier) and the
+ *     engine's create_space verb (resolve.ts)
+ *   - never anyone's manager: person-access.server.ts checkManagerCandidate,
+ *     PATCH /api/users/[id], the bulk routes and the dotted lines
+ *   - "most exports": the export routes refuse an Agent, but a few that
+ *     hand a person their own work back do not (their meetings and their
+ *     own timesheet CSV, /api/export/[type]), so the sentence never says all.
+ * It leaves out "never holds Full access": the share dialogs for tools, SOP
+ * folders, teams and goals clamp an Agent to Can edit, but the Space, Folder
+ * and List rules do not yet (node-rules.ts moveVerdict, A8), so an Agent who
+ * owns a List still manages it.
+ */
+export const AGENT_TIER_BLURB =
+  "For frontline staff, such as support, warehouse or field teams. An Agent works as a Member but can't delete tasks, create Spaces or be anyone's manager, and most exports are closed to them.";

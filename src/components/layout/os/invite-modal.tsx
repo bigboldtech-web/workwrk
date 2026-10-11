@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
+import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import { useOsToast } from "./toast";
 import { useViewerRole } from "./boot-context";
 import { Dots } from "@/components/ui/dots";
@@ -389,7 +390,7 @@ export function InviteModal({ open, onOpenChange, onSent, allowedDomains, defaul
             <input type="checkbox" checked={agent} onChange={(e) => setAgent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--os-brand)]" />
             <span>
               This is an agent account
-              <span className="block text-sm text-ink-2">A bot or service that works as a Member. It can edit what it is given, never has Full access, and never exports or invites.</span>
+              <span className="block text-sm text-ink-2">{AGENT_TIER_BLURB}</span>
             </span>
           </label>
         </div>

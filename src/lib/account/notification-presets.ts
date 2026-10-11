@@ -6,19 +6,19 @@
 //
 // The task-level rows (decided addition c): assigned, mentioned, status change
 // and comment on MY task, status change and comment on a task I FOLLOW (a
-// watcher or a past commenter), due soon (the day it is due) and overdue.
-// The three split-out keys read their parent key while they have never been
-// stored, so a person who turned "Status changes on my tasks" off before the
-// split never starts hearing about followed tasks either. The page, the
-// presets and the senders all read through inboxKeyOn, so the switch shown
-// is exactly what the sender does (settings-architecture 9.1).
+// watcher or a past commenter) and due soon (the day it is due). Overdue is
+// held back (HELD_INBOX_KEYS below). The split-out keys read their parent key
+// while they have never been stored, so a person who turned "Status changes
+// on my tasks" off before the split never starts hearing about followed tasks
+// either. The page, the presets and the senders all read through inboxKeyOn,
+// so the switch shown is exactly what the sender does (settings-architecture
+// 9.1).
 
 export const TASK_INBOX_KEYS = [
   "task_assigned",
   "status_changes",
   "followed_status",
   "due_reminders",
-  "overdue",
   "mentions",
   "comments",
   "followed_comments",
@@ -27,10 +27,29 @@ export const TASK_INBOX_KEYS = [
 export type TaskInboxKey = (typeof TASK_INBOX_KEYS)[number];
 export type InboxPreset = "default" | "focused" | "custom";
 
+/**
+ * Inbox keys a person may already have stored but that no sender reads yet,
+ * so no switch shows them and no preset writes or reads them. A switch with
+ * nothing behind it tells a person they will hear about something they never
+ * will, so it waits behind "Show upcoming features" as a Coming soon row.
+ *
+ * "overdue": nothing writes a task_overdue notification. The producer is
+ * written (notifyItemsDueToday in src/lib/notify-item.ts) but no cron calls
+ * it. To turn the switch back on: call it once a day from a registered job
+ * (the tasks-due-today run of /api/email/send-reminders is the natural home)
+ * with a cap per person, so someone with a backlog of old overdue tasks is
+ * not handed one row per task every morning; then move "overdue" back into
+ * TASK_INBOX_KEYS (and FOCUSED_ON) and put its row back in WORK_ROWS on
+ * /account/notifications. A choice already stored under the key is never
+ * touched meanwhile, so it holds when the sender lands.
+ */
+export const HELD_INBOX_KEYS = ["overdue"] as const;
+
 /** A split-out key reads its parent until it is stored itself. */
 export const INBOX_KEY_FALLBACK: Readonly<Partial<Record<string, string>>> = {
   followed_status: "status_changes",
   followed_comments: "comments",
+  // Held (HELD_INBOX_KEYS); kept so the stored choice reads the same once a sender exists.
   overdue: "due_reminders",
 };
 
@@ -43,8 +62,8 @@ export function inboxKeyOn(inbox: Record<string, boolean> | null | undefined, ke
   return true;
 }
 
-/** Focused: only what is aimed at you (a task handed to you, a mention, your own task running late). */
-const FOCUSED_ON: ReadonlySet<TaskInboxKey> = new Set<TaskInboxKey>(["task_assigned", "mentions", "overdue"]);
+/** Focused: only what is aimed at you (a task handed to you, a mention). Overdue rejoins it with its sender. */
+const FOCUSED_ON: ReadonlySet<TaskInboxKey> = new Set<TaskInboxKey>(["task_assigned", "mentions"]);
 
 export function presetValues(preset: Exclude<InboxPreset, "custom">): Record<TaskInboxKey, boolean> {
   const out = {} as Record<TaskInboxKey, boolean>;
