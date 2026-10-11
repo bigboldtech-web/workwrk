@@ -428,7 +428,8 @@ vi.mock("./browser-access", async (orig) => {
 vi.mock("./teammate-server", () => ({ askableTeammates: async () => [{ name: "Project Manager", job: "Keeps <projects> moving." }] }));
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
-import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, buildSystemBlocks, getOrCreateTeammateSession, historyMessages, runTeammateTurn, type TurnArgs } from "./engine";
+import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, browserNotHereLine, buildSystemBlocks, getOrCreateTeammateSession, historyMessages, runTeammateTurn, type TurnArgs } from "./engine";
+import type { BrowserNotHere } from "./browser-rules";
 import { RUN_STALE_MS } from "./budget";
 import { MEMORY_LIMITS } from "./memory";
 import { TURN_ERRORS } from "./teammate-copy";
@@ -1192,6 +1193,8 @@ describe("the computer while this deployment does not offer it (Phase 4 step 3, 
       // The tools offered were asked for with the computer off; the teammate's own set with it on, to know what it holds.
       expect(db.toolOpts.find((x) => x.connectors !== undefined && (x.connectors as Record<string, boolean>).gmail !== true)?.computer ?? false, label).toBe(false);
       expect(db.requests[0].system[1].text).not.toMatch(/web browser/);
+      // Nor where it runs (step 5): a deployment with no computer never mentions one.
+      expect(db.requests[0].system[1].text).not.toContain("browser tools");
     });
   }
 });
@@ -1232,14 +1235,15 @@ describe("the computer in a turn (Phase 4 step 3)", () => {
     expect(db.executed[0].browserNotHere).toBeUndefined();
   });
 
-  const elsewhere: Array<[string, Partial<TurnArgs>, string]> = [
-    ["a group CHAT", { userText: null, group: GROUP }, "group"],
-    ["TALK", { trigger: "TALK", userText: "@Chief of Staff open it", userMessageId: null, origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 3, context: [] } }, "talk"],
-    ["ROUTINE", { trigger: "ROUTINE", userText: null, userMessageId: null, routine: { id: "r1", name: "Daily brief", prompt: "Summarise my tasks." } }, "routine"],
-    ["AUTOMATION", { trigger: "AUTOMATION", userText: null, userMessageId: null, origin: { kind: "automation", workflowId: "wf1", workflowName: "Triage", automationRunId: "arun1", instruction: "Open it", values: [] } }, "automation"],
-    ["DELEGATED", { trigger: "DELEGATED", userText: null, userMessageId: null, origin: { kind: "delegated", by: { agentId: "a9", name: "Chief of Staff", sessionId: "s-cos", runId: "run-cos" }, request: "Open the shop." } }, "delegated"],
+  // Step 5: each place's reason, word for word as the spec gives it.
+  const elsewhere: Array<[string, Partial<TurnArgs>, string, string]> = [
+    ["a group CHAT", { userText: null, group: GROUP }, "group", "a group chat has several teammates and one browser; the person can ask you in your own chat"],
+    ["TALK", { trigger: "TALK", userText: "@Chief of Staff open it", userMessageId: null, origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 3, context: [] } }, "talk", "your answer is posted for everyone in the conversation"],
+    ["ROUTINE", { trigger: "ROUTINE", userText: null, userMessageId: null, routine: { id: "r1", name: "Daily brief", prompt: "Summarise my tasks." } }, "routine", "nobody is watching a routine to approve its steps or take over"],
+    ["AUTOMATION", { trigger: "AUTOMATION", userText: null, userMessageId: null, origin: { kind: "automation", workflowId: "wf1", workflowName: "Triage", automationRunId: "arun1", instruction: "Open it", values: [] } }, "automation", "nobody is there to approve its steps"],
+    ["DELEGATED", { trigger: "DELEGATED", userText: null, userMessageId: null, origin: { kind: "delegated", by: { agentId: "a9", name: "Chief of Staff", sessionId: "s-cos", runId: "run-cos" }, request: "Open the shop." } }, "delegated", "your answer goes back to the teammate that asked; the person can ask you directly"],
   ];
-  for (const [label, o, kind] of elsewhere) {
+  for (const [label, o, kind, why] of elsewhere) {
     it(`offers none in ${label} with the computer on and the access passing, and names where it runs`, async () => {
       db.computer = { available: true };
       db.computerOn = true;
@@ -1251,7 +1255,26 @@ describe("the computer in a turn (Phase 4 step 3)", () => {
       // Its access is never read where it could not be used.
       expect(db.browserAccessCalls).toEqual([]);
       expect(db.executed[0]).toMatchObject({ name: "read_page", browserNotHere: kind });
-      expect(db.requests[0].system[1].text).not.toContain("You can use a web browser");
+      const block2 = db.requests[0].system[1].text;
+      expect(block2).not.toContain("You can use a web browser");
+      // Step 5: block 2 says why, once. Before: nothing did, and the model could only guess.
+      const line = `Your browser tools aren't available here: ${why}. If asked, say so in one sentence.`;
+      expect(block2).toContain(line);
+      expect(block2.split(line).length - 1, label).toBe(1);
+      expect(browserNotHereLine(kind as BrowserNotHere)).toBe(line);
+    });
+
+    it(`says nothing of a browser in ${label} for a teammate that holds no browser tool, or where the workspace has the computer off`, async () => {
+      // No browser tool in its own set: nothing to say, the computer on or not.
+      db.computer = { available: true };
+      db.replies = [reply([say("Done.")], "end_turn"), reply([say("Done.")], "end_turn")];
+      await runTeammateTurn(turn({ agent: { ...AGENT, toolNames: ["search_tasks"] as unknown, browserSites: [] }, ...o }));
+      expect(db.requests[0].system[1].text, label).not.toMatch(/browser/i);
+      // Browser tools held, but the workspace may not use the computer now
+      // (off, its plan, a trial, closed): a workspace without it never hears of it.
+      db.computer = { available: false };
+      await runTeammateTurn(turn({ agent: BROWSING, ...o }));
+      expect(db.requests[1].system[1].text, label).not.toMatch(/browser/i);
     });
   }
 
