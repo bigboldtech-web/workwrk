@@ -6,7 +6,8 @@
 // apply, and no seat was checked.
 //
 // In order: the level rule, the personal note, the address, the
-// company-domain lock, the KRA and SOP ownership check, "already here", a
+// company-domain lock, the KRA and SOP ownership check, the manager check
+// (never an Agent), "already here", a
 // live invitation blocks a second one (an expired one is renewed in place),
 // the seat, then the email with the real expiry, the webhook and the audit
 // row.
@@ -28,6 +29,7 @@ import { invitationTemplate } from "@/lib/email-templates";
 import { logAuditEvent } from "@/lib/activity";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 
 export interface InvitationRequest {
@@ -105,6 +107,15 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
     if (sopCount !== cleanSopIds.length) {
       return { ok: false, status: 400, error: "One or more selected SOPs don't belong to your organization." };
     }
+  }
+
+  // "Reports to" names a live person of this workspace who may manage:
+  // never an Agent (access 2.4), never someone of another workspace. It was
+  // stored as sent, and the acceptance wrote it straight onto the new person.
+  if (typeof req.managerId === "string" && req.managerId) {
+    const candidate = await managerCandidateIn(orgId, req.managerId);
+    if (candidate === "not_found") return { ok: false, status: 400, error: "That manager isn't in this workspace" };
+    if (candidate === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" };
   }
 
   // Already in this workspace, as their own account or as a membership

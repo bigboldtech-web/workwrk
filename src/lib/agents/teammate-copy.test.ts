@@ -299,6 +299,13 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
       ["You stopped it."],
       'The browser closed in this answer, and the browser card says why: "You stopped it." A teammate doesn\'t open another one in the same answer. If the person wants one, they can ask in a new message.',
     ],
+    // Last polish of Phase 4: a browser that closed while it was starting drew no card, so the chat's line; a failed start that used the answer's one start never says "Try again".
+    closedNoCard: [["You stopped it."], 'The browser closed while it was starting, and the chat says why: "You stopped it."'],
+    closedForAnswerNoCard: [
+      ["You stopped it."],
+      'The browser closed in this answer while it was starting, and the chat says why: "You stopped it." A teammate doesn\'t open another one in the same answer. If the person wants one, they can ask in a new message.',
+    ],
+    providerBusyNoOther: [[30], "The browser service is busy. This answer can't try again. If the person wants a browser, they can ask in a new message after 30 seconds."],
     notAllowedSite: [["exfil.proof.test"], "exfil.proof.test isn't one of the sites this teammate may open."],
     blockedSite: [["blocked.proof.test"], "blocked.proof.test is blocked in this workspace."],
     sensitiveField: [["Max"], "That's a password, code or payment field. Ask Max to take over and type it themselves."],
@@ -330,7 +337,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
   });
   it("says the polish after review round 6's lines word for word: the teammate's, which may speak of the person, and the person's own, which never do", () => {
     // The teammate's (BROWSER_COPY): no invitation an answer that can start no browser can't take.
-    expect(copy.BROWSER_COPY.startFailedNoOther).toBe("The browser didn't start. This answer can't start another one. If the person wants one, they can ask in a new message.");
+    // Last polish of Phase 4: "can't start one", true for a continue that started none itself too.
+    expect(copy.BROWSER_COPY.startFailedNoOther).toBe("The browser didn't start, and this answer can't start one. If the person wants one, they can ask in a new message.");
     expect(copy.BROWSER_COPY.noBrowserNoOther).toBe("No page is open, and this answer can't start a browser. If the person wants one, they can ask in a new message.");
     expect(copy.BROWSER_COPY.tooManyStepsNoOther).toBe("This browser took its most steps. Close it with close_browser. This answer can't open another one. If the person wants one, they can ask in a new message.");
     for (const line of [copy.BROWSER_COPY.startFailedNoOther, copy.BROWSER_COPY.noBrowserNoOther, copy.BROWSER_COPY.tooManyStepsNoOther]) {
@@ -343,6 +351,27 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     for (const line of [copy.BROWSER_PANEL_COPY.stepClosed(null), copy.BROWSER_PANEL_COPY.stepClosed("You stopped it."), copy.BROWSER_PANEL_COPY.stepsUsedUp]) {
       expect(BANNED.test(line), line).toBe(false);
       expect(line).not.toMatch(/the person|open_page|close_browser|This answer|teammate/i);
+    }
+  });
+  it("says the last polish of Phase 4's lines word for word: the teammate's, which may speak of the person, and the person's own, which never do", () => {
+    // The teammate's (BROWSER_COPY): never "Try again" after the answer's one start, never the card a browser that closed while starting never drew.
+    expect(copy.BROWSER_COPY.providerUnavailableNoOther).toBe("The browser service didn't answer. This answer can't try again. If the person wants a browser, they can ask in a new message.");
+    expect(copy.BROWSER_COPY.notReachedNow).toBe("The browser couldn't be reached just now. Try again in a moment.");
+    for (const line of [copy.BROWSER_COPY.providerUnavailableNoOther, copy.BROWSER_COPY.providerBusyNoOther(30), copy.BROWSER_COPY.startFailedNoOther]) {
+      expect(BANNED.test(line), line).toBe(false);
+      expect(line).not.toMatch(/Try again|another one|browser card/);
+    }
+    for (const line of [copy.BROWSER_COPY.closedNoCard("You stopped it."), copy.BROWSER_COPY.closedForAnswerNoCard("You stopped it.")]) {
+      expect(BANNED.test(line), line).toBe(false);
+      expect(line).not.toMatch(/browser card|Open a page|open_page first|start a new one|Try again/);
+    }
+    // The person's (BROWSER_PANEL_COPY): never "the person", a tool's name, a first name or what the answer may do.
+    expect(copy.BROWSER_PANEL_COPY.youHaveIt).toBe("You have the browser now. Press Done or Give it back first.");
+    expect(copy.BROWSER_PANEL_COPY.sensitiveStep).toBe("That's a password, code or payment field, which your teammate never uses, so nothing was done.");
+    expect(copy.BROWSER_PANEL_COPY.nothingToType).toBe("There's nothing to type, so nothing was done.");
+    for (const line of [copy.BROWSER_PANEL_COPY.youHaveIt, copy.BROWSER_PANEL_COPY.sensitiveStep, copy.BROWSER_PANEL_COPY.nothingToType]) {
+      expect(BANNED.test(line), line).toBe(false);
+      expect(line).not.toMatch(/the person|open_page|close_browser|This answer|Max|Say what|Ask .* to take over/i);
     }
   });
   it("says step 3's fixed lines as the spec words them, with no dash", () => {

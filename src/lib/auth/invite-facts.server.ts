@@ -9,6 +9,7 @@
 // Server-only (prisma).
 
 import { prisma } from "@/lib/prisma";
+import { managerCandidateIn } from "@/lib/access/manager-candidate";
 
 export interface InviteRow {
   id: string;
@@ -54,12 +55,27 @@ export async function invitePlacement(inv: Pick<InviteRow, "organizationId" | "d
   managerName: string | null;
   space: { id: string; name: string } | null;
 }> {
-  const [dept, manager, space] = await Promise.all([
+  const [dept, manager, space, managerId] = await Promise.all([
     inv.departmentId ? prisma.department.findFirst({ where: { id: inv.departmentId, organizationId: inv.organizationId }, select: { name: true } }) : null,
     inv.managerId ? prisma.user.findFirst({ where: { id: inv.managerId, organizationId: inv.organizationId, deletedAt: null }, select: { firstName: true, lastName: true } }) : null,
     inv.spaceId ? prisma.space.findFirst({ where: { id: inv.spaceId, organizationId: inv.organizationId, archivedAt: null }, select: { id: true, name: true } }) : null,
+    managerOnAccept(inv),
   ]);
-  return { departmentName: dept?.name ?? null, managerName: fullName(manager), space: space ?? null };
+  // /join names the manager the acceptance will write, never one it won't (an Agent).
+  return { departmentName: dept?.name ?? null, managerName: managerId ? fullName(manager) : null, space: space ?? null };
+}
+
+/**
+ * The manager an accepted invitation writes: the one it names, while they are
+ * still a live person in the workspace who may manage. Never an Agent (access
+ * 2.4): the invitation may predate their move to the Agent tier, or have come
+ * from a path that did not check (sendInvitation checks now). Otherwise none,
+ * so the new person joins with no manager rather than under an Agent, and an
+ * Admin sets one in Members.
+ */
+export async function managerOnAccept(inv: Pick<InviteRow, "organizationId" | "managerId">): Promise<string | null> {
+  if (!inv.managerId) return null;
+  return (await managerCandidateIn(inv.organizationId, inv.managerId)) === "ok" ? inv.managerId : null;
 }
 
 /** A live account anywhere on the platform for this address (the person who can log in with it). */

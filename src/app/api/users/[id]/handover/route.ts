@@ -5,6 +5,10 @@
 // (org-admin OR the target sits inside the caller's report tree).
 //
 //   GET  → counts + capped lists (advisory summary for the confirm dialog)
+//   GET ?to=<id> → only what the handover would do with their direct
+//          reports if <id> takes the work (the dialog says it before it
+//          runs): an Agent takes the work but never the reports, which go
+//          up to the leaver's own manager instead
 //   POST → { reassignToId } moves their OPEN items' ownerId and their
 //          reports' managerId to the picked person. Done work keeps its
 //          original owner: history is never rewritten.
@@ -14,7 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
-import { isOpenStatus, runHandover } from "@/lib/people/handover.server";
+import { isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 
 const LIST_CAP = 5;
 
@@ -32,7 +36,7 @@ async function gateHandover(_session: unknown, id: string) {
   return null;
 }
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
@@ -46,6 +50,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     select: { id: true },
   });
   if (!target) return jsonError("User not found", 404);
+
+  const to = new URL(req.url).searchParams.get("to");
+  if (to) {
+    const recipient = await prisma.user.findFirst({ where: { id: to, organizationId: orgId, deletedAt: null }, select: { id: true } });
+    if (!recipient || to === id) return jsonError("Reassignment target not found or inactive", 404);
+    return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });
+  }
 
   const [items, okrs, kraAssignments, assets, directReports, spaces, folders, lists] = await Promise.all([
     prisma.item.findMany({

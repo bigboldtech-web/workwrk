@@ -1407,6 +1407,36 @@ export const BROWSER_COPY = {
   providerUnavailable: "The browser service didn't answer. Try again in a moment.",
   providerBusy: (s: number) => `The browser service is busy. Try again in ${count(s, "second", "seconds")}.`,
   startFailed: "The browser didn't start. Try again in a moment.",
+  /**
+   * providerUnavailable and providerBusy, told to the answer whose own start
+   * just met them (last polish of Phase 4; browser-rules.ts
+   * browserRefusalSentence with `mayOpen: false`): that start was the
+   * answer's one (Decision 22), so it can't try again, and the person can
+   * ask in a new message. A start that failed in the browser itself says
+   * startFailedNoOther.
+   */
+  providerUnavailableNoOther: "The browser service didn't answer. This answer can't try again. If the person wants a browser, they can ask in a new message.",
+  providerBusyNoOther: (s: number) => `The browser service is busy. This answer can't try again. If the person wants a browser, they can ask in a new message after ${count(s, "second", "seconds")}.`,
+  /**
+   * A browser that went no further than starting (last polish of Phase 4:
+   * its chat has no browser_started line for it, so no browser card was
+   * drawn; sessions.ts runEnds and endedWhileStarting), closed for a reason
+   * other than its start failing: `why` is the end's line the chat shows
+   * the person (BROWSER_PANEL_COPY.ENDED_WORDS, the browser_ended line),
+   * quoted as closedBecause quotes the card's. The second is for open_page,
+   * and a start refused, in an answer such an end holds (closedForAnswer's
+   * place). Neither invites a new browser.
+   */
+  closedNoCard: (why: string) => `The browser closed while it was starting, and the chat says why: "${why}"`,
+  closedForAnswerNoCard: (why: string) =>
+    `The browser closed in this answer while it was starting, and the chat says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`,
+  /**
+   * A browser this process doesn't hold whose end could not be written, or
+   * whose row could not be read (last polish of Phase 4, browser-tools.ts
+   * goneAnswer): it is not known to be closed, so nothing says it is, and an
+   * approval's card waits (Decision 14).
+   */
+  notReachedNow: "The browser couldn't be reached just now. Try again in a moment.",
   restarted: "The browser closed because WorkwrK restarted. Open the page again to start a new one.",
   timeCap: (m: number) => `The browser closed: it reached its ${count(m, "minute", "minutes")}.`,
   browserClosed: "The browser closed. Open a page to start a new one.",
@@ -1443,8 +1473,11 @@ export const BROWSER_COPY = {
    * answer, which can start no other (polish after review round 6 of Phase 4;
    * browser-rules.ts closedSentence and closedForAnswerSentence). The start's
    * own reason: no browser card was drawn, so none is named, and no try again.
+   * "can't start one" (last polish of Phase 4), never "another": a continue
+   * told of its earlier answer's failed start started none itself, and the
+   * answer whose own start failed hears it too, at once and after.
    */
-  startFailedNoOther: "The browser didn't start. This answer can't start another one. If the person wants one, they can ask in a new message.",
+  startFailedNoOther: "The browser didn't start, and this answer can't start one. If the person wants one, they can ask in a new message.",
   /** noBrowserYet, told to an answer that can start no browser (polish after review round 6 of Phase 4; browser-rules.ts browserRefusalSentence). */
   noBrowserNoOther: "No page is open, and this answer can't start a browser. If the person wants one, they can ask in a new message.",
   /** tooManySteps, told to an answer that can start no browser (polish after review round 6 of Phase 4): it may still close this one. */
@@ -1719,6 +1752,14 @@ export const BROWSER_PANEL_COPY = {
   stepClosed: (why: string | null) => (why ? `The browser closed before the step could run, so nothing was done. ${why}` : "The browser closed before the step could run, so nothing was done."),
   /** An approved step on a browser that took its most steps, in the person's words (polish after review round 6 of Phase 4; the teammate is told tooManyStepsNoOther). */
   stepsUsedUp: "The browser took its most steps, so nothing was done. Ask again in a new message.",
+  // Last polish of Phase 4: an approval's words for the person where the
+  // teammate's sentence speaks of them by name or tells the teammate what to do.
+  /** An approval held while the person has the browser (the toast, after CONNECTOR_COPY.stillWaits's lead); the teammate's own is personHasIt. */
+  youHaveIt: "You have the browser now. Press Done or Give it back first.",
+  /** An approved step on a password, code or payment field (Decision 18); the teammate is told sensitiveField. */
+  sensitiveStep: "That's a password, code or payment field, which your teammate never uses, so nothing was done.",
+  /** An approved typing left with nothing to type once cleaned; the teammate is told emptyText. */
+  nothingToType: "There's nothing to type, so nothing was done.",
   liveViewFailed: "Couldn't show the browser. Try again.",
   // Step 4: the few words the spec names by their part only.
   /** The take over card's second button, which says no (the spec's "Not now"). */

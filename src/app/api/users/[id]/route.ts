@@ -548,7 +548,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         targetId: id,
         next: roleNext,
       });
-      if (!r.ok) return { ok: false, status: r.status, error: r.error, code: r.status === 409 ? "last_owner" : "field_forbidden", fields: ["orgRole"] };
+      // The planner names its refusal (an Agent with reports, or the last
+      // Owner); every other refusal is a field this actor may not write.
+      if (!r.ok) return { ok: false, status: r.status, error: r.error, code: r.code ?? (r.status === 409 ? "last_owner" : "field_forbidden"), fields: ["orgRole"] };
       rc = r;
     }
     const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;

@@ -52,7 +52,7 @@
 //
 // Server-only: drives a browser.
 
-import { actSentence, navSentence, pageKey, pageKeyHash, pageOrigin, pageWords, verdictSentence, type BrowserCardInput, type TakeOverReason } from "@/lib/agents/browser-rules";
+import { actForPersonLine, actSentence, navSentence, pageKey, pageKeyHash, pageOrigin, pageWords, verdictSentence, type BrowserCardInput, type TakeOverReason } from "@/lib/agents/browser-rules";
 import { clampText } from "@/lib/agents/clamp";
 import type { HeldCode } from "@/lib/agents/connector-rules";
 import { plainData } from "@/lib/agents/plain-data";
@@ -76,7 +76,7 @@ export interface StepDraft {
 
 /** One call's outcome on the page. */
 export interface PageCall {
-  /** What the model reads: the result, or { error } (with `held` or `unknownOutcome` for an approval). */
+  /** What the model reads: the result, or { error } (with `held`, `unknownOutcome` or the person's own words, `forPerson`, for an approval). */
   answer: Record<string, unknown>;
   /** The step to record, or none (a call that never reached the page). */
   step: StepDraft | null;
@@ -88,9 +88,9 @@ export interface PageCall {
   lost?: true;
 }
 
-function refusal(error: string, step: StepDraft | null, o: { touched?: boolean; site?: string | null; held?: HeldCode; unknownOutcome?: true; lost?: true } = {}): PageCall {
+function refusal(error: string, step: StepDraft | null, o: { touched?: boolean; site?: string | null; held?: HeldCode; unknownOutcome?: true; lost?: true; forPerson?: string } = {}): PageCall {
   return {
-    answer: { error, ...(o.held ? { held: o.held } : {}), ...(o.unknownOutcome ? { unknownOutcome: true } : {}) },
+    answer: { error, ...(o.held ? { held: o.held } : {}), ...(o.unknownOutcome ? { unknownOutcome: true } : {}), ...(o.forPerson ? { forPerson: o.forPerson } : {}) },
     step,
     touched: o.touched === true,
     ...(o.site !== undefined ? { site: o.site } : {}),
@@ -441,7 +441,9 @@ export function prepareTakeOverOn(lb: LiveBrowser, reason: TakeOverReason): { ok
  * the header): the page must still be the card's, its site allowed now,
  * then the driver finds the element again and acts. A step lost before
  * anything was sent answers `held` (the card waits); one whose outcome is
- * unknown answers `unknownOutcome` (the card fails, never re-run).
+ * unknown answers `unknownOutcome` (the card fails, never re-run). A
+ * sensitive field carries the person's own words (`forPerson`, last polish
+ * of Phase 4, browser-rules.ts actForPersonLine) beside the teammate's.
  */
 export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "select_option", input: BrowserCardInput, first: string): Promise<PageCall> {
   const kind: StepKind = tool === "click" ? "click" : tool === "type_text" ? "type" : "select";
@@ -493,8 +495,11 @@ export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "
     lb.refsUrl = null;
   }
   const error = actSentence(out, first);
+  // The person's own words where the teammate's speak of them by name (last polish of Phase 4): only an approval runs a step.
+  const forPerson = actForPersonLine(out);
   return refusal(error, { kind, site: input.site, outcome: "failed", code: out.code }, {
     touched: out.code === "blocked_hop",
+    ...(forPerson ? { forPerson } : {}),
     ...(mayHaveRun ? { unknownOutcome: true as const } : {}),
     ...(out.code === "unknown_outcome" && lb.lost ? { lost: true as const } : {}),
   });

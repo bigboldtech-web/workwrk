@@ -30,7 +30,10 @@ describe("Folders", () => {
     const route = read("src/app/api/folders/[id]/route.ts");
     const del = route.slice(route.indexOf("export async function DELETE("));
     expect(del.indexOf("checkFolderDelete(gate.ctx, id)")).toBeGreaterThan(0);
-    expect(del.indexOf("checkFolderDelete(gate.ctx, id)")).toBeLessThan(del.indexOf("moveToTrash("));
+    // The trash runs through trashContainer (src/lib/access/container-trash.ts,
+    // docs-found fixes batch 2), still after the subtree check.
+    expect(del.indexOf("trashContainer(\"folder\", id, c)")).toBeGreaterThan(0);
+    expect(del.indexOf("checkFolderDelete(gate.ctx, id)")).toBeLessThan(del.indexOf("trashContainer(\"folder\", id, c)"));
     const trash = read("src/lib/trash.ts");
     expect(trash).toMatch(/const subtree = await folderBranch\(db, row\.organizationId, id\)/);
     expect(trash).toMatch(/await tx\.folder\.deleteMany\(\{ where: \{ id: \{ in: ids \} \} \}\)/);

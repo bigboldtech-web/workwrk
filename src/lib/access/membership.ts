@@ -26,6 +26,10 @@
 //      tokenVersion, so lowered access lands on their very next request; a
 //      promotion does not sign anyone out (it lands within the five-minute
 //      revalidation), which is the Staff console's Set Owner decision too.
+//   6. Nobody becomes an Agent while people report to them, solid or dotted
+//      (access 2.4, AGENT_TIER_BLURB: an Agent is never anyone's manager).
+//      The reports move first, so no team is left under a manager the rest
+//      of the product refuses as one (checkManagerCandidate).
 
 import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { ownerIdsOf } from "@/lib/admin/companies-list";
@@ -77,15 +81,36 @@ export interface RoleChangeInput {
   actorId: string;
   actorIsOwner: boolean;
   actorIsAdmin: boolean;
-  target: { id: string; level: string; isOwner: boolean; createdAt: Date | string };
+  target: {
+    id: string;
+    level: string;
+    isOwner: boolean;
+    createdAt: Date | string;
+    /** People who report to them, solid or dotted (rule 6). Counted only when the change would make them an Agent. */
+    reports?: number;
+  };
   /** Every live Owner and Admin candidate, for the last-Owner guard. */
   admins: { id: string; level: string; createdAt: Date | string }[];
   next: { role: MemberRole; tier?: string | null };
 }
 
+/** Why a role change was refused, for the caller's `code` (the drawer and the bulk report read it). */
+export type RoleChangeRefusal = "agent_has_reports" | "last_owner";
+
 export type RoleChangePlan =
   | { ok: true; level: string; changed: boolean; bump: boolean; beforeRole: MemberRole; afterRole: MemberRole }
-  | { ok: false; status: 400 | 403 | 409; error: string };
+  | { ok: false; status: 400 | 403 | 409; error: string; code?: RoleChangeRefusal };
+
+/** Rule 6's sentence: plain, and it says what to do. */
+export function agentHasReportsError(reports: number): string {
+  const who = reports === 1 ? "1 person reports to them" : `${reports} people report to them`;
+  return `An Agent can't be anyone's manager, and ${who}. Move their reports to someone else first.`;
+}
+
+/** Would this tier change make the person an Agent? Only then are their reports counted. */
+export function becomesAgent(targetLevel: string, next: { role: MemberRole; tier?: string | null }): boolean {
+  return next.role === "MEMBER" && next.tier === "AGENT" && targetLevel !== "AGENT";
+}
 
 /** Decide one role change (pure; tested). */
 export function planRoleChange(input: RoleChangeInput): RoleChangePlan {
@@ -110,13 +135,18 @@ export function planRoleChange(input: RoleChangeInput): RoleChangePlan {
   const changed = level !== target.level || (beforeRole === "OWNER" && next.role !== "OWNER");
   if (!changed) return { ok: true, level, changed: false, bump: false, beforeRole, afterRole: beforeRole };
 
+  // Rule 6: never an Agent with a team under them.
+  if (level === "AGENT" && (target.reports ?? 0) > 0) {
+    return { ok: false, status: 409, error: agentHasReportsError(target.reports ?? 0), code: "agent_has_reports" };
+  }
+
   // Last-Owner guard: recompute the Owners with this one change applied.
   const after = input.admins
     .filter((a) => a.id !== target.id)
     .concat(LEGACY_ADMIN_LEVELS.has(level) ? [{ id: target.id, level, createdAt: target.createdAt }] : []);
   const ownersAfter = ownerIdsOf(after.map((a) => ({ id: a.id, level: a.level, createdAt: a.createdAt })));
   if (ownersAfter.length === 0) {
-    return { ok: false, status: 409, error: "The workspace needs at least one Owner. Make someone else an Owner first." };
+    return { ok: false, status: 409, error: "The workspace needs at least one Owner. Make someone else an Owner first.", code: "last_owner" };
   }
   const afterRole = memberRoleOf(level, ownersAfter.includes(target.id));
   // Under the step-0 mapping an Admin who joined before every other admin is
@@ -197,7 +227,7 @@ export interface AppliedRoleChange {
 export async function applyRoleChange(
   db: Db,
   input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
-): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string }> {
+): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string; code?: RoleChangeRefusal }> {
   if (isClient(db)) return db.$transaction((tx) => applyRoleChangeIn(tx, input));
   return applyRoleChangeIn(db, input);
 }
@@ -205,7 +235,7 @@ export async function applyRoleChange(
 async function applyRoleChangeIn(
   db: Prisma.TransactionClient,
   input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
-): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string }> {
+): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string; code?: RoleChangeRefusal }> {
   await lockOrgRoles(db, input.organizationId);
   const target = await db.user.findFirst({
     where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null },
@@ -218,11 +248,13 @@ async function applyRoleChangeIn(
   const actorStillAdmin = admins.some((a) => a.id === input.actorId);
   const actorIsAdmin = input.actorIsAdmin && actorStillAdmin;
   const actorIsOwner = input.actorIsOwner && actorStillAdmin && owners.includes(input.actorId);
+  // Rule 6 needs the team only when the change would make them an Agent.
+  const reports = becomesAgent(target.accessLevel, input.next) ? await reportCountOf(db, input.organizationId, target.id) : 0;
   const plan = planRoleChange({
     actorId: input.actorId,
     actorIsOwner,
     actorIsAdmin,
-    target: { id: target.id, level: target.accessLevel, isOwner: owners.includes(target.id), createdAt: target.createdAt },
+    target: { id: target.id, level: target.accessLevel, isOwner: owners.includes(target.id), createdAt: target.createdAt, reports },
     admins: admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })),
     next: input.next,
   });
@@ -257,6 +289,22 @@ async function applyRoleChangeIn(
     after: { level: plan.level, role: plan.afterRole },
     bumped: plan.bump,
   };
+}
+
+/**
+ * The people who report to this person in this workspace, solid or dotted,
+ * each counted once (rule 6). Removed people are left out; a deactivated one
+ * still counts, because reactivating them would put them back under an Agent
+ * (the same set pendingHandover counts as direct reports).
+ */
+export async function reportCountOf(db: Db, organizationId: string, managerId: string): Promise<number> {
+  const [solid, dotted] = await Promise.all([
+    db.user.findMany({ where: { organizationId, managerId, deletedAt: null }, select: { id: true } }),
+    db.userDottedLine.findMany({ where: { managerId, user: { organizationId, deletedAt: null } }, select: { userId: true } }),
+  ]);
+  const ids = new Set<string>([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
+  ids.delete(managerId);
+  return ids.size;
 }
 
 /** The words an audit row uses for a role: "Owner", "Admin", or the tier ("Manager"). */

@@ -42,6 +42,15 @@ export type InboxPreset = "default" | "focused" | "custom";
  * TASK_INBOX_KEYS (and FOCUSED_ON) and put its row back in WORK_ROWS on
  * /account/notifications. A choice already stored under the key is never
  * touched meanwhile, so it holds when the sender lands.
+ *
+ * WHEN OVERDUE REJOINS FOCUSED_ON, write it for the people who picked Focused
+ * meanwhile. Their Focused never stored "overdue", so it reads its parent,
+ * due_reminders, which Focused turned off: presetOf would then read them as
+ * Custom, and they would hear nothing about overdue work although Focused
+ * promises it. Before the release that moves the key back, set
+ * inbox.overdue = true on every stored inbox whose switches match Focused
+ * (presetOf(inbox) === "focused" under the old lists), so they keep reading
+ * as Focused and get what Focused gives.
  */
 export const HELD_INBOX_KEYS = ["overdue"] as const;
 
@@ -62,7 +71,13 @@ export function inboxKeyOn(inbox: Record<string, boolean> | null | undefined, ke
   return true;
 }
 
-/** Focused: only what is aimed at you (a task handed to you, a mention). Overdue rejoins it with its sender. */
+/**
+ * Focused: of the work and people switches, only a task handed to you and a
+ * mention stay on (kudos goes off too). It never writes the Talk and
+ * announcement switches (inbox-notify-keys.ts), which keep their own values,
+ * and the page's sentence says exactly that. Overdue rejoins it with its
+ * sender (see HELD_INBOX_KEYS).
+ */
 const FOCUSED_ON: ReadonlySet<TaskInboxKey> = new Set<TaskInboxKey>(["task_assigned", "mentions"]);
 
 export function presetValues(preset: Exclude<InboxPreset, "custom">): Record<TaskInboxKey, boolean> {

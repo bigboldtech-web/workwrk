@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { ConfirmDialog, Field } from "@/components/settings/settings-form";
-import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
+import { reportHandoverNote } from "@/lib/people/reporting-lines";
 
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
 
@@ -90,11 +91,17 @@ type Handover = {
   containers?: { count: number; spaces: number; folders: number; lists: number };
 };
 
+/** GET /api/users/[id]/handover?to=: where the direct reports go if `to` takes the work. */
+type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[] };
+
 /**
  * The transfer dialog (560px): what the person holds, a transferee picker
  * preselected to their manager else the acting admin, then the handover
  * (POST /api/users/[id]/handover) and the deactivation or removal. Remove
- * also asks for the person's name typed.
+ * also asks for the person's name typed. When the person picked cannot take
+ * the direct reports (an Agent is never anyone's manager, or a reporting
+ * loop), the dialog says where they go instead, from the server's own plan,
+ * before anything runs.
  */
 export function TransferDialog({
   member,
@@ -113,6 +120,7 @@ export function TransferDialog({
   const [to, setTo] = useState<PickPerson | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<{ for: string; plan: ReportsPlan | null } | null>(null);
 
   useEffect(() => {
     if (!member) return;
@@ -124,6 +132,20 @@ export function TransferDialog({
     }, 0);
     return () => clearTimeout(t);
   }, [member]);
+
+  // Where the direct reports go if this person takes the work, asked again
+  // whenever the pick changes, so the line below is never about someone else.
+  const reportCount = summary && summary !== "error" ? summary.directReports.count : 0;
+  const memberId = member?.id ?? null;
+  const pickedId = to?.id ?? actingId;
+  useEffect(() => {
+    if (!memberId || reportCount === 0) return;
+    let live = true;
+    void apiFetch<{ reports: ReportsPlan }>(`/api/users/${memberId}/handover?to=${encodeURIComponent(pickedId)}`, { cache: "no-store" }).then((r) => {
+      if (live) setPlan({ for: `${memberId}:${pickedId}`, plan: r.ok ? r.data.reports : null });
+    });
+    return () => { live = false; };
+  }, [memberId, reportCount, pickedId]);
 
   if (!member) return null;
   const s = summary && summary !== "error" ? summary : null;
@@ -138,6 +160,12 @@ export function TransferDialog({
       ].filter(([n]) => (n as number) > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`)
     : [];
   const needsTransfer = !!s && ((s.openTasks.count + s.directReports.count + (s.containers?.count ?? 0)) > 0);
+  const recipientId = to?.id ?? actingId;
+  const needsPlan = !!s && s.directReports.count > 0;
+  // Keyed by the person leaving and the person picked, so a plan for anyone else never shows.
+  const planKey = `${member.id}:${recipientId}`;
+  const planNow = plan && plan.for === planKey ? plan.plan : null;
+  const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
 
   const run = async () => {
     setBusy(true);
@@ -165,7 +193,7 @@ export function TransferDialog({
       typed={mode === "remove" ? member.name : undefined}
       confirmLabel={mode === "remove" ? "Remove from workspace" : "Deactivate"}
       onConfirm={run}
-      busy={busy || summary === null}
+      busy={busy || summary === null || (needsPlan && plan?.for !== planKey)}
       error={error ?? (summary === "error" ? "Couldn't read what they hold. Try again." : null)}
     >
       <p>{mode === "remove" ? "They lose access at once and leave the directory." : "They lose access at once. Their record stays, and you can reactivate them."}</p>
@@ -185,6 +213,7 @@ export function TransferDialog({
                 />
               </Field>
             ) : null}
+            {reportsNote ? <p className="text-sm text-ink-2">{reportsNote}</p> : null}
           </>
         ) : (
           <p className="text-ink-2">They hold no open work, reports or Spaces.</p>

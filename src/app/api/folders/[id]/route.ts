@@ -22,7 +22,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveFolder, updateFolder, type UpdateFolderInput } from "@/lib/folder";
-import { moveToTrash } from "@/lib/trash";
+import { trashContainer } from "@/lib/access/container-trash";
 import { prisma } from "@/lib/prisma";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 import { PlacementConflict, checkFolderDelete, moveFolder } from "@/lib/access/node-placement";
@@ -141,8 +141,11 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const hard = new URL(req.url).searchParams.get("hard") === "1";
   if (hard) {
     // Recoverable delete: the Folder and its whole subtree as one Trash row.
+    // An Agent's delete goes only while nothing in the subtree holds a task
+    // (src/lib/access/container-trash.ts).
     try {
-      await moveToTrash("folder", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+      const trashed = await trashContainer("folder", id, c);
+      if (!trashed.ok) return NextResponse.json({ error: trashed.error, code: trashed.code }, { status: trashed.status });
     } catch (err) {
       // A branch that kept growing under its locks: nothing was written.
       if (err instanceof PlacementConflict) return NextResponse.json({ error: err.message }, { status: err.status });

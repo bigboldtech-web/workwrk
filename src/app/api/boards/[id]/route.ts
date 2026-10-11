@@ -10,7 +10,7 @@ import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { moveList } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { recordGeneralAccessChange } from "@/lib/access/grants";
-import { moveToTrash } from "@/lib/trash";
+import { trashContainer } from "@/lib/access/container-trash";
 import { prisma } from "@/lib/prisma";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -183,8 +183,11 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if ("error" in gate) return gate.error;
   const hard = new URL(req.url).searchParams.get("hard") === "1";
   if (hard) {
-    // Recoverable delete — snapshot the list (+ items/views/members) to Trash.
-    await moveToTrash("board", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+    // Recoverable delete: snapshot the list (+ items/views/members) to Trash.
+    // An Agent's delete goes only while the List holds no task
+    // (src/lib/access/container-trash.ts).
+    const trashed = await trashContainer("board", id, c);
+    if (!trashed.ok) return NextResponse.json({ error: trashed.error, code: trashed.code }, { status: trashed.status });
     return NextResponse.json({ ok: true });
   }
   const archived = await archiveBoard(id, c.userId);

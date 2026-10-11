@@ -95,6 +95,16 @@
 // steps, is never told as an invitation to an answer that can start none
 // (noBrowserNoOther, tooManyStepsNoOther).
 //
+// LAST POLISH OF PHASE 4. The person's own words at an approval reach every
+// line they read: the held toast while they have the browser
+// (BROWSER_PANEL_COPY.youHaveIt), a sensitive field (sensitiveStep), the
+// person read again (ACTION_ERRORS.personCannot). A failed start that used
+// the answer's one start never says "Try again" (mayOpen false). A browser
+// that closed while it was starting drew no card, and says the chat's line
+// (`noCard`, sessions.ts runEnds). An end that lost to another names the end
+// that won (recheckUnderLock's time cap), and a guard gone whose restarted
+// end lost reads the row again before saying it closed (goneAnswer).
+//
 // No runtime import from teammate-tools.ts, which imports this file: what
 // the handlers need loads on first use, as connector-tools.ts does, so Ask
 // AI keeps loading exactly what it loaded before.
@@ -104,7 +114,7 @@ import type { ActingPerson } from "./acting";
 import type { ComputerAgent } from "./browser-access";
 import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, storedCardInput, verdictSentence } from "./browser-rules";
 import type { HeldCode } from "./connector-rules";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
 import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
@@ -186,7 +196,8 @@ interface Opened {
 async function openFor(ctx: ToolContext, t: TeammateToolContext): Promise<Opened | Refusal> {
   const approval = t.trigger === "APPROVAL";
   const person = await (await acting()).actingPersonFor(ctx);
-  if (!person) return refused(ERR.personCant);
+  // At an approval the person reads their own words (last polish of Phase 4); the teammate keeps its sentence.
+  if (!person) return approval ? refused(ERR.personCant, { forPerson: ACTION_ERRORS.personCannot }) : refused(ERR.personCant);
   const agent = await (await browserAccess()).computerAgentById(ctx.orgId, t.agentId);
   // Paused or removed since its approval's own check: the card waits, as a paused teammate's does.
   if (!agent || !agent.browserTools) return approval ? refused(BROWSER_COPY.teammateOff, { held: "agent_paused" satisfies HeldCode }) : refused(BROWSER_COPY.teammateOff);
@@ -222,9 +233,15 @@ export { closedSentence };
  * Why a call is refused once it has the lock (recheckUnderLock, goneAnswer).
  * `closed`: the session ended, `endReason` by its end's reason when one is
  * on record (polish after review round 6 of Phase 4: an approval tells the
- * person in their own words, onBrowser).
+ * person in their own words, onBrowser). `forPerson` (last polish of Phase
+ * 4): an approval held while the person has the browser, in their words.
  */
-type Moved = { error: string; held?: HeldCode; closed?: true; endReason?: string | null };
+type Moved = { error: string; held?: HeldCode; closed?: true; endReason?: string | null; forPerson?: string };
+
+/** The person holding the browser: the teammate's sentence, and at an approval held, in the person's own words too (last polish of Phase 4). */
+function personHasMoved(approval: boolean, first: string): Moved {
+  return approval ? { error: BROWSER_COPY.personHasIt(first), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt } : { error: BROWSER_COPY.personHasIt(first) };
+}
 
 /**
  * The session read again under its browser's lock (see the file header).
@@ -233,7 +250,7 @@ type Moved = { error: string; held?: HeldCode; closed?: true; endReason?: string
  * at an approval.
  */
 export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { approval: boolean; runId: string | null; first: string; mayOpen?: boolean }): Promise<Moved | null> {
-  const personHas = (): Moved => (a.approval ? { error: BROWSER_COPY.personHasIt(a.first), held: "browser_busy" } : { error: BROWSER_COPY.personHasIt(a.first) });
+  const personHas = (): Moved => personHasMoved(a.approval, a.first);
   if (lb.handedOver === true) return personHas();
   const may = { mayOpen: a.approval ? false : a.mayOpen };
   const s = await sessions();
@@ -245,7 +262,13 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
   if (!a.approval && now.lastRunId !== a.runId) return { error: BROWSER_COPY.otherTurn };
   // The wait ran past its time cap: nothing more runs on it.
   if (Date.now() >= now.endsBy.getTime()) {
-    await s.endBrowserSession(rowId, "time_cap", s.SYSTEM_END).catch(() => false);
+    const mine = await s.endBrowserSession(rowId, "time_cap", s.SYSTEM_END).catch(() => false);
+    if (!mine) {
+      // Another end won (last polish of Phase 4): the person's Stop that
+      // landed meanwhile says itself, never "it reached its time limit".
+      const won = await s.sessionNow(rowId).catch(() => null);
+      if (won && (won.status === "ending" || won.status === "ended")) return { error: closedSentence(won.endReason, won.reservedMinutes, may), closed: true, endReason: won.endReason ?? null };
+    }
     return { error: closedSentence("time_cap", now.reservedMinutes, may), closed: true, endReason: "time_cap" };
   }
   return null;
@@ -256,14 +279,32 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
  * header): an end that landed while it waited says its own reason; only a
  * row still live has lost its guard, and ends "restarted" (Decision 7).
  * `mayOpen`: as recheckUnderLock's (review round 5 of Phase 4).
+ *
+ * THE ROW READ AGAIN WHEN THE RESTARTED END LOST (last polish of Phase 4).
+ * Before, every lost swap answered "closed", a row still starting or one
+ * whose end could not be written included. Now: gone, ending or ended says
+ * so in its end's words; still starting says so; the person holding it says
+ * that; any other open row, and one that can't be read, is not known to be
+ * closed, so it says the browser couldn't be reached, and at an approval
+ * (`approval`, `first`) the card waits (Decision 14), never fails.
  */
-export async function goneAnswer(rowId: string, o: { mayOpen?: boolean } = {}): Promise<Moved> {
+export async function goneAnswer(rowId: string, o: { mayOpen?: boolean; approval?: boolean; first?: string } = {}): Promise<Moved> {
   const s = await sessions();
+  const may = { mayOpen: o.mayOpen };
+  const approval = o.approval === true;
   const now = await s.sessionNow(rowId).catch(() => null);
-  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, now.reservedMinutes, o), closed: true, endReason: now.endReason ?? null };
-  if (await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false)) return { error: closedSentence("restarted", undefined, o), closed: true, endReason: "restarted" };
-  const after = await s.sessionNow(rowId).catch(() => null);
-  return { error: closedSentence(after?.endReason, after?.reservedMinutes, o), closed: true, endReason: after?.endReason ?? null };
+  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, now.reservedMinutes, may), closed: true, endReason: now.endReason ?? null };
+  if (await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false)) return { error: closedSentence("restarted", undefined, may), closed: true, endReason: "restarted" };
+  const after = await s.sessionNow(rowId).then(
+    (r) => ({ read: true as const, r }),
+    () => ({ read: false as const, r: null }),
+  );
+  if (after.read && (!after.r || after.r.status === "ending" || after.r.status === "ended")) {
+    return { error: closedSentence(after.r?.endReason, after.r?.reservedMinutes, may), closed: true, endReason: after.r?.endReason ?? null };
+  }
+  if (after.r?.status === "handed_over") return personHasMoved(approval, o.first ?? "");
+  const said = after.r?.status === "starting" ? BROWSER_COPY.starting : BROWSER_COPY.notReachedNow;
+  return approval ? { error: said, held: "retry_later" } : { error: said };
 }
 
 /**
@@ -277,14 +318,16 @@ export async function goneAnswer(rowId: string, o: { mayOpen?: boolean } = {}): 
  * (`ended` names it, so an answer that can start none says why: review
  * round 5 of Phase 4). A continue reads the answers it carries on too.
  */
-async function turnSession(o: Opened, opts: { opening?: boolean } = {}): Promise<{ rowId: string } | { none: true; ended?: { endReason: EndReason | null } } | Refusal> {
+async function turnSession(o: Opened, opts: { opening?: boolean } = {}): Promise<{ rowId: string } | { none: true; ended?: { endReason: EndReason | null; noCard?: true } } | Refusal> {
   const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, ...continuesOf(o), purpose: "model" });
   if (use.ok) return { rowId: use.row.id };
   if (use.reason === "none") return { none: true };
   const mayOpen = mayOpenAnother(o);
   if (use.reason === "ended") {
-    if (opts.opening !== true) return refused(closedSentence(use.endReason, use.minutes, { mayOpen }));
-    return endHolds(use.endReason) ? refused(closedForAnswerSentence(use.endReason)) : { none: true, ended: { endReason: use.endReason ?? null } };
+    // A browser that closed while it was starting drew no card (last polish of Phase 4): the chat's line, never the card's.
+    const noCard = use.noCard === true;
+    if (opts.opening !== true) return refused(closedSentence(use.endReason, use.minutes, { mayOpen, noCard }));
+    return endHolds(use.endReason) ? refused(closedForAnswerSentence(use.endReason, { noCard })) : { none: true, ended: { endReason: use.endReason ?? null, ...(noCard ? { noCard: true as const } : {}) } };
   }
   return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes, mayOpen }));
 }
@@ -369,7 +412,7 @@ async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Prom
   const who = { approval: o.approval, runId: o.t.runId ?? null, first: o.person.firstName, mayOpen };
   const answer = (m: Moved): Record<string, unknown> => {
     if (opts.closing === true && m.closed) return { ok: true, closed: false, note: BROWSER_COPY.notOpen };
-    if (m.held) return refused(m.error, { held: m.held });
+    if (m.held) return refused(m.error, { held: m.held, ...(o.approval && m.forPerson ? { forPerson: m.forPerson } : {}) });
     return o.approval && m.closed ? refused(m.error, { forPerson: closedForPersonLine(m.endReason) }) : refused(m.error);
   };
   const out = await (await live()).withBrowserLock(rowId, LOCK_WAIT_MS, async (lb) => {
@@ -384,7 +427,7 @@ async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Prom
     return fn(lb);
   });
   if ("busy" in out && out.busy === true) return o.approval ? refused(BROWSER_COPY.busyNow, { held: "retry_later" satisfies HeldCode }) : refused(BROWSER_COPY.busyNow);
-  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId, { mayOpen: o.approval ? false : mayOpen }));
+  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId, { mayOpen: o.approval ? false : mayOpen, approval: o.approval, first: o.person.firstName }));
   return out as Record<string, unknown>;
 }
 
@@ -394,7 +437,7 @@ async function modelCall<T extends z.ZodType>(
   schema: T,
   raw: Record<string, unknown>,
   opts: { opening?: boolean } = {},
-): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true; ended?: { endReason: EndReason | null } } } | Refusal> {
+): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true; ended?: { endReason: EndReason | null; noCard?: true } } } | Refusal> {
   const t = ctx.teammate;
   if (!t) return refused(ERR.teammateOnly);
   const parsed = schema.safeParse(raw);
@@ -423,7 +466,7 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
     // answer can start no other (review round 5 of Phase 4): the card's
     // reason, never linkOnly's "or the same page again", which no closed
     // browser opens, nor oneStart alone.
-    if (m.session.ended && (tainted || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true }));
+    if (m.session.ended && (tainted || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true, noCard: m.session.ended.noCard === true }));
     if (tainted) return refused(BROWSER_COPY.linkOnly);
     if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
     if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);
@@ -433,7 +476,17 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
       if (opened.reachedProvider) o.t.browser?.onStart();
       // Read again once the start was on record (review round 1 of Phase 4, sessions.ts startStillAllowed).
       if (opened.reason === "person_cant") return refused(ERR.personCant);
-      return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce, endReason: opened.endReason }));
+      // A start that reached the provider was this answer's one (Decision 22): its failure never says "Try again" (last polish of Phase 4).
+      return refused(
+        browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, {
+          otherName: opened.otherName,
+          retryAfter: opened.retryAfter,
+          atOnce: opened.atOnce,
+          endReason: opened.endReason,
+          mayOpen: opened.reachedProvider ? false : mayOpen,
+          noCard: opened.noCard === true,
+        }),
+      );
     }
     o.t.browser?.onStart();
     mayOpen = false;
@@ -573,7 +626,10 @@ function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["
     const noOther = { mayOpen: false };
     const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, browserSessionId: stored.browserSessionId, runId: null, purpose: "approval" });
     if (!use.ok) {
-      if (use.reason === "person_has_it") return refused(BROWSER_COPY.personHasIt(o.person.firstName), { held: "browser_busy" satisfies HeldCode });
+      if (use.reason === "person_has_it") {
+        const m = personHasMoved(true, o.person.firstName);
+        return refused(m.error, { held: "browser_busy" satisfies HeldCode, forPerson: m.forPerson });
+      }
       if (use.reason === "busy") return refused(BROWSER_COPY.starting, { held: "retry_later" satisfies HeldCode });
       const r = approvalRefusal(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes, endReason: use.endReason });
       return r.forPerson ? refused(r.error, { forPerson: r.forPerson }) : refused(r.error);

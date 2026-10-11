@@ -8,7 +8,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveSpace, canEditSpace, getSpaceForReader, spaceReparentRefusal, updateSpace } from "@/lib/space";
-import { moveToTrash } from "@/lib/trash";
+import { trashContainer } from "@/lib/access/container-trash";
 import { prisma } from "@/lib/prisma";
 import { recordGeneralAccessChange } from "@/lib/access/grants";
 
@@ -107,7 +107,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (hard) {
     try {
       // Recoverable delete — snapshot the whole Space subtree to Trash.
-      await moveToTrash("space", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
+      // An Agent's delete goes only while no List in it holds a task
+      // (src/lib/access/container-trash.ts).
+      const trashed = await trashContainer("space", id, c);
+      if (!trashed.ok) return NextResponse.json({ error: trashed.error, code: trashed.code }, { status: trashed.status });
       return NextResponse.json({ ok: true });
     } catch {
       return NextResponse.json({ error: "Couldn't delete this Space" }, { status: 400 });

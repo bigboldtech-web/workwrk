@@ -140,7 +140,7 @@ The task pipeline now emits real notifications:
 
 Each of these honors the recipient's `/settings/notifications` toggles, and you are never notified about your own action (assigning yourself work, or moving your own task, is not news).
 
-**Due-date notifications do not fire automatically yet.** The producer that sweeps tasks due today and overdue is written and ready, but nothing calls it on a schedule: no cron job covers board Items today. So a due date arriving does not, on its own, land in your Inbox. Until that job is wired, use My Wrk and the "Today & Overdue" filter for what is due.
+**Due today lands in your Inbox once a day.** Each morning a scheduled run finds the open tasks due that day and sends each task's assignee one notification, Task Due Today, that opens the task. It follows your Due soon switch on My settings > Notifications, and it stays quiet for a task in a Space, Folder or List you muted. Overdue tasks send no notification yet: the Overdue switch waits behind Show upcoming features until something sends it. For what is past due, use My Wrk and the "Today & Overdue" filter; managers also get a Monday email of their team's overdue tasks.
 
 A live **notifications bell** sits in the top right, next to the reminders bell. It carries an unread count badge, opens a popover of your recent notifications with **Mark all read**, and can raise a desktop notification when the count climbs while the tab is in the background, once you grant permission from the popover's **Enable desktop alerts** button.
 

@@ -39,7 +39,7 @@ import { reanchorUser } from "@/lib/access/workspace-anchor";
 import { cleanPersonName, inviteFailure, inviteOrgRole, inviteRoleLabel, joinLanding, spaceObjectRoleLabel } from "@/lib/access/join-invite";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { policyView } from "@/lib/auth/password-rules";
-import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor } from "@/lib/auth/invite-facts.server";
+import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor, managerOnAccept } from "@/lib/auth/invite-facts.server";
 import { appBaseUrl } from "@/lib/auth/send-verification";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
@@ -326,6 +326,8 @@ export async function POST(req: NextRequest) {
     if (pwError) return fail("password", 400, pwError, { field: "password" });
 
     const passwordHash = await bcrypt.hash(password, 12);
+    // Never under an Agent, or someone since removed (invite-facts managerOnAccept).
+    const managerId = await managerOnAccept(inv);
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -343,7 +345,7 @@ export async function POST(req: NextRequest) {
             orgRole: orgRoleOf({ accessLevel: inv.accessLevel }),
             departmentId: inv.departmentId,
             roleId: inv.roleId,
-            managerId: inv.managerId,
+            managerId,
             officeId: inv.officeId,
             phone: inv.phone ?? null,
             passwordChangedAt: new Date(),

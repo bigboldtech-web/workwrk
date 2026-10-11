@@ -8,7 +8,7 @@
 // field (Decision 18), and the guard's notes joined to the next answer.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
 import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runStepOn, scrollOn, withNotes } from "./page-calls";
 import type { LiveBrowser } from "./live";
@@ -397,7 +397,10 @@ describe("runStepOn (Decision 14)", () => {
       ["sensitive", BROWSER_COPY.sensitiveField("Max")],
     ] as const) {
       fake.act = { ok: false, code };
-      expect((await runStepOn(lb, "click", card(), "Max")).answer, code).toEqual({ error: said });
+      // Last polish of Phase 4: a sensitive field carries the person's own words too (never "Ask Max to take over" to Max).
+      const forPerson = code === "sensitive" ? { forPerson: "That's a password, code or payment field, which your teammate never uses, so nothing was done." } : {};
+      if (code === "sensitive") expect(BROWSER_PANEL_COPY.sensitiveStep).toBe(forPerson.forPerson);
+      expect((await runStepOn(lb, "click", card(), "Max")).answer, code).toEqual({ error: said, ...forPerson });
     }
   });
 });

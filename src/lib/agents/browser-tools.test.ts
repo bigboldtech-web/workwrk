@@ -74,7 +74,12 @@ vi.mock("@/lib/browser/sessions", () => ({
   releaseWaiting: async (rowId: unknown) => {
     h.released.push(rowId);
   },
-  sessionNow: async () => (h.nowQueue.length > 0 ? h.nowQueue.shift() : h.now),
+  sessionNow: async () => {
+    const n = h.nowQueue.length > 0 ? h.nowQueue.shift() : h.now;
+    // A read that fails (last polish of Phase 4): { throws: true }.
+    if (n && n.throws === true) throw new Error("The database didn't answer");
+    return n;
+  },
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
@@ -87,7 +92,7 @@ vi.mock("@/lib/browser/shots", () => ({
 
 import { BROWSER_TOOLS_DEFS, closedSentence } from "./browser-tools";
 import { BrowserLost } from "@/lib/browser/cdp-driver";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext, TeammateToolContext } from "./tools";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { fingerprintOf } from "@/lib/browser/snapshot";
@@ -419,7 +424,8 @@ describe("the acts (Decisions 12 and 14)", () => {
 
   it("wait, never failing, while the person has the browser, or when it lost the step before sending anything", async () => {
     h.uses = [{ ok: false, reason: "person_has_it" }];
-    expect(await run("click", stored(), approval())).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy" });
+    // Last polish of Phase 4: the held toast in the person's own words beside the teammate's.
+    expect(await run("click", stored(), approval())).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy", forPerson: "You have the browser now. Press Done or Give it back first." });
     h.uses = [{ ok: true, row: { id: "bs1" } }];
     live("http://shop.proof.test/checkout");
     f.act = { ok: false, code: "lost_before" };
@@ -462,7 +468,8 @@ describe("one start an answer counts the starts that failed (review of Phase 4 s
     h.uses = [{ ok: false, reason: "none" }];
     h.opened = { ok: false, reason: "provider_unavailable", reachedProvider: true };
     const c = ctx({ mayStart: () => marks.starts < 1 });
-    expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.providerUnavailable });
+    // Last polish of Phase 4: the answer's one start is used, so never "Try again in a moment".
+    expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.providerUnavailableNoOther });
     // Before: 0, so the answer could ask the provider again and again.
     expect(marks.starts).toBe(1);
     expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.oneStart });
@@ -581,7 +588,7 @@ describe("the session read again under the browser's lock (review round 1 of Pha
     // Before: the read ran on the page the person had, the open navigated under them, and the approved click went through.
     expect(read).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
     expect(open).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
-    expect(click).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy" });
+    expect(click).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy", forPerson: "You have the browser now. Press Done or Give it back first." });
     expect([f.navigate, f.clicks, h.steps]).toEqual([[], [], []]);
     expect(h.released).toEqual([]);
     expect(marks.webReads).toBe(0);
@@ -1115,6 +1122,218 @@ describe("polish after review round 6 of Phase 4", () => {
         expect(await run("read_page", {}, c), why).toEqual({ error: BROWSER_COPY.tooManyStepsNoOther });
       }
       expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.tooManySteps });
+    });
+  });
+});
+
+// Last polish of Phase 4: the sentences the person or the model read that
+// were untrue or in the wrong voice. The sessions module is mocked here; the
+// flows over the real one are in src/lib/browser/sessions.test.ts.
+describe("last polish of Phase 4", () => {
+  /** What the teammate is told, never shown to the person: "the person", a tool's name, a first name, what this answer may open. */
+  const MODEL_WORDS = /the person|open_page|close_browser|This answer|A teammate doesn't|Open a page|start a new one|Max/i;
+  const card = () => ({
+    browserSessionId: "bs1",
+    site: "shop.proof.test",
+    pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
+    page: "shop.proof.test/checkout",
+    element: "e1",
+    target: fingerprintOf(button),
+    role: "button",
+    name: "Place order",
+    warnings: ["buys"],
+    inForm: true,
+    shotId: null,
+    shot: null,
+  });
+  const approval = () => ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined });
+  const liveNow = (o: Row = {}) => ({ status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15, ...o });
+  const words = BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>;
+  /** The person's own lines, word for word (teammate-copy.ts BROWSER_PANEL_COPY), so a test never passes on a line that does not exist. */
+  const YOU_HAVE_IT = "You have the browser now. Press Done or Give it back first.";
+  const SENSITIVE_STEP = "That's a password, code or payment field, which your teammate never uses, so nothing was done.";
+
+  describe("the person holding the browser, at an approval (item 1)", () => {
+    it("holds the card with the person's own words on every path, the teammate's sentence kept beside them", async () => {
+      expect(BROWSER_PANEL_COPY.youHaveIt).toBe(YOU_HAVE_IT);
+      const held = { error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy", forPerson: YOU_HAVE_IT };
+      // The card's own session read: handed over.
+      h.uses = [{ ok: false, reason: "person_has_it" }];
+      expect(await run("click", card(), approval())).toEqual(held);
+      // Read fresh under the lock: the row handed over, then the flag Take over sets under the lock.
+      h.uses = [{ ok: true, row: { id: "bs1" } }];
+      live("http://shop.proof.test/checkout");
+      h.now = liveNow({ status: "handed_over" });
+      // Before: { error: "Max has the browser now. Wait until they finish.", held: "browser_busy" }, the toast Max read.
+      expect(await run("click", card(), approval())).toEqual(held);
+      h.now = liveNow();
+      lb.handedOver = true;
+      expect(await run("click", card(), approval())).toEqual(held);
+      expect(MODEL_WORDS.test(YOU_HAVE_IT)).toBe(false);
+      expect([f.clicks, h.steps, h.released]).toEqual([[], [], []]);
+    });
+
+    it("never hands the person's words to a turn's own call, which the model reads", async () => {
+      live("http://shop.proof.test/checkout");
+      lb.handedOver = true;
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    });
+  });
+
+  describe("an approval's other refusals in the teammate's words (item 2)", () => {
+    it("a password, code or payment field: the person's line, never 'Ask Max to take over'", async () => {
+      live("http://shop.proof.test/checkout");
+      f.act = { ok: false, code: "sensitive" };
+      const out = await run("click", card(), approval());
+      // Before: { error: "That's a password, code or payment field. Ask Max to take over and type it themselves." } on Max's card.
+      expect(out).toEqual({ error: BROWSER_COPY.sensitiveField("Max"), forPerson: SENSITIVE_STEP });
+      expect(MODEL_WORDS.test(SENSITIVE_STEP)).toBe(false);
+      // Decided, nothing sent: the session waits on it no more.
+      expect(h.released).toEqual(["bs1"]);
+    });
+
+    it("the person no longer someone a teammate may act for: the person's line at an approval, the teammate's alone in a turn", async () => {
+      h.person = null;
+      // Before: { error: "The person this teammate works for can't do that in this workspace now." } on the card.
+      expect(await run("click", card(), approval())).toEqual({ error: TEAMMATE_TOOL_ERRORS.personCant, forPerson: ACTION_ERRORS.personCannot });
+      expect(MODEL_WORDS.test(ACTION_ERRORS.personCannot)).toBe(false);
+      expect(await run("read_page", {})).toEqual({ error: TEAMMATE_TOOL_ERRORS.personCant });
+    });
+  });
+
+  describe("a failed start that used the answer's one start (item 3)", () => {
+    it("never says try again, and says how long the service is busy for a new message", async () => {
+      const cases: Array<[Row, string]> = [
+        [{ ok: false, reason: "provider_unavailable", reachedProvider: true }, BROWSER_COPY.providerUnavailableNoOther],
+        [{ ok: false, reason: "provider_busy", retryAfter: 20, reachedProvider: true }, BROWSER_COPY.providerBusyNoOther(20)],
+        [{ ok: false, reason: "start_failed", reachedProvider: true }, BROWSER_COPY.startFailedNoOther],
+      ];
+      for (const [failed, said] of cases) {
+        marks = { webReads: 0, starts: 0 };
+        h.uses = [{ ok: false, reason: "none" }];
+        h.opened = failed;
+        const out = await run("open_page", { url: "http://docs.proof.test/" });
+        // Before: "Try again in a moment." or "Try again in 20 seconds." though the answer's one start was used.
+        expect(out, String(failed.reason)).toEqual({ error: said });
+        expect(String(out.error)).not.toMatch(/Try again/);
+        expect(marks.starts, String(failed.reason)).toBe(1);
+      }
+      expect(BROWSER_COPY.providerBusyNoOther(20)).toContain("after 20 seconds");
+    });
+
+    it("keeps a refusal's own words when the provider was never asked", async () => {
+      h.uses = [{ ok: false, reason: "none" }];
+      h.opened = { ok: false, reason: "workspace_at_once", atOnce: 2 };
+      expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.workspaceAtOnce(2) });
+      expect(marks.starts).toBe(0);
+    });
+  });
+
+  describe("a browser that closed while it was starting drew no card (item 4)", () => {
+    it("every later call quotes the chat's line, never the browser card's", async () => {
+      h.uses = [{ ok: false, reason: "ended", endReason: "stopped", noCard: true }];
+      for (const tool of ["read_page", "find_on_page", "scroll_page", "show_page"] as const) {
+        // Before: 'The browser closed before this step, and the browser card says why: "You stopped it."'
+        expect(await run(tool, { text: "x", direction: "down" }), tool).toEqual({ error: BROWSER_COPY.closedNoCard(words.stopped) });
+      }
+      // Before: 'The browser closed in this answer, and the browser card says why: "You stopped it." ...'
+      expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.closedForAnswerNoCard(words.stopped) });
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, ctx({ tainted: true, mayStart: false }))).toEqual({ error: BROWSER_COPY.closedForAnswerNoCard(words.stopped) });
+      expect(h.openCalls).toEqual([]);
+    });
+
+    it("a start the end met on its way says the chat's line too, and one that went live keeps the card's", async () => {
+      h.uses = [{ ok: false, reason: "none" }];
+      h.opened = { ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true, noCard: true };
+      expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.closedForAnswerNoCard(words.stopped) });
+      // A browser that went live drew its card: its sentence as before.
+      h.opened = { ok: false, reason: "closed_in_answer", endReason: "stopped" };
+      expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.closedForAnswer(words.stopped) });
+      h.uses = [{ ok: false, reason: "ended", endReason: "stopped" }];
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.closedBecause(words.stopped) });
+    });
+  });
+
+  describe("an end that lost to another names the end that won (item 5)", () => {
+    it("the time cap's own end lost to a Stop: the Stop, to the model and to the person", async () => {
+      live("http://shop.proof.test/checkout");
+      h.endWins = false;
+      // Under the lock the row is past its time; by the time its own end is tried, the person's Stop has won.
+      h.nowQueue = [liveNow({ endsBy: new Date(Date.now() - 1000) })];
+      h.now = liveNow({ status: "ending", endReason: "stopped" });
+      // Before: "The browser closed: it reached its 15 minutes."
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.closedBecause(words.stopped) });
+      h.nowQueue = [liveNow({ endsBy: new Date(Date.now() - 1000) })];
+      // Before: the person read "...nothing was done. Closed: it reached its time limit." after they stopped it.
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.closedBecause(words.stopped), forPerson: BROWSER_PANEL_COPY.stepClosed(words.stopped) });
+      expect(h.ends.map((e) => e[1])).toEqual(["time_cap", "time_cap"]);
+      expect(f.clicks).toEqual([]);
+    });
+
+    it("keeps the time cap when its own end won, or when the row can't be read after", async () => {
+      live("http://shop.proof.test/checkout");
+      h.now = liveNow({ endsBy: new Date(Date.now() - 1000) });
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.timeCap(15) });
+      h.endWins = false;
+      h.nowQueue = [liveNow({ endsBy: new Date(Date.now() - 1000) })];
+      h.now = { throws: true };
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.timeCap(15) });
+    });
+  });
+
+  describe("a guard gone whose restarted end lost reads the row again (item 6)", () => {
+    const cases: Array<[string, Row, Row, Row]> = [
+      // [why, the row after the lost end, a turn's answer, an approval's answer]
+      ["still starting", liveNow({ status: "starting" }), { error: BROWSER_COPY.starting }, { error: BROWSER_COPY.starting, held: "retry_later" }],
+      ["open, its end not written", liveNow(), { error: BROWSER_COPY.notReachedNow }, { error: BROWSER_COPY.notReachedNow, held: "retry_later" }],
+      ["unreadable", { throws: true }, { error: BROWSER_COPY.notReachedNow }, { error: BROWSER_COPY.notReachedNow, held: "retry_later" }],
+      ["held by the person", liveNow({ status: "handed_over" }), { error: BROWSER_COPY.personHasIt("Max") }, { error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy", forPerson: YOU_HAVE_IT }],
+    ];
+
+    it("never says a browser still open closed, and an approval's card waits (Decision 14)", async () => {
+      for (const [why, after, turn, approved] of cases) {
+        resetLiveRegistryForTests();
+        h.endWins = false;
+        h.nowQueue = [liveNow()];
+        h.now = after;
+        // Before: "The browser closed. Open a page to start a new one.", and at an approval the card FAILED with "...nothing was done."
+        expect(await run("read_page", {}), why).toEqual(turn);
+        h.nowQueue = [liveNow()];
+        expect(await run("click", card(), approval()), why).toEqual(approved);
+        expect(h.released, why).toEqual([]);
+      }
+      expect(f.clicks).toEqual([]);
+    });
+
+    it("still says a row gone or ended closed, in its end's words", async () => {
+      resetLiveRegistryForTests();
+      h.endWins = false;
+      h.nowQueue = [liveNow()];
+      h.now = liveNow({ status: "ended", endReason: "stopped" });
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.closedBecause(words.stopped) });
+      h.nowQueue = [liveNow()];
+      h.now = null;
+      expect(await run("read_page", {}, ctx({ tainted: true }))).toEqual({ error: BROWSER_COPY.closedNoOther });
+      // Its own end won: restarted, as before.
+      h.endWins = true;
+      h.nowQueue = [];
+      h.now = liveNow();
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.restarted });
+    });
+  });
+
+  describe("a failed start told to a continue that started none itself (item 9)", () => {
+    it("says this answer can't start one, never another", async () => {
+      // A continue, tainted (Decision 15), told of the answer it carries on, whose start failed.
+      h.uses = [{ ok: false, reason: "ended", endReason: "start_failed" }];
+      const c = ctx({ tainted: true, trigger: "RESUME", browser: { tainted: true, mayStart: true, onStart: () => undefined, onWebRead: () => undefined, continues: ["run0"] } });
+      const out = await run("read_page", {}, c);
+      expect(out).toEqual({ error: BROWSER_COPY.startFailedNoOther });
+      // Before: "The browser didn't start. This answer can't start another one. ..." to a continue that started none.
+      expect(String(out.error)).not.toMatch(/another/);
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.startFailedNoOther });
+      expect(h.openCalls).toEqual([]);
     });
   });
 });

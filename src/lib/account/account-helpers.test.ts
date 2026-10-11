@@ -121,6 +121,28 @@ describe("the held Overdue switch", () => {
   });
 });
 
+// Docs-found fixes batch 2: Focused said it "keeps only what is aimed at
+// you", but it never touches the Talk and announcement switches, and it turns
+// kudos (aimed at you) off. The sentence now says exactly what it does.
+describe("the Focused preset's sentence", () => {
+  const page = readFileSync(join(__dirname, "..", "..", "app", "(dashboard)", "account", "notifications", "page.tsx"), "utf8");
+  const sentence = /id="notifications\.preset" description="([^"]+)"/.exec(page)?.[1] ?? "";
+
+  it("names the two switches Focused keeps on, and says Talk and announcements keep their own", () => {
+    const on = Object.entries(presetValues("focused")).filter(([, v]) => v).map(([k]) => k).sort();
+    expect(on).toEqual(["mentions", "task_assigned"]);
+    expect(sentence).toBe("Focused keeps two switches on, tasks assigned to you and mentions, and turns the other work and people switches off. Talk and announcements keep their own switches.");
+    expect(sentence).not.toMatch(/keeps only what is aimed at you/);
+  });
+
+  it("is true: no preset writes a Talk or announcement switch", () => {
+    for (const k of ["dm", "channel", "calls", "announcements"]) {
+      expect(presetValues("focused")).not.toHaveProperty(k);
+      expect(presetValues("default")).not.toHaveProperty(k);
+    }
+  });
+});
+
 describe("locale options", () => {
   it("maps a stored language to a wired catalog cookie, or nothing", () => {
     expect(localeCookieFor("de")).toBe("de");

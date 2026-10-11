@@ -188,6 +188,8 @@ export interface WhiteboardCanvasProps {
    * Mobile / narrow).
    */
   readOnly?: boolean;
+  /** The tool strip's Export as PNG button. Off for an Agent or a Guest (canvas-editor.tsx). Absent means on. */
+  canExport?: boolean;
 }
 
 /** Imperative handle — lets the page drop an AI-generated diagram onto the board. */
@@ -213,7 +215,7 @@ export interface WhiteboardCanvasHandle {
 }
 
 export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProps>(function WhiteboardCanvas(
-  { initialScene, onChange, loadEntities, onOpenEntity, readOnly = false },
+  { initialScene, onChange, loadEntities, onOpenEntity, readOnly = false, canExport = true },
   ref,
 ) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
@@ -2111,7 +2113,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         <button type="button" title="Redo (⌘⇧Z)" onClick={redo} disabled={hist.r === 0} style={toolBtn(false)}><Redo2 style={{ width: 16, height: 16 }} /></button>
         <button type="button" title="Delete (⌫)" onClick={deleteSelected} disabled={selectedIds.size === 0} style={toolBtn(false)}><Trash2 style={{ width: 16, height: 16 }} /></button>
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
-        <button type="button" title="Export as PNG" onClick={exportPng} style={toolBtn(false)}><Download style={{ width: 16, height: 16 }} /></button>
+        {canExport ? <button type="button" title="Export as PNG" onClick={exportPng} style={toolBtn(false)}><Download style={{ width: 16, height: 16 }} /></button> : null}
       </div>
 
       )}

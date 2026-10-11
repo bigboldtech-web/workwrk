@@ -305,13 +305,15 @@ export type OpenRefusal =
  * came of it (review of Phase 4 step 3), so it counts as the answer's one
  * start (Decision 22). `closed_in_answer` (review round 4 of Phase 4): a
  * browser of this person and teammate ended in this run for a reason that
- * holds (types.ts END_HOLDS), `endReason` naming it.
+ * holds (types.ts END_HOLDS), `endReason` naming it, and `noCard` (last
+ * polish of Phase 4) when that browser closed while it was starting, so no
+ * browser card was drawn (RunEnd).
  */
 export type OpenResult =
   | { ok: true; rowId: string }
-  | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true; endReason?: EndReason };
+  | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true; endReason?: EndReason; noCard?: true };
 
-type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number; endReason?: EndReason };
+type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number; endReason?: EndReason; noCard?: true };
 
 /**
  * The month's minutes, the day's sessions and the person's, for one
@@ -392,7 +394,7 @@ export async function openBrowserSession(a: {
     // read under the lock, so no end that holds slips between the caller's
     // read and this start. A later run is never refused for it (runEnds).
     const held = (await runEnds(tx, { organizationId: org, userId: user, agentId: agent.id, runId: a.runId, continues: a.continues }, new Date())).held;
-    if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}) };
+    if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}), ...(held.noCard ? { noCard: true as const } : {}) };
     const live = await liveCounts(tx, org);
     const month = await monthCounts(tx, org, user);
     if (month.personToday >= SESSION_CAPS.personPerDay) return { refusal: "person_today" };
@@ -435,7 +437,7 @@ export async function openBrowserSession(a: {
       const other = await prisma.agent.findUnique({ where: { id: counted.otherAgentId }, select: { name: true } }).catch(() => null);
       return { ok: false, reason: "other_teammate", ...(other?.name ? { otherName: other.name } : {}) };
     }
-    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}), ...(counted.endReason ? { endReason: counted.endReason } : {}) };
+    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}), ...(counted.endReason ? { endReason: counted.endReason } : {}), ...(counted.noCard ? { noCard: counted.noCard } : {}) };
   }
   const rowId = counted.id;
 
@@ -544,12 +546,14 @@ export async function openBrowserSession(a: {
  * (closed_in_answer, its reason), never "Try again in a moment"; any other
  * answers `otherwise` (start_failed, or since review round 5 of Phase 4 the
  * provider's own refusal when its call failed too). The provider was asked
- * either way.
+ * either way. The row never went live, so no browser card was drawn
+ * (`noCard`, last polish of Phase 4): only a start that went live writes
+ * the browser_started line the card is drawn in place of.
  */
 async function endedWhileStarting(rowId: string, otherwise: OpenResult = { ok: false, reason: "start_failed", reachedProvider: true }): Promise<OpenResult> {
   const now = await sessionNow(rowId).catch(() => null);
   const why = now?.endReason ?? null;
-  if (why && END_HOLDS[why] === true) return { ok: false, reason: "closed_in_answer", endReason: why, reachedProvider: true };
+  if (why && END_HOLDS[why] === true) return { ok: false, reason: "closed_in_answer", endReason: why, reachedProvider: true, noCard: true };
   return otherwise;
 }
 
@@ -589,10 +593,46 @@ const RUN_ENDS_MAX = 25;
  */
 export const RUN_ENDS_RUNS_MAX = 51;
 
-/** One ended browser as runEnds hands it on: its end's reason and its reserved minutes (for the time cap's sentence). */
-export type RunEnd = { rowId: string; endReason: EndReason | null; reservedMinutes: number };
+/**
+ * One ended browser as runEnds hands it on: its end's reason and its
+ * reserved minutes (for the time cap's sentence). `noCard` (last polish of
+ * Phase 4): its chat holds no browser_started line for it, so no browser
+ * card was drawn (drewCard), and no sentence may say "the browser card says
+ * why".
+ */
+export type RunEnd = { rowId: string; endReason: EndReason | null; reservedMinutes: number; noCard?: true };
 
-type EndsDb = Pick<Prisma.TransactionClient, "teammateBrowserSession" | "teammateBrowserStep" | "agentRun">;
+type EndsDb = Pick<Prisma.TransactionClient, "teammateBrowserSession" | "teammateBrowserStep" | "agentRun" | "chatMessage">;
+
+/** How long before a session's start its browser_started line may be stamped (drewCard): the database's clock and ours, which may differ a little. */
+const CARD_LINE_SKEW_MS = 5 * 60_000;
+
+/**
+ * Whether a session's browser card was drawn (last polish of Phase 4): the
+ * thread draws it in place of the session's browser_started line
+ * (teammate-thread.tsx), which openBrowserSession writes only once the
+ * start went live, while its run is open. A row that closed while it was
+ * starting (a Stop, the switch, a leave) has none. A row with no chat has
+ * no card. A read that fails says it was drawn: the sentence as it was.
+ */
+async function drewCard(db: Pick<Prisma.TransactionClient, "chatMessage">, row: { id: string; chatSessionId: string | null; startedAt: Date }): Promise<boolean> {
+  if (!row.chatSessionId) return false;
+  try {
+    const line = await db.chatMessage.findFirst({
+      where: {
+        sessionId: row.chatSessionId,
+        kind: "EVENT",
+        createdAt: { gte: new Date(row.startedAt.getTime() - CARD_LINE_SKEW_MS) },
+        AND: [{ meta: { path: ["event"], equals: "browser_started" } }, { meta: { path: ["browserSessionId"], equals: row.id } }],
+      },
+      select: { id: true },
+    });
+    return line !== null;
+  } catch (err) {
+    console.error(`[browser] a browser card's line was not read: ${errorLine(err)}`);
+    return true;
+  }
+}
 
 /** A session's end reason as runEnds reads it: a known EndReason, or null. */
 function knownEndReason(v: string | null | undefined): EndReason | null {
@@ -647,7 +687,7 @@ export async function runEnds(
       status: { in: ["ending", "ended"] },
       OR: [{ lastRunId: { in: own } }, { endReason: { in: [...HELD_END_REASONS] } }],
     },
-    select: { id: true, endReason: true, lastRunId: true, reservedMinutes: true, endedAt: true },
+    select: { id: true, endReason: true, lastRunId: true, reservedMinutes: true, endedAt: true, chatSessionId: true, startedAt: true },
     orderBy: { startedAt: "desc" },
     take: RUN_ENDS_MAX,
   });
@@ -675,10 +715,15 @@ export async function runEnds(
       }
     }
   }
-  const inRun = rows
-    .filter((r) => isMine(r) || (duringRun.has(r.id) && holds(reasonOf(r))))
-    .map((r): RunEnd => ({ rowId: r.id, endReason: reasonOf(r), reservedMinutes: r.reservedMinutes }));
-  return { last: inRun[0] ?? null, held: inRun.find((r) => holds(r.endReason)) ?? null };
+  const inRun = rows.filter((r) => isMine(r) || (duringRun.has(r.id) && holds(reasonOf(r))));
+  const lastRow = inRun[0] ?? null;
+  const heldRow = inRun.find((r) => holds(reasonOf(r))) ?? null;
+  // Whether each one named drew a card (last polish of Phase 4): read only for these, at most two.
+  const drawn = new Map<string, boolean>();
+  for (const r of [lastRow, heldRow]) if (r && !drawn.has(r.id)) drawn.set(r.id, await drewCard(db, r));
+  const told = (r: (typeof rows)[number] | null): RunEnd | null =>
+    r ? { rowId: r.id, endReason: reasonOf(r), reservedMinutes: r.reservedMinutes, ...(drawn.get(r.id) === false ? { noCard: true as const } : {}) } : null;
+  return { last: told(lastRow), held: told(heldRow) };
 }
 
 // ── Using a session ─────────────────────────────────────────────────
@@ -690,12 +735,14 @@ export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "p
  * sentence that says so (step 3). `endReason`: a session found ended, or
  * ending, as this call read it, by its end's own reason (review round 1 of
  * Phase 4), so the call says why and never "WorkwrK restarted" unless it did.
+ * `noCard` (last polish of Phase 4): this run's browser closed while it was
+ * starting, so no browser card was drawn (RunEnd).
  */
-export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number; endReason?: EndReason | null };
+export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number; endReason?: EndReason | null; noCard?: true };
 
-/** A session found ended, with its end's reason when it has one (UseResult), and its minutes when it was the time cap. */
-function endedBy(endReason: EndReason | null, minutes?: number): UseResult {
-  return { ok: false, reason: "ended", ...(endReason ? { endReason } : {}), ...(endReason === "time_cap" && minutes && minutes > 0 ? { minutes } : {}) };
+/** A session found ended, with its end's reason when it has one (UseResult), its minutes when it was the time cap, and `noCard` when it drew no card. */
+function endedBy(endReason: EndReason | null, minutes?: number, noCard?: true): UseResult {
+  return { ok: false, reason: "ended", ...(endReason ? { endReason } : {}), ...(endReason === "time_cap" && minutes && minutes > 0 ? { minutes } : {}), ...(noCard ? { noCard } : {}) };
 }
 
 /** Whether another run of the person's still holds the browser: open, and started within staleRunMs. */
@@ -742,7 +789,7 @@ export async function useBrowserSession(a: {
     if (!row) {
       const ended = await runEnds(prisma, { organizationId: a.person.organizationId, userId: a.person.userId, agentId: a.agentId, runId: a.runId, continues: a.continues }, now);
       const end = ended.held ?? ended.last;
-      return end ? endedBy(end.endReason, end.reservedMinutes) : { ok: false, reason: "none" };
+      return end ? endedBy(end.endReason, end.reservedMinutes, end.noCard) : { ok: false, reason: "none" };
     }
     if (row.agentId !== a.agentId) {
       const other = await prisma.agent.findUnique({ where: { id: row.agentId }, select: { name: true } }).catch(() => null);
@@ -776,8 +823,11 @@ export async function useBrowserSession(a: {
     return endedBy(after?.endReason ?? null);
   }
   if (now.getTime() >= row.endsBy.getTime()) {
-    await endBrowserSession(row.id, "time_cap", SYSTEM_END);
-    return { ok: false, reason: "time_cap", minutes: row.reservedMinutes };
+    if (await endBrowserSession(row.id, "time_cap", SYSTEM_END)) return { ok: false, reason: "time_cap", minutes: row.reservedMinutes };
+    // Another end won since the read (last polish of Phase 4): the person's
+    // Stop says itself, never "it reached its time limit".
+    const after = await sessionNow(row.id);
+    return endedBy(after?.endReason ?? null, after?.reservedMinutes);
   }
   const allowed = a.purpose === "take_over" ? ["live", "waiting", "handed_over"] : ["live", "waiting"];
   const touched = await prisma.teammateBrowserSession.updateMany({

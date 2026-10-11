@@ -30,6 +30,8 @@ type Tables = {
   actions: Row[];
   notifications: Row[];
   activity: Row[];
+  /** Chat lines (ChatMessage): a browser's browser_started line, which its card is drawn in place of (last polish of Phase 4). */
+  messages: Row[];
 };
 
 export const bdb = {
@@ -46,7 +48,7 @@ export const bdb = {
 };
 
 function emptyTables(): Tables {
-  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [] };
+  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [] };
 }
 
 export function resetBrowserDb(): void {
@@ -74,6 +76,7 @@ const MODEL_TABLE: Record<string, keyof Tables> = {
   agentAction: "actions",
   notification: "notifications",
   activityLog: "activity",
+  chatMessage: "messages",
 };
 
 const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
@@ -97,6 +100,7 @@ const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
   }),
   steps: () => ({ id: nextId("st"), code: null, actionId: null, shotId: null, at: new Date() }),
   activity: () => ({ id: nextId("al"), createdAt: new Date() }),
+  messages: () => ({ id: nextId("cm"), role: "SYSTEM", createdAt: new Date() }),
 };
 
 // ── Seeds ───────────────────────────────────────────────────────────
@@ -125,7 +129,14 @@ export function seedUser(o: Row = {}): Row {
   return row;
 }
 
+/**
+ * A session row. One seeded past starting went live, so its chat holds the
+ * browser_started line its card is drawn in place of (sessions.ts drewCard,
+ * last polish of Phase 4); `drewCard: false` seeds one that closed while it
+ * was starting, which has none.
+ */
 export function seedSession(o: Row = {}): Row {
+  const { drewCard, ...given } = o;
   const now = Date.now();
   const row = {
     ...DEFAULTS.sessions!(),
@@ -141,9 +152,25 @@ export function seedSession(o: Row = {}): Row {
     startedAt: new Date(now - 60_000),
     endsBy: new Date(now + 14 * 60_000),
     lastActiveAt: new Date(now - 30_000),
-    ...o,
+    ...given,
   };
   bdb.t.sessions.push(row);
+  if (drewCard !== false && row.status !== "starting" && row.chatSessionId) seedCardLine(row);
+  return row;
+}
+
+/** A session's browser_started line, as openBrowserSession writes it once the start went live (actions.ts writeEventLine's row). */
+export function seedCardLine(session: Row, o: Row = {}): Row {
+  const row = {
+    ...DEFAULTS.messages!(),
+    sessionId: session.chatSessionId,
+    kind: "EVENT",
+    content: "Opened a browser for you.",
+    meta: { event: "browser_started", agentId: session.agentId, browserSessionId: session.id },
+    createdAt: session.startedAt instanceof Date ? new Date((session.startedAt as Date).getTime() + 1000) : new Date(),
+    ...o,
+  };
+  bdb.t.messages.push(row);
   return row;
 }
 

@@ -24,6 +24,8 @@ import { canContributeSpace, canEditSpace, getSpaceForReader, uniqueSpaceSlug } 
 import { duplicateBoard } from "@/lib/board";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
+import { AGENT_NO_SPACES } from "@/lib/access/labels";
+import { isAgentOf } from "@/lib/access/org-role";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!(await canEditSpace(id, u.id, accessLevel))) {
     return NextResponse.json({ error: "You need Full access to this Space to duplicate it." }, { status: 403 });
   }
+  // A copy is a new Space, and an Agent never creates one (AGENT_TIER_BLURB;
+  // the engine's create_space verb), even holding Full access on this one.
+  if (isAgentOf(accessLevel)) return NextResponse.json({ error: AGENT_NO_SPACES }, { status: 403 });
   // Full access on the Space duplicates it, as it always has (the placement
   // rule's P7: nothing that works for a Space OWNER or ADMIN changes). A Space
   // OWNER or ADMIN who is not a manager has always copied their own Space;
