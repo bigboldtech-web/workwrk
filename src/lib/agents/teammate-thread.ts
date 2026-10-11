@@ -84,6 +84,10 @@ export const TEAMMATE_EVENT_KINDS = [
   "delegate_waiting",
   "talk_asked",
   "automation_asked",
+  // Phase 4 (docs/plans/ai-teammates-phase4.md): a browser opened for this
+  // chat, and closed (meta.browserSessionId names it; step 4 draws its card).
+  "browser_started",
+  "browser_ended",
 ] as const;
 
 /** What an EVENT line is about (meta.event). */
@@ -174,6 +178,8 @@ export type TeammateMessageView =
       agentId?: string | null;
       replyTo?: string;
       link?: EventLink | null;
+      /** The browser a browser_started or browser_ended line is about (Phase 4). */
+      browserSessionId?: string;
     })
   | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string; agentId?: string });
 
@@ -517,6 +523,9 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
       const agentId = str(meta?.agentId);
       const replyTo = str(meta?.replyTo);
       const link = linkFrom(meta?.link);
+      const browser = str(meta?.browserSessionId);
+      // A ref, at most 200 characters, as every id a line carries.
+      const browserSessionId = browser && browser.length <= 200 ? browser : null;
       return {
         ...base,
         kind: "event",
@@ -526,6 +535,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
         ...(agentId ? { agentId } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(link ? { link } : {}),
+        ...(browserSessionId ? { browserSessionId } : {}),
       };
     }
     case "APPROVAL": {

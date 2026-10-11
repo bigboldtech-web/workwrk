@@ -315,7 +315,9 @@ vi.mock("@/lib/prisma", () => {
 
 import { prisma } from "@/lib/prisma";
 import {
+  BROWSER_SESSION_BATCH,
   ERASURE_BATCH,
+  ERASURE_PARTS,
   ERASURE_OVERDUE_MS,
   ERASURE_SETTLED_MS,
   ERASURE_BRIDGE_PER_TICK,
@@ -541,6 +543,73 @@ describe("blankTeammateHistory", () => {
     st.log = [];
     expect(await blankTeammateHistory("u1", (st.clock as number) - 1)).toEqual({ done: false, rows: 0, part: "chats", cursor: null });
     expect(st.log).toEqual([]);
+  });
+});
+
+// Phase 4 (docs/plans/ai-teammates-phase4.md, the reconciliation note): the
+// person's teammates' browser steps and pictures go with the erasure's pass,
+// read through their sessions a batch at a time, never inside its short
+// transaction; the session rows stay (their minutes are the workspace's).
+describe("the person's browser steps and pictures (Phase 4)", () => {
+  function seedBrowsing(u: string, sessions: number) {
+    (st.tables.user ??= []).push({ id: u, deletedAt: t(-3 * HOUR), ...ANON(u) });
+    for (let i = 0; i < sessions; i++) {
+      const id = `${u}-bs${String(i).padStart(2, "0")}`;
+      (st.tables.teammateBrowserSession ??= []).push({ id, userId: u, startedAt: t(i), currentSite: "shop.proof.test", status: "ended", reservedMinutes: 15 });
+      (st.tables.teammateBrowserStep ??= []).push(
+        { id: `${id}-st1`, browserSessionId: id, userId: u, seq: 1, kind: "open", site: "shop.proof.test" },
+        { id: `${id}-st2`, browserSessionId: id, userId: u, seq: 2, kind: "click", site: "shop.proof.test" },
+      );
+      (st.tables.teammateBrowserShot ??= []).push({ id: `${id}-sh`, browserSessionId: id, userId: u, organizationId: "org1" });
+    }
+  }
+
+  it("deletes every step and picture of theirs and blanks their sessions' hosts, a batch of sessions at a time, touching nobody else's", async () => {
+    seedBrowsing("u1", BROWSER_SESSION_BATCH * 2 + 3);
+    seedBrowsing("u2", 2);
+    const pass = await blankTeammateHistory("u1", FAR());
+    expect(pass.done).toBe(true);
+    expect(ofTable("teammateBrowserStep", (r) => r.userId === "u1")).toEqual([]);
+    expect(ofTable("teammateBrowserShot", (r) => r.userId === "u1")).toEqual([]);
+    // The rows stay: their minutes are the workspace's month count.
+    expect(ofTable("teammateBrowserSession", (r) => r.userId === "u1")).toHaveLength(BROWSER_SESSION_BATCH * 2 + 3);
+    expect(ofTable("teammateBrowserSession", (r) => r.userId === "u1" && r.currentSite !== null)).toEqual([]);
+    // Nobody else's.
+    expect(ofTable("teammateBrowserStep", (r) => r.userId === "u2")).toHaveLength(4);
+    expect(ofTable("teammateBrowserShot", (r) => r.userId === "u2")).toHaveLength(2);
+    expect(ofTable("teammateBrowserSession", (r) => r.userId === "u2" && r.currentSite === "shop.proof.test")).toHaveLength(2);
+    // Read in batches, each after the last.
+    const reads = st.log.filter((l) => l.model === "teammateBrowserSession" && l.op === "findMany");
+    expect(reads.map((r) => r.take)).toEqual([BROWSER_SESSION_BATCH, BROWSER_SESSION_BATCH, BROWSER_SESSION_BATCH]);
+    expect(reads.flatMap((r) => r.returned)).toHaveLength(BROWSER_SESSION_BATCH * 2 + 3);
+    expect(new Set(reads.flatMap((r) => r.returned)).size).toBe(BROWSER_SESSION_BATCH * 2 + 3);
+  });
+
+  it("runs after the requests, before the runs, and a pass stopped in it goes on from its place", async () => {
+    expect(ERASURE_PARTS.indexOf("browser")).toBe(ERASURE_PARTS.indexOf("requests") + 1);
+    seedBrowsing("u1", BROWSER_SESSION_BATCH + 4);
+    const from = { part: "browser" as const, cursor: { at: t(BROWSER_SESSION_BATCH - 1).toISOString(), id: `u1-bs${String(BROWSER_SESSION_BATCH - 1).padStart(2, "0")}` } };
+    await blankTeammateHistory("u1", FAR(), from);
+    // Only the sessions after the place were read.
+    expect(ofTable("teammateBrowserStep", (r) => r.userId === "u1")).toHaveLength(BROWSER_SESSION_BATCH * 2);
+  });
+
+  it("is the part list the database's CHECK holds, replaced under its own name and guarded by its definition", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const sql = readFileSync(path.join(process.cwd(), "prisma/sql/2026-10-11-ai-teammates-phase4-erasure.sql"), "utf8").replace(/--[^\n]*/g, "");
+    const list = /"part" IN \(([^)]*)\)/.exec(sql)?.[1] ?? "";
+    expect([...list.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual([...ERASURE_PARTS]);
+    // Under round 6's own name, so round 6's file (run first on every deploy) never adds the old list back.
+    expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS "AccountErasure_values_check"/);
+    expect(sql).toMatch(/ADD CONSTRAINT "AccountErasure_values_check" CHECK/);
+    expect(sql).toMatch(/pg_get_constraintdef\(oid\) LIKE '%''browser''%'/);
+    expect(sql.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
+    // Listed after the Phase 4 tables' file (read as text: the deploy script runs on import).
+    const manifest = readFileSync(path.join(process.cwd(), "scripts/deploy-migrations.mjs"), "utf8");
+    const at = (name: string) => manifest.indexOf(`"${name}",`);
+    expect(at("2026-10-11-ai-teammates-phase4-erasure.sql")).toBeGreaterThan(at("2026-10-11-ai-teammates-phase4.sql"));
+    expect(at("2026-10-11-ai-teammates-phase4.sql")).toBeGreaterThan(at("2026-10-11-ai-teammates-phase3-round6.sql"));
   });
 });
 

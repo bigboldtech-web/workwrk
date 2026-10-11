@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { decryptSecret, decryptSecretWith, encryptSecret, encryptSecretWith } from "./secrets-crypto";
+import { decryptBytes, decryptSecret, decryptSecretWith, encryptBytes, encryptSecret, encryptSecretWith } from "./secrets-crypto";
 
 const OLD = "a".repeat(64);
 const NEW = "b".repeat(64);
@@ -41,5 +41,25 @@ describe("secrets-crypto", () => {
     const fresh = encryptSecret("sk-ant-new-value");
     expect(decryptSecretWith(fresh, NEW)).toBe("sk-ant-new-value");
     expect(() => decryptSecretWith(fresh, OLD)).toThrow();
+  });
+
+  // The computer for AI teammates' pictures (docs/plans/ai-teammates-phase4.md Decision 23).
+  it("seals bytes as wks1, iv, tag and ciphertext, and opens them with the previous key during a rotation", () => {
+    process.env.SECRETS_ENCRYPTION_KEY = OLD;
+    const plain = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    const sealed = encryptBytes(plain);
+    expect(sealed.subarray(0, 4).toString("ascii")).toBe("wks1");
+    expect(sealed.length).toBe(4 + 12 + 16 + plain.length);
+    expect(sealed.includes(Buffer.from([0xff, 0xd8]))).toBe(false);
+    expect(decryptBytes(sealed)).toEqual(plain);
+    process.env.SECRETS_ENCRYPTION_KEY = NEW;
+    delete process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS;
+    expect(() => decryptBytes(sealed)).toThrow();
+    process.env.SECRETS_ENCRYPTION_KEY_PREVIOUS = OLD;
+    expect(decryptBytes(sealed)).toEqual(plain);
+    const tampered = Buffer.from(sealed);
+    tampered[tampered.length - 1] ^= 1;
+    expect(() => decryptBytes(tampered)).toThrow();
+    expect(() => encryptBytes(Buffer.alloc(0))).toThrow();
   });
 });

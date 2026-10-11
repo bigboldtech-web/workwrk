@@ -26,7 +26,10 @@ const mocks = vi.hoisted(() => ({
   claimTeammateTurn: vi.fn(),
   runTeammateTurn: vi.fn(),
   resolveActingPerson: vi.fn(),
+  endTeammateBrowserSessions: vi.fn<(agentId: string) => Promise<number>>(async () => 0),
 }));
+// Phase 4 (Decision 6): a teammate paused, removed or losing its browser tools closes its browsers.
+vi.mock("@/lib/browser/sessions", () => ({ endTeammateBrowserSessions: mocks.endTeammateBrowserSessions }));
 vi.mock("@/lib/agents/audit", () => ({ auditAgent: async (a: { action: string; metadata?: Record<string, unknown> }) => void mocks.audits.push(a) }));
 vi.mock("@/lib/agents/actions", () => ({
   cancelPendingActionsOf: mocks.cancelPendingActionsOf,
@@ -348,6 +351,37 @@ describe("removing, pausing and adding back", () => {
   // Phase 4 step 1: the browser tools are tools now, and no page draws their
   // rows yet. A stored one is read as stored, so no save of another tool
   // drops it, and none is offered while the computer is off.
+  it("closes a teammate's browsers when it is paused or removed, never when it is turned on or edited (Phase 4)", async () => {
+    const agent = seedShared({ toolNames: ["open_page", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    mocks.endTeammateBrowserSessions.mockClear();
+    await call(patchTeammate(jsonRequest("PATCH", { job: "Reads the docs." }), slugged(SHARED_SLUG)));
+    expect(mocks.endTeammateBrowserSessions).not.toHaveBeenCalled();
+    await call(patchTeammate(jsonRequest("PATCH", { status: "DISABLED" }), slugged(SHARED_SLUG)));
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledWith(agent.id);
+    mocks.endTeammateBrowserSessions.mockClear();
+    await call(patchTeammate(jsonRequest("PATCH", { status: "ENABLED" }), slugged(SHARED_SLUG)));
+    expect(mocks.endTeammateBrowserSessions).not.toHaveBeenCalled();
+    // A failure there never fails the route: the sweep ends what it missed.
+    mocks.endTeammateBrowserSessions.mockRejectedValueOnce(new Error("provider down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await call(deleteTeammate(jsonRequest("DELETE"), slugged(SHARED_SLUG)))).status).toBe(200);
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledWith(agent.id);
+  });
+
+  it("closes a teammate's browsers when its last browser tool is taken away, never for a tick of another tool (Phase 4)", async () => {
+    const agent = seedShared({ toolNames: ["open_page", "read_page", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    mocks.endTeammateBrowserSessions.mockClear();
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", true)), slugged(SHARED_SLUG)));
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("open_page", false)), slugged(SHARED_SLUG)));
+    expect(mocks.endTeammateBrowserSessions).not.toHaveBeenCalled();
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("read_page", false)), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["create_task", "search_tasks"]);
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledWith(agent.id);
+  });
+
   it("keeps a stored browser tool through a tick of another tool and a whole list, and never shows it while the computer is off (Phase 4)", async () => {
     seedShared({ toolNames: ["open_page", "search_tasks"] });
     db.viewer = PEOPLE.admin;

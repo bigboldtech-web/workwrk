@@ -103,6 +103,8 @@ export type AgentChangedEvent = {
   sessionId?: string;
   /** A Run now's turn ended (legacy-schedules.ts finishRunNow): the Workspace agents page offers Run now again (review round 9). */
   runNowDone?: true;
+  /** A browser of this chat changed (docs/plans/ai-teammates-phase4.md): its card re-reads it. */
+  browserSessionId?: string;
 };
 
 /**

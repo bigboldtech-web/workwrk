@@ -258,6 +258,8 @@ export interface EventLine {
   replyTo?: string | null;
   /** What its Open goes to (teammate-thread.ts EventLink; the address is built when read). */
   link?: EventLink | null;
+  /** The browser a browser_started or browser_ended line is about (Phase 4). */
+  browserSessionId?: string | null;
 }
 
 /**
@@ -284,6 +286,7 @@ export async function writeEventLine(
   if (line.agentId) meta.agentId = line.agentId;
   if (line.replyTo) meta.replyTo = line.replyTo;
   if (line.link) meta.link = line.link;
+  if (line.browserSessionId) meta.browserSessionId = line.browserSessionId;
   const data = { sessionId, role: "SYSTEM" as const, kind: "EVENT", content: line.text, meta: json(meta) };
   const select = { id: true, role: true, content: true, kind: true, meta: true, createdAt: true } as const;
   const open = opts.whileOpen;

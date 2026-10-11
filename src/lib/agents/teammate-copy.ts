@@ -1341,6 +1341,191 @@ export const BROWSER_COPY = {
   linksLeftOut: (n: number) => (n === 1 ? "1 link whose address carries a code, a token or a key isn't listed." : `${n} links whose addresses carry a code, a token or a key aren't listed.`),
   /** Lists whose options were left out to keep the read within its size (review of Phase 4 step 1). */
   optionsLeftOut: (n: number) => `The options of ${n} ${n === 1 ? "list" : "lists"} aren't shown.`,
+  // Step 2: what the guard saw between two calls (a result's note) and what
+  // ending a session or a take over writes. Step 3 brings the rest.
+  /** A page sent the browser to a host the guard refused, by a redirect or its own script. */
+  redirectRefused: (s: string) => `That page sent the browser on to ${s}, which isn't allowed, so it stopped there.`,
+  /** A page served from a private address was closed before anything was read. */
+  privateAddress: "That site led to a private address, so the page was closed.",
+  /** A page opened a new tab, which was closed while it was held. */
+  popupClosed: (s: string) => `The page tried to open a new tab on ${s}. It was closed; open it here if it's a link you read.`,
+  dialogClosed: "The page showed a message box, which was closed without answering it.",
+  downloadsOff: "Downloads are off: teammates can't download files yet.",
+  uploadsOff: "Uploads are off: teammates can't upload files yet.",
+  /** A card of a session that ended before the person decided it. */
+  cancelledClosed: (why: string) => `Cancelled: the browser closed before you decided, so nothing was done. ${why}`,
+  takeOverDoneText: "You took over and finished.",
+  takeOverStoppedText: "You took over and gave it back.",
+  takeOverDoneNote: (f: string) => `${f} finished the step in the browser. Nothing they typed or saw is shared with you. Read the page again before you carry on.`,
+  takeOverStoppedNote: (f: string) => `${f} gave the browser back without finishing. Ask them what to do next.`,
+} as const;
+
+/**
+ * Settings, Apps & modules, the computer for AI teammates
+ * (docs/plans/ai-teammates-phase4.md step 2; the section itself is step 4).
+ */
+export const BROWSER_POLICY_COPY = {
+  title: "Computer for AI teammates",
+  intro:
+    "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs at our browser provider for one chat, and is deleted when it closes.",
+  regionLine: (r: string) => `Browsers run in ${r}.`,
+  switchLabel: "Let teammates use a web browser",
+  planNote: "The computer for AI teammates comes with Growth and above.",
+  trialNote: "The computer for AI teammates comes with a paid plan, Growth or above.",
+  billingLink: "Plan & billing",
+  allowHeading: "Sites teammates may open",
+  allowHint:
+    "Only these sites, and of them only the ones each teammate's managers pick. Add a site like example.com, which includes www. Add *.example.com for every part of it. Pages still load their pictures and scripts from wherever they do, as in your own browser.",
+  blockHeading: "Blocked sites",
+  blockHint: "Never opened, whatever else is allowed.",
+  addSite: "Add site",
+  addPlaceholder: "example.com",
+  remove: (s: string) => `Remove ${s}`,
+  /** Why a site entry was refused (browser/sites.ts SiteProblem). */
+  SITE_PROBLEM_WORDS: {
+    ip: "Addresses made of numbers aren't allowed. Use the site's name.",
+    internal: "Private and internal addresses are never allowed.",
+    app: "WorkwrK's own pages are never allowed.",
+    port: "Only the usual web port is allowed.",
+    credentials: "A site can't carry a user name or password.",
+    wildcard: "A star needs a site after it, like *.example.com.",
+    invalid: "That isn't a site name.",
+    too_long: "That name is too long.",
+  },
+  tooMany: (n: number) => `A list can hold at most ${n} sites.`,
+  usageHeading: "This month",
+  minutes: (u: number, c: number) => `${u} of ${c} browser minutes used.`,
+  atOnce: (n: number, c: number) => `${n} of ${c} running now.`,
+  today: (n: number, c: number) => `${n} of ${c} sessions today.`,
+  cost: (amount: string) => `About ${amount} of browser time this month.`,
+  stopAll: "Stop every browser",
+  stopAllTitle: "Stop every browser in this workspace?",
+  stopAllBody: "Every teammate browser here closes at once, and steps waiting for approval in them are cancelled. Nothing they did is undone. People can start again while the computer is on.",
+  stoppedAll: (n: number) => `Stopped ${count(n, "browser", "browsers")}.`,
+  turnOffTitle: "Turn off the computer for AI teammates?",
+  turnOffBody: "Every teammate browser here closes at once, and steps waiting for approval in them are cancelled.",
+  turnOff: "Turn off",
+  auditChanged: (on: boolean) => (on ? "Turned on the computer for AI teammates" : "Turned off the computer for AI teammates"),
+  auditSite: (list: "allow" | "block", site: string, added: boolean) =>
+    `${added ? "Added" : "Removed"} ${site} ${added ? "to" : "from"} the ${list === "allow" ? "sites teammates may open" : "blocked sites"}`,
+  /** The admin's own audit row for Stop every browser (step 2: the spec names its type, not its words). */
+  auditStoppedAll: (n: number) => `Stopped every teammate browser in the workspace: ${count(n, "browser", "browsers")}`,
+  saved: "Saved",
+  saveFailed: "Couldn't save that. Try again.",
+  confirmNeeded: "Confirm to stop every browser.",
+} as const;
+
+/** A teammate's own allowed sites (docs/plans/ai-teammates-phase4.md step 2; the drawer's section is step 4). */
+export const BROWSER_SITES_COPY = {
+  heading: "Allowed sites",
+  hint: "The sites this teammate may open, from the ones an Owner or Admin allowed for the workspace.",
+  none: "An Owner or Admin hasn't allowed any site in this workspace yet.",
+  readOnly: "Only this teammate's managers can change these.",
+  notInWorkspace: (s: string) => `${s} isn't allowed in the workspace any more.`,
+  blocked: (s: string) => `${s} is blocked in the workspace.`,
+  auditChanged: (name: string, site: string, added: boolean) => `${added ? "Let" : "Stopped"} ${name} ${added ? "open" : "opening"} ${site}`,
+  saveFailed: "Couldn't save that. Try again.",
+} as const;
+
+/** The /api/teammate-browser routes' refusals (docs/plans/ai-teammates-phase4.md step 2). */
+export const BROWSER_ROUTE_ERRORS = {
+  notFound: "That browser isn't there.",
+  ended: "That browser is closed.",
+  notHandedOver: "You don't have the browser now.",
+  cardDecided: "That request was already decided.",
+  busy: "The browser is busy with a step. Try again in a moment.",
+  notInWorkspaceList: (s: string) => `${s} isn't one of the sites the workspace allows.`,
+  blocked: (s: string) => `${s} is blocked in this workspace.`,
+  notConfigured: "The computer for AI teammates isn't set up on this WorkwrK.",
+  liveViewFailed: "Couldn't show the browser now. Try again.",
+  rateLimited: (s: number) => `Too many tries. Try again in ${count(s, "second", "seconds")}.`,
+  // Step 2: the refusals the routes answer that the spec names by code only.
+  plan: "The computer for AI teammates comes with Growth and above.",
+  trial: "The computer for AI teammates comes with a paid plan, Growth or above.",
+  workspaceClosed: "This workspace is suspended or closed, so teammates can't use a browser in it.",
+  signedOut: "Sign in first.",
+} as const;
+
+/**
+ * The browser card's words (docs/plans/ai-teammates-phase4.md step 4), here
+ * from step 2 since the session views (browser/views.ts) and the chat lines
+ * ending a session writes read them.
+ */
+export const BROWSER_PANEL_COPY = {
+  title: "Browser",
+  live: "Live",
+  waiting: "Waiting for you",
+  handedOver: "You have it",
+  closed: "Closed",
+  watch: "Watch",
+  hide: "Hide",
+  takeOver: "Take over",
+  done: "Done",
+  giveBack: "Give it back",
+  stop: "Stop",
+  stopTitle: "Stop the browser?",
+  stopBody: "The browser closes at once, and anything waiting for your approval in it is cancelled. Nothing it did is undone.",
+  stopped: "Browser stopped",
+  stopFailed: "Couldn't stop the browser. Try again.",
+  viewOnly: "You're watching. Take over to use it yourself.",
+  handedOverHint: "Your teammate sees nothing while you have it. Press Done when you've finished.",
+  endsAt: (t: string) => `Closes by ${t}`,
+  minutesUsed: (n: number) => `${count(n, "minute", "minutes")}`,
+  stepsHeading: "What it did",
+  noSteps: "Nothing yet.",
+  STEP_WORDS: {
+    open: (s: string) => `Opened ${s}`,
+    read: (s: string) => `Read ${s}`,
+    find: (s: string) => `Searched ${s}`,
+    scroll: (s: string) => `Scrolled ${s}`,
+    show: (s: string) => `Showed you ${s}`,
+    click: (s: string) => `Clicked on ${s}`,
+    type: (s: string) => `Typed on ${s}`,
+    select: (s: string) => `Chose an option on ${s}`,
+    take_over: (s: string) => `You took over on ${s}`,
+    give_back: "You gave it back",
+    close: "Closed the browser",
+    end: "Closed",
+    unknownSite: "a page",
+  },
+  OUTCOME_WORDS: { ok: "", refused: "not allowed", failed: "didn't work", waiting: "waiting for you", practice: "practice" },
+  picture: "Picture of the page",
+  pictureFor: "Only you can see this picture, for a day.",
+  pictureGone: "The picture was deleted after a day.",
+  ENDED_WORDS: {
+    idle: "Closed after 5 idle minutes.",
+    time_cap: "Closed: it reached its time limit.",
+    waited_too_long: "Closed after waiting 10 minutes for you.",
+    take_over_too_long: "Closed after you had it for 10 minutes.",
+    stopped: "You stopped it.",
+    closed_by_teammate: "Your teammate closed it.",
+    turned_off: "Closed: the computer was turned off in this workspace.",
+    plan: "Closed: the computer isn't on this workspace's plan now.",
+    left: "Closed.",
+    deactivated: "Closed.",
+    no_access: "Closed: your teammates can't act for you here now.",
+    workspace_closed: "Closed: this workspace is suspended or closed.",
+    teammate_off: "Closed: the teammate was paused, removed or changed.",
+    restarted: "Closed: WorkwrK restarted.",
+    start_failed: "It didn't start.",
+    provider_ended: "Closed by the browser service.",
+    admin_stopped: "An Owner or Admin stopped every browser in this workspace.",
+  },
+  startedLine: "Opened a browser for you.",
+  liveViewFailed: "Couldn't show the browser. Try again.",
+} as const;
+
+/**
+ * The audit log's words for a browser session (docs/plans/ai-teammates-phase4.md
+ * Decision 24), each inside agentAuditLine "<Teammate> (for <Person>): ...".
+ * Never a page's address path, an element's words or typed text: the rows
+ * carry hosts, kinds and counts in their metadata.
+ */
+export const BROWSER_AUDIT_COPY = {
+  sessionStarted: "Opened a browser",
+  sessionEnded: (minutes: number) => `Closed a browser after ${count(minutes, "minute", "minutes")}`,
+  takeOverStarted: (site: string) => `Took over the browser on ${site}`,
+  takeOverEnded: (finished: boolean) => (finished ? "Finished in the browser and gave it back" : "Gave the browser back"),
 } as const;
 
 /**

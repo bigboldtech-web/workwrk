@@ -4,7 +4,7 @@ import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/works
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { writeOrgSettingsKeys } from "@/lib/org-settings-write";
-import { endWorkspaceConnections } from "@/lib/connectors/connections";
+import { endWorkspaceTeammateAccess } from "@/lib/agents/leaver-hooks";
 import { expireOpenCheckouts, openSubscriptionsOf, stopSubscription, stripe } from "@/services/billing";
 
 /**
@@ -152,7 +152,8 @@ export async function POST(req: NextRequest) {
   // the commit, never failing the delete; the cron sweep ends any left in a
   // CANCELLED workspace on its next tick (review of step 2), and a connect
   // finishing meanwhile is refused (connections.ts saveConnection).
-  await endWorkspaceConnections(orgId, "workspace_deleted", userId).catch((e) => {
+  // Its teammates' browsers close at once too (docs/plans/ai-teammates-phase4.md Decision 27).
+  await endWorkspaceTeammateAccess(orgId, "workspace_deleted", userId).catch((e) => {
     console.error(`[connectors] workspace deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
   });
 
