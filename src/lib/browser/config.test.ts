@@ -7,7 +7,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { browserConfig, browserReleaseConfig, liveViewOriginOk, shotsDirFrom, siteRulesFor } from "./config";
+import { browserConfig, browserReleaseConfig, DEFAULT_SHOTS_MAX_BYTES, GB, liveViewOriginOk, shotsDirFrom, shotsMaxBytesFrom, siteRulesFor } from "./config";
 
 const SHOTS = path.join(os.tmpdir(), "wk-config-test-shots");
 
@@ -138,5 +138,15 @@ describe("siteRulesFor and liveViewOriginOk", () => {
     expect(liveViewOriginOk("https://user:pw@www.browserbase.com/x", cfg)).toBe(false);
     expect(liveViewOriginOk("javascript:alert(1)", cfg)).toBe(false);
     expect(liveViewOriginOk("http://127.0.0.1:8789/live/s1?t=x", { liveViewOrigins: ["http://127.0.0.1:8789"], standIn: true })).toBe(true);
+  });
+});
+
+describe("shotsMaxBytesFrom (review round 1 of Phase 4)", () => {
+  it("is 20 GB unless set to a whole number of bytes, a malformed value keeping the default rather than no budget", () => {
+    expect(DEFAULT_SHOTS_MAX_BYTES).toBe(20 * GB);
+    expect(shotsMaxBytesFrom({} as NodeJS.ProcessEnv)).toBe(20 * GB);
+    expect(shotsMaxBytesFrom({ BROWSER_SHOTS_MAX_BYTES: " 5368709120 " } as unknown as NodeJS.ProcessEnv)).toBe(5 * GB);
+    expect(shotsMaxBytesFrom({ BROWSER_SHOTS_MAX_BYTES: "0" } as unknown as NodeJS.ProcessEnv)).toBe(0);
+    for (const bad of ["20GB", "-1", "1e12", "", "9999999999999999"]) expect(shotsMaxBytesFrom({ BROWSER_SHOTS_MAX_BYTES: bad } as unknown as NodeJS.ProcessEnv), bad).toBe(20 * GB);
   });
 });

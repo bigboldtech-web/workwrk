@@ -18,19 +18,25 @@ import {
   browserStored,
   browserTitle,
   pageKey,
+  pageKeyHash,
+  pageOrigin,
   pageWords,
   storedCardInput,
   type BrowserCardInput,
 } from "./browser-rules";
+import { sealFingerprint, sealWords } from "@/lib/browser/snapshot";
 import { BROWSER_COPY } from "./teammate-copy";
 import { BROWSER_TOOL_NAMES } from "./tool-names";
 
-const target = { tag: "button", role: "button", name: "Place order", kind: "none" as const, type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "1a2b3c4d", at: 3 };
+// The fingerprint as a page read gives it, and as a card stores it, sealed (review round 1 of Phase 4).
+const rawTarget = { tag: "button", role: "button", name: "Place order", kind: "none" as const, type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "1a2b3c4d", at: 3 };
+const target = sealFingerprint(rawTarget);
 
 const card = (o: Partial<BrowserCardInput> = {}): BrowserCardInput => ({
   browserSessionId: "bs1",
   site: "shop.proof.test",
-  pageUrl: "http://shop.proof.test/checkout?step=2",
+  pageUrl: "http://shop.proof.test",
+  pageKeyHash: pageKeyHash("http://shop.proof.test/checkout?step=2"),
   documentId: "doc-1.4",
   page: "shop.proof.test/checkout",
   element: "e4",
@@ -126,6 +132,16 @@ describe("what is kept and named", () => {
     expect(pageWords("http://shop.proof.test/checkout?card=4242#pay")).toBe("shop.proof.test/checkout");
     expect(pageWords("https://docs.proof.test/")).toBe("docs.proof.test");
   });
+
+  // Review round 1 of Phase 4.
+  it("names a page whose path carries a code by its redacted path, and keeps its origin and sealed address apart", () => {
+    expect(pageWords("https://accounts.proof.test/verify-code/482913?state=x")).toBe("accounts.proof.test/verify-code/[hidden]");
+    expect(pageWords("https://shop.proof.test/caf%C3%A9")).toBe("shop.proof.test/caf%C3%A9");
+    expect(pageOrigin("https://shop.proof.test/checkout?token=abc#x")).toBe("https://shop.proof.test");
+    expect(pageOrigin("not a url")).toBe("");
+    expect(pageKeyHash("https://shop.proof.test/checkout?token=abc#pay")).toBe(sealWords("https://shop.proof.test/checkout?token=abc"));
+    expect(pageKeyHash("https://shop.proof.test/checkout?token=abc")).not.toBe(pageKeyHash("https://shop.proof.test/checkout?token=abd"));
+  });
 });
 
 describe("browserCard", () => {
@@ -155,7 +171,7 @@ describe("browserCard", () => {
   });
 
   it("asks the person to take over on its own card, with why, what the teammate sees and whom to trust", () => {
-    const p = browserCard("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", page: "login.proof.test", shotId: null, shot: null, reason: "sign_in" });
+    const p = browserCard("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test", pageKeyHash: pageKeyHash("http://login.proof.test/"), page: "login.proof.test", shotId: null, shot: null, reason: "sign_in" });
     expect(p).toEqual({
       title: BROWSER_COPY.takeOverTitle("login.proof.test"),
       lines: [BROWSER_COPY.TAKE_OVER_REASON.sign_in, BROWSER_COPY.takeOverBlind, BROWSER_COPY.takeOverTrust("login.proof.test"), BROWSER_COPY.pageLine("login.proof.test")],
@@ -170,6 +186,11 @@ describe("storedCardInput", () => {
     const stored = { ...card(), extra: "ignored" };
     expect(storedCardInput("click", stored)).toEqual(card());
     expect(storedCardInput("click", { ...card(), target: { ...target, kind: "laser" } })).toBeNull();
+    // Sealed words that are not 64 hex digits are no seal (review round 1 of Phase 4).
+    expect(storedCardInput("click", { ...card(), target: { ...target, nameHash: "Place order" } })).toBeNull();
+    expect(storedCardInput("click", { ...card(), target: { ...target, hrefHash: "x" } })).toBeNull();
+    expect(storedCardInput("click", { ...card(), pageKeyHash: "http://shop.proof.test/checkout?step=2" })).toBeNull();
+    expect(storedCardInput("click", { ...card(), pageUrl: "not a url" })).toBeNull();
     expect(storedCardInput("click", { ...card(), element: "#buy" })).toBeNull();
     expect(storedCardInput("click", { ...card(), site: "evil host" })).toBeNull();
     expect(storedCardInput("click", { ...card(), browserSessionId: undefined })).toBeNull();
@@ -183,6 +204,7 @@ describe("storedCardInput", () => {
     expect(storedCardInput("click", { ...card(), documentId: undefined })).toBeNull();
     for (const bad of [{ twins: undefined }, { twins: 0 }, { twin: 1, twins: 1 }, { anchor: undefined }, { anchor: "x".repeat(40) }, { at: -1 }, { at: undefined }]) {
       expect(storedCardInput("click", { ...card(), target: { ...target, ...bad } }), JSON.stringify(bad)).toBeNull();
+      expect(storedCardInput("click", { ...card(), target: { ...rawTarget, ...bad } }), `a card stored before ${JSON.stringify(bad)}`).toBeNull();
     }
     const choice = card({ role: "combobox", name: "Country", option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
     expect(storedCardInput("select_option", choice)).toMatchObject({ option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
@@ -192,5 +214,17 @@ describe("storedCardInput", () => {
     expect(storedCardInput("type_text", { ...card(), text: "Max", replaces: true })?.replaces).toBe(true);
     // A take over is asked on a page, never acted on: it needs no document.
     expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "sign_in" })).toMatchObject({ reason: "sign_in" });
+  });
+
+  // Review round 1 of Phase 4.
+  it("reads a card stored before, with its whole address and raw words, into the sealed form it compares by", () => {
+    const before = { ...card(), pageUrl: "http://shop.proof.test/checkout?step=2&token=SECRET42", pageKeyHash: undefined, page: "shop.proof.test/verify-code/482913", target: rawTarget };
+    delete (before as Record<string, unknown>).pageKeyHash;
+    const read = storedCardInput("click", before);
+    expect(read).toEqual({ ...card(), pageKeyHash: pageKeyHash("http://shop.proof.test/checkout?step=2&token=SECRET42"), page: "shop.proof.test/checkout" });
+    expect(JSON.stringify(read)).not.toContain("SECRET42");
+    expect(read?.target).toEqual(sealFingerprint(rawTarget));
+    // A take over request stored before reads the same way.
+    expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/?code=1234", reason: "sign_in" })).toMatchObject({ pageUrl: "http://login.proof.test", pageKeyHash: pageKeyHash("http://login.proof.test/?code=1234") });
   });
 });

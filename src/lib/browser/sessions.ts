@@ -63,7 +63,7 @@ import { createProviderSession, listRunningProviderSessions, releaseProviderSess
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
 import { browserConfig, browserReleaseConfig, siteRulesFor, type BrowserConfig } from "./config";
-import { BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
+import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
 import { LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
@@ -235,10 +235,17 @@ export async function computerAccess(a: { organizationId: string; agent: Pick<Co
 /**
  * The guard of one session: the rules its process entry holds now (or those
  * it started with, until the entry exists), the frame rule, and the notes
- * each event leaves for the next call's result.
+ * each event leaves for the next call's result. While the person has the
+ * browser no note is kept (review round 1 of Phase 4): a hop they made to a
+ * site not on the list, a popup of their sign-in, a download they tried are
+ * theirs, and the model is told only that they finished (Decision 19).
  */
 function guardHooks(rowId: string, initial: SiteRules): GuardHooks {
   const rules = () => liveBrowser(rowId)?.rules ?? initial;
+  const note = (text: string) => {
+    const lb = liveBrowser(rowId);
+    if (lb && lb.handedOver !== true) noteEvent(lb, text);
+  };
   return {
     verdict: (url, mainFrame) => {
       const r = rules();
@@ -251,7 +258,7 @@ function guardHooks(rowId: string, initial: SiteRules): GuardHooks {
     },
     onRefused: (host, code, mainFrame) => {
       if (mainFrame === false) return;
-      noteEvent(liveBrowser(rowId), code === "private_address" ? BROWSER_COPY.privateAddress : BROWSER_COPY.redirectRefused(host ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite));
+      note(code === "private_address" ? BROWSER_COPY.privateAddress : BROWSER_COPY.redirectRefused(host ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite));
     },
     onLost: () => {
       const lb = liveBrowser(rowId);
@@ -260,17 +267,24 @@ function guardHooks(rowId: string, initial: SiteRules): GuardHooks {
       lb.lost = true;
       void endBrowserSession(rowId, "provider_ended", SYSTEM_END).catch((err) => console.error(`[browser] a lost browser did not end: ${errorLine(err)}`));
     },
-    onDialog: () => noteEvent(liveBrowser(rowId), BROWSER_COPY.dialogClosed),
-    onDownload: () => noteEvent(liveBrowser(rowId), BROWSER_COPY.downloadsOff),
-    onUpload: () => noteEvent(liveBrowser(rowId), BROWSER_COPY.uploadsOff),
-    onPopup: (url) => noteEvent(liveBrowser(rowId), BROWSER_COPY.popupClosed(siteOf(url) ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite)),
+    onDialog: () => note(BROWSER_COPY.dialogClosed),
+    onDownload: () => note(BROWSER_COPY.downloadsOff),
+    onUpload: () => note(BROWSER_COPY.uploadsOff),
+    onPopup: (url) => note(BROWSER_COPY.popupClosed(siteOf(url) ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite)),
   };
 }
 
 // ── Starting a session ──────────────────────────────────────────────
 
+/**
+ * `teammate_off` and `person_cant`: read again once the start was on record
+ * (review round 1 of Phase 4), the teammate paused or holding no browser
+ * tool, or the person no longer someone a teammate may act for here.
+ */
 export type OpenRefusal =
   | ComputerRefusal
+  | "teammate_off"
+  | "person_cant"
   | "other_teammate"
   | "busy"
   | "person_today"
@@ -289,7 +303,7 @@ export type OpenRefusal =
  */
 export type OpenResult = { ok: true; rowId: string } | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true };
 
-type Counted = { id: string; reserved: number; seconds: number } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number };
+type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number };
 
 /**
  * The month's minutes, the day's sessions and the person's, for one
@@ -320,8 +334,28 @@ async function liveCounts(db: Prisma.TransactionClient | typeof prisma, organiza
 }
 
 /**
+ * Whether a start on record may still reach the provider (review round 1 of
+ * Phase 4, openBrowserSession): the person, the teammate and the computer's
+ * access, each read now, in the order every call reads them. A refusal
+ * carries its reason and the end it gives the row.
+ */
+async function startStillAllowed(
+  person: Pick<ActingPerson, "organizationId" | "userId">,
+  agentId: string,
+): Promise<{ ok: true; access: Extract<ComputerAccess, { ok: true }> } | { ok: false; reason: OpenRefusal; endReason: EndReason }> {
+  const acting = await resolveActingPerson(person.organizationId, person.userId);
+  if (!acting.ok) return { ok: false, reason: "person_cant", endReason: leaverReason(acting.reason) };
+  const agent = await computerAgentById(person.organizationId, agentId);
+  if (!agent || !agent.browserTools) return { ok: false, reason: "teammate_off", endReason: "teammate_off" };
+  const access = await computerAccess({ organizationId: person.organizationId, agent });
+  if (!access.ok) return { ok: false, reason: access.reason, endReason: endReasonFor(access.reason) };
+  return { ok: true, access };
+}
+
+/**
  * Start the person's browser for this teammate and chat, in order (spec
- * step 2): the caps under one lock and the row "starting"; the provider's
+ * step 2): the caps under one lock and the row "starting"; the person, the
+ * teammate and the access read again (startStillAllowed); the provider's
  * browser; the guard; the row "live"; the audit row; the chat line, only
  * while the turn's run is open (budget.ts runStillOpen).
  */
@@ -360,6 +394,7 @@ export async function openBrowserSession(a: {
       reserved = Math.max(1, Math.ceil(seconds / 60));
     }
     const now = new Date();
+    const endsBy = new Date(now.getTime() + seconds * 1000);
     const row = await tx.teammateBrowserSession.create({
       data: {
         organizationId: org,
@@ -371,13 +406,13 @@ export async function openBrowserSession(a: {
         bootId: BOOT_ID,
         reservedMinutes: reserved,
         startedAt: now,
-        endsBy: new Date(now.getTime() + seconds * 1000),
+        endsBy,
         lastActiveAt: now,
         lastRunId: a.runId,
       },
       select: { id: true },
     });
-    return { id: row.id, reserved, seconds };
+    return { id: row.id, reserved, seconds, endsBy };
   }, LOCK_TX);
 
   if ("refusal" in counted) {
@@ -388,6 +423,19 @@ export async function openBrowserSession(a: {
     return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}) };
   }
   const rowId = counted.id;
+
+  // Read again now the row is on record (review round 1 of Phase 4): the
+  // caller read the access, the teammate and the person before this start
+  // waited on its lock, and a switch turned off, a leave or a pause that
+  // committed meanwhile ended no row then. One that commits after this read
+  // finds the row (every hook reads the live rows after its write), and one
+  // that committed before it is seen here, so no start slips between them.
+  const again = await startStillAllowed(person, agent.id);
+  if (!again.ok) {
+    await endBrowserSession(rowId, again.endReason, SYSTEM_END).catch((err) => console.error(`[browser] a start refused on its second read did not end: ${errorLine(err)}`));
+    return { ok: false, reason: again.reason };
+  }
+  const fresh = again.access;
 
   // The provider's browser, tagged with this deployment and its row; its own
   // limit is the reserved time plus a minute (the last backstop, Decision 27).
@@ -411,7 +459,7 @@ export async function openBrowserSession(a: {
 
   let handle: LiveBrowser["handle"];
   try {
-    handle = await attachBrowser(connectUrl, guardHooks(rowId, access.rules), { fixtureSuffix: access.rules.fixtureSuffix });
+    handle = await attachBrowser(connectUrl, guardHooks(rowId, fresh.rules), { fixtureSuffix: fresh.rules.fixtureSuffix });
   } catch (err) {
     console.error(`[browser] the guard was not attached: ${errorLine(err)}`);
     await endBrowserSession(rowId, "start_failed", SYSTEM_END).catch(() => undefined);
@@ -423,8 +471,8 @@ export async function openBrowserSession(a: {
     userId: user,
     agentId: agent.id,
     handle,
-    rules: access.rules,
-    rulesVersion: access.rulesVersion,
+    rules: fresh.rules,
+    rulesVersion: fresh.rulesVersion,
     links: new Set(),
     refs: new Map(),
     refsUrl: null,
@@ -441,6 +489,8 @@ export async function openBrowserSession(a: {
     if (rc) await releaseProviderSession(rc, providerSessionId).catch(() => "failed");
     return { ok: false, reason: "start_failed", ...reached };
   }
+  // Its idle window holds from now, in this process (review round 1 of Phase 4).
+  armWindows(rowId, { status: "live", lastActiveAt: now, waitingSince: null, handedOverAt: null, endsBy: counted.endsBy });
 
   await logActivity({
     type: "teammate_browser.session_started",
@@ -468,8 +518,18 @@ export async function openBrowserSession(a: {
 
 export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy";
 
-/** `minutes`: a session ended at its time cap, its reserved minutes, for the sentence that says so (step 3). */
-export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number };
+/**
+ * `minutes`: a session ended at its time cap, its reserved minutes, for the
+ * sentence that says so (step 3). `endReason`: a session found ended, or
+ * ending, as this call read it, by its end's own reason (review round 1 of
+ * Phase 4), so the call says why and never "WorkwrK restarted" unless it did.
+ */
+export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number; endReason?: EndReason | null };
+
+/** A session found ended, with its end's reason when it has one (UseResult). */
+function endedBy(endReason: EndReason | null): UseResult {
+  return { ok: false, reason: "ended", ...(endReason ? { endReason } : {}) };
+}
 
 /** Whether another run of the person's still holds the browser: open, and started within staleRunMs. */
 async function runHolds(runId: string | null, exceptRunId: string | null, now: Date): Promise<boolean> {
@@ -520,15 +580,21 @@ export async function useBrowserSession(a: {
       select: SESSION_SELECT,
     });
     if (!row) return { ok: false, reason: "none" };
-    if (row.status === "ended" || row.status === "ending") return { ok: false, reason: "ended" };
+    if (row.status === "ended" || row.status === "ending") return endedBy((row.endReason as EndReason | null) ?? null);
     if (row.status === "starting") return { ok: false, reason: "busy" };
     if (row.status === "handed_over" && a.purpose === "approval") return { ok: false, reason: "person_has_it" };
   }
 
   const lb = liveBrowser(row.id);
+  // Take over set it under the lock a moment ago (review round 1 of Phase 4).
+  if (lb?.handedOver === true && a.purpose !== "take_over") return { ok: false, reason: "person_has_it" };
   if (row.bootId !== BOOT_ID || !lb || lb.lost) {
-    await endBrowserSession(row.id, lb?.lost ? "provider_ended" : "restarted", SYSTEM_END);
-    return { ok: false, reason: "restarted" };
+    // Only a row that had a guard ends so (review round 1 of Phase 4); one
+    // that ended meanwhile, by Stop or the switch, says its own reason.
+    const why = lb?.lost ? "provider_ended" : "restarted";
+    if (await endBrowserSession(row.id, why, SYSTEM_END, { only: GUARD_GONE_ONLY })) return { ok: false, reason: "restarted" };
+    const after = await sessionNow(row.id);
+    return endedBy(after?.endReason ?? null);
   }
   if (now.getTime() >= row.endsBy.getTime()) {
     await endBrowserSession(row.id, "time_cap", SYSTEM_END);
@@ -539,16 +605,38 @@ export async function useBrowserSession(a: {
     where: { id: row.id, status: { in: allowed } },
     data: { lastActiveAt: now, ...(a.purpose === "model" ? { lastRunId: a.runId } : {}) },
   });
-  if (touched.count !== 1) return { ok: false, reason: "ended" };
-  return { ok: true, row: { ...row, lastActiveAt: now, ...(a.purpose === "model" ? { lastRunId: a.runId } : {}) } };
+  if (touched.count !== 1) {
+    // Moved since the read (review round 1 of Phase 4): taken over, or ended by its own reason.
+    const after = await sessionNow(row.id);
+    if (after?.status === "handed_over") return { ok: false, reason: "person_has_it" };
+    return endedBy(after?.endReason ?? null);
+  }
+  const used = { ...row, lastActiveAt: now, ...(a.purpose === "model" ? { lastRunId: a.runId } : {}) };
+  armWindows(row.id, used);
+  return { ok: true, row: used };
 }
 
-/** After a turn that used the browser: its idle window starts at the turn's end, not its last call (spec step 3). */
+/**
+ * A session's state read now (review round 1 of Phase 4): for a call that
+ * waited for its browser's lock and must look again under it, or one that
+ * found the browser gone. Null when there is no such row.
+ */
+export async function sessionNow(rowId: string): Promise<{ status: string; endReason: EndReason | null; lastRunId: string | null; endsBy: Date; reservedMinutes: number } | null> {
+  if (typeof rowId !== "string" || !rowId || rowId.length > 64) return null;
+  const row = await prisma.teammateBrowserSession.findUnique({ where: { id: rowId }, select: { status: true, endReason: true, lastRunId: true, endsBy: true, reservedMinutes: true } });
+  return row ? { status: String(row.status), endReason: (row.endReason as EndReason | null) ?? null, lastRunId: row.lastRunId ?? null, endsBy: row.endsBy, reservedMinutes: row.reservedMinutes } : null;
+}
+
+/** After a turn that used the browser: its idle window starts at the turn's end, not its last call (spec step 3), and holds in this process (review round 1 of Phase 4). */
 export async function touchAfterTurn(organizationId: string, userId: string, agentId: string): Promise<void> {
+  const now = Date.now();
   await prisma.teammateBrowserSession.updateMany({
     where: { organizationId, userId, agentId, status: { in: ["live", "waiting"] } },
-    data: { lastActiveAt: new Date() },
+    data: { lastActiveAt: new Date(now) },
   });
+  // A waiting one's window is its card's: the timer reads the row when it fires (live.ts).
+  const { idleMs } = windowTimes();
+  for (const lb of liveBrowsersWhere((b) => b.organizationId === organizationId && b.userId === userId && b.agentId === agentId)) armAt(lb.rowId, now + idleMs);
 }
 
 /** The host a live session is on now (never a path, Decision 23); null when it left every page. An ended one keeps none. */
@@ -595,7 +683,9 @@ export async function releaseWaiting(rowId: unknown): Promise<void> {
   if (typeof rowId !== "string" || !rowId || rowId.length > 64) return;
   try {
     if (await waitingCardOf(rowId, null)) return;
-    await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: "waiting" }, data: { status: "live", waitingSince: null, lastActiveAt: new Date() } });
+    const back = await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: "waiting" }, data: { status: "live", waitingSince: null, lastActiveAt: new Date() } });
+    // Its idle window starts now, in this process (review round 1 of Phase 4).
+    if (back.count === 1) await armWindowsFromRow(rowId);
   } catch (err) {
     console.error(`[browser] a waiting browser not released: ${errorLine(err)}`);
   }
@@ -674,17 +764,40 @@ async function hostsOf(rowId: string): Promise<Array<{ site: string; reads: numb
 
 // ── Ending a session ────────────────────────────────────────────────
 
-/** Ask the provider to end the browser, through the release settings alone (never BROWSER_OFFERED). */
-async function release(providerSessionId: string | null): Promise<"released" | "already" | "failed" | "none"> {
+/**
+ * `p`, or `late` once `ms` passed (review round 1 of Phase 4): the sweep
+ * stops waiting on a provider that hangs. The request itself still ends at
+ * its own timeout (browserbase.ts PROVIDER_TIMEOUT_MS); a release that lands
+ * after is found "already" by the next try.
+ */
+function within<T>(p: Promise<T>, ms: number | undefined, late: T): Promise<T> {
+  if (!ms || !(ms > 0)) return p;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const t = new Promise<T>((r) => {
+    timer = setTimeout(() => r(late), ms);
+    timer.unref?.();
+  });
+  return Promise.race([p, t]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Ask the provider to end the browser, through the release settings alone
+ * (never BROWSER_OFFERED); `withinMs`, the most this caller waits (the
+ * sweep's SWEEP_RELEASE_MS), past which it reads as failed and is tried again.
+ */
+async function release(providerSessionId: string | null, withinMs?: number): Promise<"released" | "already" | "failed" | "none"> {
   if (!providerSessionId) return "none";
   const rc = browserReleaseConfig();
   if (!rc) return "failed";
   try {
-    return await releaseProviderSession(rc, providerSessionId);
+    return await within(releaseProviderSession(rc, providerSessionId).catch(() => "failed" as const), withinMs, "failed" as const);
   } catch {
     return "failed";
   }
 }
+
+/** The provider's own limit is the reserve plus this (openBrowserSession): past endsBy and this, its browser is gone (review round 1 of Phase 4). */
+export const PROVIDER_GRACE_MS = 60_000;
 
 /** The row "ended": its time billed (none when no browser ever started), its host forgotten. */
 async function markEnded(row: { id: string; providerSessionId: string | null; reservedMinutes: number; startedAt: Date }, now: Date, billed?: number): Promise<number> {
@@ -746,8 +859,19 @@ export const GUARD_GONE_ONLY = { status: { in: ["live", "waiting", "handed_over"
  * waiting and take over parts; a guard found gone) never ends a row that
  * moved since: a turn touched it, the person approved, Done was pressed, or
  * it is still starting.
+ *
+ * `releaseMs`: the most the release may wait for the provider (the sweep's
+ * own ends, review round 1 of Phase 4). A release not confirmed once the
+ * provider's own limit has passed (endsBy plus PROVIDER_GRACE_MS) ends the
+ * row at once at its reserved minutes: that browser is gone, and the row
+ * must not hold a slot of the caps.
  */
-export async function endBrowserSession(rowId: string, reason: EndReason, actor: EndActor, o: { only?: Prisma.TeammateBrowserSessionWhereInput } = {}): Promise<boolean> {
+export async function endBrowserSession(
+  rowId: string,
+  reason: EndReason,
+  actor: EndActor,
+  o: { only?: Prisma.TeammateBrowserSessionWhereInput; releaseMs?: number } = {},
+): Promise<boolean> {
   const now = new Date();
   const won = await prisma.teammateBrowserSession.updateMany({
     where: { id: rowId, status: { in: LIVE }, ...(o.only ? { AND: [o.only] } : {}) },
@@ -759,9 +883,11 @@ export async function endBrowserSession(rowId: string, reason: EndReason, actor:
 
   await cancelCards(row, reason, now).catch((err) => console.error(`[browser] cards of an ended browser not cancelled: ${errorLine(err)}`));
   await dropLiveBrowser(rowId);
-  const released = await release(row.providerSessionId);
+  const released = await release(row.providerSessionId, o.releaseMs);
   let minutes: number;
-  if (released === "failed") {
+  if (released === "failed" && now.getTime() > row.endsBy.getTime() + PROVIDER_GRACE_MS) {
+    minutes = await markEnded(row, now, row.reservedMinutes);
+  } else if (released === "failed") {
     await prisma.teammateBrowserSession.updateMany({
       where: { id: rowId, status: "ending" },
       data: { stopAttempts: { increment: 1 }, nextStopAt: new Date(now.getTime() + STOP_RETRY_MS) },
@@ -786,8 +912,10 @@ export async function endBrowserSession(rowId: string, reason: EndReason, actor:
   await logActivity({
     type: "teammate_browser.session_ended",
     actorId: actor.type === "system" ? null : (actor.id ?? row.userId),
-    ...(actor.type === "system" ? { actorType: "system", actorLabel: "WorkwrK", actingForId: row.userId } : {}),
-    ...(actor.type === "agent" ? { actorType: "agent", actorLabel: actorLabelFor({ name: agentName }, { name: personName }), actingForId: row.userId } : {}),
+    ...(actor.type === "system" ? { actorType: "system", actorLabel: "WorkwrK" } : {}),
+    ...(actor.type === "agent" ? { actorType: "agent", actorLabel: actorLabelFor({ name: agentName }, { name: personName }) } : {}),
+    // The session's person, whoever ended it (review round 1 of Phase 4): the feeds show the row to them.
+    actingForId: row.userId,
     organizationId: row.organizationId,
     description: agentAuditLine(agentName, personName, BROWSER_AUDIT_COPY.sessionEnded(minutes)),
     targetId: row.agentId,
@@ -806,11 +934,11 @@ export async function endBrowserSession(rowId: string, reason: EndReason, actor:
  * on a browser being closed. A row whose browser this process does not hold
  * has no step in flight here, and ends as it would have.
  */
-async function endWhenFree(rowId: string, reason: EndReason, actor: EndActor, only: Prisma.TeammateBrowserSessionWhereInput): Promise<boolean> {
-  const out = await withBrowserLock(rowId, 0, () => endBrowserSession(rowId, reason, actor, { only }));
+async function endWhenFree(rowId: string, reason: EndReason, actor: EndActor, only: Prisma.TeammateBrowserSessionWhereInput, releaseMs?: number): Promise<boolean> {
+  const out = await withBrowserLock(rowId, 0, () => endBrowserSession(rowId, reason, actor, { only, releaseMs }));
   if (typeof out === "boolean") return out;
   if ("busy" in out) return false;
-  return endBrowserSession(rowId, reason, actor, { only });
+  return endBrowserSession(rowId, reason, actor, { only, releaseMs });
 }
 
 /**
@@ -822,14 +950,14 @@ async function endRows(
   reason: EndReason,
   actor: EndActor,
   deadline = Number.POSITIVE_INFINITY,
-  o: { only?: Prisma.TeammateBrowserSessionWhereInput; whenFree?: boolean } = {},
+  o: { only?: Prisma.TeammateBrowserSessionWhereInput; whenFree?: boolean; releaseMs?: number } = {},
 ): Promise<number> {
   let ended = 0;
   for (let i = 0; i < ids.length; i += END_AT_ONCE) {
     if (Date.now() >= deadline) break;
     const outs = await Promise.all(
       ids.slice(i, i + END_AT_ONCE).map((id) =>
-        (o.whenFree && o.only ? endWhenFree(id, reason, actor, o.only) : endBrowserSession(id, reason, actor, o.only ? { only: o.only } : {})).catch((err) => {
+        (o.whenFree && o.only ? endWhenFree(id, reason, actor, o.only, o.releaseMs) : endBrowserSession(id, reason, actor, { ...(o.only ? { only: o.only } : {}), releaseMs: o.releaseMs })).catch((err) => {
           console.error(`[browser] a browser did not end: ${errorLine(err)}`);
           return false;
         }),
@@ -838,6 +966,103 @@ async function endRows(
     ended += outs.filter(Boolean).length;
   }
   return ended;
+}
+
+// ── The windows, ended in this process (review round 1 of Phase 4) ──
+//
+// Decision 6's idle, waiting and take over windows used to end only on the
+// cron's sweep, every 10 minutes after the routines, so a browser idle for 5
+// minutes ran, signed in and billed, for up to about 17. Now the process
+// holding the guard ends them on time: one timer per browser (live.ts
+// armWindowTimer), armed whenever a window moves (a call, a turn's end, a
+// card decided, a take over started or handed back; a card asked moves the
+// window later, so the timer armed before it reads the row again in time),
+// and armed again by each firing for what is due then. The sweep stays the
+// backstop for a process that died.
+
+/** How soon a window found due is looked at again when a step held its browser or the row moved meanwhile. */
+const WINDOW_RETRY_MS = 15_000;
+/** How often an idle browser is looked at while its last turn still runs, and after a check that failed. */
+const WINDOW_RECHECK_MS = 60_000;
+
+/** Decision 6's windows (the stand-in's own seconds for its proofs, as the sweep reads them). */
+function windowTimes(cfg: BrowserConfig | null = browserConfig()): { idleMs: number; waitingMs: number; takeOverMs: number } {
+  const ms = (seconds: number | null | undefined, fallback: number) => (cfg?.standIn && seconds ? seconds * 1000 : fallback);
+  return { idleMs: ms(cfg?.testTimes.idleSeconds, SESSION_TIMES.idleMs), waitingMs: ms(cfg?.testTimes.waitSeconds, SESSION_TIMES.waitingMs), takeOverMs: SESSION_TIMES.takeOverMs };
+}
+
+type WindowRow = Pick<SessionRow, "status" | "lastActiveAt" | "waitingSince" | "handedOverAt" | "endsBy">;
+
+/** When this row's next window falls due, ms since the epoch: its time cap, or sooner the window of the state it is in. */
+export function windowDueAt(row: WindowRow, w = windowTimes()): number {
+  const cap = row.endsBy.getTime();
+  if (row.status === "live") return Math.min(cap, row.lastActiveAt.getTime() + w.idleMs);
+  if (row.status === "waiting" && row.waitingSince) return Math.min(cap, row.waitingSince.getTime() + w.waitingMs);
+  if (row.status === "handed_over" && row.handedOverAt) return Math.min(cap, row.handedOverAt.getTime() + w.takeOverMs);
+  return cap;
+}
+
+/** This browser's timer for `at`, never later than one armed (live.ts). */
+function armAt(rowId: string, at: number): void {
+  const lb = liveBrowser(rowId);
+  if (lb) armWindowTimer(lb, at, () => void checkWindows(rowId));
+}
+
+/** The timer, from the row as its caller just wrote it. */
+export function armWindows(rowId: string, row: WindowRow): void {
+  armAt(rowId, windowDueAt(row));
+}
+
+/** The timer, from the row read now: for a caller that wrote it by a condition and does not hold its other times. Never throws. */
+export async function armWindowsFromRow(rowId: string): Promise<void> {
+  if (!liveBrowser(rowId)) return;
+  try {
+    const row = await prisma.teammateBrowserSession.findUnique({ where: { id: rowId }, select: SESSION_SELECT });
+    if (row && LIVE.includes(row.status)) armWindows(rowId, row);
+  } catch (err) {
+    console.error(`[browser] a browser's window timer not set: ${errorLine(err)}`);
+    armAt(rowId, Date.now() + WINDOW_RECHECK_MS);
+  }
+}
+
+/**
+ * A window timer fired (see above): the row read again. Past its time cap it
+ * ends at once, as the sweep's time cap does. A take over, waiting or idle
+ * window that has passed ends only if the row still meets it at the swap and
+ * no step holds the browser (endWhenFree, the sweep's own conditions), an
+ * idle one only once its last run ended or went stale (runHolds). Otherwise
+ * the timer is armed for what is due next. Never throws.
+ */
+export async function checkWindows(rowId: string): Promise<void> {
+  try {
+    if (!liveBrowser(rowId)) return;
+    const row = await prisma.teammateBrowserSession.findUnique({ where: { id: rowId }, select: SESSION_SELECT });
+    if (!row || !LIVE.includes(row.status)) return;
+    const now = Date.now();
+    if (row.status === "starting") return armAt(rowId, now + WINDOW_RETRY_MS);
+    if (now >= row.endsBy.getTime()) {
+      await endBrowserSession(rowId, "time_cap", SYSTEM_END, { only: { endsBy: { lte: new Date(now) } } });
+      return;
+    }
+    const w = windowTimes();
+    const due = windowDueAt(row, w);
+    if (now < due) return armAt(rowId, due);
+    const before = (ms: number) => new Date(now - ms);
+    let ended: boolean;
+    if (row.status === "handed_over") {
+      ended = await endWhenFree(rowId, "take_over_too_long", SYSTEM_END, { status: "handed_over", handedOverAt: { lte: before(w.takeOverMs) } });
+    } else if (row.status === "waiting") {
+      ended = await endWhenFree(rowId, "waited_too_long", SYSTEM_END, { status: "waiting", waitingSince: { lte: before(w.waitingMs) } });
+    } else {
+      if (await runHolds(row.lastRunId, null, new Date(now))) return armAt(rowId, now + WINDOW_RECHECK_MS);
+      ended = await endWhenFree(rowId, "idle", SYSTEM_END, { status: "live", lastActiveAt: { lte: before(w.idleMs) } });
+    }
+    // A step held the browser, or the row moved since the read: looked at again soon.
+    if (!ended) armAt(rowId, now + WINDOW_RETRY_MS);
+  } catch (err) {
+    console.error(`[browser] a browser's window was not checked: ${errorLine(err)}`);
+    armAt(rowId, Date.now() + WINDOW_RECHECK_MS);
+  }
 }
 
 /** The most rows one hook ends: every workspace's live rows are far fewer (its plan's browsers at once). */
@@ -903,7 +1128,8 @@ async function leaveRefusedPage(rowId: string): Promise<void> {
     await lb.handle.blank();
     lb.refs.clear();
     lb.refsUrl = null;
-    noteEvent(lb, BROWSER_COPY.siteNoLongerAllowed(site));
+    // Not while the person has it (review round 1 of Phase 4): the site they were on is theirs.
+    if (lb.handedOver !== true) noteEvent(lb, BROWSER_COPY.siteNoLongerAllowed(site));
     await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: { in: LIVE } }, data: { currentSite: null } });
     await recordStep(rowId, lb.userId, { kind: "open", site, outcome: "refused", code: verdict.code });
     return true;
@@ -1011,6 +1237,10 @@ export async function setComputerEnabled(organizationId: string, on: boolean, ac
       RETURNING "enabled"`;
     return { before: was[0]?.enabled === true, after: rows[0]?.enabled === true };
   }, LOCK_TX);
+  // After the commit (review round 1 of Phase 4): a call that read the
+  // switch on before it reads its access again under the browser's lock
+  // (live.ts callRulesCurrent), as after a list change.
+  nextRulesVersion();
   const ended = out.after ? 0 : await endWorkspaceBrowserSessions(organizationId, "turned_off", actorId);
   return { ...out, ended };
 }
@@ -1193,6 +1423,8 @@ export type BrowserSweepCounts = {
   waited: number;
   takeOver: number;
   noAccess: number;
+  /** "ending" rows past the provider's own limit, ended without asking it again (review round 1 of Phase 4). */
+  overdue: number;
   retried: number;
   reaped: number;
   stepsDeleted: number;
@@ -1206,43 +1438,59 @@ function leaverReason(r: string): EndReason {
   return "no_access";
 }
 
+/** How long a release the sweep asks for may wait for the provider (review round 1 of Phase 4). */
+export const SWEEP_RELEASE_MS = 4_000;
+/** Releases the provider did not confirm, tried again a tick at most, END_AT_ONCE at a time (review round 1 of Phase 4). */
+export const RETRY_MAX = 25;
+/** The share of the sweep's budget the pictures may take: they run first (review round 1 of Phase 4). */
+const SHOTS_SHARE = 0.25;
+
 /**
- * The cron's step (run-due-agents), each part only while the budget lasts
- * and each on its own (one that throws is counted in `failed`, which fails
- * the tick, and the rest still run), the answer counts only:
- *   1. "starting" past SESSION_TIMES.startMs            start_failed
- *   2. a guard another process held, or that this one
+ * The cron's step (run-due-agents, every 10 minutes: the backstop, since the
+ * process holding a browser ends its windows on time, review round 1 of
+ * Phase 4), each part only while the budget lasts and each on its own (one
+ * that throws is counted in `failed`, which fails the tick, and the rest
+ * still run), the answer counts only. What is kept past its time goes
+ * first, each with its own slice, so a provider that hangs never keeps a
+ * picture or a step past its days (review round 1 of Phase 4):
+ *   1. steps older than 30 days, at most STEP_RETENTION_BATCH
+ *   2. pictures past their 24 hours, and files no row names (shots.ts
+ *      sweepShots), within SHOTS_SHARE of the budget
+ *   3. "starting" past SESSION_TIMES.startMs            start_failed
+ *   4. a guard another process held, or that this one
  *      no longer holds (or lost its connection)          restarted
- *   3. past endsBy                                       time_cap
- *   4. handed over past takeOverMs                       take_over_too_long
- *   5. waiting past waitingMs                            waited_too_long
- *   6. live, idle past idleMs, its last run ended or
+ *   5. past endsBy                                       time_cap
+ *   6. handed over past takeOverMs                       take_over_too_long
+ *   7. waiting past waitingMs                            waited_too_long
+ *   8. live, idle past idleMs, its last run ended or
  *      stale                                             idle
- *      (4 to 6 each end a row only if it still meets its condition at the
+ *      (6 to 8 each end a row only if it still meets its condition at the
  *      swap and no step holds its browser: review of Phase 4 step 2)
- *   7. the rest: the person may no longer be acted for (left, deactivated,
+ *   9. the rest: the person may no longer be acted for (left, deactivated,
  *      no_access), the computer may not be used (turned_off, plan,
  *      workspace_closed, teammate_off for no sites), the teammate paused,
  *      removed or holding no browser tool (teammate_off)
- *   8. releases the provider did not confirm, tried again; after
- *      STOP_ATTEMPTS_MAX the row is ended at its reserved minutes (the
- *      provider's own limit has ended it by then)
- *   9. the reaper: provider sessions tagged with this deployment whose row
+ *  10. "ending" rows past endsBy plus PROVIDER_GRACE_MS, ended at their
+ *      reserved minutes whatever their tries say: the provider's own limit
+ *      ended that browser, and the row must not hold a slot of the caps
+ *  11. releases the provider did not confirm, tried again, RETRY_MAX a tick,
+ *      END_AT_ONCE at a time; after STOP_ATTEMPTS_MAX the row is ended at its
+ *      reserved minutes
+ *  12. the reaper: provider sessions tagged with this deployment whose row
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
- *  10. steps older than 30 days, at most STEP_RETENTION_BATCH
- *  11. pictures past their 24 hours, and files no row names
+ * Every release the sweep asks for waits at most `releaseMs`
+ * (SWEEP_RELEASE_MS), and reads as not confirmed after it.
  * Two app processes would end each other's browsers as "restarted": the
  * deployment runs one (pm2 one workwrk instance), failing closed if not.
  */
-export async function sweepBrowserSessions(now: Date, o: { limit: number; budgetMs: number }): Promise<BrowserSweepCounts> {
-  const counts: BrowserSweepCounts = { failed: 0, startFailed: 0, restarted: 0, timeCap: 0, idle: 0, waited: 0, takeOver: 0, noAccess: 0, retried: 0, reaped: 0, stepsDeleted: 0, shotsDeleted: 0 };
-  const deadline = Date.now() + Math.max(0, o.budgetMs);
+export async function sweepBrowserSessions(now: Date, o: { limit: number; budgetMs: number; releaseMs?: number }): Promise<BrowserSweepCounts> {
+  const counts: BrowserSweepCounts = { failed: 0, startFailed: 0, restarted: 0, timeCap: 0, idle: 0, waited: 0, takeOver: 0, noAccess: 0, overdue: 0, retried: 0, reaped: 0, stepsDeleted: 0, shotsDeleted: 0 };
+  const budget = Math.max(0, o.budgetMs);
+  const deadline = Date.now() + budget;
   const limit = Math.max(0, o.limit);
-  const cfg = browserConfig();
-  const ms = (seconds: number | null | undefined, fallback: number) => (cfg?.standIn && seconds ? seconds * 1000 : fallback);
-  const idleMs = ms(cfg?.testTimes.idleSeconds, SESSION_TIMES.idleMs);
-  const waitingMs = ms(cfg?.testTimes.waitSeconds, SESSION_TIMES.waitingMs);
+  const releaseMs = o.releaseMs ?? SWEEP_RELEASE_MS;
+  const { idleMs, waitingMs, takeOverMs } = windowTimes();
   const before = (n: number) => new Date(now.getTime() - n);
   const open = () => Date.now() < deadline;
   const ids = async (where: Prisma.TeammateBrowserSessionWhereInput) =>
@@ -1257,9 +1505,23 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       console.error(`[cron-failure] run-due-agents: the browser sweep's ${what} threw: ${errorLine(err)}`);
     }
   };
+  const ends = { releaseMs };
 
   await part(async () => {
-    counts.startFailed = await endRows(await ids({ status: "starting", startedAt: { lt: before(SESSION_TIMES.startMs) } }), "start_failed", SYSTEM_END, deadline);
+    counts.stepsDeleted = await prisma.$executeRaw`
+      DELETE FROM "TeammateBrowserStep"
+       WHERE "id" IN (SELECT "id" FROM "TeammateBrowserStep"
+                       WHERE "at" < (now() AT TIME ZONE 'UTC') - interval '30 days'
+                       LIMIT ${STEP_RETENTION_BATCH})`;
+  }, "step retention");
+
+  await part(async () => {
+    const s = await sweepShots(now, { deadline: Math.min(deadline, Date.now() + Math.floor(budget * SHOTS_SHARE)) });
+    counts.shotsDeleted = s.expired + s.orphans;
+  }, "pictures");
+
+  await part(async () => {
+    counts.startFailed = await endRows(await ids({ status: "starting", startedAt: { lt: before(SESSION_TIMES.startMs) } }), "start_failed", SYSTEM_END, deadline, ends);
   }, "start check");
 
   await part(async () => {
@@ -1267,11 +1529,11 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     const here = await prisma.teammateBrowserSession.findMany({ where: { status: { in: ["live", "waiting", "handed_over"] }, bootId: BOOT_ID }, select: { id: true }, take: limit });
     const orphaned = here.map((r) => r.id).filter((id) => !liveBrowser(id));
     const lost = here.map((r) => r.id).filter((id) => liveBrowser(id)?.lost === true);
-    counts.restarted = (await endRows([...elsewhere, ...orphaned], "restarted", SYSTEM_END, deadline)) + (await endRows(lost, "provider_ended", SYSTEM_END, deadline));
+    counts.restarted = (await endRows([...elsewhere, ...orphaned], "restarted", SYSTEM_END, deadline, ends)) + (await endRows(lost, "provider_ended", SYSTEM_END, deadline, ends));
   }, "guard check");
 
   await part(async () => {
-    counts.timeCap = await endRows(await ids({ status: { in: LIVE }, endsBy: { lte: now } }), "time_cap", SYSTEM_END, deadline);
+    counts.timeCap = await endRows(await ids({ status: { in: LIVE }, endsBy: { lte: now } }), "time_cap", SYSTEM_END, deadline, ends);
   }, "time cap");
 
   // The time-based parts (review of Phase 4 step 2): each row ends only if
@@ -1279,13 +1541,13 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
   // its browser; time_cap, the access refusals, Stop and the hard cap still
   // end at once.
   await part(async () => {
-    const only = { status: "handed_over", handedOverAt: { lt: before(SESSION_TIMES.takeOverMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
-    counts.takeOver = await endRows(await ids(only), "take_over_too_long", SYSTEM_END, deadline, { only, whenFree: true });
+    const only = { status: "handed_over", handedOverAt: { lt: before(takeOverMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
+    counts.takeOver = await endRows(await ids(only), "take_over_too_long", SYSTEM_END, deadline, { only, whenFree: true, releaseMs });
   }, "take over check");
 
   await part(async () => {
     const only = { status: "waiting", waitingSince: { lt: before(waitingMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
-    counts.waited = await endRows(await ids(only), "waited_too_long", SYSTEM_END, deadline, { only, whenFree: true });
+    counts.waited = await endRows(await ids(only), "waited_too_long", SYSTEM_END, deadline, { only, whenFree: true, releaseMs });
   }, "waiting check");
 
   await part(async () => {
@@ -1293,7 +1555,7 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     const idle = await prisma.teammateBrowserSession.findMany({ where: only, select: { id: true, lastRunId: true }, take: limit, orderBy: { lastActiveAt: "asc" } });
     const quiet: string[] = [];
     for (const r of idle) if (!(await runHolds(r.lastRunId, null, now))) quiet.push(r.id);
-    counts.idle = await endRows(quiet, "idle", SYSTEM_END, deadline, { only, whenFree: true });
+    counts.idle = await endRows(quiet, "idle", SYSTEM_END, deadline, { only, whenFree: true, releaseMs });
   }, "idle check");
 
   await part(async () => {
@@ -1316,30 +1578,46 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
           if (!access.ok) reason = endReasonFor(access.reason);
         }
       }
-      if (reason && (await endBrowserSession(r.id, reason, SYSTEM_END).catch(() => false))) counts.noAccess += 1;
+      if (reason && (await endBrowserSession(r.id, reason, SYSTEM_END, ends).catch(() => false))) counts.noAccess += 1;
     }
   }, "access check");
+
+  await part(async () => {
+    const over = await prisma.teammateBrowserSession.findMany({
+      where: { status: "ending", endsBy: { lt: before(PROVIDER_GRACE_MS) } },
+      select: { id: true, providerSessionId: true, reservedMinutes: true, startedAt: true },
+      take: limit,
+      orderBy: { endsBy: "asc" },
+    });
+    for (const r of over) {
+      await markEnded(r, now, r.reservedMinutes);
+      counts.overdue += 1;
+    }
+  }, "ending past its time");
 
   await part(async () => {
     const due = await prisma.teammateBrowserSession.findMany({
       where: { status: "ending", nextStopAt: { lte: now } },
       select: { id: true, providerSessionId: true, reservedMinutes: true, startedAt: true, stopAttempts: true },
-      take: limit,
+      take: Math.min(limit, RETRY_MAX),
       orderBy: { nextStopAt: "asc" },
     });
     let givenUp = 0;
-    for (const r of due) {
-      if (!open()) break;
-      const out = await release(r.providerSessionId);
-      if (out !== "failed") {
-        await markEnded(r, now);
-        counts.retried += 1;
-      } else if (r.stopAttempts + 1 >= STOP_ATTEMPTS_MAX) {
-        await markEnded(r, now, r.reservedMinutes);
-        givenUp += 1;
-      } else {
-        await prisma.teammateBrowserSession.updateMany({ where: { id: r.id, status: "ending" }, data: { stopAttempts: { increment: 1 }, nextStopAt: new Date(now.getTime() + STOP_RETRY_MS) } });
-      }
+    for (let i = 0; i < due.length && open(); i += END_AT_ONCE) {
+      await Promise.all(
+        due.slice(i, i + END_AT_ONCE).map(async (r) => {
+          const out = await release(r.providerSessionId, releaseMs);
+          if (out !== "failed") {
+            await markEnded(r, now);
+            counts.retried += 1;
+          } else if (r.stopAttempts + 1 >= STOP_ATTEMPTS_MAX) {
+            await markEnded(r, now, r.reservedMinutes);
+            givenUp += 1;
+          } else {
+            await prisma.teammateBrowserSession.updateMany({ where: { id: r.id, status: "ending" }, data: { stopAttempts: { increment: 1 }, nextStopAt: new Date(now.getTime() + STOP_RETRY_MS) } });
+          }
+        }),
+      );
     }
     if (givenUp > 0) console.error(`[browser] ${givenUp} release(s) the provider never confirmed, ended at their reserved minutes`);
   }, "release retry");
@@ -1347,7 +1625,7 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
   await part(async () => {
     const rc = browserReleaseConfig();
     if (!rc) return;
-    const listed = await listRunningProviderSessions(rc);
+    const listed = await within(listRunningProviderSessions(rc), Math.max(1, deadline - Date.now()), { ok: false as const, failure: "unavailable" as const });
     if (!listed.ok) return;
     const tagged = listed.data.filter((s) => s.tag === rc.deploymentTag).slice(0, 500);
     if (tagged.length === 0) return;
@@ -1362,23 +1640,10 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       const row = byPid.get(t.providerSessionId) ?? (t.rowId ? byRow.get(t.rowId) : undefined);
       // A row still starting has not written its provider id yet: it is live.
       if (row && LIVE.includes(row.status)) continue;
-      const out = await releaseProviderSession(rc, t.providerSessionId).catch(() => "failed" as const);
+      const out = await within(releaseProviderSession(rc, t.providerSessionId).catch(() => "failed" as const), releaseMs, "failed" as const);
       if (out !== "failed") counts.reaped += 1;
     }
   }, "reaper");
-
-  await part(async () => {
-    counts.stepsDeleted = await prisma.$executeRaw`
-      DELETE FROM "TeammateBrowserStep"
-       WHERE "id" IN (SELECT "id" FROM "TeammateBrowserStep"
-                       WHERE "at" < (now() AT TIME ZONE 'UTC') - interval '30 days'
-                       LIMIT ${STEP_RETENTION_BATCH})`;
-  }, "step retention");
-
-  await part(async () => {
-    const s = await sweepShots(now);
-    counts.shotsDeleted = s.expired + s.orphans;
-  }, "pictures");
 
   return counts;
 }

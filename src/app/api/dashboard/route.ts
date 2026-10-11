@@ -4,10 +4,14 @@ import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { getTopPerformers } from "@/services/performanceScoreService";
 import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
+import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 
 /**
  * The home feed's recent activity: never a record of who was given access
- * to what (those rows are for the audit surfaces), and never a row about a
+ * to what (those rows are for the audit surfaces), never a row about one
+ * person's own AI teammate work, their browser or their Google (review
+ * round 1 of Phase 4: personal-activity.ts, the person's and the audit
+ * log's alone, never every colleague's home), and never a row about a
  * Space, Folder, List, doc, table, canvas or form the viewer cannot open (its
  * description names the thing). Rows about anything else pass as before.
  */
@@ -62,8 +66,8 @@ export async function GET() {
     prisma.user.count({ where: { organizationId: orgId, status: "PIP", deletedAt: null } }),
     // Over-fetched, then narrowed to what this viewer may read (below).
     prisma.activityLog.findMany({
-      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
-      include: { actor: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] }, NOT: { type: { in: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } } },
+      select: { id: true, type: true, description: true, targetType: true, targetId: true, createdAt: true, actor: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
       orderBy: { createdAt: "desc" },
       take: 40,
     }),

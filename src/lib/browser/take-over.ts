@@ -16,6 +16,15 @@
 // THE LIVE VIEW'S ADDRESS is minted for this request, answered with
 // Cache-Control: no-store by the route, never stored or logged (Decision 19).
 //
+// NOTHING RUNS, AND NOTHING IS NOTED, WHILE THE PERSON HAS IT (review round 1
+// of Phase 4). Under the browser's lock, after its swap, Take over sets the
+// browser's handedOver flag and empties the guard's notes; Done swaps the
+// row back under the lock, empties them once more and clears the flag. A
+// call that waited on the lock behind a take over reads the flag and the
+// row again and refuses (browser-tools.ts onBrowser, browser-previews.ts),
+// and the guard keeps no note meanwhile (sessions.ts guardHooks), so the
+// model hears only that the person finished or gave it back.
+//
 // Server-only: imports prisma.
 
 import type { Viewer } from "@/lib/access/types";
@@ -26,8 +35,8 @@ import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { liveViewUrl } from "./browserbase";
 import { browserConfig } from "./config";
-import { withBrowserLock } from "./live";
-import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
+import { takeEvents, withBrowserLock, type LiveBrowser } from "./live";
+import { armWindows, armWindowsFromRow, endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
 import type { BrowserSessionView } from "./views";
 
 type Refusal = { ok: false; status: number; code: string; error: string };
@@ -69,7 +78,7 @@ export async function startTakeOver(
     return ended();
   }
 
-  const out = await withBrowserLock(row.id, TAKE_OVER_WAIT_MS, async () => {
+  const out = await withBrowserLock(row.id, TAKE_OVER_WAIT_MS, async (lb) => {
     const use = await useBrowserSession({ person: viewer, agentId: row.agentId, browserSessionId: row.id, runId: null, purpose: "take_over" });
     if (!use.ok) return use.reason === "busy" ? ({ ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy } as Refusal) : ended();
     const now = new Date();
@@ -102,6 +111,10 @@ export async function startTakeOver(
       if (err instanceof SessionMoved) return ended();
       throw err;
     }
+    // Still under the lock (see the header): every call after this one sees it.
+    lb.handedOver = true;
+    takeEvents(lb);
+    armWindows(row.id, { status: "handed_over", lastActiveAt: now, waitingSince: null, handedOverAt: use.row.status === "handed_over" ? (use.row.handedOverAt ?? now) : now, endsBy: use.row.endsBy });
     return { ok: true as const, row: use.row, at: now };
   });
   if ("busy" in out) return { ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy };
@@ -118,6 +131,8 @@ export async function startTakeOver(
   await logActivity({
     type: "teammate_browser.take_over",
     actorId: viewer.userId,
+    // The session's person (review round 1 of Phase 4): the feeds show the row to them.
+    actingForId: row.userId,
     organizationId: viewer.organizationId,
     description: BROWSER_AUDIT_COPY.takeOverStarted(row.currentSite ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite),
     targetId: row.agentId,
@@ -148,19 +163,34 @@ export async function finishTakeOver(
   const row = await ownSessionRow(viewer, rowId);
   if (!row) return notFound();
   const now = new Date();
-  const back = await prisma.teammateBrowserSession.updateMany({
-    where: { id: row.id, status: "handed_over" },
-    data: { status: "live", handedOverAt: null, lastActiveAt: now },
-  });
-  if (back.count !== 1) return { ok: false, status: 409, code: "not_handed_over", error: BROWSER_ROUTE_ERRORS.notHandedOver };
-  // A step the teammate asked for still waits (the person took over from the
-  // browser card meanwhile, step 3): the session waits on it again, from
-  // when it was asked, so the idle sweep never closes it under its card and
-  // the waiting window stays the card's own.
-  const pending = await waitingCardOf(row.id, row.chatSessionId).catch(() => null);
-  if (pending) {
-    await prisma.teammateBrowserSession.updateMany({ where: { id: row.id, status: "live" }, data: { status: "waiting", waitingSince: pending.createdAt } });
-  }
+  const handBack = async (lb: LiveBrowser | null): Promise<boolean> => {
+    const back = await prisma.teammateBrowserSession.updateMany({
+      where: { id: row.id, status: "handed_over" },
+      data: { status: "live", handedOverAt: null, lastActiveAt: now },
+    });
+    if (back.count !== 1) return false;
+    // A step the teammate asked for still waits (the person took over from the
+    // browser card meanwhile, step 3): the session waits on it again, from
+    // when it was asked, so the idle sweep never closes it under its card and
+    // the waiting window stays the card's own.
+    const pending = await waitingCardOf(row.id, row.chatSessionId).catch(() => null);
+    if (pending) {
+      await prisma.teammateBrowserSession.updateMany({ where: { id: row.id, status: "live" }, data: { status: "waiting", waitingSince: pending.createdAt } });
+    }
+    if (lb) {
+      // Under the lock (see the header): the notes of the person's own steps go, then the flag.
+      takeEvents(lb);
+      lb.handedOver = false;
+    }
+    return true;
+  };
+  // A browser this process no longer holds has nothing to empty: its next call ends it "restarted".
+  const out = await withBrowserLock(row.id, TAKE_OVER_WAIT_MS, (lb) => handBack(lb));
+  if (typeof out === "object" && "busy" in out) return { ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy };
+  const back = typeof out === "boolean" ? out : await handBack(null);
+  if (!back) return { ok: false, status: 409, code: "not_handed_over", error: BROWSER_ROUTE_ERRORS.notHandedOver };
+  // Its idle or waiting window holds from now, in this process (review round 1 of Phase 4).
+  await armWindowsFromRow(row.id);
 
   const user = await prisma.user.findUnique({ where: { id: viewer.userId }, select: { firstName: true, lastName: true, email: true } }).catch(() => null);
   const first = (user?.firstName ?? "").trim() || personName(user) || "The person";
@@ -184,6 +214,7 @@ export async function finishTakeOver(
   await logActivity({
     type: "teammate_browser.take_over",
     actorId: viewer.userId,
+    actingForId: row.userId,
     organizationId: viewer.organizationId,
     description: BROWSER_AUDIT_COPY.takeOverEnded(finished),
     targetId: row.agentId,

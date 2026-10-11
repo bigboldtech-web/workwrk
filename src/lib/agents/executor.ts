@@ -1319,7 +1319,10 @@ export async function auditAgentAction(a: {
   // audit log, and the subject and the addresses are the person's mail. A
   // browser step's names its site, and its facts are the site, the kind and
   // the element's role (Phase 4 Decision 24): never typed text, an element's
-  // words or a page's path.
+  // words or a page's path. Both rows are the person's own (review round 1
+  // of Phase 4, src/lib/access/personal-activity.ts): only the person (its
+  // actingForId) and Owners and Admins read them in Activity, and the home
+  // feed shows them to no one.
   const connector = isConnectorToolName(a.toolName) ? a.toolName : null;
   const browser = isBrowserToolName(a.toolName) ? a.toolName : null;
   const what = connector

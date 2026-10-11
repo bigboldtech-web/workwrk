@@ -46,8 +46,18 @@
 // Only the links that made it into the view are returned for open_page
 // (Decision 11), so the model can follow nothing it was not shown.
 //
-// Pure.
+// A CARD KEEPS NO WORDS OR ADDRESS IT ONLY COMPARES (review round 1 of
+// Phase 4). A card's fingerprint is stored sealed (sealFingerprint): the
+// element's raw name and link are kept only as keyed hashes, as its anchor
+// already is, and a fresh read is sealed the same way before it is compared
+// (controlOf). The key is this server process's own (sealWords), never
+// stored: a card is approved only in the process that holds its browser,
+// the one that made it (Decision 7), and a plain hash of a six digit code
+// or a short share key is undone by trying every value.
+//
+// Pure but for that key, made once a process.
 
+import { createHmac, randomBytes } from "node:crypto";
 import { plainData } from "@/lib/agents/plain-data";
 import { clampText } from "@/lib/agents/clamp";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
@@ -284,6 +294,57 @@ export function optionWords(label: string): { text: string; hidden: boolean } {
   return { text, hidden: count.hidden > 0 };
 }
 
+// ── Sealed words (review round 1 of Phase 4; the header) ─────────────
+
+/**
+ * The process's key for a card's sealed words: made once, kept on
+ * globalThis as live.ts keeps the browser registry, so a dev server's hot
+ * reload keeps it with the browsers it holds; a restart makes a new one, as
+ * it ends every browser and its cards.
+ */
+const sealHolder = globalThis as typeof globalThis & { __wkCardSealKey?: Buffer };
+const SEAL_KEY: Buffer = (sealHolder.__wkCardSealKey ??= randomBytes(32));
+
+/** Words or an address as a card keeps them to compare: a keyed SHA-256, 64 hex digits. */
+export function sealWords(s: string): string {
+  return createHmac("sha256", SEAL_KEY).update(s, "utf8").digest("hex");
+}
+
+/**
+ * A control's fingerprint as a card stores it: every field of
+ * ElementFingerprint but the name and the link, which are kept as their
+ * sealed words only (`hrefHash` null when it has no link).
+ */
+export interface SealedFingerprint {
+  tag: string;
+  role: string;
+  nameHash: string;
+  kind: FieldKind;
+  type: string | null;
+  formHost: string | null;
+  hrefHash: string | null;
+  twin: number;
+  twins: number;
+  anchor: string;
+  at: number;
+}
+
+export function sealFingerprint(fp: ElementFingerprint): SealedFingerprint {
+  return {
+    tag: fp.tag,
+    role: fp.role,
+    nameHash: sealWords(fp.name),
+    kind: fp.kind,
+    type: fp.type,
+    formHost: fp.formHost,
+    hrefHash: fp.href === null ? null : sealWords(fp.href),
+    twin: fp.twin,
+    twins: fp.twins,
+    anchor: fp.anchor,
+    at: fp.at,
+  };
+}
+
 /** A raw control's fingerprint (types.ts ElementFingerprint), field by field: what an act finds it again by (Decision 14). */
 export function fingerprintOf(e: RawElement): ElementFingerprint {
   return {
@@ -312,20 +373,38 @@ export function sameFingerprint(a: ElementFingerprint, b: ElementFingerprint): b
   return sameTwinKey(a, b) && a.twin === b.twin && a.twins === b.twins && a.anchor === b.anchor && a.at === b.at;
 }
 
+/** The fields sealed twins share: everything but which twin it is. */
+function sameSealedTwinKey(a: SealedFingerprint, b: SealedFingerprint): boolean {
+  return a.tag === b.tag && a.role === b.role && a.nameHash === b.nameHash && a.kind === b.kind && a.type === b.type && a.formHost === b.formHost && a.hrefHash === b.hrefHash;
+}
+
 /**
- * The main frame's control with this fingerprint in a raw read, and its
- * facts as a card shows them (made plain and redacted, as a read shows
- * them); `changed` when the page has such a control but another count of
- * twins, another anchor or another place (review of Phase 4 step 3: a twin
- * inserted above, or its row's words changed); null when the page no longer
- * has it (browser-previews.ts).
+ * The main frame's control with this sealed fingerprint in a raw read, each
+ * control of the read sealed the same way first (review round 1 of Phase 4),
+ * and its facts as a card shows them (made plain and redacted, as a read
+ * shows them); `changed` when the page has such a control but another count
+ * of twins, another anchor or another place (review of Phase 4 step 3: a
+ * twin inserted above, or its row's words changed); null when the page no
+ * longer has it (browser-previews.ts).
  */
-export function controlOf(raw: RawSnapshot, fp: ElementFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | { changed: true } | null {
+export function controlOf(raw: RawSnapshot, fp: SealedFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | { changed: true } | null {
   const list = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
-  const twins = list.filter((e) => sameTwinKey(fingerprintOf(e), fp));
+  const sealed = list.map((e) => ({ e, s: sealFingerprint(fingerprintOf(e)) }));
+  const twins = sealed.filter((x) => sameSealedTwinKey(x.s, fp));
   if (twins.length === 0) return null;
-  const hit = twins.length === fp.twins ? twins.find((e) => sameFingerprint(fingerprintOf(e), fp)) : undefined;
-  return hit ? { raw: hit, facts: elementFacts(hit, { hidden: 0 }) } : { changed: true };
+  const hit = twins.length === fp.twins ? twins.find((x) => x.s.twin === fp.twin && x.s.twins === fp.twins && x.s.anchor === fp.anchor && x.s.at === fp.at) : undefined;
+  return hit ? { raw: hit.e, facts: elementFacts(hit.e, { hidden: 0 }) } : { changed: true };
+}
+
+/**
+ * The words a control is also called by, beside the name a person sees (the
+ * page reader's `alsoNamed`, review round 1 of Phase 4: its aria-labelledby
+ * or aria-label words where they differ), for a click's warnings only: never
+ * shown to the model or on a card. Empty when the read carries none.
+ */
+export function alsoNamedOf(e: RawElement): string {
+  const v = (e as RawElement & { alsoNamed?: unknown }).alsoNamed;
+  return typeof v === "string" ? v.slice(0, 300) : "";
 }
 
 /**

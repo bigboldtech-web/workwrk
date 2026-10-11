@@ -81,6 +81,7 @@ import { fieldKindOf, isSensitiveField } from "./classes";
 import { randomUUID } from "node:crypto";
 import { READER_SOURCE, READER_WORLD } from "./page-reader";
 import { siteOf, type SiteVerdict } from "./sites";
+import { sealWords, type SealedFingerprint } from "./snapshot";
 import { OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type BrowserHandle, type ElementFingerprint, type FieldKind, type ListOption, type NavOutcome, type RawElement, type RawLink, type RawSnapshot } from "./types";
 
 export interface GuardHooks {
@@ -161,6 +162,8 @@ interface ReaderElement {
   anchor: string;
   options?: string[];
   optionCount: number | null;
+  /** Other words it is called by (aria-labelledby or aria-label, review round 1 of Phase 4): for click warnings only, never its name, its fingerprint or the model's read. */
+  alsoNamed: string | null;
 }
 
 function readerElement(v: unknown, i: number): ReaderElement {
@@ -187,6 +190,7 @@ function readerElement(v: unknown, i: number): ReaderElement {
     anchor: typeof r.anchor === "string" && /^[0-9a-f]{1,16}$/.test(r.anchor) ? r.anchor : "",
     ...(Array.isArray(r.options) ? { options: r.options.filter((o): o is string => typeof o === "string") } : {}),
     optionCount: num(r.optionCount),
+    alsoNamed: typeof r.alsoNamed === "string" && r.alsoNamed ? r.alsoNamed.slice(0, 300) : null,
   };
 }
 
@@ -208,6 +212,32 @@ function kindOfElement(e: ReaderElement): FieldKind {
 /** The fingerprint fields twins share (everything but which twin it is, review of Phase 4 step 3). */
 function twinKey(f: Pick<ElementFingerprint, "tag" | "role" | "name" | "kind" | "type" | "formHost" | "href">): string {
   return JSON.stringify([f.tag, f.role, f.name, f.kind, f.type, f.formHost, f.href]);
+}
+
+/**
+ * A target as a card may hold it (review round 1 of Phase 4): its name and
+ * link as read, or sealed (snapshot.ts sealFingerprint, a keyed hash of each,
+ * nameHash and hrefHash). A sealed one is compared by sealing the fresh
+ * read's words the same way; a plain one as before.
+ */
+export type TargetFingerprint = ElementFingerprint | SealedFingerprint;
+
+function isSealed(t: TargetFingerprint): t is SealedFingerprint {
+  return typeof (t as Partial<SealedFingerprint>).nameHash === "string";
+}
+
+/** Whether a fresh control shares the target's twin key, in the target's own form (see TargetFingerprint). */
+function sameTwinOf(e: ElementFingerprint, target: TargetFingerprint): boolean {
+  if (!isSealed(target)) return twinKey(e) === twinKey(target);
+  return (
+    e.tag === target.tag &&
+    e.role === target.role &&
+    e.kind === target.kind &&
+    e.type === target.type &&
+    e.formHost === target.formHost &&
+    sealWords(e.name) === target.nameHash &&
+    (e.href === null ? null : sealWords(e.href)) === target.hrefHash
+  );
 }
 
 /**
@@ -235,6 +265,8 @@ function fingerprinted(list: ReaderElement[]): Array<RawElement & { readerIndex:
       filled: e.filled,
       ...(e.options ? { options: e.options } : {}),
       ...(e.optionCount !== null ? { optionCount: e.optionCount } : {}),
+      // Kept beside the fingerprint, never in it or in the twin key (review round 1 of Phase 4).
+      ...(e.alsoNamed ? { alsoNamed: e.alsoNamed } : {}),
       inMainFrame: true,
       readerIndex: e.i,
     };
@@ -850,12 +882,15 @@ class Driver {
    * same count of twins, the same twin, the same anchor and the same place
    * among the controls, or `changed` (review of Phase 4 step 3: a twin
    * inserted above moved the card's index onto another one).
+   *
+   * The target may be in either form (TargetFingerprint, review round 1 of
+   * Phase 4): its name and link as read, or sealed, compared by sealing the
+   * fresh read's the same way.
    */
-  private async locateTarget(target: ElementFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; code: "not_found" | "changed" }> {
+  private async locateTarget(target: TargetFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; code: "not_found" | "changed" }> {
     const out = await this.reader("read", {});
     const all = fingerprinted((Array.isArray(out.elements) ? out.elements : []).map(readerElement));
-    const key = twinKey(target);
-    const twins = all.filter((e) => twinKey(e) === key);
+    const twins = all.filter((e) => sameTwinOf(e, target));
     if (twins.length === 0) return { ok: false, code: "not_found" };
     if (twins.length !== target.twins) return { ok: false, code: "changed" };
     const el = twins.find((e) => e.twin === target.twin);
@@ -891,7 +926,7 @@ class Driver {
     return { atEnd: out.atEnd === true };
   }
 
-  async screenshot(o: { around?: ElementFingerprint | null }): Promise<{ jpeg: Uint8Array; width: number; height: number }> {
+  async screenshot(o: { around?: TargetFingerprint | null }): Promise<{ jpeg: Uint8Array; width: number; height: number }> {
     if (this.lost) throw new BrowserLost();
     if (this.privateHold) throw new Error("The page was closed");
     let clip: { x: number; y: number; width: number; height: number; scale: number } | null = null;
@@ -929,7 +964,7 @@ class Driver {
    * Every option the list has, at most OPTIONS_MATCH_MAX, for matching a
    * choice only (review of Phase 4 step 3): read, never shown to the model.
    */
-  async options(target: ElementFingerprint): Promise<{ ok: true; options: ListOption[]; total: number } | { ok: false; code: "not_found" | "changed" }> {
+  async options(target: TargetFingerprint): Promise<{ ok: true; options: ListOption[]; total: number } | { ok: false; code: "not_found" | "changed" }> {
     if (this.lost) throw new BrowserLost();
     if (this.privateHold) return { ok: false, code: "changed" };
     const found = await this.locateTarget(target);
@@ -945,7 +980,7 @@ class Driver {
   }
 
   /** The checks every act makes before any input (see the header). */
-  private async prepareAct(target: ElementFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; outcome: ActOutcome }> {
+  private async prepareAct(target: TargetFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; outcome: ActOutcome }> {
     if (this.lost) return { ok: false, outcome: { ok: false, code: "lost_before" } };
     // A page being closed is acted on no more than it is read (review of Phase 4 step 2).
     if (this.privateHold) return { ok: false, outcome: { ok: false, code: "changed" } };
@@ -987,7 +1022,7 @@ class Driver {
     return { ok: true, settled, url: this.url, site };
   }
 
-  async click(target: ElementFingerprint): Promise<ActOutcome> {
+  async click(target: TargetFingerprint): Promise<ActOutcome> {
     const prep = await this.prepareAct(target);
     if (!prep.ok) return prep.outcome;
     let sent = false;
@@ -1018,7 +1053,7 @@ class Driver {
     }
   }
 
-  async type(target: ElementFingerprint, text: string, pressEnter: boolean): Promise<ActOutcome> {
+  async type(target: TargetFingerprint, text: string, pressEnter: boolean): Promise<ActOutcome> {
     const prep = await this.prepareAct(target);
     if (!prep.ok) return prep.outcome;
     let sent = false;
@@ -1050,7 +1085,7 @@ class Driver {
     }
   }
 
-  async select(target: ElementFingerprint, choice: { index: number; label: string }): Promise<ActOutcome> {
+  async select(target: TargetFingerprint, choice: { index: number; label: string }): Promise<ActOutcome> {
     const prep = await this.prepareAct(target);
     if (!prep.ok) return prep.outcome;
     this.act = { refusedHost: null };

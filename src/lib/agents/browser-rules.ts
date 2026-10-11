@@ -19,14 +19,27 @@
 // site, the kind and the element's role (browserAuditFacts), never its words
 // or typed text.
 //
+// A CARD STORES WHAT IT COMPARES, NEVER THE SECRET (review round 1 of Phase
+// 4). AgentAction.input lives as long as the account, in the backups and in
+// the export, so a card keeps the page's origin (what siteVerdict reads),
+// its address only as sealed words (pageKeyHash: what the approval compares)
+// and its Page line as a person reads it (site and path, the path redacted
+// as a read shows it); the element's name and link only sealed
+// (snapshot.ts sealFingerprint), its words for the card redacted. A card
+// stored before keeps its address and raw words: read here into the same
+// form, it compares as before, or fails as a page that changed.
+//
 // THE LIMITS (Decision 22): per answer at most 20 browser calls, 8 opens, 6
 // reads, 6 finds, 8 scrolls, 3 pictures, 1 step asked, 1 take over request
 // and 1 session started (BROWSER_TOOL_COUNTS, classes.ts BROWSER_TURN_LIMITS).
 
 import { BROWSER_TURN_LIMITS, CLICK_WARNINGS, type ClickWarning } from "@/lib/browser/classes";
+import { redactPageText } from "@/lib/browser/redact";
+import { sealWords, type SealedFingerprint } from "@/lib/browser/snapshot";
 import type { SiteVerdict } from "@/lib/browser/sites";
-import { FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type ElementFingerprint, type NavOutcome, type StepKind } from "@/lib/browser/types";
+import { FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type NavOutcome, type StepKind } from "@/lib/browser/types";
 import { clampText } from "./clamp";
+import { plainData } from "./plain-data";
 import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
 import type { ActionPreview } from "./teammate-thread";
 import type { BrowserToolName } from "./tool-names";
@@ -344,15 +357,44 @@ export function pageKey(url: string): string {
   }
 }
 
-/** A page as its card's Page line names it: its site and its path, at most 120 characters, never its query. */
+/** An address with its escapes decoded, as the page meant it; the raw text when they are not valid. */
+function decodedPath(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * A page as its card's Page line names it: its site and its path, at most
+ * 120 characters, never its query. A path with a code or a card number in
+ * it is shown redacted, as a read shows it (review round 1 of Phase 4).
+ */
 export function pageWords(url: string): string {
   try {
     const u = new URL(url);
-    const path = u.pathname === "/" ? "" : u.pathname;
-    return clampText(`${u.hostname}${path}`, 120);
+    const raw = u.pathname === "/" ? "" : u.pathname;
+    const r = redactPageText(plainData(decodedPath(raw)));
+    return clampText(`${u.hostname}${r.hidden > 0 ? r.text : raw}`, 120);
   } catch {
     return "";
   }
+}
+
+/** A page's origin (scheme, host and port), all siteVerdict reads of it; "" when it is no URL (review round 1 of Phase 4). */
+export function pageOrigin(url: string): string {
+  try {
+    const o = new URL(url).origin;
+    return o === "null" ? "" : o;
+  } catch {
+    return "";
+  }
+}
+
+/** A page's address as a card keeps it to compare: its pageKey, sealed (review round 1 of Phase 4). */
+export function pageKeyHash(url: string): string {
+  return sealWords(pageKey(url));
 }
 
 // ── The cards ───────────────────────────────────────────────────────
@@ -376,8 +418,14 @@ export function isTakeOverReason(v: unknown): v is TakeOverReason {
 export interface BrowserCardInput {
   browserSessionId: string;
   site: string;
-  /** The page's address, fragment dropped (pageKey): an approval acts only on this page (Decision 14). */
+  /**
+   * The page's ORIGIN, never its path or query (review round 1 of Phase 4):
+   * what siteVerdict reads at the approval. A card stored before kept the
+   * whole address here, read as its origin now.
+   */
   pageUrl: string;
+  /** The page's address, fragment dropped (pageKey), sealed: an approval acts only on this page (Decision 14). */
+  pageKeyHash: string;
   /**
    * The document the card was asked on (BrowserHandle.documentId, review of
    * Phase 4 step 3): an approval acts only while the tab still shows it, so
@@ -386,9 +434,9 @@ export interface BrowserCardInput {
   documentId?: string;
   /** Its Page line: site and path (pageWords). */
   page: string;
-  /** The element's id from the model's read, and its fingerprint (acts only). */
+  /** The element's id from the model's read, and its fingerprint, sealed (acts only). */
   element?: string;
-  target?: ElementFingerprint;
+  target?: SealedFingerprint;
   /** The element's role and words as the card shows them (acts only). */
   role?: string;
   name?: string;
@@ -425,23 +473,50 @@ function nullableText(v: unknown, max: number): string | null | undefined {
   return typeof v === "string" && v.length <= max ? v : undefined;
 }
 
-/** A stored fingerprint, read defensively (every field its type), or null. */
-function storedFingerprint(v: unknown): ElementFingerprint | null {
+const SEALED = /^[0-9a-f]{64}$/;
+
+/** Sealed words as stored: 64 hex digits, or null. */
+function sealed(v: unknown): string | null {
+  return typeof v === "string" && SEALED.test(v) ? v : null;
+}
+
+/**
+ * A stored fingerprint, read defensively (every field its type), as a
+ * sealed one, or null. One stored before review round 1 of Phase 4 kept its
+ * raw name and link: they are sealed here, in memory, so it compares as it
+ * did (snapshot.ts controlOf).
+ */
+function storedFingerprint(v: unknown): SealedFingerprint | null {
   const f = rec(v);
   const tag = text(f.tag, 40);
   const role = text(f.role, 40);
-  const name = text(f.name, 400);
   const type = nullableText(f.type, 40);
   const formHost = nullableText(f.formHost, 253);
-  const href = nullableText(f.href, 8192);
-  if (tag === null || role === null || name === null || type === undefined || formHost === undefined || href === undefined) return null;
+  if (tag === null || role === null || type === undefined || formHost === undefined) return null;
+  let nameHash: string | null;
+  let hrefHash: string | null;
+  if ("nameHash" in f) {
+    nameHash = sealed(f.nameHash);
+    if (nameHash === null) return null;
+    if (f.hrefHash === null) hrefHash = null;
+    else {
+      hrefHash = sealed(f.hrefHash);
+      if (hrefHash === null) return null;
+    }
+  } else {
+    const name = text(f.name, 400);
+    const href = nullableText(f.href, 8192);
+    if (name === null || href === undefined) return null;
+    nameHash = sealWords(name);
+    hrefHash = href === null ? null : sealWords(href);
+  }
   if (typeof f.kind !== "string" || !FIELD_KIND_SET.has(f.kind)) return null;
   if (!Number.isInteger(f.twin) || (f.twin as number) < 0) return null;
   // Which twin (review of Phase 4 step 3): how many there were, the anchor and the place, each required.
   if (!Number.isInteger(f.twins) || (f.twins as number) < 1 || (f.twin as number) >= (f.twins as number)) return null;
   const anchor = text(f.anchor, 16);
   if (anchor === null || !Number.isInteger(f.at) || (f.at as number) < 0) return null;
-  return { tag, role, name, kind: f.kind as ElementFingerprint["kind"], type, formHost, href, twin: f.twin as number, twins: f.twins as number, anchor, at: f.at as number };
+  return { tag, role, nameHash, kind: f.kind as SealedFingerprint["kind"], type, formHost, hrefHash, twin: f.twin as number, twins: f.twins as number, anchor, at: f.at as number };
 }
 
 /**
@@ -454,8 +529,15 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
   const r = rec(raw);
   const browserSessionId = text(r.browserSessionId, 64);
   const site = hostOf(r.site);
-  const pageUrl = text(r.pageUrl, 8192);
-  if (!browserSessionId || !site || !pageUrl) return null;
+  const address = text(r.pageUrl, 8192);
+  if (!browserSessionId || !site || !address) return null;
+  // The origin, and the sealed address (review round 1 of Phase 4). A card
+  // stored before holds the whole address: sealed here, it compares as it
+  // did; a sealed address that is not one compares with nothing.
+  const pageUrl = pageOrigin(address);
+  if (!pageUrl) return null;
+  const pageKeyHashStored = "pageKeyHash" in r ? sealed(r.pageKeyHash) : pageKeyHash(address);
+  if (!pageKeyHashStored) return null;
   const shotId = r.shotId === null || r.shotId === undefined ? null : text(r.shotId, 64);
   if (shotId === null && r.shotId !== null && r.shotId !== undefined) return null;
   const shot = rec(r.shot);
@@ -467,8 +549,10 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
     browserSessionId,
     site,
     pageUrl,
+    pageKeyHash: pageKeyHashStored,
     ...(documentId ? { documentId } : {}),
-    page: text(r.page, 200) ?? "",
+    // A card stored before: its Page line again from its address, redacted.
+    page: "pageKeyHash" in r ? (text(r.page, 200) ?? "") : pageWords(address),
     shotId,
     shot: shotId && width && height ? { width, height } : null,
   };

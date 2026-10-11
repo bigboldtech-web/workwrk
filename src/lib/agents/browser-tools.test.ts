@@ -35,6 +35,8 @@ const h = vi.hoisted(() => ({
   released: [] as unknown[],
   shotId: "sh0123456789abcdef0123456789abcdef" as string | null,
   shots: [] as Row[],
+  /** The session as sessionNow reads it under the lock (review round 1 of Phase 4). */
+  now: null as null | Row,
 }));
 
 vi.mock("./acting", () => ({ actingPersonFor: async () => h.person }));
@@ -68,6 +70,7 @@ vi.mock("@/lib/browser/sessions", () => ({
   releaseWaiting: async (rowId: unknown) => {
     h.released.push(rowId);
   },
+  sessionNow: async () => h.now,
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
@@ -198,6 +201,7 @@ beforeEach(() => {
   h.released = [];
   h.shotId = "sh0123456789abcdef0123456789abcdef";
   h.shots = [];
+  h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   f.navigate = [];
   f.clicks = [];
   f.nav = null;
@@ -516,5 +520,106 @@ describe("a call's rules never replace newer ones (review of Phase 4 step 3)", (
     const card = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(button), role: "button", name: "Place order", shotId: null, shot: null };
     expect(await run("click", card, ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined }))).toEqual({ error: BROWSER_COPY.busyNow, held: "retry_later" });
     expect(f.clicks).toEqual([]);
+  });
+});
+
+// Review round 1 of Phase 4.
+describe("the session read again under the browser's lock (review round 1 of Phase 4)", () => {
+  const card = () => ({
+    browserSessionId: "bs1",
+    site: "shop.proof.test",
+    pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
+    page: "shop.proof.test/checkout",
+    element: "e1",
+    target: fingerprintOf(button),
+    role: "button",
+    name: "Place order",
+    warnings: ["buys"],
+    inForm: true,
+    shotId: null,
+    shot: null,
+  });
+  const approval = () => ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined });
+
+  /**
+   * A step in flight holds the lock; each call passes its checks and waits
+   * on it (one at a time: vitest 3 can hand two dynamic imports of one
+   * mocked module started together the real module); then the person
+   * presses Take over, which sets the flag under the lock first.
+   */
+  async function takenOverWhileWaiting(calls: Array<() => Promise<Row>>): Promise<Row[]> {
+    let release!: () => void;
+    const holding = withBrowserLock("bs1", 1000, async (b) => {
+      await new Promise<void>((r) => (release = r));
+      b.handedOver = true;
+    });
+    const queued: Array<Promise<Row>> = [];
+    for (const c of calls) {
+      queued.push(c());
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    release();
+    await holding;
+    return Promise.all(queued);
+  }
+
+  it("refuses a call and an approval that waited behind a take over, the approval held so its card waits", async () => {
+    live("http://shop.proof.test/checkout");
+    const [read, open, click] = await takenOverWhileWaiting([() => run("read_page", {}), () => run("open_page", { url: "http://docs.proof.test/" }), () => run("click", card(), approval())]);
+
+    // Before: the read ran on the page the person had, the open navigated under them, and the approved click went through.
+    expect(read).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    expect(open).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    expect(click).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy" });
+    expect([f.navigate, f.clicks, h.steps]).toEqual([[], [], []]);
+    expect(h.released).toEqual([]);
+    expect(marks.webReads).toBe(0);
+  });
+
+  it("refuses by the row read fresh too, and close_browser closes nothing while the person has it", async () => {
+    live("http://shop.proof.test/checkout");
+    h.now = { ...h.now, status: "handed_over" };
+    expect(await run("show_page", {})).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    expect(await run("close_browser", {})).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    expect([h.shots, h.ends]).toEqual([[], []]);
+  });
+
+  it("answers a call that waited behind an end by that end's own reason, never that WorkwrK restarted", async () => {
+    live("http://shop.proof.test/checkout");
+    h.now = { ...h.now, status: "ending", endReason: "stopped" };
+    expect(await run("read_page", {})).toEqual({ error: `${BROWSER_COPY.browserClosed} You stopped it.` });
+    h.now = { ...h.now, status: "ended", endReason: "time_cap" };
+    expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.timeCap(15) });
+    // Already closed: nothing to close.
+    expect(await run("close_browser", {})).toEqual({ ok: true, closed: false, note: BROWSER_COPY.notOpen });
+    // Gone from this process because it ended meanwhile: its reason, and no restarted end.
+    resetLiveRegistryForTests();
+    h.now = { ...h.now, status: "ended", endReason: "turned_off" };
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.workspaceOff });
+    expect(h.ends).toEqual([]);
+    expect([f.clicks, h.steps]).toEqual([[], []]);
+  });
+
+  it("refuses a turn's call once another turn holds the browser, and ends one whose wait ran past its time cap", async () => {
+    live("http://shop.proof.test/checkout");
+    h.now = { ...h.now, lastRunId: "run-other" };
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.otherTurn });
+    h.now = { ...h.now, lastRunId: "run1", endsBy: new Date(Date.now() - 1000) };
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.timeCap(15) });
+    expect(h.ends).toEqual([["bs1", "time_cap", { id: null, type: "system" }, undefined]]);
+  });
+
+  it("says why a start read again was refused (sessions.ts startStillAllowed)", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    h.opened = { ok: false, reason: "person_cant" };
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: TEAMMATE_TOOL_ERRORS.personCant });
+    h.opened = { ok: false, reason: "teammate_off" };
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.teammateOff });
+  });
+
+  it("says the end's own reason when the session was found ended before the lock", async () => {
+    h.uses = [{ ok: false, reason: "ended", endReason: "idle" }];
+    expect(await run("read_page", {})).toEqual({ error: `${BROWSER_COPY.browserClosed} Closed after 5 idle minutes.` });
   });
 });

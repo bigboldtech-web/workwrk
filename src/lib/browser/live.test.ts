@@ -3,8 +3,9 @@
 // driving nothing, a dropped browser closed, and the links remembered for
 // open_page capped with the oldest going first.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  armWindowTimer,
   BOOT_ID,
   LINKS_MAX,
   callRulesCurrent,
@@ -159,5 +160,56 @@ describe("the rules by version (review of Phase 4 step 3)", () => {
     expect(callRulesCurrent(b, rulesVersionNow())).toBe(true);
     // A version that is no number is never current.
     expect(callRulesCurrent(b, Number.NaN)).toBe(false);
+  });
+});
+
+describe("the window timer (review round 1 of Phase 4)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires once at its time, never later than one already armed, and is armed again by the firing", async () => {
+    const b = lb("r1");
+    putLiveBrowser(b);
+    const fired: string[] = [];
+    const now = Date.now();
+    expect(armWindowTimer(b, now + 5 * 60_000, () => fired.push("idle"))).toBe(true);
+    // A later time keeps the sooner timer: it reads the row again when it fires.
+    expect(armWindowTimer(b, now + 10 * 60_000, () => fired.push("later"))).toBe(false);
+    expect(b.windowAt).toBe(now + 5 * 60_000);
+    // A sooner time replaces it.
+    expect(armWindowTimer(b, now + 60_000, () => fired.push("sooner"))).toBe(true);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(fired).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fired).toEqual(["sooner"]);
+    expect([b.windowTimer, b.windowAt]).toEqual([null, null]);
+    // Fired: the next arm sets a timer whatever its time.
+    expect(armWindowTimer(b, Date.now() + 10 * 60_000, () => fired.push("next"))).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fired).toEqual(["sooner", "next"]);
+  });
+
+  it("never keeps the process alive, and is cleared when the browser is dropped or the registry reset", async () => {
+    const b = lb("r1");
+    putLiveBrowser(b);
+    const fire = vi.fn();
+    armWindowTimer(b, Date.now() + 1000, fire);
+    expect((b.windowTimer as unknown as { hasRef?: () => boolean }).hasRef?.()).toBe(false);
+    await dropLiveBrowser("r1");
+    expect(b.windowTimer).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fire).not.toHaveBeenCalled();
+    // A browser no longer held here gets none.
+    expect(armWindowTimer(b, Date.now() + 1000, fire)).toBe(false);
+    const c = lb("r2");
+    putLiveBrowser(c);
+    armWindowTimer(c, Date.now() + 1000, fire);
+    resetLiveRegistryForTests();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fire).not.toHaveBeenCalled();
   });
 });

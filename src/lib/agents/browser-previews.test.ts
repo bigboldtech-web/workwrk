@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
   shotId: "sh0123456789abcdef0123456789abcdef" as string | null,
   shots: [] as Row[],
   ends: [] as unknown[][],
+  /** The session as sessionNow reads it under the lock (review round 1 of Phase 4). */
+  now: null as null | Row,
 }));
 
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
@@ -35,6 +37,7 @@ vi.mock("@/lib/browser/sessions", () => ({
   },
   waitingCardOf: async () => h.waiting,
   stepsUsedUp: async () => h.capped,
+  sessionNow: async () => h.now,
   endBrowserSession: async (...a: unknown[]) => {
     h.ends.push(a);
     return true;
@@ -52,9 +55,9 @@ vi.mock("@/lib/browser/shots", () => ({
 import { prepareBrowser } from "./browser-previews";
 import type { PrepareContext } from "./previews";
 import { BROWSER_COPY } from "./teammate-copy";
-import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, type LiveBrowser } from "@/lib/browser/live";
+import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { readOn } from "@/lib/browser/page-calls";
-import { fingerprintOf } from "@/lib/browser/snapshot";
+import { fingerprintOf, sealFingerprint } from "@/lib/browser/snapshot";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "@/lib/browser/sites";
 import type { BrowserHandle, RawElement, RawSnapshot } from "@/lib/browser/types";
 
@@ -115,6 +118,7 @@ beforeEach(async () => {
   h.shotId = "sh0123456789abcdef0123456789abcdef";
   h.shots = [];
   h.ends = [];
+  h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
   // The model's read of the page: the ids the card names come from it.
@@ -130,10 +134,11 @@ describe("the first preparation", () => {
       input: {
         browserSessionId: "bs1",
         site: "shop.proof.test",
-        pageUrl: "http://shop.proof.test/checkout",
+        // The origin and the sealed fingerprint (review round 1 of Phase 4, page-calls.ts and snapshot.ts sealFingerprint).
+        pageUrl: "http://shop.proof.test",
         documentId: "doc.1",
         element: "e1",
-        target: fingerprintOf(PAGE.elements[0]),
+        target: sealFingerprint(fingerprintOf(PAGE.elements[0])),
         warnings: ["buys", "submits"],
         shotId: "sh0123456789abcdef0123456789abcdef",
         shot: { width: 520, height: 330 },
@@ -169,7 +174,7 @@ describe("the first preparation", () => {
     url = "http://login.proof.test/";
     const out = await prepareBrowser("ask_to_take_over", { reason: "sign_in" }, prep());
     expect(out).toMatchObject({
-      input: { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "sign_in", shotId: null },
+      input: { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test", reason: "sign_in", shotId: null },
       preview: { title: BROWSER_COPY.takeOverTitle("login.proof.test"), browser: { sessionId: "bs1", site: "login.proof.test", takeOver: true } },
     });
   });
@@ -238,6 +243,40 @@ describe("the preparation (review of Phase 4 step 3)", () => {
     expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.notAllowedSite("shop.proof.test") });
     // Before: the preparation's older rules replaced the newer ones, and a card was made.
     expect(lb.rules).toBe(NEWER);
+    expect(h.shots).toEqual([]);
+  });
+});
+
+// Review round 1 of Phase 4.
+describe("the preparation reads the session again under the lock (review round 1 of Phase 4)", () => {
+  it("reads and pictures nothing once a take over landed while it waited", async () => {
+    let release!: () => void;
+    const holding = withBrowserLock("bs1", 1000, async (b) => {
+      await new Promise<void>((r) => (release = r));
+      b.handedOver = true;
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const preparing = prepareBrowser("click", { element: "e1" }, prep());
+    await new Promise((r) => setTimeout(r, 5));
+    release();
+    await holding;
+    // Before: the page the person had was read and pictured for a card.
+    expect(await preparing).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+    expect([shots, h.shots]).toEqual([[], []]);
+  });
+
+  it("says an end that landed while it waited by its own reason, and never ends it restarted", async () => {
+    h.now = { ...h.now, status: "ended", endReason: "admin_stopped" };
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: `${BROWSER_COPY.browserClosed} An Owner or Admin stopped every browser in this workspace.` });
+    resetLiveRegistryForTests();
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: `${BROWSER_COPY.browserClosed} An Owner or Admin stopped every browser in this workspace.` });
+    // Before: "WorkwrK restarted", with a restarted end asked for.
+    expect(h.ends).toEqual([]);
+  });
+
+  it("refuses once another turn of the person's holds the browser", async () => {
+    h.now = { ...h.now, lastRunId: "run-other" };
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.otherTurn });
     expect(h.shots).toEqual([]);
   });
 });

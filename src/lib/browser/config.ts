@@ -22,6 +22,12 @@
 // folder is refused, so no picture of a person's page is ever served,
 // backed up or replaced by a deploy.
 //
+// THE PICTURES' BUDGET (review round 1 of Phase 4): the pictures kept and
+// not yet expired may hold at most BROWSER_SHOTS_MAX_BYTES (default 20 GB)
+// across the deployment, and none is written when the folder's disk would be
+// left with less than the larger of 10 GB and a tenth of it free (shots.ts):
+// the disk is the database's too.
+//
 // ONE DEPLOYMENT, ONE TAG (Decision 27). Every provider session is tagged
 // with BROWSER_DEPLOYMENT_TAG, and the reaper releases only sessions with this
 // deployment's tag. A tag that is set but malformed turns the provider off
@@ -116,6 +122,22 @@ export function shotsDirFrom(env: NodeJS.ProcessEnv = process.env): string | nul
   // (as src/lib/local-uploads.ts; scripts/verify-commit.sh checks it).
   if (within(dir, path.resolve(/*turbopackIgnore: true*/ process.cwd()))) return null;
   return dir;
+}
+
+/** One gigabyte, as the pictures' budget and floor count it. */
+export const GB = 1024 ** 3;
+/** The pictures' budget when BROWSER_SHOTS_MAX_BYTES is not set (see the header). */
+export const DEFAULT_SHOTS_MAX_BYTES = 20 * GB;
+
+/**
+ * The most bytes the pictures not yet expired may hold, the deployment's
+ * (see the header): BROWSER_SHOTS_MAX_BYTES, a whole number of bytes (0
+ * keeps none). Unset or malformed is the default: a budget always holds.
+ */
+export function shotsMaxBytesFrom(env: NodeJS.ProcessEnv = process.env): number {
+  const t = trimmed(env.BROWSER_SHOTS_MAX_BYTES);
+  if (!/^\d{1,15}$/.test(t)) return DEFAULT_SHOTS_MAX_BYTES;
+  return Number(t);
 }
 
 /** The provider's base outside production: the stand-in's, when one is set. Null when set but not an address. */
