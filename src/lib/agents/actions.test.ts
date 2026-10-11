@@ -58,7 +58,8 @@ vi.mock("@/lib/connectors/google/config", () => ({
 }));
 
 import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount, writeEventLine } from "./actions";
-import { BROWSER_COPY, CONNECTOR_COPY } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, CONNECTOR_COPY, didntWorkLine } from "./teammate-copy";
+import { decidedLine } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -967,5 +968,77 @@ describe("a browser card (Phase 4 step 3)", () => {
     expect((await decideActions(viewer, [{ id: open.id, decision: "approve" }])).results).toEqual([
       { id: open.id, status: "PENDING", code: "retry_later", error: CONNECTOR_COPY.stillWaits(BROWSER_COPY.providerUnavailable) },
     ]);
+  });
+});
+
+// Polish after review round 6 of Phase 4: a browser card that failed because
+// its browser closed shows the person their own words on the card, its chat
+// line and the Inbox, never the teammate's sentence, which it keeps.
+describe("a browser card's failure in the person's own words (polish after review round 6 of Phase 4)", () => {
+  const BROWSING = ["search_tasks", "open_page", "read_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
+  const TITLE = 'Click "Place order"';
+  /** What the teammate is told, never shown to the person. */
+  const MODEL_WORDS = /the person|open_page|close_browser|This answer|A teammate doesn't|Open a page|start a new one/i;
+  const clickCard = () =>
+    seedAction({
+      toolName: "click",
+      risk: "IRREVERSIBLE",
+      input: { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", element: "e4" },
+      preview: { title: TITLE, lines: ["Page: shop.proof.test/checkout"], browser: { sessionId: "bs1", site: "shop.proof.test" } },
+      readWeb: true,
+    });
+  beforeEach(() => {
+    fx.agent.toolNames = BROWSING;
+    fx.cards.click = { risk: "IRREVERSIBLE", title: TITLE };
+  });
+
+  /** Everything the person reads of the decided card: the decision's answer, the card's line, its chat line and its view in the Inbox. */
+  async function shown(id: string, error: string | undefined): Promise<string[]> {
+    const views = await actionViews([id], "me");
+    const card = decidedLine(views[id], { time: "10:42", date: "11 Oct", agentName: "Chief of Staff" }) ?? "";
+    const line = fx.messages.filter((m) => m.meta.actionId === id).map((m) => m.content);
+    return [error ?? "", card, ...line, views[id].error ?? ""];
+  }
+
+  it("an approval whose browser closed shows the person a person-facing line, never closedNoOther or restartedNoOther", async () => {
+    const cases: Array<[string, string]> = [
+      [BROWSER_COPY.closedNoOther, BROWSER_PANEL_COPY.stepClosed(null)],
+      [BROWSER_COPY.restartedNoOther, BROWSER_PANEL_COPY.stepClosed("Closed: WorkwrK restarted.")],
+      [BROWSER_COPY.noBrowserNoOther, BROWSER_PANEL_COPY.stepClosed(null)],
+      [BROWSER_COPY.tooManyStepsNoOther, BROWSER_PANEL_COPY.stepsUsedUp],
+    ];
+    for (const [teammate, person] of cases) {
+      // As browser-tools.ts actRun answers it at an approval.
+      fx.answers.click = { error: teammate, forPerson: person };
+      const row = clickCard();
+      const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+      expect(out.results[0], teammate).toMatchObject({ id: row.id, status: "FAILED", error: person });
+      const all = await shown(row.id, out.results[0].error);
+      // Before: every one of these read the teammate's sentence ("If the person wants one, they can ask in a new message.").
+      expect(all, teammate).toEqual([person, `Didn't work: ${person}`, didntWorkLine(TITLE, person), person]);
+      for (const s of all) {
+        expect(s).not.toContain(teammate);
+        expect(MODEL_WORDS.test(s), s).toBe(false);
+      }
+      // The teammate keeps its own sentence for the note it reads (engine.ts outcomeNote).
+      expect(fx.actions.find((r) => r.id === row.id)).toMatchObject({ status: "FAILED", error: person, result: { modelError: teammate } });
+    }
+    // Each Inbox row was marked read.
+    expect(fx.notifications.filter((n) => n.data.read === true)).toHaveLength(cases.length);
+  });
+
+  it("says the same when its preparation found the card's own session closed", async () => {
+    const person = BROWSER_PANEL_COPY.stepClosed("Closed: WorkwrK restarted.");
+    fx.cards.click = { ok: false, error: BROWSER_COPY.restartedNoOther, forPerson: person };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results[0]).toMatchObject({ id: row.id, status: "FAILED", code: "failed", error: person });
+    const all = await shown(row.id, out.results[0].error);
+    // Before: "Didn't work: The browser closed because WorkwrK restarted. This answer can't open another one. If the person wants one, ..."
+    expect(all).toEqual([person, `Didn't work: ${person}`, didntWorkLine(TITLE, person), person]);
+    for (const s of all) expect(MODEL_WORDS.test(s), s).toBe(false);
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", error: person, result: { modelError: BROWSER_COPY.restartedNoOther } });
+    // Nothing ran.
+    expect(fx.handlerCalls).toEqual([]);
   });
 });

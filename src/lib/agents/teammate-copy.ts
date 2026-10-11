@@ -1432,10 +1432,23 @@ export const BROWSER_COPY = {
    * (review round 5 of Phase 4; browser-rules.ts closedSentence): one that
    * read anything (Decision 11), used its one start (Decision 22), or a
    * card's continue, which starts tainted (Decision 15). Neither invites a
-   * new browser such an answer can't open.
+   * new browser such an answer can't open. The teammate's words only: at an
+   * approval the person reads BROWSER_PANEL_COPY.stepClosed (polish after
+   * review round 6 of Phase 4).
    */
   closedNoOther: "The browser closed. This answer can't open another one. If the person wants one, they can ask in a new message.",
   restartedNoOther: "The browser closed because WorkwrK restarted. This answer can't open another one. If the person wants one, they can ask in a new message.",
+  /**
+   * A start that failed (start_failed), told to a later call of the same
+   * answer, which can start no other (polish after review round 6 of Phase 4;
+   * browser-rules.ts closedSentence and closedForAnswerSentence). The start's
+   * own reason: no browser card was drawn, so none is named, and no try again.
+   */
+  startFailedNoOther: "The browser didn't start. This answer can't start another one. If the person wants one, they can ask in a new message.",
+  /** noBrowserYet, told to an answer that can start no browser (polish after review round 6 of Phase 4; browser-rules.ts browserRefusalSentence). */
+  noBrowserNoOther: "No page is open, and this answer can't start a browser. If the person wants one, they can ask in a new message.",
+  /** tooManySteps, told to an answer that can start no browser (polish after review round 6 of Phase 4): it may still close this one. */
+  tooManyStepsNoOther: "This browser took its most steps. Close it with close_browser. This answer can't open another one. If the person wants one, they can ask in a new message.",
   notAllowedSite: (s: string) => `${s} isn't one of the sites this teammate may open.`,
   blockedSite: (s: string) => `${s} is blocked in this workspace.`,
   neverSite: "Teammates never open private, internal or WorkwrK addresses.",
@@ -1696,6 +1709,16 @@ export const BROWSER_PANEL_COPY = {
     admin_stopped: "An Owner or Admin stopped every browser in this workspace.",
   },
   startedLine: "Opened a browser for you.",
+  /**
+   * An approved step whose browser closed before it could run, as its card,
+   * its chat line and the Inbox say it to the person (polish after review
+   * round 6 of Phase 4; browser-rules.ts closedForPersonLine): `why` is the
+   * browser card's own end line (views.ts endedLine), null when no reason is
+   * known. The teammate is told its own sentence (closedSentence).
+   */
+  stepClosed: (why: string | null) => (why ? `The browser closed before the step could run, so nothing was done. ${why}` : "The browser closed before the step could run, so nothing was done."),
+  /** An approved step on a browser that took its most steps, in the person's words (polish after review round 6 of Phase 4; the teammate is told tooManyStepsNoOther). */
+  stepsUsedUp: "The browser took its most steps, so nothing was done. Ask again in a new message.",
   liveViewFailed: "Couldn't show the browser. Try again.",
   // Step 4: the few words the spec names by their part only.
   /** The take over card's second button, which says no (the spec's "Not now"). */

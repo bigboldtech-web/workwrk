@@ -27,7 +27,8 @@ export const ACCESS_LEVELS: { value: AccessLevel; label: string; description: st
   { value: "MANAGER", label: "Manager", description: "Team managers" },
   { value: "TEAM_LEAD", label: "Team Lead", description: "Team leads" },
   { value: "EMPLOYEE", label: "Employee", description: "Standard employees" },
-  { value: "AGENT", label: "Agent", description: "External agents (limited access)" },
+  // A person on frontline work, never a bot or an outsider (src/lib/access/labels.ts AGENT_TIER_BLURB).
+  { value: "AGENT", label: "Agent", description: "Frontline staff (limited access)" },
 ];
 
 // Roles that always have full access (cannot be restricted)

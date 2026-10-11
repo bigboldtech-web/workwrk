@@ -40,10 +40,17 @@
 // (its continue starts tainted, Decision 15), in a turn that read anything
 // (Decision 11), or one that used its one start (ctx.turn.mayStart false).
 //
+// POLISH AFTER REVIEW ROUND 6 OF PHASE 4: at an approval, a card's session
+// that closed or is gone carries the person's own words (`forPerson`,
+// browser-rules.ts approvalRefusal), which the card, its chat line and the
+// Inbox show; the teammate keeps its sentence. No browser open, or one at
+// its most steps, is never told as an invitation where the turn can start
+// none (noBrowserNoOther, tooManyStepsNoOther).
+//
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
-import { browserCard, browserRefusalSentence, isTakeOverReason, storedCardInput, type BrowserCardInput } from "./browser-rules";
+import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason, storedCardInput, type BrowserCardInput } from "./browser-rules";
 import { BROWSER_INPUT, badInput, closedSentence, goneAnswer, recheckUnderLock, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
@@ -56,7 +63,8 @@ import { computerAccess, stepsUsedUp, useBrowserSession as browserSessionFor, wa
 import { saveShot } from "@/lib/browser/shots";
 import { siteVerdict } from "@/lib/browser/sites";
 
-type Refused = { error: string; held?: HeldCode; readWeb?: true };
+/** `forPerson`: at an approval, the person's own words for the card's failure (polish after review round 6 of Phase 4); `error` stays the teammate's. */
+type Refused = { error: string; held?: HeldCode; readWeb?: true; forPerson?: string };
 
 /** How long a preparation waits for a step in flight on the same browser. */
 const PREPARE_LOCK_WAIT_MS = 20_000;
@@ -93,8 +101,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!use.ok) {
       if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy" };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
-      if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes, { mayOpen: false }) };
-      return { error: browserRefusalSentence(use.reason, agent.name, first, { minutes: use.minutes, mayOpen: false }) };
+      return approvalRefusal(use.reason, agent.name, first, { minutes: use.minutes, endReason: use.endReason });
     }
     // The lists as they are now: a site taken away since the card was asked runs nothing.
     if (!siteVerdict(stored.pageUrl, access.rules).ok) return { error: BROWSER_COPY.siteNowNotAllowed(stored.site) };
@@ -131,7 +138,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     const ruled = await rulesForCall(lb, access, first);
     if (!ruled.ok) return { error: ruled.error } as Refused;
     if (await waitingCardOf(row.id, row.chatSessionId)) return { error: BROWSER_COPY.oneStepWaits(first) } as Refused;
-    if (await stepsUsedUp(row.id)) return { error: BROWSER_COPY.tooManySteps } as Refused;
+    if (await stepsUsedUp(row.id)) return { error: mayOpen ? BROWSER_COPY.tooManySteps : BROWSER_COPY.tooManyStepsNoOther } as Refused;
     if (tool === "ask_to_take_over") {
       const reason = isTakeOverReason(asked.reason) ? asked.reason : "other";
       const t = prepareTakeOverOn(lb, reason);

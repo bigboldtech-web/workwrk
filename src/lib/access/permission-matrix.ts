@@ -18,6 +18,7 @@
 
 import { MANAGE_BAR, ROLES_BY_KIND, panelRoleBlurb, panelRoleLabel, type PanelRole } from "./access-panel";
 import { roleAtLeast } from "./node-rules";
+import { AGENT_TIER_BLURB } from "./labels";
 import { allowsItemAction, decideItem, taskSideOfListRole, type ItemAction } from "../item-role";
 
 /** yes; no; only the tasks assigned to them; only the tasks they made; the tasks assigned to them or made by them. */
@@ -124,8 +125,8 @@ export const RELATIONSHIP_RULES: readonly MatrixRule[] = [
   { key: "inherit", who: "Members of a Space or Folder", gets: "The same level on the Lists inside it, unless a List is Private." },
   // item-role rule 12 (an archived task, archivedAt; Trash is a deleted one).
   { key: "archived", who: "Anyone on an archived task", gets: "Can view at most, unless they hold Full access. Someone with Can edit may still restore it." },
-  // item-role rule 12.
-  { key: "agent", who: "An AI agent", gets: "Never deletes a task, whatever its level." },
+  // item-role rule 12: the Agent tier (accessLevel AGENT, a person), not an AI teammate.
+  { key: "agent", who: "Someone on the Agent tier", gets: "Never deletes a task, whatever its level." },
 ];
 
 /** The workspace roles, as the workspace-level gates read them. */
@@ -133,5 +134,6 @@ export const WORKSPACE_ROLES: readonly { role: string; summary: string }[] = [
   { role: "Owner", summary: "Runs the company account: billing, ownership and security. Opens everything an Admin does." },
   { role: "Admin", summary: "Runs the workspace: every Settings page, inviting people, exporting the workspace, and Full access on all work except personal notes." },
   { role: "Member", summary: "Works in what they are added to or what is open to the whole workspace, at the level they were given." },
-  { role: "Agent", summary: "An AI teammate: works at the level it was given, never deletes a task and never exports." },
+  // The one Agent sentence (labels.ts), the same words as the invite dialog and the Members drawer.
+  { role: "Agent", summary: AGENT_TIER_BLURB },
 ];

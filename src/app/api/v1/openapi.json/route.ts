@@ -2,7 +2,54 @@
  * GET /api/v1/openapi.json
  * Returns the OpenAPI 3.1 spec for the WorkwrK public API so devs can
  * drop it into Postman, Insomnia, Stoplight, Redoc, etc.
+ *
+ * Every enum here is read from the list the routes themselves use, never
+ * typed again: the Prisma enums for the columns that are enums, and
+ * src/lib/board-items-shared.ts for a task's priority. A task's status has
+ * no fixed list at all (each List keeps its own, Board.statuses), so it is a
+ * string with the default set as examples, not an enum. The docs site shows
+ * these strings, so none holds an em dash or a double hyphen
+ * (route.test.ts holds both rules).
  */
+
+import { Frequency, SOPStatus, SOPType, TaskSource, UserStatus } from "@/generated/prisma";
+import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS } from "@/lib/board-items-shared";
+
+const USER_STATUSES = Object.values(UserStatus);
+const KPI_FREQUENCIES = Object.values(Frequency);
+const SOP_TYPES = Object.values(SOPType);
+const SOP_STATUSES = Object.values(SOPStatus);
+const TASK_SOURCES = Object.values(TaskSource);
+const TASK_PRIORITIES = PRIORITY_OPTIONS.map((p) => p.value);
+const DEFAULT_TASK_STATUSES = DEFAULT_STATUS_OPTIONS.map((s) => s.value);
+
+/** The page every list endpoint answers: `{ data, nextCursor }`. */
+function listOf(ref: string) {
+  return {
+    type: "object",
+    properties: {
+      data: { type: "array", items: { $ref: `#/components/schemas/${ref}` } },
+      nextCursor: { type: "string", nullable: true, description: "Pass as `cursor` for the next page. Null on the last page." },
+    },
+  };
+}
+
+const ok = (ref: string) => ({
+  description: "OK",
+  content: { "application/json": { schema: listOf(ref) } },
+});
+
+/** The two paging parameters every list endpoint reads. */
+const PAGING = [
+  { name: "limit", in: "query", schema: { type: "integer", default: 50, minimum: 1, maximum: 200 } },
+  { name: "cursor", in: "query", schema: { type: "string" }, description: "The `nextCursor` of the page before." },
+];
+
+const person = {
+  type: "object",
+  nullable: true,
+  properties: { id: { type: "string" }, firstName: { type: "string" }, lastName: { type: "string" } },
+};
 
 export async function GET(req: Request) {
   // Public base URL. `new URL(req.url).origin` is ALWAYS truthy, so it can
@@ -33,7 +80,7 @@ export async function GET(req: Request) {
       title: "WorkwrK API",
       version: "v1",
       description:
-        "WorkwrK public REST API — programmatic access to the operating-system spine. " +
+        "WorkwrK public REST API: programmatic access to the operating-system spine. " +
         "Authenticate with `Authorization: Bearer wk_live_...`. Rate limits are enforced per key. " +
         "A signed-in session also works, for the workspace's Owner and Admins only.",
       contact: { name: "WorkwrK Developers", email: "developers@workwrk.com" },
@@ -64,10 +111,7 @@ export async function GET(req: Request) {
             email: { type: "string", format: "email" },
             firstName: { type: "string" },
             lastName: { type: "string" },
-            status: {
-              type: "string",
-              enum: ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"],
-            },
+            status: { type: "string", enum: USER_STATUSES },
             accessLevel: { type: "string" },
             avatar: { type: "string", nullable: true },
             joinDate: { type: "string", format: "date-time" },
@@ -82,15 +126,10 @@ export async function GET(req: Request) {
               nullable: true,
               properties: { id: { type: "string" }, name: { type: "string" } },
             },
+            manager: { ...person, description: "The person they report to, or null." },
           },
         },
-        PersonList: {
-          type: "object",
-          properties: {
-            data: { type: "array", items: { $ref: "#/components/schemas/Person" } },
-            nextCursor: { type: "string", nullable: true },
-          },
-        },
+        PersonList: listOf("Person"),
         KRA: {
           type: "object",
           properties: {
@@ -99,7 +138,18 @@ export async function GET(req: Request) {
             description: { type: "string", nullable: true },
             category: { type: "string", nullable: true },
             roleId: { type: "string", nullable: true },
+            role: {
+              type: "object",
+              nullable: true,
+              description: "In the list only.",
+              properties: { id: { type: "string" }, title: { type: "string" } },
+            },
             createdAt: { type: "string", format: "date-time" },
+            _count: {
+              type: "object",
+              description: "In the list only.",
+              properties: { kpis: { type: "integer" }, assignments: { type: "integer" } },
+            },
           },
         },
         KPI: {
@@ -108,11 +158,22 @@ export async function GET(req: Request) {
             id: { type: "string" },
             name: { type: "string" },
             description: { type: "string", nullable: true },
-            targetValue: { type: "number" },
-            unit: { type: "string" },
-            frequency: { type: "string" },
-            weight: { type: "number" },
-            kraId: { type: "string" },
+            targetValue: { type: "number", nullable: true },
+            unit: { type: "string", nullable: true },
+            frequency: { type: "string", enum: KPI_FREQUENCIES },
+            kraId: { type: "string", nullable: true },
+            kra: {
+              type: "object",
+              nullable: true,
+              description: "In the list only.",
+              properties: { id: { type: "string" }, name: { type: "string" } },
+            },
+            createdAt: { type: "string", format: "date-time" },
+            _count: {
+              type: "object",
+              description: "In the list only.",
+              properties: { records: { type: "integer" } },
+            },
           },
         },
         KPIRecord: {
@@ -123,8 +184,8 @@ export async function GET(req: Request) {
             userId: { type: "string" },
             period: { type: "string", example: "2026-Q1" },
             targetValue: { type: "number" },
-            actualValue: { type: "number" },
-            score: { type: "number" },
+            actualValue: { type: "number", nullable: true },
+            score: { type: "number", nullable: true },
             createdAt: { type: "string", format: "date-time" },
           },
         },
@@ -137,22 +198,37 @@ export async function GET(req: Request) {
             giverId: { type: "string" },
             receiverId: { type: "string" },
             createdAt: { type: "string", format: "date-time" },
+            giver: { ...person, description: "In the list only." },
+            receiver: { ...person, description: "In the list only." },
           },
         },
         Task: {
           type: "object",
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Opens at /item/<id> in the app." },
             title: { type: "string" },
-            description: { type: "string", nullable: true },
-            date: { type: "string", format: "date-time" },
-            status: { type: "string", enum: ["PLANNED", "IN_PROGRESS", "COMPLETED"] },
-            priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
-            slaHours: { type: "integer", nullable: true },
-            source: { type: "string", enum: ["MANUAL", "SOP", "REVIEW", "OKR", "AI"] },
+            description: { type: "string", nullable: true, description: "In the list only." },
+            date: { type: "string", format: "date-time", nullable: true, description: "The due date, or null when the task has none." },
+            status: {
+              type: "string",
+              nullable: true,
+              description:
+                "The task's status as its List stores it. Each List keeps its own set of statuses, so there is no fixed list; " +
+                "a List nobody has changed uses the three in `examples`. Null when the task has no status.",
+              examples: DEFAULT_TASK_STATUSES,
+            },
+            priority: { type: "string", nullable: true, enum: TASK_PRIORITIES, description: "Null when the task has no priority." },
+            slaHours: { type: "integer", nullable: true, description: "As it was given. Nothing escalates a task when it passes." },
+            source: { type: "string", enum: TASK_SOURCES },
             sourceRef: { type: "string", nullable: true },
-            assigneeId: { type: "string" },
-            escalatedAt: { type: "string", format: "date-time", nullable: true },
+            assigneeId: { type: "string", nullable: true, description: "The task's main assignee, or null when nobody is assigned." },
+            escalatedAt: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+              description: "In the list only. Set on tasks carried over from the old task system; nothing sets it now.",
+            },
+            createdAt: { type: "string", format: "date-time" },
           },
         },
         SOP: {
@@ -160,11 +236,16 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string" },
             title: { type: "string" },
+            description: { type: "string", nullable: true },
             category: { type: "string", nullable: true },
-            sopType: { type: "string", enum: ["WRITTEN", "RECORDED", "CHECKLIST"] },
+            subcategory: { type: "string", nullable: true },
+            sopType: { type: "string", enum: SOP_TYPES },
             version: { type: "integer" },
-            status: { type: "string" },
+            status: { type: "string", enum: SOP_STATUSES },
+            kraId: { type: "string", nullable: true },
             publishedAt: { type: "string", format: "date-time", nullable: true },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
           },
         },
       },
@@ -174,9 +255,8 @@ export async function GET(req: Request) {
         get: {
           summary: "List people",
           parameters: [
-            { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 } },
-            { name: "cursor", in: "query", schema: { type: "string" } },
-            { name: "status", in: "query", schema: { type: "string" } },
+            ...PAGING,
+            { name: "status", in: "query", schema: { type: "string", enum: USER_STATUSES } },
             { name: "departmentId", in: "query", schema: { type: "string" } },
           ],
           responses: {
@@ -203,8 +283,8 @@ export async function GET(req: Request) {
                   required: ["email"],
                   properties: {
                     email: { type: "string", format: "email" },
-                    firstName: { type: "string" },
-                    lastName: { type: "string" },
+                    firstName: { type: "string", description: "Accepted but not stored: the person gives their own name when they accept." },
+                    lastName: { type: "string", description: "Accepted but not stored: the person gives their own name when they accept." },
                     accessLevel: {
                       type: "string",
                       description:
@@ -222,7 +302,11 @@ export async function GET(req: Request) {
         },
       },
       "/kras": {
-        get: { summary: "List KRAs", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "List KRAs",
+          parameters: [...PAGING, { name: "roleId", in: "query", schema: { type: "string" } }],
+          responses: { "200": ok("KRA") },
+        },
         post: {
           summary: "Create a KRA",
           requestBody: {
@@ -242,11 +326,15 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Created" } },
+          responses: { "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/KRA" } } } } },
         },
       },
       "/kpis": {
-        get: { summary: "List KPIs", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "List KPIs",
+          parameters: [...PAGING, { name: "kraId", in: "query", schema: { type: "string" } }],
+          responses: { "200": ok("KPI") },
+        },
         post: {
           summary: "Create a KPI",
           requestBody: {
@@ -261,19 +349,27 @@ export async function GET(req: Request) {
                     name: { type: "string" },
                     description: { type: "string" },
                     targetValue: { type: "number" },
-                    unit: { type: "string", default: "#" },
-                    frequency: { type: "string", default: "monthly" },
-                    weight: { type: "number", default: 1 },
+                    unit: { type: "string", description: "Left empty when not given." },
+                    frequency: { type: "string", enum: KPI_FREQUENCIES, default: "MONTHLY" },
                   },
                 },
               },
             },
           },
-          responses: { "201": { description: "Created" } },
+          responses: { "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/KPI" } } } } },
         },
       },
       "/kpi-records": {
-        get: { summary: "List KPI readings", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "List KPI readings",
+          parameters: [
+            ...PAGING,
+            { name: "userId", in: "query", schema: { type: "string" } },
+            { name: "kpiId", in: "query", schema: { type: "string" } },
+            { name: "period", in: "query", schema: { type: "string", example: "2026-Q1" } },
+          ],
+          responses: { "200": ok("KPIRecord") },
+        },
         post: {
           summary: "Log a KPI reading (integration sweet-spot)",
           description:
@@ -298,11 +394,19 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Recorded" } },
+          responses: { "201": { description: "Recorded", content: { "application/json": { schema: { $ref: "#/components/schemas/KPIRecord" } } } } },
         },
       },
       "/kudos": {
-        get: { summary: "Feed", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "Feed",
+          parameters: [
+            ...PAGING,
+            { name: "receiverId", in: "query", schema: { type: "string" } },
+            { name: "giverId", in: "query", schema: { type: "string" } },
+          ],
+          responses: { "200": ok("Kudos") },
+        },
         post: {
           summary: "Send kudos",
           description: "Thanks the receiver (an inbox notification and an email, by their own settings, unless they are a Guest or deactivated), logs it, posts to Slack and fires the `kudos.created` webhook. Both people must be in the workspace and not removed from it.",
@@ -324,16 +428,32 @@ export async function GET(req: Request) {
             },
           },
           responses: {
-            "201": { description: "Created" },
+            "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Kudos" } } } },
             "400": { description: "A field is missing, or the giver and the receiver are the same person" },
             "404": { description: "The giver or the receiver is not in this workspace, or was removed from it" },
           },
         },
       },
       "/tasks": {
-        get: { summary: "List tasks", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "List tasks",
+          parameters: [
+            ...PAGING,
+            { name: "assigneeId", in: "query", schema: { type: "string" }, description: "Tasks this person is assigned to, as the main assignee or one of several." },
+            {
+              name: "status",
+              in: "query",
+              schema: { type: "string", examples: DEFAULT_TASK_STATUSES },
+              description: "A status as the task's List stores it, matched exactly but in any case.",
+            },
+            { name: "from", in: "query", schema: { type: "string", format: "date-time" }, description: "Due on or after." },
+            { name: "to", in: "query", schema: { type: "string", format: "date-time" }, description: "Due on or before." },
+          ],
+          responses: { "200": ok("Task") },
+        },
         post: {
-          summary: "Create a task (optionally SLA-tracked)",
+          summary: "Create a task",
+          description: "The task lands on the assignee's Personal list, in that List's first open status.",
           requestBody: {
             required: true,
             content: {
@@ -344,36 +464,46 @@ export async function GET(req: Request) {
                   properties: {
                     title: { type: "string" },
                     description: { type: "string" },
-                    date: { type: "string", format: "date-time" },
+                    date: { type: "string", format: "date-time", description: "The due date. The time of the call when left out." },
                     assigneeId: { type: "string" },
                     kraId: { type: "string" },
-                    slaHours: { type: "integer", description: "If set, task auto-escalates when breached" },
-                    priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
-                    source: { type: "string", enum: ["MANUAL", "SOP", "REVIEW", "OKR", "AI"] },
+                    category: { type: "string" },
+                    slaHours: { type: "integer", description: "Kept with the task and returned as given. Nothing escalates a task when it passes." },
+                    priority: { type: "string", enum: TASK_PRIORITIES, default: "NORMAL" },
+                    source: { type: "string", enum: TASK_SOURCES, default: "MANUAL" },
                     sourceRef: { type: "string" },
                   },
                 },
               },
             },
           },
-          responses: { "201": { description: "Created" } },
+          responses: {
+            "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Task" } } } },
+            "400": { description: "title or assigneeId is missing" },
+            "404": { description: "The assignee is not in this workspace" },
+          },
         },
       },
       "/sops": {
-        get: { summary: "List published SOPs", responses: { "200": { description: "OK" } } },
+        get: {
+          summary: "List SOPs",
+          description: "Published SOPs, unless you ask for another status.",
+          parameters: [
+            ...PAGING,
+            { name: "status", in: "query", schema: { type: "string", enum: SOP_STATUSES, default: "PUBLISHED" } },
+            { name: "category", in: "query", schema: { type: "string" } },
+            { name: "sopType", in: "query", schema: { type: "string", enum: SOP_TYPES } },
+          ],
+          responses: { "200": ok("SOP") },
+        },
       },
     },
+    // Only the events something in the product fires. A webhook can also be
+    // subscribed to other names (POST /api/webhooks), but nothing sends them.
     "x-events": [
-      { name: "kudos.created", description: "Fired on every new kudos posted." },
-      { name: "kpi.recorded", description: "Fired when a KPI reading is logged." },
-      { name: "task.created", description: "Fired on every task creation." },
-      { name: "task.escalated", description: "Fired when an SLA-tracked task breaches and escalates." },
-      { name: "review.created" },
-      { name: "review.completed" },
-      { name: "sop.published" },
-      { name: "sop.updated" },
-      { name: "okr.created" },
-      { name: "okr.updated" },
+      { name: "kudos.created", description: "Fired on every new kudos." },
+      { name: "kpi.recorded", description: "Fired when a KPI reading is logged through this API or an integration." },
+      { name: "task.created", description: "Fired when a task is created in a List, through this API or by an integration." },
     ],
   };
 
@@ -426,9 +556,9 @@ export async function GET(req: Request) {
   (spec as Record<string, unknown>).tags = [
     { name: "People", description: "Directory of everyone in the organization." },
     { name: "Alignment", description: "KRAs, KPIs and the readings recorded against them." },
-    { name: "Work", description: "Tasks, including SLA-tracked work." },
+    { name: "Work", description: "Tasks. A task made here lands on its assignee's Personal list." },
     { name: "Culture", description: "Recognition and the kudos feed." },
-    { name: "Knowledge", description: "Published SOPs." },
+    { name: "Knowledge", description: "SOPs." },
   ];
 
   return Response.json(spec, {

@@ -78,9 +78,14 @@ function freshAgent() {
   };
 }
 
-/** A refusal may carry `held` (an approval that can wait, connector-rules.ts HeldCode) and `readGoogle` (the preparation read Gmail). */
+/**
+ * A refusal may carry `held` (an approval that can wait, connector-rules.ts
+ * HeldCode), `readGoogle` (the preparation read Gmail) and `forPerson` (a
+ * browser card's failure in the person's own words, polish after review
+ * round 6 of Phase 4).
+ */
 type Card =
-  | { ok: false; error: string; held?: "connection_needed" | "retry_later" | "agent_paused"; readGoogle?: true }
+  | { ok: false; error: string; held?: "connection_needed" | "retry_later" | "agent_paused"; readGoogle?: true; forPerson?: string }
   | { risk?: ToolRisk; title?: string; targetKey?: string | null; input?: Record<string, unknown>; readGoogle?: true };
 
 export const fx = {

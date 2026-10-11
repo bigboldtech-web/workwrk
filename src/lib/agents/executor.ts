@@ -1237,11 +1237,21 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
         decidedVia: a.decidedVia,
       });
     }
+    // A browser card's failure in the person's own words (polish after review
+    // round 6 of Phase 4, browser-tools.ts `forPerson`): the row's error is
+    // what its card, its chat line and the Inbox show, so it takes those; the
+    // teammate's own sentence, which can speak of "the person" and of what
+    // its answer may open, is kept as result.modelError for its outcome note
+    // (engine.ts outcomeNote).
+    const forPerson = isBrowserToolName(name) ? record(data).forPerson : null;
+    const personError = typeof forPerson === "string" && forPerson.trim() ? clampText(forPerson.trim(), 240) : null;
+    const shown = personError ?? error;
+    const kept = { ...(unknown ? { unknownOutcome: true } : {}), ...(personError && personError !== error ? { modelError: error } : {}) };
     await prisma.agentAction.updateMany({
       where: { id: a.action.id, status: "RUNNING" },
-      data: { status: "FAILED", error, ...(unknown ? { result: json({ unknownOutcome: true }), updatedAt: new Date() } : {}) },
+      data: { status: "FAILED", error: shown, ...(Object.keys(kept).length > 0 ? { result: json(kept) } : {}), ...(unknown ? { updatedAt: new Date() } : {}) },
     });
-    return { status: "FAILED", error, data };
+    return { status: "FAILED", error: shown, data };
   }
   const href = outcome.href ?? a.action.preview?.target?.href ?? null;
   // A browser step's sentence names its site only, never the element's words (Phase 4).

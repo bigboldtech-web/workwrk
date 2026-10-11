@@ -70,12 +70,13 @@ const TABS: readonly SettingsTab[] = settingsTabs("account/notifications");
 // Decided addition (c): assigned, mentioned, status change and comment on
 // my task and on a task I follow, due soon and overdue. "Follow" is the task's
 // Watch button (and having commented on it), which is what the senders read.
+// Overdue has no sender yet, so it is a Coming soon row, not a switch
+// (HELD_INBOX_KEYS in notification-presets.ts says what turns it back on).
 const WORK_ROWS: { key: TaskInboxKey; label: string; helper: string }[] = [
   { key: "task_assigned", label: "Tasks assigned to me", helper: "When a task is created for you or handed to you" },
   { key: "status_changes", label: "Status changes on my tasks", helper: "When a task you are assigned to changes status" },
   { key: "followed_status", label: "Status changes on tasks I follow", helper: "Tasks you watch or have commented on" },
   { key: "due_reminders", label: "Due soon", helper: "On the day a task assigned to you is due" },
-  { key: "overdue", label: "Overdue", helper: "Once a day while a task assigned to you is past its due date" },
 ];
 const PEOPLE_ROWS: { key: TaskInboxKey; label: string; helper: string }[] = [
   { key: "mentions", label: "Mentions of me", helper: "When someone mentions you in a comment or doc" },
@@ -233,7 +234,7 @@ function InboxTab() {
 
   return (
     <>
-      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps only what is aimed at you: tasks assigned to you, mentions and your overdue tasks.">
+      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps only what is aimed at you: tasks assigned to you and mentions.">
         <SettingsRow
           label="Preset"
           helper={preset === "custom" ? "Custom: your own mix of the switches below" : undefined}
@@ -263,6 +264,9 @@ function InboxTab() {
           {WORK_ROWS.map((r) => (
             <SettingsRow key={r.key} id={`notifications.inbox.${r.key}`} label={r.label} helper={r.helper} {...row(`inbox.${r.key}`)} control={<Switch checked={on(r.key)} onChange={(v) => setKey(r.key, v)} aria-label={r.label} />} />
           ))}
+          <UpcomingOnly>
+            <ComingSoonRow label="Overdue: once a day while a task assigned to you is past its due date" className="border-b-0" />
+          </UpcomingOnly>
         </div>
       </SettingsCard>
 

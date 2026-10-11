@@ -42,6 +42,7 @@ import { redactPageText } from "@/lib/browser/redact";
 import { sealWords, type SealedFingerprint } from "@/lib/browser/snapshot";
 import type { SiteVerdict } from "@/lib/browser/sites";
 import { END_HOLDS, FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type EndReason, type NavOutcome, type StepKind } from "@/lib/browser/types";
+import { endedLine } from "@/lib/browser/views";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
 import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
@@ -95,9 +96,17 @@ export type BrowserRefusal =
  * Decision 15), so the two sentences that invite a new one say instead
  * that this answer can't (BROWSER_COPY.restartedNoOther, closedNoOther).
  * Left out, as before.
+ *
+ * A start that failed (polish after review round 6 of Phase 4) never drew a
+ * browser card and never closed: it says so in its own words, no page open
+ * (noBrowserYet where the answer may still start one, startFailedNoOther
+ * where it can't), never "the browser card says why".
+ *
+ * The teammate's words. At an approval the person reads closedForPersonLine.
  */
 export function closedSentence(endReason: string | null | undefined, minutes?: number, o: { mayOpen?: boolean } = {}): string {
   const noOther = o.mayOpen === false;
+  if (endReason === "start_failed") return noOther ? BROWSER_COPY.startFailedNoOther : BROWSER_COPY.noBrowserYet;
   if (endReason === "restarted") return noOther ? BROWSER_COPY.restartedNoOther : BROWSER_COPY.restarted;
   if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
@@ -121,12 +130,62 @@ export function endHolds(endReason: unknown): endReason is EndReason {
  * that read anything, Decision 11, or used its one start, Decision 22). It
  * is just as true there, so every known reason is quoted in the card's own
  * words, and only an unknown one reads "Closed.".
+ *
+ * A start that failed (polish after review round 6 of Phase 4): the retry
+ * in the same answer hears the start's own reason (startFailedNoOther),
+ * never the browser card, which a failed start never drew, and never "try
+ * again": the answer's one start is used, or it read anything.
  */
 export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boolean } = {}): string {
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
+  if (endReason === "start_failed") return BROWSER_COPY.startFailedNoOther;
   if (endHolds(endReason)) return BROWSER_COPY.closedForAnswer(ended[endReason]);
   const known = o.anyReason === true && typeof endReason === "string" && Object.hasOwn(ended, endReason);
   return BROWSER_COPY.closedForAnswer(known ? ended[endReason] : ended.left);
+}
+
+/**
+ * At an approval, a browser that closed before its step could run, in the
+ * person's own words (polish after review round 6 of Phase 4): what the
+ * card's failed line, its chat line and the Inbox show them. The teammate's
+ * sentence (closedSentence) speaks of "the person" and of what this answer
+ * may open, so it stays the teammate's, told in its outcome note
+ * (executor.ts runApprovedAction keeps it). `endReason` is read as the
+ * browser card's own end line (views.ts endedLine); none known, the plain
+ * line alone.
+ */
+export function closedForPersonLine(endReason: unknown): string {
+  const known = typeof endReason === "string" && Object.hasOwn(BROWSER_PANEL_COPY.ENDED_WORDS, endReason);
+  return BROWSER_PANEL_COPY.stepClosed(known ? endedLine(endReason as EndReason) : null);
+}
+
+/**
+ * A card's own session refused at its approval (useBrowserSession with
+ * purpose approval, polish after review round 6 of Phase 4): the teammate's
+ * sentence, which never invites a browser (the continue starts tainted,
+ * Decision 15), and for a browser that closed or is gone the person's own
+ * words (closedForPersonLine). The person holding the browser, and one still
+ * starting, are held by the caller, as before.
+ */
+export function approvalRefusal(
+  reason: BrowserRefusal,
+  agentName: string,
+  first: string,
+  extra: { minutes?: number; endReason?: string | null } = {},
+): { error: string; forPerson?: string } {
+  const error = browserRefusalSentence(reason, agentName, first, { ...extra, mayOpen: false });
+  switch (reason) {
+    case "ended":
+      return { error, forPerson: closedForPersonLine(extra.endReason) };
+    case "restarted":
+    case "time_cap":
+      return { error, forPerson: closedForPersonLine(reason) };
+    case "none":
+      // The card's session row is gone: closed, for no reason on record.
+      return { error, forPerson: closedForPersonLine(null) };
+    default:
+      return { error };
+  }
 }
 
 /**
@@ -179,7 +238,8 @@ export function browserRefusalSentence(
     case "start_failed":
       return BROWSER_COPY.startFailed;
     case "none":
-      return BROWSER_COPY.noBrowserYet;
+      // Never "Open one with open_page first" to an answer that can start none (polish after review round 6 of Phase 4).
+      return extra.mayOpen === false ? BROWSER_COPY.noBrowserNoOther : BROWSER_COPY.noBrowserYet;
     case "ended":
       // In its end's own words when the refusal carried them (review round 4 of Phase 4).
       return closedSentence(extra.endReason, extra.minutes, may);

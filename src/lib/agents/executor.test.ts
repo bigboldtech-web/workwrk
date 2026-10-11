@@ -39,7 +39,7 @@ vi.mock("@/lib/rate-limit-memory", () => ({
 import { READ_ANSWER_MAX } from "./connector-tools";
 import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type ExecuteArgs } from "./executor";
 import { VIEW_JSON_BUDGET } from "@/lib/browser/snapshot";
-import { BROWSER_COPY, CONNECTOR_COPY } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
@@ -1189,5 +1189,49 @@ describe("the person's browser (Phase 4 step 3)", () => {
     expect(fx.activity).toHaveLength(1);
     expect(fx.activity[0]).toMatchObject({ description: "Chief of Staff (for Priya Shah): Couldn't click on shop.proof.test. Nothing was done." });
     expect((fx.activity[0].metadata as Record<string, unknown>).browser).toMatchObject({ outcome: "failed" });
+  });
+});
+
+// Polish after review round 6 of Phase 4: a browser card's failure in the
+// person's own words on the card, the teammate's sentence kept for its note.
+describe("a browser card's failure in the person's own words (polish after review round 6 of Phase 4)", () => {
+  const approved = (id: string, toolName = "click") => ({
+    action: { id, toolName, risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+    input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button" },
+    person: PERSON as never,
+    agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+    trigger: "APPROVAL" as const,
+    decidedVia: "person" as const,
+    holdNotSent: true,
+  });
+
+  it("stores the person's words as the card's error and keeps the teammate's sentence for its outcome note", async () => {
+    const forPerson = BROWSER_PANEL_COPY.stepClosed("Closed: WorkwrK restarted.");
+    fx.answers.click = { error: BROWSER_COPY.restartedNoOther, forPerson };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction(approved(row.id));
+    // Before: FAILED with "The browser closed because WorkwrK restarted. This answer can't open another one. If the person wants one, ..." on the card.
+    expect(out).toMatchObject({ status: "FAILED", error: forPerson });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", error: forPerson, result: { modelError: BROWSER_COPY.restartedNoOther } });
+    // The act that did nothing is still audited (Decision 24), and never with either sentence.
+    expect(fx.activity).toHaveLength(1);
+    expect(JSON.stringify(fx.activity[0])).not.toContain("the person");
+  });
+
+  it("keeps a step that may have gone through marked so beside it, and changes nothing without the person's words", async () => {
+    fx.answers.click = { error: BROWSER_COPY.unknownOutcome, unknownOutcome: true, forPerson: "Some words" };
+    const unsure = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    await runApprovedAction(approved(unsure.id));
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", error: "Some words", result: { unknownOutcome: true, modelError: BROWSER_COPY.unknownOutcome } });
+    fx.answers.click = { error: BROWSER_COPY.pageChanged };
+    const plain = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    await runApprovedAction(approved(plain.id));
+    expect(fx.actions[1]).toMatchObject({ status: "FAILED", error: BROWSER_COPY.pageChanged });
+    expect(fx.actions[1].result ?? null).toBeNull();
+    // Only a browser tool's answer is read for it.
+    fx.answers.post_in_talk = { error: "The post failed.", forPerson: "Not for this card" };
+    const talk = seedAction({ toolName: "post_in_talk", risk: "OUTWARD", status: "RUNNING", decidedAt: new Date() });
+    await runApprovedAction({ ...approved(talk.id, "post_in_talk"), input: { conversationId: "c1", text: "Hi" }, holdNotSent: false });
+    expect(fx.actions[2]).toMatchObject({ status: "FAILED", error: "The post failed." });
   });
 });

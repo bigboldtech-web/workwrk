@@ -431,7 +431,7 @@ vi.mock("./browser-access", async (orig) => {
 vi.mock("./teammate-server", () => ({ askableTeammates: async () => [{ name: "Project Manager", job: "Keeps <projects> moving." }] }));
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
-import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, browserNotHereLine, buildSystemBlocks, getOrCreateTeammateSession, continuedRuns, historyMessages, runTeammateTurn, type TurnArgs } from "./engine";
+import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, browserNotHereLine, buildSystemBlocks, getOrCreateTeammateSession, continuedRuns, historyMessages, outcomeNote, runTeammateTurn, type TurnArgs } from "./engine";
 import type { BrowserNotHere } from "./browser-rules";
 import { RUN_STALE_MS } from "./budget";
 import { MEMORY_LIMITS } from "./memory";
@@ -2376,5 +2376,21 @@ describe("the person's own Google (Phase 3 step 3)", () => {
     await runTeammateTurn(turn({ agent: GMAIL_AGENT }));
     expect(toolsAsked(3)).toEqual(["create_task", "read_email", "search_email"]);
     expect(db.requests[3].system[1].text).not.toContain("aren't available here");
+  });
+});
+
+// Polish after review round 6 of Phase 4: a browser card whose card showed
+// the person their own words keeps the teammate's sentence for its note.
+describe("the outcome note of a browser card the person read in their own words (polish after review round 6 of Phase 4)", () => {
+  const failed = (o: Partial<AgentActionRow>): AgentActionRow => ({ id: "o1", toolName: "click", risk: "IRREVERSIBLE", status: "FAILED", preview: { title: 'Click "Place order"' }, createdAt: new Date(), expiresAt: new Date(), ...o });
+  const teammate = "The browser closed because WorkwrK restarted. This answer can't open another one. If the person wants one, they can ask in a new message.";
+  const person = "The browser closed before the step could run, so nothing was done. Closed: WorkwrK restarted.";
+
+  it("tells the teammate its own sentence, never the person's line, and a card without one as before", () => {
+    const note = outcomeNote([failed({ error: person, result: { modelError: teammate } }), failed({ id: "o2", error: "The page changed since this was asked, so nothing was done. Ask again." })], "Priya");
+    // Before: the note read the card's error, which is now the person's line.
+    expect(note).toContain(`- Approved but it didn't work: Click on the page. ${teammate}`);
+    expect(note).not.toContain(person);
+    expect(note).toContain("- Approved but it didn't work: Click on the page. The page changed since this was asked, so nothing was done. Ask again.");
   });
 });

@@ -873,7 +873,11 @@ export function outcomeNote(rows: readonly AgentActionRow[], firstName: string, 
         lines.push(head);
       }
     } else if (view.status === "FAILED") {
-      const why = dataText(view.error ?? "", 500);
+      // A browser card whose card showed the person their own words keeps the
+      // teammate's sentence for it (polish after review round 6 of Phase 4,
+      // executor.ts runApprovedAction): never "If the person wants one" on the
+      // card, never the person's line in place of the teammate's here.
+      const why = dataText(str(rec(row.result).modelError) || view.error || "", 500);
       lines.push(why ? `- Approved but it didn't work: ${title}. ${why}` : `- Approved but it didn't work: ${title}.`);
     } else if (view.status === "DENIED") {
       lines.push(`- Said no: ${title}`);

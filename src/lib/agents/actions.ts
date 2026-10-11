@@ -74,7 +74,11 @@
 // (retry_later), and a step sent but not confirmed FAILS and never runs
 // again (Decision 14). Once decided, its session waits on it no more
 // (sessions.ts releaseWaiting). A take over in progress is never failed by
-// the stuck sweep: the browser sweep ends it with its own words.
+// the stuck sweep: the browser sweep ends it with its own words. A card that
+// failed because its browser closed, is gone or took its most steps shows
+// the person their own words (`forPerson`, polish after review round 6 of
+// Phase 4), never the teammate's sentence, which it keeps for its outcome
+// note (result.modelError).
 //
 // Server-only: imports prisma.
 
@@ -755,11 +759,25 @@ async function approve(
       return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(prepared.error) };
     }
     // The person can no longer do it (or the edit left nothing to run): it
-    // fails with the reason, and the teammate is told at its next turn.
-    const failed = { status: "FAILED", decidedVia: "person", decidedById: viewer.userId, decidedAt: now, error: prepared.error, ...(edited ? { editedInput: json(edited) } : {}) };
+    // fails with the reason, and the teammate is told at its next turn. A
+    // browser card's own session closed or gone says so in the person's own
+    // words on the card, its line and the Inbox (polish after review round 6
+    // of Phase 4); the teammate keeps its sentence for its outcome note, as
+    // executor.ts runApprovedAction keeps it.
+    const forPerson = browserTool && prepared.forPerson ? prepared.forPerson : null;
+    const said = forPerson ?? prepared.error;
+    const failed = {
+      status: "FAILED",
+      decidedVia: "person",
+      decidedById: viewer.userId,
+      decidedAt: now,
+      error: said,
+      ...(forPerson && forPerson !== prepared.error ? { result: json({ modelError: prepared.error }) } : {}),
+      ...(edited ? { editedInput: json(edited) } : {}),
+    };
     if (!(await swap(row.id, "PENDING", failed))) return lost(row.id);
-    await settle(row, viewer.userId, { text: didntWorkLine(title, prepared.error), event: "action_failed" });
-    return { id: row.id, status: "FAILED", code: "failed", error: prepared.error };
+    await settle(row, viewer.userId, { text: didntWorkLine(title, said), event: "action_failed" });
+    return { id: row.id, status: "FAILED", code: "failed", error: said };
   }
 
   // The card as the person saw it decides whether "don't ask again" was on
