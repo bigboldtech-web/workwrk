@@ -23,6 +23,18 @@ import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS } from "@/lib/board-items-shar
 import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 
 const USER_STATUSES = Object.values(UserStatus);
+/** How a webhook receiver checks a delivery, in the words POST /api/webhooks uses. */
+const WEBHOOK_VERIFY =
+  "Webhooks: every delivery is a POST carrying X-Workwrk-Event, X-Workwrk-Delivery, X-Workwrk-Timestamp and " +
+  "X-Workwrk-Signature: t=<timestamp>,v1=<signature>. To check one, compute HMAC-SHA256 with the subscription's secret " +
+  "(the whsec_ value shown once when it was made or its secret rotated) as the key over <timestamp>.<raw request body>, " +
+  "as lowercase hex, and compare it with v1 in constant time. Refuse a timestamp more than five minutes old. " +
+  "An older subscription may still sign with the SHA-256 of its secret, as lowercase hex, as the key: " +
+  "GET /api/webhooks says which in `signing`, and rotating its secret moves it to the secret itself.";
+/** What a KPI reading's period is (src/lib/kpi-integration.ts). */
+const KPI_PERIOD_DESCRIPTION =
+  "The month the reading is for, written YYYY-MM. Goals read only month keys, so any other key is refused with a 400, " +
+  "and so is a month that has not started yet. Readings stored before under other keys (such as 2026-W33 or 2026-Q3) are still listed, and drive no goal.";
 const KPI_FREQUENCIES = Object.values(Frequency);
 const SOP_TYPES = Object.values(SOPType);
 const SOP_STATUSES = Object.values(SOPStatus);
@@ -97,7 +109,8 @@ export async function GET(req: Request) {
       description:
         "WorkwrK public REST API: programmatic access to the operating-system spine. " +
         "Authenticate with `Authorization: Bearer wk_live_...`. Rate limits are enforced per key. " +
-        "A signed-in session also works, for the workspace's Owner and Admins only.",
+        "A signed-in session also works, for the workspace's Owner and Admins only. " +
+        WEBHOOK_VERIFY,
       contact: { name: "WorkwrK Developers", email: "developers@workwrk.com" },
     },
     servers: [{ url: `${base}/api/v1`, description: "Production" }],
@@ -193,7 +206,11 @@ export async function GET(req: Request) {
             id: { type: "string" },
             kpiId: { type: "string" },
             userId: { type: "string" },
-            period: { type: "string", example: "2026-Q1" },
+            period: {
+              type: "string",
+              example: "2026-10",
+              description: "The month the reading is for, YYYY-MM. Readings stored before under other keys (such as 2026-W33 or 2026-Q3) keep them, and drive no goal.",
+            },
             targetValue: { type: "number" },
             actualValue: orNull({ type: "number" }),
             score: orNull({ type: "number" }),
@@ -228,7 +245,7 @@ export async function GET(req: Request) {
               examples: DEFAULT_TASK_STATUSES,
             }),
             priority: orNull({ type: "string", enum: TASK_PRIORITIES, description: "Null when the task has no priority." }),
-            slaHours: orNull({ type: "integer", description: "As it was given. Nothing escalates a task when it passes." }),
+            slaHours: orNull({ type: "number", description: "The hours it was given, or null. Nothing escalates a task when it passes." }),
             source: { type: "string", enum: TASK_SOURCES },
             sourceRef: orNull({ type: "string" }),
             assigneeId: orNull({ type: "string", description: "The task's main assignee, or null when nobody is assigned." }),
@@ -331,6 +348,16 @@ export async function GET(req: Request) {
             "201": { description: "Invitation created", content: { "application/json": { schema: { $ref: "#/components/schemas/Invitation" } } } },
             "400": { description: "email is missing, uses a domain the workspace does not invite from, or roleId or departmentId is not this workspace's" },
             "409": { description: "The email is already in the workspace, or an invitation to it is pending" },
+            "403": {
+              description:
+                "The key lacks the ADMIN scope, the workspace is suspended or cancelled, the signed-in person may not invite, " +
+                "or the workspace has no free seat for another person (`code` is `seat_limit`).",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { error: { type: "string" }, code: { type: "string", enum: ["seat_limit"] } }, required: ["error"] },
+                },
+              },
+            },
           },
         },
       },
@@ -381,9 +408,9 @@ export async function GET(req: Request) {
                     kraId: { type: "string" },
                     name: { type: "string" },
                     description: { type: "string" },
-                    targetValue: { type: "number" },
+                    targetValue: { type: "number", description: "A number, or a string of one." },
                     unit: { type: "string", description: "Left empty when not given." },
-                    frequency: { type: "string", enum: KPI_FREQUENCIES, default: "MONTHLY" },
+                    frequency: { type: "string", enum: KPI_FREQUENCIES, default: "MONTHLY", description: "Any case is accepted and stored in capitals." },
                   },
                 },
               },
@@ -391,7 +418,7 @@ export async function GET(req: Request) {
           },
           responses: {
             "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/KPI" } } } },
-            "400": { description: "kraId, name or targetValue is missing" },
+            "400": { description: "kraId, name or targetValue is missing, targetValue is not a number, or frequency is not one of the listed values" },
             "404": { description: "The KRA is not in this workspace" },
           },
         },
@@ -403,14 +430,24 @@ export async function GET(req: Request) {
             ...PAGING,
             { name: "userId", in: "query", schema: { type: "string" } },
             { name: "kpiId", in: "query", schema: { type: "string" } },
-            { name: "period", in: "query", schema: { type: "string", example: "2026-Q1" } },
+            {
+              name: "period",
+              in: "query",
+              schema: { type: "string", example: "2026-10" },
+              description: "A month, YYYY-MM, matched exactly. Older readings stored under other keys (such as 2026-W33 or 2026-Q3) are listed as they were stored, and drive no goal.",
+            },
           ],
           responses: { "200": ok("KPIRecord") },
         },
         post: {
           summary: "Log a KPI reading (integration sweet-spot)",
           description:
-            "Post a KPI value from a connected tool. Fires `kpi.recorded` webhook + recomputes composite score.",
+            "Post a KPI value from a connected tool. There is one reading per KPI, person and month. " +
+            "A new reading answers 201. The same number again answers 200 and changes nothing, so a retried call is safe. " +
+            "A different number answers 200 and replaces the reading while its month is open (this month or last month, in any timezone); " +
+            "it goes back to Pending, since a manager's approval was of the old number. " +
+            "For a closed month a different number answers 409 with the reading's `id`, and the reading stays as it is. " +
+            "A reading that changes something fires the `kpi.recorded` webhook and recomputes the person's composite score.",
           requestBody: {
             required: true,
             content: {
@@ -421,8 +458,8 @@ export async function GET(req: Request) {
                   properties: {
                     kpiId: { type: "string" },
                     userId: { type: "string" },
-                    period: { type: "string", example: "2026-Q1" },
-                    actualValue: { type: "number" },
+                    period: { type: "string", pattern: "^\\d{4}-(0[1-9]|1[0-2])$", example: "2026-10", description: KPI_PERIOD_DESCRIPTION },
+                    actualValue: { type: "number", description: "A number, or a string of one." },
                     targetValue: { type: "number" },
                     notes: { type: "string" },
                     evidence: { type: "string" },
@@ -432,9 +469,22 @@ export async function GET(req: Request) {
             },
           },
           responses: {
+            "200": { description: "A reading for this KPI, person and month was there: the same number, unchanged, or a different number that replaced it", content: { "application/json": { schema: { $ref: "#/components/schemas/KPIRecord" } } } },
             "201": { description: "Recorded", content: { "application/json": { schema: { $ref: "#/components/schemas/KPIRecord" } } } },
-            "400": { description: "kpiId, userId, period or actualValue is missing" },
+            "400": { description: "kpiId, userId, period or actualValue is missing; actualValue or targetValue is not a number; or period is not a month written YYYY-MM, or is a month that has not started" },
             "404": { description: "The KPI, or the person, is not in this workspace" },
+            "409": {
+              description: "The month is closed and its reading holds a different number, which stays as it is. `code` is `kpi_month_closed` and `id` is the reading's id.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { error: { type: "string" }, code: { type: "string", enum: ["kpi_month_closed"] }, id: { type: "string" } },
+                    required: ["error", "code", "id"],
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -490,7 +540,7 @@ export async function GET(req: Request) {
             { name: "from", in: "query", schema: { type: "string", format: "date-time" }, description: "Due on or after." },
             { name: "to", in: "query", schema: { type: "string", format: "date-time" }, description: "Due on or before." },
           ],
-          responses: { "200": ok("Task") },
+          responses: { "200": ok("Task"), "400": { description: "from or to is not a date and time" } },
         },
         post: {
           summary: "Create a task",
@@ -505,11 +555,11 @@ export async function GET(req: Request) {
                   properties: {
                     title: { type: "string" },
                     description: { type: "string" },
-                    date: { type: "string", format: "date-time", description: "The due date. The time of the call when left out." },
+                    date: { type: "string", format: "date-time", description: "The due date: an ISO date and time. The time of the call when left out or empty." },
                     assigneeId: { type: "string" },
                     kraId: { type: "string" },
                     category: { type: "string" },
-                    slaHours: { type: "integer", description: "Kept with the task and returned as given. Nothing escalates a task when it passes." },
+                    slaHours: { type: "number", description: "Hours, as a number or a string of one. Kept with the task and returned as a number; zero or less is no SLA. Nothing escalates a task when it passes." },
                     priority: { type: "string", enum: TASK_PRIORITIES, default: "NORMAL", description: "Any case is accepted and stored in capitals." },
                     source: { type: "string", enum: TASK_SOURCES, default: "MANUAL", description: "Any case is accepted and stored in capitals." },
                     sourceRef: { type: "string" },
@@ -520,7 +570,7 @@ export async function GET(req: Request) {
           },
           responses: {
             "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Task" } } } },
-            "400": { description: "title or assigneeId is missing, or priority or source is not one of the listed values" },
+            "400": { description: "title or assigneeId is missing, priority or source is not one of the listed values, date is not a date and time, or slaHours is not a number" },
             "404": { description: "The assignee is not in this workspace" },
           },
         },
@@ -531,17 +581,28 @@ export async function GET(req: Request) {
           description: "Published SOPs, unless you ask for another status.",
           parameters: [
             ...PAGING,
-            { name: "status", in: "query", schema: { type: "string", enum: SOP_STATUSES, default: "PUBLISHED" } },
+            { name: "status", in: "query", schema: { type: "string", enum: SOP_STATUSES, default: "PUBLISHED" }, description: "Any case is accepted." },
             { name: "category", in: "query", schema: { type: "string" } },
-            { name: "sopType", in: "query", schema: { type: "string", enum: SOP_TYPES } },
+            { name: "sopType", in: "query", schema: { type: "string", enum: SOP_TYPES }, description: "Any case is accepted." },
           ],
-          responses: { "200": ok("SOP") },
+          responses: { "200": ok("SOP"), "400": { description: "status or sopType is not one of the listed values" } },
         },
       },
     },
     // Exactly the events something sends, and exactly the names a webhook
     // subscription may name (POST /api/webhooks): one list.
     "x-events": WEBHOOK_EVENTS.map((e) => ({ name: e.name, description: e.description })),
+    // How a receiver checks a delivery (src/services/webhookDispatcher.ts, THE SIGNING KEY).
+    "x-webhook-signature": {
+      header: "X-Workwrk-Signature",
+      format: "t=<timestamp>,v1=<signature>",
+      algorithm: "HMAC-SHA256, as lowercase hex",
+      key: "The subscription's secret (whsec_...), shown once when the subscription is made or its secret rotated.",
+      signedPayload: "<timestamp>.<raw request body>",
+      olderSubscriptions:
+        "A subscription whose `signing` is legacy_hash (GET /api/webhooks) is signed with the SHA-256 of its secret, as lowercase hex, as the key. " +
+        "Rotating its secret (PATCH /api/webhooks with rotateSecret: true) moves it to the secret itself.",
+    },
   };
 
   // ── Post-process: group endpoints and document the failures every one of
@@ -568,7 +629,7 @@ export async function GET(req: Request) {
 
   (spec.components as Record<string, unknown>).responses = {
     Unauthorized: errRef("Missing, malformed, revoked or unknown API key."),
-    Forbidden: errRef("The key lacks the scope this endpoint requires, or the signed-in person is not the workspace's Owner or an Admin."),
+    Forbidden: errRef("The key lacks the scope this endpoint requires, the workspace is suspended or cancelled, or the signed-in person is not the workspace's Owner or an Admin."),
     RateLimited: errRef("Per-minute or per-day rate limit for this key exceeded."),
   };
 
@@ -578,10 +639,19 @@ export async function GET(req: Request) {
       if (!SCOPE_OF[method] || typeof op !== "object" || op === null) continue;
       op.tags = [TAG_OF[path] ?? "General"];
       op.operationId ??= `${method}${path.replace(/[^a-zA-Z]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ""))}`;
+      const own = op.responses as Record<string, { description?: string; content?: unknown; $ref?: string }>;
+      // Every failure answers `{ error }`: an operation's own 4xx that names
+      // no body gets the Error schema, so a generated client types it.
+      for (const [code, res] of Object.entries(own)) {
+        if (/^4\d\d$/.test(code) && !res.$ref && !res.content) {
+          own[code] = { ...res, content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } };
+        }
+      }
       op.responses = {
-        ...(op.responses as Record<string, unknown>),
+        ...own,
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        // An operation with 403s of its own (POST /people's seat limit) keeps its description.
+        "403": own["403"] ?? { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
       };
       // Surface the scope a key needs, so a reader never has to guess.

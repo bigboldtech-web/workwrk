@@ -17,6 +17,18 @@ import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { utcDayKey } from "@/lib/time-format";
 import { isOrgWideTimesheetReader } from "@/lib/timesheet-scope";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { isAgentOf } from "@/lib/access/org-role";
+import { effectiveManagerOf, managesNobody } from "@/lib/access/manager-lines";
+
+/**
+ * Is the signed-in person this week's approver? Never an Agent, who is
+ * nobody's manager (AGENT_TIER_BLURB): a week whose stored approver is an
+ * Agent (named before rule 6) is decided by the manager above them, who has
+ * the subject in their tree, or by the org-wide readers.
+ */
+function approvesAs(timesheet: { approverId: string | null }, userId: string, level: string | null | undefined): boolean {
+  return timesheet.approverId === userId && !isAgentOf(level);
+}
 
 export async function GET(
   _req: NextRequest,
@@ -54,7 +66,7 @@ export async function GET(
   // report tree, or the org-wide read the People team, Owners and Admins hold.
   let canSee =
     timesheet.userId === userId ||
-    timesheet.approverId === userId ||
+    approvesAs(timesheet, userId, session.user?.accessLevel) ||
     isOrgWideTimesheetReader(session.user?.accessLevel);
   if (!canSee && isManager(session)) {
     const tree = await getEffectiveReportTree(userId);
@@ -131,9 +143,10 @@ export async function PATCH(
     // Approvals drawer was never minted by anything and the only signal an
     // approver got was a sidebar badge they had to notice on their own.
     // The link is the queue with this week already open in the drawer.
-    const recipientId = timesheet.approverId
-      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { managerId: true } }))?.managerId
-      ?? null;
+    // Never an Agent, who is nobody's manager: a stored Agent approver
+    // (named before rule 6) gives way to the manager above them.
+    const recipientId = (timesheet.approverId && !(await managesNobody(timesheet.approverId)) ? timesheet.approverId : null)
+      ?? (await effectiveManagerOf(orgId, userId));
     if (recipientId && recipientId !== userId) {
       const submittedWeekKey = utcDayKey(new Date(timesheet.weekStartDate));
       prisma.notification.create({
@@ -184,7 +197,7 @@ export async function PATCH(
   // next submit, not here. The decision TIME is cleared, because the week
   // no longer carries a decision.
   if (body.action === "reopen") {
-    const isApprover = timesheet.approverId === userId || legacyIsAdminLevel(session.user.accessLevel);
+    const isApprover = approvesAs(timesheet, userId, session.user.accessLevel) || legacyIsAdminLevel(session.user.accessLevel);
     const ownerPath = isOwner && timesheet.status === "REJECTED";
     const approverPath = isApprover && !isOwner && timesheet.status === "APPROVED";
     if (!ownerPath && !approverPath) {
@@ -249,7 +262,7 @@ export async function PATCH(
     // asks the same question the read asks, and answers 404 the same way so
     // it never confirms that a week it will not touch exists.
     let canDecide =
-      timesheet.approverId === userId ||
+      approvesAs(timesheet, userId, session.user?.accessLevel) ||
       isOrgWideTimesheetReader(session.user?.accessLevel);
     if (!canDecide) {
       const tree = await getEffectiveReportTree(userId);

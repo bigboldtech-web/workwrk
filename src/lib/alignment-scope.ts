@@ -118,7 +118,8 @@ export async function goalRightsActor(session: unknown, chainIds?: readonly stri
         : getTeamUserIds(getOrgId(session), callerId).then((ids) => new Set(ids)),
     // Someone with a report manages people even below the manager tier (the
     // link rule reads it); the tier itself already counts, so skip the query.
-    manager
+    // An Agent manages nobody, whatever lines still name them (AGENT_TIER_BLURB).
+    manager || isAgentOf(level)
       ? Promise.resolve(0)
       : prisma.user.count({ where: { organizationId: getOrgId(session), managerId: callerId, deletedAt: null, status: { not: "INACTIVE" } } }),
   ]);

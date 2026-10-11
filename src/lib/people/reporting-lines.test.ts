@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrgForest, filterForest, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle } from "./reporting-lines";
+import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
 
 const map = (pairs: Array<[string, string | null]>) => new Map(pairs);
 
@@ -94,5 +94,75 @@ describe("reportHandoverNote", () => {
     const words = reportHandoverNote({ recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }, { to: null, count: 1 }] }, "Sam");
     expect(words).toContain("Of their direct reports, 2 go to Dana Lee and 1 goes to no manager for now instead.");
     expect(words).not.toMatch(/\u2014|-{2}/);
+  });
+});
+
+// Docs-found fixes batch 3: the walks up a line that read an Agent as no
+// one's manager, and that send moving reports only to someone live.
+const lines = (rows: Array<[string, string | null, Partial<LineFacts>?]>) =>
+  new Map(rows.map(([id, managerId, f]) => [id, { managerId, agent: false, inactive: false, ...f }]));
+
+describe("effectiveManagerFrom", () => {
+  const people = lines([
+    ["vp", null], ["mona", "vp"], ["sam", "mona", { agent: true }], ["ace", "sam", { agent: true }],
+    ["rex", "gone", { agent: true }], ["dan", "vp", { inactive: true }],
+  ]);
+  it("passes over any number of Agents to the next manager up", () => {
+    expect(effectiveManagerFrom("sam", people)).toBe("mona");
+    expect(effectiveManagerFrom("ace", people)).toBe("mona");
+  });
+  it("keeps a stored manager who is no Agent as stored, deactivated or not", () => {
+    expect(effectiveManagerFrom("mona", people)).toBe("mona");
+    expect(effectiveManagerFrom("dan", people)).toBe("dan");
+    expect(effectiveManagerFrom("gone", people)).toBe("gone");
+  });
+  it("answers nobody when the line past an Agent ends, loops or reaches a removed person", () => {
+    expect(effectiveManagerFrom("rex", people)).toBeNull();
+    expect(effectiveManagerFrom("a1", lines([["a1", "a2", { agent: true }], ["a2", "a1", { agent: true }]]))).toBeNull();
+    expect(effectiveManagerFrom("top", lines([["top", null, { agent: true }]]))).toBeNull();
+    expect(effectiveManagerFrom(null, people)).toBeNull();
+  });
+});
+
+describe("liveManagerFrom", () => {
+  it("passes over Agents and deactivated people, and gives up at a removed one", () => {
+    const people = lines([["big", null], ["boss", "big", { inactive: true }], ["sam", "boss", { agent: true }], ["lost", "gone"]]);
+    expect(liveManagerFrom("big", people)).toBe("big");
+    expect(liveManagerFrom("boss", people)).toBe("big");
+    expect(liveManagerFrom("sam", people)).toBe("big");
+    expect(liveManagerFrom("gone", people)).toBeNull();
+    expect(liveManagerFrom("lost", people)).toBe("lost");
+  });
+});
+
+describe("planReportHandover with the line's facts (batch 3)", () => {
+  // big > boss > leaver > r1, r2
+  const managers = map([["big", null], ["boss", "big"], ["leaver", "boss"], ["r1", "leaver"], ["r2", "leaver"], ["sam", "big"]]);
+  it("sends the reports past a deactivated manager to the first one who can manage them", () => {
+    const people = lines([["big", null], ["boss", "big", { inactive: true }], ["leaver", "boss"], ["r1", "leaver"], ["r2", "leaver"], ["sam", "big", { agent: true }]]);
+    const plan = planReportHandover({ leaverId: "leaver", recipientId: "sam", recipientIsAgent: true, managers, agentIds: new Set(["sam"]), people });
+    expect([...plan.rehome]).toEqual([["big", ["r1", "r2"]]]);
+  });
+  it("and to no manager when the line reaches a removed person", () => {
+    const people = lines([["leaver", "boss"], ["r1", "leaver"], ["r2", "leaver"], ["sam", null, { agent: true }]]);
+    const plan = planReportHandover({ leaverId: "leaver", recipientId: "sam", recipientIsAgent: true, managers, agentIds: new Set(["sam"]), people });
+    expect([...plan.rehome]).toEqual([[null, ["r1", "r2"]]]);
+  });
+});
+
+describe("agentReportsNote", () => {
+  it("says the Agent manages nobody listed under them, and what Move their reports does", () => {
+    expect(agentReportsNote({ solid: 3, dotted: 1, rehomed: [{ to: "Dana Lee", count: 3 }] }, "Sam Agent")).toBe(
+      "Sam Agent is on the Agent tier, and an Agent can't be anyone's manager, so Sam Agent doesn't manage the 3 direct reports and 1 dotted-line report still listed under them. Move them so the record matches: the 3 direct reports go to Dana Lee, and the dotted line is taken off.",
+    );
+    expect(agentReportsNote({ solid: 1, dotted: 0, rehomed: [{ to: null, count: 1 }] }, "Sam")).toBe(
+      "Sam is on the Agent tier, and an Agent can't be anyone's manager, so Sam doesn't manage the 1 direct report still listed under them. Move them so the record matches: the direct report goes to no manager for now.",
+    );
+    expect(agentReportsNote({ solid: 0, dotted: 2, rehomed: [] }, "Sam")).toMatch(/2 dotted-line reports still listed under them\. Move them so the record matches: the dotted lines are taken off\.$/);
+    expect(agentReportsNote({ solid: 0, dotted: 0, rehomed: [] }, "Sam")).toBeNull();
+  });
+  it("holds no dashes", () => {
+    const text = agentReportsNote({ solid: 2, dotted: 2, rehomed: [{ to: "A", count: 1 }, { to: null, count: 1 }] }, "Sam") ?? "";
+    expect(text).not.toMatch(/\u2014|\u2013|--/);
   });
 });

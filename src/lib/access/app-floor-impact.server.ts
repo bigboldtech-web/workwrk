@@ -3,7 +3,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { loadOrgFacts } from "./facts";
-import { orgRoleOf, isSeededPeopleTeam } from "./org-role";
+import { isAgentOf, orgRoleOf, isSeededPeopleTeam } from "./org-role";
 import { accessV2Tables } from "./flags";
 import { tiersOfLevel } from "./viewer-tiers";
 import type { ImpactPerson } from "./app-floor-impact";
@@ -44,9 +44,13 @@ export async function loadImpactPeople(organizationId: string, appKey?: string |
     loadOrgFacts(organizationId),
     prisma.userDottedLine.findMany({ where: { user: { organizationId, deletedAt: null } }, select: { managerId: true } }),
   ]);
+  // An Agent is nobody's manager (AGENT_TIER_BLURB), whatever lines stored
+  // before rule 6 still name them: the engine's viewer finds no reports
+  // below one (manager-lines.ts), so neither does this preview.
+  const agents = new Set(users.filter((u) => isAgentOf(u.accessLevel)).map((u) => u.id));
   const managers = new Set<string>();
-  for (const u of users) if (u.managerId) managers.add(u.managerId);
-  for (const d of dotted) managers.add(d.managerId);
+  for (const u of users) if (u.managerId && !agents.has(u.managerId)) managers.add(u.managerId);
+  for (const d of dotted) if (!agents.has(d.managerId)) managers.add(d.managerId);
   // The People team the engine reads (resolve.ts isPeopleTeam, the same
   // union boot ships as viewer.peopleTeam): the configured list, plus an
   // HR-level user while ACCESS_V2_TABLES is off (org-role.ts peopleTeamOf).

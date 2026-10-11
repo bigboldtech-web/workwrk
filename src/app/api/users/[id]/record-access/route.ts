@@ -13,6 +13,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx } from "@/lib/people/person-access.server";
+import { agentIdsIn } from "@/lib/access/manager-candidate";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -44,10 +45,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     chain.push({ id: m.id, firstName: m.firstName, lastName: m.lastName, avatar: m.avatar });
     next = m.managerId;
   }
-  const dotted = await prisma.userDottedLine.findMany({
+  const dottedRows = await prisma.userDottedLine.findMany({
     where: { userId: subject.id, manager: { deletedAt: null, organizationId: ctx.organizationId } },
     select: { manager: { select: PERSON } },
   });
+  // An Agent is nobody's manager (AGENT_TIER_BLURB): an Agent on the solid
+  // line is passed over (the people above still read through the tree), and
+  // an Agent's dotted line gives no reach (src/lib/access/manager-lines.ts).
+  // So neither is listed as someone who can see the record.
+  const agents = await agentIdsIn(ctx.organizationId, [...chain.map((p) => p.id), ...dottedRows.map((d) => d.manager.id)]);
+  const managers = chain.filter((p) => !agents.has(p.id));
+  const dotted = dottedRows.filter((d) => !agents.has(d.manager.id));
 
   const group = async (levels: string[]) => {
     // Reading OTHER people's stored level as data (who holds the People team,
@@ -71,7 +79,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     {
       subject: { id: subject.id, firstName: subject.firstName, lastName: subject.lastName, avatar: subject.avatar },
       groups: [
-        { key: "chain", label: "Their managers, up the reporting line", people: chain, total: chain.length },
+        { key: "chain", label: "Their managers, up the reporting line", people: managers, total: managers.length },
         { key: "dotted", label: "Dotted-line managers", people: dotted.map((d) => d.manager), total: dotted.length },
         { key: "people-team", label: "People team", ...peopleTeam },
         { key: "org-wide", label: "C-level, VPs and Directors", ...orgWide },

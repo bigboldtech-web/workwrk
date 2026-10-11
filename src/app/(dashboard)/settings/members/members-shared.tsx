@@ -33,6 +33,8 @@ export interface MemberRow {
   weeklyCapacityHours: number | null;
   /** Admin scopes an Owner gave (billing, security). */
   adminScopes?: string[];
+  /** An Agent who still has people listed under them: how many, by kind (members-list.server.ts). */
+  agentReports?: { solid: number; dotted: number } | null;
 }
 
 export interface Counts { owners: number; admins: number; members: number; guests: number; peopleTeam: number }
@@ -101,7 +103,9 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * also asks for the person's name typed. When the person picked cannot take
  * the direct reports (an Agent is never anyone's manager, or a reporting
  * loop), the dialog says where they go instead, from the server's own plan,
- * before anything runs.
+ * before anything runs. Confirm waits for that plan: if it cannot be read,
+ * the dialog says so and offers Retry, and Confirm stays held (Cancel
+ * stays open), so a handover never runs without saying where the reports go.
  */
 export function TransferDialog({
   member,
@@ -121,6 +125,9 @@ export function TransferDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<{ for: string; plan: ReportsPlan | null } | null>(null);
+  // A Retry of the plan read asks again under a new key, so the failure it
+  // answers never stands for the new attempt.
+  const [planTry, setPlanTry] = useState(0);
 
   useEffect(() => {
     if (!member) return;
@@ -142,10 +149,10 @@ export function TransferDialog({
     if (!memberId || reportCount === 0) return;
     let live = true;
     void apiFetch<{ reports: ReportsPlan }>(`/api/users/${memberId}/handover?to=${encodeURIComponent(pickedId)}`, { cache: "no-store" }).then((r) => {
-      if (live) setPlan({ for: `${memberId}:${pickedId}`, plan: r.ok ? r.data.reports : null });
+      if (live) setPlan({ for: `${memberId}:${pickedId}:${planTry}`, plan: r.ok ? r.data.reports : null });
     });
     return () => { live = false; };
-  }, [memberId, reportCount, pickedId]);
+  }, [memberId, reportCount, pickedId, planTry]);
 
   if (!member) return null;
   const s = summary && summary !== "error" ? summary : null;
@@ -162,9 +169,13 @@ export function TransferDialog({
   const needsTransfer = !!s && ((s.openTasks.count + s.directReports.count + (s.containers?.count ?? 0)) > 0);
   const recipientId = to?.id ?? actingId;
   const needsPlan = !!s && s.directReports.count > 0;
-  // Keyed by the person leaving and the person picked, so a plan for anyone else never shows.
-  const planKey = `${member.id}:${recipientId}`;
+  // Keyed by the person leaving, the person picked and the attempt, so a plan
+  // for anyone else, or an older attempt's failure, never shows.
+  const planKey = `${member.id}:${recipientId}:${planTry}`;
   const planNow = plan && plan.for === planKey ? plan.plan : null;
+  // The plan read failed: Confirm stays held (it would run a handover the
+  // dialog has not described), the dialog says why, and Retry asks again.
+  const planFailed = needsPlan && plan?.for === planKey && !plan.plan;
   const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
 
   const run = async () => {
@@ -194,6 +205,7 @@ export function TransferDialog({
       confirmLabel={mode === "remove" ? "Remove from workspace" : "Deactivate"}
       onConfirm={run}
       busy={busy || summary === null || (needsPlan && plan?.for !== planKey)}
+      confirmDisabled={planFailed}
       error={error ?? (summary === "error" ? "Couldn't read what they hold. Try again." : null)}
     >
       <p>{mode === "remove" ? "They lose access at once and leave the directory." : "They lose access at once. Their record stays, and you can reactivate them."}</p>
@@ -214,6 +226,12 @@ export function TransferDialog({
               </Field>
             ) : null}
             {reportsNote ? <p className="text-sm text-ink-2">{reportsNote}</p> : null}
+            {planFailed ? (
+              <p role="alert" className="text-sm text-danger-text">
+                Couldn&apos;t check where their direct reports go, so this waits until it can.{" "}
+                <button type="button" className="font-medium underline" onClick={() => setPlanTry((n) => n + 1)}>Retry</button>
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="text-ink-2">They hold no open work, reports or Spaces.</p>

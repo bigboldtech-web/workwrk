@@ -17,6 +17,8 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
+import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { lockOrgRoles } from "@/lib/access/membership";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -115,16 +117,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return err(409, "That would make a reporting loop: this person already manages them, directly or further down.", { code: "dotted_line_cycle", field: "dottedLines", managerIds: looped });
     }
   }
-  await prisma.$transaction([
-    prisma.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: ids } } }),
-    ...ids.map((managerId) =>
-      prisma.userDottedLine.upsert({
+  // The set is written under the workspace's role lock, and its managers
+  // checked again there (rule 6's race, docs-found fixes batch 3): a role
+  // change making one of them an Agent counts their dotted reports under the
+  // same lock, so it waits for this write and sees the line, or lands first
+  // and this sees an Agent.
+  const agentNow = await prisma.$transaction(async (tx) => {
+    await lockOrgRoles(tx, ctx.organizationId);
+    if (ids.length && (await agentIdsIn(ctx.organizationId, ids, tx)).size > 0) return true;
+    await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: ids } } });
+    for (const managerId of ids) {
+      await tx.userDottedLine.upsert({
         where: { userId_managerId: { userId: id, managerId } },
         create: { userId: id, managerId },
         update: {},
-      }),
-    ),
-  ]);
+      });
+    }
+    return false;
+  });
+  if (agentNow) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
   void logActivity({
     type: "reporting_line_changed",
     actorId: ctx.userId,

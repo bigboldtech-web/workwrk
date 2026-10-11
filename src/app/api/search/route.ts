@@ -9,6 +9,7 @@ import { addressHref } from "@/lib/nav/object-href";
 import { getUserTagIds } from "@/lib/user-tags";
 import { announcementInFeed } from "@/lib/announcement-view";
 import { sopVisibilityWhere } from "@/lib/sop-access";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { goalVisibilityOr } from "@/lib/goal-audience";
 import {
   parseAnnouncementAudience,
@@ -112,7 +113,9 @@ export async function GET(req: NextRequest) {
     }),
     // Items (tasks) — over-fetch then gate by their board's read access.
     prisma.item.findMany({
-      where: { organizationId: orgId, archivedAt: null, title: ci },
+      // Tasks only: a meeting is found as a meeting below, never twice as a
+      // task (src/lib/system-items.ts).
+      where: { organizationId: orgId, archivedAt: null, ...NOT_SYSTEM_ITEMS, title: ci },
       select: {
         id: true, title: true, status: true, dueAt: true, boardId: true, ownerId: true, assigneeIds: true,
       },

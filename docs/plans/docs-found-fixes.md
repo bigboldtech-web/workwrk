@@ -392,3 +392,340 @@ The dispatcher already matches a subscription by name or "*" (`webhookDispatcher
 - **The Members drawer** shows the Agent refusal with the row's generic Retry, which refuses again until the reports move.
 - **Folder mutes** silence only a task whose List sits directly in the muted Folder, in every task notification (`placeMuteKeys` knows one Folder). A sub-folder's task is not silenced.
 - **The due-today run** reads today in the server's own clock, not each person's.
+
+# Batch 3: notifications, API, docs and the browser
+
+Worktree `theywrk-agents`, on top of de954765. Nothing here is committed. Another builder works in the same worktree on people, users, handover, membership, trash, the doc export route and `src/lib/access`; none of those files were touched. The items come from the batch 2 review's "api-and-notify" reviewer (six findings and its lows) and the "phase4-last-polish" reviewer's lows.
+
+## 1. Meetings counted as tasks
+
+**What was true.** `scripts/backfill-meeting-items.mjs` gives every meeting an Item on the workspace's hidden Meetings List (`settings.system`, item type `meeting`): owner the meeting's creator, assignees its attendees, due when it starts, no status. `openItemsOf` in `/api/email/send-reminders` read every List of the workspace, a null status counts as open, and neither the due-today read nor the overdue read spread `NOT_SYSTEM_ITEMS`. So a meeting's creator got a "Task Due Today" row for each of the day's meetings, and every Monday their manager's email listed every past meeting they ever made, by title, private ones included. The rows exist only where the backfill ran with `--write`.
+
+**What changed.**
+
+- `src/lib/system-items.ts`: `isSystemBoard`, read in code (a JSON filter `NOT settings.system = true` is NULL in SQL for a List without the key, and would drop every real List).
+- `src/lib/reminder-sweep.ts` (new, pure): the rules both runs follow (below).
+- `send-reminders`: `openItemsOf` leaves the hidden List out of its groups, the read spreads `NOT_SYSTEM_ITEMS`, and each row returned is checked again (`openTask`).
+
+Every other Item sweep of a person's or a workspace's tasks had the same gap, and now spreads `NOT_SYSTEM_ITEMS`:
+
+- `notifyItemsDueToday` (`notify-item.ts`, still not called);
+- team workload, Team members (its grouped SQL leaves out `SYSTEM_ITEM_TYPES` too) and a person's work (`src/app/api/team/*`);
+- the team calendar (`/api/calendar`, both reads);
+- analytics (`src/lib/analytics.ts`);
+- the performance score's task part (`calcTaskScore`: a meeting has no done status, so every meeting read as a task left undone);
+- Everything (the rows and the facets);
+- Talk updates (`talk-updates-server.ts`);
+- an AI teammate's `list_tasks` (`agents/tools.ts`);
+- "When a task's date arrives" automations (`schedule-server.ts`: an automation could have acted on a meeting's Item);
+- search's task results (a meeting is found as a meeting already).
+
+Already right: My work, Home, My items, the ICS feed, the calendar events, the field candidates, list links, dashboards and GET `/api/v1/tasks`. Not changed: the KRA and KPI rollups and goal effort read tasks by `metadata.kraId` or `kpiId`, which a meeting's Item never has; the repeat sweep reads `recurNextAt`, which it never has; the workspace export is all data; the handover's open-task count (`src/lib/people/handover.server.ts`) is the other builder's file (below).
+
+**Tests.**
+
+- `send-reminders/route.test.ts`: a meeting on the hidden List and one on a real List, due today and overdue: no row, and no title in the digest; the read's `itemType` filter and groups.
+- `src/lib/system-items.sweeps.test.ts` (new): every sweep above spreads the fragment, read from the source (15 tests).
+- `src/lib/reminder-sweep.test.ts` (new, 8 tests).
+
+## 2. Archived places, every assignee, live people, once a day
+
+**What was true.** Both runs counted tasks in an archived List and under an archived Space or Folder (archiving writes only its own row, so its Lists keep `archivedAt` null). Due today told only `ownerId`, though the Due soon switch says "a task assigned to you" and the docs say its assignee; it told people who were removed, deactivated or no longer in the workspace; and a second run the same day wrote every row again, though `scripts/CRON-SETUP.md` said "These jobs are idempotent".
+
+**Decisions.**
+
+- Every assignee is the union of `ownerId` and `assigneeIds`, each once. The overdue digest names each assignee in their own manager's digest, one line per task and person: a manager learns of a report's late task whether the report is the first assignee or another.
+- Once a day per person and task, read by person (Notification's index leads with `userId`, never by `link`, which has none), as `notifyItemsDueToday` did. A read that fails sends anyway: a duplicate beats a missed deadline.
+- The email digests of that endpoint stay as they are, and the doc now says so: a re-run of the overdue digests, policy acknowledgment, monthly evaluation or KPI recording emails everyone again. Recording what an email run sent is a separate change; the worst case of a duplicate digest is one extra email.
+
+**What changed.**
+
+- `src/lib/reminder-sweep.ts`: `sweepBoards` (archived List, Space or Folder at any depth, a loop in the tree stops the walk), `taskPeople`, `HAS_ASSIGNEE`, `liveInWorkspace` (not removed, not deactivated, anchored or a member here).
+- `send-reminders`: `openItemsOf` reads the workspace's Lists, Spaces and Folders and keeps the live Lists; both reads take any assigned task; due today writes one row per live assignee after the switch, the mutes and today's rows already written.
+- `scripts/CRON-SETUP.md`: the due-today row says who hears and that it writes once a day; Day-2 maintenance says which rows are safe to re-run.
+
+**Tests** (`send-reminders/route.test.ts`): archived Space, child of an archived Space, archived Folder, child of an archived Folder; every assignee once, and a task with no first assignee; removed, deactivated, another workspace's and a member; three runs, the third a day later; the digest naming both assignees.
+
+## 3. The product docs on events and reminders
+
+**What was true.** `how-it-connects.mdx` said only five events are dispatched, `task.created` from the API and ingest only, `kudos.created` likewise, and "a rule on task created will not fire when you create a task in the app"; its map drew due-date notifications as a dotted "no cron yet" arrow. `status.mdx` said 5 of 16 triggers fire and that task created and kudos created rules never fire from the app.
+
+**What changed**, from `src/lib/webhook-events.ts` and the dispatch sites:
+
+- `how-it-connects.mdx`: the map's solid "due today, daily run" arrow and a dotted "overdue: no sender yet"; the table of the six events with every site (a List add, the v1 API, ingest and an automation's Create a task for `task.created`; the task edit, an AI teammate's edit, the bulk edit and an automation step for the three change events, with the 20 field cap; every kudos through `giveKudos` or `kudosAftermath`), the two time triggers, 8 of 19; the due-today paragraph (every assignee, once a day, never a meeting or an archived place).
+- `status.mdx`: the Automation row (8 of 19, which fire from where) and the due-date row.
+- `spaces-and-tasks.mdx`, `time-and-search.mdx`: each assignee, once a day.
+- `src/lib/automation/registry-triggers.ts`: its header listed the emitters as the docs did, and now matches.
+
+## 4. The KPI period
+
+**What was true.** The OpenAPI example was "2026-Q1" in three places. `latestKpiValues` skips any period with a W or a Q, and compares every other key as a string with the month keys, so "October" or "2026-10-12" sorts after every real month and would pin a goal's live value. An integration that followed the example got 201 and a webhook, and its readings never moved a goal or counted as this month (the monthly "record your KPIs" email kept coming).
+
+**Decision: refuse anything but a month key, with a 400 that says what to send.** Worst case of refusing: an integration built on the old example starts failing loudly, and is fixed by the error's own sentence. Worst case of accepting: its readings land and silently never drive a goal, for good. A month that has not started anywhere (fourteen hours ahead of UTC) is refused too: a forecast posted as next month would become the goal's live value. Any earlier month is taken, so history can be backfilled.
+
+**What changed.** `src/lib/kpi-integration.ts` (new, pure): `integrationPeriodProblem` and `KPI_PERIOD_RULE`. The OpenAPI examples are "2026-10", the request body has the month pattern and says what other keys do, and the GET filter and the reading's own `period` say older keys are listed as stored and drive no goal.
+
+## 5. A second reading for the same KPI, person and month
+
+**What was true.** POST `/api/v1/kpi-records` created with no catch, so a second reading for the same key threw P2002 and answered a bare 500; a correction was lost. The ingest action did the same, and also wrote a reading for any user id it was sent, another workspace's people included.
+
+**Decision.** There is no PATCH in the API, so a 409 would make a correction impossible, and the main integration case (a month's running total posted every day) would fail from the second day. So one reading per KPI, person and month:
+
+- the same number again: 200, nothing changed, no webhook (a retry is safe);
+- a different number while the month is open (this month or last, in any timezone, the months the in-app recorders write): 200, replaced, back to PENDING with no reviewer, since a manager's approval was of the old number and keeping it would show Approved on a number nobody approved;
+- a different number for a closed month: 409 with the reading's `id` and code `kpi_month_closed`, as the in-app recorders never rescore a closed month;
+- a create that loses a race decides again against the row that won.
+
+**What changed.** `src/lib/kpi-integration.server.ts` (new): `recordIntegrationKpi`, used by POST `/api/v1/kpi-records` and the ingest `kpi.record` action (which now checks the person is in the workspace). `actualValue` and `targetValue` take a number or a string of one (`parseKpiNumber`); anything else is a 400. The OpenAPI documents 200, 201, 400, 404 and 409.
+
+**Tests.** `src/app/api/v1/kpi-records/route.test.ts` (new, 7), `src/app/api/integrations/ingest/route.test.ts` (new, 4, the other workspace's person and a second reading among them), `src/lib/kpi-integration.test.ts` (new, 7).
+
+## 6. Webhook signatures
+
+**What was true.** POST `/api/webhooks` returned the `whsec_` secret and said to verify the signature with it, but `webhookDispatcher.ts` signed every delivery and retry with `secretHash`, the SHA-256 hex of the secret. A receiver that did what it was told rejected every delivery, and ten failures paused the subscription.
+
+**Decisions.**
+
+- The secret is kept sealed with the existing helper (`src/lib/connectors/seal.ts`, AES-256-GCM under `SECRETS_ENCRYPTION_KEY`) and every delivery is signed with it.
+- An existing subscription has only the hash (its secret was never kept), so it keeps signing with the hash, exactly as before: a receiver that already verifies it keeps working. GET says which key each one signs with (`signing`: `secret` or `legacy_hash`, with a sentence), and the new rotate path moves it to the secret.
+- A server that can't seal a secret makes no subscription (503): one made anyway would sign with a key its receiver was never shown.
+- A sealed secret no key opens sends nothing (a delivery signed with the wrong key is only rejected): the delivery waits for its retry, marked "Not sent", and the subscription's failure count is left alone, since the receiver did nothing wrong.
+
+**What changed.**
+
+- **SQL**: `prisma/sql/2026-10-12-webhook-secret-sealed.sql`, `"WebhookSubscription"."secretSealed" JSONB` nullable, catalogue-guarded, catalogue only, no backfill, listed last in `SQL_MANIFEST` (a text edit) and declared in `prisma/schema.prisma`. It must run before the new build reads subscriptions, which the manifest does. I ran `npx prisma generate` locally so the type check sees the column (the client is gitignored).
+- `src/lib/connectors/seal.ts`: `SEALED_COLUMNS` lists it (nullable), so `scripts/rotate-secrets-key.ts` moves it in a key rotation; that script's header names it.
+- `src/services/webhookDispatcher.ts`: `signingKeyOf`, `signatureHeader` and THE SIGNING KEY note; the header comment's event list is now the real one.
+- `src/app/api/webhooks/route.ts`: POST seals; new PATCH `{ id, rotateSecret: true }` makes a new secret, shown once, audited as `webhook_subscription_secret_rotated`; GET reports `signing` and never returns the sealed value; the message says exactly how to verify: `X-Workwrk-Signature: t=<timestamp>,v1=<signature>`, HMAC-SHA256 keyed with the secret over `<timestamp>.<raw body>`, lowercase hex, compared in constant time, a timestamp over five minutes old refused.
+- The OpenAPI `info.description` and a new `x-webhook-signature` say the same, and what an older subscription signs with.
+
+**Tests.** `src/services/webhookDispatcher.signing.test.ts` (new, 5), `src/app/api/webhooks/route.test.ts` (4 new), `seal.test.ts` (the list).
+
+## 7. The API's other answers (lows)
+
+- POST `/api/v1/tasks`: a `date` that is not a date answered 500 (an Invalid Date inside the create); a numeric string `slaHours` was stored as text and read back as null. Now 400 for either, `slaHours` read as a number (zero or less is no SLA, as before), and GET's `from` and `to` answer 400 too. The ingest `task.create` action reads them the same way (`src/lib/api-input.ts`, new).
+- POST `/api/v1/kpis`: an unknown `frequency`, or a target that is not a number, answered 500; now 400 naming the values, a frequency in any case stored in capitals, as a task's priority is.
+- GET `/api/v1/sops`: a `status` or `sopType` outside the enum answered 500; now 400, any case taken.
+- `x-events`: the three change events say they fire from AI teammate edits too, and `task.field_changed` that one edit fires it for at most 20 fields.
+- The 403s: `Forbidden` names the suspended or cancelled workspace; POST `/people` documents its own 403 with `code: seat_limit`. Every 4xx without a body now points at the `Error` schema.
+
+**Tests.** `v1/tasks/route.test.ts` (3 new), `v1/kpis/route.test.ts` (new, 2), `v1/sops/route.test.ts` (new, 2), `openapi.json/route.test.ts` (7 new).
+
+## 8. The Phase 4 browser lows
+
+The seven lows of the polish's reviewer, fixed by Decisions 14 and 22 (the card is read after the start lock's transaction, not in it, and only for the held row; a time cap whose swap failed on an open row, and a read that fails after a lost end, hold the card with `notReachedNow`; "The person" for an empty name; the two NoOther sentences true for a continue; no quoted "Closed."). Each one, with its tests, is in docs/plans/ai-teammates-phase4.md, "After the last polish".
+
+## Verification
+
+- `npx vitest run`, the whole suite: 703 files, 10,206 tests, all pass.
+- Old-code proof: a scratch copy of the worktree (node_modules linked, the shared worktree never touched) with the 31 changed source files put back from de954765, checked byte for byte, and the 4 new modules removed. The 18 new or edited test files: 68 tests fail.
+  - `kpi-integration.test.ts` and `reminder-sweep.test.ts` cannot load (new modules).
+  - Every new or changed test fails except three that pin behaviour that did not change: a valid month still answers 201 (kpi-records), an older subscription still signs with its hash (dispatcher), and a card read that fails after the start lock keeps the card's words (the test database cannot abort a transaction, so this one passes on both).
+  - By file: send-reminders 6 of 6 new, ingest 4 of 4, kpi-records 6 of 7, kpis 2 of 2, sops 2 of 2, tasks 3 of 3 new, openapi 7 of 7 new, webhooks 4 of 4 new, dispatcher signing 4 of 5, seal 1 of 1 changed, sweeps contract 15 of 15, and the browser files 14 of 15 (the Phase 4 entry).
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`: exit 0 with every change here in place. A last run, after the other builder added `src/app/api/users/[id]/agent-reports/route.test.ts`, shows 7 errors, all in that file and none in this batch's.
+- eslint on the 54 changed or new files: no new problems. The 2 errors and 3 warnings left were there at de954765 (`no-explicit-any` and an unused `subject` twice in `send-reminders/route.ts`, an unused `_req` in `webhooks/route.ts`).
+- `npx prisma validate`: valid. `node scripts/check-schema-sql.mjs`: ok. `node --check scripts/deploy-migrations.mjs`: ok.
+
+## Found, not fixed
+
+- **The handover's open-task count** (`src/lib/people/handover.server.ts`, the other builder's file) reads `ownerId` Items with no `NOT_SYSTEM_ITEMS`, so a leaver's meetings may count, and be handed over, as open tasks.
+- **GET `/api/v1/people`** passes `status` to the read unchecked (500 for an unknown value); left for the people track.
+- **The API's KPI score** is `actual / target`, capped at 100, not the shared direction-aware `scoreKpiRecord`, so a lower-is-better KPI posted through the API or ingest scores high for a bad number.
+- **The send-reminders email digests** send again on a second run the same day (now said in CRON-SETUP.md).
+- **Two due-today runs at the same moment** could both write: the once-a-day check is a read before the write, with no lock. The cron runs once a day.
+- **The due-today run** still reads today in the server's clock, not each person's.
+- **Webhook receivers** can't tell from the header which key a subscription signs with; GET `/api/webhooks` says so, and there is no screen for it yet.
+- **docs/product `how-it-connects.mdx`** still says analytics and the performance score read the legacy Task table; both read Item. Not about events or reminders, so left. `status.mdx` says the reminder cron needs registering by hand; I can't read the server's crontab.
+
+# Batch 3: people, access and Trash
+
+Worktree `theywrk-agents`, on top of de954765. Nothing here is committed. The items come from the batch 2 review's Agent tier findings. Another builder works in the same worktree on notifications, send-reminders, webhooks, `/api/v1`, docs/product, `src/lib/agents` and `src/lib/browser` (its part is above); none of those files were touched here. No SQL.
+
+## 1. Deleting a Space locks the Space
+
+**What was true (confirmed).** The Space branch of `moveToTrash` locked only the Lists already in the Space and their tasks. It never locked the Space row, and it deleted Lists and Folders by `spaceId`. Creating, moving (`moveList`, `moveFolder`), restoring or copying a List or Folder into the Space needs only a key-share lock on the Space row for its foreign key, so it committed during the delete:
+
+- `Board.spaceId` is SetNull and `Folder.spaceId` cascades, so a List that arrived after the capture was deleted, with its tasks cascading, and no copy in the snapshot. A List restored from Trash at that moment had already lost its own TrashItem.
+- An Agent's `keepTasks` count missed it: an Agent could delete an empty Space and take a 50-task List moved in meanwhile.
+
+The Folder branch was safe for Lists. Its Folders are locked FOR UPDATE (`lockFolderBranch`), `Board.folderId` is a foreign key, and creates take `lockParentFolder`'s share lock. But it also deleted Lists by `folderId`, not by the ids it captured.
+
+**What changed** (`src/lib/trash.ts`):
+
+- A Space takes `SELECT id FROM "Space" WHERE id = ... FOR UPDATE` first, then its Folders FOR UPDATE (a Folder can't move out mid-delete), then its Lists and their tasks, as before. The `keepTasks` count runs after all three, over exactly the Lists it removes.
+- Lists and Folders are deleted by the ids in the snapshot just written, never by `spaceId`. Canvases, tables and files already were. A row the capture never saw is never removed; at worst its SetNull keeps it.
+- A Folder's Lists are deleted by the captured ids too.
+
+A move into the Space while the delete holds it waits, then fails its foreign key: the mover gets an error and nothing is lost. Two crossing transactions can still deadlock. Postgres ends one, and the Space DELETE route answers "Couldn't delete this Space".
+
+**Tests.** `src/lib/trash-space-lock.test.ts` (new): 4 tests, all 4 fail on the old code. They cover the lock order, deletes by id, the Agent count after the Space lock, and a Folder's Lists by id.
+
+## 2. A restore re-checks the person's lines
+
+**What was true (confirmed).** Removal keeps `managerId` and the dotted lines. `DELETE /api/users/[id]?restore=true` wrote `{ deletedAt: null, status: "ACTIVE" }` and checked nothing. Rule 6 never counted removed people (`reportCountOf` leaves them out), so a person removed in March whose manager became an Agent in June came back in August under the Agent. The Agent then had chain-view of their people data and was their manager reviewer.
+
+**Decision.**
+
+- **Solid manager.** Kept only while `managerCandidateIn` with `live` answers ok: same workspace, not removed, no Agent, not deactivated. A deactivated manager fails too: a deactivated person holds no reports (invariant 13; PATCH refuses a deactivation while reports remain), so restoring under one would make the state the invariant forbids.
+- **Dotted lines.** Taken off when they point to an Agent or a removed person. A dotted line to a deactivated manager is kept, as a deactivation keeps dotted lines.
+- **Worst cases.** Clearing: the person comes back with no manager; the answer says so and the No manager view lists them. Keeping: an Agent reads their people data.
+
+**What changed.**
+
+- `src/lib/access/manager-candidate.ts`:
+  - `managerCandidateIn(org, id, { db, live })` can run inside the caller's transaction, and with `live` answers "inactive".
+  - `agentIdsIn` takes a db.
+  - New `staleLinesOf` and `staleLineWords`.
+- `src/app/api/users/[id]/route.ts`, the restore transaction:
+  - It takes the role lock, then the seats lock (PATCH's order), and reads `staleLinesOf` under them.
+  - It clears `managerId` and deletes the failing dotted lines in the same transaction.
+  - Each cleared line is logged as `reporting_line_changed`, for example "Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager".
+  - Open reviews follow (`followReportingLine`).
+  - The answer says "Max Chen has been restored with no manager, because ... Set who they report to in Members." and lists `linesCleared`.
+
+**Tests.** `src/app/api/users/[id]/route.test.ts`: 4 new restore tests, all 4 fail on the old code. They cover:
+
+- a manager who became an Agent
+- a deactivated or removed manager, and a kept one
+- dotted lines
+- the lock order.
+
+## 3. An Agent is no one's manager in every read
+
+**What was true (confirmed).** Rule 6 runs only on the change to AGENT. Agents made before it kept their reports and dotted lines, and every read followed the stored line:
+
+- report trees: `relationTo` chain and chain-view, `hasReports`, the manager app floors, Team views and queues
+- direct reports
+- the manager a row names: review reviewer, weekly review manager, timesheet approver.
+
+**Decision: no stored row is rewritten on its own.** Every read that grants reach goes through `src/lib/access/manager-lines.ts`:
+
+- **An Agent's own reach is none.** Rooted at an Agent, every walker finds nobody below:
+  - `team.ts` `getTeamUserIds`
+  - `reporting-line.ts` `getSolidReportTree`, `getEffectiveReportTree`, `getSolidReports`, `getDottedReports`, and so `isInReportTree` and the engine's `viewer.reportTree`.
+
+  `hasReports` and `peopleCtx`'s chain also check `viewer.isAgent`.
+- **The people listed under an Agent report, in effect, to the next manager up the solid line who is no Agent** (`reporting-lines.ts` `effectiveManagerFrom`).
+  - That is nobody when, past an Agent, the line ends, loops or reaches a removed person.
+  - An Agent in the middle of a tree is walked through as before, so that manager already reached them. Nobody gains reach the trees did not give.
+  - A stored manager who is no Agent is read as stored, as before.
+- **A dotted line to an Agent counts for nobody.** It is a named extra relationship, and handing it up would give the manager above reach the line never gave. Worst case: someone loses a dotted relationship only an Agent held, which an Admin can give to a manager.
+
+**Readers changed:**
+
+- **Trees and the facts read from them.**
+  - `src/lib/team.ts`, `src/lib/reporting-line.ts`
+  - `src/lib/access/resolve.ts` `hasReports`
+  - `src/lib/people/person-access.server.ts` `peopleCtxForViewer`
+  - `src/lib/people/teams-counts.ts` `hasReportsFor`
+  - `src/lib/alignment-scope.ts` (`leadsPeople`)
+  - `src/lib/access/app-floor-impact.server.ts` (the Apps page's preview)
+  - `src/app/api/calendar/events/route.ts` (`hasTeam`)
+- **Direct reports and dotted lines.**
+  - `src/app/api/kra-assignments/route.ts` (`?managerId`), `src/app/api/okrs/route.ts` (Direct reports only), `src/app/api/dashboard/team-dashboard/route.ts`
+  - `src/lib/people/team-scope.server.ts` (My team and Workload's Direct view), `src/lib/process-run-access.ts`
+  - `src/lib/team-rollup.ts`: an Agent among the directs is no sub-team lead.
+  - `src/app/api/users/[id]/record-access/route.ts`: Who can see this record lists no Agent.
+- **Review cycles.** The manager a review names is never an Agent:
+  - the launch reviewer (`reviews/[id]/launch`)
+  - the cycle GET lens and the manager review GET and PUT, through `reviewerFacts` (`review-cycle.server.ts`)
+  - `followReportingLine`
+  - the cycle page's team face.
+
+  An Agent's launch stamp writes nothing on an open review (`effectiveReviewerId`, which can now answer null). With no manager above, only the People team and Admins write it until someone is named Reports to.
+- **Weekly reviews.**
+  - The recorded manager is the effective one at create and at submit.
+  - `managerQueueWhereFor` drives the direct queue, the badge, the list and the chain. It is empty for an Agent and adds the people listed under one to the manager above.
+  - The recorded-manager fallback never admits an Agent, in the decision route or in `legacy-resolve.ts`.
+  - The reminders go to the effective manager.
+- **Timesheets and purchase orders.**
+  - The approver at creation is the effective manager (`timesheets`, `time-entries`, `time-entries/punch`, `purchase-orders` create and submit).
+  - `timesheets/[id]` never treats an Agent as the approver for read, reopen or decide.
+  - The Approvals queue shows a week whose stored approver is an Agent to the people the subject reports to, as an unclaimed week.
+  - The submit notice goes to the effective manager.
+- **KPI submissions** tell the effective manager and the dotted-line managers who are no Agent (`kpi-review.server.ts`).
+- **SCIM.** `unattendedRecipient` (`membership.ts`) passes over an Agent to the live manager above.
+
+**For Admins.**
+
+- **The Members list.** Each Agent's row carries `agentReports` (live solid and dotted reports; `members-list.server.ts`).
+- **The drawer.** For the people who write Reports to (Owner, Admin, People team), it shows under Reports to: "Sam Agent is on the Agent tier, and an Agent can't be anyone's manager, so Sam Agent doesn't manage the 3 direct reports and 1 dotted-line report still listed under them. Move them so the record matches: the 3 direct reports go to Dana Lee, and the dotted line is taken off."
+- **Move their reports** calls `POST /api/users/[id]/agent-reports` (new; GET is the preview). It runs `moveAgentReports` in `handover.server.ts`, under the role lock:
+  - The direct reports take the handover's own routing (`planReportHandover`, as if the Agent left with an Agent recipient): the first person up the line who is live and no Agent, else no manager.
+  - The dotted lines to the Agent are taken off.
+  - The move is logged, and reviews follow.
+  - The button waits for the preview; a failed preview offers Retry.
+
+**Checked, no change needed:**
+
+- These decide by level or only count: the workflow engine, `cron/review-cycles` `managersFor`, `escalation-report` (a count) and PO decisions.
+- `bulk-import` writes invitations, which are checked again at acceptance.
+- These only display or filter: the directory, the org chart, the Members manager column, `talent-assessment`, `my-team`'s direct set, `team-alignment`'s direct label, and the person page's Reports to and Direct reports.
+
+**Tests:**
+
+- `src/lib/access/manager-lines.test.ts` (new, 9): the walkers, the helpers and `hasReports` over an in-memory workspace. The module is new, so the suite cannot load on the old code.
+- `src/lib/people/person-access-agent.test.ts` (new): 1 of 2 fails on the old code. The other pins a manager's chain.
+- `src/lib/people/reporting-lines.test.ts`: 8 new, all fail. They cover `effectiveManagerFrom`, `liveManagerFrom`, the plan with the line's facts, and `agentReportsNote`.
+- `src/lib/performance/review-cycle.test.ts`: 1 new, fails.
+- `src/lib/performance/review-cycle-agent.test.ts` (new): 3 of 3 fail.
+- `src/lib/weekly-review-agent.test.ts` (new): 3 of 3 fail.
+- `src/lib/access/app-floor-impact-agent.test.ts` (new): 1 of 1 fails.
+- `src/lib/access/membership.test.ts`: 1 new (`unattendedRecipient`), fails.
+- `src/lib/process-run-access.test.ts`: 1 new, fails. Its prisma mock gained `user.findUnique`.
+- `src/app/api/users/[id]/agent-reports/route.test.ts` (new, 4). The route is new, so the suite cannot load on the old code.
+- `src/lib/people/handover.server.test.ts`: 7 new, 6 fail. They cover `moveAgentReports` and its preview, the lock, and the walk past an Agent; the walk past a deactivated manager belongs to 5b. The seventh pins that a walk past an Agent never lands on a removed person. The batch 2 tests still pass; the mocks now answer both handovers.
+- `src/lib/access/agent-manager-reads.contract.test.ts` (new): 12 of 12 fail. It holds each reader and each write to its wiring.
+
+## 4. Doc export refuses a real Guest
+
+**What was true (confirmed).** The route refused a Guest with `orgRoleOf({ accessLevel: ctx.accessLevel }) === "GUEST"`. A Guest is the stored `User.orgRole`, read with ACCESS_V2_TABLES on (`effectiveOrgRole`), and a Guest's level is EMPLOYEE, so the check never fired. The test set a "GUEST" level no row can hold. No other batch 2 change refused a Guest that way: the canvas, table and List controls read `useViewer().orgRole`, the engine's own answer.
+
+**What changed.** `src/app/api/docs/[id]/export/route.ts` decides both refusals from the engine's viewer (`viewerFromSession`), the one the menu's `useViewer` reads. It also keeps the level check for an Agent.
+
+**Tests.** `src/app/api/docs/[id]/export/route.test.ts` is rewritten to run the real `viewer.ts` hydrate. A Guest is modelled as the database holds one: level EMPLOYEE, stored orgRole GUEST, ACCESS_V2_TABLES on. 1 of 5 fails on the old code, the Guest test. The others pin the Member's download, the Agent's 403, the 404, and that with the flag off the same row is a Member, as everywhere else.
+
+## 5. Lows
+
+- **5a. Accepting an invitation.** `managerOnAccept` passes `live`, so a manager deactivated since the invitation went out is never written. The new person joins with no manager, as the batch 2 decision says. It reads inside the acceptance's transaction, under the role lock (5c).
+  - Test: `src/lib/people/send-invitation.server.test.ts`, 1 new, fails on the old code.
+- **5b. The handover walks up to someone who can manage.** `planReportHandover` takes the line's facts (`people`) and sends the reports to `liveManagerFrom(leaver's manager)`: the first person up the line who is live and no Agent, else no manager. Before, that was the leaver's own manager with no liveness check. `runHandover` and the transfer dialog's preview read the facts from `lineMapFor`.
+  - Tests: the handover and `reporting-lines` tests above.
+- **5c. Rule 6's races.** Every write of a reporting line now takes `lockOrgRoles`, the lock rule 6 counts under, and checks the manager again inside it. A change to Agent then either waits for the write and counts the new report, or lands first and is seen. The writes:
+  - PATCH `/api/users/[id]` with a new Reports to
+  - the bulk change of manager
+  - the dotted-lines PUT
+  - `POST /api/users`
+  - the acceptance
+  - the handover (now one interactive transaction, with the plan read under the lock)
+  - the Agent move
+  - the restore.
+
+  Where seats are locked too, the role lock comes first, PATCH's order.
+  - Tests that fail on the old code: 1 each in `dotted-lines/route.test.ts`, `users/route.test.ts` and `users/[id]/route.test.ts` (PATCH), plus the restore and handover lock tests and the contract test.
+- **5d. TransferDialog.** When the reports plan cannot be read, Confirm stays held and the dialog says "Couldn't check where their direct reports go, so this waits until it can." with Retry.
+  - `ConfirmDialog` gained `confirmDisabled`, which holds the confirm button and Enter but not Cancel. `busy` disables Cancel too, which would trap someone in a failed dialog.
+  - Test: `agent-tier.contract.test.ts` holds the wiring. Its three batch 2 assertions on the old wiring (the plan key, the acceptance and the export marker) were updated, and fail on the old code.
+
+## Verification
+
+- `npx vitest run` over every test in the touched folders, every test that imports or mocks a changed module, and every test that reads a changed file's source: 346 files, 4551 tests, all pass.
+- **Old-code proof.** In a scratch copy of the tree, I put the 49 changed source files back from de954765 and removed the 2 new modules, then ran the 19 new or edited test files:
+  - 53 of 162 tests fail in the 17 suites that load.
+  - `manager-lines.test.ts` and `agent-reports/route.test.ts` cannot load (new modules).
+  - Every test that passes on both pins behaviour that did not change, and says so above.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`: exit 0.
+- **eslint** on the 70 changed or new files: 2 errors and 1 warning, the same counts as at HEAD (checked by linting each file's HEAD content).
+  - The 2 errors are the G7 `accessLevel` read at line 261 of `src/app/api/calendar/events/route.ts`, already there.
+  - The warning is the breadcrumb rule on `src/app/(dashboard)/reviews/[id]/page.tsx`.
+
+## Found, not fixed
+
+- **The Monday overdue digest.** `send-reminders` (the other builder's file) picks each assignee's stored `manager`, so it can go to an Agent. It should read `effectiveManagersOf`.
+- **Canvases, tables and files moved into a Space while it is deleted.** They name the Space with no key, so the Space lock does not hold them back. One that arrives mid-delete stays live, pointing at the removed Space. Their moves and creates need a key-share read of the Space.
+- **Displays of the stored line.** The person page's Reports to and Direct reports, the org chart, the Members manager column, `my-team`'s direct set and `team-alignment`'s direct label still show the stored line. They grant nothing.
+- **No way to find them from the list.** The Members page has no filter for Agents with stored reports; the drawer shows them one at a time.
+- **A purchase order's stored approver** who is an Agent can still read that one PO (`canSee`). Deciding needs the manager tier, which an Agent never has.
+- **`sendInvitation`** accepts a deactivated manager at invite time; the acceptance drops them.
+- **The report tree's depth cap of 6** counts an Agent in the middle of a chain as a level.
+- **`weekly-review.ts` `getReviewForViewer`** has no caller. It was made Agent-safe anyway.

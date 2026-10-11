@@ -41,6 +41,7 @@ import {
 import { loadConversationRole, talkGateForUser, type TalkGate } from "@/lib/talk-gate";
 import { canPost } from "@/lib/talk-access";
 import { afterMessageSent, insertConversationMessage } from "@/lib/talk-post";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import {
   MANUAL_COOLDOWN_MS,
   MAX_FACT_TASKS,
@@ -226,7 +227,8 @@ export async function sharedFacts(args: {
     id: true, title: true, status: true, boardId: true, organizationId: true, ownerId: true,
     assigneeIds: true, parentItemId: true, dueAt: true, updatedAt: true,
   } as const;
-  const base = { organizationId: args.organizationId, archivedAt: null, parentItemId: null };
+  // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+  const base = { organizationId: args.organizationId, archivedAt: null, parentItemId: null, ...NOT_SYSTEM_ITEMS };
   const statusesOf = new Map(lists.map((l) => [l.id, getBoardStatuses(l)] as const));
   // Open work only, List by List (each List names its own done statuses; a
   // task with no status is open), so finished history never crowds it out.

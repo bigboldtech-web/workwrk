@@ -58,6 +58,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { managesNobody } from "@/lib/access/manager-lines";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/calendar-event";
@@ -176,11 +177,14 @@ export async function GET(req: Request) {
   // indirect report always implies a direct one.
   let hasTeam = false;
   {
-    const [direct, dotted] = await Promise.all([
+    // An Agent is nobody's manager, whatever lines still name them
+    // (src/lib/access/manager-lines.ts): no Team view, as the tree says.
+    const [agent, direct, dotted] = await Promise.all([
+      managesNobody(viewerId),
       prisma.user.findFirst({ where: { managerId: viewerId, organizationId: orgId }, select: { id: true } }),
       prisma.userDottedLine.findFirst({ where: { managerId: viewerId }, select: { userId: true } }),
     ]);
-    hasTeam = Boolean(direct || dotted);
+    hasTeam = !agent && Boolean(direct || dotted);
   }
   if (wantTeam) {
     const tree = await getEffectiveReportTree(viewerId);

@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
-  people: {} as Record<string, { organizationId: string; level: string; deletedAt: Date | null }>,
+  people: {} as Record<string, { organizationId: string; level: string; deletedAt: Date | null; status?: string }>,
   invitationsMade: 0,
 }));
 
@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findFirst: async (a: { where: { id: string; organizationId: string; deletedAt: null } }) => {
         const p = st.people[a.where.id];
-        return p && p.organizationId === a.where.organizationId && p.deletedAt === null ? legacyLevelRow(p.level) : null;
+        return p && p.organizationId === a.where.organizationId && p.deletedAt === null ? { ...legacyLevelRow(p.level), status: p.status ?? "ACTIVE" } : null;
       },
     },
     invitation: { findFirst: async () => null, create: async () => { st.invitationsMade += 1; return {}; } },
@@ -75,5 +75,12 @@ describe("managerOnAccept", () => {
     st.people.mona.deletedAt = new Date();
     expect(await managerOnAccept({ organizationId: "org", managerId: "mona" })).toBeNull();
     expect(await managerOnAccept({ organizationId: "org", managerId: null })).toBeNull();
+  });
+
+  it("never writes a manager deactivated since the invitation went out (batch 3: live means not deactivated either)", async () => {
+    st.people.mona.status = "INACTIVE";
+    expect(await managerOnAccept({ organizationId: "org", managerId: "mona" })).toBeNull();
+    st.people.mona.status = "ON_LEAVE";
+    expect(await managerOnAccept({ organizationId: "org", managerId: "mona" })).toBe("mona");
   });
 });

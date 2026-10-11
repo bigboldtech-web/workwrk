@@ -21,6 +21,7 @@ import { countAwaitingKpiNumbers } from "@/lib/kpi-review.server";
 import { countChainReviewsAwaiting, countReviewsAwaitingManager } from "@/lib/weekly-review";
 import { getUserTagIds } from "@/lib/user-tags";
 import { inSurveyAudience, surveyOpenNow } from "./survey-audience";
+import { managesNobody } from "@/lib/access/manager-lines";
 
 export interface TeamsViewerFacts {
   /** Reports, solid or dotted: the same rule as the access engine's viewer. */
@@ -74,7 +75,9 @@ export { currentKpiPeriod };
 
 export async function hasReportsFor(userId: string): Promise<boolean> {
   // The engine's viewer (src/lib/access/viewer.ts reportTreeFor) counts the
-  // solid tree plus direct dotted reports; one of each is enough here.
+  // solid tree plus direct dotted reports; one of each is enough here. An
+  // Agent has none, whatever lines still name them (manager-lines.ts).
+  if (await managesNobody(userId)) return false;
   const [solid, dotted] = await Promise.all([
     prisma.user.count({ where: { managerId: userId, deletedAt: null } }),
     prisma.userDottedLine.count({ where: { managerId: userId } }),

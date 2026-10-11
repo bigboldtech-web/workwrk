@@ -9,6 +9,7 @@
 // Server-only (prisma).
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
 
 export interface InviteRow {
@@ -69,13 +70,18 @@ export async function invitePlacement(inv: Pick<InviteRow, "organizationId" | "d
  * The manager an accepted invitation writes: the one it names, while they are
  * still a live person in the workspace who may manage. Never an Agent (access
  * 2.4): the invitation may predate their move to the Agent tier, or have come
- * from a path that did not check (sendInvitation checks now). Otherwise none,
- * so the new person joins with no manager rather than under an Agent, and an
+ * from a path that did not check (sendInvitation checks now). Never someone
+ * removed or deactivated since (batch 3: "live" is both; a deactivated person
+ * holds no reports, invariant 13). Otherwise none, so the new person joins
+ * with no manager rather than under someone who cannot manage them, and an
  * Admin sets one in Members.
+ *
+ * `db` is the acceptance's own transaction, under the role lock, so a role
+ * change to Agent waits for it or is seen by it (rule 6's race).
  */
-export async function managerOnAccept(inv: Pick<InviteRow, "organizationId" | "managerId">): Promise<string | null> {
+export async function managerOnAccept(inv: Pick<InviteRow, "organizationId" | "managerId">, db?: Prisma.TransactionClient): Promise<string | null> {
   if (!inv.managerId) return null;
-  return (await managerCandidateIn(inv.organizationId, inv.managerId)) === "ok" ? inv.managerId : null;
+  return (await managerCandidateIn(inv.organizationId, inv.managerId, { db, live: true })) === "ok" ? inv.managerId : null;
 }
 
 /** A live account anywhere on the platform for this address (the person who can log in with it). */

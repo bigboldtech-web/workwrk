@@ -29,6 +29,7 @@ import { utcDayKey, dayStartInZone } from "@/lib/time-format";
 import { logAuditEvent } from "@/lib/activity";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 /**
  * The punching person's own IANA zone (home.locale.timezone), or null.
@@ -231,16 +232,14 @@ export async function POST(req: NextRequest) {
         where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
       });
       if (!timesheet) {
-        const me = await tx.user.findUnique({
-          where: { id: userId },
-          select: { managerId: true },
-        });
+        // The approver is their manager, never an Agent (manager-lines.ts).
+        const approverId = await effectiveManagerOf(orgId, userId, tx);
         timesheet = await tx.timesheet.create({
           data: {
             organizationId: orgId,
             userId,
             weekStartDate: weekStart,
-            approverId: me?.managerId ?? null,
+            approverId,
           },
         });
       }

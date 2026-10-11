@@ -19,6 +19,7 @@ import {
 } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
 import { logItemActivity } from "@/lib/activity/log";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 export async function GET(
   _req: NextRequest,
@@ -141,14 +142,11 @@ export async function PATCH(
   if (action === "submit") {
     if (!isOwner) return jsonError("Forbidden", 403);
     if (po.status !== "DRAFT") return jsonError(`Cannot submit a ${po.status} PO`, 409);
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { managerId: true },
-    });
+    // The requester's manager, never an Agent (manager-lines.ts).
     updateData = {
       status: "SUBMITTED",
       submittedAt: new Date(),
-      approverId: po.approverId ?? me?.managerId ?? null,
+      approverId: po.approverId ?? (await effectiveManagerOf(orgId, userId)),
     };
   } else if (action === "retract") {
     if (!isOwner) return jsonError("Forbidden", 403);

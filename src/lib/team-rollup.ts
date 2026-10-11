@@ -204,8 +204,13 @@ export async function getDirectorRollup(args: {
     select: { id: true, managerId: true },
   });
   const reportsBySubManager = new Map<string, string[]>();
+  const directSet = new Set(directIds);
   for (const r of directReportsOfDirects) {
     if (!r.managerId) continue;
+    // Someone listed under an Agent among the directs is a direct report
+    // here already (getAllDirectReports reads past an Agent, who manages
+    // nobody), so the Agent is no sub-team lead.
+    if (directSet.has(r.id)) continue;
     const arr = reportsBySubManager.get(r.managerId) ?? [];
     arr.push(r.id);
     reportsBySubManager.set(r.managerId, arr);

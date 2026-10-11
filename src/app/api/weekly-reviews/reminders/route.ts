@@ -16,6 +16,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { listWeeklyQueue, mayOpenQueue, weeklyQueueCtx } from "@/lib/people/weekly-queue.server";
 import { parseWeeklyQuery } from "@/lib/people/weekly-queue";
+import { effectiveManagersOf } from "@/lib/access/manager-lines";
 
 const QUIET_MS = 12 * 60 * 60 * 1000;
 
@@ -55,10 +56,9 @@ export async function POST(req: Request) {
 
   // Waiting: tell each manager (not the viewer) how many wait for them.
   const waiting = rows.filter((x) => x.status === "SUBMITTED");
-  const subjects = waiting.length
-    ? await prisma.user.findMany({ where: { id: { in: waiting.map((w) => w.userId) } }, select: { id: true, managerId: true } })
-    : [];
-  const managerOf = new Map(subjects.map((s) => [s.id, s.managerId] as const));
+  // The manager whose queue each one sits in: never an Agent, who is
+  // nobody's manager (src/lib/access/manager-lines.ts effectiveManagersOf).
+  const managerOf = waiting.length ? await effectiveManagersOf(ctx.organizationId, waiting.map((w) => w.userId)) : new Map<string, string | null>();
   const perManager = new Map<string, number>();
   for (const w of waiting) {
     const m = managerOf.get(w.userId);

@@ -37,7 +37,9 @@ export default async function ReviewCycleDetailPage({ params }: { params: Promis
   const [canManage, subjectRows, reviewerRows, peerRows, chain] = await Promise.all([
     canManageReviewCycle(null, cycle),
     prisma.review.count({ where: { cycleId: id, subjectId: viewer.userId } }),
-    prisma.review.count({ where: { cycleId: id, reviewerId: viewer.userId, subjectId: { not: viewer.userId } } }),
+    // An Agent's launch stamp names them reviewer of nobody (an Agent is
+    // nobody's manager; review-cycle.ts effectiveReviewerId).
+    viewer.isAgent ? Promise.resolve(0) : prisma.review.count({ where: { cycleId: id, reviewerId: viewer.userId, subjectId: { not: viewer.userId } } }),
     prisma.peerFeedback.count({ where: { giverId: viewer.userId, review: { cycleId: id } } }),
     chainOf(viewer.userId),
   ]);

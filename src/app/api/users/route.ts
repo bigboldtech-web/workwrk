@@ -18,6 +18,7 @@ import { directoryList } from "@/lib/people/directory-list.server";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
+import { lockOrgRoles } from "@/lib/access/membership";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -216,6 +217,15 @@ export async function POST(req: NextRequest) {
   // The person takes a seat (src/lib/seats.ts), checked and taken under the
   // workspace's lock so two adds at once cannot both take the last one.
   const placed = await prisma.$transaction(async (tx) => {
+    // Reports to is checked again under the workspace's role lock, so a role
+    // change making that manager an Agent waits for this add or is seen by
+    // it (rule 6's race). The role lock first, then the seats.
+    if (reportsTo !== null) {
+      await lockOrgRoles(tx, getOrgId(session));
+      const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx });
+      if (again === "agent_cannot_manage") return { agent: true } as const;
+      if (again !== "ok") return { gone: true } as const;
+    }
     await lockWorkspaceSeats(tx, getOrgId(session));
     const seats = await seatsFor(getOrgId(session), 1, tx);
     if (!seats.ok) return { refused: seats.message } as const;
@@ -239,6 +249,8 @@ export async function POST(req: NextRequest) {
     });
     return { user: row } as const;
   });
+  if ("agent" in placed) return NextResponse.json({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" }, { status: 400 });
+  if ("gone" in placed) return jsonError("That manager isn't in this workspace");
   if (placed.refused !== undefined) return NextResponse.json({ error: placed.refused, code: "seat_limit" }, { status: 403 });
   const user = placed.user;
 

@@ -3414,6 +3414,13 @@ model WebhookSubscription {
   // HMAC secret — generated at creation, shown once, hashed in storage.
   secretHash     String
   secretPrefix   String // First 8 chars for identification (shown in UI).
+  // The secret itself, sealed with SECRETS_ENCRYPTION_KEY (src/lib/connectors/
+  // seal.ts, so a key rotation moves it), and the key every delivery is signed
+  // with: the receiver verifies with the secret it was shown. Null on a
+  // subscription made before 2026-10-12, which keeps signing with secretHash,
+  // as it always did, until its secret is rotated (PATCH /api/webhooks).
+  // Additive: prisma/sql/2026-10-12-webhook-secret-sealed.sql.
+  secretSealed   Json?
   status         WebhookStatus     @default(ACTIVE)
   // Rolling failure counter — deliveries auto-pause after too many 5xx.
   failureCount   Int               @default(0)

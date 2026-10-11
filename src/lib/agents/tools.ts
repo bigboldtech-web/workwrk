@@ -44,6 +44,7 @@ import { persistGoalRollupChain } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /**
  * Set only when an AI teammate acts for the person
@@ -367,6 +368,8 @@ const searchTasks: ToolDefinition = {
         where: {
           organizationId: ctx.orgId,
           archivedAt: null,
+          // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+          ...NOT_SYSTEM_ITEMS,
           ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
           ...(input.assignedToMe
             ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }

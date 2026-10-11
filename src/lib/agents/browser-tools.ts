@@ -238,9 +238,13 @@ export { closedSentence };
  */
 type Moved = { error: string; held?: HeldCode; closed?: true; endReason?: string | null; forPerson?: string };
 
-/** The person holding the browser: the teammate's sentence, and at an approval held, in the person's own words too (last polish of Phase 4). */
+/**
+ * The person holding the browser: the teammate's sentence, and at an approval held, in the person's own words too (last polish of Phase 4).
+ * With no first name, "The person", as browserRefusalSentence says it (after the last polish): never " has the browser now".
+ */
 function personHasMoved(approval: boolean, first: string): Moved {
-  return approval ? { error: BROWSER_COPY.personHasIt(first), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt } : { error: BROWSER_COPY.personHasIt(first) };
+  const sentence = BROWSER_COPY.personHasIt(first || "The person");
+  return approval ? { error: sentence, held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt } : { error: sentence };
 }
 
 /**
@@ -268,6 +272,10 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
       // landed meanwhile says itself, never "it reached its time limit".
       const won = await s.sessionNow(rowId).catch(() => null);
       if (won && (won.status === "ending" || won.status === "ended")) return { error: closedSentence(won.endReason, won.reservedMinutes, may), closed: true, endReason: won.endReason ?? null };
+      // The swap itself failed and the row is still open (after the last
+      // polish of Phase 4): nothing closed it, so nothing says it closed, and
+      // an approval's card waits (Decision 14). The next call ends it.
+      if (won && won.status !== "ending" && won.status !== "ended") return a.approval ? { error: BROWSER_COPY.notReachedNow, held: "retry_later" } : { error: BROWSER_COPY.notReachedNow };
     }
     return { error: closedSentence("time_cap", now.reservedMinutes, may), closed: true, endReason: "time_cap" };
   }
@@ -631,6 +639,8 @@ function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["
         return refused(m.error, { held: "browser_busy" satisfies HeldCode, forPerson: m.forPerson });
       }
       if (use.reason === "busy") return refused(BROWSER_COPY.starting, { held: "retry_later" satisfies HeldCode });
+      // Not known to be closed (sessions.ts useBrowserSession): the card waits (Decision 14).
+      if (use.reason === "not_reached") return refused(BROWSER_COPY.notReachedNow, { held: "retry_later" satisfies HeldCode });
       const r = approvalRefusal(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes, endReason: use.endReason });
       return r.forPerson ? refused(r.error, { forPerson: r.forPerson }) : refused(r.error);
     }

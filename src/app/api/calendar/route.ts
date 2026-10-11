@@ -45,6 +45,7 @@ import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { weekStartUTC } from "@/lib/timesheet";
 import { addressHref } from "@/lib/nav/object-href";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 const MANAGER_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR",
@@ -171,6 +172,9 @@ export async function GET(req: Request) {
   const items = await prisma.item.findMany({
     where: {
       organizationId: c.organizationId, archivedAt: null, ownerId: { in: userIds },
+      // Tasks only: a meeting's Item would show the meeting twice, once as
+      // a task (src/lib/system-items.ts).
+      ...NOT_SYSTEM_ITEMS,
       OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }],
       ...(spaceFilter ? { board: { spaceId: spaceFilter } } : {}),
     },
@@ -273,7 +277,7 @@ export async function GET(req: Request) {
     const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const soon = new Date(now.getTime() + 7 * 86_400_000);
     const openItems = await prisma.item.findMany({
-      where: { organizationId: c.organizationId, archivedAt: null, ownerId: { in: userIds } },
+      where: { organizationId: c.organizationId, archivedAt: null, ownerId: { in: userIds }, ...NOT_SYSTEM_ITEMS },
       select: { id: true, title: true, ownerId: true, status: true, dueAt: true, updatedAt: true, boardId: true, board: { select: { slug: true, name: true } } },
       orderBy: { updatedAt: "desc" },
       take: 1200,

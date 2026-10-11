@@ -446,10 +446,14 @@ describe("last polish of Phase 4", () => {
   it("quotes the chat's line, never the browser card, for a browser that closed while it was starting (item 4)", () => {
     for (const r of HELD_END_REASONS) {
       // Before: "...and the browser card says why: ..." for a card never drawn.
-      expect(closedSentence(r, undefined, { noCard: true }), r).toBe(BROWSER_COPY.closedNoCard(words[r]));
-      expect(closedForAnswerSentence(r, { noCard: true }), r).toBe(BROWSER_COPY.closedForAnswerNoCard(words[r]));
-      expect(browserRefusalSentence("closed_in_answer", "Shopper", "Max", { endReason: r, noCard: true }), r).toBe(BROWSER_COPY.closedForAnswerNoCard(words[r]));
-      expect(browserRefusalSentence("ended", "Shopper", "Max", { endReason: r, noCard: true, mayOpen: false }), r).toBe(BROWSER_COPY.closedNoCard(words[r]));
+      // After the last polish: the plain "Closed." of a person who left or was deactivated is no reason, so it is not quoted.
+      const plain = words[r] === "Closed.";
+      const noCard = plain ? BROWSER_COPY.closedNoCardPlain : BROWSER_COPY.closedNoCard(words[r]);
+      const forAnswer = plain ? BROWSER_COPY.closedForAnswerNoCardPlain : BROWSER_COPY.closedForAnswerNoCard(words[r]);
+      expect(closedSentence(r, undefined, { noCard: true }), r).toBe(noCard);
+      expect(closedForAnswerSentence(r, { noCard: true }), r).toBe(forAnswer);
+      expect(browserRefusalSentence("closed_in_answer", "Shopper", "Max", { endReason: r, noCard: true }), r).toBe(forAnswer);
+      expect(browserRefusalSentence("ended", "Shopper", "Max", { endReason: r, noCard: true, mayOpen: false }), r).toBe(noCard);
       for (const said of [closedSentence(r, undefined, { noCard: true }), closedForAnswerSentence(r, { noCard: true })]) {
         expect(said, r).not.toContain("browser card");
         expect(DASH.test(said), r).toBe(false);
@@ -461,7 +465,23 @@ describe("last polish of Phase 4", () => {
     expect(closedSentence("start_failed", undefined, { noCard: true, mayOpen: false })).toBe(BROWSER_COPY.startFailedNoOther);
     expect(closedForAnswerSentence("start_failed", { noCard: true })).toBe(BROWSER_COPY.startFailedNoOther);
     expect(closedSentence(null, undefined, { noCard: true, mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
-    expect(closedForAnswerSentence(null, { noCard: true })).toBe(BROWSER_COPY.closedForAnswerNoCard(words.left));
+    expect(closedForAnswerSentence(null, { noCard: true })).toBe(BROWSER_COPY.closedForAnswerNoCardPlain);
+  });
+
+  it("never quotes a plain \"Closed.\" as the reason a browser closed while it was starting (after the last polish)", () => {
+    for (const r of ["left", "deactivated"] as const) {
+      expect(words[r]).toBe("Closed.");
+      for (const said of [closedSentence(r, undefined, { noCard: true }), closedForAnswerSentence(r, { noCard: true }), closedForAnswerSentence(r, { noCard: true, anyReason: true })]) {
+        expect(said, r).not.toContain('"Closed."');
+      }
+    }
+    // A reason with words keeps them.
+    expect(closedSentence("stopped", undefined, { noCard: true })).toBe(BROWSER_COPY.closedNoCard(words.stopped));
+  });
+
+  it("says a browser that couldn't be reached is not known to be closed (after the last polish)", () => {
+    expect(browserRefusalSentence("not_reached", "Shopper", "Max")).toBe(BROWSER_COPY.notReachedNow);
+    expect(approvalRefusal("not_reached", "Shopper", "Max")).toEqual({ error: BROWSER_COPY.notReachedNow });
   });
 
   it("says a sensitive field in the person's own words, and only that act (item 2)", () => {

@@ -8,10 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   orgWheres: [] as unknown[],
   itemWheres: [] as Array<Record<string, unknown>>,
-  items: new Map<string, Array<{ id: string; title: string; dueAt: Date; status: string | null; boardId: string; ownerId: string; board?: { folderId: string | null; spaceId: string | null } }>>(),
+  items: new Map<string, Array<{ id: string; title: string; dueAt: Date; status: string | null; boardId: string; ownerId: string | null; assigneeIds?: string[]; itemType?: string; board?: { folderId: string | null; spaceId: string | null } }>>(),
+  /** Extra Lists of o1, beside the two below (the hidden Meetings List, Lists in archived places). */
+  extraBoards: [] as Array<Record<string, unknown>>,
+  spaces: [] as Array<{ id: string; parentSpaceId: string | null; archivedAt: Date | null }>,
+  folders: [] as Array<{ id: string; parentFolderId: string | null; spaceId: string; archivedAt: Date | null }>,
+  /** The people the sweeps read, by id (u1 by default). */
+  people: {} as Record<string, { id: string; email: string; firstName: string; lastName: string; deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string }> }>,
   /** home.notifications.muted[] per person, for the per-object mute. */
   muted: {} as Record<string, string[]>,
-  notified: [] as Array<{ userId: string; type: string; link: string }>,
+  notified: [] as Array<{ userId: string; type: string; link: string; createdAt?: Date }>,
   sent: [] as Array<{ to: string; organizationId?: string; count?: number; rows: number; subject: string; html: string }>,
   manager: { id: "m1", email: "m1@example.test", firstName: "Mia", deletedAt: null as Date | null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] as Array<{ id: string }> },
 }));
@@ -30,9 +36,12 @@ vi.mock("@/lib/prisma", () => ({
           ? [
               { id: "b-default", statuses: null },
               { id: "b-custom", statuses: [{ value: "OPEN", label: "Open", color: "#000000", group: "ACTIVE" }, { value: "SHIPPED", label: "Shipped", color: "#000000", group: "DONE" }] },
+              ...db.extraBoards,
             ]
           : [],
     },
+    space: { findMany: async () => db.spaces },
+    folder: { findMany: async () => db.folders },
     item: {
       findMany: async ({ where }: { where: Record<string, unknown> }) => {
         db.itemWheres.push(where);
@@ -40,9 +49,10 @@ vi.mock("@/lib/prisma", () => ({
       },
     },
     user: {
-      findMany: async () => [
-        { id: "u1", email: "u1@example.test", firstName: "Uma", lastName: "One", manager: db.manager },
-      ],
+      // The live-person filter is the route's own, checked again on what
+      // comes back, so the mock hands back everyone it is asked for.
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.filter((id) => db.people[id]).map((id) => ({ ...db.people[id], manager: db.manager })),
     },
     userPreference: {
       findMany: async ({ where }: { where: { userId: { in: string[] } } }) =>
@@ -50,9 +60,11 @@ vi.mock("@/lib/prisma", () => ({
     },
     notification: {
       createMany: async ({ data }: { data: Array<{ userId: string; type: string; link: string }> }) => {
-        db.notified.push(...data);
+        db.notified.push(...data.map((d) => ({ ...d, createdAt: new Date() })));
         return { count: data.length };
       },
+      findMany: async ({ where }: { where: { userId: { in: string[] }; type: string; createdAt: { gte: Date } } }) =>
+        db.notified.filter((n) => where.userId.in.includes(n.userId) && n.type === where.type && (n.createdAt ?? new Date(0)) >= where.createdAt.gte),
     },
   },
 }));
@@ -81,6 +93,11 @@ beforeEach(() => {
   db.sent.length = 0;
   db.muted = {};
   db.notified.length = 0;
+  db.extraBoards = [];
+  db.spaces = [];
+  db.folders = [];
+  const person = (id: string, firstName: string) => ({ id, email: `${id}@example.test`, firstName, lastName: "One", deletedAt: null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] });
+  db.people = { u1: person("u1", "Uma"), u2: person("u2", "Ugo"), u3: person("u3", "Ula") };
   db.manager = { id: "m1", email: "m1@example.test", firstName: "Mia", deletedAt: null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] };
 });
 
@@ -162,5 +179,115 @@ describe("tasks due today", () => {
     db.muted = { u1: ["space:s1", "folder:f9"], u2: ["list:b-custom"] };
     await run("tasks-due-today");
     expect(db.notified.map((n) => n.link)).toEqual(["/item/elsewhere"]);
+  });
+});
+
+// Docs-found fixes batch 3 (src/lib/reminder-sweep.ts): the sweeps counted a
+// meeting's Item on the hidden Meetings List as a task, so a meeting's
+// creator got "Task Due Today" rows and their manager's Monday email listed
+// private meeting titles. They also counted tasks in archived places, told
+// only the first assignee, told people who were removed or deactivated, and
+// a second run the same day wrote every due-today row again.
+describe("which tasks the sweeps count, and who hears of them", () => {
+  const today = () => new Date();
+  const lastWeek = () => new Date(Date.now() - 7 * 86_400_000);
+  const task = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Title ${id}`, dueAt: today(), status: "TO_DO", boardId: "b-default", ownerId: "u1", board: { folderId: null, spaceId: null }, ...extra });
+
+  it("never counts a meeting's Item: due today stays quiet and the digest never names it", async () => {
+    db.extraBoards = [{ id: "b-meetings", statuses: null, settings: { system: true, hidden: true, source: "meetings" }, itemType: "meeting" }];
+    db.items.set("o1", [
+      task("meet-hidden", { title: "HR: concerns about my manager", boardId: "b-meetings", itemType: "meeting", status: null }),
+      task("meet-stray", { title: "1:1 with HR", itemType: "meeting", status: null }),
+      task("real", { itemType: "studio-item" }),
+    ]);
+    await run("tasks-due-today");
+    expect(db.notified.map((n) => n.link)).toEqual(["/item/real"]);
+    // The read leaves them out too, and the hidden List is in none of its groups.
+    expect(db.itemWheres[0].itemType).toEqual({ notIn: ["meeting"] });
+    const grouped = (db.itemWheres[0].OR as Array<{ boardId: { in: string[] } }>).flatMap((g) => g.boardId.in);
+    expect(grouped).not.toContain("b-meetings");
+
+    db.items.set("o1", [
+      task("meet-hidden", { title: "HR: concerns about my manager", boardId: "b-meetings", itemType: "meeting", status: null, dueAt: lastWeek() }),
+      task("meet-stray", { title: "1:1 with HR", itemType: "meeting", status: null, dueAt: lastWeek() }),
+      task("late", { title: "Late report", dueAt: lastWeek() }),
+    ]);
+    await run("overdue-tasks");
+    expect(db.sent).toHaveLength(1);
+    expect(db.sent[0]).toMatchObject({ count: 1, rows: 1 });
+    expect(db.sent[0].html).toContain("Late report");
+    expect(db.sent[0].html).not.toContain("HR");
+  });
+
+  it("leaves out tasks in an archived List's place: a Space, a Folder, or any one above them", async () => {
+    const gone = new Date("2026-09-01T00:00:00Z");
+    db.spaces = [
+      { id: "s-live", parentSpaceId: null, archivedAt: null },
+      { id: "s-archived", parentSpaceId: null, archivedAt: gone },
+      { id: "s-child", parentSpaceId: "s-archived", archivedAt: null },
+    ];
+    db.folders = [
+      { id: "f-live", parentFolderId: null, spaceId: "s-live", archivedAt: null },
+      { id: "f-archived", parentFolderId: null, spaceId: "s-live", archivedAt: gone },
+      { id: "f-child", parentFolderId: "f-archived", spaceId: "s-live", archivedAt: null },
+    ];
+    db.extraBoards = [
+      { id: "b-live", statuses: null, spaceId: "s-live", folderId: "f-live" },
+      { id: "b-in-archived-space", statuses: null, spaceId: "s-archived", folderId: null },
+      { id: "b-in-child-space", statuses: null, spaceId: "s-child", folderId: null },
+      { id: "b-in-archived-folder", statuses: null, spaceId: "s-live", folderId: "f-archived" },
+      { id: "b-in-child-folder", statuses: null, spaceId: "s-live", folderId: "f-child" },
+    ];
+    const ids = ["b-live", "b-in-archived-space", "b-in-child-space", "b-in-archived-folder", "b-in-child-folder"];
+    db.items.set("o1", ids.map((b) => task(b, { boardId: b })));
+    await run("tasks-due-today");
+    expect(db.notified.map((n) => n.link)).toEqual(["/item/b-live"]);
+
+    db.items.set("o1", ids.map((b) => task(b, { boardId: b, title: `Late ${b}`, dueAt: lastWeek() })));
+    await run("overdue-tasks");
+    expect(db.sent[0]).toMatchObject({ count: 1, rows: 1 });
+    expect(db.sent[0].html).toContain("Late b-live");
+  });
+
+  it("tells every assignee of a task due today, each once, and a task with no first assignee too", async () => {
+    db.items.set("o1", [
+      task("shared", { ownerId: "u1", assigneeIds: ["u1", "u2", "u3"] }),
+      task("no-owner", { ownerId: null, assigneeIds: ["u2"] }),
+    ]);
+    await run("tasks-due-today");
+    expect(db.notified.map((n) => `${n.userId} ${n.link}`).sort()).toEqual([
+      "u1 /item/shared", "u2 /item/no-owner", "u2 /item/shared", "u3 /item/shared",
+    ]);
+  });
+
+  it("tells no one who was removed, deactivated or is not in this workspace", async () => {
+    db.people.u2 = { ...db.people.u2, deletedAt: new Date() };
+    db.people.u3 = { ...db.people.u3, status: "INACTIVE" };
+    db.people.u4 = { ...db.people.u1, id: "u4", organizationId: "agency" };
+    db.people.u5 = { ...db.people.u1, id: "u5", organizationId: "agency", organizationMemberships: [{ id: "mem" }] };
+    db.items.set("o1", [task("t", { ownerId: "u1", assigneeIds: ["u1", "u2", "u3", "u4", "u5"] })]);
+    await run("tasks-due-today");
+    expect(db.notified.map((n) => n.userId).sort()).toEqual(["u1", "u5"]);
+  });
+
+  it("writes due today once a day per person and task, however many times it runs", async () => {
+    db.items.set("o1", [task("a"), task("b", { assigneeIds: ["u1", "u2"] })]);
+    await run("tasks-due-today");
+    expect(db.notified).toHaveLength(3);
+    await run("tasks-due-today");
+    expect(db.notified).toHaveLength(3);
+    // A row from an earlier day never stands in for today's.
+    for (const n of db.notified) n.createdAt = new Date(Date.now() - 2 * 86_400_000);
+    await run("tasks-due-today");
+    expect(db.notified).toHaveLength(6);
+  });
+
+  it("names every assignee in their manager's overdue digest", async () => {
+    db.items.set("o1", [task("late", { title: "Late together", dueAt: lastWeek(), ownerId: "u1", assigneeIds: ["u1", "u2"] })]);
+    await run("overdue-tasks");
+    expect(db.sent).toHaveLength(1);
+    expect(db.sent[0]).toMatchObject({ count: 2, rows: 2 });
+    expect(db.sent[0].html).toContain("Uma One");
+    expect(db.sent[0].html).toContain("Ugo One");
   });
 });

@@ -11,6 +11,8 @@ import { isDoneStatus, getBoardStatuses, type StatusOption } from "@/lib/board-i
 import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, taskPeople, type SweepPerson } from "@/lib/reminder-sweep";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -30,6 +32,14 @@ import type { Prisma } from "@/generated/prisma";
 // manager who is in that workspace (anchored there, or a member): a person's
 // manager is one field for every workspace they work in, and a client
 // workspace's task titles used to reach the manager in the agency.
+//
+// WHICH TASKS (src/lib/reminder-sweep.ts, docs-found fixes batch 3). Tasks
+// only: never a meeting's Item on the hidden Meetings List (a meeting's
+// creator got a "Task Due Today" row per meeting, and their manager's
+// Monday email listed every meeting they ever made, private titles
+// included). Only in a List people can still see: not archived, not under an
+// archived Space or Folder. Every assignee hears of a task, not only the
+// first, and only a live person in this workspace.
 const LIVE_ORG = { status: { in: ["TRIAL", "ACTIVE"] as Array<"TRIAL" | "ACTIVE"> } };
 const LIVE_PERSON = { deletedAt: null, status: { not: "INACTIVE" as const } };
 /** Rows read at a time. */
@@ -110,7 +120,18 @@ async function liveWorkspaceIds(): Promise<string[]> {
  * runs on what comes back, for statuses no List lists (the name heuristic).
  */
 async function openItemsOf(organizationId: string): Promise<{ statuses: Map<string, StatusOption[]>; where: Prisma.ItemWhereInput }> {
-  const boards = await prisma.board.findMany({ where: { organizationId }, select: { id: true, statuses: true } });
+  // The live Lists only (reminder-sweep.ts sweepBoards): the hidden Meetings
+  // List and every List in an archived place are left out of the read, as
+  // `statuses` is the set the rows are checked against afterwards.
+  const [allBoards, spaces, folders] = await Promise.all([
+    prisma.board.findMany({
+      where: { organizationId, archivedAt: null },
+      select: { id: true, statuses: true, archivedAt: true, spaceId: true, folderId: true, settings: true, itemType: true },
+    }),
+    prisma.space.findMany({ where: { organizationId }, select: { id: true, parentSpaceId: true, archivedAt: true } }),
+    prisma.folder.findMany({ where: { organizationId }, select: { id: true, parentFolderId: true, spaceId: true, archivedAt: true } }),
+  ]);
+  const boards = sweepBoards(allBoards, spaces, folders);
   const statuses = new Map(boards.map((b) => [b.id, getBoardStatuses(b)]));
   const groups = new Map<string, { boardIds: string[]; done: string[] }>();
   for (const b of boards) {
@@ -122,9 +143,24 @@ async function openItemsOf(organizationId: string): Promise<{ statuses: Map<stri
   }
   const where: Prisma.ItemWhereInput = {
     organizationId,
+    ...NOT_SYSTEM_ITEMS,
     OR: [...groups.values()].map((g) => ({ boardId: { in: g.boardIds }, OR: [{ status: null }, { status: { notIn: g.done } }] })),
   };
   return { statuses, where };
+}
+
+/** A row the read returned that is an open task on a live List (the read's own rules, checked again on what came back). */
+function openTask(open: { statuses: Map<string, StatusOption[]> }, r: { boardId: string; status: string | null; itemType?: string | null }): boolean {
+  const own = open.statuses.get(r.boardId);
+  return own !== undefined && isSweepTask(r) && !isDoneStatus(own, r.status);
+}
+
+/** The people a page of tasks names, live and in this workspace, with what a sweep needs of them. */
+function personSelect(organizationId: string) {
+  return {
+    id: true, email: true, firstName: true, lastName: true, deletedAt: true, status: true, organizationId: true,
+    organizationMemberships: { where: { organizationId }, select: { id: true } },
+  } as const;
 }
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
@@ -265,31 +301,35 @@ async function handle(req: NextRequest) {
       const digest = new Digests();
       await eachPage(
         ({ take, last }) => prisma.item.findMany({
-          where: { ...open.where, archivedAt: null, dueAt: { lt: now }, ownerId: { not: null }, AND: afterRow("dueAt", last) as Prisma.ItemWhereInput[] },
-          select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
+          where: { ...open.where, archivedAt: null, dueAt: { lt: now }, AND: [HAS_ASSIGNEE, ...afterRow("dueAt", last)] as Prisma.ItemWhereInput[] },
+          select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true, assigneeIds: true, itemType: true },
           orderBy: [{ dueAt: "asc" }, { id: "asc" }],
           take,
         }),
         async (overdueRows) => {
-          const overdueTasks = overdueRows.filter((r) => !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status));
+          const overdueTasks = overdueRows.filter((r) => openTask(open, r));
           if (overdueTasks.length === 0) return;
           tasks += overdueTasks.length;
-          // `Item.ownerId` is a plain column, not a relation, so the people
-          // are read in one batch per page rather than per row.
-          const overdueOwners = await prisma.user.findMany({
-            where: { id: { in: Array.from(new Set(overdueTasks.map((t) => t.ownerId!))) }, ...LIVE_PERSON },
-            select: { id: true, email: true, firstName: true, lastName: true, manager: managerSelect(organizationId) },
+          // `Item.ownerId` and `assigneeIds` are plain columns, not
+          // relations, so the people are read in one batch per page rather
+          // than per row. Every assignee's manager hears of the task, each
+          // line naming that assignee.
+          const people = await prisma.user.findMany({
+            where: { id: { in: [...new Set(overdueTasks.flatMap(taskPeople))] }, ...LIVE_PERSON },
+            select: { ...personSelect(organizationId), manager: managerSelect(organizationId) },
           });
-          const ownerById = new Map(overdueOwners.map((u) => [u.id, u]));
+          const personById = new Map(people.filter((u) => liveInWorkspace(u as SweepPerson, organizationId)).map((u) => [u.id, u]));
           for (const t of overdueTasks) {
-            const assignee = ownerById.get(t.ownerId!);
-            const mgr = assignee ? digestManager(assignee.manager as ManagerFacts | null, organizationId) : null;
-            if (!assignee || !mgr) continue;
-            digest.add(mgr, {
-              type: "Task", title: t.title,
-              personName: `${assignee.firstName} ${assignee.lastName}`,
-              daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
-            });
+            for (const id of taskPeople(t)) {
+              const assignee = personById.get(id);
+              const mgr = assignee ? digestManager(assignee.manager as ManagerFacts | null, organizationId) : null;
+              if (!assignee || !mgr) continue;
+              digest.add(mgr, {
+                type: "Task", title: t.title,
+                personName: `${assignee.firstName} ${assignee.lastName}`,
+                daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
+              });
+            }
           }
         },
       );
@@ -330,30 +370,56 @@ async function handle(req: NextRequest) {
       // row, a page at a time.
       await eachPage(
         ({ take, last }) => prisma.item.findMany({
-          where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
-          select: { id: true, title: true, status: true, boardId: true, ownerId: true, board: { select: { folderId: true, spaceId: true } } },
+          where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, AND: [HAS_ASSIGNEE] as Prisma.ItemWhereInput[], ...(last ? { id: { gt: last.id } } : {}) },
+          select: { id: true, title: true, status: true, boardId: true, ownerId: true, assigneeIds: true, itemType: true, board: { select: { folderId: true, spaceId: true } } },
           orderBy: { id: "asc" },
           take,
         }),
         async (dueRows) => {
-          const dueToday = dueRows.filter(
-            (r): r is typeof r & { ownerId: string } =>
-              Boolean(r.ownerId) && !isDoneStatus(open.statuses.get(r.boardId) ?? [], r.status),
-          );
+          const dueToday = dueRows.filter((r) => openTask(open, r));
           if (dueToday.length === 0) return;
           due += dueToday.length;
+          // One row per task and person: every assignee, live and in this
+          // workspace (a removed or deactivated person, or one who left
+          // this workspace, hears nothing).
+          const named = [...new Set(dueToday.flatMap(taskPeople))];
+          const people = await prisma.user.findMany({
+            where: { id: { in: named }, ...LIVE_PERSON },
+            select: { id: true, deletedAt: true, status: true, organizationId: true, organizationMemberships: { where: { organizationId }, select: { id: true } } },
+          });
+          const live = new Set(people.filter((u) => liveInWorkspace(u as SweepPerson, organizationId)).map((u) => u.id));
+          const pairs = dueToday.flatMap((t) => taskPeople(t).filter((id) => live.has(id)).map((userId) => ({ ...t, userId })));
+          if (pairs.length === 0) return;
           // Honor the "Due-date reminders" inbox toggle (batched, one query).
-          const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.ownerId), "due_reminders");
+          const wantsDue = await filterNotifyUsers([...new Set(pairs.map((t) => t.userId))], "due_reminders");
           // And the per-object mute every other task notification honours
           // (notify-item.ts emit): a person who muted the task's List, Folder
           // or Space hears nothing about its due date, as the Muted items
           // card on My settings > Notifications says.
-          const toNotify = await unmutedRows(
-            dueToday
-              .filter((t) => wantsDue.has(t.ownerId))
-              .map((t) => ({ ...t, userId: t.ownerId, placeKeys: placeMuteKeys({ boardId: t.boardId, folderId: t.board?.folderId, spaceId: t.board?.spaceId }) })),
+          const wanted = await unmutedRows(
+            pairs
+              .filter((t) => wantsDue.has(t.userId))
+              .map((t) => ({ ...t, placeKeys: placeMuteKeys({ boardId: t.boardId, folderId: t.board?.folderId, spaceId: t.board?.spaceId }) })),
             "due_reminders",
           );
+          // ONCE A DAY per person and task, as notifyItemsDueToday was: a
+          // second run the same day (a retried cron, a run by hand) writes
+          // nothing it already wrote. Read by person (Notification's index
+          // leads with userId), never by link, which has no index. A read
+          // that fails sends anyway: a duplicate beats a missed deadline.
+          const sent = new Set<string>();
+          if (wanted.length > 0) {
+            try {
+              const already = await prisma.notification.findMany({
+                where: { userId: { in: [...new Set(wanted.map((t) => t.userId))] }, type: "task_due_today", createdAt: { gte: startOfDay } },
+                select: { userId: true, link: true },
+              });
+              for (const a of already) sent.add(`${a.userId}|${a.link}`);
+            } catch {
+              /* fail open, as above */
+            }
+          }
+          const toNotify = wanted.filter((t) => !sent.has(`${t.userId}|/item/${t.id}`));
           if (toNotify.length > 0) {
             await prisma.notification.createMany({
               // The link names THE TASK, not a landing. It used to be the bare
@@ -361,7 +427,7 @@ async function handle(req: NextRequest) {
               // notification that named one task in its message dropped the
               // reader on Home with no way back to it.
               data: toNotify.map((t) => ({
-                userId: t.ownerId,
+                userId: t.userId,
                 type: "task_due_today",
                 title: "Task Due Today",
                 message: t.title,

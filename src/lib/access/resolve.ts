@@ -52,9 +52,14 @@ function isGuest(viewer: Viewer): boolean {
   return viewer.orgRole === "GUEST";
 }
 
-/** "Manager" is a fact about the org chart, never a rung (spec 2.2). */
+/**
+ * "Manager" is a fact about the org chart, never a rung (spec 2.2). An Agent
+ * is never anyone's manager (AGENT_TIER_BLURB), whatever lines stored before
+ * rule 6 still name them: the tree walkers already find nobody below one
+ * (src/lib/access/manager-lines.ts), and this says so for any tree a caller built.
+ */
 export function hasReports(viewer: Viewer): boolean {
-  return !!viewer.reportTree && viewer.reportTree.size > 0;
+  return !viewer.isAgent && !!viewer.reportTree && viewer.reportTree.size > 0;
 }
 
 function isPeopleTeam(facts: AccessFacts): boolean {

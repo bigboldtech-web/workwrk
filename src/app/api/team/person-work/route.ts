@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { readableBoardsFor } from "@/lib/people/team-boards.server";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 export async function GET(req: NextRequest) {
   const ctx = await peopleCtx();
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
     where: {
       organizationId: ctx.organizationId,
       archivedAt: null,
+      // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+      ...NOT_SYSTEM_ITEMS,
       boardId: { in: boards.ids },
       OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
     },

@@ -33,6 +33,7 @@ import { aggregateWork, parseTeamSort, sortTeam, weekStartLocal, NO_WORK, type W
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 import { toCsv } from "@/lib/people/people-csv";
+import { NOT_SYSTEM_ITEMS, SYSTEM_ITEM_TYPES } from "@/lib/system-items";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -116,6 +117,7 @@ export async function GET(req: NextRequest) {
             ) p
            WHERE i."organizationId" = ${orgId}
              AND i."archivedAt" IS NULL
+             AND i."itemType" NOT IN (${Prisma.join([...SYSTEM_ITEM_TYPES])})
              AND i."boardId" IN (${Prisma.join(boards.ids)})
              AND p.person IN (${Prisma.join(ids)})
            GROUP BY 1, 2, 3`
@@ -176,7 +178,7 @@ export async function GET(req: NextRequest) {
       ? Promise.all(pageIds.map((pid) => prisma.item.findMany({
           where: {
             AND: [
-              { organizationId: orgId, archivedAt: null, boardId: { in: boards.ids }, OR: [{ ownerId: pid }, { assigneeIds: { has: pid } }] },
+              { organizationId: orgId, archivedAt: null, ...NOT_SYSTEM_ITEMS, boardId: { in: boards.ids }, OR: [{ ownerId: pid }, { assigneeIds: { has: pid } }] },
               open,
             ],
           },

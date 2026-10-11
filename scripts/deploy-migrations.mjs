@@ -343,6 +343,13 @@ const SQL_MANIFEST = [
   // 2026-10-11) for a moment, once: every audited write waits for it. Safe
   // before or after the reload.
   "2026-10-11-ai-teammates-phase4-activity-indexes.sql",
+  // Docs-found fixes batch 3: "WebhookSubscription"."secretSealed" JSONB,
+  // nullable, the subscription's secret sealed with SECRETS_ENCRYPTION_KEY so
+  // deliveries are signed with the secret the receiver was shown. Existing
+  // rows keep null and keep signing with "secretHash" until rotated.
+  // Catalogue-guarded, catalogue only, no backfill. Before the reload: the new
+  // build selects the column on every subscription read.
+  "2026-10-12-webhook-secret-sealed.sql",
 ];
 
 /**

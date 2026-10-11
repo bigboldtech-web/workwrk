@@ -1415,8 +1415,12 @@ export const BROWSER_COPY = {
    * ask in a new message. A start that failed in the browser itself says
    * startFailedNoOther.
    */
-  providerUnavailableNoOther: "The browser service didn't answer. This answer can't try again. If the person wants a browser, they can ask in a new message.",
-  providerBusyNoOther: (s: number) => `The browser service is busy. This answer can't try again. If the person wants a browser, they can ask in a new message after ${count(s, "second", "seconds")}.`,
+  // After the last polish of Phase 4: "This answer can't try again" was
+  // untrue for a continue of that answer, which starts with its own counters
+  // and may still start one. These say only what holds for both: no browser
+  // started, and not right away.
+  providerUnavailableNoOther: "The browser service didn't answer, so no browser started, and it can't be tried again right away. If the person wants a browser, they can ask in a new message.",
+  providerBusyNoOther: (s: number) => `The browser service is busy, so no browser started, and it can't be tried again right away. If the person wants a browser, they can ask in a new message after ${count(s, "second", "seconds")}.`,
   /**
    * A browser that went no further than starting (last polish of Phase 4:
    * its chat has no browser_started line for it, so no browser card was
@@ -1430,6 +1434,14 @@ export const BROWSER_COPY = {
   closedNoCard: (why: string) => `The browser closed while it was starting, and the chat says why: "${why}"`,
   closedForAnswerNoCard: (why: string) =>
     `The browser closed in this answer while it was starting, and the chat says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`,
+  /**
+   * closedNoCard and closedForAnswerNoCard when the end's line says no
+   * reason (after the last polish of Phase 4): the plain "Closed." of a
+   * person who left or was deactivated is not quoted as one.
+   */
+  closedNoCardPlain: "The browser closed while it was starting.",
+  closedForAnswerNoCardPlain:
+    "The browser closed in this answer while it was starting. A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.",
   /**
    * A browser this process doesn't hold whose end could not be written, or
    * whose row could not be read (last polish of Phase 4, browser-tools.ts
@@ -1656,6 +1668,8 @@ export const BROWSER_ROUTE_ERRORS = {
   notHandedOver: "You don't have the browser now.",
   cardDecided: "That request was already decided.",
   busy: "The browser is busy with a step. Try again in a moment.",
+  /** Take over when the browser's row could not be read after an end lost (after the last polish of Phase 4): not known to be closed. */
+  notReached: "Couldn't reach the browser just now. Try again in a moment.",
   notInWorkspaceList: (s: string) => `${s} isn't one of the sites the workspace allows.`,
   blocked: (s: string) => `${s} is blocked in this workspace.`,
   notConfigured: "The computer for AI teammates isn't set up on this WorkwrK.",

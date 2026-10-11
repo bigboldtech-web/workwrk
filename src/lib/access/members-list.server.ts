@@ -16,6 +16,7 @@ import type { Prisma } from "@/generated/prisma";
 import { ownerIdsOf } from "@/lib/admin/companies-list";
 import { memberRoleOf, tierLabel, type MemberRole } from "./membership";
 import { parseAccessSettings } from "./settings";
+import { agentsWithStoredReports } from "./manager-lines";
 
 export const MEMBER_SORTS = ["name_asc", "name_desc", "role", "department", "title", "status", "joined"] as const;
 export type MemberSort = (typeof MEMBER_SORTS)[number];
@@ -55,6 +56,12 @@ export interface MemberRow {
   weeklyCapacityHours: number | null;
   /** Admin scopes an Owner gave (billing, security); empty for everyone else. */
   adminScopes: string[];
+  /**
+   * For an Agent who still has people listed under them (stored before rule
+   * 6): how many, by kind. The lines give the Agent nothing (manager-lines.ts);
+   * the drawer says so and offers to move them. Null for everyone else.
+   */
+  agentReports: { solid: number; dotted: number } | null;
 }
 
 /** The People team: the configured list, else everyone at HR (access step 0). */
@@ -145,6 +152,7 @@ export async function listMembers(
     ? await prisma.activityLog.groupBy({ by: ["actorId"], where: { organizationId, type: "login", actorId: { in: ids } }, _max: { createdAt: true } })
     : [];
   const lastLogin = new Map(logins.map((l) => [l.actorId, l._max.createdAt]));
+  const agentLines = await agentsWithStoredReports(organizationId, users.filter((u) => u.accessLevel === "AGENT").map((u) => u.id));
 
   const rows: MemberRow[] = users.map((u) => {
     const role = memberRoleOf(u.accessLevel, owners.has(u.id));
@@ -167,6 +175,7 @@ export async function listMembers(
       joinedAt: u.createdAt.toISOString(),
       weeklyCapacityHours: u.weeklyCapacityHours ?? null,
       adminScopes: role === "ADMIN" ? u.adminScopes ?? [] : [],
+      agentReports: agentLines.get(u.id) ?? null,
     };
   });
   return { rows, total, page, pageCount: Math.max(1, Math.ceil(total / limit)) };

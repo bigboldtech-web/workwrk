@@ -44,6 +44,7 @@ import { appBaseUrl } from "@/lib/auth/send-verification";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
+import { lockOrgRoles } from "@/lib/access/membership";
 
 export const dynamic = "force-dynamic";
 
@@ -326,11 +327,16 @@ export async function POST(req: NextRequest) {
     if (pwError) return fail("password", 400, pwError, { field: "password" });
 
     const passwordHash = await bcrypt.hash(password, 12);
-    // Never under an Agent, or someone since removed (invite-facts managerOnAccept).
-    const managerId = await managerOnAccept(inv);
 
     try {
       await prisma.$transaction(async (tx) => {
+        // Never under an Agent, or someone since removed or deactivated
+        // (invite-facts managerOnAccept), read under the workspace's role
+        // lock so a role change to Agent waits for this join or is seen by
+        // it (rule 6's race). The role lock first, then the seats, the
+        // order PATCH /api/users/[id] takes them in.
+        if (inv.managerId) await lockOrgRoles(tx, inv.organizationId);
+        const managerId = await managerOnAccept(inv, tx);
         await seatOrThrow(tx, inv.organizationId);
         if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
         const user = await tx.user.create({

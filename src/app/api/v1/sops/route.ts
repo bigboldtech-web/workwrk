@@ -1,6 +1,16 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
+import { SOPStatus, SOPType } from "@/generated/prisma";
+
+const STATUSES: readonly string[] = Object.values(SOPStatus);
+const TYPES: readonly string[] = Object.values(SOPType);
+
+/** One of `allowed`, in any case, or null when it is outside the list. */
+function listed(value: string, allowed: readonly string[]): string | null {
+  const up = value.trim().toUpperCase();
+  return allowed.includes(up) ? up : null;
+}
 
 /** GET /api/v1/sops — list published (and optionally drafts) SOPs. */
 export async function GET(req: NextRequest) {
@@ -13,11 +23,16 @@ export async function GET(req: NextRequest) {
   const category = url.searchParams.get("category");
   const sopType = url.searchParams.get("sopType"); // WRITTEN, RECORDED, CHECKLIST, etc.
 
-  const where: Record<string, unknown> = { organizationId: ctx.organizationId };
-  if (status) where.status = status;
-  else where.status = "PUBLISHED"; // default — API callers get the active catalogue
+  // A status or type outside the enum is the caller's mistake (400); it used
+  // to reach the read and fail there (500).
+  const statusValue = status ? listed(status, STATUSES) : "PUBLISHED"; // default: API callers get the active catalogue
+  if (!statusValue) return Response.json({ error: `status must be one of ${STATUSES.join(", ")}` }, { status: 400 });
+  const typeValue = sopType ? listed(sopType, TYPES) : null;
+  if (sopType && !typeValue) return Response.json({ error: `sopType must be one of ${TYPES.join(", ")}` }, { status: 400 });
+
+  const where: Record<string, unknown> = { organizationId: ctx.organizationId, status: statusValue };
   if (category) where.category = category;
-  if (sopType) where.sopType = sopType;
+  if (typeValue) where.sopType = typeValue;
 
   const rows = await prisma.sOP.findMany({
     where,

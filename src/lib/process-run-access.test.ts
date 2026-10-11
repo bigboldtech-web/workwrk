@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { legacyTestSession } from "@/lib/access/test-fixtures";
+import { legacyLevelRow, legacyTestSession } from "@/lib/access/test-fixtures";
 
 const team = vi.fn();
 const dotted = vi.fn();
 let manager = false;
+// Who holds the Agent tier on their own row (manager-lines.ts managesNobody).
+let agents = new Set<string>();
 vi.mock("@/lib/api-helpers", () => ({ isManager: () => manager }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: (...a: unknown[]) => team(...a) }));
-vi.mock("@/lib/prisma", () => ({ prisma: { userDottedLine: { findMany: (a: unknown) => dotted(a) } } }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    userDottedLine: { findMany: (a: unknown) => dotted(a) },
+    user: { findUnique: async (a: { where: { id: string } }) => legacyLevelRow(agents.has(a.where.id) ? "AGENT" : "EMPLOYEE") },
+  },
+}));
 
 import { canManageRun, mayGiveRunTo, runTeamIds } from "./process-run-access";
 
@@ -16,6 +23,14 @@ describe("canManageRun: who reads and changes a run", () => {
     dotted.mockReset();
     dotted.mockResolvedValue([]);
     manager = false;
+    agents = new Set();
+  });
+
+  it("gives an Agent nothing through a dotted line stored before rule 6 (an Agent is nobody's manager)", async () => {
+    agents = new Set(["lead"]);
+    team.mockResolvedValue(["lead"]);
+    dotted.mockResolvedValue([{ userId: "matrix" }]);
+    expect(await canManageRun(legacyTestSession("lead", "AGENT"), "org", "lead", "matrix")).toBe(false);
   });
 
   it("lets a lead below manager level manage a run of someone in their report tree", async () => {

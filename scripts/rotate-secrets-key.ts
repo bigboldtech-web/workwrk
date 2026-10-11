@@ -59,6 +59,8 @@
 //                                                the access token may be empty)
 //   TeammateOAuthState.verifierSealed            a connect in flight (gone in 10 minutes)
 //   TeammateTokenRevocation.tokenSealed          a revoke Google has not confirmed yet
+//   WebhookSubscription.secretSealed             a webhook's signing secret (may be
+//                                                empty on an older subscription)
 // The plan is worked out by scripts/lib/rotation-plan.ts planRotation, which
 // rotation-plan.test.ts holds to every column.
 

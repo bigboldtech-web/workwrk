@@ -39,6 +39,7 @@ import {
   legacyIsManagerLevel,
 } from "@/lib/access/legacy-levels";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { isAgentOf } from "@/lib/access/org-role";
 import { toLegacyPermission, type NodeDecision, type NodeRef, type NodeVia } from "@/lib/access/node-rules";
 import { loadRows, seedsOf } from "@/lib/access/node-world";
 import { nodeName } from "@/lib/access/node-tree";
@@ -278,7 +279,9 @@ async function resolveWeeklyReview(viewer: ViewerContext, reviewId: string): Pro
   if (review.userId === viewer.userId) {
     return { permission: "edit", reason: "your review" };
   }
-  if (review.managerId === viewer.userId) {
+  // Never an Agent, who is nobody's manager (AGENT_TIER_BLURB), even where a
+  // review was recorded to them before rule 6.
+  if (review.managerId === viewer.userId && !isAgentOf(viewer.accessLevel)) {
     return { permission: "edit", reason: "you are the recorded manager" };
   }
   if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };

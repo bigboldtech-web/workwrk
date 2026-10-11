@@ -49,3 +49,17 @@ export function isSystemItemType(itemType: string | null | undefined): boolean {
 export const NOT_SYSTEM_ITEMS: { itemType: { notIn: string[] } } = {
   itemType: { notIn: [...SYSTEM_ITEM_TYPES] },
 };
+
+/**
+ * Is this a List the product keeps for itself (the hidden Meetings List:
+ * `settings.system`, and the meeting item type, as
+ * scripts/backfill-meeting-items.mjs writes it)? A sweep that reads a
+ * workspace's Lists leaves it out, as it leaves the Items out above.
+ * Checked in code, not as a JSON filter: `NOT (settings->system = true)` is
+ * NULL in SQL for a List without that key, and would drop every real List.
+ */
+export function isSystemBoard(board: { settings?: unknown; itemType?: string | null }): boolean {
+  const s = board.settings;
+  if (s && typeof s === "object" && !Array.isArray(s) && (s as Record<string, unknown>).system === true) return true;
+  return isSystemItemType(board.itemType);
+}

@@ -6,7 +6,7 @@ import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people
 import { effectiveReviewerId } from "@/lib/performance/review-cycle";
 import { peerAggregate } from "@/lib/people/anonymity";
 import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
-import { cycleViewerCtx, orgScoring } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, orgScoring, reviewerFacts } from "@/lib/performance/review-cycle.server";
 import { cycleDeleteBlocked } from "@/lib/people/review-cycle-rules";
 
 export async function GET(
@@ -79,10 +79,13 @@ export async function GET(
   // anonymous giver stays anonymous (field names kept, values nulled).
   // A former manager's launch stamp grants nothing on an open review: the
   // reviewer is whoever the subject reports to now (review-cycle.ts).
-  const lensOf = (review: { subjectId: string; reviewerId: string; status: string; subject: { managerId: string | null } }) =>
+  // The subject's manager as an Agent-free line reads it, and no Agent's
+  // stamp: an Agent is nobody's manager (review-cycle.server.ts reviewerFacts).
+  const facts = await reviewerFacts(orgId, cycle.reviews);
+  const lensOf = (review: { subjectId: string; reviewerId: string; status: string }) =>
     reviewLens({
       callerId, hrAdmin, subjectId: review.subjectId,
-      reviewerId: effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: review.subject.managerId, cycleStatus: cycle.status, reviewStatus: review.status }),
+      reviewerId: effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: facts.managerOf.get(review.subjectId) ?? null, cycleStatus: cycle.status, reviewStatus: review.status, reviewerIsAgent: facts.agentReviewers.has(review.reviewerId) }) ?? "",
       inTree: treeSet.has(review.subjectId),
     });
   const reviews = cycle.reviews.map((review) => {

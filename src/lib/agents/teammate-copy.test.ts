@@ -305,7 +305,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
       ["You stopped it."],
       'The browser closed in this answer while it was starting, and the chat says why: "You stopped it." A teammate doesn\'t open another one in the same answer. If the person wants one, they can ask in a new message.',
     ],
-    providerBusyNoOther: [[30], "The browser service is busy. This answer can't try again. If the person wants a browser, they can ask in a new message after 30 seconds."],
+    // After the last polish of Phase 4: true for the answer and for a continue of it, which may still start one.
+    providerBusyNoOther: [[30], "The browser service is busy, so no browser started, and it can't be tried again right away. If the person wants a browser, they can ask in a new message after 30 seconds."],
     notAllowedSite: [["exfil.proof.test"], "exfil.proof.test isn't one of the sites this teammate may open."],
     blockedSite: [["blocked.proof.test"], "blocked.proof.test is blocked in this workspace."],
     sensitiveField: [["Max"], "That's a password, code or payment field. Ask Max to take over and type it themselves."],
@@ -353,9 +354,26 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
       expect(line).not.toMatch(/the person|open_page|close_browser|This answer|teammate/i);
     }
   });
+  it("says the lines after the last polish of Phase 4 word for word", () => {
+    // A continue of an answer whose start failed may still start one: never "This answer can't try again".
+    for (const line of [copy.BROWSER_COPY.providerUnavailableNoOther, copy.BROWSER_COPY.providerBusyNoOther(30)]) {
+      expect(line).not.toMatch(/This answer can't/);
+      expect(line).toMatch(/so no browser started, and it can't be tried again right away/);
+    }
+    // A person who left or was deactivated: their end's plain "Closed." is no reason, so it is not quoted.
+    expect(copy.BROWSER_COPY.closedNoCardPlain).toBe("The browser closed while it was starting.");
+    expect(copy.BROWSER_COPY.closedForAnswerNoCardPlain).toBe(
+      "The browser closed in this answer while it was starting. A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.",
+    );
+    expect(copy.BROWSER_ROUTE_ERRORS.notReached).toBe("Couldn't reach the browser just now. Try again in a moment.");
+    for (const line of [copy.BROWSER_COPY.closedNoCardPlain, copy.BROWSER_COPY.closedForAnswerNoCardPlain, copy.BROWSER_ROUTE_ERRORS.notReached]) {
+      expect(BANNED.test(line), line).toBe(false);
+      expect(line).not.toMatch(/"Closed\."|browser card/);
+    }
+  });
   it("says the last polish of Phase 4's lines word for word: the teammate's, which may speak of the person, and the person's own, which never do", () => {
     // The teammate's (BROWSER_COPY): never "Try again" after the answer's one start, never the card a browser that closed while starting never drew.
-    expect(copy.BROWSER_COPY.providerUnavailableNoOther).toBe("The browser service didn't answer. This answer can't try again. If the person wants a browser, they can ask in a new message.");
+    expect(copy.BROWSER_COPY.providerUnavailableNoOther).toBe("The browser service didn't answer, so no browser started, and it can't be tried again right away. If the person wants a browser, they can ask in a new message.");
     expect(copy.BROWSER_COPY.notReachedNow).toBe("The browser couldn't be reached just now. Try again in a moment.");
     for (const line of [copy.BROWSER_COPY.providerUnavailableNoOther, copy.BROWSER_COPY.providerBusyNoOther(30), copy.BROWSER_COPY.startFailedNoOther]) {
       expect(BANNED.test(line), line).toBe(false);

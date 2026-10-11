@@ -22,13 +22,29 @@ const st = vi.hoisted(() => ({
   erasedAt: null as Date | null,
   /** The target's deletedAt as the database holds it when the removal writes, when the route's read was stale (review round 9 of Phase 3). */
   dbDeletedAt: undefined as Date | null | undefined,
+  /** Other people, by id, as a manager lookup reads them (docs-found fixes batch 3). */
+  people: {} as Record<string, { organizationId: string; accessLevel: string; status: string; deletedAt: Date | null; firstName: string; lastName: string }>,
+  /** The target's dotted-line managers. */
+  dotted: [] as string[],
+  dottedDeleted: [] as string[][],
+  logs: [] as Array<{ type: string; description: string; oldValue?: unknown; newValue?: unknown }>,
+  locks: [] as string[],
 }));
 
 const TARGET = { id: "u-max", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
 
 vi.mock("@/lib/prisma", () => {
   const user = {
-    findFirst: async () => ({ ...st.target }),
+    // A manager lookup (managerCandidateIn) names someone in st.people, with
+    // its where checked; anything else reads the target.
+    findFirst: async (a: { where?: { id?: string; organizationId?: string; deletedAt?: null } } = {}) => {
+      const p = a.where?.id ? st.people[a.where.id] : undefined;
+      if (!p) return { ...st.target };
+      if (a.where?.organizationId && p.organizationId !== a.where.organizationId) return null;
+      if (a.where && "deletedAt" in a.where && p.deletedAt) return null;
+      return { id: a.where?.id, ...p };
+    },
+    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })),
     findUnique: async () => ({ ...st.target }),
     update: async (a: { data: Record<string, unknown> }) => {
       st.updates.push(a.data);
@@ -47,11 +63,15 @@ vi.mock("@/lib/prisma", () => {
     findFirst: async (a: { where: { userId: string; method: string; withdrawnAt: unknown } }) =>
       st.erasedAt && a.where.method === "erasure" && JSON.stringify(a.where.withdrawnAt) === JSON.stringify({ not: null }) ? { id: "c1", withdrawnAt: st.erasedAt } : null,
   };
-  return { prisma: { user, consentRecord, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user }) } };
+  const userDottedLine = {
+    findMany: async () => st.dotted.map((managerId) => ({ managerId })),
+    deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
+  };
+  return { prisma: { user, consentRecord, userDottedLine, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user, userDottedLine }) } };
 });
 vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: "u-admin" } }) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("@/lib/activity", () => ({ logActivity: async () => undefined }));
+vi.mock("@/lib/activity", () => ({ logActivity: async (row: { type: string; description: string }) => { st.logs.push(row); } }));
 vi.mock("@/lib/connectors/connections", () => ({ endConnectionsFor: st.endConnectionsFor }));
 vi.mock("@/lib/browser/sessions", () => ({ endBrowserSessionsFor: st.endBrowserSessionsFor }));
 vi.mock("@/lib/access/flags", () => ({ accessV2Resolver: () => false }));
@@ -59,11 +79,11 @@ vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () =
 vi.mock("@/lib/access/membership", () => ({
   applyRoleChange: vi.fn(),
   isLiveOwner: async () => false,
-  lockOrgRoles: async () => undefined,
+  lockOrgRoles: async () => { st.locks.push("roles"); },
   roleChangeSentence: () => "",
   wouldRemoveLastOwner: async () => false,
 }));
-vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => undefined, seatsFor: async () => ({ ok: true }) }));
+vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => { st.locks.push("seats"); }, seatsFor: async () => ({ ok: true }) }));
 vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => ({ userId: "u-admin", organizationId: "org1", isAdmin: true, managerTier: true, peopleTeam: false }),
   relationTo: () => "admin",
@@ -113,6 +133,11 @@ beforeEach(() => {
   st.target = { ...TARGET };
   st.erasedAt = null;
   st.dbDeletedAt = undefined;
+  st.people = {};
+  st.dotted = [];
+  st.dottedDeleted = [];
+  st.logs = [];
+  st.locks = [];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -328,5 +353,81 @@ describe("an erased account no longer in the state its erasure left it is an ord
     expect(res.status).toBe(200);
     expect(st.updates).toEqual([]);
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
+  });
+});
+
+// Docs-found fixes batch 3. Removal keeps a person's manager and dotted
+// lines, and while they were gone that manager may have moved to the Agent
+// tier (rule 6 never counted them: removed people are left out of
+// reportCountOf), been deactivated, or left. A restore used to write
+// { deletedAt: null, status: "ACTIVE" } and nothing else, so the person came
+// back under an Agent, who then read their people data and was their manager
+// reviewer. The restore now checks the lines again under the role lock,
+// clears what fails, and logs it.
+describe("a restore re-checks the person's reporting lines", () => {
+  const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+  const person = (level: string, extra: Partial<{ status: string; deletedAt: Date | null; organizationId: string }> = {}) => ({
+    organizationId: "org1", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra,
+  });
+  beforeEach(() => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "x" };
+  });
+
+  it("comes back with no manager when the manager has since become an Agent, and says so in the log", async () => {
+    st.people.x = person("AGENT");
+    const res = await restore();
+    expect(res.status).toBe(200);
+    expect(st.updates).toContainEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.logs).toContainEqual(expect.objectContaining({
+      type: "reporting_line_changed",
+      description: "Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager",
+      oldValue: { managerId: "x" },
+    }));
+    expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because Dana Ray is on the Agent tier, and an Agent can't be anyone's manager. Set who they report to in Members.");
+  });
+
+  it("also drops a manager who is deactivated or has left, and keeps one who may still manage them", async () => {
+    st.people.x = person("MANAGER", { status: "INACTIVE" });
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    st.people.x = person("MANAGER", { deletedAt: new Date("2026-05-01") });
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    st.people.x = person("MANAGER");
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE" });
+  });
+
+  it("takes off a dotted line to an Agent or a removed person, and keeps the rest", async () => {
+    st.people.x = person("MANAGER");
+    st.people.agent = person("AGENT");
+    st.people.left = person("MANAGER", { deletedAt: new Date("2026-05-01") });
+    st.people.keep = person("DIRECTOR", { status: "INACTIVE" });
+    st.dotted = ["agent", "left", "keep"];
+    await restore();
+    expect(st.dottedDeleted).toEqual([["agent", "left"]]);
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").map((l) => l.description)).toEqual([
+      "Restored Max Chen without their dotted line to Dana Ray: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager",
+      "Restored Max Chen without their dotted line to Dana Ray: Dana Ray is no longer in the workspace",
+    ]);
+  });
+
+  it("checks under the role lock, taken before the seats (rule 6's race)", async () => {
+    st.people.x = person("MANAGER");
+    await restore();
+    expect(st.locks).toEqual(["roles", "seats"]);
+  });
+});
+
+describe("a new Reports to is checked again under the role lock (rule 6's race)", () => {
+  it("refuses a manager who became an Agent after the first check, and writes nothing", async () => {
+    // checkManagerCandidate (mocked) answered "ok" before the lock; under it
+    // the manager reads as an Agent now.
+    st.people.x = { organizationId: "org1", ...legacyLevelRow("AGENT"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" };
+    const res = await patch({ managerId: "x" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("agent_cannot_manage");
+    expect(st.locks).toContain("roles");
+    expect(st.updates).toEqual([]);
   });
 });

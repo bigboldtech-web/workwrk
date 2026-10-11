@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
+import { effectiveDirectReportIds } from "@/lib/access/manager-lines";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -43,11 +44,10 @@ export async function GET(req: NextRequest) {
     if (managerId !== callerId && !isOrgWide) {
       return jsonError("You can only view your own team's assignments.", 403);
     }
-    const directReports = await prisma.user.findMany({
-      where: { managerId, organizationId: orgId },
-      select: { id: true },
-    });
-    const reportIds = directReports.map((r) => r.id);
+    // The people who report to them as an Agent-free line reads it: nobody
+    // for an Agent, and those listed under an Agent report count for the
+    // manager above (src/lib/access/manager-lines.ts).
+    const reportIds = await effectiveDirectReportIds(orgId, managerId);
 
     const assignments = await prisma.kRAAssignment.findMany({
       where: {

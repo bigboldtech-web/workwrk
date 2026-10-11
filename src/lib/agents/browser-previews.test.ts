@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
   ends: [] as unknown[][],
   /** The session as sessionNow reads it under the lock (review round 1 of Phase 4). */
   now: null as null | Row,
+  /** Whether an end this module asks for wins (after the last polish of Phase 4). */
+  endWins: true,
 }));
 
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
@@ -40,7 +42,7 @@ vi.mock("@/lib/browser/sessions", () => ({
   sessionNow: async () => h.now,
   endBrowserSession: async (...a: unknown[]) => {
     h.ends.push(a);
-    return true;
+    return h.endWins;
   },
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
@@ -118,6 +120,7 @@ beforeEach(async () => {
   h.shotId = "sh0123456789abcdef0123456789abcdef";
   h.shots = [];
   h.ends = [];
+  h.endWins = true;
   h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
@@ -436,5 +439,27 @@ describe("last polish of Phase 4", () => {
     // Before: { error: "Say what to type." } on the person's card.
     expect(out).toEqual({ error: BROWSER_COPY.emptyText, forPerson: "There's nothing to type, so nothing was done." });
     expect(BROWSER_PANEL_COPY.nothingToType).not.toMatch(/Say what/);
+  });
+});
+
+// After the last polish of Phase 4: a guard gone whose restarted end lost on
+// a row the person holds named nobody (" has the browser now"), and a card's
+// own session not known to be closed waits.
+describe("after the last polish of Phase 4", () => {
+  it("names the person when a guard gone finds the browser in their hands", async () => {
+    resetLiveRegistryForTests();
+    h.endWins = false;
+    h.now = { ...h.now, status: "handed_over" };
+    // Before: " has the browser now. Wait until they finish."
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.personHasIt("Max") });
+  });
+
+  it("holds a card whose browser couldn't be read, never fails it", async () => {
+    const input = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(el({})), role: "button", name: "Place order", shotId: null, shot: null };
+    h.use = { ok: false, reason: "not_reached" };
+    expect(await prepareBrowser("click", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.notReachedNow, held: "retry_later" });
+    // A turn's first preparation is told the same, with nothing held.
+    h.use = { ok: false, reason: "not_reached" };
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.notReachedNow });
   });
 });

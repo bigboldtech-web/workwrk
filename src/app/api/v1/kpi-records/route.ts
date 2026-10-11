@@ -1,88 +1,35 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
-import { triggerRecalculation } from "@/services/performanceScoreService";
-import { dispatchEvent } from "@/services/webhookDispatcher";
+import { recordIntegrationKpi } from "@/lib/kpi-integration.server";
 
 /**
- * POST /api/v1/kpi-records — log a KPI reading.
+ * POST /api/v1/kpi-records: log a KPI reading.
  *
  * This is the integration sweet-spot: connected tools (HubSpot, Razorpay,
- * Keka, etc.) POST here to push a KPI value into workwrk. Triggers
- * composite score recalc on the user and fans out a `kpi.recorded`
- * webhook to subscribers.
+ * Keka, etc.) POST here to push a KPI value into workwrk. A reading that
+ * changes something recomputes the person's composite score and fans out a
+ * `kpi.recorded` webhook to subscribers.
  *
  * Body: { kpiId, userId, period, actualValue, targetValue?, notes?, evidence? }
+ *
+ * The rule (src/lib/kpi-integration.ts, docs-found fixes batch 3): `period`
+ * is a month, "YYYY-MM", and not one that has not started (400 otherwise:
+ * goals read only month keys, and the published example used to be
+ * "2026-Q1"). One reading per KPI, person and month: a new one answers 201,
+ * the same number again 200 with nothing changed, a different number 200
+ * replacing it while the month is open (this month or last), and 409 with the
+ * reading's id for a closed month. A second reading used to answer a bare 500.
  */
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
   if (error || !ctx) return error!;
 
-  const body = (await req.json().catch(() => ({}))) as {
-    kpiId?: string;
-    userId?: string;
-    period?: string;
-    actualValue?: number;
-    targetValue?: number;
-    notes?: string;
-    evidence?: string;
-  };
-  if (!body.kpiId || !body.userId || !body.period || body.actualValue == null) {
-    return Response.json(
-      { error: "kpiId, userId, period, and actualValue are required" },
-      { status: 400 },
-    );
-  }
-
-  const kpi = await prisma.kPI.findFirst({
-    where: { id: body.kpiId, organizationId: ctx.organizationId },
-    select: { id: true, targetValue: true },
-  });
-  if (!kpi) return Response.json({ error: "KPI not found" }, { status: 404 });
-
-  const user = await prisma.user.findFirst({
-    where: { id: body.userId, organizationId: ctx.organizationId },
-    select: { id: true },
-  });
-  if (!user) return Response.json({ error: "User not in org" }, { status: 404 });
-
-  // KPI.targetValue is nullable on the model; caller may override.
-  const target = body.targetValue ?? kpi.targetValue ?? 0;
-  const score =
-    target > 0 ? Math.min(100, Math.round((body.actualValue / target) * 100)) : 0;
-
-  const record = await prisma.kPIRecord.create({
-    data: {
-      kpiId: body.kpiId,
-      userId: body.userId,
-      period: body.period,
-      targetValue: target,
-      actualValue: body.actualValue,
-      score,
-      notes: body.notes ?? null,
-      evidence: body.evidence ?? null,
-    },
-    select: {
-      id: true,
-      kpiId: true,
-      userId: true,
-      period: true,
-      targetValue: true,
-      actualValue: true,
-      score: true,
-      createdAt: true,
-    },
-  });
-
-  // Non-blocking fan-out.
-  triggerRecalculation(body.userId, ctx.organizationId);
-  dispatchEvent({
-    organizationId: ctx.organizationId,
-    event: "kpi.recorded",
-    payload: record,
-  }).catch(() => {});
-
-  return Response.json(record, { status: 201 });
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const answer = await recordIntegrationKpi(ctx.organizationId, body ?? {});
+  if ("record" in answer) return Response.json(answer.record, { status: answer.status });
+  if (answer.status === 409) return Response.json({ error: answer.error, code: answer.code, id: answer.id }, { status: 409 });
+  return Response.json({ error: answer.error }, { status: answer.status });
 }
 
 /**
