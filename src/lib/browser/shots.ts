@@ -42,7 +42,7 @@ export function isShotId(id: unknown): id is string {
 }
 
 function fileOf(dir: string, id: string): string {
-  return path.join(dir, `${id}.wks`);
+  return path.join(/*turbopackIgnore: true*/ dir, `${id}.wks`);
 }
 
 async function unlinkQuiet(file: string): Promise<boolean> {
@@ -182,7 +182,7 @@ export async function sweepShots(now: Date): Promise<{ expired: number; orphans:
     const m = FILE.exec(name);
     if (!m) continue;
     try {
-      const st = await fs.stat(path.join(dir, name));
+      const st = await fs.stat(path.join(/*turbopackIgnore: true*/ dir, name));
       if (now.getTime() - st.mtimeMs >= ORPHAN_AGE_MS) old.push({ id: m[1], name });
     } catch {
       /* gone meanwhile */
@@ -196,7 +196,7 @@ export async function sweepShots(now: Date): Promise<{ expired: number; orphans:
     for (const f of batch) {
       // A half-written file never has a row worth keeping it for.
       if (kept.has(f.id) && !f.name.endsWith(".tmp")) continue;
-      if (await unlinkQuiet(path.join(dir, f.name))) orphans += 1;
+      if (await unlinkQuiet(path.join(/*turbopackIgnore: true*/ dir, f.name))) orphans += 1;
     }
   }
   return { expired, orphans };

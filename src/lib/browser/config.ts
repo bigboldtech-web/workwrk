@@ -97,7 +97,7 @@ function tagFrom(env: NodeJS.ProcessEnv): string | null {
 
 /** Whether `inner` is `outer` or inside it, both resolved. */
 function within(inner: string, outer: string): boolean {
-  const rel = path.relative(outer, inner);
+  const rel = path.relative(/*turbopackIgnore: true*/ outer, inner);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
@@ -109,9 +109,12 @@ function within(inner: string, outer: string): boolean {
 export function shotsDirFrom(env: NodeJS.ProcessEnv = process.env): string | null {
   const raw = trimmed(env.BROWSER_SHOTS_DIR);
   if (!raw || !path.isAbsolute(raw)) return null;
-  const dir = path.resolve(raw);
+  const dir = path.resolve(/*turbopackIgnore: true*/ raw);
   if (dir === path.parse(dir).root) return null;
-  if (within(dir, path.resolve(process.cwd()))) return null;
+  // turbopackIgnore: a path from the environment and the working folder must
+  // not make the build trace the whole project, which fails on the server
+  // (as src/lib/local-uploads.ts; scripts/verify-commit.sh checks it).
+  if (within(dir, path.resolve(/*turbopackIgnore: true*/ process.cwd()))) return null;
   return dir;
 }
 
