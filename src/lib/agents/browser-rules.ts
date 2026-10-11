@@ -25,7 +25,7 @@
 
 import { BROWSER_TURN_LIMITS, CLICK_WARNINGS, type ClickWarning } from "@/lib/browser/classes";
 import type { SiteVerdict } from "@/lib/browser/sites";
-import { FIELD_KINDS, type ActOutcome, type ElementFingerprint, type NavOutcome, type StepKind } from "@/lib/browser/types";
+import { FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type ElementFingerprint, type NavOutcome, type StepKind } from "@/lib/browser/types";
 import { clampText } from "./clamp";
 import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
 import type { ActionPreview } from "./teammate-thread";
@@ -186,7 +186,9 @@ export function navSentence(o: Extract<NavOutcome, { ok: false }>): string {
 /**
  * Why an act did nothing, or may have done something (Decision 14): an
  * element not found again, a different count of twins, or covered, is a page
- * that changed; lost_before sent nothing; unknown_outcome may have run.
+ * that changed; lost_before sent nothing; unknown_outcome may have run, and
+ * so may an act after which the page tried a hop the guard refused (review
+ * of Phase 4 step 3: it read as refused, as if nothing had happened).
  */
 export function actSentence(o: Extract<ActOutcome, { ok: false }>, first: string): string {
   switch (o.code) {
@@ -205,7 +207,7 @@ export function actSentence(o: Extract<ActOutcome, { ok: false }>, first: string
     case "unknown_outcome":
       return BROWSER_COPY.unknownOutcome;
     case "blocked_hop":
-      return BROWSER_COPY.redirectRefused(o.host ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite);
+      return BROWSER_COPY.mayHaveGoneThrough(o.host ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite);
   }
 }
 
@@ -251,16 +253,27 @@ export function browserStored(result: unknown): { site: string | null; ok: boole
   return out;
 }
 
+/** How an act came out, as its audit row says it (review of Phase 4 step 3): ran, did nothing, or may have run. */
+export type BrowserActOutcome = "ok" | "failed" | "unknown";
+
+/** An act's outcome from its result: `unknown` when it may have gone through (result.unknownOutcome), `failed` for any other error. */
+export function browserActOutcome(result: unknown): BrowserActOutcome {
+  const r = rec(result);
+  if (r.unknownOutcome === true) return "unknown";
+  return typeof r.error === "string" ? "failed" : "ok";
+}
+
 /**
  * A browser step's audit facts (Decision 24): its site, its kind, its
- * session and the element's role. Never the element's words, typed text or
- * a page's address path.
+ * session, the element's role and how it came out (review of Phase 4 step
+ * 3: every act is audited, whatever its outcome). Never the element's words,
+ * typed text or a page's address path.
  */
 export function browserAuditFacts(
   tool: BrowserToolName,
   input: Record<string, unknown> | null,
   result: unknown,
-): { site: string | null; kind: StepKind; browserSessionId: string | null; element: string | null } {
+): { site: string | null; kind: StepKind; browserSessionId: string | null; element: string | null; outcome: BrowserActOutcome } {
   const i = input ?? {};
   const target = rec(i.target);
   const role = typeof target.role === "string" ? target.role : typeof i.role === "string" ? i.role : null;
@@ -270,6 +283,7 @@ export function browserAuditFacts(
     kind: BROWSER_STEP_KIND[tool],
     browserSessionId: session,
     element: role ? clampText(role, 40) : null,
+    outcome: browserActOutcome(result),
   };
 }
 
@@ -364,6 +378,12 @@ export interface BrowserCardInput {
   site: string;
   /** The page's address, fragment dropped (pageKey): an approval acts only on this page (Decision 14). */
   pageUrl: string;
+  /**
+   * The document the card was asked on (BrowserHandle.documentId, review of
+   * Phase 4 step 3): an approval acts only while the tab still shows it, so
+   * a cart changed under a waiting card, at the same address, runs nothing.
+   */
+  documentId?: string;
   /** Its Page line: site and path (pageWords). */
   page: string;
   /** The element's id from the model's read, and its fingerprint (acts only). */
@@ -379,7 +399,17 @@ export interface BrowserCardInput {
   shot: { width: number; height: number } | null;
   text?: string;
   pressEnter?: boolean;
+  /** The field held something when the card was asked: the typing replaces it, and the card says so (review of Phase 4 step 3). */
+  replaces?: boolean;
+  /** The option's words as the card shows them: made one line and plain, redacted, clipped. */
   option?: string;
+  /**
+   * The very option chosen (review of Phase 4 step 3): its label as the list
+   * has it and its index there. The step chooses by the index, only while
+   * the label there is unchanged.
+   */
+  optionLabel?: string;
+  optionIndex?: number;
   reason?: TakeOverReason;
 }
 
@@ -407,7 +437,11 @@ function storedFingerprint(v: unknown): ElementFingerprint | null {
   if (tag === null || role === null || name === null || type === undefined || formHost === undefined || href === undefined) return null;
   if (typeof f.kind !== "string" || !FIELD_KIND_SET.has(f.kind)) return null;
   if (!Number.isInteger(f.twin) || (f.twin as number) < 0) return null;
-  return { tag, role, name, kind: f.kind as ElementFingerprint["kind"], type, formHost, href, twin: f.twin as number };
+  // Which twin (review of Phase 4 step 3): how many there were, the anchor and the place, each required.
+  if (!Number.isInteger(f.twins) || (f.twins as number) < 1 || (f.twin as number) >= (f.twins as number)) return null;
+  const anchor = text(f.anchor, 16);
+  if (anchor === null || !Number.isInteger(f.at) || (f.at as number) < 0) return null;
+  return { tag, role, name, kind: f.kind as ElementFingerprint["kind"], type, formHost, href, twin: f.twin as number, twins: f.twins as number, anchor, at: f.at as number };
 }
 
 /**
@@ -428,10 +462,12 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
   const size = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 4000 ? Math.floor(v) : null);
   const width = size(shot.width);
   const height = size(shot.height);
+  const documentId = text(r.documentId, 80);
   const out: BrowserCardInput = {
     browserSessionId,
     site,
     pageUrl,
+    ...(documentId ? { documentId } : {}),
     page: text(r.page, 200) ?? "",
     shotId,
     shot: shotId && width && height ? { width, height } : null,
@@ -441,6 +477,8 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
     out.reason = r.reason;
     return out;
   }
+  // An act is bound to its document (review of Phase 4 step 3): none, no act.
+  if (!documentId) return null;
   const element = text(r.element, 8);
   const target = storedFingerprint(r.target);
   if (!element || !/^e\d{1,4}$/.test(element) || !target) return null;
@@ -455,11 +493,17 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
     if (t === null) return null;
     out.text = t;
     out.pressEnter = r.pressEnter === true;
+    out.replaces = r.replaces === true;
   }
   if (tool === "select_option") {
     const o = text(r.option, 200);
-    if (!o) return null;
+    // The very option, by its label and its index (review of Phase 4 step 3).
+    const label = text(r.optionLabel, OPTION_LABEL_MAX);
+    const index = r.optionIndex;
+    if (!o || label === null || !Number.isInteger(index) || (index as number) < 0 || (index as number) >= OPTIONS_MATCH_MAX) return null;
     out.option = o;
+    out.optionLabel = label;
+    out.optionIndex = index as number;
   }
   return out;
 }
@@ -519,7 +563,15 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
     return {
       title: quotedTitle(ACTION_VERB.type_text ?? "Type into", short(label)),
       body: i.text ?? "",
-      lines: [page, BROWSER_COPY.fieldLine(label), ...(i.pressEnter ? [BROWSER_COPY.pressEnterLine] : []), ...(i.inForm ? [BROWSER_COPY.submitsLine] : []), ...noPicture],
+      lines: [
+        page,
+        BROWSER_COPY.fieldLine(label),
+        // Review of Phase 4 step 3: typing replaces what a filled field holds.
+        ...(i.replaces ? [BROWSER_COPY.replacesLine] : []),
+        ...(i.pressEnter ? [BROWSER_COPY.pressEnterLine] : []),
+        ...(i.inForm ? [BROWSER_COPY.submitsLine] : []),
+        ...noPicture,
+      ],
       target: { label: i.site },
       ...shot,
       browser,

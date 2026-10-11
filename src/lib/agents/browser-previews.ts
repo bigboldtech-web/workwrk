@@ -19,7 +19,9 @@
 // AT ITS APPROVAL the stored input is kept: the person and the teammate are
 // read again, the computer's access, the card's own session (theirs, this
 // teammate's, live and in this process), the site of its page with the
-// lists as they are now, and an edited text cleaned again. The element
+// lists as they are now, and an edited text cleaned again. The document the
+// card was asked on, the element's twins and anchor (review of Phase 4 step
+// 3) are checked by the handler, under the lock. The element
 // itself is checked by the handler, under the browser's lock, on the page as
 // it is then. The person holding the browser leaves the card waiting
 // (browser_busy), as a browser still starting does (retry_later).
@@ -31,7 +33,7 @@
 
 import { computerAgentById } from "./browser-access";
 import { browserCard, browserRefusalSentence, isTakeOverReason, storedCardInput, type BrowserCardInput } from "./browser-rules";
-import { BROWSER_INPUT, badInput } from "./browser-tools";
+import { BROWSER_INPUT, badInput, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
 import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
@@ -102,8 +104,11 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   const row = use.row;
 
   const out = await withBrowserLock(row.id, PREPARE_LOCK_WAIT_MS, async (lb) => {
-    // This call's rules (carried from step 2): read fresh, obeyed by the guard from now on.
-    lb.rules = access.rules;
+    // This call's rules (carried from step 2): read fresh, obeyed by the guard
+    // from now on, never over newer ones a refresh installed (review of Phase
+    // 4 step 3, browser-tools.ts rulesForCall).
+    const ruled = await rulesForCall(lb, access, first);
+    if (!ruled.ok) return { error: ruled.error } as Refused;
     if (await waitingCardOf(row.id, row.chatSessionId)) return { error: BROWSER_COPY.oneStepWaits(first) } as Refused;
     if (await stepsUsedUp(row.id)) return { error: BROWSER_COPY.tooManySteps } as Refused;
     if (tool === "ask_to_take_over") {

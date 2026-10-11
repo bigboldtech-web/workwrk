@@ -12,7 +12,9 @@
 //   - the main frame's buttons, fields and lists, at most 120, each with an
 //     id e1, e2 and on in document order, its role, its name (clipped), its
 //     kind, whether a field holds something (never what), and a list's
-//     options (at most 30, clipped);
+//     options (at most 30, clipped), with how many more it has
+//     (`moreOptions`, and a note, review of Phase 4 step 3: select_option
+//     matches every option the list has, not only those shown);
 //   - absolute http(s) links, fragment dropped, each once, at most 80; a
 //     link longer than 500 characters is left out, never cut, since a cut
 //     address is one the page never showed.
@@ -103,6 +105,8 @@ export interface PageViewElement {
   filled?: true;
   disabled?: true;
   options?: string[];
+  /** How many more options the list has than `options` shows (review of Phase 4 step 3). */
+  moreOptions?: number;
 }
 
 export interface PageViewLink {
@@ -263,8 +267,21 @@ function elementFacts(e: RawElement, count: { hidden: number }): Omit<PageViewEl
   if (e.disabled === true) el.disabled = true;
   if (Array.isArray(e.options)) {
     el.options = e.options.slice(0, PAGE_LIMITS.options).map((opt) => clean(opt, PAGE_LIMITS.optionChars, count));
+    const total = Number.isInteger(e.optionCount) && (e.optionCount as number) > 0 ? (e.optionCount as number) : e.options.length;
+    if (total > el.options.length) el.moreOptions = total - el.options.length;
   }
   return el;
+}
+
+/**
+ * An option's words as the model reads them and a card shows them: made one
+ * line and plain, redacted, at most PAGE_LIMITS.optionChars (elementFacts'
+ * own cleaning). `hidden`: the redaction hid something in it.
+ */
+export function optionWords(label: string): { text: string; hidden: boolean } {
+  const count = { hidden: 0 };
+  const text = clean(label, PAGE_LIMITS.optionChars, count);
+  return { text, hidden: count.hidden > 0 };
 }
 
 /** A raw control's fingerprint (types.ts ElementFingerprint), field by field: what an act finds it again by (Decision 14). */
@@ -278,23 +295,37 @@ export function fingerprintOf(e: RawElement): ElementFingerprint {
     formHost: typeof e.formHost === "string" ? e.formHost : null,
     href: typeof e.href === "string" ? e.href : null,
     twin: Number.isInteger(e.twin) ? e.twin : 0,
+    // A count, an anchor or a place the reader did not give matches nothing (review of Phase 4 step 3).
+    twins: Number.isInteger(e.twins) ? e.twins : 0,
+    anchor: typeof e.anchor === "string" ? e.anchor : "",
+    at: Number.isInteger(e.at) ? e.at : -1,
   };
 }
 
-/** Whether two fingerprints name the same control: every field equal, its place among its twins too. */
+/** The fields twins share: everything but which twin it is (review of Phase 4 step 3). */
+function sameTwinKey(a: ElementFingerprint, b: ElementFingerprint): boolean {
+  return a.tag === b.tag && a.role === b.role && a.name === b.name && a.kind === b.kind && a.type === b.type && a.formHost === b.formHost && a.href === b.href;
+}
+
+/** Whether two fingerprints name the same control: every field equal, its twin, its twins' count, its anchor and its place too. */
 export function sameFingerprint(a: ElementFingerprint, b: ElementFingerprint): boolean {
-  return a.tag === b.tag && a.role === b.role && a.name === b.name && a.kind === b.kind && a.type === b.type && a.formHost === b.formHost && a.href === b.href && a.twin === b.twin;
+  return sameTwinKey(a, b) && a.twin === b.twin && a.twins === b.twins && a.anchor === b.anchor && a.at === b.at;
 }
 
 /**
  * The main frame's control with this fingerprint in a raw read, and its
  * facts as a card shows them (made plain and redacted, as a read shows
- * them), or null when the page no longer has it (browser-previews.ts).
+ * them); `changed` when the page has such a control but another count of
+ * twins, another anchor or another place (review of Phase 4 step 3: a twin
+ * inserted above, or its row's words changed); null when the page no longer
+ * has it (browser-previews.ts).
  */
-export function controlOf(raw: RawSnapshot, fp: ElementFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | null {
+export function controlOf(raw: RawSnapshot, fp: ElementFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | { changed: true } | null {
   const list = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
-  const hit = list.find((e) => sameFingerprint(fingerprintOf(e), fp));
-  return hit ? { raw: hit, facts: elementFacts(hit, { hidden: 0 }) } : null;
+  const twins = list.filter((e) => sameTwinKey(fingerprintOf(e), fp));
+  if (twins.length === 0) return null;
+  const hit = twins.length === fp.twins ? twins.find((e) => sameFingerprint(fingerprintOf(e), fp)) : undefined;
+  return hit ? { raw: hit, facts: elementFacts(hit, { hidden: 0 }) } : { changed: true };
 }
 
 /**
@@ -350,6 +381,7 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
     if (!elements[i].options) continue;
     totalOptionChars -= optionChars(elements[i]);
     delete elements[i].options;
+    delete elements[i].moreOptions;
     optionsLeftOut += 1;
   }
 
@@ -370,6 +402,8 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
     const notes = [o.note];
     if (beyond) notes.push(BROWSER_COPY.textBeyond(PAGE_LIMITS.parts));
     if (optionsLeftOut > 0) notes.push(BROWSER_COPY.optionsLeftOut(optionsLeftOut));
+    const more = elements.filter((el) => el.options && el.moreOptions).map((el) => ({ id: el.id, more: el.moreOptions as number }));
+    if (more.length > 0) notes.push(BROWSER_COPY.moreOptions(more));
     if (elements.length < mainFrame.length) notes.push(BROWSER_COPY.moreElements(elements.length));
     if (secretLinks > 0) notes.push(BROWSER_COPY.linksLeftOut(secretLinks));
     if (moreLinks) notes.push(BROWSER_COPY.moreLinks(links.length));
@@ -395,6 +429,7 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
     }
     if (withOptions >= 0) {
       delete elements[withOptions].options;
+      delete elements[withOptions].moreOptions;
       optionsLeftOut += 1;
     } else if (elements.length > ELEMENT_FLOOR) {
       let linkAt = -1;

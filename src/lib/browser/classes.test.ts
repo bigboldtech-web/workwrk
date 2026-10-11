@@ -12,7 +12,7 @@ import type { ElementFingerprint } from "./types";
 const field = (o: Partial<Parameters<typeof fieldKindOf>[0]> = {}) =>
   fieldKindOf({ tag: "input", type: "text", autocomplete: null, inputmode: null, name: null, id: null, label: null, maxLength: null, ...o });
 
-const el = (o: Partial<ElementFingerprint> = {}): ElementFingerprint => ({ tag: "button", role: "button", name: "Go", kind: "none", type: null, formHost: null, href: null, twin: 0, ...o });
+const el = (o: Partial<ElementFingerprint> = {}): ElementFingerprint => ({ tag: "button", role: "button", name: "Go", kind: "none", type: null, formHost: null, href: null, twin: 0, twins: 1, anchor: "", at: 0, ...o });
 
 const PAGE = { path: "/", formHasSensitive: false, downloadLink: false };
 

@@ -13,7 +13,7 @@ import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
 import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runStepOn, scrollOn, withNotes } from "./page-calls";
 import type { LiveBrowser } from "./live";
 import { fingerprintOf } from "./snapshot";
-import type { ActOutcome, BrowserHandle, ElementFingerprint, NavOutcome, RawElement, RawSnapshot } from "./types";
+import type { ActOutcome, BrowserHandle, ElementFingerprint, ListOption, NavOutcome, RawElement, RawSnapshot } from "./types";
 import type { BrowserCardInput } from "@/lib/agents/browser-rules";
 
 const RULES: SiteRules = {
@@ -33,6 +33,9 @@ const button = (o: Partial<RawElement> = {}): RawElement => ({
   formHost: "shop.proof.test",
   href: null,
   twin: 0,
+  twins: 1,
+  anchor: "b0b0b0b0",
+  at: 0,
   disabled: false,
   filled: false,
   inMainFrame: true,
@@ -53,12 +56,18 @@ const page = (o: Partial<RawSnapshot> = {}): RawSnapshot => ({
 
 interface Fake {
   handle: BrowserHandle;
-  calls: { navigate: string[]; click: ElementFingerprint[]; type: Array<[ElementFingerprint, string, boolean]>; select: Array<[ElementFingerprint, string]>; snapshot: number; blank: number; screenshot: unknown[]; scroll: number };
+  calls: { navigate: string[]; click: ElementFingerprint[]; type: Array<[ElementFingerprint, string, boolean]>; select: Array<[ElementFingerprint, { index: number; label: string }]>; snapshot: number; blank: number; screenshot: unknown[]; scroll: number; options: number };
   url: string;
   snap: RawSnapshot;
   nav: ((u: string) => NavOutcome) | null;
   act: ActOutcome | null;
   matches: Array<{ text: string; near: ElementFingerprint | null }>;
+  /** The tab's document (review of Phase 4 step 3). */
+  doc: string;
+  /** A list's every option, as the reader reads them for matching; else the snapshot element's own. */
+  listed: { options: ListOption[]; total: number } | null;
+  /** Run after the picture is taken: the page moving while a card is made. */
+  afterShot: (() => void) | null;
 }
 
 let fake: Fake;
@@ -71,7 +80,10 @@ function makeFake(url: string): Fake {
     nav: null,
     act: null,
     matches: [],
-    calls: { navigate: [], click: [], type: [], select: [], snapshot: 0, blank: 0, screenshot: [], scroll: 0 },
+    doc: "doc.1",
+    listed: null,
+    afterShot: null,
+    calls: { navigate: [], click: [], type: [], select: [], snapshot: 0, blank: 0, screenshot: [], scroll: 0, options: 0 },
     handle: null as unknown as BrowserHandle,
   };
   const actOut = (): ActOutcome => f.act ?? { ok: true, settled: true, url: f.url, site: siteOf(f.url) ?? "" };
@@ -93,7 +105,15 @@ function makeFake(url: string): Fake {
     },
     screenshot: async (o) => {
       f.calls.screenshot.push(o);
+      f.afterShot?.();
       return { jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 480, height: 320 };
+    },
+    options: async (t) => {
+      f.calls.options += 1;
+      if (f.listed) return { ok: true, ...f.listed };
+      const el = f.snap.elements.find((e) => e.name === t.name && e.tag === t.tag);
+      if (!el) return { ok: false, code: "not_found" };
+      return { ok: true, options: (el.options ?? []).map((label) => ({ label, disabled: false })), total: (el.options ?? []).length };
     },
     click: async (t) => {
       f.calls.click.push(t);
@@ -103,11 +123,12 @@ function makeFake(url: string): Fake {
       f.calls.type.push([t, text, enter]);
       return actOut();
     },
-    select: async (t, option) => {
-      f.calls.select.push([t, option]);
+    select: async (t, choice) => {
+      f.calls.select.push([t, choice]);
       return actOut();
     },
     currentUrl: () => f.url,
+    documentId: () => f.doc,
     blank: async () => {
       f.calls.blank += 1;
       f.url = "about:blank";
@@ -119,7 +140,7 @@ function makeFake(url: string): Fake {
 
 beforeEach(() => {
   fake = makeFake("http://shop.proof.test/checkout");
-  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle: fake.handle, rules: RULES, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
+  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle: fake.handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
 });
 
 describe("openOn", () => {
@@ -313,7 +334,7 @@ describe("prepareStepOn", () => {
     const typed = await prepareStepOn(lb, "type_text", { element: "e3", text: "max@proof.test\u0000", pressEnter: true }, "Max");
     expect(typed).toMatchObject({ ok: true, facts: { text: "max@proof.test", pressEnter: true, name: "Email" } });
     const chosen = await prepareStepOn(lb, "select_option", { element: "e6", option: "blue" }, "Max");
-    expect(chosen).toMatchObject({ ok: true, facts: { option: "Blue" } });
+    expect(chosen).toMatchObject({ ok: true, facts: { option: "Blue", optionLabel: "Blue", optionIndex: 1 } });
   });
 
   it("asks the person to take over only on a page the rules allow", () => {
@@ -328,6 +349,7 @@ describe("runStepOn (Decision 14)", () => {
     browserSessionId: "bs1",
     site: "shop.proof.test",
     pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
     page: "shop.proof.test/checkout",
     element: "e1",
     target: fingerprintOf(button()),
@@ -376,8 +398,157 @@ describe("runStepOn (Decision 14)", () => {
       fake.act = { ok: false, code };
       expect((await runStepOn(lb, "click", card(), "Max")).answer, code).toEqual({ error: said });
     }
+  });
+});
+
+// Review of Phase 4 step 3.
+describe("open_page goes only to the address that matched (review of Phase 4 step 3)", () => {
+  it("in a tainted turn opens a shown link without the fragment the model added", async () => {
+    lb.links.add("http://shop.proof.test/buy-now?item=giftcard&qty=50");
+    expect((await openOn(lb, "http://shop.proof.test/buy-now?item=giftcard&qty=50#secret=notes", { tainted: true })).answer).toMatchObject({ ok: true });
+    // Before: the raw address, fragment and all.
+    expect(fake.calls.navigate).toEqual(["http://shop.proof.test/buy-now?item=giftcard&qty=50"]);
+  });
+
+  it("in a tainted turn opens the page it is on again without the model's fragment", async () => {
+    fake.url = "http://shop.proof.test/checkout#pay";
+    expect((await openOn(lb, "http://shop.proof.test/checkout#d=the-persons-notes", { tainted: true })).answer).toMatchObject({ ok: true });
+    expect(fake.calls.navigate).toEqual(["http://shop.proof.test/checkout"]);
+  });
+
+  it("outside a taint opens the address as asked, as before", async () => {
+    await openOn(lb, "http://docs.proof.test/guide#intro", { tainted: false });
+    expect(fake.calls.navigate).toEqual(["http://docs.proof.test/guide#intro"]);
+  });
+});
+
+describe("a card is bound to its document (review of Phase 4 step 3)", () => {
+  beforeEach(async () => {
+    fake.snap = page({ elements: [button()] });
+    await readOn(lb, 1);
+  });
+
+  it("stores the document the card was asked on", async () => {
+    expect(await prepareStepOn(lb, "click", { element: "e1" }, "Max")).toMatchObject({ ok: true, facts: { documentId: "doc.1" } });
+    expect(prepareTakeOverOn(lb, "sign_in")).toMatchObject({ ok: true, facts: { documentId: "doc.1" } });
+  });
+
+  it("makes no card when the page moved while it was made", async () => {
+    fake.afterShot = () => {
+      fake.doc = "doc.2";
+    };
+    expect(await prepareStepOn(lb, "click", { element: "e1" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.staleElement });
+  });
+
+  it("does nothing when the tab shows another document at the card's address: a cart changed under a waiting card", async () => {
+    const asked = await prepareStepOn(lb, "click", { element: "e1" }, "Max");
+    if (!asked.ok) throw new Error(asked.error);
+    // The checkout reloaded with another cart in it, at the very same address.
+    fake.doc = "doc.7";
+    const input = { browserSessionId: "bs1", shotId: null, shot: null, ...asked.facts } as BrowserCardInput;
+    const out = await runStepOn(lb, "click", input, "Max");
+    expect(out.answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    expect(out.step).toMatchObject({ outcome: "failed", code: "page_changed" });
+    expect(fake.calls.click).toEqual([]);
+    // A card with no document runs nothing either.
+    fake.doc = "doc.1";
+    expect((await runStepOn(lb, "click", { ...input, documentId: undefined }, "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    expect(fake.calls.click).toEqual([]);
+  });
+
+  it("makes no card for a control whose twins, anchor or place changed since the read", async () => {
+    // A new "Place order" twin inserted above the one the model read.
+    fake.snap = page({ elements: [button({ twin: 0, twins: 2, anchor: "dddddddd" }), button({ twin: 1, twins: 2, at: 1 })] });
+    expect(await prepareStepOn(lb, "click", { element: "e1" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.staleElement });
+    expect(fake.calls.screenshot).toEqual([]);
+  });
+});
+
+describe("a step after which the page tried a refused hop (review of Phase 4 step 3)", () => {
+  it("fails marked unknownOutcome, since its input was sent, and says to look before asking again", async () => {
     fake.act = { ok: false, code: "blocked_hop", host: "exfil.proof.test" };
-    expect((await runStepOn(lb, "click", card(), "Max")).answer).toEqual({ error: BROWSER_COPY.redirectRefused("exfil.proof.test") });
+    lb.refs.set("e1", fingerprintOf(button()));
+    const out = await runStepOn(
+      lb,
+      "click",
+      { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(button()), shotId: null, shot: null },
+      "Max",
+    );
+    expect(out.answer).toEqual({ error: BROWSER_COPY.mayHaveGoneThrough("exfil.proof.test"), unknownOutcome: true });
+    expect(out.step).toMatchObject({ kind: "click", outcome: "failed", code: "blocked_hop" });
+    expect(out.touched).toBe(true);
+    expect(lb.refs.size).toBe(0);
+  });
+});
+
+describe("typing replaces what a field holds (review of Phase 4 step 3)", () => {
+  it("marks a card on a filled field, so it says it replaces it, and not an empty one", async () => {
+    fake.snap = page({ elements: [field({ name: "Nickname", kind: "text", type: "text", filled: true }), field({ name: "Email", at: 1 })] });
+    await readOn(lb, 1);
+    expect(await prepareStepOn(lb, "type_text", { element: "e1", text: "Max" }, "Max")).toMatchObject({ ok: true, facts: { text: "Max", replaces: true } });
+    const empty = await prepareStepOn(lb, "type_text", { element: "e2", text: "max@proof.test" }, "Max");
+    expect(empty.ok && "replaces" in empty.facts).toBe(false);
+  });
+});
+
+describe("select_option matches every option the list has (review of Phase 4 step 3)", () => {
+  const list = (o: Partial<RawElement> = {}) => button({ tag: "select", role: "combobox", name: "Country", kind: "select", type: null, at: 1, ...o });
+  const opts = (labels: string[], disabled: number[] = []) => ({ options: labels.map((label, k) => ({ label, disabled: disabled.includes(k) })), total: labels.length });
+
+  beforeEach(async () => {
+    const countries = Array.from({ length: 250 }, (_, i) => `Country ${i + 1}`);
+    fake.snap = page({ elements: [button(), list({ options: countries.slice(0, 60), optionCount: 250 })] });
+    fake.listed = opts(countries);
+    await readOn(lb, 1);
+  });
+
+  it("chooses an option of a 250-option list the read did not show, by its index and label", async () => {
+    // The model was shown 30, and told how many more there are.
+    const read = await readOn(lb, 1);
+    expect((read.answer.elements as Array<{ options?: string[]; moreOptions?: number }>)[1]).toMatchObject({ moreOptions: 220 });
+    const out = await prepareStepOn(lb, "select_option", { element: "e2", option: "Country 200" }, "Max");
+    // Before: noSuchOption, the match read only the 30 shown.
+    expect(out).toMatchObject({ ok: true, facts: { option: "Country 200", optionLabel: "Country 200", optionIndex: 199 } });
+    expect(fake.calls.options).toBe(1);
+  });
+
+  it("chooses a long option by the words a read shows, and a cleaned one, storing its label as the list has it", async () => {
+    const long = `Premium plan ${"with every extra ".repeat(8)}`.trim();
+    fake.listed = opts(["Basic", long, "＜Gold＞ plan"]);
+    const shown = (await import("./snapshot")).optionWords(long).text;
+    expect(shown.length).toBeLessThan(long.length);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: shown }, "Max")).toMatchObject({ ok: true, facts: { option: shown, optionLabel: long, optionIndex: 1 } });
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "<Gold> plan" }, "Max")).toMatchObject({ ok: true, facts: { option: "<Gold> plan", optionLabel: "＜Gold＞ plan", optionIndex: 2 } });
+  });
+
+  it("never matches an earlier option that differs only by case", async () => {
+    fake.listed = opts(["Red", "red"]);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "red" }, "Max")).toMatchObject({ ok: true, facts: { optionIndex: 1, optionLabel: "red" } });
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "Red" }, "Max")).toMatchObject({ ok: true, facts: { optionIndex: 0 } });
+    // Neither is "RED": which one is meant can't be told.
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "RED" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.optionTwice("RED") });
+    // The only one, whatever its case.
+    fake.listed = opts(["Red", "Blue"]);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "BLUE" }, "Max")).toMatchObject({ ok: true, facts: { optionIndex: 1 } });
+  });
+
+  it("refuses two options with the same words, one with something hidden in it, one turned off, and says when the list is longer than it read", async () => {
+    fake.listed = opts(["Standard", "Standard"]);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "Standard" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.optionTwice("Standard") });
+    fake.listed = opts(["Visa 4242 4242 4242 4242", "New card"]);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "Visa [hidden]" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.sensitiveField("Max") });
+    fake.listed = opts(["Small", "Large"], [1]);
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "Large" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.elementHidden });
+    fake.listed = { options: Array.from({ length: 1000 }, (_, k) => ({ label: `Year ${k}`, disabled: false })), total: 4000 };
+    expect(await prepareStepOn(lb, "select_option", { element: "e2", option: "Year 3000" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.optionNotInFirst("Year 3000", 1000) });
+    expect(fake.calls.screenshot).toEqual([]);
+  });
+
+  it("chooses at its approval by the stored index and label", async () => {
+    const asked = await prepareStepOn(lb, "select_option", { element: "e2", option: "Country 200" }, "Max");
+    if (!asked.ok) throw new Error(asked.error);
+    await runStepOn(lb, "select_option", { browserSessionId: "bs1", shotId: null, shot: null, ...asked.facts } as BrowserCardInput, "Max");
+    expect(fake.calls.select).toEqual([[fingerprintOf(list({ options: undefined })), { index: 199, label: "Country 200" }]]);
   });
 });
 

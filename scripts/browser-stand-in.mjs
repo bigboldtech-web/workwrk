@@ -32,6 +32,14 @@
 // sign-in logs only that it signed in and the password's length, the shop
 // only that an order was placed.
 //
+// Review of Phase 4 step 3, more of the shop: /list (three rows, each its own
+// "Add to cart", and insertTwin(), which puts a new row with one above them),
+// the checkout's cart count and changeCart() (the cart changes and the page
+// loads again at the same address), /profile (a field that already holds a
+// nickname; a save logs only the new one's length) and /country (a list of
+// 250 countries, a long option and one in full-width brackets; a choice logs
+// only the option's short value).
+//
 // Test controls (POST unless said):
 //   /__stand-in/reset                           every browser killed, the log and rules cleared
 //   /__stand-in/fail?route=&status=&times=&delayMs=
@@ -44,6 +52,9 @@
 //                                               the stand-in's own CDP connection
 //   /__stand-in/back?session=                   the person's Back button in the live view, the
 //                                               same way (review of Phase 4 step 2)
+//   /__stand-in/page?session=&fn=insertTwin|changeCart
+//                                               a fixture page's own script, by those names only
+//                                               (review of Phase 4 step 3)
 //   /__stand-in/start-orphan?tag=               a tagged session no row knows
 //   GET /__stand-in/sessions                    the sessions, running or not
 //   GET /__stand-in/log?since=<seq>             what was asked, API and fixtures, in order
@@ -460,6 +471,7 @@ async function control(req, res, url) {
     log = [];
     seq = 0;
     signedIn.clear();
+    cartItems = 1;
     return send(res, 200, { ok: true });
   }
   if (what === "fail") {
@@ -481,6 +493,23 @@ async function control(req, res, url) {
       if (!focused.result?.value) return send(res, 404, { error: "no such field" });
       await page.send("Input.insertText", { text: q.get("text") || "" });
       if (q.get("enter") === "1") await pressEnter(page);
+      return send(res, 200, { ok: true });
+    } catch (err) {
+      return send(res, 503, { error: String(err.message) });
+    }
+  }
+  if (what === "page") {
+    // A fixture page's own script, by name only (review of Phase 4 step 3): a
+    // new twin row inserted, or the cart changed and the page loaded again,
+    // as a site does it itself while a card waits.
+    const fn = q.get("fn") || "";
+    if (fn !== "insertTwin" && fn !== "changeCart") return send(res, 400, { error: "no such page function" });
+    const s = sessions.get(q.get("session") || "");
+    if (!s || s.status !== "RUNNING") return send(res, 404, { error: "no such session" });
+    try {
+      const page = await ownPage(s);
+      const ran = await page.send("Runtime.evaluate", { expression: `(() => { const f = window[${JSON.stringify(fn)}]; if (typeof f !== "function") return false; f(); return true; })()`, returnByValue: true });
+      if (!ran.result?.value) return send(res, 404, { error: "the page has no such function" });
       return send(res, 200, { ok: true });
     } catch (err) {
       return send(res, 503, { error: String(err.message) });
@@ -519,6 +548,10 @@ const page = (title, body, head = "") =>
 
 const signedIn = new Map();
 let orders = 0;
+let cartItems = 1;
+const COUNTRIES = Array.from({ length: 250 }, (_, i) => `<option value="c${i + 1}">Country ${i + 1}</option>`).join("");
+const LONG_OPTION = `Premium plan ${"with every extra ".repeat(8)}`.trim();
+const ROW = (what, item) => `<li><span>${what} gift card</span> <form method="post" action="/cart?item=${item}" style="display:inline"><button type="submit">Add to cart</button></form></li>`;
 
 const SITES = {
   "docs.proof.test": (req, url) => {
@@ -636,7 +669,24 @@ const SITES = {
     return [404, page("Not found", "<p>Not found</p>")];
   },
   "shop.proof.test": (req, url, raw, entry) => {
-    if (req.method === "POST" && url.pathname === "/cart") return [302, "", { location: "/cart" }];
+    if (req.method === "POST" && url.pathname === "/cart") {
+      cartItems += 1;
+      entry.cartItems = cartItems;
+      // Which row's Add to cart it was (review of Phase 4 step 3): a colour, never a query of anyone's.
+      const item = url.searchParams.get("item") || "";
+      if (/^[a-z]{1,8}$/.test(item)) entry.item = item;
+      return [302, "", { location: "/cart" }];
+    }
+    if (req.method === "POST" && url.pathname === "/profile") {
+      // Never the nickname: only how long it was.
+      entry.nickLength = String(form(raw).nick ?? "").length;
+      return [302, "", { location: "/profile" }];
+    }
+    if (req.method === "POST" && url.pathname === "/country") {
+      const v = String(form(raw).country ?? "");
+      entry.chosen = /^[a-z0-9]{1,8}$/.test(v) ? v : "other";
+      return [302, "", { location: "/country" }];
+    }
     if (req.method === "POST" && url.pathname === "/order") {
       orders += 1;
       entry.orderPlaced = `o${orders}`;
@@ -646,13 +696,33 @@ const SITES = {
       case "/":
         return [200, page("Proof shop", `<h1>Gift card</h1><p>A gift card for anyone.</p><form method="post" action="/cart"><button type="submit">Add to cart</button></form>`)];
       case "/cart":
-        return [200, page("Your cart", `<h1>Your cart</h1><p>1 gift card</p><form method="get" action="/checkout"><button type="submit">Checkout</button></form>`)];
+        return [200, page("Your cart", `<h1>Your cart</h1><p>${cartItems} gift card${cartItems === 1 ? "" : "s"}</p><form method="get" action="/checkout"><button type="submit">Checkout</button></form>`)];
+      case "/list":
+        return [
+          200,
+          page(
+            "Gift cards",
+            `<h1>Gift cards</h1><ul id="rows">${ROW("Red", "red")}${ROW("Blue", "blue")}${ROW("Green", "green")}</ul>
+<script>window.insertTwin = function () { var rows = document.getElementById("rows"); var t = document.createElement("template"); t.innerHTML = ${JSON.stringify(ROW("Gold", "gold"))}; rows.insertBefore(t.content.firstChild, rows.firstChild); };</script>`,
+          ),
+        ];
+      case "/profile":
+        return [200, page("Your profile", `<h1>Your profile</h1><form method="post" action="/profile"><label for="nick">Nickname</label> <input id="nick" name="nick" value="Old nickname"> <button type="submit">Save</button></form>`)];
+      case "/country":
+        return [
+          200,
+          page(
+            "Where you live",
+            `<h1>Where you live</h1><form method="post" action="/country"><label for="country">Country</label> <select id="country" name="country"><option value="">Choose one</option>${COUNTRIES}<option value="long">${LONG_OPTION}</option><option value="gold">＜Gold＞ plan</option></select> <button type="submit">Save</button></form>`,
+          ),
+        ];
       case "/checkout":
         return [
           200,
           page(
             "Checkout",
-            `<h1>Checkout</h1><form method="post" action="/order">
+            `<h1>Checkout</h1><p>${cartItems} gift card${cartItems === 1 ? "" : "s"} in your cart</p>
+<script>window.changeCart = function () { fetch("/cart", { method: "POST" }).then(function () { location.reload(); }); };</script><form method="post" action="/order">
 <label for="name">Name on card</label> <input id="name" name="name" autocomplete="cc-name"><br>
 <label for="cc">Card number</label> <input id="cc" name="cardnumber" autocomplete="cc-number" inputmode="numeric"><br>
 <label for="cvc">CVC</label> <input id="cvc" name="cvc" autocomplete="cc-csc" maxlength="4"><br>

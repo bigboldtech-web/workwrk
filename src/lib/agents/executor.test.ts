@@ -39,7 +39,7 @@ vi.mock("@/lib/rate-limit-memory", () => ({
 import { READ_ANSWER_MAX } from "./connector-tools";
 import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type ExecuteArgs } from "./executor";
 import { VIEW_JSON_BUDGET } from "@/lib/browser/snapshot";
-import { CONNECTOR_COPY } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
@@ -1086,7 +1086,7 @@ describe("the person's browser (Phase 4 step 3)", () => {
     expect(out.status).toBe("EXECUTED");
     const audit = fx.activity[0];
     expect(audit).toMatchObject({ type: "agent.type_text", description: 'Chief of Staff (for Priya Shah): Typed on "shop.proof.test"', severity: "warning" });
-    expect((audit.metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: "textbox" });
+    expect((audit.metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: "textbox", outcome: "ok" });
     const all = JSON.stringify(audit);
     expect(all).not.toContain("secret");
     expect(all).not.toContain("Search reviews");
@@ -1110,5 +1110,49 @@ describe("the person's browser (Phase 4 step 3)", () => {
     // Before step 3 only a Google card could wait: this one failed for good.
     expect(out).toMatchObject({ status: "HELD", code: "browser_busy" });
     expect(fx.actions[0].status).toBe("RUNNING");
+    // Held: nothing was sent, and it waits to be decided again, so no audit row yet.
+    expect(fx.activity).toEqual([]);
+  });
+
+  // Review of Phase 4 step 3: a refused hop after an act's input went
+  // through was FAILED as if nothing happened, and no act that failed was
+  // audited at all.
+  it("fails an act after which the page tried a refused hop as one that may have gone through, and audits it", async () => {
+    fx.answers.click = { error: BROWSER_COPY.mayHaveGoneThrough("exfil.proof.test"), unknownOutcome: true };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button", name: "Confirm", target: { role: "button" } },
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    expect(out).toMatchObject({ status: "FAILED" });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", result: { unknownOutcome: true } });
+    expect(fx.activity).toHaveLength(1);
+    expect(fx.activity[0]).toMatchObject({ type: "agent.click", description: 'Chief of Staff (for Priya Shah): Clicked on "shop.proof.test", but the browser didn\'t confirm it finished', severity: "warning" });
+    expect((fx.activity[0].metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "click", browserSessionId: "bs1", element: "button", outcome: "unknown" });
+    expect(JSON.stringify(fx.activity[0])).not.toContain("Confirm");
+  });
+
+  it("audits an act that did nothing too, saying so", async () => {
+    fx.answers.click = { error: BROWSER_COPY.pageChanged };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button" },
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    expect(out).toMatchObject({ status: "FAILED" });
+    expect(fx.actions[0].result ?? null).toBeNull();
+    expect(fx.activity).toHaveLength(1);
+    expect(fx.activity[0]).toMatchObject({ description: "Chief of Staff (for Priya Shah): Couldn't click on shop.proof.test. Nothing was done." });
+    expect((fx.activity[0].metadata as Record<string, unknown>).browser).toMatchObject({ outcome: "failed" });
   });
 });

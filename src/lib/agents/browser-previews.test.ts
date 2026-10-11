@@ -15,6 +15,8 @@ type Row = Record<string, unknown>;
 const h = vi.hoisted(() => ({
   agent: { id: "a1", name: "Shopper", status: "ENABLED", browserSites: ["shop.proof.test"], browserTools: true } as Row | null,
   access: null as null | Row,
+  /** What computerAccess answers first, read by read, before `access` (review of Phase 4 step 3). */
+  accessQueue: [] as Row[],
   use: null as null | Row,
   useCalls: [] as Row[],
   waiting: null as null | Row,
@@ -26,7 +28,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
 vi.mock("@/lib/browser/sessions", () => ({
-  computerAccess: async () => h.access,
+  computerAccess: async () => (h.accessQueue.length > 0 ? h.accessQueue.shift() : h.access),
   useBrowserSession: async (a: Row) => {
     h.useCalls.push(a);
     return h.use;
@@ -50,14 +52,14 @@ vi.mock("@/lib/browser/shots", () => ({
 import { prepareBrowser } from "./browser-previews";
 import type { PrepareContext } from "./previews";
 import { BROWSER_COPY } from "./teammate-copy";
-import { putLiveBrowser, resetLiveRegistryForTests, type LiveBrowser } from "@/lib/browser/live";
+import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, type LiveBrowser } from "@/lib/browser/live";
 import { readOn } from "@/lib/browser/page-calls";
 import { fingerprintOf } from "@/lib/browser/snapshot";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "@/lib/browser/sites";
 import type { BrowserHandle, RawElement, RawSnapshot } from "@/lib/browser/types";
 
 const RULES: SiteRules = { allow: ["shop.proof.test", "login.proof.test"], block: [], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: FIXTURE_SUFFIX };
-const el = (o: Partial<RawElement>): RawElement => ({ tag: "button", role: "button", name: "Place order", kind: "none", type: "submit", formHost: "shop.proof.test", href: null, twin: 0, disabled: false, filled: false, inMainFrame: true, ...o });
+const el = (o: Partial<RawElement>): RawElement => ({ tag: "button", role: "button", name: "Place order", kind: "none", type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "b0b0b0b0", at: 0, disabled: false, filled: false, inMainFrame: true, ...o });
 const PAGE: RawSnapshot = {
   url: "http://shop.proof.test/checkout",
   title: "Checkout",
@@ -65,8 +67,9 @@ const PAGE: RawSnapshot = {
   blocks: ["Checkout"],
   elements: [
     el({}),
-    el({ tag: "input", role: "textbox", name: "Card number", kind: "card_number", type: "text" }),
-    el({ tag: "input", role: "textbox", name: "Name on card", kind: "text", type: "text" }),
+    el({ tag: "input", role: "textbox", name: "Card number", kind: "card_number", type: "text", at: 1 }),
+    el({ tag: "input", role: "textbox", name: "Name on card", kind: "text", type: "text", at: 2 }),
+    el({ tag: "input", role: "textbox", name: "Nickname", kind: "text", type: "text", at: 3, filled: true }),
   ],
   links: [],
 };
@@ -82,10 +85,12 @@ const handle: BrowserHandle = {
     shots.push(o);
     return { jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 520, height: 330 };
   },
+  options: async () => ({ ok: true, options: [], total: 0 }),
   click: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
   type: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
   select: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
   currentUrl: () => url,
+  documentId: () => "doc.1",
   blank: async () => undefined,
   close: async () => undefined,
 };
@@ -101,7 +106,8 @@ beforeEach(async () => {
   url = "http://shop.proof.test/checkout";
   shots.length = 0;
   h.agent = { id: "a1", name: "Shopper", status: "ENABLED", browserSites: ["shop.proof.test"], browserTools: true };
-  h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"] };
+  h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"], rulesVersion: 0 };
+  h.accessQueue = [];
   h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
   h.useCalls = [];
   h.waiting = null;
@@ -109,7 +115,7 @@ beforeEach(async () => {
   h.shotId = "sh0123456789abcdef0123456789abcdef";
   h.shots = [];
   h.ends = [];
-  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
+  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
   // The model's read of the page: the ids the card names come from it.
   await readOn(lb, 1);
@@ -125,6 +131,7 @@ describe("the first preparation", () => {
         browserSessionId: "bs1",
         site: "shop.proof.test",
         pageUrl: "http://shop.proof.test/checkout",
+        documentId: "doc.1",
         element: "e1",
         target: fingerprintOf(PAGE.elements[0]),
         warnings: ["buys", "submits"],
@@ -170,7 +177,7 @@ describe("the first preparation", () => {
   it("says why when the computer may not be used, or the browser is another teammate's", async () => {
     h.access = { ok: false, reason: "plan" };
     expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.plan });
-    h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"] };
+    h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"], rulesVersion: 0 };
     h.use = { ok: false, reason: "other_teammate", otherName: "Researcher" };
     expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.otherTeammate("Researcher") });
   });
@@ -202,14 +209,35 @@ describe("at its approval", () => {
     const input = await stored();
     h.access = { ok: false, reason: "workspace_off" };
     expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.workspaceOff });
-    h.access = { ok: true, rules: { ...RULES, allow: ["login.proof.test"] }, sites: ["login.proof.test"] };
+    h.access = { ok: true, rules: { ...RULES, allow: ["login.proof.test"] }, sites: ["login.proof.test"], rulesVersion: 0 };
     expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.siteNowNotAllowed("shop.proof.test") });
-    h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"] };
+    h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"], rulesVersion: 0 };
     h.use = { ok: false, reason: "ended" };
     expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.browserClosed });
   });
 
   it("never approves a take over request: Take over decides it", async () => {
     expect(await prepareBrowser("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "sign_in" }, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.useTakeOver });
+  });
+});
+
+// Review of Phase 4 step 3.
+describe("the preparation (review of Phase 4 step 3)", () => {
+  it("says on the card that a typing replaces what a filled field holds", async () => {
+    const out = await prepareBrowser("type_text", { element: "e4", text: "Max" }, prep());
+    expect(out).toMatchObject({ input: { replaces: true }, preview: { lines: expect.arrayContaining([BROWSER_COPY.replacesLine]) } });
+    const empty = await prepareBrowser("type_text", { element: "e3", text: "Max Pine" }, prep());
+    expect("preview" in empty && empty.preview.lines).not.toContain(BROWSER_COPY.replacesLine);
+  });
+
+  it("never puts back rules older than a refresh installed: it reads them again under the lock", async () => {
+    const NEWER = { ...RULES, allow: ["login.proof.test"] };
+    lb.rules = NEWER;
+    lb.rulesVersion = nextRulesVersion();
+    h.accessQueue = [{ ...h.access }, { ...h.access, rules: NEWER, rulesVersion: rulesVersionNow() }];
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.notAllowedSite("shop.proof.test") });
+    // Before: the preparation's older rules replaced the newer ones, and a card was made.
+    expect(lb.rules).toBe(NEWER);
+    expect(h.shots).toEqual([]);
   });
 });

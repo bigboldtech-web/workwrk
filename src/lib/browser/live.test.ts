@@ -4,7 +4,23 @@
 // open_page capped with the oldest going first.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BOOT_ID, LINKS_MAX, dropLiveBrowser, liveBrowser, noteEvent, putLiveBrowser, rememberLinks, resetLiveRegistryForTests, takeEvents, withBrowserLock, type LiveBrowser } from "./live";
+import {
+  BOOT_ID,
+  LINKS_MAX,
+  callRulesCurrent,
+  dropLiveBrowser,
+  installRules,
+  liveBrowser,
+  nextRulesVersion,
+  noteEvent,
+  putLiveBrowser,
+  rememberLinks,
+  resetLiveRegistryForTests,
+  rulesVersionNow,
+  takeEvents,
+  withBrowserLock,
+  type LiveBrowser,
+} from "./live";
 import type { BrowserHandle } from "./types";
 
 function lb(rowId: string, close = vi.fn(async () => {})): LiveBrowser {
@@ -15,6 +31,7 @@ function lb(rowId: string, close = vi.fn(async () => {})): LiveBrowser {
     agentId: "a1",
     handle: { close } as unknown as BrowserHandle,
     rules: { allow: [], block: [], appHosts: [], schemes: ["https:"], fixtureSuffix: null },
+    rulesVersion: 0,
     links: new Set(),
     refs: new Map(),
     refsUrl: null,
@@ -115,5 +132,32 @@ describe("withBrowserLock", () => {
     open();
     await held;
     expect(await waiting).toEqual({ gone: true });
+  });
+});
+
+describe("the rules by version (review of Phase 4 step 3)", () => {
+  const older = { allow: ["old.example.com"], block: [], appHosts: [], schemes: ["https:" as const], fixtureSuffix: null };
+  const newer = { allow: ["new.example.com"], block: [], appHosts: [], schemes: ["https:" as const], fixtureSuffix: null };
+
+  it("never puts back rules older than the browser holds", () => {
+    const b = lb("r1");
+    const read = rulesVersionNow();
+    const refresh = nextRulesVersion();
+    expect(installRules(b, newer, refresh)).toBe(true);
+    // A call that read its rules before the refresh began.
+    expect(installRules(b, older, read)).toBe(false);
+    expect(b.rules).toBe(newer);
+    expect(b.rulesVersion).toBe(refresh);
+  });
+
+  it("calls a read stale once a refresh began after it, even before the refresh installed anything", () => {
+    const b = lb("r1");
+    const read = rulesVersionNow();
+    expect(callRulesCurrent(b, read)).toBe(true);
+    nextRulesVersion();
+    expect(callRulesCurrent(b, read)).toBe(false);
+    expect(callRulesCurrent(b, rulesVersionNow())).toBe(true);
+    // A version that is no number is never current.
+    expect(callRulesCurrent(b, Number.NaN)).toBe(false);
   });
 });

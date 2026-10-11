@@ -918,6 +918,18 @@ describe("how an answer's links render (review round 4 of Phase 3)", () => {
     expect(answerLinks({ toolCalls: [call("draft_email")] })).toBe("inert");
   });
 
+  // Review of Phase 4 step 3: an answer that read web pages rendered a planted page's links clickable.
+  it("links nothing in an answer that read web pages, by its meta or by any browser call", () => {
+    expect(answerLinks({ readWeb: true, toolCalls: [] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("open_page")] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("search_tasks"), call("read_page")] })).toBe("inert");
+    expect(answerLinks({ toolCalls: [call("close_browser")] })).toBe("inert");
+    const saved = messageViewFromRow({ id: "m3", role: "ASSISTANT", content: "See [the deal](https://shop.proof.test/buy-now)", kind: null, meta: { readWeb: true }, toolCalls: [], createdAt: new Date("2026-10-11T09:00:00Z") } as never);
+    expect(saved && saved.kind === "agent" ? [saved.readWeb, answerLinks(saved)] : null).toEqual([true, "inert"]);
+    const report = messageViewFromRow({ id: "m4", role: "ASSISTANT", content: "Done", kind: "REPORT", meta: { routineId: "r1", routineName: "Brief", readWeb: true }, toolCalls: [], createdAt: new Date("2026-10-11T09:00:00Z") } as never);
+    expect(report && report.kind === "report" ? answerLinks(report) : null).toBe("inert");
+  });
+
   it("keeps the earlier rules: readGoogle, and an answer still arriving, link nothing; any other answer shows its links", () => {
     expect(answerLinks({ readGoogle: true, toolCalls: [] })).toBe("inert");
     expect(answerLinks({ streaming: true, toolCalls: [] })).toBe("inert");

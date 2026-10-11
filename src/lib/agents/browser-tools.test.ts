@@ -18,6 +18,11 @@ const h = vi.hoisted(() => ({
   person: { userId: "me", organizationId: "org", firstName: "Max", name: "Max Pine" } as Row | null,
   agent: { id: "a1", name: "Shopper", status: "ENABLED", browserSites: ["shop.proof.test"], browserTools: true } as Row | null,
   access: null as null | Row,
+  /** What computerAccess answers first, read by read, before `access` (review of Phase 4 step 3). */
+  accessQueue: [] as Row[],
+  accessCalls: 0,
+  /** The session's waiting card (sessions.ts waitingCardOf). */
+  waiting: null as null | Row,
   /** What useBrowserSession answers, call by call (last one repeats). */
   uses: [] as Row[],
   useCalls: [] as Row[],
@@ -35,7 +40,11 @@ const h = vi.hoisted(() => ({
 vi.mock("./acting", () => ({ actingPersonFor: async () => h.person }));
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
 vi.mock("@/lib/browser/sessions", () => ({
-  computerAccess: async () => h.access,
+  computerAccess: async () => {
+    h.accessCalls += 1;
+    return h.accessQueue.length > 0 ? h.accessQueue.shift() : h.access;
+  },
+  waitingCardOf: async () => h.waiting,
   useBrowserSession: async (a: Row) => {
     h.useCalls.push(a);
     return h.uses.length > 1 ? h.uses.shift() : h.uses[0];
@@ -72,7 +81,7 @@ vi.mock("@/lib/browser/shots", () => ({
 import { BROWSER_TOOLS_DEFS } from "./browser-tools";
 import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext, TeammateToolContext } from "./tools";
-import { putLiveBrowser, resetLiveRegistryForTests, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
+import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { fingerprintOf } from "@/lib/browser/snapshot";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "@/lib/browser/sites";
 import type { ActOutcome, BrowserHandle, ElementFingerprint, NavOutcome, RawElement, RawSnapshot } from "@/lib/browser/types";
@@ -80,13 +89,13 @@ import type { ActOutcome, BrowserHandle, ElementFingerprint, NavOutcome, RawElem
 const RULES: SiteRules = { allow: ["docs.proof.test", "shop.proof.test"], block: ["blocked.proof.test"], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: FIXTURE_SUFFIX };
 const STALE_RULES: SiteRules = { ...RULES, allow: ["everything.proof.test"] };
 
-const button: RawElement = { tag: "button", role: "button", name: "Place order", kind: "none", type: "submit", formHost: "shop.proof.test", href: null, twin: 0, disabled: false, filled: false, inMainFrame: true };
+const button: RawElement = { tag: "button", role: "button", name: "Place order", kind: "none", type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "b0b0b0b0", at: 0, disabled: false, filled: false, inMainFrame: true };
 const PAGE: RawSnapshot = {
   url: "http://shop.proof.test/checkout",
   title: "Checkout",
   contentType: "text/html",
   blocks: ["Gift card", "Your code is 482913"],
-  elements: [button, { ...button, tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", filled: true, value: "max@proof.test" } as RawElement],
+  elements: [button, { ...button, tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", filled: true, at: 1, value: "max@proof.test" } as RawElement],
   links: [{ text: "Buy now", href: "http://shop.proof.test/buy-now?item=giftcard" }],
 };
 
@@ -113,6 +122,7 @@ const handle: BrowserHandle = {
   find: async () => ({ matches: [] }),
   scroll: async () => ({ atEnd: false }),
   screenshot: async () => ({ jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 1280, height: 800 }),
+  options: async () => ({ ok: true, options: [], total: 0 }),
   click: async (t) => {
     f.clicks.push(t);
     return f.act ?? { ok: true, settled: true, url: f.url, site: siteOf(f.url) ?? "" };
@@ -120,6 +130,7 @@ const handle: BrowserHandle = {
   type: async () => f.act ?? { ok: true, settled: true, url: f.url, site: siteOf(f.url) ?? "" },
   select: async () => f.act ?? { ok: true, settled: true, url: f.url, site: siteOf(f.url) ?? "" },
   currentUrl: () => f.url,
+  documentId: () => "doc.1",
   blank: async () => {
     f.url = "about:blank";
   },
@@ -131,13 +142,13 @@ let marks: { webReads: number; starts: number };
 
 function live(url = "about:blank"): LiveBrowser {
   f.url = url;
-  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: STALE_RULES, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
+  lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: STALE_RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
   return lb;
 }
 
-function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: boolean } = {}): ToolContext {
-  const { tainted = false, mayStart = true, ...rest } = o;
+function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: boolean | (() => boolean) } = {}): ToolContext {
+  const { tainted = false, mayStart: may = true, ...rest } = o;
   return {
     orgId: "org",
     userId: "me",
@@ -151,7 +162,9 @@ function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: b
       runId: "run1",
       browser: {
         tainted,
-        mayStart,
+        get mayStart() {
+          return typeof may === "function" ? may() : may;
+        },
         onStart: () => {
           marks.starts += 1;
         },
@@ -170,7 +183,10 @@ beforeEach(() => {
   resetLiveRegistryForTests();
   h.person = { userId: "me", organizationId: "org", firstName: "Max", name: "Max Pine" };
   h.agent = { id: "a1", name: "Shopper", status: "ENABLED", browserSites: ["shop.proof.test"], browserTools: true };
-  h.access = { ok: true, rules: RULES, sites: ["docs.proof.test", "shop.proof.test"], cfg: {}, caps: {}, policy: {} };
+  h.access = { ok: true, rules: RULES, sites: ["docs.proof.test", "shop.proof.test"], cfg: {}, caps: {}, policy: {}, rulesVersion: 0 };
+  h.accessQueue = [];
+  h.accessCalls = 0;
+  h.waiting = null;
   h.uses = [{ ok: true, row: { id: "bs1", currentSite: "shop.proof.test" } }];
   h.useCalls = [];
   h.opened = { ok: true, rowId: "bs1" };
@@ -346,6 +362,7 @@ describe("the acts (Decisions 12 and 14)", () => {
     browserSessionId: "bs1",
     site: "shop.proof.test",
     pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
     page: "shop.proof.test/checkout",
     element: "e1",
     target: fingerprintOf(button),
@@ -407,5 +424,97 @@ describe("the acts (Decisions 12 and 14)", () => {
   it("wait when the teammate was paused since the approval's own check", async () => {
     h.agent = null;
     expect(await run("click", stored(), approval())).toEqual({ error: BROWSER_COPY.teammateOff, held: "agent_paused" });
+  });
+});
+
+// Review of Phase 4 step 3.
+describe("no navigation while a step waits (review of Phase 4 step 3)", () => {
+  it("refuses open_page while a card of the session waits, and lets the reads go on", async () => {
+    live("http://shop.proof.test/checkout");
+    h.waiting = { id: "act1", toolName: "click", createdAt: new Date() };
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.oneStepWaits("Max") });
+    lb.links.add("http://shop.proof.test/buy-now?item=giftcard");
+    expect(await run("open_page", { url: "http://shop.proof.test/buy-now?item=giftcard" }, ctx({ tainted: true }))).toEqual({ error: BROWSER_COPY.oneStepWaits("Max") });
+    // Before: both navigated, under the waiting card.
+    expect(f.navigate).toEqual([]);
+    expect(await run("read_page", {})).toMatchObject({ site: "shop.proof.test" });
+    h.waiting = null;
+    expect(await run("open_page", { url: "http://docs.proof.test/" })).toMatchObject({ ok: true });
+  });
+});
+
+describe("one start an answer counts the starts that failed (review of Phase 4 step 3)", () => {
+  it("counts a start that reached the provider and failed, so a second start in the answer is refused", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    h.opened = { ok: false, reason: "provider_unavailable", reachedProvider: true };
+    const c = ctx({ mayStart: () => marks.starts < 1 });
+    expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.providerUnavailable });
+    // Before: 0, so the answer could ask the provider again and again.
+    expect(marks.starts).toBe(1);
+    expect(await run("open_page", { url: "http://docs.proof.test/" }, c)).toEqual({ error: BROWSER_COPY.oneStart });
+    expect(h.openCalls).toHaveLength(1);
+  });
+
+  it("does not count a start the caps refused before the provider was asked", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    h.opened = { ok: false, reason: "person_today" };
+    await run("open_page", { url: "http://docs.proof.test/" });
+    expect(marks.starts).toBe(0);
+  });
+});
+
+describe("a call's rules never replace newer ones (review of Phase 4 step 3)", () => {
+  const NEWER: SiteRules = { ...RULES, allow: ["docs.proof.test"] };
+
+  it("reads the rules again under the lock when a refresh installed newer ones after the call read its own", async () => {
+    live("http://shop.proof.test/checkout");
+    // The call read its access (version 0, shop allowed); then the lists
+    // changed and the refresh gave the guard newer rules.
+    lb.rules = NEWER;
+    lb.rulesVersion = nextRulesVersion();
+    h.accessQueue = [{ ...h.access }, { ...h.access, rules: NEWER, rulesVersion: rulesVersionNow() }];
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.siteNoLongerAllowed("shop.proof.test") });
+    // Before: the call's older rules were put back, and the page was read.
+    expect(lb.rules).toBe(NEWER);
+    expect(h.accessCalls).toBe(2);
+  });
+
+  it("reads them again when a refresh began after the call read its own, before it installed anything", async () => {
+    live("http://shop.proof.test/checkout");
+    nextRulesVersion();
+    h.accessQueue = [{ ...h.access }, { ...h.access, rules: NEWER, rulesVersion: rulesVersionNow() }];
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.siteNoLongerAllowed("shop.proof.test") });
+    expect(lb.rules).toBe(NEWER);
+  });
+
+  it("closes the browser whatever a read of the rules again would say: closing opens nothing", async () => {
+    live("http://shop.proof.test/checkout");
+    lb.rulesVersion = nextRulesVersion();
+    h.accessQueue = [{ ...h.access }, { ok: false, reason: "workspace_off" }];
+    expect(await run("close_browser", {})).toEqual({ ok: true, closed: true });
+    expect(h.ends).toEqual([["bs1", "closed_by_teammate", { id: "me", type: "agent" }, undefined]]);
+  });
+
+  it("uses the call's own rules when nothing newer began, reading nothing again", async () => {
+    live("http://shop.proof.test/checkout");
+    expect(await run("read_page", {})).toMatchObject({ site: "shop.proof.test" });
+    expect(lb.rules).toBe(RULES);
+    expect(h.accessCalls).toBe(1);
+  });
+
+  it("refuses with the computer's reason when the read again refuses, and waits at an approval", async () => {
+    live("http://shop.proof.test/checkout");
+    lb.rulesVersion = nextRulesVersion();
+    h.accessQueue = [{ ...h.access }, { ok: false, reason: "workspace_off" }];
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.workspaceOff });
+    lb.rulesVersion = nextRulesVersion();
+    h.accessQueue = [{ ...h.access }];
+    h.agent = { ...h.agent!, browserTools: true };
+    // A refresh that never settles: the approval waits rather than act on rules it cannot trust.
+    const always = { ...h.access, rulesVersion: -1 };
+    h.access = always;
+    const card = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(button), role: "button", name: "Place order", shotId: null, shot: null };
+    expect(await run("click", card, ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined }))).toEqual({ error: BROWSER_COPY.busyNow, held: "retry_later" });
+    expect(f.clicks).toEqual([]);
   });
 });

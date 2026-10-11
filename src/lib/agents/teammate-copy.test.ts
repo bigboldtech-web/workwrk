@@ -306,6 +306,11 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     optionLine: [["Blue"], "Chooses: Blue"],
     takeOverTitle: [["login.proof.test"], "Take over the browser on login.proof.test"],
     takeOverTrust: [["login.proof.test"], "Sign in or pay only if you trust login.proof.test."],
+    // Review of Phase 4 step 3: lists longer than a read shows, a choice not found or found twice, an act that may have gone through.
+    moreOptions: [[[{ id: "e7", more: 220 }, { id: "e9", more: 1 }]], "Some lists have more options than are shown: e7 has 220 more options, e9 has 1 more option. select_option can choose any of them by their words."],
+    optionNotInFirst: [["Year 3000", 1000], 'The list has no option "Year 3000" in its first 1,000, and it has more than that, which a teammate can\'t choose from. Ask the person to choose it.'],
+    optionTwice: [["Standard"], 'The list has more than one option "Standard", so a teammate can\'t tell which. Ask the person to choose it.'],
+    mayHaveGoneThrough: [["exfil.proof.test"], "The step may have gone through: the page then tried to go on to exfil.proof.test, which isn't allowed, so it stopped there. Look at the page in the browser before asking again."],
   };
   const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -381,6 +386,9 @@ describe("the computer's step 2 copy (Phase 4)", () => {
         sessionEnded: [[4], "Closed a browser after 4 minutes"],
         takeOverStarted: [["login.proof.test"], "Took over the browser on login.proof.test"],
         takeOverEnded: [[true], "Finished in the browser and gave it back"],
+        // Review of Phase 4 step 3: every act audited, whatever its outcome.
+        actNothingDone: [["Couldn't click", "shop.proof.test"], "Couldn't click on shop.proof.test. Nothing was done."],
+        actUnconfirmed: [['Clicked on "shop.proof.test"'], 'Clicked on "shop.proof.test", but the browser didn\'t confirm it finished'],
       },
     ],
   };

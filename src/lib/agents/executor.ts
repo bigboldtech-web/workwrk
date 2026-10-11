@@ -104,6 +104,7 @@ import {
   BROWSER_STEP_KIND,
   BROWSER_TOOL_COUNTS,
   COUNTED_ON_CARD,
+  browserActOutcome,
   browserAuditFacts,
   browserNotHereOf,
   browserNotHereSentence,
@@ -120,6 +121,7 @@ import { siteOf } from "@/lib/browser/sites";
 import { prepareCall, type Prepared } from "./previews";
 import {
   ACTION_ERRORS,
+  BROWSER_AUDIT_COPY,
   BROWSER_COPY,
   CONNECTOR_COPY,
   DELEGATION_COPY,
@@ -1188,6 +1190,24 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
     // email or invitation is not asked for again (findTwin, review round 2 of
     // Phase 3). updatedAt is when it failed, which that window counts from.
     const unknown = record(data).unknownOutcome === true;
+    // A browser act is audited whatever its outcome (review of Phase 4 step
+    // 3, Decision 24): one that did nothing, and one that may have gone
+    // through (a refused hop after its input included), each its own row.
+    if (BROWSER_ACTS.has(name)) {
+      await auditAgentAction({
+        person: a.person,
+        agent: a.agent ?? ASK_AI_AUDIT,
+        toolName: name,
+        input: a.input,
+        result: data,
+        risk: a.action.risk,
+        actionId: a.action.id,
+        runId: a.action.runId,
+        sessionId: a.action.sessionId,
+        routineId: a.action.routineId,
+        decidedVia: a.decidedVia,
+      });
+    }
     await prisma.agentAction.updateMany({
       where: { id: a.action.id, status: "RUNNING" },
       data: { status: "FAILED", error, ...(unknown ? { result: json({ unknownOutcome: true }), updatedAt: new Date() } : {}) },
@@ -1230,6 +1250,9 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   return { status: "EXECUTED", result, data };
 }
 
+/** The browser steps that act on a page, each audited whatever its outcome (review of Phase 4 step 3). */
+const BROWSER_ACTS: ReadonlySet<string> = new Set<BrowserToolName>(["click", "type_text", "select_option"]);
+
 /** The object a result names, for the audit row's target: the task, the doc, the Talk conversation. */
 const AUDIT_TARGETS: ReadonlyArray<{ key: string; type: string; idKey?: string }> = [
   { key: "task", type: "BOARD_ITEM" },
@@ -1255,6 +1278,19 @@ function auditTarget(result: unknown): { id: string; type: string } | null {
     if (typeof id === "string" && id) return { id, type: t.type };
   }
   return null;
+}
+
+/**
+ * A browser step's audit sentence, by its outcome (review of Phase 4 step 3):
+ * what it did on its site; that it did nothing there; or that it may have
+ * gone through. Its site only, never an element's words.
+ */
+function browserAuditSentence(tool: BrowserToolName, input: Record<string, unknown> | null, result: unknown): string {
+  const site = browserSiteInput(input);
+  const outcome = browserActOutcome(result);
+  if (outcome === "unknown") return BROWSER_AUDIT_COPY.actUnconfirmed(toolSentence(tool, site).text);
+  if (outcome === "failed") return BROWSER_AUDIT_COPY.actNothingDone(toolSentence(tool, site, true).text, typeof site.site === "string" ? site.site : null);
+  return toolSentence(tool, site).text;
 }
 
 /**
@@ -1289,7 +1325,7 @@ export async function auditAgentAction(a: {
   const what = connector
     ? toolSentence(connector, null).text
     : browser
-      ? toolSentence(browser, browserSiteInput(a.input)).text
+      ? browserAuditSentence(browser, a.input, a.result)
       : toolOutcomeSentence(a.toolName, a.input, toolOutcome(a.toolName, a.result)).text;
   const target = connector || browser ? null : auditTarget(a.result);
   await logActivity({

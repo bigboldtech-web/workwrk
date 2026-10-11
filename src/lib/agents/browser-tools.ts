@@ -28,7 +28,20 @@
 // THE FIRST open_page STARTS THE BROWSER (Decision 6), once an answer
 // (ctx.teammate.browser.mayStart), and only for an address the guard allows
 // and, in a turn that already read anything, only a link a read showed
-// (Decision 11). Every other tool needs a browser open.
+// (Decision 11). Every other tool needs a browser open. A start counts once
+// it reached the provider, whatever came of it (review of Phase 4 step 3:
+// failed starts were not counted, so one answer could ask for browser after
+// browser).
+//
+// NO NAVIGATION WHILE A STEP WAITS (review of Phase 4 step 3): while a card
+// of the session waits for the person, open_page is refused (oneStepWaits),
+// so the page the card shows is the page its approval finds. Reads go on:
+// they change nothing. The card is bound to its document too (page-calls.ts).
+//
+// THE CALL'S RULES BY VERSION (review of Phase 4 step 3, live.ts): a call's
+// rules, read before the lock, are given to the guard only when no refresh
+// installed or began newer ones since; otherwise the teammate and the
+// access are read again under the lock (rulesForCall).
 //
 // AN ACT RUNS ONLY FROM ITS APPROVAL (Decision 12): click, type_text and
 // select_option run the card's stored input (browser-previews.ts) on the
@@ -54,6 +67,8 @@ import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
 import type { PageCall } from "@/lib/browser/page-calls";
 import type { ComputerAccess } from "@/lib/browser/sessions";
 import type { LiveBrowser } from "@/lib/browser/live";
+
+type Access = Extract<ComputerAccess, { ok: true }>;
 
 // ── Loaded on first use ─────────────────────────────────────────────
 
@@ -119,7 +134,7 @@ interface Opened {
   t: TeammateToolContext;
   person: ActingPerson;
   agent: ComputerAgent;
-  access: Extract<ComputerAccess, { ok: true }>;
+  access: Access;
   approval: boolean;
 }
 
@@ -162,18 +177,49 @@ async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall)
   return call.answer;
 }
 
+/** How many times a call reads its rules again when a refresh keeps beginning meanwhile (rulesForCall). */
+const RULES_REREADS = 2;
+
+/**
+ * This call's rules, given to the guard (see the file header; review of
+ * Phase 4 step 3): the access it read, when it is no older than the rules
+ * the browser holds and every refresh begun since (live.ts
+ * callRulesCurrent); otherwise the teammate and the computer's access read
+ * again, here under the lock, before anything is done. A refusal says its
+ * reason; `held` is what an approval waits with.
+ */
+export async function rulesForCall(lb: LiveBrowser, access: Access, first: string): Promise<{ ok: true; access: Access } | { ok: false; error: string; held?: HeldCode }> {
+  const l = await live();
+  let current = access;
+  for (let tries = 0; !l.callRulesCurrent(lb, current.rulesVersion); tries += 1) {
+    if (tries >= RULES_REREADS) return { ok: false, error: BROWSER_COPY.busyNow, held: "retry_later" };
+    const agent = await (await browserAccess()).computerAgentById(lb.organizationId, lb.agentId);
+    if (!agent || !agent.browserTools) return { ok: false, error: BROWSER_COPY.teammateOff, held: "agent_paused" };
+    const fresh = await (await sessions()).computerAccess({ organizationId: lb.organizationId, agent });
+    if (!fresh.ok) return { ok: false, error: browserRefusalSentence(fresh.reason, agent.name, first) };
+    current = fresh;
+  }
+  l.installRules(lb, current.rules, current.rulesVersion);
+  return { ok: true, access: current };
+}
+
 /**
  * Run `fn` on the session's browser under its lock (see the file header):
- * this call's rules to the guard first, then the step cap (never for
- * close_browser: a browser at its cap can always be closed). Busy past the
- * wait, or a browser this process no longer guards (ended "restarted",
- * Decision 7), says so; at an approval, busy leaves the card waiting.
+ * this call's rules to the guard first (rulesForCall), then the step cap
+ * (neither for close_browser: a browser can always be closed, at its cap or
+ * while its rules are read again, and closing opens nothing).
+ * Busy past the wait, or a browser this process no longer guards (ended
+ * "restarted", Decision 7), says so; at an approval, busy leaves the card
+ * waiting.
  */
-async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { capped?: boolean } = {}): Promise<Record<string, unknown>> {
+async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { closing?: boolean } = {}): Promise<Record<string, unknown>> {
   const s = await sessions();
   const out = await (await live()).withBrowserLock(rowId, LOCK_WAIT_MS, async (lb) => {
-    lb.rules = o.access.rules;
-    if (opts.capped !== false && (await s.stepsUsedUp(rowId))) return refused(BROWSER_COPY.tooManySteps);
+    if (opts.closing !== true) {
+      const ruled = await rulesForCall(lb, o.access, o.person.firstName);
+      if (!ruled.ok) return o.approval && ruled.held ? refused(ruled.error, { held: ruled.held }) : refused(ruled.error);
+      if (await s.stepsUsedUp(rowId)) return refused(BROWSER_COPY.tooManySteps);
+    }
     return fn(lb);
   });
   if ("busy" in out && out.busy === true) return o.approval ? refused(BROWSER_COPY.busyNow, { held: "retry_later" satisfies HeldCode }) : refused(BROWSER_COPY.busyNow);
@@ -216,14 +262,23 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
     if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
     if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);
     const opened = await (await sessions()).openBrowserSession({ person: o.person, agent: o.agent, chatSessionId: o.t.sessionId, runId: o.t.runId, access: o.access });
-    if (!opened.ok) return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce }));
+    if (!opened.ok) {
+      // It reached the provider: the answer's one start, whatever came of it (see the file header).
+      if (opened.reachedProvider) o.t.browser?.onStart();
+      return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce }));
+    }
     o.t.browser?.onStart();
     rowId = opened.rowId;
   } else {
     rowId = m.session.rowId;
   }
   const calls = await pageCalls();
-  return onBrowser(o, rowId, async (lb) => settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted })));
+  const s = await sessions();
+  return onBrowser(o, rowId, async (lb) => {
+    // No navigation while a step of the session waits (see the file header).
+    if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
+    return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted }));
+  });
 }
 
 /** read_page, find_on_page and scroll_page: a browser must be open. */
@@ -292,7 +347,7 @@ async function closeBrowserRun(ctx: ToolContext, raw: Record<string, unknown>): 
     if (t.runId) await s.recordStep(rowId, o.person.userId, { kind: "close", site: use.row.currentSite, outcome: "ok" }, { whileOpen: { runId: t.runId, personId: o.person.userId } });
     await s.endBrowserSession(rowId, "closed_by_teammate", { id: o.person.userId, type: "agent" });
     return { ok: true, closed: true };
-  }, { capped: false });
+  }, { closing: true });
 }
 
 /** An act runs only from the person's approval of its card (Decision 12): never from a rule, never unasked. */

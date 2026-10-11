@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_TOOL_COUNTS,
+  actSentence,
+  browserActOutcome,
   browserAuditFacts,
   browserCard,
   browserNotHereOf,
@@ -23,12 +25,13 @@ import {
 import { BROWSER_COPY } from "./teammate-copy";
 import { BROWSER_TOOL_NAMES } from "./tool-names";
 
-const target = { tag: "button", role: "button", name: "Place order", kind: "none" as const, type: "submit", formHost: "shop.proof.test", href: null, twin: 0 };
+const target = { tag: "button", role: "button", name: "Place order", kind: "none" as const, type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "1a2b3c4d", at: 3 };
 
 const card = (o: Partial<BrowserCardInput> = {}): BrowserCardInput => ({
   browserSessionId: "bs1",
   site: "shop.proof.test",
   pageUrl: "http://shop.proof.test/checkout?step=2",
+  documentId: "doc-1.4",
   page: "shop.proof.test/checkout",
   element: "e4",
   target,
@@ -91,9 +94,21 @@ describe("what is kept and named", () => {
 
   it("audits a step's site, kind, session and the element's role, never its words or typed text (Decision 24)", () => {
     const facts = browserAuditFacts("type_text", { ...card({ text: "my secret words", name: "Search reviews" }), role: "textbox", target: { ...target, role: "textbox", name: "Search reviews" } }, { ok: true, site: "shop.proof.test" });
-    expect(facts).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: "textbox" });
+    expect(facts).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: "textbox", outcome: "ok" });
     expect(JSON.stringify(facts)).not.toContain("secret");
     expect(JSON.stringify(facts)).not.toContain("Search reviews");
+  });
+
+  it("says how an act came out: ran, did nothing, or may have gone through (review of Phase 4 step 3)", () => {
+    expect(browserActOutcome({ ok: true, site: "shop.proof.test" })).toBe("ok");
+    expect(browserActOutcome({ error: BROWSER_COPY.pageChanged })).toBe("failed");
+    expect(browserActOutcome({ error: BROWSER_COPY.unknownOutcome, unknownOutcome: true })).toBe("unknown");
+    expect(browserAuditFacts("click", { ...card() }, { error: "x", unknownOutcome: true }).outcome).toBe("unknown");
+  });
+
+  it("says an act after which the page tried a refused hop may have gone through (review of Phase 4 step 3)", () => {
+    expect(actSentence({ ok: false, code: "blocked_hop", host: "exfil.proof.test" }, "Max")).toBe(BROWSER_COPY.mayHaveGoneThrough("exfil.proof.test"));
+    expect(actSentence({ ok: false, code: "blocked_hop", host: "exfil.proof.test" }, "Max")).not.toBe(BROWSER_COPY.redirectRefused("exfil.proof.test"));
   });
 
   it("counts each tool per answer, the three acts sharing one step asked (Decision 22)", () => {
@@ -133,6 +148,12 @@ describe("browserCard", () => {
     expect(p.lines).toEqual([BROWSER_COPY.pageLine("shop.proof.test/checkout"), BROWSER_COPY.fieldLine("Search reviews"), BROWSER_COPY.pressEnterLine, BROWSER_COPY.submitsLine]);
   });
 
+  it("says a typing replaces what a filled field holds (review of Phase 4 step 3)", () => {
+    const p = browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", replaces: true, inForm: false }));
+    expect(p.lines).toEqual([BROWSER_COPY.pageLine("shop.proof.test/checkout"), BROWSER_COPY.fieldLine("Nickname"), BROWSER_COPY.replacesLine]);
+    expect(browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", inForm: false })).lines).not.toContain(BROWSER_COPY.replacesLine);
+  });
+
   it("asks the person to take over on its own card, with why, what the teammate sees and whom to trust", () => {
     const p = browserCard("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", page: "login.proof.test", shotId: null, shot: null, reason: "sign_in" });
     expect(p).toEqual({
@@ -156,5 +177,20 @@ describe("storedCardInput", () => {
     expect(storedCardInput("select_option", card())).toBeNull();
     expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "anything" })).toBeNull();
     expect(storedCardInput("click", { ...card(), warnings: ["buys", "rm -rf"] })?.warnings).toEqual(["buys"]);
+  });
+
+  it("needs an act's document, its twins, anchor and place, and a choice's label and index (review of Phase 4 step 3)", () => {
+    expect(storedCardInput("click", { ...card(), documentId: undefined })).toBeNull();
+    for (const bad of [{ twins: undefined }, { twins: 0 }, { twin: 1, twins: 1 }, { anchor: undefined }, { anchor: "x".repeat(40) }, { at: -1 }, { at: undefined }]) {
+      expect(storedCardInput("click", { ...card(), target: { ...target, ...bad } }), JSON.stringify(bad)).toBeNull();
+    }
+    const choice = card({ role: "combobox", name: "Country", option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
+    expect(storedCardInput("select_option", choice)).toMatchObject({ option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
+    expect(storedCardInput("select_option", { ...choice, optionIndex: undefined })).toBeNull();
+    expect(storedCardInput("select_option", { ...choice, optionIndex: 1.5 })).toBeNull();
+    expect(storedCardInput("select_option", { ...choice, optionLabel: undefined })).toBeNull();
+    expect(storedCardInput("type_text", { ...card(), text: "Max", replaces: true })?.replaces).toBe(true);
+    // A take over is asked on a page, never acted on: it needs no document.
+    expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "sign_in" })).toMatchObject({ reason: "sign_in" });
   });
 });

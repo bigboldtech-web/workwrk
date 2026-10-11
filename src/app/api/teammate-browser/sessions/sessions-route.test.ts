@@ -73,6 +73,7 @@ function live(o: Record<string, unknown> = {}) {
     agentId: String(row.agentId),
     handle: { close: async () => undefined } as never,
     rules: { allow: ["login.proof.test"], block: [], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: ".proof.test" },
+    rulesVersion: 0,
     links: new Set(),
     refs: new Map(),
     refsUrl: null,

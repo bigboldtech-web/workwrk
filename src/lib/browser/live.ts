@@ -12,6 +12,17 @@
 // two never drive one page at once; a caller that waits past its limit gets
 // { busy: true } and drives nothing.
 //
+// RULES BY VERSION (review of Phase 4 step 3). A call reads the computer's
+// access (its rules) before it takes the lock, and a list change between
+// that read and the lock installed newer rules (sessions.ts
+// refreshLiveRules), which the call then put back. Now every refresh starts
+// a new version (nextRulesVersion), every access read carries the version it
+// began at (sessions.ts computerAccess), a browser holds the version of its
+// rules (rulesVersion), rules are installed only when not older
+// (installRules), and a call whose read is older than the browser's rules or
+// than the newest refresh begun reads them again under the lock
+// (callRulesCurrent).
+//
 // Server-only: holds live connections.
 
 import { randomUUID } from "node:crypto";
@@ -31,6 +42,8 @@ export interface LiveBrowser {
   handle: BrowserHandle;
   /** What the guard obeys now: read by every request it pauses, replaced whenever the lists change (sessions.ts refreshLiveRules). */
   rules: SiteRules;
+  /** The version `rules` were read at (see the header, review of Phase 4 step 3). */
+  rulesVersion: number;
   /** Exact links reads in this session showed (Decision 11). */
   links: Set<string>;
   /** The latest read's ids, valid only while the page is still at refsUrl. */
@@ -47,10 +60,12 @@ interface Registry {
   boot: string;
   live: Map<string, LiveBrowser>;
   tails: Map<string, Promise<void>>;
+  /** The newest rules version begun in this process (review of Phase 4 step 3); absent in a registry a hot reload kept from before. */
+  rulesVersion?: number;
 }
 
 const g = globalThis as typeof globalThis & { __wkBrowserRegistry?: Registry };
-const registry: Registry = (g.__wkBrowserRegistry ??= { boot: randomUUID(), live: new Map(), tails: new Map() });
+const registry: Registry = (g.__wkBrowserRegistry ??= { boot: randomUUID(), live: new Map(), tails: new Map(), rulesVersion: 0 });
 
 /** This server process, as a session row names the process holding its guard. */
 export const BOOT_ID: string = registry.boot;
@@ -78,6 +93,32 @@ export async function dropLiveBrowser(rowId: string): Promise<void> {
   } catch {
     /* already gone */
   }
+}
+
+/** The newest rules version begun in this process (see the header). */
+export function rulesVersionNow(): number {
+  return registry.rulesVersion ?? 0;
+}
+
+/** A refresh of the rules begins (sessions.ts refreshLiveRules): every access read older than this is stale. */
+export function nextRulesVersion(): number {
+  registry.rulesVersion = rulesVersionNow() + 1;
+  return registry.rulesVersion;
+}
+
+/** Give the guard rules read at `version`, unless it holds newer ones (see the header). Answers whether they were installed. */
+export function installRules(lb: LiveBrowser, rules: SiteRules, version: number): boolean {
+  const v = Number.isInteger(version) ? version : -1;
+  if (v < lb.rulesVersion) return false;
+  lb.rules = rules;
+  lb.rulesVersion = v;
+  return true;
+}
+
+/** Whether a call's own access read, begun at `version`, is no older than the browser's rules and every refresh begun since (see the header). */
+export function callRulesCurrent(lb: LiveBrowser, version: number): boolean {
+  const v = Number.isInteger(version) ? version : -1;
+  return v >= lb.rulesVersion && v >= rulesVersionNow();
 }
 
 /** Remember links a read showed, the oldest forgotten past LINKS_MAX. */
@@ -149,4 +190,5 @@ export async function withBrowserLock<T>(rowId: string, waitMs: number, fn: (lb:
 export function resetLiveRegistryForTests(): void {
   registry.live.clear();
   registry.tails.clear();
+  registry.rulesVersion = 0;
 }

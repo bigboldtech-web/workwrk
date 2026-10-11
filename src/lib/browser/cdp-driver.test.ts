@@ -8,7 +8,7 @@
 // unknown_outcome.
 
 import { describe, expect, it, vi } from "vitest";
-import { CdpClosed, type Cdp } from "./cdp";
+import { CdpClosed, CdpTimeout, type Cdp } from "./cdp";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import type { SiteVerdict } from "./sites";
 import type { ElementFingerprint } from "./types";
@@ -59,10 +59,10 @@ class FakeCdp implements Cdp {
 type Reader = (mode: string, arg: Record<string, unknown>) => unknown;
 
 const ELEMENTS = [
-  { i: 0, tag: "input", role: "textbox", name: "Email", type: "email", autocomplete: "email", inputmode: null, nameAttr: "email", idAttr: "email", label: "Email", maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: true },
-  { i: 1, tag: "input", role: "textbox", name: "Password", type: "password", autocomplete: "current-password", inputmode: null, nameAttr: "pw", idAttr: "pw", label: "Password", maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false },
-  { i: 2, tag: "button", role: "button", name: "Sign in", type: null, autocomplete: null, inputmode: null, nameAttr: null, idAttr: null, label: null, maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false },
-  { i: 3, tag: "button", role: "button", name: "Sign in", type: null, autocomplete: null, inputmode: null, nameAttr: null, idAttr: null, label: null, maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false },
+  { i: 0, tag: "input", role: "textbox", name: "Email", type: "email", autocomplete: "email", inputmode: null, nameAttr: "email", idAttr: "email", label: "Email", maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: true, anchor: "e0e0e0e0" },
+  { i: 1, tag: "input", role: "textbox", name: "Password", type: "password", autocomplete: "current-password", inputmode: null, nameAttr: "pw", idAttr: "pw", label: "Password", maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false, anchor: "e0e0e0e0" },
+  { i: 2, tag: "button", role: "button", name: "Sign in", type: null, autocomplete: null, inputmode: null, nameAttr: null, idAttr: null, label: null, maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false, anchor: "f0f0f0f0" },
+  { i: 3, tag: "button", role: "button", name: "Sign in", type: null, autocomplete: null, inputmode: null, nameAttr: null, idAttr: null, label: null, maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false, anchor: "f1f1f1f1" },
 ];
 
 function readerFor(over: Partial<Record<string, Reader>> = {}): Reader {
@@ -287,7 +287,7 @@ describe("the guard", () => {
   describe("the commit check (review of Phase 4 step 2)", () => {
     const blanks = (fake: FakeCdp) => fake.sent.filter((s) => s.method === "Page.navigate" && s.params.url === "about:blank" && s.sessionId === "S1").length;
     const readerCalls = (fake: FakeCdp) => fake.sent.filter((s) => s.method === "Runtime.callFunctionOn").length;
-    const signIn: ElementFingerprint = { tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin: 0 };
+    const signIn: ElementFingerprint = { tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin: 0, twins: 2, anchor: "f0f0f0f0", at: 2 };
 
     it("holds and blanks a refused host that committed with no request paused, a back/forward cache restore", async () => {
       const fake = fakeBrowser();
@@ -486,6 +486,13 @@ describe("reading", () => {
       ["Sign in", "none", 0, "login.proof.test"],
       ["Sign in", "none", 1, "login.proof.test"],
     ]);
+    // Which twin (review of Phase 4 step 3): how many, its anchor and its place.
+    expect(snap.elements.map((e) => [e.twins, e.anchor, e.at])).toEqual([
+      [1, "e0e0e0e0", 0],
+      [1, "e0e0e0e0", 1],
+      [2, "f0f0f0f0", 2],
+      [2, "f1f1f1f1", 3],
+    ]);
     const json = JSON.stringify(snap);
     for (const hint of ["autocomplete", "nameAttr", "idAttr", "inputmode", "readerIndex", "current-password"]) expect(json).not.toContain(hint);
     // The reader runs in its own world, its arguments passed by value.
@@ -496,12 +503,15 @@ describe("reading", () => {
 
   it("finds words with the nearest control's fingerprint", async () => {
     const { handle } = await attached(fakeBrowser());
-    expect(await handle.find("sign in")).toEqual({ matches: [{ text: "Sign in here", near: { tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin: 0 } }] });
+    expect(await handle.find("sign in")).toEqual({
+      matches: [{ text: "Sign in here", near: { tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin: 0, twins: 2, anchor: "f0f0f0f0", at: 2 } }],
+    });
   });
 });
 
 describe("acting", () => {
-  const signIn = (twin: number): ElementFingerprint => ({ tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin });
+  const signIn = (twin: number): ElementFingerprint => ({ tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin, twins: 2, anchor: twin === 0 ? "f0f0f0f0" : "f1f1f1f1", at: 2 + twin });
+  const password: ElementFingerprint = { tag: "input", role: "textbox", name: "Password", kind: "password", type: "password", formHost: "login.proof.test", href: null, twin: 0, twins: 1, anchor: "e0e0e0e0", at: 1 };
   const inputs = (fake: FakeCdp) => fake.sent.filter((s) => s.method.startsWith("Input."));
 
   it("clicks the second of two twins at its centre", async () => {
@@ -509,7 +519,7 @@ describe("acting", () => {
     const fake = fakeBrowser({ reader: readerFor({ locate: (_m, arg) => (located.push(arg), { ok: true, x: 40, y: 50 }) }) });
     const { handle } = await attached(fake);
     expect(await handle.click(signIn(1))).toMatchObject({ ok: true, settled: true });
-    expect(located).toEqual([{ i: 3, tag: "button", name: "Sign in" }]);
+    expect(located).toEqual([{ i: 3, tag: "button", name: "Sign in", anchor: "f1f1f1f1" }]);
     expect(inputs(fake).map((s) => s.params.type)).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
     expect(inputs(fake)[1].params).toMatchObject({ x: 40, y: 50, button: "left", clickCount: 1 });
   });
@@ -517,11 +527,11 @@ describe("acting", () => {
   it("sends nothing for a sensitive field, an element gone, fewer twins, or one covered", async () => {
     const fake = fakeBrowser({ reader: readerFor({ locate: () => ({ ok: false, code: "covered" }) }) });
     const { handle } = await attached(fake);
-    expect(await handle.type({ tag: "input", role: "textbox", name: "Password", kind: "password", type: "password", formHost: "login.proof.test", href: null, twin: 0 }, "hunter2", false)).toEqual({ ok: false, code: "sensitive" });
+    expect(await handle.type(password, "hunter2", false)).toEqual({ ok: false, code: "sensitive" });
     // Read as sensitive now even when the card's fingerprint said otherwise.
-    expect(await handle.type({ tag: "input", role: "textbox", name: "Password", kind: "password", type: "password", formHost: "login.proof.test", href: null, twin: 0 }, "x", false)).toEqual({ ok: false, code: "sensitive" });
+    expect(await handle.type(password, "x", false)).toEqual({ ok: false, code: "sensitive" });
     expect(await handle.click({ ...signIn(0), name: "Place order" })).toEqual({ ok: false, code: "not_found" });
-    expect(await handle.click(signIn(2))).toEqual({ ok: false, code: "changed" });
+    expect(await handle.click({ ...signIn(2), twins: 3 })).toEqual({ ok: false, code: "changed" });
     expect(await handle.click(signIn(0))).toEqual({ ok: false, code: "covered" });
     expect(inputs(fake)).toEqual([]);
   });
@@ -558,12 +568,129 @@ describe("acting", () => {
       },
     });
     const { handle } = await attached(fake);
-    const email: ElementFingerprint = { tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", formHost: "login.proof.test", href: null, twin: 0 };
+    const email: ElementFingerprint = { tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", formHost: "login.proof.test", href: null, twin: 0, twins: 1, anchor: "e0e0e0e0", at: 0 };
     expect(await handle.type(email, "max@proof.test", true)).toEqual({ ok: false, code: "blocked_hop", host: "exfil.proof.test" });
     expect(inputs(fake).map((s) => [s.method, s.params.type ?? s.params.text])).toEqual([
       ["Input.insertText", "max@proof.test"],
       ["Input.dispatchKeyEvent", "keyDown"],
       ["Input.dispatchKeyEvent", "keyUp"],
     ]);
+  });
+});
+
+// Review of Phase 4 step 3.
+describe("which twin, the document, once, replacing and the whole list", () => {
+  const signIn = (twin: number): ElementFingerprint => ({ tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin, twins: 2, anchor: twin === 0 ? "f0f0f0f0" : "f1f1f1f1", at: 2 + twin });
+  const inputs = (fake: FakeCdp) => fake.sent.filter((s) => s.method.startsWith("Input."));
+  const readerSends = (fake: FakeCdp, mode: string) => fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && (s.params.arguments as Array<{ value: unknown }>)[0].value === mode);
+  const country: ElementFingerprint = { tag: "select", role: "combobox", name: "Country", kind: "select", type: null, formHost: "login.proof.test", href: null, twin: 0, twins: 1, anchor: "c0c0c0c0", at: 4 };
+  const withList = [...ELEMENTS, { i: 4, tag: "select", role: "combobox", name: "Country", type: null, autocomplete: null, inputmode: null, nameAttr: "country", idAttr: "country", label: "Country", maxLength: null, codeBoxes: null, formAction: "http://login.proof.test/session", href: null, editable: false, disabled: false, filled: false, anchor: "c0c0c0c0", options: ["Andorra"], optionCount: 250 }];
+  const listPage = (over: Partial<Record<string, Reader>> = {}) =>
+    readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: withList, links: [] }), ...over });
+
+  it("answers changed for a new twin inserted above the card's, and clicks nothing", async () => {
+    // The card's twin was the first "Sign in" (index 2); a new one now sits above it.
+    const newcomer = { ...ELEMENTS[2], anchor: "abababab" };
+    const moved = [ELEMENTS[0], ELEMENTS[1], newcomer, { ...ELEMENTS[2], i: 3 }, { ...ELEMENTS[3], i: 4 }];
+    const fake = fakeBrowser({ reader: readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: moved, links: [] }) }) });
+    const { handle } = await attached(fake);
+    expect(await handle.click(signIn(0))).toEqual({ ok: false, code: "changed" });
+    // The same count with another anchor at the index, or the same anchor at another place, is changed too.
+    const swapped = fakeBrowser({ reader: readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: [ELEMENTS[0], ELEMENTS[1], ELEMENTS[3], ELEMENTS[2]].map((e, i) => ({ ...e, i })), links: [] }) }) });
+    expect(await (await attached(swapped)).handle.click(signIn(0))).toEqual({ ok: false, code: "changed" });
+    expect(inputs(fake)).toEqual([]);
+    expect(inputs(swapped)).toEqual([]);
+    expect(readerSends(fake, "locate")).toEqual([]);
+  });
+
+  it("passes the anchor back to the reader, which checks it again in the page", async () => {
+    const located: unknown[] = [];
+    const fake = fakeBrowser({ reader: readerFor({ locate: (_m, arg) => (located.push(arg), { ok: true, x: 1, y: 1 }) }) });
+    const { handle } = await attached(fake);
+    await handle.click(signIn(0));
+    expect(located).toEqual([{ i: 2, tag: "button", name: "Sign in", anchor: "f0f0f0f0" }]);
+  });
+
+  it("changes the document id with every commit and every move within a document, and not otherwise", async () => {
+    const fake = fakeBrowser();
+    const { handle } = await attached(fake);
+    const first = handle.documentId();
+    expect(handle.documentId()).toBe(first);
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L1", url: "http://shop.proof.test/checkout" } }, "S1");
+    const second = handle.documentId();
+    expect(second).not.toBe(first);
+    fake.emit("Page.navigatedWithinDocument", { frameId: "TAB", url: "http://shop.proof.test/checkout#pay" }, "S1");
+    const third = handle.documentId();
+    expect(third).not.toBe(second);
+    // A frame's commit is not the tab's document.
+    fake.emit("Page.frameNavigated", { frame: { id: "CHILD", parentId: "TAB", loaderId: "L9", url: "http://ads.proof.test/frame" } }, "S1");
+    expect(handle.documentId()).toBe(third);
+    // Another browser's ids never equal this one's.
+    expect((await attached(fakeBrowser())).handle.documentId()).not.toBe(first);
+  });
+
+  it("sends a choice once: one that timed out is unknown_outcome, never sent again in a new world", async () => {
+    let selects = 0;
+    const fake = fakeBrowser({
+      reader: listPage(),
+      extra: (method, params) => {
+        if (method === "Runtime.callFunctionOn" && (params.arguments as Array<{ value: unknown }>)[0].value === "select") {
+          selects += 1;
+          return Promise.reject(new CdpTimeout(method));
+        }
+        return undefined;
+      },
+    });
+    const { handle } = await attached(fake);
+    expect(await handle.select(country, { index: 249, label: "Zimbabwe" })).toEqual({ ok: false, code: "unknown_outcome" });
+    // Before: the reader tried it again in a new world, so a choice could be made twice.
+    expect(selects).toBe(1);
+  });
+
+  it("locates and focuses once too, a failure after the call left being unknown_outcome", async () => {
+    const fail = (mode: string) =>
+      fakeBrowser({
+        extra: (method, params) => (method === "Runtime.callFunctionOn" && (params.arguments as Array<{ value: unknown }>)[0].value === mode ? Promise.reject(new CdpTimeout(method)) : undefined),
+      });
+    const click = fail("locate");
+    expect(await (await attached(click)).handle.click(signIn(0))).toEqual({ ok: false, code: "unknown_outcome" });
+    expect(readerSends(click, "locate")).toHaveLength(1);
+    const email: ElementFingerprint = { tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", formHost: "login.proof.test", href: null, twin: 0, twins: 1, anchor: "e0e0e0e0", at: 0 };
+    const typing = fail("focus");
+    expect(await (await attached(typing)).handle.type(email, "max@proof.test", false)).toEqual({ ok: false, code: "unknown_outcome" });
+    expect(readerSends(typing, "focus")).toHaveLength(1);
+    expect(inputs(typing)).toEqual([]);
+  });
+
+  it("asks the reader to replace what a field holds before typing", async () => {
+    const focused: Array<Record<string, unknown>> = [];
+    const fake = fakeBrowser({ reader: readerFor({ focus: (_m, arg) => (focused.push(arg), { ok: true }) }) });
+    const { handle } = await attached(fake);
+    const email: ElementFingerprint = { tag: "input", role: "textbox", name: "Email", kind: "email", type: "email", formHost: "login.proof.test", href: null, twin: 0, twins: 1, anchor: "e0e0e0e0", at: 0 };
+    expect(await handle.type(email, "max@proof.test", false)).toMatchObject({ ok: true });
+    expect(focused).toEqual([{ i: 0, tag: "input", name: "Email", anchor: "e0e0e0e0", replace: true }]);
+  });
+
+  it("reads a list's options for matching, at most 1,000, with how many it has, and chooses by index and label", async () => {
+    const asked: Array<[string, Record<string, unknown>]> = [];
+    const fake = fakeBrowser({
+      reader: listPage({
+        options: (m, arg) => (asked.push([m, arg]), { ok: true, options: Array.from({ length: 1200 }, (_, k) => ({ label: `Country ${k + 1}`, disabled: k === 3 })), total: 1200 }),
+        select: (m, arg) => (asked.push([m, arg]), { ok: true }),
+        locate: () => ({ ok: true, x: 1, y: 1 }),
+      }),
+    });
+    const { handle } = await attached(fake);
+    const listed = await handle.options(country);
+    expect(listed.ok && listed.options).toHaveLength(1000);
+    expect(listed).toMatchObject({ ok: true, total: 1200 });
+    expect(listed.ok && listed.options[3]).toEqual({ label: "Country 4", disabled: true });
+    expect(await handle.select(country, { index: 249, label: "Country 250" })).toMatchObject({ ok: true });
+    expect(asked).toEqual([
+      ["options", { i: 4, tag: "select", name: "Country", anchor: "c0c0c0c0" }],
+      ["select", { i: 4, tag: "select", name: "Country", anchor: "c0c0c0c0", index: 249, label: "Country 250" }],
+    ]);
+    // A list whose place changed reads nothing.
+    expect(await handle.options({ ...country, at: 9 })).toEqual({ ok: false, code: "changed" });
   });
 });

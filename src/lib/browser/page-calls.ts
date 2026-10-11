@@ -24,14 +24,20 @@
 //
 // AFTER A READ, ONLY LINKS (Decision 11). In a turn that read anything,
 // open_page opens only an exact link a read in this session showed, or the
-// page it is on, never an address the model composed.
+// page it is on, never an address the model composed. It goes to the very
+// address that matched, the link as the read kept it or the page's own,
+// never the model's string (review of Phase 4 step 3: a fragment the model
+// added was dropped for the check and then sent with the navigation).
 //
 // AN APPROVED STEP ACTS ON THE PAGE AND THE ELEMENT ITS CARD SHOWED
 // (Decision 14): the page's address (fragment dropped) must be the card's,
+// the tab must still show the document the card was asked on (review of
+// Phase 4 step 3: a cart changed under a waiting card at the same address),
 // its site still allowed, and the element found again by its fingerprint
 // (the driver), or nothing is done. A step the browser lost before sending
 // anything waits (held retry_later); one sent and not confirmed fails and is
-// never run again.
+// never run again, and so does one after which the page tried a hop the
+// guard refused (review of Phase 4 step 3): it may have gone through.
 //
 // NEVER A SENSITIVE FIELD (Decision 18): typing into, choosing in, or
 // clicking a password, code, card or bank field is refused before any card,
@@ -48,9 +54,9 @@ import { PAGE_LIMITS, clickWarnings, isSensitiveField } from "./classes";
 import { BrowserLost } from "./cdp-driver";
 import { rememberLinks, takeEvents, type LiveBrowser } from "./live";
 import { redactPageText } from "./redact";
-import { controlOf, sameFingerprint, shapeSnapshot } from "./snapshot";
+import { controlOf, optionWords, sameFingerprint, shapeSnapshot } from "./snapshot";
 import { siteOf, siteVerdict } from "./sites";
-import type { ElementFingerprint, FieldKind, StepKind, StepOutcome } from "./types";
+import { OPTIONS_MATCH_MAX, type ElementFingerprint, type FieldKind, type StepKind, type StepOutcome } from "./types";
 
 /** The step a call leaves on the session's record (sessions.ts recordStep): kinds and hosts only. */
 export interface StepDraft {
@@ -132,13 +138,18 @@ function isCall(v: unknown): v is PageCall {
 export async function openOn(lb: LiveBrowser, url: string, o: { tainted: boolean }): Promise<PageCall> {
   const v = siteVerdict(url, lb.rules);
   if (!v.ok) return refusal(verdictSentence(v), { kind: "open", site: v.site, outcome: "refused", code: v.code });
+  // Outside a taint, the address as asked; in one, only the canonical address that matched (see the header).
+  let target = url;
   if (o.tainted) {
     const asked = pageKey(url);
-    if (!lb.links.has(asked) && asked !== pageKey(lb.handle.currentUrl())) return refusal(BROWSER_COPY.linkOnly, { kind: "open", site: v.site, outcome: "refused", code: "link_only" });
+    const here = pageKey(lb.handle.currentUrl());
+    if (lb.links.has(asked)) target = [...lb.links].find((l) => l === asked) ?? asked;
+    else if (asked === here) target = here;
+    else return refusal(BROWSER_COPY.linkOnly, { kind: "open", site: v.site, outcome: "refused", code: "link_only" });
   }
   let nav: Awaited<ReturnType<LiveBrowser["handle"]["navigate"]>>;
   try {
-    nav = await lb.handle.navigate(url);
+    nav = await lb.handle.navigate(target);
   } catch {
     nav = { ok: false, code: "lost" };
   }
@@ -274,6 +285,49 @@ export function cleanTyped(text: unknown): string {
 /** What a card's preparation found on the page: the card's facts and the picture's bytes, or why there is no card. */
 export type StepPrepared = { ok: true; facts: Omit<BrowserCardInput, "browserSessionId" | "shotId" | "shot">; picture: { jpeg: Uint8Array; width: number; height: number } | null } | { ok: false; error: string };
 
+/** A choice's words made one line, for matching. */
+function oneLine(s: unknown): string {
+  return String(s ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The option a choice names, matched against every option the list really
+ * has, at most OPTIONS_MATCH_MAX (review of Phase 4 step 3: only the 30 the
+ * model was shown were matched, and their shortened, cleaned words were
+ * stored, so a long or cleaned option could never be chosen). The words the
+ * model asks with are the ones a read shows (snapshot.ts optionWords): an
+ * exact match first; a match with another case only when it is the list's
+ * only one, so a case-only difference never matches an earlier option; two
+ * options the same words are refused, as is one with something hidden in
+ * it (its label would be kept on the card) or one that cannot be chosen.
+ */
+async function matchOption(lb: LiveBrowser, fp: ElementFingerprint, asked: unknown, who: string): Promise<{ ok: true; words: string; label: string; index: number } | { ok: false; error: string }> {
+  const wanted = oneLine(asked);
+  const said = clampText(String(asked ?? ""), 80);
+  if (!wanted) return { ok: false, error: BROWSER_COPY.noSuchOption(said) };
+  let listed: Awaited<ReturnType<LiveBrowser["handle"]["options"]>>;
+  try {
+    listed = await lb.handle.options(fp);
+  } catch {
+    return { ok: false, error: BROWSER_COPY.readFailed };
+  }
+  if (!listed.ok) return { ok: false, error: listed.code === "changed" ? BROWSER_COPY.staleElement : BROWSER_COPY.elementGone };
+  const words = listed.options.map((o) => (o.label ? optionWords(o.label) : null));
+  const where = (same: (w: string) => boolean) => words.flatMap((w, k) => (w && same(w.text) ? [k] : []));
+  let found = where((w) => w === wanted);
+  if (found.length === 0) {
+    const lower = wanted.toLowerCase();
+    found = where((w) => w.toLowerCase() === lower);
+  }
+  if (found.length === 0) return { ok: false, error: listed.total > listed.options.length ? BROWSER_COPY.optionNotInFirst(said, OPTIONS_MATCH_MAX) : BROWSER_COPY.noSuchOption(said) };
+  if (found.length > 1) return { ok: false, error: BROWSER_COPY.optionTwice(said) };
+  const k = found[0];
+  const w = words[k]!;
+  if (w.hidden) return { ok: false, error: BROWSER_COPY.sensitiveField(who) };
+  if (listed.options[k].disabled) return { ok: false, error: BROWSER_COPY.elementHidden };
+  return { ok: true, words: w.text, label: listed.options[k].label, index: k };
+}
+
 /**
  * A click, a typing or a choice the model asks for, checked on the page as
  * it is now (spec step 3, the first preparation): the page allowed; the id
@@ -296,6 +350,8 @@ export async function prepareStepOn(
   const key = pageKey(url);
   const fp = lb.refs.get(input.element);
   if (!fp || lb.refsUrl !== key) return { ok: false, error: BROWSER_COPY.staleElement };
+  // The document the card is bound to, taken before it is read (review of Phase 4 step 3).
+  const documentId = lb.handle.documentId();
   let raw: Awaited<ReturnType<LiveBrowser["handle"]["snapshot"]>>;
   try {
     raw = await lb.handle.snapshot();
@@ -304,6 +360,8 @@ export async function prepareStepOn(
   }
   const found = controlOf(raw, fp);
   if (!found) return { ok: false, error: BROWSER_COPY.elementGone };
+  // Another count of twins, another anchor or another place: the page changed since the model read it (review of Phase 4 step 3).
+  if ("changed" in found) return { ok: false, error: BROWSER_COPY.staleElement };
   const who = first || "the person";
   if (isSensitiveField(fp.kind) || isSensitiveField(found.raw.kind)) return { ok: false, error: BROWSER_COPY.sensitiveField(who) };
   if (tool === "click" && fp.kind === "file") return { ok: false, error: BROWSER_COPY.uploadsOff };
@@ -318,6 +376,7 @@ export async function prepareStepOn(
   const base = {
     site,
     pageUrl: key,
+    documentId,
     page: pageWords(key),
     element: input.element,
     target: fp,
@@ -330,15 +389,13 @@ export async function prepareStepOn(
     if (!TYPED_KINDS.has(fp.kind)) return { ok: false, error: BROWSER_COPY.notAField };
     const text = cleanTyped(input.text);
     if (!text.trim()) return { ok: false, error: BROWSER_COPY.emptyText };
-    facts = { ...base, text, pressEnter: input.pressEnter === true };
+    // The typing replaces what the field holds, and a filled field's card says so (review of Phase 4 step 3).
+    facts = { ...base, text, pressEnter: input.pressEnter === true, ...(found.raw.filled === true ? { replaces: true } : {}) };
   } else if (tool === "select_option") {
-    const wanted = String(input.option ?? "").trim().toLowerCase();
-    const shown = found.facts.options ?? [];
-    const at = shown.findIndex((o) => o.trim().toLowerCase() === wanted);
-    const rawOption = at >= 0 ? (found.raw.options ?? [])[at] : undefined;
-    if (!wanted || at < 0 || typeof rawOption !== "string") return { ok: false, error: BROWSER_COPY.noSuchOption(clampText(String(input.option ?? ""), 80)) };
-    // What the card shows is the option as the list shows it; the step chooses the very same one.
-    facts = { ...base, option: shown[at] };
+    const chosen = await matchOption(lb, fp, input.option, who);
+    if (!chosen.ok) return { ok: false, error: chosen.error };
+    // The card shows the option's words as a read shows them; the step chooses that very option, by its index and label.
+    facts = { ...base, option: chosen.words, optionLabel: chosen.label, optionIndex: chosen.index };
   } else {
     const formHasSensitive = fp.formHost !== null && raw.elements.some((e) => e && e.inMainFrame === true && e.formHost === fp.formHost && isSensitiveField(e.kind));
     facts = { ...base, warnings: clickWarnings(fp, { path, formHasSensitive, downloadLink: downloadLink(fp.href) }) };
@@ -349,6 +406,8 @@ export async function prepareStepOn(
   } catch {
     picture = null;
   }
+  // The page moved while the card was made: what it read is not what the tab shows (review of Phase 4 step 3).
+  if (lb.handle.documentId() !== documentId) return { ok: false, error: BROWSER_COPY.staleElement };
   return { ok: true, facts, picture };
 }
 
@@ -360,7 +419,7 @@ export function prepareTakeOverOn(lb: LiveBrowser, reason: TakeOverReason): { ok
   const v = siteVerdict(url, lb.rules);
   if (!v.ok) return { ok: false, error: verdictSentence(v) };
   const key = pageKey(url);
-  return { ok: true, facts: { site, pageUrl: key, page: pageWords(key), reason } };
+  return { ok: true, facts: { site, pageUrl: key, documentId: lb.handle.documentId(), page: pageWords(key), reason } };
 }
 
 // ── An approved step ────────────────────────────────────────────────
@@ -376,6 +435,8 @@ export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "
   const kind: StepKind = tool === "click" ? "click" : tool === "type_text" ? "type" : "select";
   const current = pageKey(lb.handle.currentUrl());
   if (current !== input.pageUrl) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
+  // The same document, not only the same address (review of Phase 4 step 3).
+  if (!input.documentId || lb.handle.documentId() !== input.documentId) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
   const v = siteVerdict(current, lb.rules);
   if (!v.ok) return refusal(BROWSER_COPY.siteNowNotAllowed(input.site), { kind, site: input.site, outcome: "refused", code: v.code });
   if (!input.target) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "no_target" });
@@ -386,7 +447,7 @@ export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "
         ? await lb.handle.click(input.target)
         : tool === "type_text"
           ? await lb.handle.type(input.target, input.text ?? "", input.pressEnter === true)
-          : await lb.handle.select(input.target, input.option ?? "");
+          : await lb.handle.select(input.target, { index: input.optionIndex ?? -1, label: input.optionLabel ?? "" });
   } catch {
     // A driver that threw mid-act may have sent input: never re-run (Decision 14).
     out = { ok: false, code: "unknown_outcome" };
@@ -397,14 +458,18 @@ export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "
     return { answer: { ok: true, site: out.site || input.site, settled: out.settled, note: BROWSER_COPY.actNote }, step: { kind, site: input.site, outcome: "ok" }, touched: true, site: out.site || input.site };
   }
   if (out.code === "lost_before") return refusal(BROWSER_COPY.providerUnavailable, null, { held: "retry_later" });
-  if (out.code === "unknown_outcome" || out.code === "blocked_hop") {
+  // Input was sent before either: the step may have gone through (review of
+  // Phase 4 step 3, a refused hop after the act included), so the card fails
+  // marked unknownOutcome and is never run again.
+  const mayHaveRun = out.code === "unknown_outcome" || out.code === "blocked_hop";
+  if (mayHaveRun) {
     lb.refs.clear();
     lb.refsUrl = null;
   }
   const error = actSentence(out, first);
-  return refusal(error, { kind, site: input.site, outcome: out.code === "blocked_hop" ? "refused" : "failed", code: out.code }, {
+  return refusal(error, { kind, site: input.site, outcome: "failed", code: out.code }, {
     touched: out.code === "blocked_hop",
-    ...(out.code === "unknown_outcome" ? { unknownOutcome: true as const } : {}),
+    ...(mayHaveRun ? { unknownOutcome: true as const } : {}),
     ...(out.code === "unknown_outcome" && lb.lost ? { lost: true as const } : {}),
   });
 }

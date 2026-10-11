@@ -32,7 +32,7 @@ import { clampText } from "./clamp";
 import type { TeammateHue } from "./hues";
 import { plainLine } from "./run-view";
 import { ALWAYS_ASK, EDITABLE_FIELD } from "./tool-policy";
-import { isConnectorToolName, isToolName } from "./tool-names";
+import { isBrowserToolName, isConnectorToolName, isToolName } from "./tool-names";
 import { toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_ERRORS,
@@ -168,8 +168,10 @@ export type TeammateMessageView =
       resume?: boolean;
       /** The turn read the person's Gmail or Google Calendar (meta.readGoogle): its links are shown, never clickable (review round 3 of Phase 3). */
       readGoogle?: true;
+      /** The turn read a web page (meta.readWeb): its links are shown, never clickable (review of Phase 4 step 3). */
+      readWeb?: true;
     })
-  | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef; readGoogle?: true })
+  | (MessageBase & { kind: "report"; practice: boolean; toolCalls: AiToolCall[]; routine: TeammateRoutineRef; readGoogle?: true; readWeb?: true })
   | (MessageBase & {
       kind: "event";
       event: TeammateEventKind | null;
@@ -186,14 +188,16 @@ export type TeammateMessageView =
 /**
  * How an answer's or a routine report's links render (OsMarkdown `links`):
  * "inert", linking nothing, when the turn read the person's Google
- * (meta.readGoogle), while it is still arriving (it cannot say yet), or when
- * any of its calls is a Google tool; else "shown". Review round 4 of Phase 3:
- * an answer settled after its save failed carries no meta.readGoogle, and its
- * calls are then all that say it used the person's mail or calendar.
+ * (meta.readGoogle) or a web page (meta.readWeb, review of Phase 4 step 3: a
+ * planted page's link rendered clickable in the answer), while it is still
+ * arriving (it cannot say yet), or when any of its calls is a Google or a
+ * browser tool; else "shown". Review round 4 of Phase 3: an answer settled
+ * after its save failed carries no meta, and its calls are then all that say
+ * it used the person's mail, calendar or browser.
  */
-export function answerLinks(m: { readGoogle?: true; streaming?: boolean; toolCalls: ReadonlyArray<Pick<AiToolCall, "name">> }): "inert" | "shown" {
-  if (m.readGoogle === true || m.streaming === true) return "inert";
-  return m.toolCalls.some((c) => isConnectorToolName(c.name)) ? "inert" : "shown";
+export function answerLinks(m: { readGoogle?: true; readWeb?: true; streaming?: boolean; toolCalls: ReadonlyArray<Pick<AiToolCall, "name">> }): "inert" | "shown" {
+  if (m.readGoogle === true || m.readWeb === true || m.streaming === true) return "inert";
+  return m.toolCalls.some((c) => isConnectorToolName(c.name) || isBrowserToolName(c.name)) ? "inert" : "shown";
 }
 
 export const AGENT_ACTION_STATUSES = ["PENDING", "RUNNING", "EXECUTED", "FAILED", "DENIED", "EXPIRED", "CANCELLED"] as const;
@@ -516,6 +520,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
           ...(origin ? { origin } : {}),
           ...(meta?.resume === true ? { resume: true } : {}),
           ...(meta?.readGoogle === true ? { readGoogle: true as const } : {}),
+          ...(meta?.readWeb === true ? { readWeb: true as const } : {}),
         };
       }
       return null;
@@ -532,6 +537,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
           dueAt: iso(str(meta?.dueAt)),
         },
         ...(meta?.readGoogle === true ? { readGoogle: true as const } : {}),
+        ...(meta?.readWeb === true ? { readWeb: true as const } : {}),
       };
     case "EVENT": {
       const event = meta?.event;

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, controlOf, fingerprintOf, sameFingerprint, shapeSnapshot } from "./snapshot";
+import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, controlOf, fingerprintOf, optionWords, sameFingerprint, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -21,6 +21,9 @@ const element = (o: Partial<RawElement> = {}): RawElement => ({
   formHost: "shop.proof.test",
   href: null,
   twin: 0,
+  twins: 1,
+  anchor: "c0ffee00",
+  at: 0,
   disabled: false,
   filled: false,
   inMainFrame: true,
@@ -130,7 +133,7 @@ describe("shapeSnapshot", () => {
   it("maps each id to the fingerprint its act finds the element by", () => {
     const field = element({ tag: "input", role: "textbox", name: "Gift message", kind: "text", type: "text", formHost: "shop.proof.test", twin: 2, options: undefined });
     const { refs, view } = shape(raw({ elements: [element(), field, element({ tag: "select", role: "combobox", name: "Size", kind: "select", type: null, options: ["Small", "Large"] })] }));
-    expect(refs.get("e2")).toEqual({ tag: "input", role: "textbox", name: "Gift message", kind: "text", type: "text", formHost: "shop.proof.test", href: null, twin: 2 });
+    expect(refs.get("e2")).toEqual({ tag: "input", role: "textbox", name: "Gift message", kind: "text", type: "text", formHost: "shop.proof.test", href: null, twin: 2, twins: 1, anchor: "c0ffee00", at: 0 });
     expect(view.elements[2]).toEqual({ id: "e3", role: "combobox", name: "Size", kind: "select", options: ["Small", "Large"] });
     // A kind the reader named that no field has is read as none.
     expect(shape(raw({ elements: [element({ kind: "secret" as never })] })).view.elements[0].kind).toBe("none");
@@ -196,6 +199,29 @@ describe("whitespace first, then the redaction (review of Phase 4 step 1)", () =
     expect(view.links[0].text).toBe(`Code ${HIDDEN_MARK}`);
     expect(view.title).toBe(`Code ${HIDDEN_MARK}`);
     expect(JSON.stringify(view)).not.toMatch(/482913|771204|9921|4242/);
+  });
+});
+
+// Review of Phase 4 step 3: select_option matched only the 30 options a read
+// shows; the view still shows 30, and says how many more there are.
+describe("lists longer than a read shows (review of Phase 4 step 3)", () => {
+  it("shows 30 of a 250-option list and says how many more it has, by its id", () => {
+    const countries = Array.from({ length: 250 }, (_, i) => `Country ${i + 1}`);
+    const list = element({ tag: "select", role: "combobox", name: "Country", kind: "select", type: null, options: countries.slice(0, 60), optionCount: 250 });
+    const { view } = shape(raw({ elements: [element(), list] }));
+    expect(view.elements[1].options).toHaveLength(30);
+    expect(view.elements[1].moreOptions).toBe(220);
+    expect(view.note).toContain(BROWSER_COPY.moreOptions([{ id: "e2", more: 220 }]));
+    // A list that shows all it has says nothing more.
+    const small = shape(raw({ elements: [element({ tag: "select", role: "combobox", name: "Size", kind: "select", type: null, options: ["S", "M"], optionCount: 2 })] }));
+    expect(small.view.elements[0].moreOptions).toBeUndefined();
+    expect(small.view.note).toBe(NOTE);
+  });
+
+  it("cleans an option's words as a read shows them, and says when something was hidden", () => {
+    expect(optionWords("  Gold\n plan ")).toEqual({ text: "Gold plan", hidden: false });
+    expect(optionWords("x".repeat(300)).text).toHaveLength(PAGE_LIMITS.optionChars);
+    expect(optionWords("Visa 4242 4242 4242 4242")).toEqual({ text: `Visa ${HIDDEN_MARK}`, hidden: true });
   });
 });
 
@@ -273,16 +299,31 @@ describe("one read fits one result (review of Phase 4 step 1)", () => {
 // Step 3: a card finds its control again in a fresh read by its fingerprint (browser-previews.ts).
 describe("controlOf (Phase 4 step 3)", () => {
   it("finds the control by every field of its fingerprint, its twin included, and gives its facts with no value", () => {
-    const one = element({ name: "Add to cart", twin: 0 });
-    const two = element({ name: "Add to cart", twin: 1, disabled: true });
-    const page = raw({ elements: [one, two, { ...element({ tag: "input", role: "textbox", name: "Card 4242 4242 4242 4242", kind: "text", type: "text" }), value: "hunter2" } as RawElement] });
-    expect(controlOf(page, fingerprintOf(two))?.facts).toEqual({ role: "button", name: "Add to cart", kind: "none", disabled: true });
-    expect(controlOf(page, { ...fingerprintOf(two), twin: 2 })).toBeNull();
+    const one = element({ name: "Add to cart", twin: 0, twins: 2, at: 0 });
+    const two = element({ name: "Add to cart", twin: 1, twins: 2, at: 1, disabled: true });
+    const page = raw({ elements: [one, two, { ...element({ tag: "input", role: "textbox", name: "Card 4242 4242 4242 4242", kind: "text", type: "text", at: 2 }), value: "hunter2" } as RawElement] });
+    const facts = (v: ReturnType<typeof controlOf>) => (v && "facts" in v ? v.facts : null);
+    expect(facts(controlOf(page, fingerprintOf(two)))).toEqual({ role: "button", name: "Add to cart", kind: "none", disabled: true });
+    expect(controlOf(page, { ...fingerprintOf(two), twin: 2 })).toEqual({ changed: true });
     expect(controlOf(page, { ...fingerprintOf(one), formHost: "other.proof.test" })).toBeNull();
-    const field = controlOf(page, fingerprintOf(page.elements[2]));
-    expect(JSON.stringify(field?.facts)).not.toContain("hunter2");
-    expect(field?.facts.name).toBe(`Card ${HIDDEN_MARK}`);
+    const field = facts(controlOf(page, fingerprintOf(page.elements[2])));
+    expect(JSON.stringify(field)).not.toContain("hunter2");
+    expect(field?.name).toBe(`Card ${HIDDEN_MARK}`);
     expect(sameFingerprint(fingerprintOf(one), fingerprintOf(two))).toBe(false);
+  });
+
+  // Review of Phase 4 step 3: only the twin index was kept, so a new twin
+  // inserted above moved the card's index onto another one, which it found.
+  it("answers changed for a new twin inserted above, another anchor or another place, never the twin now at the index", () => {
+    const ours = element({ name: "Add to cart", twin: 0, twins: 1, anchor: "a1a1a1a1", at: 4 });
+    const fp = fingerprintOf(ours);
+    // A twin inserted above: the card's index 0 now names the newcomer.
+    const inserted = raw({ elements: [element({ name: "Add to cart", twin: 0, twins: 2, anchor: "b2b2b2b2", at: 4 }), element({ name: "Add to cart", twin: 1, twins: 2, anchor: "a1a1a1a1", at: 5 })] });
+    expect(controlOf(inserted, fp)).toEqual({ changed: true });
+    // The same count, but its row's words changed, or another control moved it.
+    expect(controlOf(raw({ elements: [{ ...ours, anchor: "c3c3c3c3" }] }), fp)).toEqual({ changed: true });
+    expect(controlOf(raw({ elements: [{ ...ours, at: 5 }] }), fp)).toEqual({ changed: true });
+    expect(controlOf(raw({ elements: [ours] }), fp)).toMatchObject({ raw: ours });
   });
 
   it("never finds a control of another frame", () => {

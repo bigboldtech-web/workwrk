@@ -1341,6 +1341,9 @@ export const BROWSER_COPY = {
   linksLeftOut: (n: number) => (n === 1 ? "1 link whose address carries a code, a token or a key isn't listed." : `${n} links whose addresses carry a code, a token or a key aren't listed.`),
   /** Lists whose options were left out to keep the read within its size (review of Phase 4 step 1). */
   optionsLeftOut: (n: number) => `The options of ${n} ${n === 1 ? "list" : "lists"} aren't shown.`,
+  /** Lists with more options than a read shows, by their ids (review of Phase 4 step 3): select_option matches every option the list has. */
+  moreOptions: (lists: ReadonlyArray<{ id: string; more: number }>) =>
+    `Some lists have more options than are shown: ${lists.map((l) => `${l.id} has ${count(l.more, "more option", "more options")}`).join(", ")}. select_option can choose any of them by their words.`,
   // Step 2: what the guard saw between two calls (a result's note) and what
   // ending a session or a take over writes. Step 3 brings the rest.
   /** A page sent the browser to a host the guard refused, by a redirect or its own script. */
@@ -1413,11 +1416,17 @@ export const BROWSER_COPY = {
   inFrame: "That is inside a frame from another site, which teammates don't use.",
   sensitiveField: (f: string) => `That's a password, code or payment field. Ask ${f} to take over and type it themselves.`,
   noSuchOption: (o: string) => `The list has no option "${o}".`,
+  /** A choice not found in the first options of a list longer than a match reads (review of Phase 4 step 3). */
+  optionNotInFirst: (o: string, n: number) => `The list has no option "${o}" in its first ${n.toLocaleString("en-US")}, and it has more than that, which a teammate can't choose from. Ask the person to choose it.`,
+  /** Two options with the same words, which a card could not tell apart (review of Phase 4 step 3). */
+  optionTwice: (o: string) => `The list has more than one option "${o}", so a teammate can't tell which. Ask the person to choose it.`,
   emptyText: "Say what to type.",
   oneStepWaits: (f: string) => `A browser step already waits for ${f}'s approval. Wait for their answer.`,
   pageChanged: "The page changed since this was asked, so nothing was done. Ask again.",
   siteNowNotAllowed: (s: string) => `${s} isn't allowed any more, so nothing was done.`,
   unknownOutcome: "The browser didn't confirm the step finished. Look at the page in the browser before asking again.",
+  /** An act after which the page tried a hop the guard refused (review of Phase 4 step 3): input was sent, so it may have gone through. */
+  mayHaveGoneThrough: (s: string) => `The step may have gone through: the page then tried to go on to ${s}, which isn't allowed, so it stopped there. Look at the page in the browser before asking again.`,
   tooManyThisTurn: "That's the most browser steps one answer can take. Send another message to carry on.",
   tooManyOpens: "That's the most pages one answer can open.",
   tooManyReads: "That's the most page reads one answer can make.",
@@ -1452,6 +1461,8 @@ export const BROWSER_COPY = {
   fieldLine: (l: string) => `Field: ${l}`,
   optionLine: (o: string) => `Chooses: ${o}`,
   pressEnterLine: "Then presses Enter, which may send the form.",
+  /** A typing into a field that held something (review of Phase 4 step 3): it replaces it. */
+  replacesLine: "Replaces what the field holds.",
   buysLine: "This looks like it buys, books or pays.",
   sendsLine: "This looks like it sends, posts or shares something.",
   deletesLine: "This looks like it deletes or cancels something.",
@@ -1651,6 +1662,10 @@ export const BROWSER_AUDIT_COPY = {
   sessionEnded: (minutes: number) => `Closed a browser after ${count(minutes, "minute", "minutes")}`,
   takeOverStarted: (site: string) => `Took over the browser on ${site}`,
   takeOverEnded: (finished: boolean) => (finished ? "Finished in the browser and gave it back" : "Gave the browser back"),
+  /** An act that did nothing, audited too (review of Phase 4 step 3): its failed sentence and its site. */
+  actNothingDone: (failed: string, site: string | null) => (site ? `${failed} on ${site}. Nothing was done.` : `${failed}. Nothing was done.`),
+  /** An act that may have gone through (review of Phase 4 step 3). */
+  actUnconfirmed: (done: string) => `${done}, but the browser didn't confirm it finished`,
 } as const;
 
 /**
