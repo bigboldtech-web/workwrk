@@ -29,6 +29,7 @@ import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-o
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
+import { isAgentOf } from "@/lib/access/org-role";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { PathContainerView } from "@/components/access/path-container-view";
@@ -767,6 +768,7 @@ export default async function SpacePage(props: {
             viewerId={u.id}
             spaceSlug={space.slug}
             statusesByList={statusesByList}
+            canExport={!isAgentOf(u.accessLevel)}
           />
         ) : null}
         {view === "board" ? (
@@ -2206,6 +2208,7 @@ function SpaceListSection({
   viewerId,
   spaceSlug,
   statusesByList,
+  canExport,
 }: {
   items: Array<{
     id: string;
@@ -2224,6 +2227,8 @@ function SpaceListSection({
   spaceSlug: string;
   /** Each List's own statuses, by slug (audit High #3). */
   statusesByList: Record<string, StatusOption[]>;
+  /** The CSV download: never for an Agent (AGENT_TIER_BLURB). */
+  canExport: boolean;
 }) {
   // The Space workflow palette, as the StatusOption[] both the progress circle
   // and the item popup's status picker expect.
@@ -2282,7 +2287,7 @@ function SpaceListSection({
         <ListDueMenu opts={opts} spaceSlug={spaceSlug} />
         <ListGroupByMenu opts={opts} spaceSlug={spaceSlug} />
         <ListSortMenu opts={opts} spaceSlug={spaceSlug} />
-        <ListCsvExport
+        {canExport ? <ListCsvExport
           filename={`${spaceSlug}-items-${new Date().toISOString().slice(0, 10)}.csv`}
           rows={items.map((it) => ({
             title: it.title,
@@ -2291,7 +2296,7 @@ function SpaceListSection({
             ownerName: it.ownerId ? (ownerFacets.find((o) => o.id === it.ownerId)?.name ?? "") : "",
             updatedAt: it.updatedAt instanceof Date ? it.updatedAt.toISOString() : String(it.updatedAt),
           }))}
-        />
+        /> : null}
       </div>
       {filterActive ? (
         <FilterChipStrip

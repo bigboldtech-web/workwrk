@@ -205,7 +205,8 @@ describe("at its approval", () => {
   it("waits while the person has the browser, and while it is still starting", async () => {
     const input = await stored();
     h.use = { ok: false, reason: "person_has_it" };
-    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy" });
+    // Last polish of Phase 4: the toast is the person's own ("You have the browser now"), the teammate's sentence kept beside it.
+    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.personHasIt("Max"), held: "browser_busy", forPerson: "You have the browser now. Press Done or Give it back first." });
     h.use = { ok: false, reason: "busy" };
     expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.starting, held: "retry_later" });
   });
@@ -382,5 +383,58 @@ describe("polish after review round 6 of Phase 4", () => {
     h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
     h.capped = true;
     expect(await prepareBrowser("click", { element: "e1" }, may)).toEqual({ error: BROWSER_COPY.tooManySteps });
+  });
+});
+
+// Last polish of Phase 4: the first preparation invites a browser only where
+// its turn says it may start one, a browser that closed while it was
+// starting names the chat's line, and an approval's typing left with nothing
+// to type tells the person in their own words.
+describe("last polish of Phase 4", () => {
+  /** Words that invite the model to open a new browser. */
+  const INVITES = /Open a page|open_page first|start a new one|Open the page again/;
+  const noTurn = (o: { tainted?: boolean; turn?: Row } = {}): PrepareContext =>
+    ({ person: PERSON, teammate: { agentId: "a1", agentName: "Shopper", trigger: "CHAT" }, tainted: o.tainted ?? false, taintedBy: "web", ...(o.turn ? { turn: o.turn } : {}) }) as unknown as PrepareContext;
+
+  it("never invites a browser when the turn is missing or names no mayStart, as the tools read it (item 8)", async () => {
+    for (const c of [noTurn(), noTurn({ turn: { runId: "run1", sessionId: "chat1" } })]) {
+      const which = JSON.stringify((c as unknown as Row).turn ?? null);
+      h.use = { ok: false, reason: "none" };
+      // Before: "No page is open. Open one with open_page first."
+      expect(await prepareBrowser("click", { element: "e1" }, c), which).toEqual({ error: BROWSER_COPY.noBrowserNoOther });
+      h.use = { ok: false, reason: "ended" };
+      // Before: "The browser closed. Open a page to start a new one."
+      expect(await prepareBrowser("click", { element: "e1" }, c), which).toEqual({ error: BROWSER_COPY.closedNoOther });
+      h.use = { ok: false, reason: "restarted" };
+      expect(await prepareBrowser("ask_to_take_over", { reason: "sign_in" }, c), which).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    }
+    // Its most steps, in a turn that names no mayStart.
+    h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
+    h.capped = true;
+    const out = await prepareBrowser("click", { element: "e1" }, noTurn({ turn: { runId: "run1", sessionId: "chat1" } }));
+    expect(out).toEqual({ error: BROWSER_COPY.tooManyStepsNoOther });
+    expect(INVITES.test(String((out as Row).error))).toBe(false);
+    // A turn that says it may start one keeps the invitation.
+    h.capped = false;
+    h.use = { ok: false, reason: "none" };
+    expect(await prepareBrowser("click", { element: "e1" }, noTurn({ turn: { runId: "run1", sessionId: "chat1", mayStart: true } }))).toEqual({ error: BROWSER_COPY.noBrowserYet });
+  });
+
+  it("names the chat's line for a browser that closed while it was starting, never the browser card (item 4)", async () => {
+    h.use = { ok: false, reason: "ended", endReason: "stopped", noCard: true };
+    // Before: 'The browser closed before this step, and the browser card says why: "You stopped it."'
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.closedNoCard("You stopped it.") });
+    h.use = { ok: false, reason: "ended", endReason: "stopped" };
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.closedBecause("You stopped it.") });
+  });
+
+  it("tells the person at an approval that there was nothing to type, the teammate keeping 'Say what to type' (item 2)", async () => {
+    const first = await prepareBrowser("type_text", { element: "e3", text: "Max Pine" }, prep());
+    if ("error" in first) throw new Error(first.error);
+    // The person's edit, cleaned, leaves nothing.
+    const out = await prepareBrowser("type_text", { ...first.input, text: "\u0000\u0007" }, prep("APPROVAL"));
+    // Before: { error: "Say what to type." } on the person's card.
+    expect(out).toEqual({ error: BROWSER_COPY.emptyText, forPerson: "There's nothing to type, so nothing was done." });
+    expect(BROWSER_PANEL_COPY.nothingToType).not.toMatch(/Say what/);
   });
 });

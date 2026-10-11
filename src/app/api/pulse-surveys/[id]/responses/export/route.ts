@@ -27,6 +27,10 @@ import { csvFormulaSafe } from "@/lib/csv";
  * the same per-question floor the results page applies. Accepts `officeId` and
  * `departmentId` query params so the export matches what the manager
  * sees in the filtered view.
+ *
+ * Never for an Agent (the `export` action; AGENT_TIER_BLURB), whatever else
+ * would let them in: an Agent in the People team, or one who made the
+ * survey. The survey pages hide Export CSV from Agents; this holds it.
  */
 
 interface Question {
@@ -59,6 +63,7 @@ function csvEscape(val: unknown): string {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
+  if ((session.user as { accessLevel?: string }).accessLevel === "AGENT") return jsonError("Agents can't export survey responses.", 403);
   if (!(await cultureOrganiserFromSession(session))) return jsonError("Forbidden", 403);
 
   const { id } = await params;

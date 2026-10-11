@@ -47,6 +47,13 @@
 // its most steps, is never told as an invitation where the turn can start
 // none (noBrowserNoOther, tooManyStepsNoOther).
 //
+// LAST POLISH OF PHASE 4: the person holding the browser, and a typing left
+// with nothing to type, carry the person's own words at an approval too
+// (BROWSER_PANEL_COPY.youHaveIt, nothingToType); the first preparation
+// invites a browser only when its turn says it may start one (mayStart
+// true, as the tools read it), and a browser that closed while it was
+// starting names the chat's line, never the card it never drew (`noCard`).
+//
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
@@ -54,7 +61,7 @@ import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason,
 import { BROWSER_INPUT, badInput, closedSentence, goneAnswer, recheckUnderLock, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
-import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { BrowserToolName } from "./tool-names";
 import { withBrowserLock } from "@/lib/browser/live";
 import { cleanTyped, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page-calls";
@@ -99,7 +106,8 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!stored) return { error: ERR.notAllowed };
     const use = await browserSessionFor({ person, agentId: agent.id, browserSessionId: stored.browserSessionId, runId: null, purpose: "approval" });
     if (!use.ok) {
-      if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy" };
+      // The toast the person reads is theirs (last polish of Phase 4): "Max has the browser now" is the teammate's.
+      if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
       return approvalRefusal(use.reason, agent.name, first, { minutes: use.minutes, endReason: use.endReason });
     }
@@ -108,7 +116,8 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     const input: BrowserCardInput = { ...stored };
     if (tool === "type_text") {
       const text = cleanTyped(stored.text);
-      if (!text.trim()) return { error: BROWSER_COPY.emptyText };
+      // "Say what to type" is the teammate's (last polish of Phase 4): the person's card says nothing was done.
+      if (!text.trim()) return { error: BROWSER_COPY.emptyText, forPerson: BROWSER_PANEL_COPY.nothingToType };
       input.text = text;
     }
     return { input: { ...input }, risk: "IRREVERSIBLE", preview: browserCard(tool, input), targetKey: null };
@@ -120,10 +129,13 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   const asked = parsed.data as { element?: string; text?: string; pressEnter?: boolean; option?: string; reason?: string };
   const runId = ctx.turn?.runId ?? null;
   const continues = ctx.turn?.continues;
-  const mayOpen = ctx.tainted !== true && ctx.turn?.mayStart !== false;
+  // Invited to open a browser only where the turn says it may start one (last
+  // polish of Phase 4: as the tools' mayOpenAnother reads it, `mayStart ===
+  // true`; a missing turn, or one that names no mayStart, never invites).
+  const mayOpen = ctx.tainted !== true && ctx.turn?.mayStart === true;
   const use = await browserSessionFor({ person, agentId: agent.id, runId, ...(continues && continues.length > 0 ? { continues } : {}), purpose: "model" });
   if (!use.ok) {
-    if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes, { mayOpen }) };
+    if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes, { mayOpen, noCard: use.noCard === true }) };
     return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes, mayOpen }) };
   }
   const row = use.row;

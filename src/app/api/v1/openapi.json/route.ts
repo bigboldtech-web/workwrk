@@ -10,10 +10,17 @@
  * string with the default set as examples, not an enum. The docs site shows
  * these strings, so none holds an em dash or a double hyphen
  * (route.test.ts holds both rules).
+ *
+ * A value that may be null says so the OpenAPI 3.1 way (orNull below): "null"
+ * joins its type, and an enum lists null. 3.1 is JSON Schema, which has no
+ * `nullable` keyword, so the 3.0 form this used to carry was ignored and every
+ * one of those fields read as never null. The webhook events are the one list
+ * POST /api/webhooks accepts (src/lib/webhook-events.ts).
  */
 
 import { Frequency, SOPStatus, SOPType, TaskSource, UserStatus } from "@/generated/prisma";
 import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS } from "@/lib/board-items-shared";
+import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
 
 const USER_STATUSES = Object.values(UserStatus);
 const KPI_FREQUENCIES = Object.values(Frequency);
@@ -23,13 +30,22 @@ const TASK_SOURCES = Object.values(TaskSource);
 const TASK_PRIORITIES = PRIORITY_OPTIONS.map((p) => p.value);
 const DEFAULT_TASK_STATUSES = DEFAULT_STATUS_OPTIONS.map((s) => s.value);
 
+/**
+ * A schema that may also be null, in OpenAPI 3.1's own form: "null" joins the
+ * type, and an enum that may be null lists null among its values.
+ */
+function orNull<S extends { type: string; enum?: readonly unknown[] }>(schema: S) {
+  const { type, enum: values, ...rest } = schema;
+  return { ...rest, type: [type, "null"], ...(values ? { enum: [...values, null] } : {}) };
+}
+
 /** The page every list endpoint answers: `{ data, nextCursor }`. */
 function listOf(ref: string) {
   return {
     type: "object",
     properties: {
       data: { type: "array", items: { $ref: `#/components/schemas/${ref}` } },
-      nextCursor: { type: "string", nullable: true, description: "Pass as `cursor` for the next page. Null on the last page." },
+      nextCursor: orNull({ type: "string", description: "Pass as `cursor` for the next page. Null on the last page." }),
     },
   };
 }
@@ -45,11 +61,10 @@ const PAGING = [
   { name: "cursor", in: "query", schema: { type: "string" }, description: "The `nextCursor` of the page before." },
 ];
 
-const person = {
+const person = orNull({
   type: "object",
-  nullable: true,
   properties: { id: { type: "string" }, firstName: { type: "string" }, lastName: { type: "string" } },
-};
+});
 
 export async function GET(req: Request) {
   // Public base URL. `new URL(req.url).origin` is ALWAYS truthy, so it can
@@ -113,19 +128,17 @@ export async function GET(req: Request) {
             lastName: { type: "string" },
             status: { type: "string", enum: USER_STATUSES },
             accessLevel: { type: "string" },
-            avatar: { type: "string", nullable: true },
+            avatar: orNull({ type: "string" }),
             joinDate: { type: "string", format: "date-time" },
             createdAt: { type: "string", format: "date-time" },
-            role: {
+            role: orNull({
               type: "object",
-              nullable: true,
               properties: { id: { type: "string" }, title: { type: "string" } },
-            },
-            department: {
+            }),
+            department: orNull({
               type: "object",
-              nullable: true,
               properties: { id: { type: "string" }, name: { type: "string" } },
-            },
+            }),
             manager: { ...person, description: "The person they report to, or null." },
           },
         },
@@ -135,15 +148,14 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string" },
             name: { type: "string" },
-            description: { type: "string", nullable: true },
-            category: { type: "string", nullable: true },
-            roleId: { type: "string", nullable: true },
-            role: {
+            description: orNull({ type: "string" }),
+            category: orNull({ type: "string" }),
+            roleId: orNull({ type: "string" }),
+            role: orNull({
               type: "object",
-              nullable: true,
               description: "In the list only.",
               properties: { id: { type: "string" }, title: { type: "string" } },
-            },
+            }),
             createdAt: { type: "string", format: "date-time" },
             _count: {
               type: "object",
@@ -157,17 +169,16 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string" },
             name: { type: "string" },
-            description: { type: "string", nullable: true },
-            targetValue: { type: "number", nullable: true },
-            unit: { type: "string", nullable: true },
+            description: orNull({ type: "string" }),
+            targetValue: orNull({ type: "number" }),
+            unit: orNull({ type: "string" }),
             frequency: { type: "string", enum: KPI_FREQUENCIES },
-            kraId: { type: "string", nullable: true },
-            kra: {
+            kraId: orNull({ type: "string" }),
+            kra: orNull({
               type: "object",
-              nullable: true,
               description: "In the list only.",
               properties: { id: { type: "string" }, name: { type: "string" } },
-            },
+            }),
             createdAt: { type: "string", format: "date-time" },
             _count: {
               type: "object",
@@ -184,8 +195,8 @@ export async function GET(req: Request) {
             userId: { type: "string" },
             period: { type: "string", example: "2026-Q1" },
             targetValue: { type: "number" },
-            actualValue: { type: "number", nullable: true },
-            score: { type: "number", nullable: true },
+            actualValue: orNull({ type: "number" }),
+            score: orNull({ type: "number" }),
             createdAt: { type: "string", format: "date-time" },
           },
         },
@@ -194,7 +205,7 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string" },
             message: { type: "string" },
-            companyValue: { type: "string", nullable: true },
+            companyValue: orNull({ type: "string" }),
             giverId: { type: "string" },
             receiverId: { type: "string" },
             createdAt: { type: "string", format: "date-time" },
@@ -207,27 +218,25 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string", description: "Opens at /item/<id> in the app." },
             title: { type: "string" },
-            description: { type: "string", nullable: true, description: "In the list only." },
-            date: { type: "string", format: "date-time", nullable: true, description: "The due date, or null when the task has none." },
-            status: {
+            description: orNull({ type: "string", description: "In the list only." }),
+            date: orNull({ type: "string", format: "date-time", description: "The due date, or null when the task has none." }),
+            status: orNull({
               type: "string",
-              nullable: true,
               description:
                 "The task's status as its List stores it. Each List keeps its own set of statuses, so there is no fixed list; " +
                 "a List nobody has changed uses the three in `examples`. Null when the task has no status.",
               examples: DEFAULT_TASK_STATUSES,
-            },
-            priority: { type: "string", nullable: true, enum: TASK_PRIORITIES, description: "Null when the task has no priority." },
-            slaHours: { type: "integer", nullable: true, description: "As it was given. Nothing escalates a task when it passes." },
+            }),
+            priority: orNull({ type: "string", enum: TASK_PRIORITIES, description: "Null when the task has no priority." }),
+            slaHours: orNull({ type: "integer", description: "As it was given. Nothing escalates a task when it passes." }),
             source: { type: "string", enum: TASK_SOURCES },
-            sourceRef: { type: "string", nullable: true },
-            assigneeId: { type: "string", nullable: true, description: "The task's main assignee, or null when nobody is assigned." },
-            escalatedAt: {
+            sourceRef: orNull({ type: "string" }),
+            assigneeId: orNull({ type: "string", description: "The task's main assignee, or null when nobody is assigned." }),
+            escalatedAt: orNull({
               type: "string",
               format: "date-time",
-              nullable: true,
               description: "In the list only. Set on tasks carried over from the old task system; nothing sets it now.",
-            },
+            }),
             createdAt: { type: "string", format: "date-time" },
           },
         },
@@ -236,16 +245,36 @@ export async function GET(req: Request) {
           properties: {
             id: { type: "string" },
             title: { type: "string" },
-            description: { type: "string", nullable: true },
-            category: { type: "string", nullable: true },
-            subcategory: { type: "string", nullable: true },
+            description: orNull({ type: "string" }),
+            category: orNull({ type: "string" }),
+            subcategory: orNull({ type: "string" }),
             sopType: { type: "string", enum: SOP_TYPES },
             version: { type: "integer" },
             status: { type: "string", enum: SOP_STATUSES },
-            kraId: { type: "string", nullable: true },
-            publishedAt: { type: "string", format: "date-time", nullable: true },
+            kraId: orNull({ type: "string" }),
+            publishedAt: orNull({ type: "string", format: "date-time" }),
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
+            _count: {
+              type: "object",
+              description: "How many compliance records and assignments the SOP has.",
+              properties: { compliance: { type: "integer" }, assignments: { type: "integer" } },
+            },
+          },
+        },
+        Invitation: {
+          type: "object",
+          properties: {
+            invitation: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                email: { type: "string", format: "email" },
+                token: { type: "string", description: "The secret in the join link. Treat it as a password." },
+                expiresAt: { type: "string", format: "date-time" },
+                acceptUrl: { type: "string", format: "uri", description: "The join link to send the person." },
+              },
+            },
           },
         },
       },
@@ -283,8 +312,8 @@ export async function GET(req: Request) {
                   required: ["email"],
                   properties: {
                     email: { type: "string", format: "email" },
-                    firstName: { type: "string", description: "Accepted but not stored: the person gives their own name when they accept." },
-                    lastName: { type: "string", description: "Accepted but not stored: the person gives their own name when they accept." },
+                    firstName: { type: "string", description: "Kept on the invitation, so the join form starts filled in. The person can change it when they accept." },
+                    lastName: { type: "string", description: "Kept on the invitation, so the join form starts filled in. The person can change it when they accept." },
                     accessLevel: {
                       type: "string",
                       description:
@@ -298,7 +327,11 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Invitation created" } },
+          responses: {
+            "201": { description: "Invitation created", content: { "application/json": { schema: { $ref: "#/components/schemas/Invitation" } } } },
+            "400": { description: "email is missing, uses a domain the workspace does not invite from, or roleId or departmentId is not this workspace's" },
+            "409": { description: "The email is already in the workspace, or an invitation to it is pending" },
+          },
         },
       },
       "/kras": {
@@ -356,7 +389,11 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/KPI" } } } } },
+          responses: {
+            "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/KPI" } } } },
+            "400": { description: "kraId, name or targetValue is missing" },
+            "404": { description: "The KRA is not in this workspace" },
+          },
         },
       },
       "/kpi-records": {
@@ -394,7 +431,11 @@ export async function GET(req: Request) {
               },
             },
           },
-          responses: { "201": { description: "Recorded", content: { "application/json": { schema: { $ref: "#/components/schemas/KPIRecord" } } } } },
+          responses: {
+            "201": { description: "Recorded", content: { "application/json": { schema: { $ref: "#/components/schemas/KPIRecord" } } } },
+            "400": { description: "kpiId, userId, period or actualValue is missing" },
+            "404": { description: "The KPI, or the person, is not in this workspace" },
+          },
         },
       },
       "/kudos": {
@@ -469,8 +510,8 @@ export async function GET(req: Request) {
                     kraId: { type: "string" },
                     category: { type: "string" },
                     slaHours: { type: "integer", description: "Kept with the task and returned as given. Nothing escalates a task when it passes." },
-                    priority: { type: "string", enum: TASK_PRIORITIES, default: "NORMAL" },
-                    source: { type: "string", enum: TASK_SOURCES, default: "MANUAL" },
+                    priority: { type: "string", enum: TASK_PRIORITIES, default: "NORMAL", description: "Any case is accepted and stored in capitals." },
+                    source: { type: "string", enum: TASK_SOURCES, default: "MANUAL", description: "Any case is accepted and stored in capitals." },
                     sourceRef: { type: "string" },
                   },
                 },
@@ -479,7 +520,7 @@ export async function GET(req: Request) {
           },
           responses: {
             "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/Task" } } } },
-            "400": { description: "title or assigneeId is missing" },
+            "400": { description: "title or assigneeId is missing, or priority or source is not one of the listed values" },
             "404": { description: "The assignee is not in this workspace" },
           },
         },
@@ -498,13 +539,9 @@ export async function GET(req: Request) {
         },
       },
     },
-    // Only the events something in the product fires. A webhook can also be
-    // subscribed to other names (POST /api/webhooks), but nothing sends them.
-    "x-events": [
-      { name: "kudos.created", description: "Fired on every new kudos." },
-      { name: "kpi.recorded", description: "Fired when a KPI reading is logged through this API or an integration." },
-      { name: "task.created", description: "Fired when a task is created in a List, through this API or by an integration." },
-    ],
+    // Exactly the events something sends, and exactly the names a webhook
+    // subscription may name (POST /api/webhooks): one list.
+    "x-events": WEBHOOK_EVENTS.map((e) => ({ name: e.name, description: e.description })),
   };
 
   // ── Post-process: group endpoints and document the failures every one of

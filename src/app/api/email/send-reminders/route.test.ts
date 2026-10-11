@@ -8,7 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   orgWheres: [] as unknown[],
   itemWheres: [] as Array<Record<string, unknown>>,
-  items: new Map<string, Array<{ id: string; title: string; dueAt: Date; status: string | null; boardId: string; ownerId: string }>>(),
+  items: new Map<string, Array<{ id: string; title: string; dueAt: Date; status: string | null; boardId: string; ownerId: string; board?: { folderId: string | null; spaceId: string | null } }>>(),
+  /** home.notifications.muted[] per person, for the per-object mute. */
+  muted: {} as Record<string, string[]>,
+  notified: [] as Array<{ userId: string; type: string; link: string }>,
   sent: [] as Array<{ to: string; organizationId?: string; count?: number; rows: number; subject: string; html: string }>,
   manager: { id: "m1", email: "m1@example.test", firstName: "Mia", deletedAt: null as Date | null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] as Array<{ id: string }> },
 }));
@@ -41,6 +44,16 @@ vi.mock("@/lib/prisma", () => ({
         { id: "u1", email: "u1@example.test", firstName: "Uma", lastName: "One", manager: db.manager },
       ],
     },
+    userPreference: {
+      findMany: async ({ where }: { where: { userId: { in: string[] } } }) =>
+        where.userId.in.filter((id) => db.muted[id]).map((userId) => ({ userId, home: { notifications: { muted: db.muted[userId] } } })),
+    },
+    notification: {
+      createMany: async ({ data }: { data: Array<{ userId: string; type: string; link: string }> }) => {
+        db.notified.push(...data);
+        return { count: data.length };
+      },
+    },
   },
 }));
 vi.mock("@/lib/email", () => ({
@@ -48,7 +61,12 @@ vi.mock("@/lib/email", () => ({
     db.sent.push({ to: e.to, organizationId: e.organizationId, count: e.variables?.count, rows: (e.html.match(/d overdue/g) ?? []).length, subject: e.subject, html: e.html });
   },
 }));
-vi.mock("@/lib/notify-prefs", () => ({ filterNotifyUsers: async (ids: string[]) => new Set(ids) }));
+// The inbox switches all on; the per-object mute is the real one, over the
+// userPreference rows above.
+vi.mock("@/lib/notify-prefs", async () => ({
+  ...(await vi.importActual<object>("@/lib/notify-prefs")),
+  filterNotifyUsers: async (ids: string[]) => new Set(ids),
+}));
 vi.mock("@/lib/policy-remind", () => ({ remindPolicyAssignmentsDue: async () => ({ orgs: 0, reminded: 0 }) }));
 vi.mock("@/lib/cron-auth", () => ({ cronRefusal: () => null }));
 
@@ -61,6 +79,8 @@ beforeEach(() => {
   db.itemWheres.length = 0;
   db.items.clear();
   db.sent.length = 0;
+  db.muted = {};
+  db.notified.length = 0;
   db.manager = { id: "m1", email: "m1@example.test", firstName: "Mia", deletedAt: null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] };
 });
 
@@ -117,5 +137,30 @@ describe("overdue tasks digest", () => {
     ]);
     await run("overdue-tasks");
     expect(db.sent[0]).toMatchObject({ count: 1, rows: 1 });
+  });
+});
+
+// Docs-found fixes batch 2: the Muted items card says muting a Space, Folder
+// or List stops its due-date updates, and every other task notification
+// honoured that (notify-item.ts), but the due-today run did not.
+describe("tasks due today", () => {
+  const today = () => new Date();
+
+  it("tells the owner about an open task due today", async () => {
+    db.items.set("o1", [{ id: "t1", title: "Ship it", dueAt: today(), status: "TO_DO", boardId: "b-default", ownerId: "u1", board: { folderId: "f1", spaceId: "s1" } }]);
+    await run("tasks-due-today");
+    expect(db.notified).toEqual([expect.objectContaining({ userId: "u1", type: "task_due_today", link: "/item/t1" })]);
+  });
+
+  it("says nothing about a task in a List, Folder or Space its owner muted", async () => {
+    db.items.set("o1", [
+      { id: "in-muted-space", title: "A", dueAt: today(), status: "TO_DO", boardId: "b-default", ownerId: "u1", board: { folderId: null, spaceId: "s1" } },
+      { id: "in-muted-folder", title: "B", dueAt: today(), status: "TO_DO", boardId: "b-custom", ownerId: "u1", board: { folderId: "f9", spaceId: "s2" } },
+      { id: "in-muted-list", title: "C", dueAt: today(), status: "OPEN", boardId: "b-custom", ownerId: "u2", board: { folderId: null, spaceId: "s3" } },
+      { id: "elsewhere", title: "D", dueAt: today(), status: "TO_DO", boardId: "b-default", ownerId: "u2", board: { folderId: null, spaceId: "s2" } },
+    ]);
+    db.muted = { u1: ["space:s1", "folder:f9"], u2: ["list:b-custom"] };
+    await run("tasks-due-today");
+    expect(db.notified.map((n) => n.link)).toEqual(["/item/elsewhere"]);
   });
 });

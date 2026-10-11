@@ -1211,7 +1211,13 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
     // A Google or browser card stopped before anything was sent waits again (Phase 4: the browser's too).
     if (a.holdNotSent && (isConnectorToolName(name) || isBrowserToolName(name)) && isHeldCode(held)) {
       const said = record(data).error;
-      return { status: "HELD", code: held, error: typeof said === "string" && said ? said : (outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed), data };
+      // A browser card held in the person's own words (last polish of Phase
+      // 4, browser-tools.ts `forPerson`): only the approval's answer reads a
+      // held error, and the person reads it, so never "Max has the browser
+      // now" to Max. Nothing of it reaches the teammate.
+      const forPerson = isBrowserToolName(name) ? record(data).forPerson : null;
+      const personError = typeof forPerson === "string" && forPerson.trim() ? clampText(forPerson.trim(), 240) : null;
+      return { status: "HELD", code: held, error: personError ?? (typeof said === "string" && said ? said : (outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed)), data };
     }
     const error = outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed;
     // A write Google may have carried out (connector-tools.ts failed) says so

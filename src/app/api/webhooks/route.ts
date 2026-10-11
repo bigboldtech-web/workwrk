@@ -10,29 +10,31 @@ import {
 import { generateWebhookSecret } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
 import { settingsWriteGate } from "@/lib/access/settings-write";
+import { WEBHOOK_ANY, WEBHOOK_EVENT_NAMES, unsentWebhookEvents } from "@/lib/webhook-events";
 
 /**
  * Webhook subscription management (admin-only).
  *
- * GET    /api/webhooks   — list subscriptions + recent delivery summary
- * POST   /api/webhooks   — create; plaintext secret shown ONCE
- * DELETE /api/webhooks?id=  — delete (also deletes delivery history)
+ * GET    /api/webhooks   list subscriptions + recent delivery summary
+ * POST   /api/webhooks   create; plaintext secret shown ONCE
+ * DELETE /api/webhooks?id=  delete (also deletes delivery history)
+ *
+ * THE EVENTS. A subscription names "*" or events from WEBHOOK_EVENTS
+ * (src/lib/webhook-events.ts), exactly the names something sends through
+ * dispatchEvent, which delivers an event to every ACTIVE subscription whose
+ * stored list holds its name or "*". The list used to offer seven names
+ * nothing sends, plus task.completed, while three that are sent
+ * (task.status_changed, task.assignee_changed, task.field_changed) could not
+ * be named, so they reached "*" subscriptions only.
+ *
+ * A name nothing sends is refused out loud on create, never dropped in
+ * silence (it used to be filtered out, and the rest saved). A subscription
+ * stored before keeps every name it holds, sent or not: GET reports the
+ * names nothing sends as `unsentEvents`, so an Admin can see why that part
+ * of it stays quiet, and nothing is rewritten behind them.
  */
 
-const VALID_EVENTS = [
-  "*",
-  "kudos.created",
-  "kpi.recorded",
-  "review.created",
-  "review.completed",
-  "task.created",
-  "task.escalated",
-  "task.completed",
-  "sop.published",
-  "sop.updated",
-  "okr.created",
-  "okr.updated",
-];
+const VALID_EVENTS = [WEBHOOK_ANY, ...WEBHOOK_EVENT_NAMES];
 
 export async function GET(_req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -56,7 +58,7 @@ export async function GET(_req: NextRequest) {
       _count: { select: { deliveries: true } },
     },
   });
-  return jsonSuccess({ data: subs, validEvents: VALID_EVENTS });
+  return jsonSuccess({ data: subs.map((s) => ({ ...s, unsentEvents: unsentWebhookEvents(s.events) })), validEvents: VALID_EVENTS });
 }
 
 export async function POST(req: NextRequest) {
@@ -74,11 +76,15 @@ export async function POST(req: NextRequest) {
   if (!body.url || !/^https?:\/\//i.test(body.url)) {
     return jsonError("A valid https URL is required");
   }
-  const events =
-    body.events && body.events.length > 0
-      ? body.events.filter((e) => VALID_EVENTS.includes(e))
-      : ["*"];
-  if (events.length === 0) return jsonError("Pick at least one valid event");
+  if (body.events !== undefined && (!Array.isArray(body.events) || !body.events.every((e) => typeof e === "string"))) {
+    return jsonError("events is a list of event names");
+  }
+  const asked = [...new Set(body.events ?? [])];
+  const unknown = asked.filter((e) => !VALID_EVENTS.includes(e));
+  if (unknown.length > 0) {
+    return jsonError(`Nothing sends ${unknown.length === 1 ? "this event" : "these events"}: ${unknown.join(", ")}. Pick from ${VALID_EVENTS.join(", ")}.`);
+  }
+  const events = asked.length > 0 ? asked : [WEBHOOK_ANY];
 
   const { plaintext, prefix, hash } = generateWebhookSecret();
   const row = await prisma.webhookSubscription.create({
@@ -114,7 +120,7 @@ export async function POST(req: NextRequest) {
     ...row,
     secret: plaintext,
     message:
-      "This is the only time we'll show the webhook signing secret. Store it now — you'll use it to verify the X-Workwrk-Signature header on every delivery.",
+      "This is the only time we'll show the webhook signing secret. Store it now: you'll use it to verify the X-Workwrk-Signature header on every delivery.",
   });
 }
 

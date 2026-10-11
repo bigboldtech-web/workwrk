@@ -4,6 +4,24 @@ import { authenticate } from "@/lib/api-auth";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
+import { TaskSource } from "@/generated/prisma";
+
+/** The values a task's priority and source may hold: the List priority set and the TaskSource enum. */
+const PRIORITIES: readonly string[] = PRIORITY_OPTIONS.map((p) => p.value);
+const SOURCES: readonly string[] = Object.values(TaskSource);
+
+/**
+ * One of `allowed`, in any case (an integration that sent "high" has always
+ * been stored as HIGH), or null when the value is outside the list. Absent
+ * is the default, never an error.
+ */
+function pickListed(value: unknown, allowed: readonly string[], fallback: string): string | null {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string") return null;
+  const up = value.trim().toUpperCase();
+  return allowed.includes(up) ? up : null;
+}
 
 /**
  * GET /api/v1/tasks: list; POST, create (with optional SLA + source).
@@ -119,14 +137,21 @@ export async function POST(req: NextRequest) {
     assigneeId?: string;
     kraId?: string;
     slaHours?: number;
-    priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
-    source?: "MANUAL" | "SOP" | "REVIEW" | "OKR" | "AI";
+    priority?: unknown;
+    source?: unknown;
     sourceRef?: string;
     category?: string;
   };
   if (!body.title?.trim() || !body.assigneeId) {
     return Response.json({ error: "title and assigneeId are required" }, { status: 400 });
   }
+  // A value outside the real lists is the caller's mistake, answered as one:
+  // an unknown priority used to throw inside createBoardItem and answer 500,
+  // and any source was stored as sent.
+  const priority = pickListed(body.priority, PRIORITIES, "NORMAL");
+  if (!priority) return Response.json({ error: `priority must be one of ${PRIORITIES.join(", ")}` }, { status: 400 });
+  const source = pickListed(body.source, SOURCES, "MANUAL");
+  if (!source) return Response.json({ error: `source must be one of ${SOURCES.join(", ")}` }, { status: 400 });
 
   // Assignee must be in caller's org. createPersonalTask re-checks this (it is
   // the one thing that must never be guessed at), but the check stays here so
@@ -143,12 +168,12 @@ export async function POST(req: NextRequest) {
     title: body.title.trim().slice(0, 200),
     description: body.description?.slice(0, 2000) ?? null,
     dueAt: body.date ? new Date(body.date) : new Date(),
-    priority: body.priority ?? "NORMAL",
+    priority,
     legacy: {
       category: body.category?.slice(0, 80) ?? null,
       kraId: body.kraId ?? null,
       slaHours: body.slaHours && body.slaHours > 0 ? body.slaHours : null,
-      source: body.source ?? "MANUAL",
+      source,
       sourceRef: body.sourceRef ?? null,
     },
     actorId: null,
@@ -161,7 +186,7 @@ export async function POST(req: NextRequest) {
     status: created.status,
     priority: created.priority,
     slaHours: body.slaHours && body.slaHours > 0 ? body.slaHours : null,
-    source: body.source ?? "MANUAL",
+    source,
     sourceRef: body.sourceRef ?? null,
     assigneeId: created.assigneeId,
     createdAt: new Date(),

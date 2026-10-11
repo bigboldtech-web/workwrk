@@ -12,13 +12,14 @@ import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { cleanPersonName } from "@/lib/access/join-invite";
 
 /**
  * GET /api/v1/people
  *
  * Query params:
  *   • limit        (1-200, default 50)
- *   • cursor       (user id — return records AFTER this one)
+ *   • cursor       (user id: return records AFTER this one)
  *   • status       (ACTIVE | INACTIVE | ON_LEAVE | ...)
  *   • departmentId
  *
@@ -70,11 +71,11 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/v1/people — invite a user into the org.
+ * POST /api/v1/people: invite a user into the org.
  * Body: { email, firstName, lastName, accessLevel?, roleId?, departmentId? }
  *
- * Triggers invitation creation (does NOT create a fully-activated user
- * — that happens when they accept the invite). Returns the invitation
+ * Triggers invitation creation (does NOT create a fully-activated user;
+ * that happens when they accept the invite). Returns the invitation
  * token + acceptance URL for admins who want to hand it over manually.
  *
  * Inviting someone opens the workspace to them, so this holds every rule of
@@ -85,6 +86,11 @@ export async function GET(req: NextRequest) {
  * keeps to the workspace's email domains, names only this workspace's role and
  * department, carries a token from crypto.randomBytes, expires as Invite rules
  * say, and is audited.
+ *
+ * firstName and lastName are kept on the invitation, as the People import
+ * keeps them (POST /api/people/bulk-import), so the join form starts filled
+ * in; the person can still change them when they accept. They were accepted
+ * and dropped.
  */
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
@@ -172,6 +178,10 @@ export async function POST(req: NextRequest) {
         isAgent: isAgentOf(level),
         roleId: body.roleId ?? null,
         departmentId: body.departmentId ?? null,
+        // The join form's starting values (accept-invite GET), cleaned the
+        // way the form cleans what the person types.
+        firstName: cleanPersonName(body.firstName) || null,
+        lastName: cleanPersonName(body.lastName) || null,
       },
     });
     return { invite: created } as const;

@@ -1042,3 +1042,47 @@ describe("a browser card's failure in the person's own words (polish after revie
     expect(fx.handlerCalls).toEqual([]);
   });
 });
+
+// Last polish of Phase 4: the toast an approval answers while the person has
+// the browser said the teammate's "Priya has the browser now. Wait until they
+// finish." to Priya herself.
+describe("a held browser card in the person's own words (last polish of Phase 4)", () => {
+  const BROWSING = ["search_tasks", "open_page", "read_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
+  const TITLE = 'Click "Place order"';
+  const clickCard = () =>
+    seedAction({
+      toolName: "click",
+      risk: "IRREVERSIBLE",
+      input: { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", element: "e4" },
+      preview: { title: TITLE, lines: ["Page: shop.proof.test/checkout"], browser: { sessionId: "bs1", site: "shop.proof.test" } },
+      readWeb: true,
+    });
+  beforeEach(() => {
+    fx.agent.toolNames = BROWSING;
+    fx.cards.click = { risk: "IRREVERSIBLE", title: TITLE };
+  });
+
+  it("answers a step the tool held with the person's line, the card waiting as it was", async () => {
+    // As browser-tools.ts actRun answers it at an approval while the person has the browser.
+    fx.answers.click = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    // Before: "Priya has the browser now. Wait until they finish. It still waits for you, ..."
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "browser_busy", error: CONNECTOR_COPY.stillWaits(BROWSER_PANEL_COPY.youHaveIt) }]);
+    expect(out.results[0].error).not.toContain("Priya");
+    expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null, error: null });
+    expect(computer.released).toEqual([]);
+  });
+
+  it("answers a card its preparation held with the person's line too", async () => {
+    // As browser-previews.ts answers it at an approval.
+    fx.cards.click = { ok: false, error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "browser_busy", error: CONNECTOR_COPY.stillWaits(BROWSER_PANEL_COPY.youHaveIt) }]);
+    expect(fx.handlerCalls).toEqual([]);
+    // A hold with no words of the person's says its own sentence, as before.
+    fx.cards.click = { ok: false, error: BROWSER_COPY.starting, held: "retry_later" };
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ status: "PENDING", code: "retry_later", error: CONNECTOR_COPY.stillWaits(BROWSER_COPY.starting) });
+  });
+});

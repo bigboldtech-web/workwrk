@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_TOOL_COUNTS,
+  actForPersonLine,
   actSentence,
   approvalRefusal,
   browserActOutcome,
@@ -342,9 +343,11 @@ describe("polish after review round 6 of Phase 4", () => {
   const DASH = /\u2014|\u2013|--/;
 
   it("says a browser that closed before an approved step in the person's words: the browser card's own end line, never the teammate's sentence", () => {
+    // Last polish of Phase 4: the plain "Closed." (left, deactivated) and "It didn't start." add nothing after it, so the line stands alone.
+    const plain = new Set(["left", "deactivated", "start_failed"]);
     for (const r of END_REASONS) {
       const line = closedForPersonLine(r);
-      expect(line, r).toBe(BROWSER_PANEL_COPY.stepClosed((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]));
+      expect(line, r).toBe(BROWSER_PANEL_COPY.stepClosed(plain.has(r) ? null : (BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]));
       expect(MODEL_WORDS.test(line), r).toBe(false);
       expect(DASH.test(line), r).toBe(false);
     }
@@ -397,5 +400,75 @@ describe("polish after review round 6 of Phase 4", () => {
       expect(s).not.toMatch(/browser card|closed/);
       expect(INVITES.test(s), s).toBe(false);
     }
+  });
+});
+
+// Last polish of Phase 4: a failed start that used the answer's one start
+// never says "Try again"; a browser that closed while it was starting drew
+// no card; the person's line after "nothing was done" adds only what is
+// news; a sensitive field in the person's own words.
+describe("last polish of Phase 4", () => {
+  const words = BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>;
+  const DASH = /\u2014|\u2013|--/;
+
+  it("reads the person's line cleanly for every end reason: never '...nothing was done. Closed.', never 'It didn't start.' after 'closed' (item 7)", () => {
+    for (const r of END_REASONS) {
+      const line = closedForPersonLine(r);
+      // Before: left and deactivated read "The browser closed before the step could run, so nothing was done. Closed."
+      expect(line, r).not.toMatch(/nothing was done\. Closed\.?$/);
+      expect(line, r).not.toContain("It didn't start.");
+      // The plain line, then at most the card's reason, one sentence each, never a bare "Closed" after it.
+      expect(line.startsWith(BROWSER_PANEL_COPY.stepClosed(null)), r).toBe(true);
+      const after = line.slice(BROWSER_PANEL_COPY.stepClosed(null).length).trim();
+      expect(["Closed", "Closed."], r).not.toContain(after);
+      expect(line, r).toMatch(/\.$/);
+      expect(line, r).not.toMatch(/ {2}|\.\./);
+      expect(DASH.test(line), r).toBe(false);
+    }
+    for (const r of ["left", "deactivated", "start_failed"]) expect(closedForPersonLine(r), r).toBe("The browser closed before the step could run, so nothing was done.");
+    expect(closedForPersonLine("idle")).toBe("The browser closed before the step could run, so nothing was done. Closed after 5 idle minutes.");
+    expect(closedForPersonLine("admin_stopped")).toBe("The browser closed before the step could run, so nothing was done. An Owner or Admin stopped every browser in this workspace.");
+  });
+
+  it("says a failed start that used the answer's one start can't try again, and keeps 'Try again' where the start was not used (item 3)", () => {
+    // Before: "Try again in a moment." and "Try again in 20 seconds." whatever the answer had used.
+    expect(browserRefusalSentence("provider_unavailable", "Shopper", "Max", { mayOpen: false })).toBe(BROWSER_COPY.providerUnavailableNoOther);
+    expect(browserRefusalSentence("provider_busy", "Shopper", "Max", { mayOpen: false, retryAfter: 20 })).toBe(BROWSER_COPY.providerBusyNoOther(20));
+    expect(browserRefusalSentence("start_failed", "Shopper", "Max", { mayOpen: false })).toBe(BROWSER_COPY.startFailedNoOther);
+    for (const r of ["provider_unavailable", "provider_busy", "start_failed"] as const) {
+      expect(browserRefusalSentence(r, "Shopper", "Max", { mayOpen: false }), r).not.toMatch(/Try again/);
+    }
+    expect(browserRefusalSentence("provider_unavailable", "Shopper", "Max")).toBe(BROWSER_COPY.providerUnavailable);
+    expect(browserRefusalSentence("provider_busy", "Shopper", "Max", { retryAfter: 20 })).toBe(BROWSER_COPY.providerBusy(20));
+    expect(browserRefusalSentence("start_failed", "Shopper", "Max", { mayOpen: true })).toBe(BROWSER_COPY.startFailed);
+  });
+
+  it("quotes the chat's line, never the browser card, for a browser that closed while it was starting (item 4)", () => {
+    for (const r of HELD_END_REASONS) {
+      // Before: "...and the browser card says why: ..." for a card never drawn.
+      expect(closedSentence(r, undefined, { noCard: true }), r).toBe(BROWSER_COPY.closedNoCard(words[r]));
+      expect(closedForAnswerSentence(r, { noCard: true }), r).toBe(BROWSER_COPY.closedForAnswerNoCard(words[r]));
+      expect(browserRefusalSentence("closed_in_answer", "Shopper", "Max", { endReason: r, noCard: true }), r).toBe(BROWSER_COPY.closedForAnswerNoCard(words[r]));
+      expect(browserRefusalSentence("ended", "Shopper", "Max", { endReason: r, noCard: true, mayOpen: false }), r).toBe(BROWSER_COPY.closedNoCard(words[r]));
+      for (const said of [closedSentence(r, undefined, { noCard: true }), closedForAnswerSentence(r, { noCard: true })]) {
+        expect(said, r).not.toContain("browser card");
+        expect(DASH.test(said), r).toBe(false);
+      }
+      // One that drew its card keeps the card's words.
+      expect(closedForAnswerSentence(r), r).toBe(BROWSER_COPY.closedForAnswer(words[r]));
+    }
+    // A failed start says its own words whatever the card; no reason known says only that it closed.
+    expect(closedSentence("start_failed", undefined, { noCard: true, mayOpen: false })).toBe(BROWSER_COPY.startFailedNoOther);
+    expect(closedForAnswerSentence("start_failed", { noCard: true })).toBe(BROWSER_COPY.startFailedNoOther);
+    expect(closedSentence(null, undefined, { noCard: true, mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
+    expect(closedForAnswerSentence(null, { noCard: true })).toBe(BROWSER_COPY.closedForAnswerNoCard(words.left));
+  });
+
+  it("says a sensitive field in the person's own words, and only that act (item 2)", () => {
+    expect(actForPersonLine({ ok: false, code: "sensitive" })).toBe(BROWSER_PANEL_COPY.sensitiveStep);
+    for (const code of ["not_found", "changed", "covered", "frame", "disabled", "lost_before", "unknown_outcome", "blocked_hop"] as const) {
+      expect(actForPersonLine({ ok: false, code }), code).toBeUndefined();
+    }
+    expect(BROWSER_PANEL_COPY.sensitiveStep).not.toMatch(/the person|Max|take over/i);
   });
 });

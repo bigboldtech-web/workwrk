@@ -759,9 +759,35 @@ const REGISTRY: Record<TrashType, Entry> = {
 
 // Snapshot the row (+ children) into TrashItem and delete it from its table.
 // Returns false if the row no longer exists.
+/**
+ * moveToTrash with `keepTasks` found tasks in the List, Folder or Space it
+ * was asked to take: nothing was written. `tasks` is how many, for the
+ * refusal (labels.ts agentTrashRefusal).
+ */
+export class TrashHoldsTasks extends Error {
+  readonly tasks: number;
+  constructor(tasks: number) {
+    super(`holds ${tasks} task(s)`);
+    this.name = "TrashHoldsTasks";
+    this.tasks = tasks;
+  }
+}
+
 export async function moveToTrash(
   type: TrashType, id: string,
-  ctx: { organizationId: string; userId?: string | null; userName?: string | null },
+  ctx: {
+    organizationId: string;
+    userId?: string | null;
+    userName?: string | null;
+    /**
+     * For a List, Folder or Space: go ahead only if it holds no task at all
+     * (archived ones count), else throw TrashHoldsTasks and write nothing.
+     * The Agent tier deletes with this on (it never deletes a task, resolve.ts
+     * rule 12). Counted under the same locks the delete takes, so a task
+     * added meanwhile waits and is counted, never trashed with it.
+     */
+    keepTasks?: boolean;
+  },
 ): Promise<boolean> {
   // A table or a form keeps receiving children while it is being trashed (a
   // cell edit, a form response from a live public link). Captured outside a
@@ -826,6 +852,12 @@ export async function moveToTrash(
             : await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "spaceId" = ${id} FOR UPDATE`;
         const boardIds = boards.map((b) => b.id);
         if (boardIds.length) await tx.$queryRaw`SELECT id FROM "Item" WHERE "boardId" = ANY(${boardIds}::text[]) FOR UPDATE`;
+        // Every task the delete below would take: the Lists locked above are
+        // exactly the Lists it removes, and their tasks cascade with them.
+        if (ctx.keepTasks && boardIds.length) {
+          const tasks = await tx.item.count({ where: { boardId: { in: boardIds } } });
+          if (tasks > 0) throw new TrashHoldsTasks(tasks);
+        }
       }
       const captured = await REGISTRY[type].capture(id, tx);
       if (!captured) return false;

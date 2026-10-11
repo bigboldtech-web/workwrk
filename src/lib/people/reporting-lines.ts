@@ -26,6 +26,60 @@ export function wouldCreateCycle(subjectId: string, managerId: string | null, ma
   return false;
 }
 
+/**
+ * Where a leaver's direct reports go in a handover (handover.server.ts
+ * runHandover, and the transfer dialog's preview of it, so the dialog says
+ * exactly what the run does).
+ *
+ *   to the recipient   unless that would close a loop, or the recipient is an
+ *                      Agent (access 2.4: an Agent is never anyone's manager;
+ *                      the work still goes to them as asked)
+ *   otherwise          up to the leaver's own manager, when that manager is
+ *                      no Agent and no loop follows; else to no manager
+ */
+export function planReportHandover(input: {
+  leaverId: string;
+  recipientId: string;
+  recipientIsAgent: boolean;
+  managers: ManagerMap;
+  /** Agents among the people who could take the reports (the leaver's manager). */
+  agentIds: ReadonlySet<string>;
+}): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null } {
+  const { leaverId, recipientId, managers } = input;
+  const reportIds = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
+  const toRecipient = input.recipientIsAgent ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
+  const leaverManager = managers.get(leaverId) ?? null;
+  const rehome = new Map<string | null, string[]>();
+  for (const r of reportIds) {
+    if (toRecipient.includes(r)) continue;
+    const up = leaverManager && leaverManager !== r && !input.agentIds.has(leaverManager) && !wouldCreateCycle(r, leaverManager, managers) ? leaverManager : null;
+    rehome.set(up, [...(rehome.get(up) ?? []), r]);
+  }
+  return { reportIds, toRecipient, rehome, leaverManager };
+}
+
+/**
+ * The transfer dialog's line about the reports when they cannot all go to
+ * the person picked (pure; tested). Null when every report goes to them.
+ */
+export function reportHandoverNote(
+  plan: { recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[] },
+  recipientName: string,
+): string | null {
+  const groups = plan.rehomed.filter((g) => g.count > 0);
+  const rest = groups.reduce((n, g) => n + g.count, 0);
+  if (rest === 0) return null;
+  const where = (to: string | null) => (to ? `to ${to}` : "to no manager for now");
+  const moves =
+    groups.length === 1
+      ? `${rest === 1 ? "Their direct report goes" : `Their ${rest} direct reports go`} ${where(groups[0].to)}`
+      : `Of their direct reports, ${groups.map((g) => `${g.count} ${g.count === 1 ? "goes" : "go"} ${where(g.to)}`).join(" and ")}`;
+  if (plan.recipientIsAgent) {
+    return `${recipientName} is on the Agent tier, and an Agent can't be anyone's manager. ${moves} instead. The rest still goes to ${recipientName}.`;
+  }
+  return `${moves}, because moving ${rest === 1 ? "it" : "them"} to ${recipientName} would make a reporting loop.`;
+}
+
 export interface OrgPerson {
   id: string;
   managerId: string | null;

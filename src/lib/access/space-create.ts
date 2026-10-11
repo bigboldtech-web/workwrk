@@ -13,6 +13,8 @@
 // Server-only.
 
 import { accessV2Resolver } from "./flags";
+import { AGENT_NO_SPACES } from "./labels";
+import { isAgentOf } from "./org-role";
 import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
 
 export async function mayCreateSpace(accessLevel: string | null | undefined): Promise<boolean> {
@@ -23,7 +25,12 @@ export async function mayCreateSpace(accessLevel: string | null | undefined): Pr
   return !!accessLevel && SPACE_CREATE_LEVELS.has(accessLevel);
 }
 
-/** The refusal sentence for the flag state, the same on every door. */
-export function spaceCreateRefusal(): string {
+/**
+ * The refusal sentence for the flag state, the same on every door. An Agent
+ * reads the engine's own words, whatever the flag: no setting opens Space
+ * creation to the Agent tier (AGENT_TIER_BLURB).
+ */
+export function spaceCreateRefusal(accessLevel?: string | null): string {
+  if (isAgentOf(accessLevel)) return AGENT_NO_SPACES;
   return accessV2Resolver() ? "Only Owners and Admins create Spaces here." : "Manager-level access required to create Spaces.";
 }

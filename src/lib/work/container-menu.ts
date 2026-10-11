@@ -221,7 +221,9 @@ export function containerMenuRows(input: ContainerMenuInput): ContainerMenuEntry
   if (kind === "space") out.push(row("hide", "Hide from sidebar"));
   if (full) {
     out.push(row("move", "Move"));
-    out.push(row("duplicate", "Duplicate"));
+    // A Space's copy is a new Space, which an Agent never creates (the
+    // duplicate route refuses it too); a Folder's or a List's copy is not.
+    if (!(isAgent && kind === "space")) out.push(row("duplicate", "Duplicate"));
     out.push(row("archive", "Archive"));
     if (canDelete && !isAgent) out.push(row("delete", "Delete", { destructive: true }));
   }

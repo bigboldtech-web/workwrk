@@ -754,9 +754,12 @@ async function approve(
     // before anything was sent: it waits, to be approved again (review of
     // step 3: it used to fail for good, and the person had to ask again). A
     // browser card whose person has the browser, or whose browser is still
-    // starting, the same (Phase 4 Decision 14).
+    // starting, the same (Phase 4 Decision 14), in the person's own words
+    // where the teammate's speak of them (last polish of Phase 4: never
+    // "Max has the browser now" to Max).
     if (agent && (product || browserTool) && prepared.held) {
-      return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(prepared.error) };
+      const said = browserTool && prepared.forPerson ? prepared.forPerson : prepared.error;
+      return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(said) };
     }
     // The person can no longer do it (or the edit left nothing to run): it
     // fails with the reason, and the teammate is told at its next turn. A

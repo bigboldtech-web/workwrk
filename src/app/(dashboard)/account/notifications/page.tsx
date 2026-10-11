@@ -234,7 +234,7 @@ function InboxTab() {
 
   return (
     <>
-      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps only what is aimed at you: tasks assigned to you and mentions.">
+      <SettingsCard title="Notification preset" id="notifications.preset" description="Focused keeps two switches on, tasks assigned to you and mentions, and turns the other work and people switches off. Talk and announcements keep their own switches.">
         <SettingsRow
           label="Preset"
           helper={preset === "custom" ? "Custom: your own mix of the switches below" : undefined}

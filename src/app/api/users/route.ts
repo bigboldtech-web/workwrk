@@ -17,6 +17,7 @@ import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
+import { managerCandidateIn } from "@/lib/access/manager-candidate";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -180,6 +181,17 @@ export async function POST(req: NextRequest) {
   const level = grantableAccessLevel(fresh.level, accessLevel);
   if (!level) return jsonError("You can't give that access level. An admin sets it in Members.", 403);
 
+  // Reports to: a live person of this workspace, never an Agent (access 2.4,
+  // AGENT_TIER_BLURB), the rule every other door that writes a manager holds.
+  // It was written as sent.
+  const reportsTo = managerId === undefined || managerId === null || managerId === "" ? null : managerId;
+  if (reportsTo !== null) {
+    if (typeof reportsTo !== "string") return jsonError("managerId is a person's id");
+    const candidate = await managerCandidateIn(getOrgId(session), reportsTo);
+    if (candidate === "not_found") return jsonError("That manager isn't in this workspace");
+    if (candidate === "agent_cannot_manage") return NextResponse.json({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" }, { status: 400 });
+  }
+
   const existing = await prisma.user.findFirst({
     where: { email, organizationId: getOrgId(session) },
   });
@@ -218,7 +230,7 @@ export async function POST(req: NextRequest) {
         accessLevel: level,
         // The org-role mirror, written with the level (spec 10 step 0).
         orgRole: orgRoleOf({ accessLevel: level }),
-        managerId,
+        managerId: reportsTo,
         organizationId: getOrgId(session),
       },
       // Never the password hash, MFA secrets or token version: the answer is

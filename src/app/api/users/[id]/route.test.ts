@@ -185,6 +185,19 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     expect(res.status).toBe(200);
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
+
+  // Docs-found fixes batch 2: the planner refuses an Agent with reports
+  // (membership.ts rule 6), and the drawer shows the route's answer on the
+  // Tier row. Before, every 409 was coded last_owner.
+  it("answers a refused Agent change with the planner's own code and sentence, writing nothing", async () => {
+    const sentence = "An Agent can't be anyone's manager, and 2 people report to them. Move their reports to someone else first.";
+    vi.mocked(applyRoleChange).mockResolvedValueOnce({ ok: false, status: 409, error: sentence, code: "agent_has_reports" });
+    const res = await patch({ orgRole: "MEMBER", memberTier: "AGENT" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: sentence, code: "agent_has_reports", fields: ["orgRole"] });
+    expect(st.updates).toEqual([]);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
+  });
 });
 
 // Review round 8 of Phase 3: an Admin's restore set deletedAt back to null on

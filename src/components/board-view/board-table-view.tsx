@@ -71,6 +71,7 @@ import { useAiFieldsAvailable } from "./ai-field-value";
 import { FILL_BATCH, aiFieldConfig, aiFieldNotReady, aiValueSortKey, aiValueText, isAiFieldType, type AiFieldValue as AiFieldValueShape } from "@/lib/ai-fields";
 import { PERMANENT_FILL_FAILURES, requestAiFill } from "@/lib/ai-fill-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
@@ -344,6 +345,9 @@ function bulkReasonSentences(reasons: string[]): string {
 
 export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canManage: canManageProp, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, assigneeEdit = null, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix, rowColorRules = [], loadedSettings = null, canSaveView = false, statusOf: statusOfProp, personalList = false }: BoardTableViewProps) {
   const confirm = useConfirm();
+  // Export to CSV is closed to the Agent tier (AGENT_TIER_BLURB), as every
+  // other export of others' work is; the rows stay readable on screen.
+  const { isAgent } = useViewerRole();
   const monday = gridStyle === "table";
   // The status a row has IN THIS LIST. A row shown here through a link keeps
   // its HOME status, remapped into this List's set for grouping and colour.
@@ -2036,16 +2040,18 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         ) : null}
         {/* Sort */}
         <SortMenu sortKey={sortKey} onChange={setSortKey} />
-        {/* CSV export */}
-        <button
-          type="button"
-          onClick={exportCsv}
-          title="Export to CSV"
-          aria-label="Export to CSV"
-          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
-        >
-          <Download className="w-4 h-4" />
-        </button>
+        {/* CSV export (never for an Agent) */}
+        {!isAgent ? (
+          <button
+            type="button"
+            onClick={exportCsv}
+            title="Export to CSV"
+            aria-label="Export to CSV"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+        ) : null}
         {/* Quick search (magnifier expands to an input) */}
         {searchOpen ? (
           <div className="flex items-center gap-1 h-7 px-2 rounded-md border border-zinc-200 bg-white">

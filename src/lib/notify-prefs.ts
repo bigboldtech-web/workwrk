@@ -142,3 +142,23 @@ export async function filterUnmutedUsers(userIds: string[], placeKeys: string[],
   }
   return allowed;
 }
+
+/**
+ * The same mute check for a batch where every row has its own place (the
+ * daily due-today sweep in /api/email/send-reminders): keeps the rows whose
+ * person has NOT muted that row's List, Folder or Space. One preferences read
+ * for the whole batch. Fails open, as filterUnmutedUsers does.
+ */
+export async function unmutedRows<T extends { userId: string; placeKeys: string[] }>(rows: T[], type: NotifyType): Promise<T[]> {
+  if (!MUTABLE_NOTIFY_TYPES.has(type) || rows.length === 0) return rows;
+  try {
+    const prefs = await prisma.userPreference.findMany({ where: { userId: { in: [...new Set(rows.map((r) => r.userId))] } }, select: { userId: true, home: true } });
+    const mutedBy = new Map(prefs.map((p) => [p.userId, new Set(mutedObjectKeys(p.home))]));
+    return rows.filter((r) => {
+      const muted = mutedBy.get(r.userId);
+      return !muted || !r.placeKeys.some((k) => muted.has(k));
+    });
+  } catch {
+    return rows;
+  }
+}

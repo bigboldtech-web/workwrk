@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // Space, so it takes the same floor POST /api/spaces takes, and the
       // sentence is the same one, because it is the same rule.
       if (!(await mayCreateSpace(accessLevel))) {
-        return jsonError(spaceCreateRefusal(), 403);
+        return jsonError(spaceCreateRefusal(accessLevel), 403);
       }
       const vis = body.visibility;
       // A Space template that carries a bundle (the Tuesday template) makes

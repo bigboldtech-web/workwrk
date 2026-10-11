@@ -1235,3 +1235,38 @@ describe("a browser card's failure in the person's own words (polish after revie
     expect(fx.actions[2]).toMatchObject({ status: "FAILED", error: "The post failed." });
   });
 });
+
+// Last polish of Phase 4: an approval held while the person has the browser
+// answered the teammate's "Max has the browser now. Wait until they finish."
+// to Max, through the approval's toast.
+describe("a browser card held in the person's own words (last polish of Phase 4)", () => {
+  const approved = (id: string, toolName = "click") => ({
+    action: { id, toolName, risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+    input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button" },
+    person: PERSON as never,
+    agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+    trigger: "APPROVAL" as const,
+    decidedVia: "person" as const,
+    holdNotSent: true,
+  });
+
+  it("answers a held browser step with the person's words, leaving the row waiting and untouched", async () => {
+    fx.answers.click = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction(approved(row.id));
+    // Before: { status: "HELD", error: "Priya has the browser now. Wait until they finish." }, the toast Priya read.
+    expect(out).toMatchObject({ status: "HELD", code: "browser_busy", error: BROWSER_PANEL_COPY.youHaveIt });
+    expect(fx.actions[0]).toMatchObject({ status: "RUNNING" });
+    expect(fx.actions[0].error ?? null).toBeNull();
+    expect(fx.activity).toEqual([]);
+  });
+
+  it("keeps the held sentence when there are no words of the person's, and reads them only for a browser tool", async () => {
+    fx.answers.click = { error: BROWSER_COPY.providerUnavailable, held: "retry_later" };
+    const plain = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    expect(await runApprovedAction(approved(plain.id))).toMatchObject({ status: "HELD", code: "retry_later", error: BROWSER_COPY.providerUnavailable });
+    fx.answers.send_email = { error: "Google didn't answer.", held: "retry_later", forPerson: "Not for this card" };
+    const mail = seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    expect(await runApprovedAction({ ...approved(mail.id, "send_email"), input: { to: "a@b.test" } })).toMatchObject({ status: "HELD", error: "Google didn't answer." });
+  });
+});

@@ -102,14 +102,20 @@ export type BrowserRefusal =
  * (noBrowserYet where the answer may still start one, startFailedNoOther
  * where it can't), never "the browser card says why".
  *
+ * `noCard` (last polish of Phase 4): the browser closed while it was
+ * starting, so no browser card was drawn (sessions.ts runEnds reads its
+ * browser_started line): its end's line is quoted as the chat shows it
+ * (BROWSER_COPY.closedNoCard), never "the browser card says why".
+ *
  * The teammate's words. At an approval the person reads closedForPersonLine.
  */
-export function closedSentence(endReason: string | null | undefined, minutes?: number, o: { mayOpen?: boolean } = {}): string {
+export function closedSentence(endReason: string | null | undefined, minutes?: number, o: { mayOpen?: boolean; noCard?: boolean } = {}): string {
   const noOther = o.mayOpen === false;
   if (endReason === "start_failed") return noOther ? BROWSER_COPY.startFailedNoOther : BROWSER_COPY.noBrowserYet;
+  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
+  if (o.noCard === true && endReason && Object.hasOwn(ended, endReason)) return BROWSER_COPY.closedNoCard(ended[endReason]);
   if (endReason === "restarted") return noOther ? BROWSER_COPY.restartedNoOther : BROWSER_COPY.restarted;
   if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
-  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
   if (endReason && Object.hasOwn(ended, endReason)) return BROWSER_COPY.closedBecause(ended[endReason]);
   return noOther ? BROWSER_COPY.closedNoOther : BROWSER_COPY.browserClosed;
 }
@@ -135,13 +141,31 @@ export function endHolds(endReason: unknown): endReason is EndReason {
  * in the same answer hears the start's own reason (startFailedNoOther),
  * never the browser card, which a failed start never drew, and never "try
  * again": the answer's one start is used, or it read anything.
+ *
+ * `noCard` (last polish of Phase 4): the browser closed while it was
+ * starting (a Stop, the switch, a leave), so no browser card was drawn: the
+ * end's line as the chat shows it (BROWSER_COPY.closedForAnswerNoCard).
  */
-export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boolean } = {}): string {
+export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boolean; noCard?: boolean } = {}): string {
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
   if (endReason === "start_failed") return BROWSER_COPY.startFailedNoOther;
-  if (endHolds(endReason)) return BROWSER_COPY.closedForAnswer(ended[endReason]);
+  const say = o.noCard === true ? BROWSER_COPY.closedForAnswerNoCard : BROWSER_COPY.closedForAnswer;
+  if (endHolds(endReason)) return say(ended[endReason]);
   const known = o.anyReason === true && typeof endReason === "string" && Object.hasOwn(ended, endReason);
-  return BROWSER_COPY.closedForAnswer(known ? ended[endReason] : ended.left);
+  return say(known ? ended[endReason] : ended.left);
+}
+
+/**
+ * The end lines that add nothing after "The browser closed before the step
+ * could run" (last polish of Phase 4): the card's plain "Closed." (a person
+ * who left or was deactivated, BROWSER_PANEL_COPY.ENDED_WORDS) and "It
+ * didn't start.", which a browser that ran a card's step never says and which
+ * would contradict it.
+ */
+const ADDS_NOTHING: ReadonlySet<string> = new Set<string>([BROWSER_PANEL_COPY.closed, `${BROWSER_PANEL_COPY.closed}.`, BROWSER_PANEL_COPY.ENDED_WORDS.start_failed]);
+
+function addsToStepClosed(line: string): boolean {
+  return !ADDS_NOTHING.has(line.trim());
 }
 
 /**
@@ -151,12 +175,14 @@ export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boo
  * sentence (closedSentence) speaks of "the person" and of what this answer
  * may open, so it stays the teammate's, told in its outcome note
  * (executor.ts runApprovedAction keeps it). `endReason` is read as the
- * browser card's own end line (views.ts endedLine); none known, the plain
- * line alone.
+ * browser card's own end line (views.ts endedLine); none known, or one that
+ * adds nothing (addsToStepClosed, last polish of Phase 4: "...so nothing was
+ * done. Closed."), the plain line alone.
  */
 export function closedForPersonLine(endReason: unknown): string {
   const known = typeof endReason === "string" && Object.hasOwn(BROWSER_PANEL_COPY.ENDED_WORDS, endReason);
-  return BROWSER_PANEL_COPY.stepClosed(known ? endedLine(endReason as EndReason) : null);
+  const line = known ? endedLine(endReason as EndReason) : null;
+  return BROWSER_PANEL_COPY.stepClosed(line && addsToStepClosed(line) ? line : null);
 }
 
 /**
@@ -192,16 +218,20 @@ export function approvalRefusal(
  * Why a browser call can't run now, in the person's words (Decision 33).
  * `first` is the person's first name; `extra` what the refusal carried
  * (another teammate's name, the provider's wait, the workspace's cap, a
- * session's minutes, an end's reason).
+ * session's minutes, an end's reason). `mayOpen: false` (last polish of
+ * Phase 4 too): a start that failed and used the answer's one start says
+ * it can't try again, never "Try again in a moment"; `noCard`: closedSentence's.
  */
 export function browserRefusalSentence(
   reason: BrowserRefusal,
   agentName: string,
   first: string,
-  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number; endReason?: string | null; mayOpen?: boolean } = {},
+  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number; endReason?: string | null; mayOpen?: boolean; noCard?: boolean } = {},
 ): string {
   // An answer that can start no browser is never told to open one (closedSentence, review round 5 of Phase 4).
-  const may = { mayOpen: extra.mayOpen };
+  const may = { mayOpen: extra.mayOpen, noCard: extra.noCard };
+  // A failed start that used the answer's one start never says "Try again" (last polish of Phase 4).
+  const noOther = extra.mayOpen === false;
   switch (reason) {
     case "not_configured":
       return BROWSER_COPY.notConfigured;
@@ -232,11 +262,13 @@ export function browserRefusalSentence(
     case "month_used":
       return BROWSER_COPY.monthUsed;
     case "provider_unavailable":
-      return BROWSER_COPY.providerUnavailable;
-    case "provider_busy":
-      return BROWSER_COPY.providerBusy(Math.max(1, Math.round(extra.retryAfter ?? 30)));
+      return noOther ? BROWSER_COPY.providerUnavailableNoOther : BROWSER_COPY.providerUnavailable;
+    case "provider_busy": {
+      const wait = Math.max(1, Math.round(extra.retryAfter ?? 30));
+      return noOther ? BROWSER_COPY.providerBusyNoOther(wait) : BROWSER_COPY.providerBusy(wait);
+    }
     case "start_failed":
-      return BROWSER_COPY.startFailed;
+      return noOther ? BROWSER_COPY.startFailedNoOther : BROWSER_COPY.startFailed;
     case "none":
       // Never "Open one with open_page first" to an answer that can start none (polish after review round 6 of Phase 4).
       return extra.mayOpen === false ? BROWSER_COPY.noBrowserNoOther : BROWSER_COPY.noBrowserYet;
@@ -253,7 +285,7 @@ export function browserRefusalSentence(
       // With no minutes known, the card's reason, never "Open a page" (review round 4 of Phase 4).
       return closedSentence("time_cap", extra.minutes, may);
     case "closed_in_answer":
-      return closedForAnswerSentence(extra.endReason);
+      return closedForAnswerSentence(extra.endReason, { noCard: extra.noCard });
   }
 }
 
@@ -345,6 +377,16 @@ export function actSentence(o: Extract<ActOutcome, { ok: false }>, first: string
     case "blocked_hop":
       return BROWSER_COPY.mayHaveGoneThrough(o.host ?? BROWSER_PANEL_COPY.STEP_WORDS.unknownSite);
   }
+}
+
+/**
+ * An approved act's failure in the person's own words, where actSentence's
+ * is the teammate's (last polish of Phase 4): a password, code or payment
+ * field says "Ask Max to take over" to Max. Every other act sentence reads
+ * the same to both, so there is none.
+ */
+export function actForPersonLine(o: Extract<ActOutcome, { ok: false }>): string | undefined {
+  return o.code === "sensitive" ? BROWSER_PANEL_COPY.sensitiveStep : undefined;
 }
 
 // ── Names, records and audit facts ──────────────────────────────────

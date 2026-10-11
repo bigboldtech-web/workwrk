@@ -116,6 +116,7 @@ import {
   FunctionSquare,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -997,6 +998,9 @@ function formulasReferToLabel(columns: { formula?: string | null }[], rows: { va
 
 export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const router = useRouter();
+  // File > Download is an export, closed to the Agent tier as the table's
+  // own Export as CSV is (GET /api/tables/[id]/export; AGENT_TIER_BLURB).
+  const { isAgent } = useViewerRole();
   const searchParams = useSearchParams();
   // Work mode is a value, read once here before any early return: the
   // placement is the route's own (its segment's params), so it holds under
@@ -5722,10 +5726,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         { label: "New table", icon: Plus, onSelect: () => void newTable() },
         { label: "Make a copy", icon: Copy, onSelect: () => void makeCopy() },
         { label: "Import a CSV…", icon: Upload, onSelect: () => setCsvOpen(true) },
-        { label: "Download", icon: Download, submenu: [
+        ...(!isAgent ? [{ label: "Download", icon: Download, submenu: [
           { label: "CSV, formatted values", onSelect: () => exportCsv(true) },
           { label: "CSV, raw values", onSelect: () => exportCsv(false) },
-        ] },
+        ] }] : []),
         { label: "Print", icon: Printer, shortcut: "⌘P", onSelect: () => window.print() },
         { separator: true },
         ...(table.canManage ? [{ label: "Move to Space…", icon: FolderInput, onSelect: () => { setSheetMenuMode("move"); setSheetMoreOpen(true); } }] : []),

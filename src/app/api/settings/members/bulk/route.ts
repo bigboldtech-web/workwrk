@@ -32,7 +32,7 @@ export async function POST(req: Request) {
   if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
   if (!fresh.admin) return NextResponse.json({ error: "Only Owners and Admins change roles" }, { status: 403 });
   const actorIsOwner = fresh.owner;
-  const results: { id: string; ok: boolean; error?: string; changed?: boolean }[] = [];
+  const results: { id: string; ok: boolean; error?: string; code?: string; changed?: boolean }[] = [];
   for (const id of [...new Set(parsed.data.ids)]) {
     if (id === su.id) { results.push({ id, ok: false, error: "Change your own role from your row, one at a time" }); continue; }
     const r = await applyRoleChange(prisma, {
@@ -43,7 +43,9 @@ export async function POST(req: Request) {
       targetId: id,
       next: { role: parsed.data.role, tier: parsed.data.tier ?? null },
     });
-    if (!r.ok) { results.push({ id, ok: false, error: r.error }); continue; }
+    // A person with reports is never made an Agent (membership.ts rule 6):
+    // refused and named with its code, and the rest still change.
+    if (!r.ok) { results.push({ id, ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }); continue; }
     results.push({ id, ok: true, changed: r.changed });
     if (r.changed) {
       void logActivity({

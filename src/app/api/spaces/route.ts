@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   // create_space verb; off, today's manager-tier rule.
   // The one answer (src/lib/access/space-create.ts) the New Space controls read.
   if (!(await mayCreateSpace(c.accessLevel))) {
-    return NextResponse.json({ error: spaceCreateRefusal() }, { status: 403 });
+    return NextResponse.json({ error: spaceCreateRefusal(c.accessLevel) }, { status: 403 });
   }
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

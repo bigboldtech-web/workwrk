@@ -6,7 +6,7 @@ import {
   evaluationReminderTemplate,
   overdueManagerTemplate,
 } from "@/lib/email-templates";
-import { filterNotifyUsers } from "@/lib/notify-prefs";
+import { filterNotifyUsers, placeMuteKeys, unmutedRows } from "@/lib/notify-prefs";
 import { isDoneStatus, getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
 import { cronRefusal } from "@/lib/cron-auth";
@@ -331,7 +331,7 @@ async function handle(req: NextRequest) {
       await eachPage(
         ({ take, last }) => prisma.item.findMany({
           where: { ...open.where, archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay }, ownerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
-          select: { id: true, title: true, status: true, boardId: true, ownerId: true },
+          select: { id: true, title: true, status: true, boardId: true, ownerId: true, board: { select: { folderId: true, spaceId: true } } },
           orderBy: { id: "asc" },
           take,
         }),
@@ -344,7 +344,16 @@ async function handle(req: NextRequest) {
           due += dueToday.length;
           // Honor the "Due-date reminders" inbox toggle (batched, one query).
           const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.ownerId), "due_reminders");
-          const toNotify = dueToday.filter((t) => wantsDue.has(t.ownerId));
+          // And the per-object mute every other task notification honours
+          // (notify-item.ts emit): a person who muted the task's List, Folder
+          // or Space hears nothing about its due date, as the Muted items
+          // card on My settings > Notifications says.
+          const toNotify = await unmutedRows(
+            dueToday
+              .filter((t) => wantsDue.has(t.ownerId))
+              .map((t) => ({ ...t, userId: t.ownerId, placeKeys: placeMuteKeys({ boardId: t.boardId, folderId: t.board?.folderId, spaceId: t.board?.spaceId }) })),
+            "due_reminders",
+          );
           if (toNotify.length > 0) {
             await prisma.notification.createMany({
               // The link names THE TASK, not a landing. It used to be the bare

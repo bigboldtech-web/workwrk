@@ -209,6 +209,10 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   const selfPath = inWork && place ? place.self : canonicalHref("canvas", canvasId);
   const { askAiVisible } = useOsShell();
   const viewer = useViewer();
+  // Every export of the canvas (the "..." row, the tool strip's button and
+  // the older editor's own menu) is closed to Agents and Guests
+  // (AGENT_TIER_BLURB; resolve.ts rule 12).
+  const canExport = !viewer.isAgent && viewer.orgRole !== "GUEST";
   const aiOn = askAiVisible;
   const [board, setBoard] = useState<Whiteboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -600,7 +604,7 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
             onRenameInline={() => { titleRef.current?.focus(); titleRef.current?.select(); }}
             extraRows={
               <>
-                {!viewer.isAgent && viewer.orgRole !== "GUEST" && useFirstParty ? <MenuItem icon={Download} label="Export as PNG" onClick={() => { setMoreOpen(false); exportPng(); }} /> : null}
+                {canExport && useFirstParty ? <MenuItem icon={Download} label="Export as PNG" onClick={() => { setMoreOpen(false); exportPng(); }} /> : null}
                 <MenuItem icon={History} label="Version history" onClick={() => { setMoreOpen(false); setAiOpen(false); setVersionsOpen(true); }} />
               </>
             }
@@ -650,6 +654,7 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
               loadEntities={() => loadCanvasEntities(board.id)}
               onOpenEntity={(href) => router.push(sectionHrefNow(href))}
               readOnly={readOnly}
+              canExport={canExport}
             />
             </div>
             {versionsOpen ? <CanvasVersionsPanel canvasId={board.id} canRestore={!readOnly} onClose={() => setVersionsOpen(false)} /> : null}
@@ -676,7 +681,9 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
                 // and clear; theme and background stay the workspace's.
                 changeViewBackgroundColor: false,
                 clearCanvas: true,
-                export: { saveFileToDisk: true },
+                // Export is closed to Agents and Guests, as the "..." row is.
+                export: canExport ? { saveFileToDisk: true } : false,
+                saveAsImage: canExport,
                 loadScene: false,
                 saveToActiveFile: false,
                 toggleTheme: false,
